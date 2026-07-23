@@ -1,0 +1,27 @@
+# Private brief — strategy/context, not for the public repo
+gui-app-kickoff-brief.md
+
+# Private data (never publish)
+data/private/
+captures/
+*.mdat
+rules-dev/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Env / secrets
+.env
+.env.local
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
