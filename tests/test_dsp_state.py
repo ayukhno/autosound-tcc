@@ -48,3 +48,28 @@ def test_samples_derived_from_ms():
     # 3.10 ms at 48 kHz -> round(148.8) = 149 samples.
     assert snap.samples_for(3.10) == 149
     assert snap.samples_for(0.0) == 0
+
+
+def test_crossover_labels():
+    snap = _load()
+    assert snap.channels["FL"].hp.label == "80 Hz LR24"
+    assert snap.channels["SUB"].hp.label == "OFF"
+    assert snap.channels["SUB"].lp.label == "80 Hz LR24"
+
+
+def test_channels_ordered_sub_first_left_before_right():
+    from autosound_tcc.state.dsp_state import ChannelState, DspSnapshot
+
+    raw = {
+        "preset": "x",
+        "sample_rate": 96000,
+        "channels": {
+            "tw_R": {"gain_db": 0, "ta_ms": 0, "polarity": "NORM"},
+            "sub": {"gain_db": 0, "ta_ms": 0, "polarity": "NORM"},
+            "w_L": {"gain_db": 0, "ta_ms": 0, "polarity": "NORM"},
+            "tw_L": {"gain_db": 0, "ta_ms": 0, "polarity": "NORM"},
+            "w_R": {"gain_db": 0, "ta_ms": 0, "polarity": "NORM"},
+        },
+    }
+    order = [ch.name for ch in DspSnapshot.from_dict(raw).channels_ordered()]
+    assert order == ["sub", "w_L", "w_R", "tw_L", "tw_R"]
