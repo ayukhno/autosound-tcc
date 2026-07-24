@@ -1,0 +1,29 @@
+{
+  "preset": "demo",
+  "version": "v_001",
+  "created": "2026-07-24T12:00:00",
+  "note": "synthetic fixture — no real capture data",
+  "sample_rate": 48000,
+  "channels": {
+    "FL": {
+      "helix_ch": 1,
+      "hp": { "f": 80, "type": "LR", "slope": 24 },
+      "lp": { "f": 3200, "type": "LR", "slope": 12 },
+      "gain_db": -2.5,
+      "ta_ms": 3.10,
+      "polarity": "NORM",
+      "eq_ptr": "FL_eq",
+      "status": "measured"
+    },
+    "SUB": {
+      "helix_ch": 7,
+      "hp": "OFF",
+      "lp": { "f": 80, "type": "LR", "slope": 24 },
+      "gain_db": 0.0,
+      "ta_ms": 0.0,
+      "polarity": "INV",
+      "eq_ptr": null,
+      "status": "applied"
+    }
+  }
+}
