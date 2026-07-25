@@ -15,6 +15,10 @@ dependencies = [
     # Declared now because the very next milestone (curve plotting) needs it;
     # pulls numpy transitively. No app code imports it yet.
     "pyqtgraph>=0.13",
+    # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to the
+    # locally-authenticated `claude` CLI session — no separate API key needed
+    # in dev.
+    "claude-agent-sdk>=0.2",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +26,7 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"
+dsp-profile-interview = "autosound_tcc.dsp_profile_interview:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autosound_tcc"]
