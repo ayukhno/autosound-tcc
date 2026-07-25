@@ -1,0 +1,849 @@
+<title>TCC — main-screen prototype</title>
+<style>
+  :root {
+    --ground: #0f1318; --panel: #161b22; --panel2: #1c232c; --panel3: #222b36;
+    --border: #263040; --border2: #33404f;
+    --text: #dfe6ee; --muted: #8b97a6; --faint: #5f6b7a;
+    --accent: #e8973c; --accent-dim: #b3712c;
+    --ok: #4bbf87; --inv: #e8973c; --off: #6a7686; --warn: #e05c5c; --info: #5aa9e6; --yellow: #e8c34a;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --r: 7px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground: #eef1f5; --panel: #ffffff; --panel2: #f4f6f9; --panel3: #e9edf2;
+      --border: #d7dee6; --border2: #c4cdd8;
+      --text: #1b2430; --muted: #5c6875; --faint: #93a0ad;
+      --accent: #c56f18; --accent-dim: #a95f14;
+      --ok: #1f9c63; --inv: #c56f18; --off: #8492a0; --warn: #c0392b; --info: #2f7fc4; --yellow: #c99a12;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1318; --panel: #161b22; --panel2: #1c232c; --panel3: #222b36;
+    --border: #263040; --border2: #33404f;
+    --text: #dfe6ee; --muted: #8b97a6; --faint: #5f6b7a;
+    --accent: #e8973c; --accent-dim: #b3712c;
+    --ok: #4bbf87; --inv: #e8973c; --off: #6a7686; --warn: #e05c5c; --info: #5aa9e6; --yellow: #e8c34a;
+  }
+  :root[data-theme="light"] {
+    --ground: #eef1f5; --panel: #ffffff; --panel2: #f4f6f9; --panel3: #e9edf2;
+    --border: #d7dee6; --border2: #c4cdd8;
+    --text: #1b2430; --muted: #5c6875; --faint: #93a0ad;
+    --accent: #c56f18; --accent-dim: #a95f14;
+    --ok: #1f9c63; --inv: #c56f18; --off: #8492a0; --warn: #c0392b; --info: #2f7fc4; --yellow: #c99a12;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--ui); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+
+  .app { height: 100vh; display: grid; grid-template-rows: auto 1fr auto;
+    grid-template-columns: minmax(230px, 265px) 1fr minmax(280px, 320px);
+    grid-template-areas: "head head head" "left center right" "foot foot foot"; gap: 8px; padding: 8px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); }
+  .head { grid-area: head; } .left { grid-area: left; overflow: hidden; display: flex; flex-direction: column; }
+  .center { grid-area: center; overflow: hidden; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .right { grid-area: right; overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+  .foot { grid-area: foot; }
+
+  /* header / footer as 3 zones so the feedback CTA sits centred */
+  .head { padding: 8px 14px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; }
+  .foot { padding: 7px 14px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; }
+  .zone-l { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; min-width: 0; }
+  .zone-r { display: flex; align-items: center; gap: 12px; justify-self: end; flex-wrap: wrap; }
+  .kv { display: flex; align-items: baseline; gap: 8px; }
+  .kv .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .kv .val { font-weight: 600; }
+  .preset-select, .mini-select { appearance: none; background: var(--panel3); color: var(--text); border: 1px solid var(--border2); border-radius: 5px; padding: 4px 26px 4px 10px; font: inherit; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+  .preset-select { font-weight: 600; }
+  .mini-select { font-size: 12px; padding: 4px 24px 4px 9px; }
+  .slot { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+  .savename { color: var(--muted); font-family: var(--mono); }
+  .theme-btn { background: var(--panel3); border: 1px solid var(--border2); color: var(--muted); border-radius: 5px; padding: 5px 11px; cursor: pointer; font: inherit; font-size: 12px; }
+  .theme-btn:hover { color: var(--text); }
+
+  /* big bright feedback CTA (temporary, community) */
+  .fb-cta { justify-self: center; background: var(--accent); color: #1a1206; border: none; border-radius: 22px; padding: 9px 22px; font: inherit; font-size: 14px; font-weight: 800; letter-spacing: .01em; cursor: pointer; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent), 0 3px 12px rgba(0,0,0,.35); animation: fbpulse 2.4s ease-in-out infinite; }
+  .fb-cta:hover { filter: brightness(1.08); }
+  @keyframes fbpulse { 0%,100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 26%, transparent), 0 3px 12px rgba(0,0,0,.35); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 12%, transparent), 0 3px 16px rgba(0,0,0,.4); } }
+  @media (prefers-reduced-motion: reduce) { .fb-cta { animation: none; } }
+
+  .phead { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; justify-content: space-between; flex: none; }
+  .phead .sub { color: var(--faint); letter-spacing: .04em; text-transform: none; font-size: 11px; }
+
+  .dsp-model { padding: 9px 12px; border-bottom: 1px solid var(--border); flex: none; }
+  .dsp-model .rew { margin-top: 5px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--off); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .dot.pending { background: var(--yellow); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 22%, transparent); }
+  .tree { overflow-y: auto; padding: 6px 4px 12px; flex: 1; }
+  .row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 5px; white-space: nowrap; }
+  .row.click { cursor: pointer; } .row.click:hover { background: var(--panel2); }
+  .tw { width: 12px; text-align: center; color: var(--faint); font-family: var(--mono); font-size: 10px; flex: none; user-select: none; }
+  .grp > .row.ghead { text-transform: uppercase; letter-spacing: .1em; font-size: 10.5px; color: var(--muted); font-weight: 600; }
+  .ghead .cnt { color: var(--faint); font-family: var(--mono); }
+  .indent-2 { padding-left: 20px; }
+  .paramrow { display: flex; padding: 3px 8px 3px 20px; font-size: 11px; }
+  .paramrow .pk { color: var(--muted); } .paramrow .pv { margin-left: auto; font-family: var(--mono); }
+  .prow-params { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 20px; border-radius: 5px; cursor: pointer; color: var(--muted); font-size: 12px; }
+  .prow-params:hover { background: var(--panel2); color: var(--accent); }
+  .prow-params .ic { color: var(--accent); }
+  .chan { padding: 4px 8px 5px 20px; border-radius: 5px; cursor: pointer; }
+  .chan:hover { background: var(--panel2); }
+  .chan.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .chan-dim { opacity: .5; }
+  .cline1 { display: flex; align-items: center; gap: 6px; }
+  .cline1 .cid { font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--accent); background: var(--panel3); border-radius: 3px; padding: 0 4px; flex: none; }
+  .cline1 .cn { font-weight: 600; }
+  .cline1 .ctag2 { font-size: 9px; letter-spacing: .03em; color: var(--info); background: color-mix(in srgb, var(--info) 15%, transparent); border-radius: 3px; padding: 0 5px; flex: none; }
+  .cline1 .eq-chip { margin-left: auto; }
+  .cline2 { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; padding: 1px 6px; border-radius: 20px; flex: none; }
+  .pill.inv { color: var(--inv); background: color-mix(in srgb, var(--inv) 16%, transparent); }
+  .pill.norm { color: var(--muted); background: var(--panel3); }
+  .pill.off { color: var(--off); background: var(--panel3); }
+  .eq-chip { font-size: 10px; font-family: var(--mono); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 4px; padding: 0 6px; cursor: pointer; flex: none; }
+  .eq-chip:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .eq-chip.muted { color: var(--faint); border-color: var(--border2); cursor: default; }
+  .collapsed > .children { display: none; }
+
+  .detail { flex: none; max-height: 0; overflow: hidden; transition: max-height .2s ease; }
+  .detail.open { max-height: 50%; }
+  @media (prefers-reduced-motion: reduce) { .detail { transition: none; } }
+  .detail .panel { max-height: 100%; display: flex; flex-direction: column; }
+  .d-tabs { display: flex; gap: 6px; align-items: center; }
+  .d-tab { font-size: 11px; color: var(--muted); border: 1px solid transparent; border-radius: 5px; padding: 2px 9px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .d-tab:hover { color: var(--text); }
+  .d-tab.on { color: var(--accent); border-color: var(--accent-dim); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .d-close { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 5px; cursor: pointer; padding: 2px 9px; font: inherit; font-size: 11px; }
+  .d-close:hover { color: var(--text); }
+  .d-body { padding: 0; overflow: auto; flex: 1; }
+
+  .ptable { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ptable th { text-align: right; font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 7px 12px; border-bottom: 1px solid var(--border2); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .ptable th.l, .ptable td.l { text-align: left; }
+  .ptable td { padding: 6px 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .ptable tbody tr { cursor: pointer; }
+  .ptable tbody tr:hover td { background: var(--panel2); }
+  .ptable tr.sel td { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+  .ptable td.cid2 { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+  .ptable td.cname { font-family: var(--ui); font-weight: 600; }
+  .ptable .ttag { color: var(--info); font-size: 10px; }
+  .ptable .gpos { color: var(--ok); } .ptable .gneg { color: var(--accent); }
+  .ptable .tinv { color: var(--inv); font-weight: 600; } .ptable .tnorm { color: var(--muted); }
+  .ptable .eqcell { color: var(--accent); } .ptable .eqcell.muted { color: var(--faint); }
+  .ptable .dim { color: var(--faint); }
+
+  .eq-hint { color: var(--faint); font-size: 11px; margin: 10px 12px 8px; }
+  .eq-hint b { color: var(--muted); font-weight: 600; }
+  .eq-table { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; padding: 0 12px 14px; }
+  .eq-rows { display: flex; flex-direction: column; gap: 12px; padding: 4px 12px 14px; }
+  .eq-row .rowlab { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 6px; letter-spacing: .04em; }
+  .eq-row .eq-table { padding: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .match-legend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 10.5px; color: var(--muted); padding: 0 12px 4px; }
+  .match-legend .ml { display: flex; align-items: center; gap: 4px; font-family: var(--mono); }
+  .match-legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .band { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; width: 112px; overflow: hidden; }
+  .band.bypassed { opacity: .45; }
+  .band .bid { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--panel3); padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .band .frow { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 11px; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+  .band .frow .fk { color: var(--muted); }
+  .band .frow .fv { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .band .frow .fv.type { color: var(--info); }
+  .band .frow .fv.gain-pos { color: var(--ok); } .band .frow .fv.gain-neg { color: var(--accent); }
+  .band .byp { text-align: center; font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 4px 0 7px; user-select: none; }
+  .band .byp .b-o { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--faint); vertical-align: -2px; margin-right: 5px; }
+  .band.bypassed .byp .b-o { background: var(--warn); border-color: var(--warn); }
+
+  .dialog { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .dialog .body { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 82%; padding: 9px 12px; border-radius: 10px; }
+  .msg .who { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+  .msg.gen { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); border-top-left-radius: 3px; }
+  .msg.crit { align-self: flex-start; background: color-mix(in srgb, var(--info) 12%, var(--panel2)); border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border)); border-top-left-radius: 3px; }
+  .msg.crit .who { color: var(--info); }
+  .msg.user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 16%, var(--panel2)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-top-right-radius: 3px; }
+  .msg.user .who { color: var(--accent); }
+  .msg code { font-family: var(--mono); font-size: 12px; background: var(--panel3); padding: 1px 4px; border-radius: 3px; }
+  .composer { flex: none; border-top: 1px solid var(--border); padding: 9px 12px; display: flex; gap: 8px; }
+  .composer input { flex: 1; background: var(--panel2); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); padding: 8px 11px; font: inherit; }
+  .composer input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent-dim); }
+  .composer button { background: var(--accent); color: #1a1206; border: none; border-radius: 6px; padding: 0 16px; font: inherit; font-weight: 700; cursor: pointer; }
+  .composer button:hover { filter: brightness(1.08); }
+
+  .right .plan { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .plantree { overflow-y: auto; padding: 8px 10px 12px; flex: 1; }
+  .phase { margin-bottom: 4px; }
+  .phase > .prow { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; }
+  .phase > .prow.click { cursor: pointer; } .phase > .prow.click:hover { background: var(--panel2); }
+  .phase.current > .prow { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .pcaret { width: 12px; text-align: center; color: var(--faint); font-family: var(--mono); font-size: 10px; flex: none; }
+  .pcnt { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .phase.pcol .psteps { display: none; }
+  .st { width: 15px; height: 15px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 10px; font-weight: 700; }
+  .st.done { background: var(--ok); color: #04160d; } .st.cur { background: var(--accent); color: #1a1206; } .st.todo { background: var(--panel3); color: var(--faint); }
+  .pname { font-weight: 600; } .phase.current > .prow .pname { color: var(--accent); }
+  .substep { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 26px; color: var(--muted); font-size: 12px; }
+  .substep .stag { margin-left: auto; font-size: 10px; }
+  .stag.ok { color: var(--ok); } .stag.wait { color: var(--yellow); }
+
+  .meas { flex: none; max-height: 50%; display: flex; }
+  .meas .panel { border-color: color-mix(in srgb, var(--yellow) 45%, var(--border)); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .meas .phead { color: color-mix(in srgb, var(--yellow) 70%, var(--text)); border-bottom-color: color-mix(in srgb, var(--yellow) 30%, var(--border)); flex: none; }
+  .meas-body { padding: 10px 13px 13px; overflow-y: auto; }
+  .meas-head { font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 5px 9px; border-radius: 5px;
+    color: color-mix(in srgb, var(--yellow) 82%, var(--text)); background: color-mix(in srgb, var(--yellow) 20%, transparent); border: 1px solid color-mix(in srgb, var(--yellow) 42%, transparent); }
+  .meas-legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 10px; margin: 4px 0 10px; }
+  .meas-legend .lg { display: flex; align-items: center; gap: 4px; }
+  .tl { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .tl.wait { background: var(--yellow); } .tl.done { background: var(--ok); } .tl.bad { background: var(--warn); }
+  .meas-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; }
+  .mcol-h { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 3px; margin-bottom: 5px; }
+  .mrow { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; padding: 2px 0; }
+  .mrow .mn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow.bad .mn { color: var(--warn); } .mrow.wait .mn { color: var(--muted); }
+  .mrow .mn-n { color: var(--faint); }
+
+  .zone-r .ai, .zone-l .ai { display: flex; align-items: center; gap: 8px; }
+  .ai .role { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .ai .last { font-size: 11px; color: var(--faint); }
+  .foot .note { font-size: 11px; color: var(--faint); justify-self: end; text-align: right; } .foot .note b { color: var(--muted); }
+
+  .fb-modal { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 20px; }
+  .fb-modal.open { display: flex; }
+  .fb-card { background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; width: 100%; max-width: 460px; padding: 18px 20px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .fb-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+  .fb-x { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+  .fb-hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  .fb-toolbar { display: flex; gap: 4px; margin-bottom: 6px; }
+  .fb-toolbar button { background: var(--panel3); border: 1px solid var(--border2); color: var(--text); border-radius: 6px; width: 30px; height: 28px; font: inherit; font-size: 13px; cursor: pointer; }
+  .fb-toolbar button:hover { background: var(--panel2); border-color: var(--accent-dim); }
+  .fb-toolbar button[data-cmd="italic"] { font-style: italic; }
+  .fb-rte { width: 100%; min-height: 110px; max-height: 240px; overflow-y: auto; background: var(--panel2); border: 1px solid var(--border2); border-radius: 8px; color: var(--text); padding: 10px 12px; font: inherit; }
+  .fb-rte:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent-dim); }
+  .fb-rte:empty:before { content: attr(data-ph); color: var(--faint); }
+  .fb-rte ul, .fb-rte ol { margin: 4px 0; padding-left: 22px; }
+  .fb-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-top: 12px; cursor: pointer; }
+  .fb-check input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  .fb-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  .fb-cancel { background: var(--panel3); border: 1px solid var(--border2); color: var(--muted); border-radius: 7px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  .fb-send { background: var(--accent); color: #1a1206; border: none; border-radius: 7px; padding: 8px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+  .fb-send:hover { filter: brightness(1.08); }
+</style>
+
+<div class="app">
+  <header class="panel head">
+    <div class="zone-l">
+      <div class="kv"><span class="lbl" id="lbPreset">Preset</span>
+        <select class="preset-select" id="presetSel"></select>
+        <span class="slot" id="slot"></span><span class="savename" id="savename"></span>
+      </div>
+      <div class="kv"><span class="lbl" id="lbTarget">Target curve</span><span class="val" id="target"></span></div>
+    </div>
+    <button class="fb-cta" data-fb>💬 <span data-i="fbBig">Give feedback</span></button>
+    <div class="zone-r">
+      <select class="mini-select" id="langSel" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="uk">UK</option>
+        <option value="pl" disabled>PL — reliz</option>
+        <option value="de" disabled>DE — reliz</option>
+      </select>
+      <button class="theme-btn" id="themeBtn">◐ <span data-i="theme">theme</span></button>
+    </div>
+  </header>
+
+  <aside class="panel left">
+    <div class="dsp-model">
+      <b>DSP:</b> Helix DSP Ultra S <span style="color:var(--muted);font-family:var(--mono)">· 96 kHz</span>
+      <div class="rew"><span class="dot pending"></span> <span data-i="rewOnline">REW: offline</span> <span style="color:var(--faint)">· :4735</span></div>
+    </div>
+    <div class="tree" id="tree"></div>
+  </aside>
+
+  <section class="center">
+    <div class="detail" id="detail">
+      <div class="panel">
+        <div class="phead">
+          <div class="d-tabs">
+            <span class="d-tab" id="tabTable" data-i="tabTable">Table</span>
+            <span class="d-tab" id="tabEq">EQ</span>
+            <span class="d-tab" id="pairBtn" style="display:none">⇄ L + R</span>
+            <span class="sub" id="detailTitle" style="margin-left:6px"></span>
+          </div>
+          <button class="d-close" id="dClose" data-i="close">close ✕</button>
+        </div>
+        <div class="d-body" id="detailBody"></div>
+      </div>
+    </div>
+
+    <div class="panel dialog">
+      <div class="phead"><span><span data-i="dialog">AI dialog</span> <span class="sub" data-i="dialogSub">Generator ↔ Critic ↔ Arbiter</span></span></div>
+      <div class="body" id="chat"></div>
+      <div class="composer">
+        <input id="composerInput" data-ph="composer" aria-label="message" />
+        <button data-i="send">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="right">
+    <div class="panel plan">
+      <div class="phead"><span data-i="planTitle">Plan — Fact</span><span class="sub" data-i="planSub">phases + steps</span></div>
+      <div class="plantree" id="plan"></div>
+    </div>
+    <div class="meas">
+      <div class="panel">
+        <div class="phead"><span data-i="focus">◆ IN FOCUS NOW</span><span class="sub" data-i="measSub">measurement task</span></div>
+        <div class="meas-body" id="measBody"></div>
+      </div>
+    </div>
+  </aside>
+
+  <footer class="panel foot">
+    <div class="zone-l">
+      <div class="ai"><span class="role" data-i="aiMain">AI main</span>
+        <select class="mini-select"><option>Claude Opus 4.8</option><option>Claude Sonnet 5</option><option>Claude Fable 5</option></select></div>
+      <div class="ai"><span class="role" data-i="aiCritic">AI critic</span>
+        <select class="mini-select"><option>Gemini 3.1 Pro</option><option>Gemini 3.5 Flash</option><option>Claude Opus 4.8</option></select></div>
+    </div>
+    <button class="fb-cta" data-fb>💬 <span data-i="fbBig">Give feedback</span></button>
+    <div class="note" data-i="note">prototype · real data (sound_AutoSci) · tuning the form</div>
+  </footer>
+</div>
+
+<div class="fb-modal" id="fbModal">
+  <div class="fb-card">
+    <div class="fb-head"><span data-i="fbHead">Feedback on the TCC prototype</span> <button class="fb-x" id="fbX" aria-label="close">✕</button></div>
+    <div class="fb-toolbar">
+      <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+      <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+      <button type="button" data-cmd="insertUnorderedList" title="Bulleted list">•≡</button>
+      <button type="button" data-cmd="insertOrderedList" title="Numbered list">1.≡</button>
+    </div>
+    <div id="fbRte" class="fb-rte" contenteditable="true" data-ph="fbPh"></div>
+    <label class="fb-check"><input type="checkbox" id="fbGithub" /> <span data-i="fbViaGithub">Send via GitHub (I have an account)</span></label>
+    <div class="fb-actions"><button class="fb-cancel" id="fbCancel" data-i="fbCancel">Cancel</button><button class="fb-send" id="fbSend" data-i="fbSendGeneric">Send feedback →</button></div>
+  </div>
+</div>
+
+<script>
+// ================= i18n =================
+let lang = "en";
+const T = {
+  en: {
+    preset:"Preset", target:"Target curve", theme:"theme", rewOnline:"REW: offline",
+    params:"PARAMS", virtual:"VIRTUAL", output:"OUTPUT", paramsRow:"params · all parameters as a table",
+    tabTable:"Table", close:"close ✕", outTitle:"OUTPUT — physical drivers", virtTitle:"VIRTUAL — input voicing",
+    colId:"ID", colChan:"Channel", colGain:"Gain dB", colDelay:"Delay ms", colPol:"Pol", colMute:"Mute", colEQ:"EQ", bandsCell:"bands ▸",
+    eqHint:"Only <b>active bands</b> (all parameters at once — MUSWAY's edge over Helix). APF is a band type, not a column. Bypass is read-only (for now). Empty of 30 are hidden.",
+    shared:"shared frequencies:", noShared:"no shared frequencies", band:"band", active:"active",
+    dialog:"AI dialog", dialogSub:"Generator ↔ Critic ↔ Arbiter", composer:"Message the Generator…  (prototype — doesn't send)", send:"Send",
+    planTitle:"Plan — Fact", planSub:"phases + steps", focus:"◆ IN FOCUS NOW", measSub:"measurement task",
+    legWait:"waiting", legDone:"done", legBad:"taken, unusable", captures:"capture(s)",
+    aiMain:"AI main", aiCritic:"AI critic", note:"prototype · real data (sound_AutoSci) · tuning the form",
+    fbBig:"Give feedback", fbHead:"Feedback on the TCC prototype",
+    fbHint:"Tell us what you like / what to change. Use the B / I / list buttons — no need to type markdown by hand.",
+    fbPh:"Your feedback on the prototype…", fbCancel:"Cancel", fbSend:"Send to GitHub →", fbSendGeneric:"Send feedback →",
+    fbViaGithub:"Send via GitHub (I have an account)",
+    lastMain:"last: phase 2 / step 2.2 · just now", lastCrit:"last: 12 min ago",
+  },
+  uk: {
+    preset:"Пресет", target:"Цільова крива", theme:"тема", rewOnline:"REW: офлайн",
+    params:"ПАРАМЕТРИ", virtual:"ВІРТУАЛЬНІ", output:"ВИХІДНІ", paramsRow:"params · усі параметри таблицею",
+    tabTable:"Таблиця", close:"закрити ✕", outTitle:"OUTPUT — фізичні драйвери", virtTitle:"VIRTUAL — вхідний voicing",
+    colId:"ID", colChan:"Канал", colGain:"Gain dB", colDelay:"Delay ms", colPol:"Pol", colMute:"Mute", colEQ:"EQ", bandsCell:"банд ▸",
+    eqHint:"Тільки <b>задіяні банди</b> (усі параметри одразу — перевага MUSWAY над Helix). APF — це тип банда, не окрема колонка. Bypass — read-only (поки). Порожні з 30 сховані.",
+    shared:"спільні частоти:", noShared:"спільних частот нема", band:"банд", active:"active",
+    dialog:"Діалог з ШІ", dialogSub:"Generator ↔ Critic ↔ Arbiter", composer:"Написати Генератору…  (прототип — не відправляє)", send:"Надіслати",
+    planTitle:"План — Факт", planSub:"фази + кроки", focus:"◆ У ФОКУСІ ЗАРАЗ", measSub:"задача на замір",
+    legWait:"чекаю", legDone:"готово", legBad:"знятий, не підходить", captures:"замір(и)",
+    aiMain:"ШІ main", aiCritic:"ШІ critic", note:"прототип · реальні дані (sound_AutoSci) · крутимо форму",
+    fbBig:"Залишити відгук", fbHead:"Відгук про прототип TCC",
+    fbHint:"Напишіть, що подобається / що змінити. Скористайтесь кнопками B / I / список — набирати markdown руками не треба.",
+    fbPh:"Ваш відгук про прототип…", fbCancel:"Скасувати", fbSend:"Надіслати в GitHub →", fbSendGeneric:"Надіслати відгук →",
+    fbViaGithub:"Через GitHub (маю акаунт)",
+    lastMain:"останній: фаза 2 / крок 2.2 · щойно", lastCrit:"останній: 12 хв тому",
+  },
+};
+const t = k => (T[lang] && T[lang][k]) != null ? T[lang][k] : (T.en[k] != null ? T.en[k] : k);
+const tx = o => (o && typeof o==="object" && !Array.isArray(o)) ? (o[lang] != null ? o[lang] : o.en) : o;
+
+// ================= data =================
+const OFF = "OFF";
+const leg = (f,t2,s)=>({f,t:t2,s});
+const b = (id,type,freq,q,gain)=>({id,type,freq,q,gain,bypass:false});
+const DSP = { model:"Helix DSP Ultra S", virtualMax:8, outputMax:12 };
+
+const PRESET_LABELS = {
+  FULL:{en:'"FULL" (daily)', uk:'"FULL" (повсякденний)'},
+  SQ:{en:'"SQ Jazzi v.2" (competition)', uk:'"SQ Jazzi v.2" (змагальний)'},
+};
+const ABBR = {
+  virtual:{"Front L Full":"FL","Front R Full":"FR","Rear L Full":"RL","Rear R Full":"RR","Front Center Full":"FC","Rear Fill Full":"RF","Subwoofer 1":"SW"},
+  output:{"Front Center Full":"c","Front L Low":"w-L","Front R Low":"w-R","Front L Mid":"m-L","Front R Mid":"m-R","Front L High":"tw-L","Front R High":"tw-R","Rear L Full":"r-L","Rear R Full":"r-R","Subwoofer 1":"sub"},
+};
+const abbrOf = (c,isOut)=> (ABBR[isOut?"output":"virtual"][c.name]) || c.name;
+
+const FEAT = {
+  full:[["RealCenter","ON"],["SubRC",{en:"−4 dB (judging)",uk:"−4 dB (суддівство)"}],["RearRC","3/4"]],
+  sq:[["RealCenter","ON"],["RTC",{en:"off (SQ always)",uk:"off (SQ назавжди)"}],["SubRC",{en:"−4 dB (judging)",uk:"−4 dB (суддівство)"}]],
+};
+
+const PRESETS = {
+  FULL: {
+    slot:"DSP #01", save:"B8_EMMA_v10_Finish", target:"SQ-Comp-Ref", features:FEAT.full,
+    virtual:[
+      {id:"A",name:"Front L Full",gain:0.0,delay:0.0,pol:"NORM",eq:[b(1,"LS",150,0.71,+2.5),b(2,"PK",1420,2.0,-2.0),b(5,"PK",2800,1.8,+1.2),b(10,"PK",3600,1.1,+2.2)]},
+      {id:"B",name:"Front R Full",gain:0.0,delay:0.0,pol:"NORM",eq:[b(1,"LS",150,0.71,+2.5),b(2,"PK",1420,2.0,-2.0),b(10,"PK",3600,1.1,+2.2)]},
+      {id:"C",tag:"RearATT",name:"Rear L Full",gain:0.0,delay:0.0,pol:"NORM",eq:[]},
+      {id:"D",tag:"RearATT",name:"Rear R Full",gain:0.0,delay:0.0,pol:"NORM",eq:[]},
+      {id:"E",name:"Front Center Full",gain:0.0,delay:0.0,pol:"NORM",eq:[]},
+      {id:"F",tag:"RearATT",name:"Rear Fill Full",gain:0.0,delay:0.0,pol:"NORM",eq:[]},
+      {id:"K",tag:"SubRC",name:"Subwoofer 1",gain:0.0,delay:0.0,pol:"NORM",eq:[b(3,"LS",150,0.71,+2.5)]},
+      {id:"L",name:"Not assigned",na:true},
+    ],
+    output:[
+      {id:"A",name:"Not assigned",na:true},
+      {id:"B",name:"Front Center Full",hp:leg(620,"LR",36),lp:leg(2330,"LR",36),gain:3.5,delay:1.32,pol:"INV",eq:[b(1,"PK",1000,2.0,-9.0),b(2,"PK",1450,2.0,-9.0)]},
+      {id:"C",name:"Front L Low",hp:leg(86,"LR",12),lp:leg(215,"LR",12),gain:-0.3,delay:3.69,pol:"NORM",eq:[b(4,"PK",102,3.5,-3.0),b(6,"PK",188,7.0,-2.5)]},
+      {id:"D",name:"Front R Low",hp:leg(86,"LR",12),lp:leg(215,"LR",12),gain:0.6,delay:3.69,pol:"NORM",eq:[b(2,"PK",134,5.0,-3.0),b(6,"PK",175,2.5,-3.5)]},
+      {id:"E",name:"Front L Mid",hp:leg(460,"BW",24),lp:leg(2000,"LR",12),gain:-3.0,delay:3.12,pol:"INV",eq:[b(1,"PK",1120,2.2,-2.5),b(3,"PK",320,2.0,-2.5),b(5,"PK",520,1.8,+1.2)]},
+      {id:"F",name:"Front R Mid",hp:leg(460,"BW",24),lp:leg(2000,"LR",12),gain:1.4,delay:2.71,pol:"INV",eq:[b(5,"PK",520,1.8,+1.2)]},
+      {id:"G",name:"Front L High",hp:leg(3625,"BW",24),lp:OFF,gain:-5.6,delay:2.27,pol:"INV",eq:[b(2,"PK",4050,2.0,-2.0),b(4,"PK",6800,1.5,-1.5),b(5,"APF2",2177,1.5,null),b(8,"PK",8800,1.4,+1.0)]},
+      {id:"H",name:"Front R High",hp:leg(3625,"BW",24),lp:OFF,gain:-4.0,delay:1.44,pol:"INV",eq:[b(8,"PK",8800,1.4,-1.0)]},
+      {id:"I",tag:"RearATT",name:"Rear L Full",hp:leg(400,"LR",24),lp:leg(4000,"LR",24),gain:0.0,delay:12.0,pol:"NORM",eq:[b(1,"PK",850,1.5,-4.5)]},
+      {id:"J",tag:"RearATT",name:"Rear R Full",hp:leg(400,"LR",24),lp:leg(4000,"LR",24),gain:3.0,delay:9.5,pol:"NORM",eq:[b(1,"PK",850,1.5,-5.5)]},
+      {id:"K",tag:"SubRC",name:"Subwoofer 1",hp:OFF,lp:leg(88,"BW",36),gain:0.0,delay:0.0,pol:"NORM",eq:[b(3,"PK",55,5.0,+1.9),b(4,"LS",30,0.71,-2.2)]},
+      {id:"L",name:"Not assigned",na:true},
+    ],
+  },
+  SQ: {
+    slot:"DSP #02", save:"SQ_EMMA_v5.1.2", target:"Jazzi v2", features:FEAT.sq,
+    virtual:[
+      {id:"A",name:"Front L Full",gain:0.0,delay:0.0,pol:"NORM",eq:[b(1,"LS",150,0.71,+2.5),b(2,"PK",1420,2.0,-2.0),b(5,"PK",2800,1.8,+1.2),b(10,"PK",3600,1.1,+2.2)]},
+      {id:"B",name:"Front R Full",gain:0.0,delay:0.0,pol:"NORM",eq:[b(1,"LS",150,0.71,+2.5),b(2,"PK",1420,2.0,-2.0),b(10,"PK",3600,1.1,+2.2)]},
+      {id:"C",tag:"RearATT",name:"Rear L Full",gain:0.0,delay:0.0,pol:"NORM",mute:true,eq:[]},
+      {id:"D",tag:"RearATT",name:"Rear R Full",gain:0.0,delay:0.0,pol:"NORM",mute:true,eq:[]},
+      {id:"E",name:"Front Center Full",gain:0.0,delay:0.0,pol:"NORM",eq:[]},
+      {id:"F",tag:"RearATT",name:"Rear Fill Full",gain:0.0,delay:0.0,pol:"NORM",mute:true,eq:[]},
+      {id:"K",tag:"SubRC",name:"Subwoofer 1",gain:0.0,delay:0.0,pol:"NORM",eq:[b(3,"LS",150,0.71,+2.5),b(7,"PK",27,4.3,+3.0)]},
+      {id:"L",name:"Not assigned",na:true},
+    ],
+    output:[
+      {id:"A",name:"Not assigned",na:true},
+      {id:"B",name:"Front Center Full",hp:leg(620,"LR",36),lp:leg(2330,"LR",36),gain:3.0,delay:1.32,pol:"INV",eq:[b(1,"PK",1000,2.0,-9.0),b(2,"PK",1450,2.0,-9.0)]},
+      {id:"C",name:"Front L Low",hp:leg(86,"LR",12),lp:leg(215,"LR",12),gain:-0.3,delay:3.69,pol:"NORM",eq:[b(4,"PK",102,3.5,-3.0),b(6,"PK",188,7.0,-2.5)]},
+      {id:"D",name:"Front R Low",hp:leg(86,"LR",12),lp:leg(215,"LR",12),gain:0.6,delay:3.69,pol:"NORM",eq:[b(2,"PK",134,5.0,-3.0),b(6,"PK",175,2.5,-3.5)]},
+      {id:"E",name:"Front L Mid",hp:leg(460,"BW",24),lp:leg(2000,"LR",12),gain:-3.5,delay:3.12,pol:"INV",eq:[b(1,"PK",1120,2.2,-2.5),b(3,"PK",320,2.0,-2.5),b(5,"PK",520,1.8,+1.2)]},
+      {id:"F",name:"Front R Mid",hp:leg(460,"BW",24),lp:leg(2000,"LR",12),gain:0.9,delay:2.71,pol:"INV",eq:[b(5,"PK",520,1.8,+1.2)]},
+      {id:"G",name:"Front L High",hp:leg(3625,"BW",24),lp:OFF,gain:-5.8,delay:2.27,pol:"INV",eq:[b(2,"PK",4050,2.0,-2.0),b(4,"PK",6800,1.5,-1.5),b(5,"APF2",2177,1.5,null),b(8,"PK",8800,1.4,+1.0)]},
+      {id:"H",name:"Front R High",hp:leg(3625,"BW",24),lp:OFF,gain:-4.2,delay:1.44,pol:"INV",eq:[b(8,"PK",8800,1.4,-1.0)]},
+      {id:"I",tag:"RearATT",name:"Rear L Full",hp:leg(400,"LR",24),lp:leg(4000,"LR",24),gain:0.0,delay:12.0,pol:"NORM",off:true,eq:[b(1,"PK",850,1.5,-4.5)]},
+      {id:"J",tag:"RearATT",name:"Rear R Full",hp:leg(400,"LR",24),lp:leg(4000,"LR",24),gain:3.0,delay:9.5,pol:"NORM",off:true,eq:[b(1,"PK",850,1.5,-5.5)]},
+      {id:"K",tag:"SubRC",name:"Subwoofer 1",hp:OFF,lp:leg(88,"BW",36),gain:0.0,delay:0.0,pol:"NORM",eq:[b(3,"PK",55,5.0,+1.9),b(4,"LS",30,0.71,-2.2),b(7,"PK",27,4.3,+3.0)]},
+      {id:"L",name:"Not assigned",na:true},
+    ],
+  },
+};
+
+const DIALOG = [
+  {who:"gen",role:"Generator · Claude Opus 4.8",
+    en:"Phase 2 (EQ), step 2.2. Proposing a left-lobe cut on <code>m_L</code>: <code>PK 1120 −2.5 Q2.2</code>. Hot L 990–1250 pulls the image left; this evens it out without shifting the pair's phase (9.8°→6.8°).",
+    uk:"Фаза 2 (EQ), крок 2.2. Пропоную на <code>m_L</code> зріз лівого лоба: <code>PK 1120 −2.5 Q2.2</code>. Гарячий L 990–1250 тягне образ вліво; вирівнює без зсуву фази пари (9.8°→6.8°)."},
+  {who:"crit",role:"Critic · Gemini",
+    en:"The \"175-stack destroys GD attack\" risk is ruled out by measurement. Gate fail-criterion: if #13/T8 \"bloats\" — revert. Recommendation: apply.",
+    uk:"Ризик «стек 175 руйнує GD-атаку» знято виміром. Фейл-критерій: якщо №13/T8 «розпухає» — відкат. Рекомендація: вводити."},
+  {who:"user",role:"Arbiter · you",
+    en:"Applied. Captured <code>_32</code>. Punch intact, no diffuseness. Keeping it.",
+    uk:"Ввів. Зняв <code>_32</code>. Панч на місці, дифузності нема. Лишаємо."},
+  {who:"gen",role:"Generator · Claude Opus 4.8",
+    en:"Attested: lobe 990–1250 <code>+2.40 → −0.07</code>. Next step — the measurement task (panel on the right).",
+    uk:"Атестовано: лоб 990–1250 <code>+2.40 → −0.07</code>. Наступний крок — задача на замір (панель праворуч)."},
+];
+
+const PLAN = [
+  {st:"done", name:{en:"Phase 0 · Intake + install", uk:"Фаза 0 · Intake + інсталяція"}, steps:[
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"0.1 interview: equipment + goals",uk:"0.1 інтерв'ю: обладнання + цілі"}},
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"0.2 protective cuts before capture",uk:"0.2 захисні зрізи перед замірами"}},
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"0.3 mic calibration + loopback",uk:"0.3 калібрування міка + loopback"}},
+  ]},
+  {st:"done", name:{en:"Phase 1 · Foundation (XO · TA · polarity)", uk:"Фаза 1 · Foundation (XO · TA · полярність)"}, steps:[
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"1.1 crossovers (acoustic onset)",uk:"1.1 кросовери (акустичний онсет)"}},
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"1.2 delays + coplanarity",uk:"1.2 затримки + копланарність"}},
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"1.3 phase coherence of junctions",uk:"1.3 фазова когерентність стиків"}},
+  ]},
+  {st:"cur", current:true, name:{en:"Phase 2 · EQ + tonal balance", uk:"Фаза 2 · EQ + тональний баланс"}, steps:[
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"2.1 per-driver EQ (v4.5)",uk:"2.1 per-driver EQ (v4.5)"}},
+    {tag:{en:"ok",uk:"ок"},tagc:"ok", name:{en:"2.2 voicing (virtual FL/FR/sub)",uk:"2.2 voicing (virtual FL/FR/sub)"}},
+    {tag:{en:"in progress",uk:"в роботі"},tagc:"wait", name:{en:"2.3 target-match (SQ-Comp-Ref)",uk:"2.3 target-match (SQ-Comp-Ref)"}},
+    {tag:{en:"needs v10",uk:"чекає замір v10"},tagc:"wait", name:{en:"2.4 cold L-lobes 700–880",uk:"2.4 холодні L-лоби 700–880"}},
+  ]},
+  {st:"todo", name:{en:"Phase 3 · Imaging / staging", uk:"Фаза 3 · Imaging / staging"}, steps:[
+    {tag:"",tagc:"", name:{en:"3.1 center (RealCenter) + gain",uk:"3.1 центр (RealCenter) + гейн"}},
+    {tag:"",tagc:"", name:{en:"3.2 TA-refine (height / depth)",uk:"3.2 TA-refine (висота / глибина)"}},
+  ]},
+  {st:"todo", name:{en:"Phase 4 · Advisory / safety gates", uk:"Фаза 4 · Advisory / safety-гейти"}, steps:[
+    {tag:"",tagc:"", name:{en:"4.1 eq_gate (no boost below Fs)",uk:"4.1 eq_gate (не бустити нижче Fs)"}},
+    {tag:"",tagc:"", name:{en:"4.2 attenuation-at-Fs",uk:"4.2 attenuation-at-Fs"}},
+  ]},
+  {st:"todo", name:{en:"Phase 5 · Voicing / presets (SQ + FULL)", uk:"Фаза 5 · Voicing / пресети (SQ + FULL)"}, steps:[]},
+  {st:"todo", name:{en:"Phase 6 · Verification + finish", uk:"Фаза 6 · Верифікація + фінал"}, steps:[
+    {tag:"",tagc:"", name:{en:"6.1 MMM + listening gates",uk:"6.1 MMM + слухові гейти"}},
+    {tag:"",tagc:"", name:{en:"6.2 backup .pct6 + REW mdat",uk:"6.2 бекап .pct6 + REW mdat"}},
+  ]},
+];
+
+const MEAS = {
+  version:{en:"Capture series v10 · test capture", uk:"Зняти серію v10 · тестове зняття"},
+  groups: [
+    {type:"sw (LB)", items:[
+      {name:"sub_10",st:"done",n:2}, {name:"w-L_10",st:"done",n:2}, {name:"w-R_10",st:"done",n:3},
+      {name:"m-L_10",st:"wait"}, {name:"m-R_10",st:"bad",n:1}, {name:"tw-L_10",st:"wait"}, {name:"tw-R_10",st:"wait"},
+      {name:"c_10",st:"wait"}, {name:"r-L_10",st:"wait"}, {name:"r-R_10",st:"wait"},
+    ]},
+    {type:"RTA (MMM)", items:[
+      {name:"sub_10",st:"wait"}, {name:"w-L_10",st:"wait"}, {name:"w-R_10",st:"wait"},
+      {name:"m-L_10",st:"wait"}, {name:"m-R_10",st:"wait"}, {name:"tw-L_10",st:"wait"}, {name:"tw-R_10",st:"wait"},
+      {name:"c_10",st:"wait"}, {name:"r-L_10",st:"wait"}, {name:"r-R_10",st:"wait"},
+    ]},
+    {type:"RTA · group", items:[
+      {name:"Ws_10",st:"wait"}, {name:"Ms_10",st:"wait"}, {name:"TWs_10",st:"wait"}, {name:"SW+Ws_10",st:"wait"},
+      {name:"L_10",st:"wait"}, {name:"R_10",st:"wait"}, {name:"ALL_10",st:"wait"}, {name:"ALL+C_10",st:"wait"}, {name:"ALL+C+Rs_10",st:"wait"},
+    ]},
+  ],
+};
+
+// ================= state =================
+let cur = "FULL", mode = null, tableTier = "output", selChan = null, pairMode = false;
+
+const el = (tag,c,h)=>{ const e=document.createElement(tag); if(c) e.className=c; if(h!=null) e.innerHTML=h; return e; };
+const legLabel = l => (l===OFF||!l) ? "OFF" : `${fmt(l.f)} ${l.t}${l.s}`;
+const fmt = n => (Math.round(n*100)/100).toString();
+const gsign = g => (g>=0?"+":"")+g.toFixed(1);
+
+// ================= tree =================
+function renderTree(){
+  const p = PRESETS[cur];
+  const root = document.getElementById("tree"); root.innerHTML = "";
+  const paramKids = (p.features||[]).map(([k,v])=>infoRow(k, tx(v)));
+  if(paramKids.length) root.appendChild(groupNode(t("params"), "", true, paramKids));
+  root.appendChild(groupNode(t("virtual"), `${p.virtual.filter(x=>!x.na).length}/${DSP.virtualMax}`, false,
+    [paramsRow("virtual")].concat(p.virtual.map((v,i)=> v.na?null:chanRow(v,"virtual",i,false)).filter(Boolean))));
+  root.appendChild(groupNode(t("output"), `${p.output.filter(x=>!x.na).length}/${DSP.outputMax}`, false,
+    [paramsRow("output")].concat(p.output.map((c,i)=> c.na?null:chanRow(c,"output",i,true)).filter(Boolean))));
+}
+function groupNode(label, count, collapsed, children){
+  const node = el("div","node grp"+(collapsed?" collapsed":""));
+  const row = el("div","row click ghead");
+  const tw = el("span","tw", collapsed?"▸":"▾");
+  row.appendChild(tw);
+  row.appendChild(el("span",null, label + (count!==""?` <span class="cnt">${count}</span>`:"")));
+  const kids = el("div","children"); children.forEach(c=>kids.appendChild(c));
+  row.addEventListener("click",()=>{ node.classList.toggle("collapsed"); tw.textContent = node.classList.contains("collapsed")?"▸":"▾"; });
+  node.appendChild(row); node.appendChild(kids); return node;
+}
+function infoRow(k,v){ return el("div","paramrow", `<span class="pk">${k}</span><span class="pv">${v}</span>`); }
+function paramsRow(tier){
+  const r = el("div","prow-params", `<span class="ic">⊞</span> ${t("paramsRow")}`);
+  r.addEventListener("click",()=> openTable(tier)); return r;
+}
+function chanRow(c, tier, idx, isOutput){
+  const wrap = el("div","chan"); wrap.dataset.tier=tier; wrap.dataset.idx=idx;
+  const dis = c.off||c.mute; const n=(c.eq||[]).length;
+  if(dis) wrap.classList.add("chan-dim");
+  const l1 = el("div","cline1");
+  l1.appendChild(el("span","cid", c.id));
+  l1.appendChild(el("span","cn", abbrOf(c,isOutput)));
+  if(dis) l1.appendChild(el("span","pill off", c.mute?"MUTE":"OFF"));
+  else l1.appendChild(el("span","pill "+(c.pol==="INV"?"inv":"norm"), c.pol));
+  if(!isOutput && c.tag) l1.appendChild(el("span","ctag2", c.tag));
+  if(n>0){ const chip=el("span","eq-chip",`EQ ${n}`); chip.addEventListener("click",e=>{e.stopPropagation();openEq(tier,idx);}); l1.appendChild(chip); }
+  else l1.appendChild(el("span","eq-chip muted","EQ —"));
+  wrap.appendChild(l1);
+  if(isOutput){ const l2=el("div","cline2"); l2.textContent=`HP ${legLabel(c.hp)} · LP ${legLabel(c.lp)} · ${gsign(c.gain)}dB`; wrap.appendChild(l2); }
+  wrap.title = isOutput
+    ? `${c.id} · ${c.name}\nHPF ${legLabel(c.hp)} · LPF ${legLabel(c.lp)}\nGain ${gsign(c.gain)} dB · Delay ${fmt(c.delay)} ms · Ph ${c.pol}\nEQ ${n}`
+    : `${c.id} · ${c.name}${c.tag?` [${c.tag}]`:""}\nGain ${gsign(c.gain)} dB · Delay ${fmt(c.delay)} ms · Ph ${c.pol}${c.mute?" · MUTE":""}\nEQ ${n}`;
+  wrap.addEventListener("click",()=>{ openTable(tier); selectChan(tier,idx); });
+  return wrap;
+}
+
+// ================= detail pane =================
+function openDetail(){ document.getElementById("detail").classList.add("open"); }
+document.getElementById("dClose").addEventListener("click",()=>{ document.getElementById("detail").classList.remove("open"); mode=null; syncTabs(); });
+document.getElementById("tabTable").addEventListener("click",()=>{ if(mode) openTable(tableTier); });
+document.getElementById("tabEq").addEventListener("click",()=>{ if(selChan) openEq(selChan.tier, selChan.idx); });
+document.getElementById("pairBtn").addEventListener("click",()=>{ if(selChan){ pairMode=!pairMode; openEq(selChan.tier, selChan.idx); } });
+function syncTabs(){
+  document.getElementById("tabTable").classList.toggle("on", mode==="table");
+  document.getElementById("tabEq").classList.toggle("on", mode==="eq");
+  if(mode!=="eq") document.getElementById("pairBtn").style.display = "none";
+}
+function openTable(tier){
+  mode="table"; tableTier=tier;
+  const p = PRESETS[cur]; const list = tier==="virtual"?p.virtual:p.output; const isOut = tier==="output";
+  document.getElementById("detailTitle").textContent = (isOut?t("outTitle"):t("virtTitle"))+` · ${list.filter(x=>!x.na).length}/${isOut?DSP.outputMax:DSP.virtualMax}`;
+  const cols = isOut ? [t("colId"),t("colChan"),"HPF","LPF",t("colGain"),t("colDelay"),t("colPol"),t("colEQ")]
+                     : [t("colId"),t("colChan"),t("colGain"),t("colDelay"),t("colPol"),t("colMute"),t("colEQ")];
+  let h = `<table class="ptable"><thead><tr>`;
+  cols.forEach((c,i)=> h += `<th class="${i<2?'l':''}">${c}</th>`);
+  h += `</tr></thead><tbody>`;
+  list.forEach((c,idx)=>{
+    if(c.na) return;
+    const dis = c.off||c.mute; const gc = c.gain>=0?"gpos":"gneg";
+    const pol = `<span class="${c.pol==='INV'?'tinv':'tnorm'}">${c.pol}</span>`;
+    const eqn = (c.eq||[]).length;
+    const eq = eqn>0 ? `<span class="eqcell">${eqn} ${t("bandsCell")}</span>` : `<span class="eqcell muted">—</span>`;
+    const nameCell = `<td class="l cid2">${c.id}</td><td class="l cname" title="${c.name}">${abbrOf(c,isOut)}${(!isOut&&c.tag)?` <span class="ttag">[${c.tag}]</span>`:''}</td>`;
+    if(isOut){
+      h += `<tr data-idx="${idx}" ${dis?'class="rdis"':''}>${nameCell}
+        <td class="${c.hp===OFF?'dim':''}">${legLabel(c.hp)}</td>
+        <td class="${c.lp===OFF?'dim':''}">${legLabel(c.lp)}</td>
+        <td class="${dis?'dim':gc}">${gsign(c.gain)}</td>
+        <td>${fmt(c.delay)}</td><td>${pol}</td>
+        <td class="eqc">${eq}</td></tr>`;
+    } else {
+      h += `<tr data-idx="${idx}" ${dis?'class="rdis"':''}>${nameCell}
+        <td class="${dis?'dim':gc}">${gsign(c.gain)}</td>
+        <td>${fmt(c.delay)}</td><td>${pol}</td>
+        <td class="${c.mute?'':'dim'}">${c.mute?'MUTE':'—'}</td>
+        <td class="eqc">${eq}</td></tr>`;
+    }
+  });
+  h += `</tbody></table>`;
+  const body = document.getElementById("detailBody"); body.innerHTML = h;
+  body.querySelectorAll("tbody tr").forEach(tr=>{
+    const idx = +tr.dataset.idx;
+    tr.addEventListener("click",()=> selectChan(tier, idx));
+    const eqc = tr.querySelector(".eqcell:not(.muted)");
+    if(eqc) eqc.addEventListener("click",(e)=>{ e.stopPropagation(); openEq(tier, idx); });
+  });
+  openDetail(); syncTabs();
+  if(selChan && selChan.tier===tier) highlightRow(selChan.idx);
+}
+function selectChan(tier, idx){
+  selChan = {tier, idx};
+  if(mode==="table" && tableTier===tier) highlightRow(idx);
+  document.querySelectorAll(".tree .chan").forEach(r=> r.classList.toggle("active", r.dataset.tier===tier && +r.dataset.idx===idx));
+}
+function highlightRow(idx){ document.querySelectorAll("#detailBody tbody tr").forEach(tr=> tr.classList.toggle("sel", +tr.dataset.idx===idx)); }
+
+function siblingName(n){ if(n.includes(" L ")) return n.replace(" L "," R "); if(n.includes(" R ")) return n.replace(" R "," L "); return null; }
+const isLeft = n => n.includes(" L ");
+function bandHtml(cidx, band, mc){
+  const noGain = band.gain==null; const gc = noGain ? "" : (band.gain>=0?"gain-pos":"gain-neg"); const gv = noGain ? "—" : gsign(band.gain)+" dB";
+  const mstyle = mc ? ` style="border-top:3px solid ${mc}"` : "";
+  return `<div class="band${band.bypass?' bypassed':''}"${mstyle} data-cidx="${cidx}" data-id="${band.id}">
+    <div class="bid">${t("band")} ${band.id}</div>
+    <div class="frow"><span class="fk">Type</span><span class="fv type">${band.type}</span></div>
+    <div class="frow"><span class="fk">Freq</span><span class="fv">${band.freq} Hz</span></div>
+    <div class="frow"><span class="fk">Q</span><span class="fv">${band.q.toFixed(2)}</span></div>
+    <div class="frow"><span class="fk">Gain</span><span class="fv ${gc}">${gv}</span></div>
+    <div class="byp"><span class="b-o"></span>${band.bypass?'BYPASS':t("active")}</div></div>`;
+}
+const bandsFlex = (cidx, chan, cmap) => `<div class="eq-table">`+chan.eq.map(bd=>bandHtml(cidx,bd, cmap?cmap[bd.freq]:null)).join("")+`</div>`;
+const MATCH_PALETTE = ["#5aa9e6","#4bbf87","#e8973c","#c98fe0","#e8c34a","#e05c5c"];
+function openEq(tier, idx){
+  mode="eq"; selChan={tier, idx};
+  const list = tier==="virtual"?PRESETS[cur].virtual:PRESETS[cur].output; const c = list[idx];
+  const sibN = siblingName(c.name); const sibIdx = sibN ? list.findIndex(x=>x.name===sibN) : -1; const hasSib = sibIdx>=0;
+  const pairBtn = document.getElementById("pairBtn");
+  pairBtn.style.display = hasSib ? "" : "none"; pairBtn.classList.toggle("on", pairMode && hasSib);
+  const pair = pairMode && hasSib;
+  const hint = `<p class="eq-hint">${t("eqHint")}</p>`;
+  let title, bodyH;
+  if(pair){
+    let li=idx, ri=sibIdx; if(!isLeft(c.name)){ li=sibIdx; ri=idx; }
+    const L=list[li], R=list[ri];
+    const rf = new Set(R.eq.map(x=>x.freq));
+    const shared = [...new Set(L.eq.map(x=>x.freq).filter(f=>rf.has(f)))];
+    const cmap = {}; shared.forEach((f,i)=> cmap[f]=MATCH_PALETTE[i%MATCH_PALETTE.length]);
+    const legend = shared.length
+      ? `<div class="match-legend">${t("shared")} ${shared.map(f=>`<span class="ml"><span class="sw" style="background:${cmap[f]}"></span>${f}</span>`).join("")}</div>`
+      : `<div class="match-legend">${t("noShared")}</div>`;
+    const isOut = tier==="output", aL=abbrOf(L,isOut), aR=abbrOf(R,isOut);
+    title = `EQ · ${aL} + ${aR}`;
+    bodyH = hint + legend + `<div class="eq-rows">
+      <div class="eq-row"><div class="rowlab" title="${L.name}">L · ${aL} <span style="color:var(--faint)">(${L.eq.length})</span></div>${bandsFlex(li,L,cmap)}</div>
+      <div class="eq-row"><div class="rowlab" title="${R.name}">R · ${aR} <span style="color:var(--faint)">(${R.eq.length})</span></div>${bandsFlex(ri,R,cmap)}</div></div>`;
+  } else {
+    title = `EQ · ${c.id} · ${abbrOf(c, tier==="output")}`;
+    bodyH = hint + bandsFlex(idx, c);
+  }
+  document.getElementById("detailTitle").textContent = title;
+  document.getElementById("detailBody").innerHTML = bodyH;
+  openDetail(); syncTabs();
+  document.querySelectorAll(".tree .chan").forEach(r=> r.classList.toggle("active", r.dataset.tier===tier && +r.dataset.idx===idx));
+}
+
+// ================= dialog =================
+function renderDialog(){
+  const root = document.getElementById("chat"); root.innerHTML="";
+  DIALOG.forEach(m=>{
+    const d = el("div","msg "+m.who);
+    d.appendChild(el("div","who", m.role));
+    const body = el("div"); body.innerHTML = tx(m); d.appendChild(body);
+    root.appendChild(d);
+  });
+}
+
+// ================= plan =================
+function renderPlan(){
+  const root = document.getElementById("plan"); root.innerHTML="";
+  PLAN.forEach(ph=>{
+    const hasSteps = ph.steps && ph.steps.length;
+    const collapsed = hasSteps && !ph.current;
+    const node = el("div","phase"+(ph.current?" current":"")+(collapsed?" pcol":""));
+    const prow = el("div","prow"+(hasSteps?" click":""));
+    prow.appendChild(el("span","pcaret", hasSteps ? (collapsed?"▸":"▾") : ""));
+    prow.appendChild(el("span","st "+(ph.st==="done"?"done":ph.st==="cur"?"cur":"todo"), ph.st==="done"?"✓":""));
+    prow.appendChild(el("span","pname", tx(ph.name)));
+    if(hasSteps) prow.appendChild(el("span","pcnt", String(ph.steps.length)));
+    node.appendChild(prow);
+    const steps = el("div","psteps");
+    ph.steps.forEach(s=>{
+      const ss = el("div","substep");
+      ss.appendChild(el("span",null, tx(s.name)));
+      const tag = tx(s.tag); if(tag) ss.appendChild(el("span","stag "+s.tagc, tag));
+      steps.appendChild(ss);
+    });
+    node.appendChild(steps);
+    if(hasSteps){ const caret = prow.querySelector(".pcaret"); prow.addEventListener("click",()=>{ node.classList.toggle("pcol"); caret.textContent = node.classList.contains("pcol")?"▸":"▾"; }); }
+    root.appendChild(node);
+  });
+}
+
+// ================= measurement task =================
+function renderMeas(){
+  const root = document.getElementById("measBody");
+  const legend = [["wait",t("legWait")],["done",t("legDone")],["bad",t("legBad")]]
+    .map(([c,tt])=>`<span class="lg"><span class="tl ${c}"></span>${tt}</span>`).join("");
+  const st_txt = {wait:t("legWait"), done:t("legDone"), bad:t("legBad")};
+  const cols = MEAS.groups.map(g=>
+    `<div class="mcol"><div class="mcol-h">${g.type}</div>`+
+    g.items.map(it=>`<div class="mrow ${it.st}" title="${it.name} (${g.type})${it.n?` · ${it.n} ${t("captures")}`:""} — ${st_txt[it.st]}"><span class="tl ${it.st}"></span><span class="mn">${it.name}${it.n?` <span class="mn-n">(${it.n})</span>`:""}</span></div>`).join("")+
+    `</div>`).join("");
+  root.innerHTML = `<div class="meas-head">${tx(MEAS.version)}</div><div class="meas-legend">${legend}</div><div class="meas-cols">${cols}</div>`;
+}
+
+// ================= chrome / preset / theme / lang =================
+function applyStatic(){
+  document.querySelectorAll("[data-i]").forEach(e=> e.textContent = t(e.dataset.i));
+  document.querySelectorAll("[data-i-html]").forEach(e=> e.innerHTML = t(e.dataset.iHtml));
+  document.querySelectorAll("[data-ph]").forEach(e=> e.placeholder = t(e.dataset.ph));
+  document.getElementById("lbPreset").textContent = t("preset");
+  document.getElementById("lbTarget").textContent = t("target");
+  document.querySelectorAll(".ai .last")[0] && (document.querySelectorAll(".ai .last")[0].textContent = t("lastMain"));
+}
+function fillPresetOptions(){
+  const sel = document.getElementById("presetSel");
+  sel.innerHTML = Object.keys(PRESETS).map(k=>`<option value="${k}">${tx(PRESET_LABELS[k])}</option>`).join("");
+  sel.value = cur;
+}
+function renderAll(){ renderTree(); renderDialog(); renderPlan(); renderMeas(); }
+function applyPreset(){
+  const p = PRESETS[cur];
+  document.getElementById("slot").textContent = p.slot;
+  document.getElementById("savename").textContent = p.save;
+  document.getElementById("target").textContent = p.target;
+  document.getElementById("detail").classList.remove("open"); mode=null; selChan=null; syncTabs();
+  renderTree();
+}
+function setLang(l){
+  lang = l;
+  applyStatic(); fillPresetOptions(); renderAll();
+  // footer AI "last" lines (two)
+  const lasts = document.querySelectorAll(".ai .last");
+  if(lasts[0]) lasts[0].textContent = t("lastMain");
+  if(lasts[1]) lasts[1].textContent = t("lastCrit");
+}
+document.getElementById("presetSel").addEventListener("change",e=>{ cur=e.target.value; applyPreset(); });
+document.getElementById("langSel").addEventListener("change",e=>{ setLang(e.target.value); });
+document.getElementById("themeBtn").addEventListener("click",()=>{
+  const r = document.documentElement;
+  const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  r.dataset.theme = dark ? "light" : "dark";
+});
+
+// footer AI "last" lines need spans
+(function(){
+  document.querySelectorAll(".zone-l .ai").forEach((ai,i)=>{
+    const s = el("span","last", i===0 ? t("lastMain") : t("lastCrit"));
+    ai.appendChild(s);
+  });
+})();
+
+// ================= feedback → rich-text-to-Markdown, then GitHub =================
+// Non-GitHub destination: a public Google Form (no login required), pointing
+// at the same "Your feedback" question via its entry ID for prefill.
+const GFORM_ID = "1FAIpQLSdMzITv6Rzh8PWITy5QWc3xQMcAn9aDl1k0QbpZykHEQd6A4g";
+const GFORM_ENTRY = "970390217";
+
+function htmlToMarkdown(root){
+  function inline(node){
+    let out = "";
+    node.childNodes.forEach(n=>{
+      if(n.nodeType===Node.TEXT_NODE){ out += n.textContent; return; }
+      const tag = n.tagName;
+      if(tag==="B"||tag==="STRONG") out += `**${inline(n)}**`;
+      else if(tag==="I"||tag==="EM") out += `_${inline(n)}_`;
+      else if(tag==="BR") out += "\n";
+      else out += inline(n);
+    });
+    return out;
+  }
+  let lines = [];
+  function block(node){
+    node.childNodes.forEach(n=>{
+      if(n.nodeType===Node.TEXT_NODE){ const s=n.textContent; if(s.trim()) lines.push(s); return; }
+      const tag = n.tagName;
+      if(tag==="UL"){ n.querySelectorAll(":scope > li").forEach(li=> lines.push("- "+inline(li).trim())); }
+      else if(tag==="OL"){ [...n.querySelectorAll(":scope > li")].forEach((li,i)=> lines.push(`${i+1}. `+inline(li).trim())); }
+      else if(tag==="DIV"||tag==="P"){ const s=inline(n).trim(); if(s) lines.push(s); else lines.push(""); }
+      else if(tag==="BR"){ lines.push(""); }
+      else { const s=inline(n).trim(); if(s) lines.push(s); }
+    });
+  }
+  block(root);
+  return lines.join("\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+
+(function(){
+  const REPO = "ayukhno/autosound-tcc";
+  const modal = document.getElementById("fbModal"), rte = document.getElementById("fbRte"), gh = document.getElementById("fbGithub");
+  const open = ()=>{ modal.classList.add("open"); rte.focus(); };
+  const close = ()=> modal.classList.remove("open");
+  document.querySelectorAll("[data-fb]").forEach(b=> b.addEventListener("click", open));
+  document.getElementById("fbX").addEventListener("click", close);
+  document.getElementById("fbCancel").addEventListener("click", close);
+  modal.addEventListener("click", e=>{ if(e.target===modal) close(); });
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") close(); });
+
+  // toolbar: preventDefault on mousedown keeps the RTE selection alive
+  document.querySelectorAll(".fb-toolbar button").forEach(btn=>{
+    btn.addEventListener("mousedown", e=>{ e.preventDefault(); rte.focus(); document.execCommand(btn.dataset.cmd, false, null); });
+  });
+
+  document.getElementById("fbSend").addEventListener("click", ()=>{
+    const md = htmlToMarkdown(rte) || "(feedback)";
+    if(gh.checked){
+      const body = encodeURIComponent(md + "\n\n---\nSource: TCC main-screen prototype · lang="+lang);
+      const title = encodeURIComponent("TCC prototype — feedback");
+      window.open(`https://github.com/${REPO}/issues/new?title=${title}&body=${body}`, "_blank", "noopener");
+      close(); rte.innerHTML = "";
+    } else {
+      const full = md + "\n\n---\nlang="+lang;
+      const url = `https://docs.google.com/forms/d/e/${GFORM_ID}/viewform?usp=pp_url&entry.${GFORM_ENTRY}=${encodeURIComponent(full)}`;
+      window.open(url, "_blank", "noopener");
+      close(); rte.innerHTML = "";
+    }
+  });
+})();
+
+// ================= init =================
+setLang("en");
+applyPreset();
+</script>
