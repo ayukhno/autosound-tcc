@@ -173,7 +173,18 @@
   .msg.crit .who { color: var(--info); }
   .msg.user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 16%, var(--panel2)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-top-right-radius: 3px; }
   .msg.user .who { color: var(--accent); }
+  .msg.sys { align-self: center; background: color-mix(in srgb, var(--info) 10%, var(--panel2)); border: 1px dashed color-mix(in srgb, var(--info) 45%, var(--border)); max-width: 92%; font-size: 11.5px; }
+  .msg.sys .who { color: var(--info); }
   .msg code { font-family: var(--mono); font-size: 12px; background: var(--panel3); padding: 1px 4px; border-radius: 3px; }
+  .panel.dialog.editing { border-color: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 20%, transparent); }
+  .edit-chip { background: var(--panel3); border: 1px solid var(--border2); color: var(--muted); border-radius: 20px; padding: 4px 11px; font: inherit; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .edit-chip:hover { color: var(--text); }
+  .edit-chip.on { background: color-mix(in srgb, var(--info) 16%, var(--panel2)); border-color: var(--info); color: var(--info); font-weight: 600; }
+  .edit-chip .x { opacity: .75; }
+  .edit-reasons { display: none; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel2); flex-wrap: wrap; }
+  .edit-reasons .sub { flex: none; }
+  .reason-btn { background: var(--panel3); border: 1px solid var(--border2); color: var(--text); border-radius: 16px; padding: 4px 12px; font: inherit; font-size: 11.5px; cursor: pointer; }
+  .reason-btn:hover { border-color: var(--info); color: var(--info); }
   .composer { flex: none; border-top: 1px solid var(--border); padding: 9px 12px; display: flex; gap: 8px; }
   .composer input { flex: 1; background: var(--panel2); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); padding: 8px 11px; font: inherit; }
   .composer input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent-dim); }
@@ -290,8 +301,16 @@
       </div>
     </div>
 
-    <div class="panel dialog">
-      <div class="phead"><span><span data-i="dialog">AI dialog</span> <span class="sub" data-i="dialogSub">Generator ↔ Critic ↔ Arbiter</span></span></div>
+    <div class="panel dialog" id="dialogPanel">
+      <div class="phead">
+        <span><span data-i="dialog">AI dialog</span> <span class="sub" data-i="dialogSub">Generator ↔ Critic ↔ Arbiter</span></span>
+        <button class="edit-chip" id="editChip">✎ <span id="editChipTxt" data-i="editChipLabel">Project param edit</span></button>
+      </div>
+      <div class="edit-reasons" id="editReasons">
+        <span class="sub" data-i="editReasonsQ">Why?</span>
+        <button class="reason-btn" data-reason="forgot" data-i="reasonForgot">skill didn't save</button>
+        <button class="reason-btn" data-reason="manual" data-i="reasonManual">I changed something manually</button>
+      </div>
       <div class="body" id="chat"></div>
       <div class="composer">
         <input id="composerInput" data-ph="composer" aria-label="message" />
@@ -354,6 +373,11 @@ const T = {
     eqHint:"Only <b>active bands</b> (all parameters at once — MUSWAY's edge over Helix). APF is a band type, not a column. Bypass is read-only (for now). Empty of 30 are hidden.",
     shared:"shared frequencies:", noShared:"no shared frequencies", band:"band",
     dialog:"AI dialog", dialogSub:"Generator ↔ Critic ↔ Arbiter", composer:"Message the Generator…  (prototype — doesn't send)", send:"Send",
+    editChipLabel:"Project param edit", editReasonsQ:"Why?", reasonForgot:"skill didn't save", reasonManual:"I changed something manually",
+    editStartForgot:"◆ Editing project parameters — flagged: the skill may not have saved a recent change. Describe what should be in the ledger; I'll check and fix it.",
+    editStartManual:"◆ Editing project parameters — you changed something by hand. Tell me what and where; I'll log it in the ledger so future recommendations account for it.",
+    editDoneForgot:"✓ Ledger checked: <code>Rear R Full</code> delay was 9.5 ms in the dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
+    editDoneManual:"✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). Ledger updated and re-attested.",
     planTitle:"Plan — Fact", planSub:"phases + steps", focus:"◆ IN FOCUS NOW", measSub:"measurement task",
     legWait:"waiting", legDone:"done", legBad:"taken, unusable", captures:"capture(s)",
     aiMain:"AI main", aiCritic:"AI critic", note:"prototype · real data (sound_AutoSci) · tuning the form",
@@ -371,6 +395,11 @@ const T = {
     eqHint:"Тільки <b>задіяні банди</b> (усі параметри одразу — перевага MUSWAY над Helix). APF — це тип банда, не окрема колонка. Bypass — read-only (поки). Порожні з 30 сховані.",
     shared:"спільні частоти:", noShared:"спільних частот нема", band:"банд",
     dialog:"Діалог з ШІ", dialogSub:"Generator ↔ Critic ↔ Arbiter", composer:"Написати Генератору…  (прототип — не відправляє)", send:"Надіслати",
+    editChipLabel:"Правка параметрів проекту", editReasonsQ:"Причина?", reasonForgot:"скіл не зберіг", reasonManual:"я змінив щось руками",
+    editStartForgot:"◆ Правка параметрів проекту — позначено: скіл, можливо, не зберіг останню зміну. Опиши, що повинно бути в ledger; я перевірю і виправлю.",
+    editStartManual:"◆ Правка параметрів проекту — ти змінив щось руками. Скажи що і де; я запишу в ledger, щоб наступні рекомендації це враховували.",
+    editDoneForgot:"✓ Перевірив ledger: у <code>Rear R Full</code> delay в діалозі був 9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
+    editDoneManual:"✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ (вручну). Ledger оновлено і переатестовано.",
     planTitle:"План — Факт", planSub:"фази + кроки", focus:"◆ У ФОКУСІ ЗАРАЗ", measSub:"задача на замір",
     legWait:"чекаю", legDone:"готово", legBad:"знятий, не підходить", captures:"замір(и)",
     aiMain:"ШІ main", aiCritic:"ШІ critic", note:"прототип · реальні дані (sound_AutoSci) · крутимо форму",
@@ -868,6 +897,45 @@ function htmlToMarkdown(root){
   const apply = ()=>{ document.documentElement.style.setProperty("--appzoom", z); lbl.textContent = Math.round(z*100)+"%"; };
   document.getElementById("zoomOut").addEventListener("click", ()=>{ z = Math.max(0.8, Math.round((z-0.1)*10)/10); apply(); });
   document.getElementById("zoomIn").addEventListener("click", ()=>{ z = Math.min(1.5, Math.round((z+0.1)*10)/10); apply(); });
+})();
+
+// ================= project-param edit flag (reuses main AI dialog) =================
+(function(){
+  const chip = document.getElementById("editChip"), chipTxt = document.getElementById("editChipTxt");
+  const reasonsBar = document.getElementById("editReasons"), dialogPanel = document.getElementById("dialogPanel");
+  const chat = document.getElementById("chat");
+  let editing = false, reason = null;
+
+  function addSys(html){
+    const div = el("div","msg sys");
+    div.innerHTML = `<div class="who">SYSTEM · ledger</div><div>${html}</div>`;
+    chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  }
+  function start(r){
+    reason = r; editing = true;
+    reasonsBar.style.display = "none";
+    chip.classList.add("on");
+    chipTxt.textContent = t(r==="forgot" ? "reasonForgot" : "reasonManual");
+    chip.querySelector(".x")?.remove();
+    chip.appendChild(el("span","x","✕"));
+    dialogPanel.classList.add("editing");
+    addSys(t(r==="forgot" ? "editStartForgot" : "editStartManual"));
+  }
+  function finish(){
+    addSys(t(reason==="forgot" ? "editDoneForgot" : "editDoneManual"));
+    editing = false; reason = null;
+    dialogPanel.classList.remove("editing");
+    chip.classList.remove("on");
+    chip.querySelector(".x")?.remove();
+    chipTxt.textContent = t("editChipLabel");
+  }
+  chip.addEventListener("click", ()=>{
+    if(editing){ finish(); return; }
+    reasonsBar.style.display = reasonsBar.style.display==="flex" ? "none" : "flex";
+  });
+  reasonsBar.querySelectorAll(".reason-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=> start(btn.dataset.reason));
+  });
 })();
 
 // ================= init =================
