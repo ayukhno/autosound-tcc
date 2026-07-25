@@ -19,11 +19,32 @@ from typing import Optional
 # config.py -> core -> autosound_tcc -> src -> <repo root>
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATE_ROOT = _REPO_ROOT / "data" / "private" / "state"
+DEFAULT_BUNDLED_PROFILES_DIR = _REPO_ROOT / "data" / "dsp_profiles"
 
 
 def state_root() -> Path:
     env = os.environ.get("AUTOSOUND_TCC_STATE_ROOT")
     return Path(env).expanduser() if env else DEFAULT_STATE_ROOT
+
+
+def project_dir() -> Path:
+    """Directory holding this project's `dsp_profile.json`.
+
+    Defaults to `state_root()` — the same tree also holds `<preset>/v_NNN.json` for now. Full
+    `project.json` + `presets/<preset>/{target,state}` nesting (TCC-TZ.md §3) is a later storage
+    migration, not required for the profile mechanism itself.
+    """
+    env = os.environ.get("AUTOSOUND_TCC_PROJECT_DIR")
+    return Path(env).expanduser() if env else state_root()
+
+
+def dsp_profile_path(project_dir_: Optional[Path] = None) -> Path:
+    return (project_dir_ or project_dir()) / "dsp_profile.json"
+
+
+def bundled_profiles_dir() -> Path:
+    """Reference DSP profiles shipped with the app (public, no project data)."""
+    return DEFAULT_BUNDLED_PROFILES_DIR
 
 
 def _preset_dirs(root: Path) -> list[str]:

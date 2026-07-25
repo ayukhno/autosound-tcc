@@ -1,0 +1,81 @@
+{
+  "dsp_profile": {
+    "name": "Helix DSP Ultra S",
+    "vendor": "Audiotec-Fischer",
+    "sources": [
+      "raw/papers/HELIX_DSP-ULTRA-S_11-04-2024.pdf (hardware I/O + electrical specs, page 16 'Technische Daten')",
+      "user, confirmed directly from the PC-Tool software UI, 2026-07-10 (filter grid, gain/freq/Q resolution)",
+      "user, confirmed real channel model + feature toggles during TCC concept design, 2026-07-25"
+    ],
+    "sample_rate_hz": 96000,
+
+    "groups": [
+      {
+        "id": "virtual_channels",
+        "label": "Virtual channels",
+        "max_count": 8,
+        "row_id_style": "letter",
+        "fields": ["gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq_bypass", "eq"],
+        "no_crossover": true,
+        "eq": { "bands_per_channel": 30, "band_types": ["PK", "LSH", "HSH", "APF1", "APF2"] }
+      },
+      {
+        "id": "physical_outputs",
+        "label": "Output channels",
+        "max_count": 12,
+        "row_id_style": "letter",
+        "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "eq"],
+        "crossover_filters": {
+          "types": {
+            "LR": { "orders_db_per_oct": [12, 24, 36] },
+            "BE": { "orders_db_per_oct": [6, 12, 18, 24, 30, 36, 42] },
+            "BW": { "orders_db_per_oct": [6, 12, 18, 24, 30, 36, 42] },
+            "CHEBYSHEV": { "orders_db_per_oct": [6, 12, 18, 24, 30, 36, 42], "ripple_db": null },
+            "SELF_DEFINED": { "q_range": [0.5, 2.0] }
+          },
+          "corner_freq_step_hz": 1.0,
+          "corner_freq_range_hz": null
+        },
+        "eq": { "bands_per_channel": 30, "band_types": ["PK", "LSH", "HSH", "APF1", "APF2"] }
+      }
+    ],
+
+    "parametric_eq": {
+      "freq_step_hz": 0.01,
+      "freq_range_hz": null,
+      "q_range": [0.5, 15.0],
+      "q_step": 0.1,
+      "gain_range_db": [-30.0, 12.0],
+      "gain_step_db": 0.1
+    },
+
+    "phase_control": {
+      "scope": "per driver output, all drivers except midbass (midbass is the fixed alignment reference)",
+      "implementation": "all-pass filter; exact order/frequency mapping not confirmed from the PC-Tool UI itself",
+      "cross_reference": "autosound-tuning skill's GEMINI.md independently documents this as APF2 (2nd-order all-pass) at the channel's own crossover frequency -- likely-correct, not independently re-confirmed here"
+    },
+
+    "polarity": {
+      "scope": ["per driver output", "per virtual channel"],
+      "note": "double-inversion possible (driver stage + virtual channel stage); net effect cancels if both are inverted"
+    },
+
+    "delay": { "step_ms": 0.01, "scope": ["per driver output", "per virtual channel"] },
+
+    "features": [
+      { "key": "RealCenter" },
+      { "key": "DynamicBass" },
+      { "key": "SubXpander" },
+      { "key": "ActiveToneControl" },
+      { "key": "RemoteToneControl" },
+      { "key": "SubRC" },
+      { "key": "RearRC" }
+    ],
+
+    "_open_questions": [
+      "Chebyshev ripple parameter: is it user-settable, and what range?",
+      "DSP compute budget: with up to 60 bands stacked (30 virtual-channel + 30 output) plus crossover + phase + delay, is there a practical ceiling before the 2x295MHz DSP saturates?",
+      "corner_freq_range_hz and parametric_eq.freq_range_hz lower/upper bounds"
+    ]
+  }
+}

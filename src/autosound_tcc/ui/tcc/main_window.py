@@ -1,9 +1,11 @@
 """The main TCC window.
 
-Two read-only panels fed from the project-local DSP ledger: the OUTPUT drivers
-and the VIRTUAL (input-side voicing) channels — the two tiers of the Helix
-signal path. REW curve panels come in a later milestone. Nothing here writes to
-the DSP — read-only by design (brief §11).
+Renders one read-only table per group declared in the project's DSP capability profile
+(`core/vendor_loader.load_dsp_profile`) — not a hardcoded VIRTUAL/OUTPUT pair. A Helix profile
+declares `virtual_channels` + `physical_outputs`; a MUSWAY profile might declare only
+`physical_outputs` + `inputs`. No per-DSP Qt code is needed either way (docs/TCC-TZ.md §2).
+REW curve panels come in a later milestone. Nothing here writes to the DSP — read-only by
+design (brief §11).
 """
 
 from __future__ import annotations
@@ -18,9 +20,8 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc import __version__
 from autosound_tcc.core import config
-from autosound_tcc.state.dsp_state import DspSnapshot, load_snapshot
-from autosound_tcc.ui.tcc.channels_table import ChannelsTable
-from autosound_tcc.ui.tcc.virtual_table import VirtualChannelsTable
+from autosound_tcc.state.dsp_state import ProjectView, load_project_view
+from autosound_tcc.ui.tcc.group_table import GroupTable
 
 
 def _section_label(text: str) -> QLabel:
@@ -37,64 +38,104 @@ class MainWindow(QMainWindow):
 
         self._header = QLabel()
         self._header.setTextFormat(Qt.TextFormat.RichText)
-        self._virtual_table = VirtualChannelsTable()
-        self._output_table = ChannelsTable()
         self._status = QLabel()
         self._status.setStyleSheet("color: #888;")
 
-        central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(6)
-        layout.addWidget(self._header)
-        layout.addWidget(_section_label("Virtual channels (input-side voicing)"))
-        layout.addWidget(self._virtual_table, stretch=2)
-        layout.addWidget(_section_label("Output channels (physical drivers)"))
-        layout.addWidget(self._output_table, stretch=3)
-        layout.addWidget(self._status)
-        self.setCentralWidget(central)
+        self._central = QWidget()
+        self._layout = QVBoxLayout(self._central)
+        self._layout.setContentsMargins(12, 12, 12, 12)
+        self._layout.setSpacing(6)
+        self._layout.addWidget(self._header)
+        self._group_widgets: list[tuple[QLabel, GroupTable]] = []
+        self._layout.addWidget(self._status)
+        self.setCentralWidget(self._central)
 
         self._load()
 
+    def _clear_group_widgets(self) -> None:
+        for label, table in self._group_widgets:
+            self._layout.removeWidget(label)
+            self._layout.removeWidget(table)
+            label.deleteLater()
+            table.deleteLater()
+        self._group_widgets = []
+
+    def _build_group_widgets(self, count: int) -> None:
+        """(Re)build exactly `count` section-label + GroupTable pairs, inserted before the
+        trailing status label — one pair per profile group, in profile-declared order."""
+        self._clear_group_widgets()
+        status_index = self._layout.indexOf(self._status)
+        for _ in range(count):
+            label = _section_label("")
+            table = GroupTable()
+            self._layout.insertWidget(status_index, label)
+            self._layout.insertWidget(status_index + 1, table, stretch=1)
+            status_index += 2
+            self._group_widgets.append((label, table))
+
     def _load(self) -> None:
+        profile_path = config.dsp_profile_path()
+        if not profile_path.is_file():
+            self._show_no_profile(profile_path)
+            return
+        try:
+            from autosound_tcc.core import vendor_loader
+
+            dsp_profile = vendor_loader.load_dsp_profile()
+            profile = dsp_profile.load_profile(str(profile_path))
+            dsp_profile.validate_profile(profile)
+        except Exception as exc:  # missing/broken profile — degrade, don't crash
+            self._show_error("DSP profile", exc)
+            return
+
         root = config.state_root()
         preset = config.resolve_preset(root)
         if preset is None:
-            self._show_empty(root)
+            self._show_no_ledger(root, profile)
             return
         try:
-            snapshot = load_snapshot(str(root), preset)
-        except Exception as exc:  # missing/broken ledger — degrade, don't crash
+            view = load_project_view(str(root), preset, profile)
+        except Exception as exc:
             self._show_error(preset, exc)
             return
-        self._show_snapshot(snapshot)
+        self._show_view(view, profile)
 
-    def _show_snapshot(self, snapshot: DspSnapshot) -> None:
-        self._virtual_table.set_snapshot(snapshot)
-        self._output_table.set_snapshot(snapshot)
-        sr_khz = snapshot.sample_rate / 1000
+    def _show_view(self, view: ProjectView, profile: dict) -> None:
+        self._build_group_widgets(len(view.groups))
+        for (label, table), group in zip(self._group_widgets, view.groups):
+            label.setText(f"{group.label} ({len(group.rows)})")
+            table.set_group(group)
+
+        prof = profile.get("dsp_profile", profile)
+        sr = f"{view.sample_rate / 1000:g} kHz" if view.sample_rate else "—"
         self._header.setText(
-            f"<b>Preset:</b> {snapshot.preset} &nbsp;&nbsp; "
-            f"<b>Sample rate:</b> {sr_khz:g} kHz &nbsp;&nbsp; "
-            f"<b>Version:</b> {snapshot.version or '—'}"
+            f"<b>DSP:</b> {prof.get('vendor', '?')} {prof.get('name', '?')} &nbsp;&nbsp; "
+            f"<b>Preset:</b> {view.preset} &nbsp;&nbsp; "
+            f"<b>Sample rate:</b> {sr} &nbsp;&nbsp; "
+            f"<b>Version:</b> {view.version or '—'}"
         )
-        note = f" — {snapshot.note}" if snapshot.note else ""
+        note = f" — {view.note}" if view.note else ""
+        counts = " · ".join(f"{g.label.lower()}: {len(g.rows)}" for g in view.groups)
+        self._status.setText(f"{counts} · read-only view v{__version__}{note}")
+
+    def _show_no_profile(self, path) -> None:
+        self._clear_group_widgets()
+        self._header.setText("<b>No DSP profile found</b>")
         self._status.setText(
-            f"{len(snapshot.virtual_channels)} virtual · {len(snapshot.channels)} output "
-            f"channels · read-only view v{__version__}{note}"
+            f"Looked for {path}. Run the DSP onboarding interview "
+            f"(`python -m autosound_tcc.dsp_profile_interview`) to create one."
         )
 
-    def _show_empty(self, root) -> None:
-        self._virtual_table.clear_snapshot()
-        self._output_table.clear_snapshot()
-        self._header.setText("<b>No DSP snapshot found</b>")
+    def _show_no_ledger(self, root, profile: dict) -> None:
+        self._clear_group_widgets()
+        prof = profile.get("dsp_profile", profile)
+        self._header.setText(f"<b>{prof.get('vendor', '?')} {prof.get('name', '?')}</b> — no ledger yet")
         self._status.setText(
-            f"Looked in {root}. Set AUTOSOUND_TCC_STATE_ROOT / AUTOSOUND_TCC_PRESET "
-            f"to point at a project ledger."
+            f"Profile OK, but no preset snapshot found under {root}. Set "
+            f"AUTOSOUND_TCC_STATE_ROOT / AUTOSOUND_TCC_PRESET to point at a project ledger."
         )
 
-    def _show_error(self, preset: str, exc: Exception) -> None:
-        self._virtual_table.clear_snapshot()
-        self._output_table.clear_snapshot()
-        self._header.setText(f"<b>Could not load preset</b> {preset}")
+    def _show_error(self, what: str, exc: Exception) -> None:
+        self._clear_group_widgets()
+        self._header.setText(f"<b>Could not load</b> {what}")
         self._status.setText(f"{type(exc).__name__}: {exc}")

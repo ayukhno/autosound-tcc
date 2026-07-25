@@ -30,6 +30,7 @@ REW_TOOL_DIR = (
 _VENDORED = {
     "rew_api.py": "autosound_tcc._vendor.rew_api",
     "state/state.py": "autosound_tcc._vendor.dsp_state",
+    "dsp_profile.py": "autosound_tcc._vendor.dsp_profile",
 }
 
 
@@ -82,3 +83,8 @@ def load_rew_api() -> ModuleType:
 def load_dsp_state() -> ModuleType:
     """The DSP-state ledger module (`state/state.py`)."""
     return load("state/state.py")
+
+
+def load_dsp_profile() -> ModuleType:
+    """The DSP capability-profile module (`dsp_profile.py`)."""
+    return load("dsp_profile.py")

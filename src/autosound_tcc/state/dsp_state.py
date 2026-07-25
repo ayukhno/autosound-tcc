@@ -1,18 +1,22 @@
-"""Typed model of the DSP-state ledger, translated from its raw JSON schema.
+"""Generic, profile-driven view of a project's DSP-state ledger.
 
-The source of truth is the vendored `state/state.py` `PresetHistory`: one JSON
-snapshot per version under ``<root>/<preset>/v_NNN.json``. `root` is the USER's
-own project folder (tier-1 install-specific data, brief §3a) — never anything
-inside the vendored skill repo — so the caller supplies it (e.g. from a future
-settings screen).
+The ledger's source of truth is the vendored `state/state.py` `PresetHistory`: one JSON
+snapshot per version under ``<root>/<preset>/v_NNN.json``. Its schema only strictly requires
+top-level `channels` (validated) — anything else, including `virtual_channels` or any other
+group-shaped key, is unvalidated passthrough. This module reads that passthrough generically,
+driven by a DSP capability profile (`core.dsp_profile`) rather than a fixed dataclass shape, so
+the same code renders a Helix (virtual_channels + physical_outputs) and a MUSWAY (inputs +
+physical_outputs, no virtual tier at all) without per-DSP code.
 
-`DspSnapshot.from_dict` works on a raw dict alone, so the UI/tests can consume a
-snapshot without the submodule present; only `load_snapshot` (which reads from
-disk via `PresetHistory`) needs the vendored code.
+Ledger-key convention (by profile group id):
+    * `physical_outputs` -> the ledger's required `channels` key (unchanged, existing convention).
+    * any other declared group id (e.g. `virtual_channels`, `inputs`) -> a same-named top-level
+      key in the ledger JSON, a dict of row-name -> field-dict. Absent = that group has no rows
+      yet in this project (not an error — the group still renders, just empty).
 
-Raw per-channel schema: {helix_ch, hp, lp, gain_db, ta_ms, polarity, eq_ptr,
-status}. `hp`/`lp` are crossover legs — either None / "OFF" (disabled) or
-{f, type, slope}. `ta_ms` is time-alignment delay in milliseconds (canonical).
+`ProjectView.from_dict` works on a raw dict + a loaded profile alone, so the UI/tests can consume
+a view without the submodule present; only `load_project_view` (which reads from disk via
+`PresetHistory`) needs the vendored code.
 """
 
 from __future__ import annotations
@@ -32,17 +36,11 @@ class CrossoverLeg:
 
     @classmethod
     def from_raw(cls, raw: Any) -> "CrossoverLeg":
-        # A leg is null / "OFF" (disabled) or a {f, type, slope} dict.
         if raw is None or raw == "OFF":
             return cls(enabled=False)
         if not isinstance(raw, dict) or "f" not in raw:
             raise ValueError(f"crossover leg must be null/'OFF' or {{f,...}}, got {raw!r}")
-        return cls(
-            freq_hz=raw["f"],
-            type=raw.get("type"),
-            slope=raw.get("slope"),
-            enabled=True,
-        )
+        return cls(freq_hz=raw["f"], type=raw.get("type"), slope=raw.get("slope"), enabled=True)
 
     @property
     def label(self) -> str:
@@ -57,140 +55,112 @@ class CrossoverLeg:
         return freq
 
 
-@dataclass(frozen=True)
-class ChannelState:
-    """One DSP output channel's (physical driver) settings."""
+def _field_label(field_name: str, raw_value: Any) -> Optional[str]:
+    """Render one declared field as a "label: value" chip, or None if genuinely absent.
 
-    name: str
-    helix_ch: Optional[Any] = None
-    hp: CrossoverLeg = field(default_factory=CrossoverLeg)
-    lp: CrossoverLeg = field(default_factory=CrossoverLeg)
-    gain_db: float = 0.0
-    ta_ms: float = 0.0
-    polarity: str = "NORM"
-    eq_ptr: Optional[Any] = None
-    eq: tuple[str, ...] = ()
-    apf: Optional[str] = None
-    note: Optional[str] = None
-    status: str = "proposed"
-    role: Optional[str] = None
-
-    @classmethod
-    def from_raw(cls, name: str, raw: dict) -> "ChannelState":
-        return cls(
-            name=name,
-            helix_ch=raw.get("helix_ch"),
-            hp=CrossoverLeg.from_raw(raw.get("hp")),
-            lp=CrossoverLeg.from_raw(raw.get("lp")),
-            gain_db=raw["gain_db"],
-            ta_ms=raw["ta_ms"],
-            polarity=raw.get("polarity", "NORM"),
-            eq_ptr=raw.get("eq_ptr"),
-            eq=tuple(raw.get("eq", ())),
-            apf=raw.get("apf"),
-            note=raw.get("note"),
-            status=raw.get("status", "proposed"),
-            role=raw.get("role"),
-        )
+    Generic by construction: a group declares WHICH fields matter (`profile.groups[i].fields`);
+    this only decides HOW to print a value once we know it's a crossover leg vs. a plain scalar
+    vs. an EQ-band list. No per-DSP special-casing.
+    """
+    if raw_value is None:
+        return None
+    if field_name in ("hp", "lp"):
+        leg = CrossoverLeg.from_raw(raw_value)
+        return f"{field_name.upper()}: {leg.label}"
+    if field_name == "eq":
+        n = len(raw_value) if isinstance(raw_value, (list, tuple)) else 0
+        return f"EQ: {n} band{'s' if n != 1 else ''}" if n else None
+    if field_name in ("gain_db",):
+        return f"Gain: {raw_value:+.1f} dB" if isinstance(raw_value, (int, float)) else None
+    if field_name in ("delay_ms", "ta_ms"):
+        return f"Delay: {raw_value:g} ms" if isinstance(raw_value, (int, float)) else None
+    if field_name == "phase_deg":
+        return f"Phase: {raw_value:g}°" if isinstance(raw_value, (int, float)) else None
+    if field_name == "polarity":
+        return f"Pol: {raw_value}"
+    if field_name == "mute":
+        return "MUTE" if raw_value else None
+    if field_name == "eq_bypass":
+        return "EQ bypass" if raw_value else None
+    return f"{field_name}: {raw_value}"
 
 
 @dataclass(frozen=True)
-class VirtualChannel:
-    """One virtual (input-side) channel — the voicing/matrix stage that feeds
-    the physical outputs. Fields are looser than an output channel: some carry
-    no crossover (full-range), some (FX) carry only an on/off state."""
+class GroupRow:
+    """One row (channel/input/whatever) inside a profile-declared group."""
 
+    id: str
     name: str
-    role: Optional[str] = None
-    hp: CrossoverLeg = field(default_factory=CrossoverLeg)
-    lp: CrossoverLeg = field(default_factory=CrossoverLeg)
-    level_db: Optional[float] = None
-    ta_ms: Optional[float] = None
-    polarity: Optional[str] = None
-    eq: tuple[str, ...] = ()
-    feed: Optional[str] = None
-    active: bool = True
+    raw: dict
     order: Optional[int] = None
 
-    @classmethod
-    def from_raw(cls, name: str, raw: dict) -> "VirtualChannel":
-        return cls(
-            name=name,
-            role=raw.get("role"),
-            hp=CrossoverLeg.from_raw(raw.get("hp")),
-            lp=CrossoverLeg.from_raw(raw.get("lp")),
-            level_db=raw.get("level_db"),
-            ta_ms=raw.get("ta_ms"),
-            polarity=raw.get("polarity"),
-            eq=tuple(raw.get("eq", ())),
-            feed=raw.get("feed"),
-            active=raw.get("active", True),
-            order=raw.get("order"),
-        )
+    def params(self, fields: tuple[str, ...]) -> list[str]:
+        """Rendered "label: value" chips for exactly this group's declared fields — a field this
+        row's raw dict doesn't have (or that's null) is silently skipped, never shown as an error;
+        that's what lets MUSWAY's `inputs` rows (no hp/lp at all) sit next to Helix's
+        `physical_outputs` rows (hp/lp/gain/delay/pol/eq) with the same rendering code."""
+        out = []
+        for f in fields:
+            label = _field_label(f, self.raw.get(f))
+            if label is not None:
+                out.append(label)
+        return out
+
+    def eq_count(self) -> int:
+        eq = self.raw.get("eq")
+        return len(eq) if isinstance(eq, (list, tuple)) else 0
 
 
 @dataclass(frozen=True)
-class DspSnapshot:
-    """A whole DSP preset snapshot — the read-only view the UI displays."""
+class ProfileGroup:
+    """One DSP-profile-declared tier (e.g. virtual_channels, physical_outputs, inputs),
+    populated with this project's actual rows for that tier."""
+
+    id: str
+    label: str
+    fields: tuple[str, ...]
+    rows: tuple[GroupRow, ...] = ()
+
+    def rows_ordered(self) -> list[GroupRow]:
+        return sorted(self.rows, key=lambda r: (r.order if r.order is not None else 99, r.name))
+
+
+@dataclass(frozen=True)
+class ProjectView:
+    """A whole project's DSP state, shaped by its profile — the read-only view the UI displays."""
 
     preset: str
-    sample_rate: float
-    channels: dict[str, ChannelState]
-    virtual_channels: dict[str, VirtualChannel] = field(default_factory=dict)
+    sample_rate: Optional[float]
+    groups: tuple[ProfileGroup, ...]
     version: Optional[str] = None
     note: Optional[str] = None
-    created: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, raw: dict) -> "DspSnapshot":
-        chans = raw.get("channels", {})
-        virt = raw.get("virtual_channels", {})
+    def from_dict(cls, raw: dict, profile: dict) -> "ProjectView":
+        prof = profile.get("dsp_profile", profile)
+        groups = []
+        for g in prof.get("groups", []):
+            gid = g["id"]
+            # convention: physical_outputs maps to the ledger's required `channels` key;
+            # every other group id maps to a same-named top-level key (absent -> no rows yet).
+            row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
+            rows = tuple(
+                GroupRow(id=name, name=name, raw=row_raw, order=row_raw.get("order"))
+                for name, row_raw in (row_source or {}).items()
+            )
+            groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
+                                        fields=tuple(g.get("fields", ())), rows=rows))
         return cls(
             preset=raw.get("preset", ""),
-            sample_rate=raw["sample_rate"],
-            channels={name: ChannelState.from_raw(name, ch) for name, ch in chans.items()},
-            virtual_channels={name: VirtualChannel.from_raw(name, vc) for name, vc in virt.items()},
+            sample_rate=raw.get("sample_rate"),
+            groups=tuple(groups),
             version=raw.get("version"),
             note=raw.get("note"),
-            created=raw.get("created"),
-        )
-
-    def samples_for(self, ms: float) -> int:
-        """DSP samples for a delay in ms at this snapshot's sample rate.
-
-        Derived, never stored (entering 96 kHz samples into a 48 kHz DSP would
-        double the physical delay). Mirrors the vendored `state.samples_for`.
-        """
-        return int(round(ms * self.sample_rate / 1000.0))
-
-    def channels_ordered(self) -> list["ChannelState"]:
-        """Output channels in signal-path reading order: sub, woofer, mid,
-        tweeter, center, rear, left before right — not raw/alphabetical."""
-        return sorted(self.channels.values(), key=_channel_sort_key)
-
-    def virtual_ordered(self) -> list["VirtualChannel"]:
-        """Virtual channels in their declared `order`, then by name."""
-        return sorted(
-            self.virtual_channels.values(),
-            key=lambda vc: (vc.order if vc.order is not None else 99, vc.name),
         )
 
 
-# Band order for display: sub first, then up the spectrum. Unknown prefixes
-# sort last (kept stable by name). Left before right within a band.
-_BAND_ORDER = {"sub": 0, "sw": 0, "w": 1, "mb": 1, "m": 2, "mid": 2, "tw": 3, "t": 3, "c": 4, "r": 5}
-
-
-def _channel_sort_key(ch: "ChannelState") -> tuple:
-    name = ch.name.lower()
-    prefix = name.split("_", 1)[0].split("-", 1)[0]
-    band = _BAND_ORDER.get(prefix, 90)
-    side = 0 if name.endswith(("_l", "-l")) else 1 if name.endswith(("_r", "-r")) else 0
-    return (band, side, name)
-
-
-def load_snapshot(root: str, preset: str, version: Optional[str] = None) -> DspSnapshot:
-    """Read a snapshot from disk via the vendored `PresetHistory`.
+def load_project_view(root: str, preset: str, profile: dict, version: Optional[str] = None) -> ProjectView:
+    """Read a ledger snapshot from disk via the vendored `PresetHistory` and shape it per `profile`.
 
     `version=None` loads the current HEAD. Requires the `rew_tool` submodule.
     """
@@ -199,4 +169,4 @@ def load_snapshot(root: str, preset: str, version: Optional[str] = None) -> DspS
     vstate = vendor_loader.load_dsp_state()
     history = vstate.PresetHistory(root, preset)
     raw = history.load(version)
-    return DspSnapshot.from_dict(raw)
+    return ProjectView.from_dict(raw, profile)
