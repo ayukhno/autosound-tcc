@@ -3,7 +3,7 @@ app via the Claude Agent SDK).
 
 Scoped narrowly to ONE task — building or extending a DSP capability profile — never the whole
 autosound-tuning skill. The agent has no built-in Bash/Read/Write/Edit tools at all
-(`ClaudeAgentOptions.allowed_tools` lists only the four tools below); its entire filesystem reach
+(`ClaudeAgentOptions.allowed_tools` lists only the five tools below); its entire filesystem reach
 is through them, and each is a closure hardcoded to exactly one project directory chosen by the
 CALLER, never a path the model supplies.
 
@@ -41,7 +41,23 @@ CAPABILITY_CHECKLIST = [
     "Input routing: a separate input for the measurement signal?",
 ]
 
-SYSTEM_PROMPT = """You are the DSP-profile onboarding interviewer for the Tuning Command Center \
+# The ONLY field-name tokens a consumer (TCC's generic renderer) knows how to display. A group's
+# `fields` list must be drawn from exactly these strings -- never nested objects, never invented
+# names. `dsp_state.py::_field_label` is the renderer that reads this vocabulary; keep both in
+# sync if it ever grows.
+FIELD_VOCABULARY = {
+    "hp": "high-pass crossover leg ({f, type, slope} or null/OFF on the ledger row)",
+    "lp": "low-pass crossover leg (same shape as hp)",
+    "gain_db": "gain in dB, a number",
+    "ta_ms": "delay in milliseconds, a number (the canonical delay field name, ms not samples)",
+    "polarity": "\"NORM\" or \"INV\"",
+    "phase_deg": "continuous phase/all-pass angle in degrees, a number",
+    "mute": "boolean",
+    "eq_bypass": "boolean",
+    "eq": "a list of PEQ band strings, e.g. [\"PK 1000 -2.0 Q2.0\"]",
+}
+
+SYSTEM_PROMPT = f"""You are the DSP-profile onboarding interviewer for the Tuning Command Center \
 (TCC), a car-audio DSP tuning tool.
 
 Your ONLY job: run the DSP capability-checklist interview and write the answers into a DSP \
@@ -50,17 +66,43 @@ questions per turn, not a wall of text. Never assume a fact about the DSP model 
 hasn't told you or that check_existing_profile hasn't confirmed — leave it null and move on \
 rather than guessing.
 
+## The profile schema — follow this EXACTLY, it is consumed by code, not read by a human
+
+Top level: {{"name": str, "vendor": str, "groups": [...], "sample_rate_hz": number|null, \
+"_open_questions": [...]}}. Add other descriptive top-level keys if you like (e.g. `presets`, \
+`input_routing`) — those are fine as freeform nested objects, they're just not rendered per-row.
+
+`groups` is a flat JSON array of group objects, each EXACTLY:
+    {{"id": "<snake_case_id>", "label": "<Human Label>", "fields": [<tokens>]}}
+`fields` MUST be a flat array of STRING TOKENS drawn ONLY from this fixed vocabulary — nothing
+else, no nested objects, no invented names:
+{json.dumps(FIELD_VOCABULARY, indent=2)}
+A field not in this list has no renderer — if the DSP has a capability that doesn't fit (rare),
+note it in `_open_questions` instead of inventing a field name.
+
+Example — a DSP with no virtual layer but per-input processing (this shape, not richer):
+    "groups": [
+      {{"id": "physical_outputs", "label": "Output channels",
+        "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "eq"]}},
+      {{"id": "inputs", "label": "Inputs", "fields": ["gain_db", "eq", "ta_ms"]}}
+    ]
+
 Steps:
 1. Call check_existing_profile first. If it returns a project profile or an exact bundled match,
    do not re-ask about anything it already confirmed — call get_capability_checklist and ask only
    about what's still open.
 2. As the user answers, call save_profile_field immediately for each confirmed fact — one field
-   per call, don't batch everything to the end.
+   per call, don't batch everything to the end. If a save produced the wrong shape (e.g. you
+   meant to store a list but it came back as a string), call reset_profile_field on that exact
+   path and re-save it — don't leave a corrupted field in place or give up on finalize_profile.
 3. The profile's `groups` list is the load-bearing structure: figure out which tiers this DSP
    actually has (e.g. does it have a virtual/voicing layer above the per-channel one, at all? does
    it expose per-input gain/EQ/delay on things like Optic/USB/BT — that's its own group, not a
-   channel) and declare each group's `id`/`label`/`fields` accordingly. A DSP with no virtual
-   layer must simply have no `virtual_channels` group — never invent one to match another DSP.
+   channel) and declare each group's `id`/`label`/`fields` per the schema above. A DSP with no
+   virtual layer must simply have no `virtual_channels` group — never invent one to match another
+   DSP. Details that don't fit a group row (EQ band count/types, crossover filter types/orders,
+   delay step/range, preset count, input routing) are genuinely useful — record them as
+   descriptive top-level keys (not inside `fields`), they just won't be per-row rendered yet.
 4. When the profile is complete enough to be useful, or the user says they're done, call
    finalize_profile. Do not just say you're done in text — call the tool.
 """
@@ -74,9 +116,28 @@ def _empty_draft(vendor: str, model: str) -> dict:
     return {"dsp_profile": {"name": model, "vendor": vendor, "groups": [], "_open_questions": []}}
 
 
+def _maybe_decode_json(value: Any) -> Any:
+    """Some tool-calling round-trips hand back a complex value (dict/list) JSON-encoded as a
+    plain string instead of the real structure — observed live: a model call that intended to
+    write a whole `groups` list sometimes arrived as the STRING '[{"id": ...}]', silently
+    corrupting the field's type from list to str (and finalize_profile's `isinstance` check then
+    fails for reasons invisible from the conversation) -- the same happened with plain booleans
+    arriving as the string "false". Decode defensively: any string that parses as JSON (object,
+    array, bool, number, null) is almost certainly meant to BE that value, not literal text; a
+    genuine multi-word free-text answer fails to parse and is kept as-is."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value.strip())
+        except ValueError:
+            return value
+    return value
+
+
 def _set_dotted(root: dict, dotted_path: str, value: Any) -> None:
     """Set `value` at a dotted path from the profile root, creating intermediate dicts/lists as
     needed. List indices in the path are plain integers, e.g. 'groups.0.fields'."""
+    if not dotted_path:
+        raise ValueError("path must not be empty")
     parts = dotted_path.split(".")
     node = root
     for i, part in enumerate(parts[:-1]):
@@ -141,8 +202,30 @@ def build_tools(project_dir: Path, vendor: str, model: str):
            },
            "required": ["path", "value"]})
     async def save_profile_field(args: dict) -> dict:
-        _set_dotted(draft["data"].setdefault("dsp_profile", {}), args["path"], args["value"])
-        return {"content": [{"type": "text", "text": f"saved {args['path']} = {args['value']!r}"}]}
+        value = _maybe_decode_json(args["value"])
+        _set_dotted(draft["data"].setdefault("dsp_profile", {}), args["path"], value)
+        return {"content": [{"type": "text", "text": f"saved {args['path']} = {value!r}"}]}
+
+    @tool("reset_profile_field",
+          "Delete a field from the draft (by dotted path) so it can be re-saved from scratch. "
+          "Use this if a previous save_profile_field produced the wrong shape (e.g. a list "
+          "written as a string) — recovery, not part of the normal interview flow.",
+          {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]})
+    async def reset_profile_field(args: dict) -> dict:
+        parts = args["path"].split(".")
+        node = draft["data"].get("dsp_profile", {})
+        for part in parts[:-1]:
+            key: Any = int(part) if part.isdigit() else part
+            if isinstance(node, (dict, list)) and key in (node if isinstance(node, dict) else range(len(node))):
+                node = node[key]
+            else:
+                return {"content": [{"type": "text", "text": f"{args['path']} not found, nothing to reset"}]}
+        last: Any = int(parts[-1]) if parts[-1].isdigit() else parts[-1]
+        if isinstance(node, dict) and last in node:
+            del node[last]
+        elif isinstance(node, list) and isinstance(last, int) and 0 <= last < len(node):
+            node[last] = None
+        return {"content": [{"type": "text", "text": f"reset {args['path']}"}]}
 
     @tool("finalize_profile",
           "Validate and write the profile to disk. Call this when the interview is done.", {})
@@ -152,7 +235,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
         return {"content": [{"type": "text", "text": f"saved to {profile_path}"}]}
 
     return [get_capability_checklist, check_existing_profile, save_profile_field,
-            finalize_profile], draft
+            reset_profile_field, finalize_profile], draft
 
 
 class OnboardingSession:
