@@ -558,8 +558,15 @@ const MEAS = {
   ],
 };
 
+// ================= persisted UI state =================
+const UI_KEY = "tcc_proto_ui_v1";
+function loadUI(){ try{ return JSON.parse(localStorage.getItem(UI_KEY)) || {}; }catch(e){ return {}; } }
+function saveUI(patch){ const s = Object.assign(loadUI(), patch); try{ localStorage.setItem(UI_KEY, JSON.stringify(s)); }catch(e){} }
+const uiState = loadUI();
+
 // ================= state =================
-let cur = "FULL", mode = null, tableTier = "output", selChan = null, pairMode = false;
+let cur = uiState.preset || "FULL", mode = null, tableTier = "output", selChan = null, pairMode = false;
+let treeCollapsed = Object.assign({params:true, virtual:true, output:false}, uiState.treeCollapsed||{});
 
 const el = (tag,c,h)=>{ const e=document.createElement(tag); if(c) e.className=c; if(h!=null) e.innerHTML=h; return e; };
 const legLabel = l => (l===OFF||!l) ? "OFF" : `${fmt(l.f)} ${l.t}${l.s}`;
@@ -571,20 +578,26 @@ function renderTree(){
   const p = PRESETS[cur];
   const root = document.getElementById("tree"); root.innerHTML = "";
   const paramKids = (p.features||[]).map(([k,v])=>infoRow(k, tx(v)));
-  if(paramKids.length) root.appendChild(groupNode(t("params"), "", true, paramKids));
-  root.appendChild(groupNode(t("virtual"), `${p.virtual.filter(x=>!x.na).length}/${DSP.virtualMax}`, true,
+  if(paramKids.length) root.appendChild(groupNode("params", t("params"), "", paramKids));
+  root.appendChild(groupNode("virtual", t("virtual"), `${p.virtual.filter(x=>!x.na).length}/${DSP.virtualMax}`,
     [paramsRow("virtual")].concat(p.virtual.map((v,i)=> v.na?null:chanRow(v,"virtual",i,false)).filter(Boolean))));
-  root.appendChild(groupNode(t("output"), `${p.output.filter(x=>!x.na).length}/${DSP.outputMax}`, true,
+  root.appendChild(groupNode("output", t("output"), `${p.output.filter(x=>!x.na).length}/${DSP.outputMax}`,
     [paramsRow("output")].concat(p.output.map((c,i)=> c.na?null:chanRow(c,"output",i,true)).filter(Boolean))));
 }
-function groupNode(label, count, collapsed, children){
+function groupNode(key, label, count, children){
+  const collapsed = !!treeCollapsed[key];
   const node = el("div","node grp"+(collapsed?" collapsed":""));
   const row = el("div","row click ghead");
   const tw = el("span","tw", collapsed?"▸":"▾");
   row.appendChild(tw);
   row.appendChild(el("span",null, label + (count!==""?` <span class="cnt">${count}</span>`:"")));
   const kids = el("div","children"); children.forEach(c=>kids.appendChild(c));
-  row.addEventListener("click",()=>{ node.classList.toggle("collapsed"); tw.textContent = node.classList.contains("collapsed")?"▸":"▾"; });
+  row.addEventListener("click",()=>{
+    treeCollapsed[key] = !treeCollapsed[key];
+    node.classList.toggle("collapsed", treeCollapsed[key]);
+    tw.textContent = treeCollapsed[key] ? "▸" : "▾";
+    saveUI({treeCollapsed});
+  });
   node.appendChild(row); node.appendChild(kids); return node;
 }
 function infoRow(k,v){ return el("div","paramrow", `<span class="pk">${k}</span><span class="pv">${v}</span>`); }
@@ -800,18 +813,21 @@ function applyPreset(){
 }
 function setLang(l){
   lang = l;
+  saveUI({lang});
+  document.getElementById("langSel").value = lang;
   applyStatic(); fillPresetOptions(); renderAll();
   // footer AI "last" lines (two)
   const lasts = document.querySelectorAll(".ai .last");
   if(lasts[0]) lasts[0].textContent = t("lastMain");
   if(lasts[1]) lasts[1].textContent = t("lastCrit");
 }
-document.getElementById("presetSel").addEventListener("change",e=>{ cur=e.target.value; applyPreset(); });
+document.getElementById("presetSel").addEventListener("change",e=>{ cur=e.target.value; saveUI({preset:cur}); applyPreset(); });
 document.getElementById("langSel").addEventListener("change",e=>{ setLang(e.target.value); });
 document.getElementById("themeBtn").addEventListener("click",()=>{
   const r = document.documentElement;
   const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   r.dataset.theme = dark ? "light" : "dark";
+  saveUI({theme:r.dataset.theme});
 });
 
 // footer AI "last" lines need spans
@@ -892,11 +908,12 @@ function htmlToMarkdown(root){
 
 // ================= zoom (test: font/UI size) =================
 (function(){
-  let z = 1;
+  let z = uiState.zoom || 1;
   const lbl = document.getElementById("zoomLbl");
-  const apply = ()=>{ document.documentElement.style.setProperty("--appzoom", z); lbl.textContent = Math.round(z*100)+"%"; };
+  const apply = ()=>{ document.documentElement.style.setProperty("--appzoom", z); lbl.textContent = Math.round(z*100)+"%"; saveUI({zoom:z}); };
   document.getElementById("zoomOut").addEventListener("click", ()=>{ z = Math.max(0.8, Math.round((z-0.1)*10)/10); apply(); });
   document.getElementById("zoomIn").addEventListener("click", ()=>{ z = Math.min(1.5, Math.round((z+0.1)*10)/10); apply(); });
+  apply();
 })();
 
 // ================= project-param edit flag (reuses main AI dialog) =================
@@ -939,6 +956,7 @@ function htmlToMarkdown(root){
 })();
 
 // ================= init =================
-setLang("en");
+if(uiState.theme) document.documentElement.dataset.theme = uiState.theme;
+setLang(uiState.lang || "en");
 applyPreset();
 </script>
