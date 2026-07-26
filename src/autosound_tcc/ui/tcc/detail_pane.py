@@ -15,10 +15,12 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -30,6 +32,8 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
+from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # field token -> (column header, cell-renderer). Order here is the fallback display order when a
 # group declares a field not already covered by a fixed prototype-matching order below.
@@ -91,7 +95,11 @@ class EqBandCard(QFrame):
         self.setProperty("class", "band")
         self.setFixedWidth(112)
         if match_color:
-            self.setStyleSheet(f"border-top: 3px solid {match_color};")
+            # A bare (selector-less) setStyleSheet() rule is implicitly "*" and cascades to every
+            # descendant widget, not just this QFrame -- without the type-selector scope, this
+            # border-top would also apply to each Freq/Q/Gain row inside, producing a colored bar
+            # under every row (a "zebra stripe") instead of a single accent line at the card top.
+            self.setStyleSheet(f"EqBandCard {{ border-top: 3px solid {match_color}; }}")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -118,6 +126,7 @@ class EqBandCard(QFrame):
 
         byp = QLabel("○ ByPass")
         byp.setProperty("class", "band-byp")
+        apply_caps(byp, spacing_px=0.8)
         byp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(byp)
 
@@ -186,10 +195,8 @@ class DetailPane(QFrame):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         outer.addWidget(self._scroll, stretch=1)
-        # A fixed cap rather than the prototype's dynamic "50% of the center column" — simpler,
-        # and the internal QScrollArea already handles anything taller. Revisit if it feels wrong
-        # once this sits next to the real AI dialog (M5).
-        self.setMaximumHeight(420)
+        # Sized by the parent QSplitter now (main_window._build_center), which gives the user a
+        # drag handle between this pane and the AI dialog below it -- no fixed cap here anymore.
 
     # ---- public API ----------------------------------------------------
 
@@ -255,23 +262,66 @@ class DetailPane(QFrame):
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(False)
+        table.setShowGrid(False)
+        # Fill the pane width (user request: "table on full width"): every column shares the space
+        # equally, except the narrow ID column which sizes to its content.
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        apply_caps(header, spacing_px=0.7)  # QSS text-transform/letter-spacing don't apply to th
 
+        t = current_theme()
         for r, row in enumerate(group.rows_ordered()):
-            table.setItem(r, 0, QTableWidgetItem(row.id))
-            table.setItem(r, 1, QTableWidgetItem(row.name))
+            id_item = QTableWidgetItem(row.slot or row.id)
+            id_item.setForeground(QColor(t.accent))
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            table.setItem(r, 0, id_item)
+            name_item = QTableWidgetItem(row.name)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            table.setItem(r, 1, name_item)
             for c, field in enumerate(columns, start=2):
-                table.setItem(r, c, QTableWidgetItem(self._cell_text(field, row)))
+                table.setItem(r, c, self._styled_cell(field, row, t))
             table.setRowHeight(r, 26)
 
         def _activate(r: int, _c: int) -> None:
             row_obj = group.rows_ordered()[r]
             self.tableRowActivated.emit(group.id, row_obj.id)
-            self.open_eq(group, row_obj)
+            # cellClicked fires from inside QTableWidget's own mouseReleaseEvent; open_eq()
+            # replaces this table's widget in self._scroll (QScrollArea.setWidget deletes the
+            # old widget synchronously), which would destroy `table` while it is still executing
+            # its own C++ event handler -- a use-after-free that crashes with SIGSEGV. Deferring
+            # to the next event-loop tick lets mouseReleaseEvent return first.
+            QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
 
         table.cellClicked.connect(_activate)
-        table.resizeColumnsToContents()
         return table
+
+    def _styled_cell(self, field: str, row: GroupRow, t) -> QTableWidgetItem:
+        """A value cell with prototype-style alignment + colour: numbers right-aligned, gain
+        green/orange by sign, INV highlighted, the EQ count an accent link. Mirrors the web
+        `.ptable` cell classes (`.gpos/.gneg/.tinv/.eqcell`)."""
+        item = QTableWidgetItem(self._cell_text(field, row))
+        if field in ("hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"):
+            item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        elif field in ("polarity", "mute", "eq_bypass"):
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        else:
+            item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        color = None
+        if field == "gain_db":
+            v = row.raw.get("gain_db")
+            if isinstance(v, (int, float)):
+                color = t.ok if v >= 0 else t.accent
+        elif field == "polarity":
+            color = t.inv if row.raw.get("polarity") == "INV" else t.muted
+        elif field == "eq":
+            color = t.accent if row.eq_count() > 0 else t.faint
+        elif field in ("hp", "lp") and self._cell_text(field, row) == "OFF":
+            color = t.faint
+        if color:
+            item.setForeground(QColor(color))
+        return item
 
     @staticmethod
     def _cell_text(field: str, row: GroupRow) -> str:
@@ -295,7 +345,7 @@ class DetailPane(QFrame):
             return "Y" if raw.get("eq_bypass") else "—"
         if field == "eq":
             n = row.eq_count()
-            return f"{n} band{'s' if n != 1 else ''}" if n else "—"
+            return f"{n} band{'s' if n != 1 else ''} ▸" if n else "—"
         return "—"
 
     # ---- EQ view ----------------------------------------------------------
@@ -306,9 +356,9 @@ class DetailPane(QFrame):
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(8)
 
-        hint = QLabel(
-            "Only active bands shown. Bypass is read-only for now."
-        )
+        hint = QLabel(i18n.t("eqHint"))
+        hint.setTextFormat(Qt.TextFormat.RichText)
+        hint.setWordWrap(True)
         hint.setProperty("class", "eq-hint")
         layout.addWidget(hint)
 

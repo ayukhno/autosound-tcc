@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
     QPushButton,
@@ -31,16 +30,41 @@ from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
+from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
-from autosound_tcc.ui.tcc.theme import apply_theme
+from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
 _LANG_KEY = "ui/lang"
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
+# TODO(user): paste the published Google Form viewform URL here (the one built last session — see
+# memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
+_FEEDBACK_FORM_URL = ""
+
+# Human-readable preset names for the header picker (dir names FULL/SQ are the ledger keys).
+_PRESET_LABELS = {
+    "FULL": {"en": '"FULL" (daily)', "uk": '"FULL" (повсякденний)'},
+    "SQ": {"en": '"SQ Jazzi v.2" (competition)', "uk": '"SQ Jazzi v.2" (змагальний)'},
+}
+
+
+def _preset_label(key: str) -> str:
+    return i18n.tx(_PRESET_LABELS.get(key, {"en": key}))
+
+
+def _mini_combo() -> QComboBox:
+    """A themed `.mini-select` combo that grows to fit its content, so the popup never clips its
+    labels (the language picker was collapsing "EN"/"UK" down to "E"/"U")."""
+    combo = QComboBox()
+    combo.setProperty("class", "mini-select")
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    return combo
+
+
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
 
 
@@ -48,6 +72,13 @@ def _panel() -> QFrame:
     frame = QFrame()
     frame.setProperty("class", "panel")
     return frame
+
+
+def _vline() -> QFrame:
+    line = QFrame()
+    line.setProperty("class", "zoomgroup-div")
+    line.setFixedWidth(1)
+    return line
 
 
 def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
@@ -64,6 +95,7 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
 
     title = QLabel(i18n.t(title_key))
     title.setProperty("class", "phead-title")
+    apply_caps(title, spacing_px=1.4)
     layout.addWidget(title)
 
     sub = None
@@ -140,26 +172,36 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(14)
 
-        self._preset_combo = QComboBox()
-        self._preset_combo.setProperty("class", "mini-select")
-        self._preset_combo.currentTextChanged.connect(self._on_preset_selected)
+        self._preset_field_lbl = QLabel(i18n.t("preset"))
+        self._preset_field_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._preset_field_lbl, spacing_px=1.2)
+        layout.addWidget(self._preset_field_lbl)
+
+        self._preset_combo = _mini_combo()
+        self._preset_combo.currentIndexChanged.connect(self._on_preset_index)
         layout.addWidget(self._preset_combo)
 
+        self._slot_label = QLabel("")
+        self._slot_label.setProperty("class", "slot-val")
+        layout.addWidget(self._slot_label)
+        self._save_label = QLabel("")
+        self._save_label.setProperty("class", "phead-sub")
+        layout.addWidget(self._save_label)
+
+        self._target_field_lbl = QLabel(i18n.t("target"))
+        self._target_field_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._target_field_lbl, spacing_px=1.2)
+        layout.addWidget(self._target_field_lbl)
         self._target_label = QLabel("")
-        self._target_label.setProperty("class", "phead-sub")
+        self._target_label.setProperty("class", "kv-val")
         layout.addWidget(self._target_label)
+
         self._version_label = QLabel("")
         self._version_label.setProperty("class", "phead-sub")
         layout.addWidget(self._version_label)
         layout.addStretch(1)
 
-        new_profile_btn = QPushButton("+ New DSP profile…")
-        new_profile_btn.setProperty("class", "theme-btn")
-        new_profile_btn.clicked.connect(self._on_new_dsp_profile)
-        layout.addWidget(new_profile_btn)
-
-        self._lang_combo = QComboBox()
-        self._lang_combo.setProperty("class", "mini-select")
+        self._lang_combo = _mini_combo()
         self._lang_combo.addItems(["EN", "UK"])
         self._lang_combo.setCurrentText(i18n.current_language().upper())
         self._lang_combo.currentTextChanged.connect(
@@ -167,17 +209,27 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._lang_combo)
 
+        zoom_group = QFrame()
+        zoom_group.setProperty("class", "zoomgroup")
+        zg_layout = QHBoxLayout(zoom_group)
+        zg_layout.setContentsMargins(0, 0, 0, 0)
+        zg_layout.setSpacing(0)
+
         zoom_out = QPushButton("A−")
-        zoom_out.setProperty("class", "theme-btn")
+        zoom_out.setProperty("class", "zoomgroup-btn")
         zoom_out.clicked.connect(self._zoom_out)
-        layout.addWidget(zoom_out)
+        zg_layout.addWidget(zoom_out)
+        zg_layout.addWidget(_vline())
         self._zoom_label = QLabel(f"{round(self._zoom * 100)}%")
-        self._zoom_label.setProperty("class", "phead-sub")
-        layout.addWidget(self._zoom_label)
+        self._zoom_label.setProperty("class", "zoomgroup-label")
+        self._zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zg_layout.addWidget(self._zoom_label)
+        zg_layout.addWidget(_vline())
         zoom_in = QPushButton("A+")
-        zoom_in.setProperty("class", "theme-btn")
+        zoom_in.setProperty("class", "zoomgroup-btn")
         zoom_in.clicked.connect(self._zoom_in)
-        layout.addWidget(zoom_in)
+        zg_layout.addWidget(zoom_in)
+        layout.addWidget(zoom_group)
 
         self._theme_btn = QPushButton("◐ " + i18n.t("theme"))
         self._theme_btn.setProperty("class", "theme-btn")
@@ -192,42 +244,30 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(14, 7, 14, 7)
 
-        ai_main = QComboBox()
-        ai_main.setProperty("class", "mini-select")
+        self._ai_main_lbl = QLabel(i18n.t("aiMain"))
+        self._ai_main_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._ai_main_lbl, spacing_px=1.2)
+        layout.addWidget(self._ai_main_lbl)
+        ai_main = _mini_combo()
         ai_main.addItems(["Claude Opus 4.8", "Claude Sonnet 5", "Claude Fable 5"])
-        layout.addWidget(QLabel("AI main"))
         layout.addWidget(ai_main)
 
-        ai_critic = QComboBox()
-        ai_critic.setProperty("class", "mini-select")
+        self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
+        self._ai_critic_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._ai_critic_lbl, spacing_px=1.2)
+        layout.addWidget(self._ai_critic_lbl)
+        ai_critic = _mini_combo()
         ai_critic.addItems(["Gemini 3.1 Pro", "Gemini 3.5 Flash", "Claude Opus 4.8"])
-        layout.addWidget(QLabel("AI critic"))
         layout.addWidget(ai_critic)
 
         layout.addStretch(1)
 
-        feedback_btn = QPushButton("💬 Give feedback")
-        feedback_btn.setProperty("class", "theme-btn")
-        feedback_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(_FEEDBACK_URL))
-        )
+        feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
+        feedback_btn.setProperty("class", "feedback-btn")
+        feedback_btn.clicked.connect(self._open_feedback)
+        self._feedback_btn = feedback_btn
         layout.addWidget(feedback_btn)
         return footer
-
-    def _on_new_dsp_profile(self) -> None:
-        """Prompt for vendor/model, then open the existing onboarding chat
-        (ui/tcc/profile_interview_dialog.py) for the current project directory."""
-        vendor, ok = QInputDialog.getText(self, "New DSP profile", "Vendor (e.g. Musway):")
-        if not ok or not vendor.strip():
-            return
-        model, ok = QInputDialog.getText(self, "New DSP profile", "Model (e.g. M6V4):")
-        if not ok or not model.strip():
-            return
-        from autosound_tcc.ui.tcc.profile_interview_dialog import ProfileInterviewDialog
-
-        dialog = ProfileInterviewDialog(config.project_dir(), vendor.strip(), model.strip(), self)
-        dialog.exec()
-        self._load_project()  # pick up the new/updated profile if one was saved
 
     # ---- left / center / right --------------------------------------------
 
@@ -292,9 +332,12 @@ class MainWindow(QMainWindow):
         )
         self._preset_combo.blockSignals(True)
         self._preset_combo.clear()
-        self._preset_combo.addItems(available)
+        for p in available:
+            self._preset_combo.addItem(_preset_label(p), p)  # display label, key as userData
         if preset:
-            self._preset_combo.setCurrentText(preset)
+            idx = self._preset_combo.findData(preset)
+            if idx >= 0:
+                self._preset_combo.setCurrentIndex(idx)
         self._preset_combo.blockSignals(False)
 
         if preset is None:
@@ -317,10 +360,16 @@ class MainWindow(QMainWindow):
         self._view = view
         self._tree.set_view(view)
 
-        self._target_label.setText(f"Target: {view.target}" if view.target else "")
+        self._slot_label.setText(view.slot_label or "")
+        self._save_label.setText(view.save or "")
+        self._target_label.setText(view.target or "")
         self._version_label.setText(view.version or "")
 
-    def _on_preset_selected(self, preset: str) -> None:
+    def _open_feedback(self) -> None:
+        FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
+
+    def _on_preset_index(self, _index: int) -> None:
+        preset = self._preset_combo.currentData()
         if not preset or preset == self._preset_override:
             return
         self._preset_override = preset
@@ -358,13 +407,11 @@ class MainWindow(QMainWindow):
             self._detail.open_eq(group, row)
 
     def _build_center(self) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
 
         self._detail = DetailPane()
-        layout.addWidget(self._detail)
+        splitter.addWidget(self._detail)
 
         self._dialog_frame = _panel()
         dialog_layout = QVBoxLayout(self._dialog_frame)
@@ -372,9 +419,14 @@ class MainWindow(QMainWindow):
         self._dialog = DialogPanel()
         self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
         dialog_layout.addWidget(self._dialog)
-        layout.addWidget(self._dialog_frame, stretch=1)
+        splitter.addWidget(self._dialog_frame)
 
-        return container
+        # Detail pane starts hidden (no channel selected yet); give the dialog the room until
+        # a table/EQ view opens and the user drags the handle themselves.
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([420, 600])
+        return splitter
 
     def _on_dialog_editing_changed(self, editing: bool) -> None:
         self._dialog_frame.setProperty("class", "panel dialog-editing" if editing else "panel")
@@ -459,6 +511,17 @@ class MainWindow(QMainWindow):
         self._plan_sub.setText(i18n.t("planSub"))
         self._meas_title.setText(i18n.t("focus"))
         self._meas_sub.setText(i18n.t("measSub"))
+        self._preset_field_lbl.setText(i18n.t("preset"))
+        self._target_field_lbl.setText(i18n.t("target"))
+        self._ai_main_lbl.setText(i18n.t("aiMain"))
+        self._ai_critic_lbl.setText(i18n.t("aiCritic"))
+        self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
+        for i in range(self._preset_combo.count()):
+            self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()
         self._meas_panel.retranslate()
         self._dialog.retranslate()
+        # The tree builds its group headers / params-row labels from i18n at set_view() time and
+        # has no live binding, so rebuild it in the new language (cheap -- a handful of widgets).
+        if self._view is not None:
+            self._tree.set_view(self._view)

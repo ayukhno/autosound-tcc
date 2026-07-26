@@ -106,7 +106,7 @@ def test_switching_preset_does_not_duplicate_tree_sections(tmp_path, monkeypatch
     window = MainWindow()
     assert len(window._tree._layout.parentWidget().findChildren(TreeGroupSection)) == 1
 
-    window._on_preset_selected("PRESET_B")
-    assert window._target_label.text() == "Target: target-PRESET_B"
+    window._preset_combo.setCurrentIndex(window._preset_combo.findData("PRESET_B"))
+    assert window._target_label.text() == "target-PRESET_B"
     sections = window._tree._layout.parentWidget().findChildren(TreeGroupSection)
     assert len(sections) == 1, f"expected exactly 1 section, found {len(sections)} (stale ones?)"

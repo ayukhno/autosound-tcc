@@ -32,8 +32,8 @@ def test_group_row_params_render_declared_fields():
     group = view.groups[0]
     rows = {r.name: r for r in group.rows}
     fl = rows["FL"].params(group.fields)
-    assert "HP: 80 Hz LR24" in fl
-    assert "LP: 3200 Hz LR12" in fl
+    assert "HP: 80 LR4" in fl
+    assert "LP: 3200 LR2" in fl
     assert "Gain: -2.5 dB" in fl
     assert "Delay: 3.1 ms" in fl
     assert "Pol: NORM" in fl
@@ -45,13 +45,16 @@ def test_disabled_leg_and_inverted_polarity():
     sub = {r.name: r for r in view.groups[0].rows}["SUB"]
     params = sub.params(view.groups[0].fields)
     assert "HP: OFF" in params
-    assert "LP: 80 Hz LR24" in params
+    assert "LP: 80 LR4" in params
     assert "Pol: INV" in params
     assert not any(p.startswith("EQ") for p in params)  # no eq key at all -> no EQ chip
 
 
 def test_crossover_leg_labels():
-    assert CrossoverLeg.from_raw({"f": 80, "type": "LR", "slope": 24}).label == "80 Hz LR24"
+    # space between freq and filter; filter ORDER (slope / 6), not the raw dB/oct slope
+    assert CrossoverLeg.from_raw({"f": 80, "type": "LR", "slope": 24}).label == "80 LR4"
+    assert CrossoverLeg.from_raw({"f": 620, "type": "LR", "slope": 36}).label == "620 LR6"
+    assert CrossoverLeg.from_raw({"f": 88, "type": "BW", "slope": 12}).label == "88 BW2"
     assert CrossoverLeg.from_raw("OFF").label == "OFF"
     assert CrossoverLeg.from_raw(None).label == "OFF"
 
@@ -161,3 +164,51 @@ def test_group_row_eq_bands_method():
     fl = {r.name: r for r in view.groups[0].rows}["FL"]
     bands = fl.eq_bands()
     assert len(bands) == 1 and bands[0].type == "PK"
+
+
+def test_slot_order_descr_and_tag_read_from_ledger():
+    profile = {"dsp_profile": {"groups": [
+        {"id": "virtual_channels", "label": "Virtual channels", "max_count": 8,
+         "fields": ["gain_db", "polarity", "eq"]},
+    ]}}
+    ledger = {"virtual_channels": {
+        "VFL": {"slot": "A", "order": 0, "descr": "Front L Full", "polarity": "NORM",
+                "eq": ["LS 150 +2.5 Q0.71"]},
+        "VRL": {"slot": "C", "order": 2, "descr": "Rear L Full", "tag": "RearATT",
+                "polarity": "NORM", "eq": []},
+    }}
+    group = ProjectView.from_dict(ledger, profile).groups[0]
+    assert group.max_count == 8
+    rows = {r.name: r for r in group.rows}
+    assert (rows["VFL"].slot, rows["VFL"].order, rows["VFL"].descr) == ("A", 0, "Front L Full")
+    assert rows["VFL"].tag is None
+    assert (rows["VRL"].slot, rows["VRL"].tag) == ("C", "RearATT")
+
+
+def test_muted_and_off_flags():
+    profile = {"dsp_profile": {"groups": [
+        {"id": "virtual_channels", "label": "V", "fields": ["eq"]},
+    ]}}
+    ledger = {"virtual_channels": {
+        "A": {"mute": True, "eq": []}, "B": {"off": True, "eq": []}, "C": {"eq": []},
+    }}
+    rows = {r.name: r for r in ProjectView.from_dict(ledger, profile).groups[0].rows}
+    assert rows["A"].muted and not rows["A"].off
+    assert rows["B"].off and not rows["B"].muted
+    assert not rows["C"].muted and not rows["C"].off
+
+
+def test_features_and_header_metadata_parsed():
+    profile = {"dsp_profile": {"groups": []}}
+    ledger = {"features": [["RealCenter", "ON"], ["SubRC", "-4 dB (judging)"]],
+              "slot_label": "DSP #01", "save": "B8_EMMA_v10_Finish"}
+    view = ProjectView.from_dict(ledger, profile)
+    assert view.features == (("RealCenter", "ON"), ("SubRC", "-4 dB (judging)"))
+    assert view.slot_label == "DSP #01"
+    assert view.save == "B8_EMMA_v10_Finish"
+
+
+def test_features_absent_is_empty_tuple():
+    view = _view()
+    assert view.features == ()
+    assert view.slot_label is None and view.save is None

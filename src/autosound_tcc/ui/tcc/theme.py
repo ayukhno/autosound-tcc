@@ -15,7 +15,22 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QWidget
+
 Mode = Literal["dark", "light"]
+
+
+def apply_caps(widget: QWidget, spacing_px: float = 1.0, upper: bool = True) -> None:
+    """Apply small-caps tracking to a widget's font. Qt Style Sheets silently ignore both
+    `text-transform` and `letter-spacing`, so the prototype's uppercase, spaced-out section
+    labels have to be reproduced through the widget's QFont instead of QSS."""
+    f = widget.font()
+    if upper:
+        f.setCapitalization(QFont.Capitalization.AllUppercase)
+    if spacing_px:
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, spacing_px)
+    widget.setFont(f)
 
 # Exact copies of the prototype's :root[data-theme="..."] tokens.
 PALETTE_DARK: dict[str, str] = {
@@ -114,6 +129,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QLabel {{
         background: transparent;
+        color: {t.text};
     }}
 
     /* .panel — the card background used by every section */
@@ -149,6 +165,106 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QPushButton[class~="theme-btn"]:hover {{
         color: {t.text};
+    }}
+
+    QPushButton[class~="feedback-btn"] {{
+        background: {t.accent};
+        border: 1px solid {t.accent_dim};
+        color: #1a1206;
+        border-radius: 5px;
+        padding: 5px 11px;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QPushButton[class~="feedback-btn"]:hover {{
+        background: {t.mix('accent', 88, 'panel')};
+    }}
+
+    /* .zoomgroup — A-/percent/A+ as one bordered block with divider lines, ported from the
+    prototype's disconnected three-pill look at the user's request (2026-07-26 feedback). */
+    QFrame[class~="zoomgroup"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+    }}
+    QPushButton[class~="zoomgroup-btn"] {{
+        background: transparent;
+        border: none;
+        color: {t.muted};
+        padding: 5px 11px;
+        font-size: 12px;
+    }}
+    QPushButton[class~="zoomgroup-btn"]:hover {{
+        color: {t.text};
+        background: {t.mix('accent', 10)};
+    }}
+    QLabel[class~="zoomgroup-label"] {{
+        color: {t.faint};
+        font-size: 12px;
+        padding: 0 8px;
+    }}
+    QFrame[class~="zoomgroup-div"] {{
+        background: {t.border2};
+        border: none;
+    }}
+
+    /* .mini-select — themed QComboBox (preset / language / AI-model pickers). Without this the
+    combos render in the native platform style, which reads as an unstyled, wrong-font intrusion
+    against the rest of the flat dark UI. */
+    QComboBox[class~="mini-select"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 4px 9px;
+        font-size: 12px;
+    }}
+    QComboBox[class~="mini-select"]:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QComboBox[class~="mini-select"]::drop-down {{
+        border: none;
+        width: 18px;
+    }}
+    QComboBox[class~="mini-select"] QAbstractItemView {{
+        background: {t.panel};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
+        outline: none;
+        padding: 3px;
+    }}
+    QComboBox[class~="mini-select"] QAbstractItemView::item {{
+        /* left padding reserves room for the current-item check mark so labels aren't clipped
+        down to their first letter (the "E / U" language-picker bug) */
+        padding: 5px 14px 5px 28px;
+        min-height: 22px;
+    }}
+
+    /* Native tooltips are tiny and low-contrast -- theme them so channel hover-hints read well. */
+    QToolTip {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 6px 9px;
+        font-size: 12px;
+    }}
+
+    /* .kv-lbl — the small uppercase field labels in the header/footer (Preset / Target / AI...) */
+    QLabel[class~="kv-lbl"] {{
+        color: {t.muted};
+        font-size: 10px;
+    }}
+    QLabel[class~="kv-val"] {{
+        color: {t.text};
+        font-weight: 600;
+    }}
+    QLabel[class~="slot-val"] {{
+        color: {t.accent};
+        font-weight: 600;
+        font-family: "SF Mono", Menlo, monospace;
     }}
 
     /* ---- DSP tree (.ghead / .chan / .pill / .eq-chip / .prow-params / .cline2) ---- */
@@ -210,6 +326,30 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-family: "SF Mono", Menlo, monospace;
         font-size: 10.5px;
         color: {t.muted};
+    }}
+    /* .ctype — the muted speaker-type label (woofer/mid/tweeter/...) on output rows */
+    QLabel[class~="ctype"] {{
+        color: {t.faint};
+        font-size: 10px;
+    }}
+    /* .ctag2 — the small feature tag (RearATT/SubRC) next to a virtual channel's name */
+    QLabel[class~="ctag2"] {{
+        color: {t.info};
+        background: {t.mix('info', 15)};
+        border-radius: 3px;
+        padding: 0 5px;
+        font-size: 9px;
+    }}
+    /* .paramrow — key/value feature rows inside the top PARAMS section */
+    QWidget[class~="paramrow"] {{
+        font-size: 11px;
+    }}
+    QLabel[class~="pk"] {{
+        color: {t.muted};
+    }}
+    QLabel[class~="pv"] {{
+        color: {t.text};
+        font-family: "SF Mono", Menlo, monospace;
     }}
     QLabel[class~="pill"] {{
         font-size: 9.5px;
@@ -280,8 +420,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-bottom: 1px solid {t.mix('border', 60)};
     }}
     QTableWidget[class~="ptable"]::item:selected {{
-        background: {t.mix('accent', 13)};
-        color: {t.text};
+        background: {t.mix('accent', 18)};
     }}
     QHeaderView::section {{
         background: {t.panel};
@@ -403,8 +542,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-radius: 10px;
     }}
     QFrame[class~="msg-gen"] {{
-        background: {t.panel2};
-        border: 1px solid {t.border};
+        background: {t.panel3};
+        border: 1px solid {t.border2};
     }}
     QFrame[class~="msg-crit"] {{
         background: {t.mix('info', 12, 'panel2')};
@@ -461,9 +600,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QPushButton[class~="edit-chip"]:hover {{ color: {t.text}; }}
     QPushButton[class~="edit-chip"][class~="on"] {{
-        background: {t.mix('info', 16, 'panel2')};
-        border-color: {t.info};
-        color: {t.info};
+        background: {t.mix('accent', 16, 'panel2')};
+        border-color: {t.accent};
+        color: {t.accent};
         font-weight: 600;
     }}
     QWidget[class~="edit-reasons"] {{
@@ -482,12 +621,23 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-color: {t.info};
         color: {t.info};
     }}
+    /* param-edit mode: a bright ORANGE (accent) border, distinct + more visible than the old
+    thin blue one -- the user reads blue as the feedback/send colour. */
     QFrame[class~="dialog-editing"] {{
-        border-color: {t.info};
+        border: 2px solid {t.accent};
     }}
 
     QSplitter::handle {{
-        background: transparent;
+        background: {t.border};
+    }}
+    QSplitter::handle:hover {{
+        background: {t.accent};
+    }}
+    QSplitter::handle:horizontal {{
+        width: 2px;
+    }}
+    QSplitter::handle:vertical {{
+        height: 2px;
     }}
 
     QScrollBar:vertical {{
@@ -503,14 +653,94 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0;
     }}
+
+    /* ---- feedback modal (.fb-*) ---- */
+    QDialog {{
+        background: {t.panel};
+    }}
+    QLabel[class~="fb-head"] {{
+        font-size: 15px;
+        font-weight: 700;
+    }}
+    QLabel[class~="fb-hint"] {{
+        color: {t.muted};
+        font-size: 12px;
+    }}
+    QPushButton[class~="fb-tool"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.text};
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 13px;
+        min-width: 26px;
+    }}
+    QPushButton[class~="fb-tool"]:hover {{ border-color: {t.accent_dim}; }}
+    QTextEdit[class~="fb-rte"] {{
+        background: {t.panel2};
+        border: 1px solid {t.border2};
+        border-radius: 8px;
+        color: {t.text};
+        padding: 8px 10px;
+    }}
+    QPushButton[class~="fb-cancel"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 7px;
+        padding: 8px 14px;
+    }}
+    QPushButton[class~="fb-cancel"]:hover {{ color: {t.text}; }}
+    QPushButton[class~="fb-send"] {{
+        background: {t.accent};
+        color: #1a1206;
+        border: none;
+        border-radius: 7px;
+        padding: 8px 16px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="fb-send"]:hover {{ background: {t.mix('accent', 88, 'panel')}; }}
+    QRadioButton {{
+        color: {t.text};
+        font-size: 12.5px;
+        spacing: 7px;
+    }}
     """
     return _scale_font_sizes(qss, scale)
+
+
+_CURRENT: "Theme | None" = None
+
+
+def current_theme() -> "Theme":
+    """The palette last applied via `apply_theme` — lets a widget that paints its own colors
+    (e.g. table-cell foregrounds) pick theme-correct hex without threading the mode through."""
+    return _CURRENT if _CURRENT is not None else get_theme("dark")
 
 
 def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     """Swap the whole application's stylesheet — the Qt equivalent of the prototype's
     `document.documentElement.dataset.theme = mode`. `scale` reapplies the current zoom level
     (build_qss default is 1.0, i.e. no-op) so a theme toggle doesn't reset zoom."""
+    global _CURRENT
     theme = get_theme(mode)
+    _CURRENT = theme
+    # Set the base palette too, not just QSS: a QSS `color` on `QWidget{}` does NOT reliably
+    # reach a QLabel that also matches a more-specific class rule (Qt resolves color from the
+    # widget's palette then, which defaulted to black -> invisible names in dark mode). The
+    # palette is the dependable source for any text/base color not set by an explicit QSS rule.
+    from PySide6.QtGui import QColor, QPalette
+
+    pal = app.palette()
+    text = QColor(theme.text)
+    base = QColor(theme.panel)
+    ground = QColor(theme.ground)
+    pal.setColor(QPalette.ColorRole.WindowText, text)
+    pal.setColor(QPalette.ColorRole.Text, text)
+    pal.setColor(QPalette.ColorRole.ButtonText, text)
+    pal.setColor(QPalette.ColorRole.Window, ground)
+    pal.setColor(QPalette.ColorRole.Base, base)
+    pal.setColor(QPalette.ColorRole.PlaceholderText, QColor(theme.faint))
+    app.setPalette(pal)
     app.setStyleSheet(build_qss(theme, scale=scale))
     return theme

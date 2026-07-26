@@ -96,15 +96,27 @@ class CrossoverLeg:
 
     @property
     def label(self) -> str:
-        """Short display string, e.g. "86 LR12", "88 BW36", or "OFF"."""
+        """Compact display string: corner freq, a space, then the filter type + its ORDER, e.g.
+        "620 LR6", "88 BW6", or "OFF". The ledger stores the slope in dB/octave (LR36); we show the
+        order (LR36 -> LR6, since order = slope / 6) with a space, matching how the user reads it
+        off the DSP (user pref 2026-07-26, replacing the earlier space-less slope form "620LR36")."""
         if not self.enabled or self.freq_hz is None:
             return "OFF"
-        freq = f"{self.freq_hz:g} Hz"
+        freq = f"{self.freq_hz:g}"
         if self.type and self.slope is not None:
-            return f"{freq} {self.type}{self.slope}"
+            return f"{freq} {self.type}{self._order()}"
         if self.type:
             return f"{freq} {self.type}"
         return freq
+
+    def _order(self):
+        """Filter order from the ledger's dB/octave slope (LR36 -> 6, BW24 -> 4). A non-numeric or
+        non-multiple-of-6 slope falls through to the raw value so nothing is silently dropped."""
+        try:
+            order = float(self.slope) / 6
+        except (TypeError, ValueError):
+            return self.slope
+        return int(order) if order == int(order) else f"{order:g}"
 
 
 def _field_label(field_name: str, raw_value: Any) -> Optional[str]:
@@ -145,6 +157,21 @@ class GroupRow:
     name: str
     raw: dict
     order: Optional[int] = None
+    slot: Optional[str] = None
+    descr: Optional[str] = None
+
+    @property
+    def tag(self) -> Optional[str]:
+        """Short feature tag shown as a chip next to the channel name (e.g. RearATT, SubRC)."""
+        return self.raw.get("tag")
+
+    @property
+    def muted(self) -> bool:
+        return bool(self.raw.get("mute"))
+
+    @property
+    def off(self) -> bool:
+        return bool(self.raw.get("off"))
 
     def params(self, fields: tuple[str, ...]) -> list[str]:
         """Rendered "label: value" chips for exactly this group's declared fields — a field this
@@ -175,6 +202,7 @@ class ProfileGroup:
     label: str
     fields: tuple[str, ...]
     rows: tuple[GroupRow, ...] = ()
+    max_count: Optional[int] = None
 
     def rows_ordered(self) -> list[GroupRow]:
         return sorted(self.rows, key=lambda r: (r.order if r.order is not None else 99, r.name))
@@ -190,6 +218,9 @@ class ProjectView:
     version: Optional[str] = None
     note: Optional[str] = None
     target: Optional[str] = None
+    features: tuple[tuple[str, str], ...] = ()
+    slot_label: Optional[str] = None
+    save: Optional[str] = None
 
     @classmethod
     def from_dict(cls, raw: dict, profile: dict) -> "ProjectView":
@@ -201,11 +232,16 @@ class ProjectView:
             # every other group id maps to a same-named top-level key (absent -> no rows yet).
             row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
             rows = tuple(
-                GroupRow(id=name, name=name, raw=row_raw, order=row_raw.get("order"))
+                GroupRow(id=name, name=name, raw=row_raw, order=row_raw.get("order"),
+                         slot=row_raw.get("slot"), descr=row_raw.get("descr"))
                 for name, row_raw in (row_source or {}).items()
             )
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
-                                        fields=tuple(g.get("fields", ())), rows=rows))
+                                        fields=tuple(g.get("fields", ())), rows=rows,
+                                        max_count=g.get("max_count")))
+        features = tuple(
+            (str(k), str(v)) for k, v in raw.get("features", []) if k is not None
+        )
         return cls(
             preset=raw.get("preset", ""),
             sample_rate=raw.get("sample_rate"),
@@ -213,6 +249,9 @@ class ProjectView:
             version=raw.get("version"),
             note=raw.get("note"),
             target=raw.get("target"),
+            features=features,
+            slot_label=raw.get("slot_label"),
+            save=raw.get("save"),
         )
 
 

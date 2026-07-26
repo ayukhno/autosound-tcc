@@ -10,6 +10,8 @@ Mock `DIALOG` messages only (M5 scope) — this is the main tuning-dialog surfac
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -24,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.mock_data import DIALOG, DialogMessage
+from autosound_tcc.ui.tcc.theme import apply_caps
 
 
 class MessageBubble(QFrame):
@@ -31,7 +34,7 @@ class MessageBubble(QFrame):
         super().__init__()
         self.setProperty("class", f"msg msg-{who}")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setContentsMargins(12, 7, 12, 8)
         layout.setSpacing(3)
         who_label = QLabel(role)
         who_label.setProperty("class", f"msg-who msg-who-{who}")
@@ -41,6 +44,14 @@ class MessageBubble(QFrame):
         body.setWordWrap(True)
         body.setProperty("class", "msg-body")
         layout.addWidget(body)
+        # Width the bubble would want if its text sat on one line -- lets the panel size each
+        # bubble to its content (dynamic, like the web) up to the max-width cap, instead of every
+        # bubble being forced to the same width.
+        plain = re.sub(r"<[^>]+>", "", html)
+        self.natural_width = max(
+            body.fontMetrics().horizontalAdvance(plain),
+            who_label.fontMetrics().horizontalAdvance(role),
+        ) + 28
 
 
 class DialogPanel(QWidget):
@@ -55,6 +66,7 @@ class DialogPanel(QWidget):
         super().__init__()
         self._editing = False
         self._reason: str | None = None
+        self._bubbles: list[MessageBubble] = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -67,6 +79,7 @@ class DialogPanel(QWidget):
         head_layout.setSpacing(8)
         self._title_label = QLabel(i18n.t("dialog"))
         self._title_label.setProperty("class", "phead-title")
+        apply_caps(self._title_label, spacing_px=1.4)
         head_layout.addWidget(self._title_label)
         self._sub_label = QLabel(i18n.t("dialogSub"))
         self._sub_label.setProperty("class", "phead-sub")
@@ -104,11 +117,14 @@ class DialogPanel(QWidget):
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._chat = QWidget()
         self._chat_layout = QVBoxLayout(self._chat)
-        self._chat_layout.setContentsMargins(14, 14, 14, 14)
-        self._chat_layout.setSpacing(12)
+        self._chat_layout.setContentsMargins(14, 12, 14, 12)
+        self._chat_layout.setSpacing(8)
+        # Trailing stretch must exist BEFORE the bubbles are added: _add_bubble inserts each row at
+        # count()-1 (just before the stretch), so without it the -1 index folds messages back to
+        # the front and scrambles their order (the dialog rendered crit→user→gen→gen otherwise).
+        self._chat_layout.addStretch(1)
         for message in DIALOG:
             self._add_bubble(message.who, message.role, i18n.tx(message.text))
-        self._chat_layout.addStretch(1)
         self._scroll.setWidget(self._chat)
         outer.addWidget(self._scroll, stretch=1)
 
@@ -127,9 +143,11 @@ class DialogPanel(QWidget):
         outer.addWidget(composer)
 
     def retranslate(self) -> None:
-        """Re-set every static label's text, and rebuild the mock chat from DIALOG in the new
-        language (simpler and just as correct as translating already-rendered bubbles in place,
-        since it's mock data either way)."""
+        """Re-set the panel's own *chrome* (title, chip, composer) into the new UI language.
+
+        The message bubbles are deliberately NOT re-translated: a dialog turn is live model /
+        user output, produced in one language, not a UI string. Flipping the interface language
+        must leave the actual conversation exactly as it happened (user feedback 2026-07-26)."""
         self._title_label.setText(i18n.t("dialog"))
         self._sub_label.setText(i18n.t("dialogSub"))
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
@@ -143,37 +161,34 @@ class DialogPanel(QWidget):
         else:
             self._edit_chip.setText("✎ " + i18n.t("editChipLabel"))
 
-        while self._chat_layout.count():
-            item = self._chat_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)
-                widget.deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    sub_item = item.layout().takeAt(0)
-                    sub_widget = sub_item.widget()
-                    if sub_widget:
-                        # setParent(None) first -- see set_view()/retranslate() elsewhere for why
-                        # deleteLater() alone would leave this bubble visible one frame too long.
-                        sub_widget.setParent(None)
-                        sub_widget.deleteLater()
-        for message in DIALOG:
-            self._add_bubble(message.who, message.role, i18n.tx(message.text))
-        self._chat_layout.addStretch(1)
+    def _bubble_max_width(self) -> int:
+        width = self._chat.width()
+        return int(width * 0.9) if width > 0 else 600
+
+    def _fit(self, bubble: MessageBubble) -> None:
+        """Size a bubble to its content up to the max-width cap: short messages hug their text,
+        long ones wrap at the cap. A fixed width is needed because a wrapped QLabel's own sizeHint
+        collapses far narrower than the space available."""
+        bubble.setFixedWidth(min(bubble.natural_width, self._bubble_max_width()))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        # Bubble widths are computed from the panel width, which is Qt's un-shown default until the
+        # panel is actually laid out -- refit on every resize so they track the real width.
+        for bubble in self._bubbles:
+            self._fit(bubble)
 
     def _add_bubble(self, who: str, role: str, html: str) -> None:
         bubble_row = QHBoxLayout()
         bubble = MessageBubble(who, role, html)
-        bubble.setMaximumWidth(int(self._chat.width() * 0.82) or 500)
+        self._bubbles.append(bubble)
+        self._fit(bubble)
         if who == "user":
-            bubble_row.addStretch(1)
+            bubble_row.addStretch(1)  # right-aligned
             bubble_row.addWidget(bubble)
-        elif who == "sys":
-            bubble_row.addStretch(1)
-            bubble_row.addWidget(bubble)
-            bubble_row.addStretch(1)
         else:
+            # Generator / Critic / system(ledger): left-aligned. System messages used to be
+            # centered, which read as them "jumping to the middle" during a param-edit flow.
             bubble_row.addWidget(bubble)
             bubble_row.addStretch(1)
         self._chat_layout.insertLayout(self._chat_layout.count() - 1, bubble_row)

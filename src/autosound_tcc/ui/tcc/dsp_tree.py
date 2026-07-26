@@ -8,10 +8,10 @@ that a "virtual" or "output" group exists, so a MUSWAY profile with only `physic
 `inputs` renders correctly with zero changes here). Each section holds a clickable "params" row
 (opens the full table, M3) followed by one `ChannelRow` per row in that group.
 
-Deliberately NOT ported: the prototype's per-name abbreviation table (`ABBR`) and Helix-specific
-`tag` (RearATT/SubRC) — both were conventions tied to *known Helix channel names*, not part of
-the generic profile schema. Rows show their real name as-is; abbreviation can return later as an
-optional profile-declared field if it proves worth the complexity.
+Channel identity comes from the ledger, kept generic: `slot` (the hardware slot letter shown as
+the ID badge), `descr` (full descriptive name, tooltip only), and an optional `tag` (RearATT/SubRC)
+rendered as a chip on virtual-tier rows only — all plain profile-agnostic fields, absent = simply
+not shown, so a MUSWAY ledger without them still renders.
 """
 
 from __future__ import annotations
@@ -25,8 +25,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup, ProjectView
+from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
+from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
+
+# Short, translatable header labels for the known DSP tiers (matches the prototype's T.virtual /
+# T.output / T.params). Unknown group ids fall back to the profile's own label, so a novel profile
+# still renders — just with its verbose label instead of a short one.
+_GROUP_LABEL_KEY = {
+    "virtual_channels": "virtual",
+    "physical_outputs": "output",
+    "inputs": "inputs",
+}
+
+
+def _group_label(group: ProfileGroup) -> str:
+    key = _GROUP_LABEL_KEY.get(group.id)
+    return i18n.t(key) if key else group.label
 
 
 def _collapsed_key(group_id: str) -> str:
@@ -45,22 +61,24 @@ class _Pill(QLabel):
     def __init__(self, text: str, kind: str) -> None:
         super().__init__(text)
         self.setProperty("class", f"pill pill-{kind}")
+        apply_caps(self, spacing_px=0.6)
 
 
 class _EqChip(QLabel):
+    """Always clickable, even at zero bands -- the tree chip is the one-click path to a channel's
+    EQ view (vs. the crash-prone route of opening the table and clicking the row); an empty-band
+    channel still has an EQ view worth seeing (e.g. to confirm it's genuinely empty)."""
+
     clicked = Signal()
 
     def __init__(self, count: int) -> None:
         super().__init__(f"EQ {count}" if count else "EQ —")
         self.setProperty("class", "eq-chip" if count else "eq-chip muted")
-        self.setCursor(Qt.CursorShape.PointingHandCursor if count else Qt.CursorShape.ArrowCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        if self.property("class") == "eq-chip":
-            event.accept()
-            self.clicked.emit()
-        else:
-            super().mousePressEvent(event)
+        event.accept()
+        self.clicked.emit()
 
 
 class ChannelRow(QWidget):
@@ -78,24 +96,40 @@ class ChannelRow(QWidget):
         layout.setContentsMargins(20, 4, 8, 5)
         layout.setSpacing(1)
 
+        is_output = "hp" in group.fields or "lp" in group.fields
         line1 = QHBoxLayout()
         line1.setSpacing(6)
-        cid = QLabel(row.id)
-        cid.setProperty("class", "cid")
-        line1.addWidget(cid)
+        if row.slot:
+            # The hardware slot letter (e.g. "A".."K") is the channel's ID badge. Falls back to
+            # nothing when a ledger has no slot field (older captures) -- the name still shows.
+            cid = QLabel(row.slot)
+            cid.setProperty("class", "cid")
+            line1.addWidget(cid)
         name = QLabel(row.name)
         name.setProperty("class", "cn")
         line1.addWidget(name)
 
         raw = row.raw
-        muted_or_off = bool(raw.get("mute")) or bool(raw.get("off"))
-        if muted_or_off:
-            line1.addWidget(_Pill("MUTE" if raw.get("mute") else "OFF", "off"))
-        elif raw.get("polarity"):
-            pol = raw["polarity"]
-            line1.addWidget(_Pill(pol, "inv" if pol == "INV" else "norm"))
-        if muted_or_off:
+        # Speaker type (woofer/mid/tweeter/...) shown next to the name on output rows so the
+        # physical driver behind a channel is identifiable at a glance (user request 2026-07-26).
+        if is_output and raw.get("role"):
+            ctype = QLabel(raw["role"])
+            ctype.setProperty("class", "ctype")
+            line1.addWidget(ctype)
+        if row.muted or row.off:
+            line1.addWidget(_Pill("MUTE" if row.muted else "OFF", "off"))
             self.setProperty("class", "chan chan-dim")
+        elif raw.get("polarity") == "INV":
+            # Only flag inversion -- NORM is the default and showing it on every row is noise
+            # (user request 2026-07-27).
+            line1.addWidget(_Pill("INV", "inv"))
+
+        # Feature tag (RearATT/SubRC) is a virtual-tier convention -- the prototype shows it only
+        # on virtual channels, not on the physical outputs that carry the same tag.
+        if row.tag and not is_output:
+            tag = QLabel(row.tag)
+            tag.setProperty("class", "ctag2")
+            line1.addWidget(tag)
 
         line1.addStretch(1)
         eq_count = row.eq_count()
@@ -104,22 +138,75 @@ class ChannelRow(QWidget):
         line1.addWidget(self._eq_chip)
         layout.addLayout(line1)
 
-        if "hp" in group.fields or "lp" in group.fields:
-            from autosound_tcc.state.dsp_state import CrossoverLeg
-
+        if is_output:
             hp = CrossoverLeg.from_raw(raw.get("hp")).label
             lp = CrossoverLeg.from_raw(raw.get("lp")).label
             gain = raw.get("gain_db")
             gain_s = f"{gain:+.1f}dB" if isinstance(gain, (int, float)) else "—"
             line2 = QLabel(f"HP {hp} · LP {lp} · {gain_s}")
             line2.setProperty("class", "cline2")
+            line2.setWordWrap(True)
+            layout.addWidget(line2)
+        else:
+            # Virtual channels have no crossover, but their gain (and delay) matter in the main
+            # list -- surface them the same way (user request 2026-07-27).
+            gain = raw.get("gain_db")
+            delay = raw.get("ta_ms")
+            parts = [f"Gain {gain:+.1f}dB" if isinstance(gain, (int, float)) else "Gain —"]
+            if isinstance(delay, (int, float)):
+                parts.append(f"Delay {delay:g}ms")
+            line2 = QLabel(" · ".join(parts))
+            line2.setProperty("class", "cline2")
+            line2.setWordWrap(True)
             layout.addWidget(line2)
 
-        tip_lines = [f"{row.id} · {row.name}"]
-        params = row.params(group.fields)
-        if params:
-            tip_lines.append(" · ".join(params))
-        self.setToolTip("\n".join(tip_lines))
+        self.setToolTip(self._tooltip_html(row, raw, is_output))
+
+    @staticmethod
+    def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:
+        """A formatted, colour-coded hover hint (QToolTip renders rich text). Driver make + Fs,
+        the crossover, and gain/polarity/EQ all use the same colours as the table so the hint
+        reads at a glance."""
+        t = current_theme()
+
+        def c(text: str, color: str) -> str:
+            return f"<span style='color:{color}'>{text}</span>"
+
+        head = f"{row.slot} · {row.descr or row.name}" if row.slot else (row.descr or row.name)
+        html = [f"<b>{head}</b>"]
+
+        if is_output:
+            meta = []
+            if raw.get("driver"):  # speaker make/model (e.g. "Hertz MP70") -- shown when captured
+                meta.append(f"<b>{raw['driver']}</b>")
+            if raw.get("role"):
+                meta.append(raw["role"])
+            fs = raw.get("fs")
+            if isinstance(fs, (int, float)):
+                meta.append(f"Fs&nbsp;{fs:g}&nbsp;Hz")
+            if meta:
+                html.append(c(" · ".join(meta), t.muted))
+            hp = CrossoverLeg.from_raw(raw.get("hp")).label
+            lp = CrossoverLeg.from_raw(raw.get("lp")).label
+            html.append(f"HP&nbsp;<b>{hp}</b> &nbsp;·&nbsp; LP&nbsp;<b>{lp}</b>")
+
+        parts = []
+        gain = raw.get("gain_db")
+        if isinstance(gain, (int, float)):
+            parts.append("Gain " + c(f"{gain:+.1f}&nbsp;dB", t.ok if gain >= 0 else t.accent))
+        delay = raw.get("ta_ms")
+        if isinstance(delay, (int, float)):
+            parts.append(f"Delay {delay:g}&nbsp;ms")
+        pol = raw.get("polarity")
+        if pol:
+            parts.append("Pol " + (c("INV", t.inv) if pol == "INV" else c(pol, t.muted)))
+        if parts:
+            html.append(" &nbsp;·&nbsp; ".join(parts))
+
+        n = row.eq_count()
+        if n:
+            html.append("EQ " + c(f"{n} band{'s' if n != 1 else ''}", t.accent))
+        return "<div>" + "<br>".join(html) + "</div>"
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().mousePressEvent(event)
@@ -141,13 +228,80 @@ class _ParamsOpenRow(QWidget):
         icon = QLabel("⊞")
         icon.setProperty("class", "prow-params-ic")
         layout.addWidget(icon)
-        label = QLabel("params · all parameters as a table")
+        label = QLabel(i18n.t("paramsRow"))
         layout.addWidget(label)
         layout.addStretch(1)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         event.accept()
         self.clicked.emit()
+
+
+class _ParamRow(QWidget):
+    """One `key → value` DSP-feature row (RealCenter ON, SubRC −4 dB, ...) inside PARAMS."""
+
+    def __init__(self, key: str, value: str) -> None:
+        super().__init__()
+        self.setProperty("class", "paramrow")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 3, 8, 3)
+        layout.setSpacing(6)
+        k = QLabel(key)
+        k.setProperty("class", "pk")
+        layout.addWidget(k)
+        layout.addStretch(1)
+        v = QLabel(value)
+        v.setProperty("class", "pv")
+        layout.addWidget(v)
+
+
+class ParamsSection(QWidget):
+    """Top-of-tree PARAMS group: the preset's DSP feature toggles as key/value rows. Mirrors the
+    prototype's `groupNode("params", ...)` built from `p.features`. Collapsed by default."""
+
+    _GID = "params"
+
+    def __init__(self, features: tuple[tuple[str, str], ...], settings: QSettings) -> None:
+        super().__init__()
+        self._settings = settings
+        collapsed = settings.value(_collapsed_key(self._GID), True, type=bool)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._header = QWidget()
+        self._header.setProperty("class", "ghead")
+        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
+        head_layout = QHBoxLayout(self._header)
+        head_layout.setContentsMargins(8, 4, 8, 4)
+        head_layout.setSpacing(6)
+        self._twist = QLabel()
+        self._twist.setProperty("class", "tw")
+        head_layout.addWidget(self._twist)
+        params_label = QLabel(i18n.t("params"))
+        apply_caps(params_label, spacing_px=1.0)
+        head_layout.addWidget(params_label)
+        head_layout.addStretch(1)
+        self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]
+        outer.addWidget(self._header)
+
+        self._children = QWidget()
+        children_layout = QVBoxLayout(self._children)
+        children_layout.setContentsMargins(0, 0, 0, 0)
+        children_layout.setSpacing(0)
+        for key, value in features:
+            children_layout.addWidget(_ParamRow(key, value))
+        outer.addWidget(self._children)
+        self._set_collapsed(collapsed)
+
+    def _on_header_clicked(self, event) -> None:
+        self._set_collapsed(not self._children.isHidden())
+        self._settings.setValue(_collapsed_key(self._GID), self._children.isHidden())
+
+    def _set_collapsed(self, collapsed: bool) -> None:
+        self._children.setHidden(collapsed)
+        self._twist.setText("▸" if collapsed else "▾")
 
 
 class TreeGroupSection(QWidget):
@@ -179,9 +333,13 @@ class TreeGroupSection(QWidget):
         self._twist = QLabel()
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
-        title = QLabel(group.label.upper())
+        title = QLabel(_group_label(group).upper())
+        apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
-        count = QLabel(f"{len(group.rows)}")
+        count_text = (
+            f"{len(group.rows)}/{group.max_count}" if group.max_count else f"{len(group.rows)}"
+        )
+        count = QLabel(count_text)
         count.setProperty("class", "cnt")
         head_layout.addWidget(count)
         head_layout.addStretch(1)
@@ -246,6 +404,9 @@ class DspTreeWidget(QScrollArea):
                 # which overlaps with the freshly-added replacement widgets on a preset switch.
                 widget.setParent(None)
                 widget.deleteLater()
+        if view.features:
+            params = ParamsSection(view.features, self._settings)
+            self._layout.insertWidget(self._layout.count() - 1, params)
         for group in view.groups:
             section = TreeGroupSection(group, self._settings)
             section.channelClicked.connect(self.channelClicked.emit)
