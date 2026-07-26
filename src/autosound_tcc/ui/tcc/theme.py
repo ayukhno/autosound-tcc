@@ -383,6 +383,94 @@ def build_qss(theme: Theme) -> str:
     QLabel[class~="mn-wait"] {{ color: {t.muted}; }}
     QLabel[class~="mn-done"] {{ color: {t.text}; }}
 
+    /* ---- AI dialog: bubbles / composer / edit-chip ---- */
+    QFrame[class~="msg"] {{
+        border-radius: 10px;
+    }}
+    QFrame[class~="msg-gen"] {{
+        background: {t.panel2};
+        border: 1px solid {t.border};
+    }}
+    QFrame[class~="msg-crit"] {{
+        background: {t.mix('info', 12, 'panel2')};
+        border: 1px solid {t.mix('info', 30, 'border')};
+    }}
+    QFrame[class~="msg-user"] {{
+        background: {t.mix('accent', 16, 'panel2')};
+        border: 1px solid {t.mix('accent', 30, 'border')};
+    }}
+    QFrame[class~="msg-sys"] {{
+        background: {t.mix('info', 10, 'panel2')};
+        border: 1px dashed {t.mix('info', 45, 'border')};
+    }}
+    QLabel[class~="msg-who"] {{
+        font-size: 10px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: {t.muted};
+    }}
+    QLabel[class~="msg-who-crit"] {{ color: {t.info}; }}
+    QLabel[class~="msg-who-user"] {{ color: {t.accent}; }}
+    QLabel[class~="msg-who-sys"] {{ color: {t.info}; }}
+    QLabel[class~="msg-body"] {{
+        font-size: 13px;
+    }}
+
+    QWidget[class~="composer"] {{
+        border-top: 1px solid {t.border};
+    }}
+    QLineEdit[class~="composer-input"] {{
+        background: {t.panel2};
+        border: 1px solid {t.border2};
+        border-radius: 6px;
+        color: {t.text};
+        padding: 8px 11px;
+    }}
+    QPushButton[class~="composer-send"] {{
+        background: {t.info};
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        padding: 0 16px;
+        font-weight: 700;
+        min-height: 32px;
+    }}
+
+    QPushButton[class~="edit-chip"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 12px;
+        padding: 4px 11px;
+        font-size: 11px;
+    }}
+    QPushButton[class~="edit-chip"]:hover {{ color: {t.text}; }}
+    QPushButton[class~="edit-chip"][class~="on"] {{
+        background: {t.mix('info', 16, 'panel2')};
+        border-color: {t.info};
+        color: {t.info};
+        font-weight: 600;
+    }}
+    QWidget[class~="edit-reasons"] {{
+        background: {t.panel2};
+        border-bottom: 1px solid {t.border};
+    }}
+    QPushButton[class~="reason-btn"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.text};
+        border-radius: 12px;
+        padding: 4px 12px;
+        font-size: 11.5px;
+    }}
+    QPushButton[class~="reason-btn"]:hover {{
+        border-color: {t.info};
+        color: {t.info};
+    }}
+    QFrame[class~="dialog-editing"] {{
+        border-color: {t.info};
+    }}
+
     QSplitter::handle {{
         background: transparent;
     }}

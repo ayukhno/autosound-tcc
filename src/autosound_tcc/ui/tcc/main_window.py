@@ -28,6 +28,7 @@ from autosound_tcc.core import config
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
+from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
@@ -268,18 +269,20 @@ class MainWindow(QMainWindow):
         self._detail = DetailPane()
         layout.addWidget(self._detail)
 
-        dialog_panel = _panel()
-        dialog_layout = QVBoxLayout(dialog_panel)
+        self._dialog_frame = _panel()
+        dialog_layout = QVBoxLayout(self._dialog_frame)
         dialog_layout.setContentsMargins(0, 0, 0, 0)
-        dialog_head, self._dialog_title, self._dialog_sub = _phead("dialog", "dialogSub")
-        dialog_layout.addWidget(dialog_head)
-        body = QLabel("AI dialog (M5)")
-        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.setProperty("class", "phead-sub")
-        dialog_layout.addWidget(body, stretch=1)
-        layout.addWidget(dialog_panel, stretch=1)
+        self._dialog = DialogPanel()
+        self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
+        dialog_layout.addWidget(self._dialog)
+        layout.addWidget(self._dialog_frame, stretch=1)
 
         return container
+
+    def _on_dialog_editing_changed(self, editing: bool) -> None:
+        self._dialog_frame.setProperty("class", "panel dialog-editing" if editing else "panel")
+        self._dialog_frame.style().unpolish(self._dialog_frame)
+        self._dialog_frame.style().polish(self._dialog_frame)
 
     def _build_right(self) -> QWidget:
         container = QWidget()

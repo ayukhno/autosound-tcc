@@ -23,6 +23,22 @@ T: dict[Lang, dict[str, str]] = {
         "planSub": "phases + steps",
         "focus": "◆ IN FOCUS NOW",
         "measSub": "measurement task",
+        "composer": "Message the Generator…  (prototype — doesn't send)",
+        "send": "Send",
+        "editChipLabel": "Project param edit",
+        "editReasonsQ": "Why?",
+        "reasonForgot": "skill didn't save",
+        "reasonManual": "I changed something manually",
+        "editStartForgot": "◆ Editing project parameters — flagged: the skill may not have "
+                            "saved a recent change. Describe what should be in the ledger; "
+                            "I'll check and fix it.",
+        "editStartManual": "◆ Editing project parameters — you changed something by hand. "
+                            "Tell me what and where; I'll log it in the ledger so future "
+                            "recommendations account for it.",
+        "editDoneForgot": "✓ Ledger checked: <code>Rear R Full</code> delay was 9.5 ms in the "
+                           "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
+        "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
+                           "Ledger updated and re-attested.",
     },
     "uk": {
         "theme": "тема",
@@ -33,6 +49,21 @@ T: dict[Lang, dict[str, str]] = {
         "planSub": "фази + кроки",
         "focus": "◆ У ФОКУСІ ЗАРАЗ",
         "measSub": "задача на замір",
+        "composer": "Написати Генератору…  (прототип — не відправляє)",
+        "send": "Надіслати",
+        "editChipLabel": "Правка параметрів проекту",
+        "editReasonsQ": "Причина?",
+        "reasonForgot": "скіл не зберіг",
+        "reasonManual": "я змінив щось руками",
+        "editStartForgot": "◆ Правка параметрів проекту — позначено: скіл, можливо, не "
+                            "зберіг останню зміну. Опиши, що повинно бути в ledger; я "
+                            "перевірю і виправлю.",
+        "editStartManual": "◆ Правка параметрів проекту — ти змінив щось руками. Скажи що і "
+                            "де; я запишу в ledger, щоб наступні рекомендації це враховували.",
+        "editDoneForgot": "✓ Перевірив ledger: у <code>Rear R Full</code> delay в діалозі був "
+                           "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
+        "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
+                           "(вручну). Ledger оновлено і переатестовано.",
     },
 }
 

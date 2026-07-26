@@ -13,6 +13,41 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class DialogMessage:
+    who: str  # "gen" | "crit" | "user"
+    role: str
+    text: dict  # {"en": "...", "uk": "..."} — may contain <code> spans
+
+
+DIALOG: tuple[DialogMessage, ...] = (
+    DialogMessage(who="gen", role="Generator · Claude Opus 4.8", text={
+        "en": "Phase 2 (EQ), step 2.2. Proposing a left-lobe cut on <code>m_L</code>: "
+              "<code>PK 1120 −2.5 Q2.2</code>. Hot L 990–1250 pulls the image left; this "
+              "evens it out without shifting the pair's phase (9.8°→6.8°).",
+        "uk": "Фаза 2 (EQ), крок 2.2. Пропоную на <code>m_L</code> зріз лівого лоба: "
+              "<code>PK 1120 −2.5 Q2.2</code>. Гарячий L 990–1250 тягне образ вліво; "
+              "вирівнює без зсуву фази пари (9.8°→6.8°).",
+    }),
+    DialogMessage(who="crit", role="Critic · Gemini", text={
+        "en": "The \"175-stack destroys GD attack\" risk is ruled out by measurement. Gate "
+              "fail-criterion: if #13/T8 \"bloats\" — revert. Recommendation: apply.",
+        "uk": "Ризик «стек 175 руйнує GD-атаку» знято виміром. Фейл-критерій: якщо №13/T8 "
+              "«розпухає» — відкат. Рекомендація: вводити.",
+    }),
+    DialogMessage(who="user", role="Arbiter · you", text={
+        "en": "Applied. Captured <code>_32</code>. Punch intact, no diffuseness. Keeping it.",
+        "uk": "Ввів. Зняв <code>_32</code>. Панч на місці, дифузності нема. Лишаємо.",
+    }),
+    DialogMessage(who="gen", role="Generator · Claude Opus 4.8", text={
+        "en": "Attested: lobe 990–1250 <code>+2.40 → −0.07</code>. Next step — the "
+              "measurement task (panel on the right).",
+        "uk": "Атестовано: лоб 990–1250 <code>+2.40 → −0.07</code>. Наступний крок — задача "
+              "на замір (панель праворуч).",
+    }),
+)
+
+
+@dataclass(frozen=True)
 class PlanStep:
     name: dict
     tag: object = ""  # dict {"en","uk"} or "" — mirrors the prototype's tx()-able value
