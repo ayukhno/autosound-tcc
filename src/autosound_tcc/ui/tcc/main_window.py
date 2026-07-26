@@ -1,141 +1,234 @@
-"""The main TCC window.
+"""The main TCC window — layout skeleton ported from the web prototype
+(`data/private/prototype/tcc-main.html`): header / left DSP panel / center (detail + AI dialog) /
+right (plan-fact + measurement task) / footer, matching the prototype's CSS grid areas
+`head`/`left`/`center`/`right`/`foot`.
 
-Renders one read-only table per group declared in the project's DSP capability profile
-(`core/vendor_loader.load_dsp_profile`) — not a hardcoded VIRTUAL/OUTPUT pair. A Helix profile
-declares `virtual_channels` + `physical_outputs`; a MUSWAY profile might declare only
-`physical_outputs` + `inputs`. No per-DSP Qt code is needed either way (docs/TCC-TZ.md §2).
-REW curve panels come in a later milestone. Nothing here writes to the DSP — read-only by
-design (brief §11).
+M1 scope only: the shell, theme, and empty section placeholders. The real content of each panel
+lands in later milestones (see the plan file / task list) — this file will keep growing as each
+section gets wired to real data, but the outer structure built here should not need to change.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from autosound_tcc import __version__
-from autosound_tcc.core import config
-from autosound_tcc.state.dsp_state import ProjectView, load_project_view
-from autosound_tcc.ui.tcc.group_table import GroupTable
+from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.theme import apply_theme
+
+_SETTINGS_ORG = "autosound-tcc"
+_SETTINGS_APP = "TCC"
+_THEME_KEY = "ui/theme"
 
 
-def _section_label(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setStyleSheet("font-weight: 600; margin-top: 6px;")
-    return label
+def _panel() -> QFrame:
+    frame = QFrame()
+    frame.setProperty("class", "panel")
+    return frame
+
+
+def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
+    """A small-caps section header row (mirrors the prototype's `.phead`).
+
+    Returns (widget, title_label, sub_label) so callers can retranslate the labels later and add
+    trailing content (buttons, tabs) to the same row.
+    """
+    row = QWidget()
+    row.setProperty("class", "phead")
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(12, 8, 12, 8)
+    layout.setSpacing(8)
+
+    title = QLabel(i18n.t(title_key))
+    title.setProperty("class", "phead-title")
+    layout.addWidget(title)
+
+    sub = None
+    if sub_key:
+        sub = QLabel(i18n.tx(i18n.t(sub_key)))
+        sub.setProperty("class", "phead-sub")
+        layout.addWidget(sub)
+
+    layout.addStretch(1)
+    return row, title, sub
+
+
+def _detect_system_mode() -> str:
+    """Dark unless the OS explicitly prefers light — mirrors the prototype's CSS default
+    (bare `:root` is dark; `@media (prefers-color-scheme: light)` is the only thing that flips
+    it without an explicit override)."""
+    hints = QGuiApplication.styleHints()
+    scheme = getattr(hints, "colorScheme", None)
+    if scheme is not None:
+        from PySide6.QtCore import Qt as _Qt
+
+        if scheme() == _Qt.ColorScheme.Light:
+            return "light"
+    return "dark"
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("autosound-tcc — Tuning Command Center")
-        self.resize(1040, 720)
+        self.resize(1280, 820)
 
-        self._header = QLabel()
-        self._header.setTextFormat(Qt.TextFormat.RichText)
-        self._status = QLabel()
-        self._status.setStyleSheet("color: #888;")
+        self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
 
-        self._central = QWidget()
-        self._layout = QVBoxLayout(self._central)
-        self._layout.setContentsMargins(12, 12, 12, 12)
-        self._layout.setSpacing(6)
-        self._layout.addWidget(self._header)
-        self._group_widgets: list[tuple[QLabel, GroupTable]] = []
-        self._layout.addWidget(self._status)
-        self.setCentralWidget(self._central)
+        root = QWidget()
+        root.setObjectName("AppRoot")
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(8)
 
-        self._load()
+        outer.addWidget(self._build_header())
 
-    def _clear_group_widgets(self) -> None:
-        for label, table in self._group_widgets:
-            self._layout.removeWidget(label)
-            self._layout.removeWidget(table)
-            label.deleteLater()
-            table.deleteLater()
-        self._group_widgets = []
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        self._left = self._build_left()
+        self._center = self._build_center()
+        self._right = self._build_right()
+        splitter.addWidget(self._left)
+        splitter.addWidget(self._center)
+        splitter.addWidget(self._right)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([260, 900, 300])
+        outer.addWidget(splitter, stretch=1)
 
-    def _build_group_widgets(self, count: int) -> None:
-        """(Re)build exactly `count` section-label + GroupTable pairs, inserted before the
-        trailing status label — one pair per profile group, in profile-declared order."""
-        self._clear_group_widgets()
-        status_index = self._layout.indexOf(self._status)
-        for _ in range(count):
-            label = _section_label("")
-            table = GroupTable()
-            self._layout.insertWidget(status_index, label)
-            self._layout.insertWidget(status_index + 1, table, stretch=1)
-            status_index += 2
-            self._group_widgets.append((label, table))
+        outer.addWidget(self._build_footer())
 
-    def _load(self) -> None:
-        profile_path = config.dsp_profile_path()
-        if not profile_path.is_file():
-            self._show_no_profile(profile_path)
-            return
-        try:
-            from autosound_tcc.core import vendor_loader
+        self.setCentralWidget(root)
+        self._apply_theme(self._mode)
 
-            dsp_profile = vendor_loader.load_dsp_profile()
-            profile = dsp_profile.load_profile(str(profile_path))
-            dsp_profile.validate_profile(profile)
-        except Exception as exc:  # missing/broken profile — degrade, don't crash
-            self._show_error("DSP profile", exc)
-            return
+    # ---- header / footer -------------------------------------------------
 
-        root = config.state_root()
-        preset = config.resolve_preset(root)
-        if preset is None:
-            self._show_no_ledger(root, profile)
-            return
-        try:
-            view = load_project_view(str(root), preset, profile)
-        except Exception as exc:
-            self._show_error(preset, exc)
-            return
-        self._show_view(view, profile)
+    def _build_header(self) -> QFrame:
+        header = _panel()
+        header.setProperty("class", "panel phead")  # header itself IS a .panel in the prototype
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(14)
 
-    def _show_view(self, view: ProjectView, profile: dict) -> None:
-        self._build_group_widgets(len(view.groups))
-        for (label, table), group in zip(self._group_widgets, view.groups):
-            label.setText(f"{group.label} ({len(group.rows)})")
-            table.set_group(group)
+        placeholder = QLabel("PRESET · TARGET  (wired in M6)")
+        placeholder.setProperty("class", "phead-sub")
+        layout.addWidget(placeholder)
+        layout.addStretch(1)
 
-        prof = profile.get("dsp_profile", profile)
-        sr = f"{view.sample_rate / 1000:g} kHz" if view.sample_rate else "—"
-        self._header.setText(
-            f"<b>DSP:</b> {prof.get('vendor', '?')} {prof.get('name', '?')} &nbsp;&nbsp; "
-            f"<b>Preset:</b> {view.preset} &nbsp;&nbsp; "
-            f"<b>Sample rate:</b> {sr} &nbsp;&nbsp; "
-            f"<b>Version:</b> {view.version or '—'}"
-        )
-        note = f" — {view.note}" if view.note else ""
-        counts = " · ".join(f"{g.label.lower()}: {len(g.rows)}" for g in view.groups)
-        self._status.setText(f"{counts} · read-only view v{__version__}{note}")
+        self._theme_btn = QPushButton("◐ " + i18n.t("theme"))
+        self._theme_btn.setProperty("class", "theme-btn")
+        self._theme_btn.clicked.connect(self._toggle_theme)
+        layout.addWidget(self._theme_btn)
 
-    def _show_no_profile(self, path) -> None:
-        self._clear_group_widgets()
-        self._header.setText("<b>No DSP profile found</b>")
-        self._status.setText(
-            f"Looked for {path}. Run the DSP onboarding interview "
-            f"(`python -m autosound_tcc.dsp_profile_interview`) to create one."
-        )
+        return header
 
-    def _show_no_ledger(self, root, profile: dict) -> None:
-        self._clear_group_widgets()
-        prof = profile.get("dsp_profile", profile)
-        self._header.setText(f"<b>{prof.get('vendor', '?')} {prof.get('name', '?')}</b> — no ledger yet")
-        self._status.setText(
-            f"Profile OK, but no preset snapshot found under {root}. Set "
-            f"AUTOSOUND_TCC_STATE_ROOT / AUTOSOUND_TCC_PRESET to point at a project ledger."
-        )
+    def _build_footer(self) -> QFrame:
+        footer = _panel()
+        footer.setProperty("class", "panel phead")
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(14, 7, 14, 7)
+        placeholder = QLabel("model selectors · feedback  (wired in M6)")
+        placeholder.setProperty("class", "phead-sub")
+        layout.addWidget(placeholder)
+        layout.addStretch(1)
+        return footer
 
-    def _show_error(self, what: str, exc: Exception) -> None:
-        self._clear_group_widgets()
-        self._header.setText(f"<b>Could not load</b> {what}")
-        self._status.setText(f"{type(exc).__name__}: {exc}")
+    # ---- left / center / right --------------------------------------------
+
+    def _build_left(self) -> QFrame:
+        panel = _panel()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        head, self._left_title, _ = _phead("dspPanel")
+        layout.addWidget(head)
+        body = QLabel("DSP tree (M2)")
+        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.setProperty("class", "phead-sub")
+        layout.addWidget(body, stretch=1)
+        return panel
+
+    def _build_center(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._detail_panel = _panel()
+        detail_layout = QVBoxLayout(self._detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_head, _, _ = _phead("dspPanel")
+        detail_layout.addWidget(detail_head)
+        self._detail_panel.setVisible(False)  # closed by default, like the prototype's .detail
+        layout.addWidget(self._detail_panel)
+
+        dialog_panel = _panel()
+        dialog_layout = QVBoxLayout(dialog_panel)
+        dialog_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_head, self._dialog_title, self._dialog_sub = _phead("dialog", "dialogSub")
+        dialog_layout.addWidget(dialog_head)
+        body = QLabel("AI dialog (M5)")
+        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        body.setProperty("class", "phead-sub")
+        dialog_layout.addWidget(body, stretch=1)
+        layout.addWidget(dialog_panel, stretch=1)
+
+        return container
+
+    def _build_right(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        plan_panel = _panel()
+        plan_layout = QVBoxLayout(plan_panel)
+        plan_layout.setContentsMargins(0, 0, 0, 0)
+        plan_head, self._plan_title, self._plan_sub = _phead("planTitle", "planSub")
+        plan_layout.addWidget(plan_head)
+        plan_body = QLabel("Plan (M4)")
+        plan_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        plan_body.setProperty("class", "phead-sub")
+        plan_layout.addWidget(plan_body, stretch=1)
+        layout.addWidget(plan_panel, stretch=1)
+
+        meas_panel = _panel()
+        meas_layout = QVBoxLayout(meas_panel)
+        meas_layout.setContentsMargins(0, 0, 0, 0)
+        meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
+        meas_layout.addWidget(meas_head)
+        meas_body = QLabel("Measurement task (M4)")
+        meas_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        meas_body.setProperty("class", "phead-sub")
+        meas_layout.addWidget(meas_body, stretch=1)
+        layout.addWidget(meas_panel)
+
+        return container
+
+    # ---- theme -------------------------------------------------------------
+
+    def _apply_theme(self, mode: str) -> None:
+        app = QApplication.instance()
+        apply_theme(app, mode)
+        self._mode = mode
+        self._settings.setValue(_THEME_KEY, mode)
+        # Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
+        for widget in app.allWidgets():
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+
+    def _toggle_theme(self) -> None:
+        self._apply_theme("light" if self._mode == "dark" else "dark")
