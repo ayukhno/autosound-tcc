@@ -10,12 +10,14 @@ section gets wired to real data, but the outer structure built here should not n
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QSettings, QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QPushButton,
@@ -37,6 +39,10 @@ from autosound_tcc.ui.tcc.theme import apply_theme
 _SETTINGS_ORG = "autosound-tcc"
 _SETTINGS_APP = "TCC"
 _THEME_KEY = "ui/theme"
+_ZOOM_KEY = "ui/zoom"
+_LANG_KEY = "ui/lang"
+_FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
+_ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
 
 
 def _panel() -> QFrame:
@@ -93,7 +99,10 @@ class MainWindow(QMainWindow):
 
         self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
+        self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
+        self._preset_override: str | None = self._settings.value("ui/preset", None)
+        i18n.set_language(self._settings.value(_LANG_KEY, "en"))
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -132,10 +141,44 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(14)
 
-        placeholder = QLabel("PRESET · TARGET  (wired in M6)")
-        placeholder.setProperty("class", "phead-sub")
-        layout.addWidget(placeholder)
+        self._preset_combo = QComboBox()
+        self._preset_combo.setProperty("class", "mini-select")
+        self._preset_combo.currentTextChanged.connect(self._on_preset_selected)
+        layout.addWidget(self._preset_combo)
+
+        self._target_label = QLabel("")
+        self._target_label.setProperty("class", "phead-sub")
+        layout.addWidget(self._target_label)
+        self._version_label = QLabel("")
+        self._version_label.setProperty("class", "phead-sub")
+        layout.addWidget(self._version_label)
         layout.addStretch(1)
+
+        new_profile_btn = QPushButton("+ New DSP profile…")
+        new_profile_btn.setProperty("class", "theme-btn")
+        new_profile_btn.clicked.connect(self._on_new_dsp_profile)
+        layout.addWidget(new_profile_btn)
+
+        self._lang_combo = QComboBox()
+        self._lang_combo.setProperty("class", "mini-select")
+        self._lang_combo.addItems(["EN", "UK"])
+        self._lang_combo.setCurrentText(i18n.current_language().upper())
+        self._lang_combo.currentTextChanged.connect(
+            lambda text: self._on_language_selected(text.lower())
+        )
+        layout.addWidget(self._lang_combo)
+
+        zoom_out = QPushButton("A−")
+        zoom_out.setProperty("class", "theme-btn")
+        zoom_out.clicked.connect(self._zoom_out)
+        layout.addWidget(zoom_out)
+        self._zoom_label = QLabel(f"{round(self._zoom * 100)}%")
+        self._zoom_label.setProperty("class", "phead-sub")
+        layout.addWidget(self._zoom_label)
+        zoom_in = QPushButton("A+")
+        zoom_in.setProperty("class", "theme-btn")
+        zoom_in.clicked.connect(self._zoom_in)
+        layout.addWidget(zoom_in)
 
         self._theme_btn = QPushButton("◐ " + i18n.t("theme"))
         self._theme_btn.setProperty("class", "theme-btn")
@@ -149,11 +192,43 @@ class MainWindow(QMainWindow):
         footer.setProperty("class", "panel phead")
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(14, 7, 14, 7)
-        placeholder = QLabel("model selectors · feedback  (wired in M6)")
-        placeholder.setProperty("class", "phead-sub")
-        layout.addWidget(placeholder)
+
+        ai_main = QComboBox()
+        ai_main.setProperty("class", "mini-select")
+        ai_main.addItems(["Claude Opus 4.8", "Claude Sonnet 5", "Claude Fable 5"])
+        layout.addWidget(QLabel("AI main"))
+        layout.addWidget(ai_main)
+
+        ai_critic = QComboBox()
+        ai_critic.setProperty("class", "mini-select")
+        ai_critic.addItems(["Gemini 3.1 Pro", "Gemini 3.5 Flash", "Claude Opus 4.8"])
+        layout.addWidget(QLabel("AI critic"))
+        layout.addWidget(ai_critic)
+
         layout.addStretch(1)
+
+        feedback_btn = QPushButton("💬 Give feedback")
+        feedback_btn.setProperty("class", "theme-btn")
+        feedback_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_FEEDBACK_URL))
+        )
+        layout.addWidget(feedback_btn)
         return footer
+
+    def _on_new_dsp_profile(self) -> None:
+        """Prompt for vendor/model, then open the existing onboarding chat
+        (ui/tcc/profile_interview_dialog.py) for the current project directory."""
+        vendor, ok = QInputDialog.getText(self, "New DSP profile", "Vendor (e.g. Musway):")
+        if not ok or not vendor.strip():
+            return
+        model, ok = QInputDialog.getText(self, "New DSP profile", "Model (e.g. M6V4):")
+        if not ok or not model.strip():
+            return
+        from autosound_tcc.ui.tcc.profile_interview_dialog import ProfileInterviewDialog
+
+        dialog = ProfileInterviewDialog(config.project_dir(), vendor.strip(), model.strip(), self)
+        dialog.exec()
+        self._load_project()  # pick up the new/updated profile if one was saved
 
     # ---- left / center / right --------------------------------------------
 
@@ -177,6 +252,12 @@ class MainWindow(QMainWindow):
 
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
+        # Connected once here (not in _load_project, which can now run multiple times across a
+        # session -- preset switch, "New DSP profile..." -- and would otherwise stack duplicate
+        # connections on the same long-lived tree instance).
+        self._tree.tableRequested.connect(self._on_table_requested)
+        self._tree.channelClicked.connect(self._on_channel_clicked)
+        self._tree.eqRequested.connect(self._on_eq_requested)
         layout.addWidget(self._tree, stretch=1)
 
         return panel
@@ -206,7 +287,17 @@ class MainWindow(QMainWindow):
             return
 
         root = config.state_root()
-        preset = config.resolve_preset(root)
+        available = config.available_presets(root)
+        preset = self._preset_override or config.resolve_preset(root) or (
+            available[0] if available else None
+        )
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.clear()
+        self._preset_combo.addItems(available)
+        if preset:
+            self._preset_combo.setCurrentText(preset)
+        self._preset_combo.blockSignals(False)
+
         if preset is None:
             prof = profile.get("dsp_profile", profile)
             self._show_left_status(
@@ -226,9 +317,16 @@ class MainWindow(QMainWindow):
         self._tree.setVisible(True)
         self._view = view
         self._tree.set_view(view)
-        self._tree.tableRequested.connect(self._on_table_requested)
-        self._tree.channelClicked.connect(self._on_channel_clicked)
-        self._tree.eqRequested.connect(self._on_eq_requested)
+
+        self._target_label.setText(f"Target: {view.target}" if view.target else "")
+        self._version_label.setText(view.version or "")
+
+    def _on_preset_selected(self, preset: str) -> None:
+        if not preset or preset == self._preset_override:
+            return
+        self._preset_override = preset
+        self._settings.setValue("ui/preset", preset)
+        self._load_project()
 
     def _show_left_status(self, message: str) -> None:
         self._tree.setVisible(False)
@@ -295,7 +393,8 @@ class MainWindow(QMainWindow):
         plan_layout.setContentsMargins(0, 0, 0, 0)
         plan_head, self._plan_title, self._plan_sub = _phead("planTitle", "planSub")
         plan_layout.addWidget(plan_head)
-        plan_layout.addWidget(PlanPanel(), stretch=1)
+        self._plan_panel = PlanPanel()
+        plan_layout.addWidget(self._plan_panel, stretch=1)
         layout.addWidget(plan_panel, stretch=1)
 
         meas_panel = _panel()
@@ -304,7 +403,8 @@ class MainWindow(QMainWindow):
         meas_layout.setContentsMargins(0, 0, 0, 0)
         meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
         meas_layout.addWidget(meas_head)
-        meas_layout.addWidget(MeasurementPanel())
+        self._meas_panel = MeasurementPanel()
+        meas_layout.addWidget(self._meas_panel)
         layout.addWidget(meas_panel)
 
         return container
@@ -313,13 +413,53 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self, mode: str) -> None:
         app = QApplication.instance()
-        apply_theme(app, mode)
+        apply_theme(app, mode, scale=self._zoom)
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
+        self._repolish_all()
+
+    def _repolish_all(self) -> None:
         # Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
+        app = QApplication.instance()
         for widget in app.allWidgets():
             widget.style().unpolish(widget)
             widget.style().polish(widget)
 
     def _toggle_theme(self) -> None:
         self._apply_theme("light" if self._mode == "dark" else "dark")
+
+    def _set_zoom(self, zoom: float) -> None:
+        self._zoom = round(min(_ZOOM_MAX, max(_ZOOM_MIN, zoom)), 2)
+        self._settings.setValue(_ZOOM_KEY, self._zoom)
+        apply_theme(QApplication.instance(), self._mode, scale=self._zoom)
+        self._repolish_all()
+        self._zoom_label.setText(f"{round(self._zoom * 100)}%")
+
+    def _zoom_out(self) -> None:
+        self._set_zoom(self._zoom - _ZOOM_STEP)
+
+    def _zoom_in(self) -> None:
+        self._set_zoom(self._zoom + _ZOOM_STEP)
+
+    # ---- language -----------------------------------------------------------
+
+    def _on_language_selected(self, lang: str) -> None:
+        i18n.set_language(lang)
+        self._settings.setValue(_LANG_KEY, lang)
+        self._retranslate()
+
+    def _retranslate(self) -> None:
+        """Re-set every already-built widget's text. Header/footer labels created via `_phead`
+        aren't re-queried automatically (no live template binding) -- this is the "wire
+        retranslate" step the plan calls for, done by direct re-assignment rather than a full
+        observer registry, since the widget count is still small enough for that to be simple
+        and correct."""
+        self._theme_btn.setText("◐ " + i18n.t("theme"))
+        self._left_title.setText(i18n.t("dspPanel"))
+        self._plan_title.setText(i18n.t("planTitle"))
+        self._plan_sub.setText(i18n.t("planSub"))
+        self._meas_title.setText(i18n.t("focus"))
+        self._meas_sub.setText(i18n.t("measSub"))
+        self._plan_panel.retranslate()
+        self._meas_panel.retranslate()
+        self._dialog.retranslate()

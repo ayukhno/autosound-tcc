@@ -54,9 +54,9 @@ class MeasurementPanel(QWidget):
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
 
-        version = QLabel(i18n.tx(MEAS.version))
-        version.setProperty("class", "meas-head")
-        layout.addWidget(version)
+        self._version = QLabel(i18n.tx(MEAS.version))
+        self._version.setProperty("class", "meas-head")
+        layout.addWidget(self._version)
 
         legend = QWidget()
         legend_layout = QHBoxLayout(legend)
@@ -81,3 +81,6 @@ class MeasurementPanel(QWidget):
             for r, item in enumerate(group.items, start=1):
                 cols.addWidget(_MeasRow(item), r, c)
         layout.addLayout(cols)
+
+    def retranslate(self) -> None:
+        self._version.setText(i18n.tx(MEAS.version))

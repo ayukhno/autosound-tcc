@@ -104,11 +104,25 @@ class PlanPanel(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(8, 8, 8, 12)
-        layout.setSpacing(2)
+        self._body = QWidget()
+        self._layout = QVBoxLayout(self._body)
+        self._layout.setContentsMargins(8, 8, 8, 12)
+        self._layout.setSpacing(2)
+        self.setWidget(self._body)
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        """Rebuild every phase/step row from PLAN in the current language — simplest correct
+        approach for mock data this small (no in-place text-swapping to keep in sync)."""
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                # setParent(None) first -- deleteLater() alone leaves the old, un-laid-out
+                # widget visibly overlapping the freshly-built replacement until the next
+                # event-loop pass.
+                widget.setParent(None)
+                widget.deleteLater()
         for phase in PLAN:
-            layout.addWidget(_PhaseRow(phase))
-        layout.addStretch(1)
-        self.setWidget(body)
+            self._layout.addWidget(_PhaseRow(phase))
+        self._layout.addStretch(1)

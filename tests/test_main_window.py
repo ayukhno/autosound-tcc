@@ -70,3 +70,43 @@ def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatc
     assert window._left_sub.text() == "Musway M6V4"
     assert not window._tree.isHidden()
     assert window._left_status.isHidden()
+
+
+def test_switching_preset_does_not_duplicate_tree_sections(tmp_path, monkeypatch):
+    """Regression: DspTreeWidget.set_view() clearing old sections with deleteLater() alone (no
+    setParent(None) first) leaves them as real children until the event loop next spins --
+    switching presets synchronously (exactly what the header combo's currentTextChanged does)
+    never triggers that, so the old groups would still count via findChildren() without the fix.
+    """
+    import json
+
+    from autosound_tcc.ui.tcc.dsp_tree import TreeGroupSection
+
+    profile = {
+        "dsp_profile": {
+            "name": "M6V4", "vendor": "Musway",
+            "groups": [{"id": "physical_outputs", "label": "Output channels",
+                        "fields": ["hp", "lp", "gain_db"]}],
+        }
+    }
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    for name in ("PRESET_A", "PRESET_B"):
+        preset_dir = tmp_path / name
+        preset_dir.mkdir()
+        ledger = {"preset": name, "sample_rate": 48000, "target": f"target-{name}",
+                  "channels": {"w_L": {"hp": {"f": 80}, "lp": {"f": 4000}, "gain_db": -2.0}}}
+        (preset_dir / "v_001.json").write_text(json.dumps(ledger))
+        (preset_dir / "HEAD").write_text("v_001")
+
+    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "PRESET_A")
+
+    _app()
+    window = MainWindow()
+    assert len(window._tree._layout.parentWidget().findChildren(TreeGroupSection)) == 1
+
+    window._on_preset_selected("PRESET_B")
+    assert window._target_label.text() == "Target: target-PRESET_B"
+    sections = window._tree._layout.parentWidget().findChildren(TreeGroupSection)
+    assert len(sections) == 1, f"expected exactly 1 section, found {len(sections)} (stale ones?)"

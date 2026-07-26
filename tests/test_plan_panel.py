@@ -34,6 +34,18 @@ def test_plan_panel_builds_one_row_per_phase():
     assert len(rows) == len(PLAN)
 
 
+def test_retranslate_does_not_leave_stale_rows_behind():
+    """Regression: see test_dialog_panel.py's identical-shaped test -- deleteLater() alone
+    without setParent(None) first leaves the old rows as real children until the event loop
+    next spins, which a synchronous retranslate() call never triggers on its own."""
+    _app()
+    panel = PlanPanel()
+    panel.retranslate()
+    assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN)
+    panel.retranslate()
+    assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN)
+
+
 def test_measurement_panel_builds_three_columns():
     _app()
     panel = MeasurementPanel()

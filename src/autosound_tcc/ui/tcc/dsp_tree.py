@@ -241,8 +241,13 @@ class DspTreeWidget(QScrollArea):
     def set_view(self, view: ProjectView) -> None:
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                # setParent(None) removes it from the visual tree immediately; deleteLater()
+                # alone leaves it a visible, un-laid-out child until the next event-loop pass,
+                # which overlaps with the freshly-added replacement widgets on a preset switch.
+                widget.setParent(None)
+                widget.deleteLater()
         for group in view.groups:
             section = TreeGroupSection(group, self._settings)
             section.channelClicked.connect(self.channelClicked.emit)

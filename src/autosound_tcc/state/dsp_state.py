@@ -189,6 +189,7 @@ class ProjectView:
     groups: tuple[ProfileGroup, ...]
     version: Optional[str] = None
     note: Optional[str] = None
+    target: Optional[str] = None
 
     @classmethod
     def from_dict(cls, raw: dict, profile: dict) -> "ProjectView":
@@ -211,6 +212,7 @@ class ProjectView:
             groups=tuple(groups),
             version=raw.get("version"),
             note=raw.get("note"),
+            target=raw.get("target"),
         )
 
 

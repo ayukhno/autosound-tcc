@@ -52,3 +52,16 @@ def test_reasons_bar_toggles_on_chip_click_when_not_editing():
     assert not panel._reasons_bar.isHidden()
     panel._on_chip_clicked()
     assert panel._reasons_bar.isHidden()
+
+
+def test_retranslate_does_not_leave_stale_bubbles_behind():
+    """Regression: clearing the chat with deleteLater() alone (no setParent(None) first) leaves
+    the old widgets as real children of self._chat until the next event-loop pass -- calling
+    retranslate() without ever spinning the event loop (exactly what happens on a synchronous
+    language switch) would double- then triple-count bubbles here without the fix."""
+    _app()
+    panel = DialogPanel()
+    panel.retranslate()
+    assert len(panel._chat.findChildren(MessageBubble)) == len(DIALOG)
+    panel.retranslate()
+    assert len(panel._chat.findChildren(MessageBubble)) == len(DIALOG)

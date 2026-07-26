@@ -11,6 +11,7 @@ never a per-widget inline `setStyleSheet()` — so both themes stay in sync auto
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -83,13 +84,27 @@ def get_theme(mode: Mode) -> Theme:
     return Theme(mode=mode, tokens=dict(PALETTE_DARK if mode == "dark" else PALETTE_LIGHT))
 
 
-def build_qss(theme: Theme) -> str:
+_FONT_SIZE_RE = re.compile(r"font-size:\s*([\d.]+)px")
+
+
+def _scale_font_sizes(qss: str, scale: float) -> str:
+    """Post-process every literal `font-size: Npx` in the generated stylesheet by `scale` — the
+    "Qt font-scale" zoom (plan M6), a deliberately simpler stand-in for the prototype's CSS
+    `zoom` (which also scales padding/spacing, not just text). Done as a single regex pass over
+    the finished string rather than threading a scale arg through every f-string line below.
+    """
+    if scale == 1.0:
+        return qss
+    return _FONT_SIZE_RE.sub(lambda m: f"font-size: {float(m.group(1)) * scale:.1f}px", qss)
+
+
+def build_qss(theme: Theme, scale: float = 1.0) -> str:
     """The application-wide stylesheet. Widgets opt into a "class" via the Qt dynamic-property
     trick (`widget.setProperty("class", "panel")`) since QSS object names must be unique but
     many widgets share the same look — mirrors the prototype's CSS classes.
     """
     t = theme
-    return f"""
+    qss = f"""
     QMainWindow, QWidget#AppRoot {{
         background: {t.ground};
     }}
@@ -489,11 +504,13 @@ def build_qss(theme: Theme) -> str:
         height: 0;
     }}
     """
+    return _scale_font_sizes(qss, scale)
 
 
-def apply_theme(app, mode: Mode) -> Theme:
+def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     """Swap the whole application's stylesheet — the Qt equivalent of the prototype's
-    `document.documentElement.dataset.theme = mode`."""
+    `document.documentElement.dataset.theme = mode`. `scale` reapplies the current zoom level
+    (build_qss default is 1.0, i.e. no-op) so a theme toggle doesn't reset zoom."""
     theme = get_theme(mode)
-    app.setStyleSheet(build_qss(theme))
+    app.setStyleSheet(build_qss(theme, scale=scale))
     return theme

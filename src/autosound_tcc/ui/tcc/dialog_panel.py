@@ -65,12 +65,12 @@ class DialogPanel(QWidget):
         head_layout = QHBoxLayout(head)
         head_layout.setContentsMargins(12, 8, 12, 8)
         head_layout.setSpacing(8)
-        title = QLabel(i18n.t("dialog"))
-        title.setProperty("class", "phead-title")
-        head_layout.addWidget(title)
-        sub = QLabel(i18n.t("dialogSub"))
-        sub.setProperty("class", "phead-sub")
-        head_layout.addWidget(sub)
+        self._title_label = QLabel(i18n.t("dialog"))
+        self._title_label.setProperty("class", "phead-title")
+        head_layout.addWidget(self._title_label)
+        self._sub_label = QLabel(i18n.t("dialogSub"))
+        self._sub_label.setProperty("class", "phead-sub")
+        head_layout.addWidget(self._sub_label)
         head_layout.addStretch(1)
 
         self._edit_chip = QPushButton("✎ " + i18n.t("editChipLabel"))
@@ -85,13 +85,16 @@ class DialogPanel(QWidget):
         reasons_layout = QHBoxLayout(self._reasons_bar)
         reasons_layout.setContentsMargins(12, 8, 12, 8)
         reasons_layout.setSpacing(8)
-        reasons_layout.addWidget(QLabel(i18n.t("editReasonsQ")))
+        self._reasons_q_label = QLabel(i18n.t("editReasonsQ"))
+        reasons_layout.addWidget(self._reasons_q_label)
+        self._reason_btns: dict[str, QPushButton] = {}
         for reason_key, label_key in (("forgot", "reasonForgot"), ("manual", "reasonManual")):
             btn = QPushButton(i18n.t(label_key))
             btn.setProperty("class", "reason-btn")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _checked=False, r=reason_key: self._start_editing(r))
             reasons_layout.addWidget(btn)
+            self._reason_btns[reason_key] = btn
         reasons_layout.addStretch(1)
         self._reasons_bar.setHidden(True)
         outer.addWidget(self._reasons_bar)
@@ -118,10 +121,46 @@ class DialogPanel(QWidget):
         self._input.setPlaceholderText(i18n.t("composer"))
         self._input.setProperty("class", "composer-input")
         composer_layout.addWidget(self._input, stretch=1)
-        send_btn = QPushButton(i18n.t("send"))
-        send_btn.setProperty("class", "composer-send")
-        composer_layout.addWidget(send_btn)
+        self._send_btn = QPushButton(i18n.t("send"))
+        self._send_btn.setProperty("class", "composer-send")
+        composer_layout.addWidget(self._send_btn)
         outer.addWidget(composer)
+
+    def retranslate(self) -> None:
+        """Re-set every static label's text, and rebuild the mock chat from DIALOG in the new
+        language (simpler and just as correct as translating already-rendered bubbles in place,
+        since it's mock data either way)."""
+        self._title_label.setText(i18n.t("dialog"))
+        self._sub_label.setText(i18n.t("dialogSub"))
+        self._reasons_q_label.setText(i18n.t("editReasonsQ"))
+        self._reason_btns["forgot"].setText(i18n.t("reasonForgot"))
+        self._reason_btns["manual"].setText(i18n.t("reasonManual"))
+        self._input.setPlaceholderText(i18n.t("composer"))
+        self._send_btn.setText(i18n.t("send"))
+        if self._editing and self._reason:
+            label = i18n.t("reasonForgot" if self._reason == "forgot" else "reasonManual")
+            self._edit_chip.setText(f"✎ {label} ✕")
+        else:
+            self._edit_chip.setText("✎ " + i18n.t("editChipLabel"))
+
+        while self._chat_layout.count():
+            item = self._chat_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    sub_item = item.layout().takeAt(0)
+                    sub_widget = sub_item.widget()
+                    if sub_widget:
+                        # setParent(None) first -- see set_view()/retranslate() elsewhere for why
+                        # deleteLater() alone would leave this bubble visible one frame too long.
+                        sub_widget.setParent(None)
+                        sub_widget.deleteLater()
+        for message in DIALOG:
+            self._add_bubble(message.who, message.role, i18n.tx(message.text))
+        self._chat_layout.addStretch(1)
 
     def _add_bubble(self, who: str, role: str, html: str) -> None:
         bubble_row = QHBoxLayout()
