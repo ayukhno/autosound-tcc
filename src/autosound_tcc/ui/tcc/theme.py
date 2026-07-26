@@ -318,6 +318,71 @@ def build_qss(theme: Theme) -> str:
         padding: 4px 0 7px;
     }}
 
+    /* ---- Plan-Fact panel ---- */
+    QWidget[class~="prow"] {{ border-radius: 5px; }}
+    QWidget[class~="prow"]:hover {{ background: {t.panel2}; }}
+    QWidget[class~="prow-current"] {{ background: {t.mix('accent', 10)}; border-radius: 5px; }}
+    QLabel[class~="pcaret"] {{
+        color: {t.faint};
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+    }}
+    QLabel[class~="pcnt"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        color: {t.faint};
+    }}
+    QLabel[class~="pname"] {{ font-weight: 600; }}
+    QLabel[class~="pname-current"] {{ font-weight: 600; color: {t.accent}; }}
+    QLabel[class~="st"] {{
+        border-radius: 7px;
+        font-size: 10px;
+        font-weight: 700;
+    }}
+    QLabel[class~="st-done"] {{ background: {t.ok}; color: #04160d; }}
+    QLabel[class~="st-cur"] {{ background: {t.accent}; color: #1a1206; }}
+    QLabel[class~="st-todo"] {{ background: {t.panel3}; color: {t.faint}; }}
+    QLabel[class~="substep-name"] {{ color: {t.muted}; font-size: 12px; }}
+    QLabel[class~="stag"] {{ font-size: 10px; }}
+    QLabel[class~="stag-ok"] {{ color: {t.ok}; }}
+    QLabel[class~="stag-wait"] {{ color: {t.yellow}; }}
+
+    /* ---- Measurement-task card (yellow accent) ---- */
+    QWidget[class~="meas-card"] {{
+        border: 1px solid {t.mix('yellow', 45, 'border')};
+        border-radius: 7px;
+    }}
+    QLabel[class~="meas-head"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 5px 9px;
+        border-radius: 5px;
+        color: {t.mix('yellow', 82, 'text')};
+        background: {t.mix('yellow', 20)};
+        border: 1px solid {t.mix('yellow', 42)};
+    }}
+    QLabel[class~="meas-legend-label"] {{ color: {t.muted}; font-size: 10px; }}
+    QLabel[class~="tl"] {{ border-radius: 4px; }}
+    QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
+    QLabel[class~="tl-done"] {{ background: {t.ok}; }}
+    QLabel[class~="tl-bad"] {{ background: {t.warn}; }}
+    QLabel[class~="mcol-h"] {{
+        font-size: 9.5px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: {t.muted};
+        border-bottom: 1px solid {t.border};
+        padding-bottom: 3px;
+    }}
+    QLabel[class~="mn"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10.5px;
+    }}
+    QLabel[class~="mn-bad"] {{ color: {t.warn}; }}
+    QLabel[class~="mn-wait"] {{ color: {t.muted}; }}
+    QLabel[class~="mn-done"] {{ color: {t.text}; }}
+
     QSplitter::handle {{
         background: transparent;
     }}

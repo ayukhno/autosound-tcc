@@ -29,6 +29,8 @@ from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
+from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.theme import apply_theme
 
 _SETTINGS_ORG = "autosound-tcc"
@@ -290,21 +292,16 @@ class MainWindow(QMainWindow):
         plan_layout.setContentsMargins(0, 0, 0, 0)
         plan_head, self._plan_title, self._plan_sub = _phead("planTitle", "planSub")
         plan_layout.addWidget(plan_head)
-        plan_body = QLabel("Plan (M4)")
-        plan_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        plan_body.setProperty("class", "phead-sub")
-        plan_layout.addWidget(plan_body, stretch=1)
+        plan_layout.addWidget(PlanPanel(), stretch=1)
         layout.addWidget(plan_panel, stretch=1)
 
         meas_panel = _panel()
+        meas_panel.setProperty("class", "panel meas-card")
         meas_layout = QVBoxLayout(meas_panel)
         meas_layout.setContentsMargins(0, 0, 0, 0)
         meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
         meas_layout.addWidget(meas_head)
-        meas_body = QLabel("Measurement task (M4)")
-        meas_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        meas_body.setProperty("class", "phead-sub")
-        meas_layout.addWidget(meas_body, stretch=1)
+        meas_layout.addWidget(MeasurementPanel())
         layout.addWidget(meas_panel)
 
         return container
