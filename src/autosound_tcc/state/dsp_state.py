@@ -21,8 +21,60 @@ a view without the submodule present; only `load_project_view` (which reads from
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+_GAIN_RE = re.compile(r"^[+-][\d.]+$")
+_Q_RE = re.compile(r"^[Qq]([\d.]+)$")
+_NUM_RE = re.compile(r"^[\d.]+$")
+
+
+@dataclass(frozen=True)
+class EqBand:
+    """One parametric-EQ band, parsed from a ledger EQ string (e.g. `"PK 1000 -9 Q2"`,
+    `"LS 150 +2.5 Q0.71"`). Gain/Q are optional — an all-pass band (e.g. `"APF2 2177 Q1.5"`)
+    has no gain. Any leftover token (e.g. `"(L only)"`) is kept as a free-text note rather than
+    dropped or raising, since the ledger already carries these informally.
+    """
+
+    type: str
+    freq_hz: float
+    gain_db: Optional[float] = None
+    q: Optional[float] = None
+    note: Optional[str] = None
+
+    @classmethod
+    def from_string(cls, raw: str) -> "EqBand":
+        tokens = raw.split()
+        if not tokens:
+            raise ValueError("empty EQ band string")
+        band_type, rest = tokens[0], tokens[1:]
+        freq_hz: Optional[float] = None
+        gain_db: Optional[float] = None
+        q: Optional[float] = None
+        notes: list[str] = []
+        for tok in rest:
+            if freq_hz is None and _NUM_RE.match(tok):
+                freq_hz = float(tok)
+            elif _GAIN_RE.match(tok):
+                gain_db = float(tok)
+            elif _Q_RE.match(tok):
+                q = float(_Q_RE.match(tok).group(1))
+            else:
+                notes.append(tok)
+        if freq_hz is None:
+            raise ValueError(f"could not parse a frequency from EQ band {raw!r}")
+        return cls(type=band_type, freq_hz=freq_hz, gain_db=gain_db, q=q,
+                   note=" ".join(notes) or None)
+
+
+def parse_eq_bands(raw: Any) -> tuple[EqBand, ...]:
+    """Parse a ledger `eq` field (a list of band strings) into `EqBand`s. Anything else
+    (missing, None, not a list) yields an empty tuple rather than raising — EQ is optional."""
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return tuple(EqBand.from_string(s) for s in raw)
 
 
 @dataclass(frozen=True)
@@ -109,6 +161,9 @@ class GroupRow:
     def eq_count(self) -> int:
         eq = self.raw.get("eq")
         return len(eq) if isinstance(eq, (list, tuple)) else 0
+
+    def eq_bands(self) -> tuple[EqBand, ...]:
+        return parse_eq_bands(self.raw.get("eq"))
 
 
 @dataclass(frozen=True)

@@ -24,7 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import config
+from autosound_tcc.state.dsp_state import load_project_view
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.theme import apply_theme
 
 _SETTINGS_ORG = "autosound-tcc"
@@ -113,6 +116,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self._apply_theme(self._mode)
+        self._load_project()
 
     # ---- header / footer -------------------------------------------------
 
@@ -154,12 +158,73 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         head, self._left_title, _ = _phead("dspPanel")
+        self._left_sub = QLabel("")
+        self._left_sub.setProperty("class", "phead-sub")
+        head.layout().insertWidget(head.layout().count() - 1, self._left_sub)
         layout.addWidget(head)
-        body = QLabel("DSP tree (M2)")
-        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.setProperty("class", "phead-sub")
-        layout.addWidget(body, stretch=1)
+
+        self._left_status = QLabel("")
+        self._left_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._left_status.setProperty("class", "phead-sub")
+        self._left_status.setWordWrap(True)
+        self._left_status.setContentsMargins(12, 16, 12, 16)
+        layout.addWidget(self._left_status)
+
+        self._tree = DspTreeWidget()
+        self._tree.setVisible(False)
+        layout.addWidget(self._tree, stretch=1)
+
         return panel
+
+    # ---- project loading ----------------------------------------------------
+
+    def _load_project(self) -> None:
+        """Load the DSP capability profile + the current preset's ledger, and hand the result to
+        the tree. Degrades to a status message rather than crashing — no profile / no ledger /
+        a broken file are all things a half-set-up project can legitimately be in."""
+        profile_path = config.dsp_profile_path()
+        if not profile_path.is_file():
+            self._show_left_status(
+                f"No DSP profile found.\nLooked for {profile_path}.\n"
+                f"Run the DSP onboarding interview "
+                f"(python -m autosound_tcc.dsp_profile_interview) to create one."
+            )
+            return
+        try:
+            from autosound_tcc.core import vendor_loader
+
+            dsp_profile = vendor_loader.load_dsp_profile()
+            profile = dsp_profile.load_profile(str(profile_path))
+            dsp_profile.validate_profile(profile)
+        except Exception as exc:  # noqa: BLE001 — surface any load/parse failure, don't crash
+            self._show_left_status(f"Could not load DSP profile:\n{type(exc).__name__}: {exc}")
+            return
+
+        root = config.state_root()
+        preset = config.resolve_preset(root)
+        if preset is None:
+            prof = profile.get("dsp_profile", profile)
+            self._show_left_status(
+                f"{prof.get('vendor', '?')} {prof.get('name', '?')}\n\n"
+                f"No preset ledger found under {root}."
+            )
+            return
+        try:
+            view = load_project_view(str(root), preset, profile)
+        except Exception as exc:  # noqa: BLE001
+            self._show_left_status(f"Could not load ledger {preset!r}:\n{type(exc).__name__}: {exc}")
+            return
+
+        prof = profile.get("dsp_profile", profile)
+        self._left_sub.setText(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
+        self._left_status.setVisible(False)
+        self._tree.setVisible(True)
+        self._tree.set_view(view)
+
+    def _show_left_status(self, message: str) -> None:
+        self._tree.setVisible(False)
+        self._left_status.setText(message)
+        self._left_status.setVisible(True)
 
     def _build_center(self) -> QWidget:
         container = QWidget()

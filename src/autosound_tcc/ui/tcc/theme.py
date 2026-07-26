@@ -136,6 +136,99 @@ def build_qss(theme: Theme) -> str:
         color: {t.text};
     }}
 
+    /* ---- DSP tree (.ghead / .chan / .pill / .eq-chip / .prow-params / .cline2) ---- */
+    QWidget[class~="ghead"] {{
+        background: transparent;
+    }}
+    QWidget[class~="ghead"] QLabel {{
+        color: {t.muted};
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+    }}
+    QLabel[class~="tw"] {{
+        color: {t.faint};
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        min-width: 12px;
+    }}
+    QLabel[class~="cnt"] {{
+        color: {t.faint};
+        font-family: "SF Mono", Menlo, monospace;
+        text-transform: none;
+        font-weight: 400;
+    }}
+    QWidget[class~="prow-params"] {{
+        color: {t.muted};
+        font-size: 12px;
+    }}
+    QWidget[class~="prow-params"]:hover {{
+        background: {t.panel2};
+    }}
+    QLabel[class~="prow-params-ic"] {{
+        color: {t.accent};
+    }}
+    QWidget[class~="chan"] {{
+        background: transparent;
+        border-radius: 5px;
+    }}
+    QWidget[class~="chan"]:hover {{
+        background: {t.panel2};
+    }}
+    QWidget[class~="chan-dim"] {{
+        color: {t.faint};
+    }}
+    QLabel[class~="cid"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        font-weight: 700;
+        color: {t.accent};
+        background: {t.panel3};
+        border-radius: 3px;
+        padding: 0 4px;
+    }}
+    QLabel[class~="cn"] {{
+        font-weight: 600;
+    }}
+    QLabel[class~="cline2"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10.5px;
+        color: {t.muted};
+    }}
+    QLabel[class~="pill"] {{
+        font-size: 9.5px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 8px;
+    }}
+    QLabel[class~="pill-inv"] {{
+        color: {t.inv};
+        background: {t.mix('inv', 16)};
+    }}
+    QLabel[class~="pill-norm"] {{
+        color: {t.muted};
+        background: {t.panel3};
+    }}
+    QLabel[class~="pill-off"] {{
+        color: {t.off};
+        background: {t.panel3};
+    }}
+    QLabel[class~="eq-chip"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        color: {t.accent};
+        border: 1px solid {t.mix('accent', 40)};
+        border-radius: 4px;
+        padding: 0 6px;
+    }}
+    QLabel[class~="eq-chip"][class~="muted"] {{
+        color: {t.faint};
+        border-color: {t.border2};
+    }}
+
     QSplitter::handle {{
         background: transparent;
     }}

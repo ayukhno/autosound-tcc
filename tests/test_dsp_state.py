@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from autosound_tcc.state.dsp_state import CrossoverLeg, ProjectView
+from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, ProjectView, parse_eq_bands
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LEDGER = json.loads((FIXTURES / "sample_snapshot.json").read_text())
@@ -135,3 +135,29 @@ def test_rows_ordered_by_declared_order_then_name():
     order = [r.name for r in view.groups[0].rows_ordered()]
     # order-tagged rows come first (0, then 1/1 tied -> alphabetical), untagged (99) rows last.
     assert order == ["sub", "w_L", "w_R", "tw_L", "tw_R"]
+
+
+def test_parse_eq_bands_real_formats():
+    bands = parse_eq_bands(["PK 1000 -9 Q2", "LS 150 +2.5 Q0.71", "PK 2800 +1.2 Q1.8 (L only)"])
+    assert bands[0] == EqBand(type="PK", freq_hz=1000.0, gain_db=-9.0, q=2.0)
+    assert bands[1] == EqBand(type="LS", freq_hz=150.0, gain_db=2.5, q=0.71)
+    assert bands[2].note == "(L only)"
+
+
+def test_parse_eq_bands_no_gain_allpass():
+    """An all-pass band has no gain — must parse, not raise."""
+    band = EqBand.from_string("APF2 2177 Q1.5")
+    assert band.type == "APF2" and band.freq_hz == 2177.0 and band.gain_db is None and band.q == 1.5
+
+
+def test_parse_eq_bands_absent_or_empty():
+    assert parse_eq_bands(None) == ()
+    assert parse_eq_bands([]) == ()
+    assert parse_eq_bands("not a list") == ()
+
+
+def test_group_row_eq_bands_method():
+    view = _view()
+    fl = {r.name: r for r in view.groups[0].rows}["FL"]
+    bands = fl.eq_bands()
+    assert len(bands) == 1 and bands[0].type == "PK"
