@@ -1,8 +1,9 @@
 """Application entry point.
 
-Launches an empty Qt window ("hello Qt"). No REW/DSP data is wired in yet —
-that is a later milestone. This module only proves the app starts and packages
-as a normal Python console entry point on macOS and Windows.
+Launches the TCC main window (see ui/tcc/main_window.py) -- the DSP tree, detail pane, AI
+dialog, and plan/measurement panels are real; see docs/TCC-TZ.md and the plan file for what's
+wired to real data vs. still mock. Packages as a normal Python console entry point on macOS and
+Windows.
 """
 
 from __future__ import annotations
