@@ -25,8 +25,9 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import config
-from autosound_tcc.state.dsp_state import load_project_view
+from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.theme import apply_theme
 
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
 
         self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
+        self._view: ProjectView | None = None
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -219,12 +221,41 @@ class MainWindow(QMainWindow):
         self._left_sub.setText(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._tree.setVisible(True)
+        self._view = view
         self._tree.set_view(view)
+        self._tree.tableRequested.connect(self._on_table_requested)
+        self._tree.channelClicked.connect(self._on_channel_clicked)
+        self._tree.eqRequested.connect(self._on_eq_requested)
 
     def _show_left_status(self, message: str) -> None:
         self._tree.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
+
+    # ---- detail-pane wiring --------------------------------------------
+
+    def _find_group(self, group_id: str):
+        if self._view is None:
+            return None
+        return next((g for g in self._view.groups if g.id == group_id), None)
+
+    def _on_table_requested(self, group_id: str) -> None:
+        group = self._find_group(group_id)
+        if group is not None:
+            self._detail.open_table(group)
+
+    def _on_channel_clicked(self, group_id: str, row_id: str) -> None:
+        group = self._find_group(group_id)
+        if group is not None:
+            self._detail.open_table(group, select_row_id=row_id)
+
+    def _on_eq_requested(self, group_id: str, row_id: str) -> None:
+        group = self._find_group(group_id)
+        if group is None:
+            return
+        row = next((r for r in group.rows if r.id == row_id), None)
+        if row is not None:
+            self._detail.open_eq(group, row)
 
     def _build_center(self) -> QWidget:
         container = QWidget()
@@ -232,13 +263,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self._detail_panel = _panel()
-        detail_layout = QVBoxLayout(self._detail_panel)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_head, _, _ = _phead("dspPanel")
-        detail_layout.addWidget(detail_head)
-        self._detail_panel.setVisible(False)  # closed by default, like the prototype's .detail
-        layout.addWidget(self._detail_panel)
+        self._detail = DetailPane()
+        layout.addWidget(self._detail)
 
         dialog_panel = _panel()
         dialog_layout = QVBoxLayout(dialog_panel)

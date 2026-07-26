@@ -229,6 +229,95 @@ def build_qss(theme: Theme) -> str:
         border-color: {t.border2};
     }}
 
+    /* ---- detail pane: tabs / close / table / EQ bands ---- */
+    QLabel[class~="d-tab"] {{
+        color: {t.muted};
+        border: 1px solid transparent;
+        border-radius: 5px;
+        padding: 2px 9px;
+        font-size: 11px;
+    }}
+    QLabel[class~="d-tab"][class~="on"] {{
+        color: {t.accent};
+        border-color: {t.accent_dim};
+        background: {t.mix('accent', 12)};
+    }}
+    QPushButton[class~="d-close"] {{
+        background: transparent;
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 5px;
+        padding: 2px 9px;
+        font-size: 11px;
+    }}
+    QPushButton[class~="d-close"]:hover {{
+        color: {t.text};
+    }}
+
+    QTableWidget[class~="ptable"] {{
+        background: {t.panel};
+        gridline-color: transparent;
+        border: none;
+        font-size: 12px;
+    }}
+    QTableWidget[class~="ptable"]::item {{
+        padding: 4px 10px;
+        border-bottom: 1px solid {t.mix('border', 60)};
+    }}
+    QTableWidget[class~="ptable"]::item:selected {{
+        background: {t.mix('accent', 13)};
+        color: {t.text};
+    }}
+    QHeaderView::section {{
+        background: {t.panel};
+        color: {t.muted};
+        border: none;
+        border-bottom: 1px solid {t.border2};
+        padding: 6px 10px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 600;
+    }}
+
+    QLabel[class~="eq-hint"] {{
+        color: {t.faint};
+        font-size: 11px;
+    }}
+    QLabel[class~="eq-rowlab"] {{
+        color: {t.muted};
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    QFrame[class~="band"] {{
+        background: {t.panel2};
+        border: 1px solid {t.border};
+        border-radius: 6px;
+    }}
+    QLabel[class~="band-id"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        color: {t.info};
+        background: {t.panel3};
+        padding: 3px 0;
+        border-bottom: 1px solid {t.border};
+    }}
+    QLabel[class~="band-fk"] {{
+        color: {t.muted};
+        font-size: 11px;
+    }}
+    QLabel[class~="band-fv"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 11px;
+    }}
+    QLabel[class~="band-byp"] {{
+        color: {t.faint};
+        font-size: 9.5px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        padding: 4px 0 7px;
+    }}
+
     QSplitter::handle {{
         background: transparent;
     }}
