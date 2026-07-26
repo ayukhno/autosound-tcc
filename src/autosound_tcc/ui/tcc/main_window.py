@@ -10,7 +10,7 @@ section gets wired to real data, but the outer structure built here should not n
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSettings, QUrl, Qt
+from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,11 +33,10 @@ from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.theme import apply_theme
 
-_SETTINGS_ORG = "autosound-tcc"
-_SETTINGS_APP = "TCC"
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
 _LANG_KEY = "ui/lang"
@@ -97,7 +96,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("autosound-tcc — Tuning Command Center")
         self.resize(1280, 820)
 
-        self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        self._settings = get_settings()
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
         self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None

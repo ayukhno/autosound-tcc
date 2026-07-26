@@ -26,9 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup, ProjectView
-
-_SETTINGS_ORG = "autosound-tcc"
-_SETTINGS_APP = "TCC"
+from autosound_tcc.ui.tcc.app_settings import get_settings
 
 
 def _collapsed_key(group_id: str) -> str:
@@ -230,7 +228,7 @@ class DspTreeWidget(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._settings = QSettings(_SETTINGS_ORG, _SETTINGS_APP)
+        self._settings = get_settings()
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
         self._layout.setContentsMargins(0, 6, 0, 12)
