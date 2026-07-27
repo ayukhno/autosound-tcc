@@ -46,22 +46,43 @@
 
 Проблема пілоту: щоб знайти реальний стан, довелось грепати `~/dev` — це не
 конвенція. Цільова схема — **один проєкт = одна папка, яку вказує користувач**
-(список recent-projects у застосунку), **нуль авто-пошуку по диску**:
+(список recent-projects у застосунку), **нуль авто-пошуку по диску**.
+
+Наскрізний принцип (зафіксовано 2026-07-27): **зберігаємо факти й рішення;
+деривативи генеруємо; історію не переписуємо — тільки додаємо.** Три класи
+даних з різною механікою змін:
+
+| Клас | Файли | Механіка змін |
+|---|---|---|
+| **Конфіг** (mutable) | `project.json`, `dsp_profile.json`, `glossary.json`, `presets/*/target.json` | історія = git (папка проєкту — git-репо, скіл уже так робить) + подія `config_change` з полем `impact` у journal (SCR-014); провенанс на кожен факт; незнане → `_open_questions`, не вигадується |
+| **Леджер** (immutable) | `presets/<preset>/state/v_NNN.json` + `HEAD` | як зараз: `PresetHistory`, нові версії, revert forward-only |
+| **Процес** | `process/process-state.json` (поточний зріз, перезаписується) + `process/journal.jsonl` (append-only) | SCR-004: події з evidence-лінками; `tuning-changelog` / `audit-trail` стають generated views над journal |
 
 ```
-<project>/
-  project.json                 # процесор-профіль, список пресетів, мета
-  presets/
-    <preset>/
-      target.json              # яка цільова крива (назва/референс)
-      state/v_NNN.json         # DSP-снапшоти (леджер)
-  measurements/                # або вказівник на REW .mdat / captures
+<project>/                          # git-репо
+  project.json                      # авто, DSP-модель, підсилювачі,
+                                    #   канал→драйвер (make/model/Fs), шляхи, пресети
+  dsp_profile.json                  # капабіліті процесора
+  glossary.json                     # коди каналів/пар/комбо/стиків (SCR-008)
+  preference-profile.md             # шар 4, проза
+  autosound_context.md              # generated з project.json + вільні прозові секції
+  process/
+    process-state.json              # поточний зріз процесу (SCR-004)
+    journal.jsonl                   # append-only лог подій процесу
+  presets/<preset>/
+    target.json                     # активна крива пресета
+    state/v_NNN.json + HEAD         # леджер
+  registry.json                     # активний слот DSP
+  target-curves/<name>/…            # + registry.json (SCR-009)
+  rew_analitic/                     # exports/, dsp-config/, *.mdat (gitignored)
 ```
 
 - Реальні дані проєкту — **завжди поза публічним репо** (приватна папка).
 - Публічний репо тримає лише **синтетичні фікстури**.
 - Пілот тимчасово сіє в `data/private/state/<preset>/v_NNN.json` (gitignored) —
   замінити на проєкт-папку за схемою вище.
+- Env vars: зійтись на одній конвенції зі скілом (`AUTOSOUND_STATE_ROOT`),
+  прибрати паралельний `AUTOSOUND_TCC_*` (SCR-011).
 
 ---
 
@@ -77,8 +98,30 @@
 - статус Радника/Критика: який ШІ+модель, час/фаза/крок останнього виклику;
 - вибрана цільова крива на пресет.
 
-Це вимагатиме **змін у скілі** (окрема задача). Межа app↔скіл — визначити:
-файли-стану, події, чи прямий виклик.
+Зміни в скілі специфіковано: **`docs/SKILL-CHANGE-REQUESTS.md`,
+SCR-004…SCR-014** (P1: SCR-004 process-state + journal · SCR-005 схема леджера
+v2 · SCR-006 структуровані EQ-банди). Межу app↔скіл визначено: **файли** —
+`process/process-state.json` (поточний зріз) + `process/journal.jsonl` (події)
++ леджер (§3). TCC читає через file watcher; пише тільки скіл (v1).
+
+**Фази/кроки/задачі — модель динаміки** (зафіксовано 2026-07-27):
+
+- **Фази** (−1…5) — скелет методики, власність скіла; per-project не
+  редагуються, тільки статус (`done|cur|todo`) і re-entry.
+- **Кроки** — план фази: при вході у фазу скіл інстанціює базові кроки зі
+  шаблону (`source: "skill"`), далі план мутується: ситуативні вставки
+  (`source: "project"`), повтори (`attempt: N`), скіпи. Кроки **ніколи не
+  видаляються** — superseded → `skip`, лишаються видимими (модель уже є в
+  `ui/tcc/mock_data.py::PlanStep`).
+- **Задачі** — конкретика кроку. Задача заміру **деривується**: (фаза ×
+  glossary × vN) → очікувана серія імен (capture-таблиця
+  `naming-and-structure.md §3` як функція, SCR-008); зберігаються тільки
+  оверрайди.
+- Кожна мутація плану — подія в `journal.jsonl`; `step_done` вимагає
+  **evidence-лінк** (імена замірів / vN леджера / audit-запис) — без evidence
+  не done. При resume скіл звіряє план з диском (done без заміру → flag).
+- v1: план пише тільки скіл; користувач коригує через діалог. Прямий UI-едит —
+  пізніше, теж подіями.
 
 ---
 
@@ -108,7 +151,73 @@
 
 Довідка Claude-боку (звірено зі skill `claude-api`): Messages API tool use,
 Tool Runner, Claude Agent SDK (`claude-agent-sdk`), MCP-конектор, server-tools.
-Для in-app агента — дефолт-модель Opus 4.8; Gemini/інші — через MCP + адаптер.
+Для in-app агента — дефолт-модель `claude-opus-5`; Gemini/інші — через MCP +
+адаптер.
+
+### 4a.1 Рішення (зафіксовано 2026-07-27): зараз — варіант B, Claude Agent SDK
+
+Головний ШІ (Generator) у вікні діалогу — **агент усередині застосунку через
+Claude Agent SDK (Python, in-process)**. Обґрунтування:
+
+- Скіл — головний актив, і він Claude-Code-shaped (SKILL.md + references по
+  фазах + file-based стан + Bash-запуски `rew_tool` + критик-скрипти). Agent SDK
+  (= Claude Code як бібліотека) виконує його **as is**: вбудовані
+  Read/Bash/Grep, завантаження скілів, hooks. Будь-який інший харнес = портація
+  всієї методології.
+- Патерн уже доведений у репо: `dsp_profile_interview.py` (OnboardingSession) —
+  `ClaudeSDKClient` + in-process MCP tools + `allowed_tools`.
+- Safety-гейти структурні: `allowed_tools` + `can_use_tool` hook, а не прозова
+  конвенція (жодних авто-записів у DSP — чинне правило проєкту).
+- Tool Runner / чистий Messages API — ні: втрачається файлова машинерія скіла.
+  Managed Agents — ні: потрібні локальний REW (localhost:4735) і файли проєкту.
+
+**pi.dev (Earendil) — розглянуто, зараз ні; у watch-list на етап C.**
+Факти (перевірено 2026-07-27): мінімальний агент-харнес, TypeScript/Node, 15+
+провайдерів, режими TUI / print-JSON / RPC (JSON по stdin/stdout) / TS SDK;
+свідомо **без** вбудованих MCP, sub-agents, permission-гейтів, plan mode (усе —
+TS-extensions); скіли — власний формат capability-пакетів. Проти зараз:
+runtime-розрив (Node vs Python/PySide6), портація скіла в чужу екосистему,
+permission-шар «збудуй сам». За — на етапі C: коли скіл стане портабельним
+(prompt + MCP + стан-протокол), pi RPC — один з кандидатів у
+coordinator-адаптер поряд із Gemini CLI. Межа C — наш тонкий адаптер
+(`send(messages, tools)`) / MCP, не залежність від pi. Адаптер виносити тільки
+коли реально з'явиться другий координатор.
+
+### 4a.2 Архітектура `TuningSession` (за зразком OnboardingSession)
+
+- `ClaudeSDKClient`, `cwd` = папка проєкту; скіл підключати стандартним для
+  нього шляхом — symlink `.claude/skills/autosound-tuning` → vendored копія
+  (скіл сам документує symlink-install). Модель — `claude-opus-5`.
+- **Інструменти:** Read/Grep/Glob + Bash (скіл сам ганяє `rew_tool`-скрипти і
+  критик-обгортки) + in-process MCP tools для гейтованих дій. `can_use_tool`
+  hook — permission-шар: запис у леджер тільки через `apply.propose`;
+  деструктивне → підтвердження Арбітра кнопкою в UI (це і є attest 🟡→🟢,
+  природно лягає в діалог-панель).
+- **Стрімінг у Qt:** SDK асинхронний → окремий thread з asyncio-loop (або
+  qasync), текст у панель через Qt signals; патерн `_drain()` з
+  OnboardingSession.
+- **Рендер:** AssistantMessage-текст = бабли Generator; ToolUseBlock =
+  чіпи-події процесу («читаю замір w-L_10», «propose: gain w-L −0.5»), не сирий
+  лог. Панелі плану/замірів оновлюються **не з тексту чату**, а з
+  `process-state.json` (SCR-004) через file watcher. Діалог показує процес,
+  файли — істина.
+- **Критик:** subprocess існуючих shell-обгорток
+  (`scripts/{gemini,claude,codex}_critic.sh`), відповідь = бабл Critic,
+  метадані виклику — в process-state (поле з SCR-004). Жодного харнеса для
+  Критика не треба — виклики stateless за дизайном скіла.
+- **Життєвий цикл:** стан на диску (анти-дрейф скіла) → рестарт застосунку =
+  нова сесія + промпт «resume». Конверсацію не персистимо.
+
+### 4a.3 Порядок робіт
+
+1. **SCR-004 (`process-state.json`) спершу** — контракт app↔скіл незалежно від
+   вибору харнеса (docs/SKILL-CHANGE-REQUESTS.md).
+2. Спайк: headless `TuningSession` (без Qt) на реальній папці проєкту — скіл
+   вантажиться, resume працює, стрім у термінал.
+3. Qt-міст + заміна mock `DIALOG` (`ui/tcc/mock_data.py`) на реальний стрім у
+   `dialog_panel.py`.
+4. Permission-шар (`can_use_tool` → Arbiter-confirm UI).
+5. Критик-subprocess + бабли + метадані в process-state.
 
 ## 5. Модель даних (поточна, пілот)
 
