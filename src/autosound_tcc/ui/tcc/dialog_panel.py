@@ -326,7 +326,15 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
 
     def _scroll_to_end(self) -> None:
-        bar = self._scroll.verticalScrollBar()
+        # Guarded because the callers can be reached from a *queued* signal: the MCP server thread
+        # emits a critique or a proposal, Qt defers the slot to the GUI thread, and by the time it
+        # runs the panel may already be torn down (window closed mid-call). Touching a widget
+        # whose C++ side is gone is the same class of fault as deleting a widget from inside its
+        # own event handler -- see feedback_qt_qss_gotchas. Nothing to scroll is not an error.
+        try:
+            bar = self._scroll.verticalScrollBar()
+        except (AttributeError, RuntimeError):
+            return
         bar.setValue(bar.maximum())
 
     # ---- live agent --------------------------------------------------------
@@ -453,6 +461,26 @@ class DialogPanel(QWidget):
     def _on_failed(self, message: str) -> None:
         self._add_bubble("sys", i18n.t("agentFailed"), f"⚠️ {message}")
         self._set_busy(False)
+
+    def add_critique(self, critique: dict) -> None:
+        """Render a reviewer reply as a Critic bubble — or say plainly that there isn't one yet.
+
+        `clipboard` is the zero-cost path, not a failure: no API or CLI was reachable, so the
+        package is on the clipboard for the Arbiter to paste into any free web chat. Showing it as
+        an empty critique would be the one genuinely harmful rendering, because the loop's whole
+        value is that somebody actually pushed back.
+        """
+        mode = critique.get("mode")
+        model = critique.get("model") or "?"
+        if mode == "answered":
+            self._add_bubble("crit", f"Critic · {model}", critique.get("text", ""))
+        elif mode == "clipboard":
+            self._add_system_message(i18n.t("criticClipboard"))
+        else:
+            self._add_system_message(
+                i18n.t("criticFailed").format(detail=critique.get("detail", "?"))
+            )
+        self._scroll_to_end()
 
     def _on_confirmation_resolved(self, tool: str, allowed: bool) -> None:
         key = "confirmAllowed" if allowed else "confirmDenied"

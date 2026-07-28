@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, terminal_launcher
+from autosound_tcc.core import config, critic, terminal_launcher
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
@@ -97,6 +97,26 @@ def _mini_combo() -> QComboBox:
 
 
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
+
+
+def _ago(iso_timestamp: str) -> str:
+    """Human "how long ago" for the reviewer status. Falls back to the raw stamp if unparseable."""
+    from datetime import datetime, timezone
+
+    try:
+        then = datetime.fromisoformat(iso_timestamp)
+    except (TypeError, ValueError):
+        return iso_timestamp or "?"
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    seconds = (datetime.now(timezone.utc) - then).total_seconds()
+    if seconds < 90:
+        return "just now"
+    if seconds < 5400:
+        return f"{round(seconds / 60)} min ago"
+    if seconds < 172800:
+        return f"{round(seconds / 3600)} h ago"
+    return f"{round(seconds / 86400)} d ago"
 
 
 def _panel() -> QFrame:
@@ -327,7 +347,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._ai_critic_lbl)
         ai_critic = _mini_combo()
         ai_critic.addItems(AI_CRITIC_MODELS)
+        ai_critic.currentTextChanged.connect(self._on_critic_model_changed)
+        self._ai_critic_combo = ai_critic
         layout.addWidget(ai_critic)
+
+        # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
+        # panel's "engaged? which AI+model? last called when").
+        self._critic_status = QLabel(i18n.t("criticNever"))
+        self._critic_status.setProperty("class", "kv-val")
+        layout.addWidget(self._critic_status)
 
         # Two ways to bring an AI to this project, both explicit. Neither starts on launch: one
         # spends the user's tokens, the other opens a window on their desktop, and an app that
@@ -707,13 +735,17 @@ class MainWindow(QMainWindow):
         up before the user launches a CLI is the whole point of writing `.mcp.json` for them.
         A failure here is not fatal; TCC is still a usable state viewer without it.
         """
+        # Set before anything that reads it: the status refresh below runs whether or not the
+        # server ends up starting.
+        self._mcp_server = None
         self._bridge = QtUiBridge(self)
         self._bridge.confirmationRequested.connect(self._dialog.confirm_bar.enqueue)
         self._bridge.clipboardRequested.connect(lambda text: QGuiApplication.clipboard().setText(text))
         self._bridge.proposalReceived.connect(self._on_proposal)
+        self._bridge.critiqueReceived.connect(self._on_critique)
         self._publish_snapshot()
+        self._refresh_critic_status()
 
-        self._mcp_server = None
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
             # Opting out leaves TCC a state viewer with no local port open -- a legitimate choice
             # for anyone who doesn't want one, and what the test suite uses to stay off the
@@ -741,6 +773,26 @@ class MainWindow(QMainWindow):
             f"{proposal.get('from')} → <b>{proposal.get('to')}</b><br>{proposal.get('rationale', '')}"
         )
         self._dialog._add_system_message(text)
+
+    def _on_critique(self, critique: dict) -> None:
+        self._dialog.add_critique(critique)
+        self._refresh_critic_status()
+
+    def _on_critic_model_changed(self, model: str) -> None:
+        """The footer picker steers the reviewer subprocess through its own env var."""
+        self._bridge.set_snapshot(critic_model=model)
+
+    def _refresh_critic_status(self) -> None:
+        entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
+        if not entry:
+            self._critic_status.setText(i18n.t("criticNever"))
+            return
+        self._critic_status.setText(
+            i18n.t("criticStatus").format(
+                model=entry.get("model") or entry.get("mode", "?"),
+                ago=_ago(entry.get("at", "")),
+            )
+        )
 
     def _start_tuning_session(self) -> None:
         """Front-end A: run the skill in-process and stream it into the dialog panel."""

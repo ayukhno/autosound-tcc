@@ -71,6 +71,7 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "wait_for_signal",
         "get_ledger",
         "propose_change",
+        "call_critic",
         "write_rew_filters",
         "copy_helix_eq",
         "report_phase",

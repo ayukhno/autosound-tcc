@@ -32,6 +32,7 @@ class QtUiBridge(QObject):
     confirmationRequested = Signal(object, object)
     clipboardRequested = Signal(str)
     proposalReceived = Signal(dict)
+    critiqueReceived = Signal(dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -65,3 +66,6 @@ class QtUiBridge(QObject):
 
     def show_proposal(self, proposal: dict[str, Any]) -> None:
         self.proposalReceived.emit(proposal)
+
+    def show_critique(self, critique: dict[str, Any]) -> None:
+        self.critiqueReceived.emit(critique)

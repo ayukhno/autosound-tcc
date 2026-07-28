@@ -331,3 +331,38 @@ def test_worker_streams_a_turn_and_closes_the_session(qtbot_timeout=5.0):
 
     assert received == ["opening"]
     assert session.closed
+
+
+# ---- Critic rendering -------------------------------------------------------
+
+
+def test_an_answered_critique_becomes_a_critic_bubble(tmp_path):
+    panel, _, _ = _attached(tmp_path)
+
+    panel.add_critique(
+        {"mode": "answered", "text": "Revert if #13 bloats.", "model": "Gemini 3.1 Pro"}
+    )
+
+    bubble = panel._bubbles[-1]
+    assert "Revert if #13 bloats." in bubble._body.text()
+    assert bubble.property("class") == "msg msg-crit"
+
+
+def test_clipboard_mode_is_never_rendered_as_an_empty_critique(tmp_path):
+    """The loop's value is that somebody pushed back; showing nothing as a critique hides that
+    nobody has yet."""
+    panel, _, _ = _attached(tmp_path)
+
+    panel.add_critique({"mode": "clipboard", "text": "", "model": None})
+
+    body = panel._bubbles[-1]._body.text()
+    assert panel._bubbles[-1].property("class") == "msg msg-sys"
+    assert "clipboard" in body.lower() or "буфер" in body.lower()
+
+
+def test_a_failed_reviewer_call_shows_why(tmp_path):
+    panel, _, _ = _attached(tmp_path)
+
+    panel.add_critique({"mode": "error", "text": "", "detail": "reviewer timed out after 600s"})
+
+    assert "timed out" in panel._bubbles[-1]._body.text()

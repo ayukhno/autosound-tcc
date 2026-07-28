@@ -34,7 +34,7 @@ from typing import Any, Optional, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, critic, vendor_loader
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
 
@@ -74,6 +74,8 @@ class UiBridge(Protocol):
 
     def show_proposal(self, proposal: dict[str, Any]) -> None: ...
 
+    def show_critique(self, critique: dict[str, Any]) -> None: ...
+
 
 class HeadlessBridge:
     """No GUI: every mutation is denied, reads answer from disk.
@@ -97,6 +99,9 @@ class HeadlessBridge:
         pass
 
     def show_proposal(self, proposal: dict[str, Any]) -> None:
+        pass
+
+    def show_critique(self, critique: dict[str, Any]) -> None:
         pass
 
 
@@ -285,6 +290,50 @@ def build_server(
             return json.dumps({"copied": False, "reason": "Arbiter denied or timed out"})
         bridge.copy_to_clipboard(text)
         return json.dumps({"copied": True, "chars": len(text)})
+
+    @mcp.tool()
+    async def call_critic(package: str, trace_path: str = "", model: str = "") -> str:
+        """Send a proposal package to the Critic (a different vendor's model) and return its reply.
+
+        The reviewer is stateless by design — it re-reads state from disk on every call — which is
+        what makes it a drift-watchdog and not a second agent. Cadence is **one call per round**:
+        package the whole batch (a crossover strategy, a round's EQ plan, a phase-gate verdict),
+        not one call per parameter.
+
+        `package` is the §3 package markdown itself, or a path to an existing package file.
+
+        Three outcomes, and the middle one is not a failure: `answered` carries the critique;
+        `clipboard` means no API or CLI was reachable so the package is on the Arbiter's clipboard
+        for them to paste into any web chat and bring the reply back by hand; `error` explains why
+        nothing ran. Never present `clipboard` as a critique — there isn't one yet.
+        """
+        result = await asyncio.to_thread(
+            critic.run,
+            package,
+            project_dir=project_dir,
+            trace_path=trace_path or None,
+            model=model or None,
+        )
+        critic.log_call(result, None, project_dir)
+        bridge.show_critique(
+            {
+                "mode": result.mode,
+                "text": result.text,
+                "model": result.model,
+                "role": result.role,
+                "detail": result.detail,
+            }
+        )
+        return json.dumps(
+            {
+                "mode": result.mode,
+                "critique": result.text,
+                "model": result.model,
+                "detail": result.detail,
+                "seconds": round(result.duration_s, 1),
+            },
+            ensure_ascii=False,
+        )
 
     @mcp.tool()
     async def report_phase(
