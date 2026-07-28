@@ -9,9 +9,10 @@ that a "virtual" or "output" group exists, so a MUSWAY profile with only `physic
 (opens the full table, M3) followed by one `ChannelRow` per row in that group.
 
 Channel identity comes from the ledger, kept generic: `slot` (the hardware slot letter shown as
-the ID badge), `descr` (full descriptive name, tooltip only), and an optional `tag` (RearATT/SubRC)
-rendered as a chip on virtual-tier rows only — all plain profile-agnostic fields, absent = simply
-not shown, so a MUSWAY ledger without them still renders.
+the ID badge), `descr` (full descriptive name, tooltip only), and an optional `tag`+`tag_value`
+(RearRC/SubRC/RC — Helix-specific feature names, not MUSWAY) rendered as a chip on virtual-tier
+rows only — all plain profile-agnostic fields, absent = simply not shown, so a MUSWAY ledger
+without them still renders.
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # Short, translatable header labels for the known DSP tiers (matches the prototype's T.virtual /
@@ -116,18 +118,26 @@ class ChannelRow(QWidget):
             ctype = QLabel(raw["role"])
             ctype.setProperty("class", "ctype")
             line1.addWidget(ctype)
-        if row.muted or row.off:
-            line1.addWidget(_Pill("MUTE" if row.muted else "OFF", "off"))
+        if row.muted:
+            # MUTE-only in the working interface (user request 2026-07-27) -- OFF (hardware
+            # physically disabled at the DSP level, GroupRow.off) is real data but stays out of
+            # the main tree/table for now, deferred to a future settings view to avoid confusing
+            # the two states side by side. See pill-off/`_FIELD_COLUMNS["off"]` (detail_pane.py) --
+            # left in place, just not wired into any profile's `fields` list right now.
+            line1.addWidget(_Pill(i18n.t("pillMute"), "mute"))
             self.setProperty("class", "chan chan-dim")
         elif raw.get("polarity") == "INV":
             # Only flag inversion -- NORM is the default and showing it on every row is noise
             # (user request 2026-07-27).
             line1.addWidget(_Pill("INV", "inv"))
 
-        # Feature tag (RearATT/SubRC) is a virtual-tier convention -- the prototype shows it only
-        # on virtual channels, not on the physical outputs that carry the same tag.
+        # Feature tag (RearRC/SubRC/RC) is a virtual-tier convention -- the prototype shows it only
+        # on virtual channels, not on the physical outputs that carry the same tag. Include the
+        # tag's configured value (e.g. "RearRC 3/4", "SubRC -4dB", "RC ON") when the ledger has one,
+        # so the chip reads as a fact rather than just a feature name (user request 2026-07-28).
         if row.tag and not is_output:
-            tag = QLabel(row.tag)
+            tag_text = f"{row.tag} {row.tag_value}" if row.tag_value else row.tag
+            tag = QLabel(tag_text)
             tag.setProperty("class", "ctag2")
             line1.addWidget(tag)
 
@@ -160,7 +170,9 @@ class ChannelRow(QWidget):
             line2.setWordWrap(True)
             layout.addWidget(line2)
 
-        self.setToolTip(self._tooltip_html(row, raw, is_output))
+        # rounded_tooltip.attach(), not setToolTip() -- native QToolTip's window frame stays
+        # square on macOS regardless of its own QSS border-radius (user request 2026-07-28).
+        rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
 
     @staticmethod
     def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:
@@ -200,6 +212,11 @@ class ChannelRow(QWidget):
         pol = raw.get("polarity")
         if pol:
             parts.append("Pol " + (c("INV", t.inv) if pol == "INV" else c(pol, t.muted)))
+        phase = raw.get("phase_deg")
+        if isinstance(phase, (int, float)):
+            # Lost from the tooltip in an earlier pass even though the table always had it
+            # (user report 2026-07-28).
+            parts.append(f"Phase {phase:g}°")
         if parts:
             html.append(" &nbsp;·&nbsp; ".join(parts))
 
@@ -256,15 +273,18 @@ class _ParamRow(QWidget):
 
 
 class ParamsSection(QWidget):
-    """Top-of-tree PARAMS group: the preset's DSP feature toggles as key/value rows. Mirrors the
-    prototype's `groupNode("params", ...)` built from `p.features`. Collapsed by default."""
+    """One flat key/value collapsible section (DSP feature toggles, car/setup params, car-body
+    params, ...). Mirrors the prototype's `groupNode("params", ...)` built from `p.features` --
+    generalized so more than one flat section can exist side by side (each with its own id/label/
+    collapse-state, user request 2026-07-27 item 2). Collapsed by default."""
 
-    _GID = "params"
-
-    def __init__(self, features: tuple[tuple[str, str], ...], settings: QSettings) -> None:
+    def __init__(
+        self, section_id: str, label: str, params: tuple[tuple[str, str], ...], settings: QSettings
+    ) -> None:
         super().__init__()
         self._settings = settings
-        collapsed = settings.value(_collapsed_key(self._GID), True, type=bool)
+        self._gid = section_id
+        collapsed = settings.value(_collapsed_key(self._gid), True, type=bool)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -279,7 +299,12 @@ class ParamsSection(QWidget):
         self._twist = QLabel()
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
-        params_label = QLabel(i18n.t("params"))
+        params_label = QLabel(label)
+        if section_id != "params":
+            # Project-config sections (car/setup, body/chassis, ...) read visually lighter than
+            # the DSP-features "params" section -- styled like the left panel's top "DSP" badge
+            # instead (user request 2026-07-27).
+            params_label.setProperty("class", "phead-badge")
         apply_caps(params_label, spacing_px=1.0)
         head_layout.addWidget(params_label)
         head_layout.addStretch(1)
@@ -290,14 +315,14 @@ class ParamsSection(QWidget):
         children_layout = QVBoxLayout(self._children)
         children_layout.setContentsMargins(0, 0, 0, 0)
         children_layout.setSpacing(0)
-        for key, value in features:
+        for key, value in params:
             children_layout.addWidget(_ParamRow(key, value))
         outer.addWidget(self._children)
         self._set_collapsed(collapsed)
 
     def _on_header_clicked(self, event) -> None:
         self._set_collapsed(not self._children.isHidden())
-        self._settings.setValue(_collapsed_key(self._GID), self._children.isHidden())
+        self._settings.setValue(_collapsed_key(self._gid), self._children.isHidden())
 
     def _set_collapsed(self, collapsed: bool) -> None:
         self._children.setHidden(collapsed)
@@ -336,8 +361,12 @@ class TreeGroupSection(QWidget):
         title = QLabel(_group_label(group).upper())
         apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
+        # Hidden rows (unused virtual-channel slots the skill flagged at intake, see GroupRow.hidden
+        # / docs/SKILL-CHANGE-REQUESTS.md SCR-003) are excluded from both the row count and the
+        # rendered list below.
+        visible_rows = [row for row in group.rows_ordered() if not row.hidden]
         count_text = (
-            f"{len(group.rows)}/{group.max_count}" if group.max_count else f"{len(group.rows)}"
+            f"{len(visible_rows)}/{group.max_count}" if group.max_count else f"{len(visible_rows)}"
         )
         count = QLabel(count_text)
         count.setProperty("class", "cnt")
@@ -355,7 +384,7 @@ class TreeGroupSection(QWidget):
         params_row.clicked.connect(lambda: self.tableRequested.emit(group.id))
         children_layout.addWidget(params_row)
 
-        for row in group.rows_ordered():
+        for row in visible_rows:
             chan = ChannelRow(group, row)
             chan.clicked.connect(lambda r=row: self.channelClicked.emit(group.id, r.id))
             chan.eqRequested.connect(lambda r=row: self.eqRequested.emit(group.id, r.id))
@@ -395,6 +424,9 @@ class DspTreeWidget(QScrollArea):
         self.setWidget(self._body)
 
     def set_view(self, view: ProjectView) -> None:
+        # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so
+        # it doesn't linger over a now-destroyed row.
+        RoundedTooltip.instance().hide_tip()
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             widget = item.widget()
@@ -405,7 +437,7 @@ class DspTreeWidget(QScrollArea):
                 widget.setParent(None)
                 widget.deleteLater()
         if view.features:
-            params = ParamsSection(view.features, self._settings)
+            params = ParamsSection("params", i18n.t("params"), view.features, self._settings)
             self._layout.insertWidget(self._layout.count() - 1, params)
         for group in view.groups:
             section = TreeGroupSection(group, self._settings)

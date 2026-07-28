@@ -162,8 +162,18 @@ class GroupRow:
 
     @property
     def tag(self) -> Optional[str]:
-        """Short feature tag shown as a chip next to the channel name (e.g. RearATT, SubRC)."""
+        """Short feature-tag label shown as a chip next to the channel name (e.g. RearRC, SubRC,
+        RC -- the last for VFC's RealCenter toggle, an unrelated feature that happens to share the
+        "RC" abbreviation with the Remote-Control-driven RearRC/SubRC tags; see `tag_value`)."""
         return self.raw.get("tag")
+
+    @property
+    def tag_value(self) -> Optional[str]:
+        """The tag's configured value for this project (e.g. "3/4" for RearRC, "-4dB" for SubRC,
+        "ON"/"OFF" for VFC's RC) -- shown alongside the tag label so the chip reads as a fact,
+        not just a feature name (user request 2026-07-28). None = tag shown bare, same as before
+        this field existed."""
+        return self.raw.get("tag_value")
 
     @property
     def muted(self) -> bool:
@@ -172,6 +182,14 @@ class GroupRow:
     @property
     def off(self) -> bool:
         return bool(self.raw.get("off"))
+
+    @property
+    def hidden(self) -> bool:
+        """A virtual-channel slot the skill's intake found no physical driver assigned to (e.g.
+        an unused rear-fill slot) -- written by the skill, not inferred here (see
+        docs/SKILL-CHANGE-REQUESTS.md SCR-003). Not retroactive: ledgers captured before that skill
+        change simply have no `hidden` key and every row still renders."""
+        return bool(self.raw.get("hidden"))
 
     def params(self, fields: tuple[str, ...]) -> list[str]:
         """Rendered "label: value" chips for exactly this group's declared fields — a field this
@@ -209,6 +227,19 @@ class ProfileGroup:
 
 
 @dataclass(frozen=True)
+class ParamSection:
+    """One extra flat key/value collapsible section in the left panel, beyond the DSP feature-
+    toggle PARAMS section -- e.g. car/setup + measurement params, car body/chassis params, future
+    amp-gain/second-processor/player sections (item 2, 2026-07-27). Sourced from project-level
+    config (`project_profile.json`, see core.config.project_profile_path), not the per-version
+    ledger -- these facts don't change between presets/DSP-tune versions."""
+
+    id: str
+    label: str
+    params: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class ProjectView:
     """A whole project's DSP state, shaped by its profile — the read-only view the UI displays."""
 
@@ -221,9 +252,12 @@ class ProjectView:
     features: tuple[tuple[str, str], ...] = ()
     slot_label: Optional[str] = None
     save: Optional[str] = None
+    param_sections: tuple[ParamSection, ...] = ()
 
     @classmethod
-    def from_dict(cls, raw: dict, profile: dict) -> "ProjectView":
+    def from_dict(
+        cls, raw: dict, profile: dict, param_sections: tuple[ParamSection, ...] = ()
+    ) -> "ProjectView":
         prof = profile.get("dsp_profile", profile)
         groups = []
         for g in prof.get("groups", []):
@@ -252,7 +286,28 @@ class ProjectView:
             features=features,
             slot_label=raw.get("slot_label"),
             save=raw.get("save"),
+            param_sections=param_sections,
         )
+
+
+def load_param_sections(project_dir_: Optional[Any] = None) -> tuple[ParamSection, ...]:
+    """Read `project_profile.json` (see `core.config.project_profile_path`), if present. Absent
+    file or missing `param_sections` key -> no extra sections, not an error (same convention as
+    the rest of this module). `project_dir_`, if given, overrides the configured project
+    directory (for tests)."""
+    import json
+
+    from autosound_tcc.core import config
+
+    path = config.project_profile_path(project_dir_)
+    if not path.is_file():
+        return ()
+    data = json.loads(path.read_text())
+    sections = []
+    for entry in data.get("param_sections", []):
+        params = tuple((str(k), str(v)) for k, v in entry.get("params", []))
+        sections.append(ParamSection(id=entry["id"], label=entry.get("label", entry["id"]), params=params))
+    return tuple(sections)
 
 
 def load_project_view(root: str, preset: str, profile: dict, version: Optional[str] = None) -> ProjectView:
@@ -265,4 +320,5 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     vstate = vendor_loader.load_dsp_state()
     history = vstate.PresetHistory(root, preset)
     raw = history.load(version)
-    return ProjectView.from_dict(raw, profile)
+    param_sections = load_param_sections()
+    return ProjectView.from_dict(raw, profile, param_sections=param_sections)

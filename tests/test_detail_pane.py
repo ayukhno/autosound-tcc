@@ -4,7 +4,18 @@ channel names) and a standalone word (`Front L Full`, the prototype's own conven
 
 from __future__ import annotations
 
-from autosound_tcc.ui.tcc.detail_pane import _is_left, _sibling_name
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from autosound_tcc.state.dsp_state import EqBand  # noqa: E402
+from autosound_tcc.ui.tcc.detail_pane import EqBandCard, _band_flow, _is_left, _sibling_name  # noqa: E402
+
+
+def _app() -> QApplication:
+    return QApplication.instance() or QApplication([])
 
 
 def test_sibling_name_bare_suffix():
@@ -29,3 +40,39 @@ def test_is_left():
     assert _is_left("FrontL") and not _is_left("FrontR")
     assert _is_left("w_L") and not _is_left("w_R")
     assert _is_left("Front L Full") and not _is_left("Front R Full")
+
+
+def test_gain_mismatch_flags_the_gain_value_only():
+    _app()
+    band = EqBand(type="PK", freq_hz=8800.0, gain_db=1.0, q=1.4)
+    card = EqBandCard(band, match_color="#5aa9e6", gain_mismatch=True)
+    from PySide6.QtWidgets import QLabel
+
+    labels = card.findChildren(QLabel)
+    fv_labels = [l for l in labels if "band-fv" in (l.property("class") or "")]
+    # 3 value rows (Freq/Q/Gain) -- only Gain's gets the mismatch class.
+    mismatch_labels = [l for l in fv_labels if l.property("class") == "band-fv-mismatch"]
+    assert len(mismatch_labels) == 1
+    assert "1.0" in mismatch_labels[0].text()
+
+
+def test_no_mismatch_uses_plain_gain_class():
+    _app()
+    band = EqBand(type="PK", freq_hz=8800.0, gain_db=1.0, q=1.4)
+    card = EqBandCard(band, match_color="#5aa9e6", gain_mismatch=False)
+    from PySide6.QtWidgets import QLabel
+
+    assert not any(
+        l.property("class") == "band-fv-mismatch" for l in card.findChildren(QLabel)
+    )
+
+
+def test_band_flow_marks_only_bands_at_mismatched_frequencies():
+    _app()
+    bands = (
+        EqBand(type="PK", freq_hz=8800.0, gain_db=1.0, q=1.4),
+        EqBand(type="PK", freq_hz=4050.0, gain_db=-2.0, q=2.0),
+    )
+    widget = _band_flow(bands, match_map={8800.0: "#5aa9e6", 4050.0: "#4bbf87"}, gain_mismatch_freqs={8800.0})
+    cards = widget.findChildren(EqBandCard)
+    assert len(cards) == 2

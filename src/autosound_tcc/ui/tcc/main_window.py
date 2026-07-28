@@ -10,8 +10,8 @@ section gets wired to real data, but the outer structure built here should not n
 
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtCore import QPoint, QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -31,10 +32,13 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
-from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
+from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget, ParamsSection
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS, AI_MAIN_MODELS
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+from autosound_tcc.ui.tcc.sidebar_section import SidebarSection, clear_layout
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 
 _THEME_KEY = "ui/theme"
@@ -44,6 +48,27 @@ _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
 # TODO(user): paste the published Google Form viewform URL here (the one built last session — see
 # memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
 _FEEDBACK_FORM_URL = ""
+
+# The skill's online target-curve visualizer (user request 2026-07-28) -- opened in the system
+# browser when the header's "Target curve" value is clicked, `?lang=` matching the app's own
+# current language (the tool's own param convention: en/uk).
+_TARGET_CURVE_TOOL_URL = (
+    "https://ayukhno.github.io/autosound-tuning-skill/skills/autosound-tuning/references/"
+    "patterns/target-curves/target_curves_visualizer.html"
+)
+
+# Support links (user request 2026-07-28), same two channels + wording as the skill's own
+# README (all locales) -- GitHub Sponsors first (no fees, familiar to devs with an account),
+# Monobank jar as the no-account fallback (one tap, Apple Pay/Google Pay/card).
+_GITHUB_SPONSORS_URL = "https://github.com/sponsors/ayukhno?frequency=one-time"
+_MONOBANK_JAR_URL = "https://send.monobank.ua/jar/8wThVcodjm"
+
+# REW's own default local HTTP port (see core/rew_bridge.py's module docstring -- the vendored
+# `rew_api` talks to http://localhost:4735). Shown as a fact in the "System params" sidebar
+# section (user request 2026-07-28); not yet read from or written to any config -- just a
+# reference value until that section gets real equipment-config wiring (see SKILL-CHANGE-REQUESTS
+# SCR-015).
+_REW_DEFAULT_PORT = "4735"
 
 # Human-readable preset names for the header picker (dir names FULL/SQ are the ledger keys).
 _PRESET_LABELS = {
@@ -79,6 +104,25 @@ def _vline() -> QFrame:
     line.setProperty("class", "zoomgroup-div")
     line.setFixedWidth(1)
     return line
+
+
+def _kv_row(key: str, value: str) -> QWidget:
+    """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
+    (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
+    rest of the app without depending on that module-private class."""
+    row = QWidget()
+    row.setProperty("class", "paramrow")
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(12, 5, 12, 5)
+    layout.setSpacing(6)
+    k = QLabel(key)
+    k.setProperty("class", "pk")
+    layout.addWidget(k)
+    layout.addStretch(1)
+    v = QLabel(value)
+    v.setProperty("class", "pv")
+    layout.addWidget(v)
+    return row
 
 
 def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
@@ -193,7 +237,16 @@ class MainWindow(QMainWindow):
         apply_caps(self._target_field_lbl, spacing_px=1.2)
         layout.addWidget(self._target_field_lbl)
         self._target_label = QLabel("")
-        self._target_label.setProperty("class", "kv-val")
+        self._target_label.setProperty("class", "kv-val kv-val-link")
+        # QSS silently ignores `text-decoration` on QLabel -- the underline (a persistent "this
+        # is a link" cue, not just a hover effect, user request 2026-07-28) has to be set on the
+        # font directly, same workaround `_PhaseStepRow`'s strike-through uses.
+        link_font = QFont(self._target_label.font())
+        link_font.setUnderline(True)
+        self._target_label.setFont(link_font)
+        self._target_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._target_tip = attach_tip(self._target_label, i18n.t("targetToolTip"))
+        self._target_label.mousePressEvent = self._open_target_curve_tool  # type: ignore[assignment]
         layout.addWidget(self._target_label)
 
         self._version_label = QLabel("")
@@ -202,10 +255,19 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
         self._lang_combo = _mini_combo()
-        self._lang_combo.addItems(["EN", "UK"])
-        self._lang_combo.setCurrentText(i18n.current_language().upper())
-        self._lang_combo.currentTextChanged.connect(
-            lambda text: self._on_language_selected(text.lower())
+        # Display "УК" (Cyrillic, macOS's own convention for Ukrainian) not the Latin "UK" -- that
+        # reads as United Kingdom, not Ukrainian (user request 2026-07-27). Display text is
+        # decoupled from the actual language code via itemData, same pattern as the preset combo.
+        self._lang_combo.addItem("EN", "en")
+        self._lang_combo.addItem("УК", "uk")
+        idx = self._lang_combo.findData(i18n.current_language())
+        if idx >= 0:
+            self._lang_combo.setCurrentIndex(idx)
+        # Safety margin on top of AdjustToContents -- two-letter items were the tightest case that
+        # clipped against the drop-down arrow zone (see .mini-select padding in theme.py).
+        self._lang_combo.setMinimumWidth(64)
+        self._lang_combo.currentIndexChanged.connect(
+            lambda _idx: self._on_language_selected(self._lang_combo.currentData())
         )
         layout.addWidget(self._lang_combo)
 
@@ -249,7 +311,7 @@ class MainWindow(QMainWindow):
         apply_caps(self._ai_main_lbl, spacing_px=1.2)
         layout.addWidget(self._ai_main_lbl)
         ai_main = _mini_combo()
-        ai_main.addItems(["Claude Opus 4.8", "Claude Sonnet 5", "Claude Fable 5"])
+        ai_main.addItems(AI_MAIN_MODELS)
         layout.addWidget(ai_main)
 
         self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
@@ -257,10 +319,16 @@ class MainWindow(QMainWindow):
         apply_caps(self._ai_critic_lbl, spacing_px=1.2)
         layout.addWidget(self._ai_critic_lbl)
         ai_critic = _mini_combo()
-        ai_critic.addItems(["Gemini 3.1 Pro", "Gemini 3.5 Flash", "Claude Opus 4.8"])
+        ai_critic.addItems(AI_CRITIC_MODELS)
         layout.addWidget(ai_critic)
 
         layout.addStretch(1)
+
+        coffee_btn = QPushButton(i18n.t("coffeeBtn"))
+        coffee_btn.setProperty("class", "coffee-btn")
+        coffee_btn.clicked.connect(self._open_support_menu)
+        self._coffee_btn = coffee_btn
+        layout.addWidget(coffee_btn)
 
         feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
         feedback_btn.setProperty("class", "feedback-btn")
@@ -271,23 +339,66 @@ class MainWindow(QMainWindow):
 
     # ---- left / center / right --------------------------------------------
 
+    def _placeholder_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setProperty("class", "phead-sub")
+        label.setWordWrap(True)
+        label.setContentsMargins(12, 10, 12, 10)
+        return label
+
+    def _rebuild_system_params(self) -> None:
+        """System params' one real fact today (REW's default local port) plus a placeholder for
+        everything else still pending the car-audio skill's equipment-config structure (see
+        SKILL-CHANGE-REQUESTS SCR-015) -- rebuilt from scratch so a language switch re-translates
+        both the "REW port" label and the placeholder text (same pattern as `_set_project_params`)."""
+        clear_layout(self._system_section.body_layout())
+        self._system_section.body_layout().addWidget(_kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT))
+        self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
+
     def _build_left(self) -> QFrame:
+        """The left panel is a top-level accordion (user request 2026-07-28): System params /
+        Project params / Car audio analysis / DSP, each a collapsible `SidebarSection` styled flat
+        like the DSP tree's own `.ghead` group headers (a border-bottom line, no card background --
+        matching backgrounds top-to-bottom was a follow-up correction the same day). Only DSP and
+        System params (partially) have real content today -- Project params comes from
+        `project_profile.json` (see `_set_project_params`), and Car audio analysis stays a
+        placeholder until the car-audio skill defines where that data comes from
+        (SKILL-CHANGE-REQUESTS SCR-015). System params leads (user request 2026-07-28) since it's
+        the one project-setup fact block most relevant before diving into DSP tuning."""
         panel = _panel()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        head, self._left_title, _ = _phead("dspPanel")
-        self._left_sub = QLabel("")
-        self._left_sub.setProperty("class", "phead-sub")
-        head.layout().insertWidget(head.layout().count() - 1, self._left_sub)
-        layout.addWidget(head)
+
+        self._system_section = SidebarSection(
+            "system_params", i18n.t("systemParams"), self._settings, default_collapsed=True
+        )
+        self._rebuild_system_params()
+        layout.addWidget(self._system_section)
+
+        self._project_section = SidebarSection(
+            "project_params", i18n.t("projectParams"), self._settings, default_collapsed=True
+        )
+        layout.addWidget(self._project_section)
+
+        self._audio_section = SidebarSection(
+            "audio_analysis", i18n.t("audioAnalysis"), self._settings, default_collapsed=True
+        )
+        self._audio_placeholder = self._placeholder_label(i18n.t("noDataYet"))
+        self._audio_section.body_layout().addWidget(self._audio_placeholder)
+        layout.addWidget(self._audio_section)
+
+        self._dsp_section = SidebarSection(
+            "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False
+        )
+        layout.addWidget(self._dsp_section, stretch=1)
 
         self._left_status = QLabel("")
         self._left_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._left_status.setProperty("class", "phead-sub")
         self._left_status.setWordWrap(True)
         self._left_status.setContentsMargins(12, 16, 12, 16)
-        layout.addWidget(self._left_status)
+        self._dsp_section.body_layout().addWidget(self._left_status)
 
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
@@ -297,7 +408,7 @@ class MainWindow(QMainWindow):
         self._tree.tableRequested.connect(self._on_table_requested)
         self._tree.channelClicked.connect(self._on_channel_clicked)
         self._tree.eqRequested.connect(self._on_eq_requested)
-        layout.addWidget(self._tree, stretch=1)
+        self._dsp_section.body_layout().addWidget(self._tree, stretch=1)
 
         return panel
 
@@ -354,19 +465,41 @@ class MainWindow(QMainWindow):
             return
 
         prof = profile.get("dsp_profile", profile)
-        self._left_sub.setText(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
+        self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._tree.setVisible(True)
         self._view = view
         self._tree.set_view(view)
+        self._set_project_params(view)
+        self._refresh_open_detail()
 
         self._slot_label.setText(view.slot_label or "")
         self._save_label.setText(view.save or "")
-        self._target_label.setText(view.target or "")
+        self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._version_label.setText(view.version or "")
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
+
+    def _open_target_curve_tool(self, _event=None) -> None:
+        QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={i18n.current_language()}"))
+
+    def _open_support_menu(self) -> None:
+        """Two-item menu opening upward from the footer (user request 2026-07-28): GitHub
+        Sponsors for people with a GitHub account, the Monobank jar as the no-account/one-tap
+        fallback -- same two channels + wording as the skill's own README, not a choice TCC makes
+        for the user."""
+        menu = QMenu(self)
+        menu.setProperty("class", "support-menu")
+        github_action = menu.addAction(i18n.t("supportGithub"))
+        github_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
+        )
+        mono_action = menu.addAction(i18n.t("supportMonobank"))
+        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
+        top_left = self._coffee_btn.mapToGlobal(QPoint(0, 0))
+        menu.adjustSize()
+        menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
 
     def _on_preset_index(self, _index: int) -> None:
         preset = self._preset_combo.currentData()
@@ -380,6 +513,25 @@ class MainWindow(QMainWindow):
         self._tree.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
+        self._set_project_params(None)
+        self._detail.close_pane()
+
+    def _set_project_params(self, view: ProjectView | None) -> None:
+        """(Re)builds the "Project params" section body from `view.param_sections` (car/setup,
+        body/chassis, ... -- see `state.dsp_state.load_param_sections`). Moved out of the DSP
+        tree into its own top-level section (user request 2026-07-28): this data is project-level
+        config, not part of the DSP ledger, so it now lives next to System params / Car audio
+        analysis rather than inside the DSP tier."""
+        clear_layout(self._project_section.body_layout())
+        sections = view.param_sections if view else ()
+        if not sections:
+            self._project_section.body_layout().addWidget(
+                self._placeholder_label(i18n.t("noDataYet"))
+            )
+            return
+        for section in sections:
+            widget = ParamsSection(section.id, section.label, section.params, self._settings)
+            self._project_section.body_layout().addWidget(widget)
 
     # ---- detail-pane wiring --------------------------------------------
 
@@ -387,6 +539,20 @@ class MainWindow(QMainWindow):
         if self._view is None:
             return None
         return next((g for g in self._view.groups if g.id == group_id), None)
+
+    def _refresh_open_detail(self) -> None:
+        """Keep an already-open table/EQ view in sync after a project reload (preset switch, "New
+        DSP profile...") -- otherwise it keeps showing the previous preset's frozen `ProfileGroup`/
+        `GroupRow` snapshot (MUTE state and everything else) until manually closed and reopened
+        (user report 2026-07-28)."""
+        group_id = self._detail.current_group_id()
+        if group_id is None:
+            return
+        fresh_group = self._find_group(group_id)
+        if fresh_group is None:
+            self._detail.close_pane()
+        else:
+            self._detail.refresh_with(fresh_group)
 
     def _on_table_requested(self, group_id: str) -> None:
         group = self._find_group(group_id)
@@ -454,9 +620,15 @@ class MainWindow(QMainWindow):
         meas_layout.setContentsMargins(0, 0, 0, 0)
         meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
         meas_layout.addWidget(meas_head)
-        self._meas_panel = MeasurementPanel()
+        self._meas_panel = MeasurementPanel(
+            preset_provider=lambda: self._view.preset if self._view else "",
+        )
         meas_layout.addWidget(self._meas_panel)
         layout.addWidget(meas_panel)
+
+        # A step's measurement icon opens that capture series in the panel below (user request
+        # 2026-07-28).
+        self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
 
         return container
 
@@ -494,6 +666,12 @@ class MainWindow(QMainWindow):
 
     # ---- language -----------------------------------------------------------
 
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # Let any in-flight REW worker on the measurement panel finish before the window (and its
+        # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
+        self._meas_panel.shutdown()
+        super().closeEvent(event)
+
     def _on_language_selected(self, lang: str) -> None:
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
@@ -506,16 +684,24 @@ class MainWindow(QMainWindow):
         observer registry, since the widget count is still small enough for that to be simple
         and correct."""
         self._theme_btn.setText("◐ " + i18n.t("theme"))
-        self._left_title.setText(i18n.t("dspPanel"))
+        self._project_section.set_title(i18n.t("projectParams"))
+        self._system_section.set_title(i18n.t("systemParams"))
+        self._rebuild_system_params()
+        self._audio_section.set_title(i18n.t("audioAnalysis"))
+        self._audio_placeholder.setText(i18n.t("noDataYet"))
+        self._dsp_section.set_title(i18n.t("dspPanel"))
+        self._set_project_params(self._view)
         self._plan_title.setText(i18n.t("planTitle"))
         self._plan_sub.setText(i18n.t("planSub"))
         self._meas_title.setText(i18n.t("focus"))
         self._meas_sub.setText(i18n.t("measSub"))
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))
+        self._target_tip.set_text(i18n.t("targetToolTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
+        self._coffee_btn.setText(i18n.t("coffeeBtn"))
         for i in range(self._preset_combo.count()):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()

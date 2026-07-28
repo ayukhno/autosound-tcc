@@ -257,3 +257,104 @@ What the skill must add:
    measurements and plan steps as stale; the skill, on resume, sees the impact event and proposes
    re-measuring exactly the affected channels/joints (and re-entering the touched phase — phase
    gates are already re-entrant).
+
+## SCR-015 — data-source structure for the left panel's Project / System / Car-audio-analysis sections
+
+**Status**: proposed · **Priority**: P2
+**Target**: intake flow + whatever config file(s) end up owning this (likely `project.json` per
+SCR-011, or a dedicated `system_profile.json` alongside `dsp_profile.json`)
+**TCC dependency**: `ui/tcc/main_window.py`/`ui/tcc/sidebar_section.py` (new 2026-07-28): the left
+panel is now a 4-section top-level accordion -- **System params**, **Project params**, **Car audio
+analysis**, **DSP** (in that display order). DSP is fully wired (the existing tree). Project params
+reads `project_profile.json`'s `param_sections` (car/setup, body/chassis -- unchanged, just moved
+out of the DSP tree into its own section, see `state/dsp_state.load_param_sections`). System params
+and Car audio analysis are placeholders today: System params shows one static fact (REW's default
+local port, 4735) plus a "no data yet" note; Car audio analysis shows only "no data yet".
+
+**Detail**: need the skill to define (or point at an existing definition of) the source structure
+for the fields these two placeholder sections should eventually show, so TCC can wire them up
+without guessing a schema:
+
+1. **System params** — the equipment side of the project: DSP model (already known via
+   `dsp_profile.json`), amp make/model/gain-per-channel, head unit/source, mic/measurement rig,
+   REW connection settings (host/port -- currently hardcoded display of the 4735 default, not read
+   from or written to any config). Overlaps with SCR-011's `project.json` equipment facts and
+   SCR-014's provenance-per-fact requirement (amp gain, in particular, changes mid-project and
+   should carry a `config_change` event).
+2. **Car audio analysis** — acoustic-analysis facts about the *installed car*, distinct from a
+   per-channel measurement (which already has a home: the measurement task card / REW bridge):
+   things like cabin RT60/reflections notes, install-quality observations from Phase 0 (intake +
+   install), or a rollup of "what does the room do to us" that currently, if it exists at all,
+   lives only as prose in `autosound_context.md`.
+
+Until the skill (or this doc, on a follow-up pass) defines these two structures, TCC will not guess
+a schema for either section -- they stay static placeholders by design, not an oversight.
+
+## SCR-016 — Project params: processor type + channel-config summary (project data, not just knowledge base)
+
+**Status**: proposed · **Priority**: P2
+**Target**: skill intake flow, Phase −1 (intake + install) -- the same step that already resolves
+the DSP model and channel layout to write `dsp_profile.json`/`knowledge/dsp/<slug>.md` (SCR-010)
+**TCC dependency**: `ui/tcc/main_window.py`'s **Project params** sidebar section (SCR-015). Today it
+only shows `project_profile.json`'s free-form `param_sections` (car/setup, body/chassis). User
+request 2026-07-28: it should also show the DSP processor's identity and a channel-configuration
+summary directly under it -- e.g., for the current real project: **Helix DSP Ultra S** — 8 virtual
+channels (1 off), 12 output channels (2 off).
+
+**Detail**: this is project-specific *summary* data -- how many channels of each tier this
+particular install actually uses and how many are administratively off -- not the DSP's general
+capability description (which SCR-010 already says belongs once in the shared
+`knowledge/dsp/<slug>.md`, not duplicated per-project). The skill already learns the processor model
+and full channel layout during Phase −1; it should write this project-scoped summary into the
+project's own data structure (`project.json` per SCR-011, or a project-scoped block in
+`dsp_profile.json`) rather than leave TCC to re-derive it.
+
+Note this IS technically re-derivable today from data TCC already has -- `dsp_profile.json`'s
+`groups[].max_count` plus each ledger row's `off` flag (`state/dsp_state.GroupRow.off`, read but not
+rendered anywhere today, see the "OFF ... deferred to a future settings view" comment in
+`ui/tcc/dsp_tree.py`'s `ChannelRow`) -- but per this doc's framing principle (the skill owns the
+schema and writes the data; TCC is a consumer, not a re-deriver), TCC should render an explicit
+summary fact the skill wrote, not duplicate the counting logic client-side.
+
+## SCR-017 — open question: RearRC belongs in a DSP config file, not duplicated per preset ledger
+
+**Status**: proposed (open question, not yet a concrete ask) · **Priority**: P3
+**Target**: wherever the skill ends up putting DSP hardware-level config (new file, or a section of
+`dsp_profile.json`) vs. the per-preset ledger (`state/state.py`'s `v_NNN.json`)
+**TCC dependency**: `ui/tcc/dsp_tree.py`'s `tag`/`tag_value` chip (`ChannelRow`/`GroupRow.tag_value`,
+added 2026-07-28 same as this doc pass) currently reads `RearRC`'s value (e.g. "3/4") straight off
+each preset's own ledger row (`data/private/state/{FULL,SQ}/v_001.json`, hand-edited). **This was a
+modeling mistake caught by the user (2026-07-28)**: RearRC is a physical
+remote-control knob position on the Helix hardware -- it does **not** change between presets on the
+same DSP, so it has no business being duplicated (and by hand, divergently -- the first pass here
+briefly had it wrong for SQ) into every preset's ledger. What genuinely *is* per-preset is whether a
+channel is **muted** (already correct: `mute: true` on the SQ ledger's rear channels/virtual rows,
+independent of RearRC's own value, which stays "3/4" in both presets).
+
+**Detail** — the open question for the skill: where should a DSP-hardware-level fact (RearRC/SubRC
+knob position, and likely `RealCenter`'s ON/OFF too, since that's also not preset-specific) actually
+live, so it's recorded ONCE per DSP rather than copy-pasted into every preset ledger where it can
+drift out of sync? Candidates: a section of `dsp_profile.json` itself (it's a hardware-config file
+already), or a new project-level `dsp_config.json` alongside it. Also note this entire tag
+convention (RearRC/SubRC/RC) is **Helix-specific** -- a MUSWAY or other vendor profile has no
+equivalent, so whatever structure the skill settles on must be optional/profile-declared, not
+assumed universal. Until this is settled, TCC keeps reading `tag`/`tag_value` off the per-preset
+ledger (simplest thing that works today) — moving it to a shared location is a follow-up once the
+skill decides where "DSP hardware config, constant across this DSP's presets" belongs.
+
+## SCR-018 — where does the REW project file's name + full path come from?
+
+**Status**: proposed (open question) · **Priority**: P3
+**Target**: intake flow / project config (`project.json` per SCR-011, or a dedicated field
+alongside `dsp_profile.json`)
+**TCC dependency**: user request 2026-07-28: show the REW project file's (`.mdat`) name and full
+path as a hint somewhere in the measurement panel's header. Checked `rew_tool/rew_api.py` (the
+vendored REW HTTP API wrapper) -- it has no endpoint that returns the currently-open project's file
+path; REW's API surfaces measurements/curves/filters, not the host project file itself. So this
+isn't a live read TCC can just add -- the fact has to come from somewhere else.
+
+**Detail**: this is project-level config the skill would need to record at intake (or whenever the
+user names/relocates their REW project file), the same class of fact as SCR-011's project.json
+equipment list. Deferred rather than building a manual "type the path into a settings field"
+placeholder in TCC first -- decided with the user (2026-07-28) to let the skill's own intake own
+this fact if/when it's added, rather than TCC inventing a duplicate, unsynced input for it.

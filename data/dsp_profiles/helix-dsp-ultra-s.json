@@ -24,7 +24,7 @@
         "label": "Output channels",
         "max_count": 12,
         "row_id_style": "letter",
-        "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "eq"],
+        "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq"],
         "crossover_filters": {
           "types": {
             "LR": { "orders_db_per_oct": [12, 24, 36] },

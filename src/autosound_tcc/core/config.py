@@ -42,6 +42,13 @@ def dsp_profile_path(project_dir_: Optional[Path] = None) -> Path:
     return (project_dir_ or project_dir()) / "dsp_profile.json"
 
 
+def project_profile_path(project_dir_: Optional[Path] = None) -> Path:
+    """Project-level facts that don't change between presets/versions (car setup, chassis, amp
+    gains, ...) -- rendered as extra left-panel PARAMS sections (item 2, 2026-07-27). Absent by
+    default; nothing renders until this file exists."""
+    return (project_dir_ or project_dir()) / "project_profile.json"
+
+
 def bundled_profiles_dir() -> Path:
     """Reference DSP profiles shipped with the app (public, no project data)."""
     return DEFAULT_BUNDLED_PROFILES_DIR

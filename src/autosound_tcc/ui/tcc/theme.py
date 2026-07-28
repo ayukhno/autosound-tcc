@@ -132,9 +132,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
     }}
 
-    /* .panel — the card background used by every section */
+    /* .panel — the card background used by every section. Uses `ground` (the page background),
+    not the `panel` token despite the class name -- cards used to render pure white against the
+    gray page, while content *inside* them (DSP-tree rows, table sheets, ...) mixed white and gray
+    inconsistently depending on which sub-widget happened to inherit which ancestor. One flat gray
+    everywhere, delineated only by the border below, reads as one coherent surface in both themes
+    (user request 2026-07-28). `panel`/`panel2`/`panel3` stay reserved for genuinely floating
+    surfaces (dropdown popups, tooltips, the feedback dialog) that should still stand apart. */
     QFrame[class~="panel"] {{
-        background: {t.panel};
+        background: {t.ground};
         border: 1px solid {t.border};
         border-radius: 7px;
     }}
@@ -153,6 +159,25 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="phead-sub"] {{
         color: {t.faint};
         font-size: 11px;
+    }}
+
+    /* .sidebar-head — the left panel's top-level accordion header bar (System params / Project
+    params / Car audio analysis / DSP) -- the only rows in the app deliberately shaded darker than
+    the now-uniform `.panel` gray, so the top-level accordion still reads as a distinct landmark
+    even though every surface shares one background (user request 2026-07-28). Hover sits exactly
+    between the header's own shade and the general background, per the same request. Nested
+    headers one level down (DSP tree's `.ghead` groups, `ParamsSection`'s own header) are left
+    alone -- only the top level gets this treatment. */
+    QWidget[class~="sidebar-head"] {{
+        background: {t.border};
+    }}
+    QWidget[class~="sidebar-head"]:hover {{
+        background: {t.mix('border', 50, 'ground')};
+    }}
+    QLabel[class~="sidebar-title"] {{
+        color: {t.text};
+        font-size: 11px;
+        font-weight: 700;
     }}
 
     QPushButton[class~="theme-btn"] {{
@@ -178,6 +203,37 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QPushButton[class~="feedback-btn"]:hover {{
         background: {t.mix('accent', 88, 'panel')};
+    }}
+
+    /* .coffee-btn — the footer's support button (user request 2026-07-28), same color as the AI
+    dialog's "Send" button (`.composer-send`) so it doesn't compete visually with the accent-
+    colored "Give feedback" button right next to it. */
+    QPushButton[class~="coffee-btn"] {{
+        background: {t.info};
+        color: #ffffff;
+        border: none;
+        border-radius: 5px;
+        padding: 5px 11px;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QPushButton[class~="coffee-btn"]:hover {{
+        background: {t.mix('info', 88, 'panel')};
+    }}
+    /* .support-menu — the coffee button's 2-item popup (GitHub Sponsors / Monobank jar). */
+    QMenu[class~="support-menu"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        border-radius: 8px;
+        padding: 4px;
+    }}
+    QMenu[class~="support-menu"]::item {{
+        padding: 7px 14px;
+        border-radius: 5px;
+        color: {t.text};
+    }}
+    QMenu[class~="support-menu"]::item:selected {{
+        background: {t.mix('info', 20)};
     }}
 
     /* .zoomgroup — A-/percent/A+ as one bordered block with divider lines, ported from the
@@ -216,7 +272,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
         border: 1px solid {t.border2};
         border-radius: 5px;
-        padding: 4px 9px;
+        /* right padding reserves room for the 18px ::drop-down arrow zone below -- symmetric
+        padding here squeezed the closed box's own text against the arrow */
+        padding: 4px 22px 4px 9px;
         font-size: 12px;
     }}
     QComboBox[class~="mini-select"]:hover {{
@@ -242,13 +300,26 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         min-height: 22px;
     }}
 
-    /* Native tooltips are tiny and low-contrast -- theme them so channel hover-hints read well. */
+    /* Fallback styling for native tooltips -- every widget in this app's own code now uses
+    `.rounded-tip`/`rounded_tooltip.attach()` instead (native QToolTip's window frame ignores its
+    own border-radius on macOS, user request 2026-07-28), but this still themes any tooltip Qt
+    shows on its own (e.g. a QAbstractButton's auto-elided-text tooltip). */
     QToolTip {{
         background: {t.panel3};
         color: {t.text};
         border: 1px solid {t.border2};
         border-radius: 5px;
         padding: 6px 9px;
+        font-size: 12px;
+    }}
+    /* .rounded-tip — the channel-hint popup (rounded_tooltip.py, user request 2026-07-28): a
+    frameless/translucent widget so the rounded rect is the real window shape, not a QSS radius
+    clipped by a square native frame. Background/border are painted manually in `paintEvent`
+    (a WA_TranslucentBackground top-level widget's QSS background isn't reliably composited by
+    the style engine -- verified: it silently didn't paint at all) -- only text styling belongs
+    here; padding comes from `setContentsMargins` in code, not this rule, for the same reason. */
+    QLabel[class~="rounded-tip"] {{
+        color: {t.text};
         font-size: 12px;
     }}
 
@@ -260,6 +331,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="kv-val"] {{
         color: {t.text};
         font-weight: 600;
+    }}
+    /* .kv-val-link — the header's "Target curve" value, clickable through to the skill's online
+    target-curve tool (user request 2026-07-28). Looks like a link even before hovering (an
+    accent color + the ↗ suffix main_window.py appends to the text) always, not just on hover --
+    a hover-only cue is invisible until the user already happens to be pointing at it (user
+    request 2026-07-28). The underline itself is set via `QFont.setUnderline()` in code, not
+    `text-decoration` here -- QSS silently ignores that property on QLabel (same reason
+    `.substep-name-done`'s strike-through is code-side, see `plan_panel.py`). */
+    QLabel[class~="kv-val-link"] {{
+        color: {t.accent};
     }}
     QLabel[class~="slot-val"] {{
         color: {t.accent};
@@ -310,6 +391,22 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QWidget[class~="chan-dim"] {{
         color: {t.faint};
     }}
+    /* chan-dim's own color only reaches children with no more-specific rule of their own -- cid/
+    cline2/eq-chip/ctype all have explicit colors that otherwise stay full-brightness on a muted
+    row, so they need their own descendant overrides here. */
+    QWidget[class~="chan-dim"] QLabel[class~="cid"] {{
+        color: {t.faint};
+    }}
+    QWidget[class~="chan-dim"] QLabel[class~="cline2"] {{
+        color: {t.faint};
+    }}
+    QWidget[class~="chan-dim"] QLabel[class~="eq-chip"] {{
+        color: {t.faint};
+        border-color: {t.border2};
+    }}
+    QWidget[class~="chan-dim"] QLabel[class~="ctype"] {{
+        color: {t.faint};
+    }}
     QLabel[class~="cid"] {{
         font-family: "SF Mono", Menlo, monospace;
         font-size: 10px;
@@ -340,6 +437,19 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 0 5px;
         font-size: 9px;
     }}
+    /* .phead-badge — a flat ParamsSection's own title, styled like the left-panel's top "DSP"
+    badge (`.phead-title`) instead of the DSP-tree's bolder/brighter group-header look -- these are
+    project-config sections (car/setup, body/chassis, ...), visually lighter-weight than actual DSP
+    channel groups (user request 2026-07-27). Needs the `.ghead QLabel` ancestor prefix to win
+    specificity over that shared descendant rule (see feedback_qt_qss_gotchas.md). */
+    QWidget[class~="ghead"] QLabel[class~="phead-badge"] {{
+        color: {t.muted};
+        font-size: 10px;
+        letter-spacing: 2px;
+        font-weight: 600;
+        text-transform: none;
+    }}
+
     /* .paramrow — key/value feature rows inside the top PARAMS section */
     QWidget[class~="paramrow"] {{
         font-size: 11px;
@@ -367,9 +477,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.muted};
         background: {t.panel3};
     }}
+    QLabel[class~="pill-mute"] {{
+        color: {t.muted};
+        background: {t.panel3};
+    }}
+    /* .pill-off — a real "off" flag (hardware output physically disabled at the DSP level) uses
+    the palette's dedicated `off` token, distinct from a plain mute (logically silenced but still
+    wired, which just reads muted-gray). */
     QLabel[class~="pill-off"] {{
         color: {t.off};
-        background: {t.panel3};
+        background: {t.mix('off', 16)};
     }}
     QLabel[class~="eq-chip"] {{
         font-family: "SF Mono", Menlo, monospace;
@@ -410,7 +527,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
 
     QTableWidget[class~="ptable"] {{
-        background: {t.panel};
+        background: {t.ground};
         gridline-color: transparent;
         border: none;
         font-size: 12px;
@@ -423,7 +540,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('accent', 18)};
     }}
     QHeaderView::section {{
-        background: {t.panel};
+        background: {t.ground};
         color: {t.muted};
         border: none;
         border-bottom: 1px solid {t.border2};
@@ -434,9 +551,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 600;
     }}
 
-    QLabel[class~="eq-hint"] {{
-        color: {t.faint};
-        font-size: 11px;
+    /* .eq-help — the "?" icon that replaced the always-on EQ hint paragraph (user request
+    2026-07-28: it ate vertical space every time the EQ view was open; a hover tooltip is the
+    better-practice spot for one-time explanatory text). */
+    QLabel[class~="eq-help"] {{
+        color: {t.muted};
+        border: 1px solid {t.border2};
+        border-radius: 8px;
+        min-width: 14px;
+        max-width: 14px;
+        min-height: 14px;
+        max-height: 14px;
+        font-size: 10px;
+        font-weight: 700;
+        qproperty-alignment: AlignCenter;
     }}
     QLabel[class~="eq-rowlab"] {{
         color: {t.muted};
@@ -463,6 +591,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="band-fv"] {{
         font-family: "SF Mono", Menlo, monospace;
         font-size: 11px;
+    }}
+    /* .band-fv-mismatch — a shared-frequency band whose L/R gain DIFFERS (the frequency itself
+    still gets the usual match-color top border, but same-freq same-gain and same-freq different-
+    gain otherwise looked identical -- user request 2026-07-27). */
+    QLabel[class~="band-fv-mismatch"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        color: {t.warn};
+        font-weight: 700;
     }}
     QLabel[class~="band-byp"] {{
         color: {t.faint};
@@ -497,9 +634,37 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="st-cur"] {{ background: {t.accent}; color: #1a1206; }}
     QLabel[class~="st-todo"] {{ background: {t.panel3}; color: {t.faint}; }}
     QLabel[class~="substep-name"] {{ color: {t.muted}; font-size: 12px; }}
+    /* .substep-name-project — situational/project-inserted steps (not from the skill's base
+    structure) render in the palette's blue token, per user request 2026-07-27 item 8. */
+    QLabel[class~="substep-name-project"] {{ color: {t.info}; font-size: 12px; }}
+    /* .substep-name-done — QSS has no text-decoration (silently ignored), so the strike-through
+    itself is applied via QFont.setStrikeOut() in code (_PhaseStepRow); this class only sets the
+    dimmed color. */
+    QLabel[class~="substep-name-done"] {{ color: {t.faint}; font-size: 12px; }}
     QLabel[class~="stag"] {{ font-size: 10px; }}
     QLabel[class~="stag-ok"] {{ color: {t.ok}; }}
     QLabel[class~="stag-wait"] {{ color: {t.yellow}; }}
+    QLabel[class~="stag-attempt"] {{ color: {t.info}; }}
+    /* .step-meas-icon — the per-step measurement-history icon (user request 2026-07-28): hover
+    lists the capture series used for this step, click opens one in the measurement panel below. */
+    QLabel[class~="step-meas-icon"] {{
+        color: {t.muted};
+        font-size: 12px;
+    }}
+    QLabel[class~="step-meas-icon"]:hover {{ color: {t.info}; }}
+    /* .step-skip — a superseded/skipped step stays visible (attempt history matters) but dims,
+    same descendant-override idiom as .chan-dim in the DSP tree. */
+    QWidget[class~="step-skip"] QLabel[class~="substep-name"] {{ color: {t.faint}; }}
+    QWidget[class~="step-skip"] QLabel[class~="substep-name-project"] {{ color: {t.faint}; }}
+    QPushButton[class~="add-step-btn"] {{
+        background: transparent;
+        border: none;
+        color: {t.faint};
+        font-size: 11px;
+        padding: 3px 26px;
+        text-align: left;
+    }}
+    QPushButton[class~="add-step-btn"]:hover {{ color: {t.accent}; }}
 
     /* ---- Measurement-task card (yellow accent) ---- */
     QWidget[class~="meas-card"] {{
@@ -526,8 +691,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         letter-spacing: 1px;
         text-transform: uppercase;
         color: {t.muted};
+        background: {t.panel2};
         border-bottom: 1px solid {t.border};
-        padding-bottom: 3px;
+        padding: 3px 6px;
     }}
     QLabel[class~="mn"] {{
         font-family: "SF Mono", Menlo, monospace;
@@ -620,6 +786,34 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="reason-btn"]:hover {{
         border-color: {t.info};
         color: {t.info};
+    }}
+    /* .meas-icon-btn — compact icon-only buttons for the measurement panel's Read/Assign-names
+    actions (full-text buttons ate too much of the header row next to the version banner, user
+    request 2026-07-27). Full label lives in the tooltip, not on the button face. */
+    QPushButton[class~="meas-icon-btn"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 6px;
+        font-size: 14px;
+        padding: 0;
+    }}
+    QPushButton[class~="meas-icon-btn"]:hover {{
+        border-color: {t.info};
+        color: {t.info};
+    }}
+    /* .meas-icon-btn-read — soft/gentle green (user's own wording: "салатним ніжним"), a lighter
+    tint than the strong `t.ok` used for "done" status elsewhere, so it reads as inviting rather
+    than a status indicator. */
+    QPushButton[class~="meas-icon-btn-read"] {{
+        background: {t.mix('ok', 16)};
+        border: 1px solid {t.mix('ok', 45, 'border')};
+        color: {t.ok};
+    }}
+    QPushButton[class~="meas-icon-btn-read"]:hover {{
+        border-color: {t.ok};
+        color: {t.ok};
+        background: {t.mix('ok', 26)};
     }}
     /* param-edit mode: a bright ORANGE (accent) border, distinct + more visible than the old
     thin blue one -- the user reads blue as the feedback/send colour. */

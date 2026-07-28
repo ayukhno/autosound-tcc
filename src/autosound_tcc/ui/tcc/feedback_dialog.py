@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 
 class FeedbackDialog(QDialog):
@@ -60,7 +61,7 @@ class FeedbackDialog(QDialog):
             btn = QPushButton(text)
             btn.setProperty("class", "fb-tool")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip(tip)
+            attach_tip(btn, tip)
             btn.clicked.connect(handler)
             toolbar.addWidget(btn)
         toolbar.addStretch(1)

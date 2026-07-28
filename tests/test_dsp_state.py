@@ -8,7 +8,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, ProjectView, parse_eq_bands
+from autosound_tcc.state.dsp_state import (
+    CrossoverLeg,
+    EqBand,
+    ParamSection,
+    ProjectView,
+    load_param_sections,
+    parse_eq_bands,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LEDGER = json.loads((FIXTURES / "sample_snapshot.json").read_text())
@@ -174,15 +181,16 @@ def test_slot_order_descr_and_tag_read_from_ledger():
     ledger = {"virtual_channels": {
         "VFL": {"slot": "A", "order": 0, "descr": "Front L Full", "polarity": "NORM",
                 "eq": ["LS 150 +2.5 Q0.71"]},
-        "VRL": {"slot": "C", "order": 2, "descr": "Rear L Full", "tag": "RearATT",
-                "polarity": "NORM", "eq": []},
+        "VRL": {"slot": "C", "order": 2, "descr": "Rear L Full", "tag": "RearRC",
+                "tag_value": "3/4", "polarity": "NORM", "eq": []},
     }}
     group = ProjectView.from_dict(ledger, profile).groups[0]
     assert group.max_count == 8
     rows = {r.name: r for r in group.rows}
     assert (rows["VFL"].slot, rows["VFL"].order, rows["VFL"].descr) == ("A", 0, "Front L Full")
     assert rows["VFL"].tag is None
-    assert (rows["VRL"].slot, rows["VRL"].tag) == ("C", "RearATT")
+    assert rows["VFL"].tag_value is None
+    assert (rows["VRL"].slot, rows["VRL"].tag, rows["VRL"].tag_value) == ("C", "RearRC", "3/4")
 
 
 def test_muted_and_off_flags():
@@ -212,3 +220,44 @@ def test_features_absent_is_empty_tuple():
     view = _view()
     assert view.features == ()
     assert view.slot_label is None and view.save is None
+
+
+def test_hidden_flag():
+    profile = {"dsp_profile": {"groups": [
+        {"id": "virtual_channels", "label": "V", "fields": ["eq"]},
+    ]}}
+    ledger = {"virtual_channels": {
+        "VRF": {"hidden": True, "eq": []}, "VFL": {"eq": []},
+    }}
+    rows = {r.name: r for r in ProjectView.from_dict(ledger, profile).groups[0].rows}
+    assert rows["VRF"].hidden and not rows["VFL"].hidden
+
+
+def test_param_sections_passthrough_in_from_dict():
+    sections = (ParamSection(id="car", label="Car setup", params=(("Make", "VW"),)),)
+    view = ProjectView.from_dict({"channels": {}}, {"dsp_profile": {"groups": []}}, param_sections=sections)
+    assert view.param_sections == sections
+
+
+def test_param_sections_absent_is_empty_tuple():
+    view = _view()
+    assert view.param_sections == ()
+
+
+def test_load_param_sections_reads_project_profile_json(tmp_path):
+    data = {
+        "param_sections": [
+            {"id": "car", "label": "Car setup", "params": [["Make", "VW"], ["Model", "Passat B8"]]},
+            {"id": "chassis", "label": "Body / chassis", "params": [["Doors", "4"]]},
+        ]
+    }
+    (tmp_path / "project_profile.json").write_text(json.dumps(data))
+    sections = load_param_sections(tmp_path)
+    assert sections == (
+        ParamSection(id="car", label="Car setup", params=(("Make", "VW"), ("Model", "Passat B8"))),
+        ParamSection(id="chassis", label="Body / chassis", params=(("Doors", "4"),)),
+    )
+
+
+def test_load_param_sections_absent_file_returns_empty(tmp_path):
+    assert load_param_sections(tmp_path) == ()

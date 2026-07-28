@@ -9,8 +9,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel  # noqa: E402
-from autosound_tcc.ui.tcc.mock_data import MEAS, PLAN  # noqa: E402
-from autosound_tcc.ui.tcc.plan_panel import PlanPanel, _PhaseRow  # noqa: E402
+from autosound_tcc.ui.tcc.mock_data import MEAS, PLAN, PlanStep, sessions_for_step  # noqa: E402
+from autosound_tcc.ui.tcc.plan_panel import (  # noqa: E402
+    _PhaseRow,
+    _PhaseStepRow,
+    _PlanProgress,
+    PlanPanel,
+)
 
 
 def _app() -> QApplication:
@@ -19,11 +24,12 @@ def _app() -> QApplication:
 
 def test_only_the_current_phase_starts_expanded():
     _app()
-    for phase in PLAN:
-        row = _PhaseRow(phase)
+    progress = _PlanProgress()
+    for i, phase in enumerate(PLAN):
+        row = _PhaseRow(phase, i, progress, lambda: None, lambda _sid: None)
         if phase.current:
             assert not row._steps_container.isHidden()
-        elif phase.steps:
+        else:
             assert row._steps_container.isHidden()
 
 
@@ -46,6 +52,78 @@ def test_retranslate_does_not_leave_stale_rows_behind():
     assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN)
 
 
+def test_skip_step_gets_dimmed_row_class():
+    _app()
+    progress = _PlanProgress()
+    step = PlanStep(id="x.1", name={"en": "skipped one", "uk": "пропущено"}, skip=True)
+    row = _PhaseStepRow(step, progress, lambda *_: None, lambda _sid: None)
+    assert row.property("class") == "step-skip"
+
+
+def test_attempt_gt_one_renders_attempt_chip():
+    _app()
+    progress = _PlanProgress()
+    step = PlanStep(id="x.2", name={"en": "redone", "uk": "переробили"}, attempt=2)
+    row = _PhaseStepRow(step, progress, lambda *_: None, lambda _sid: None)
+    from PySide6.QtWidgets import QLabel
+
+    labels = [w for w in row.findChildren(QLabel) if "stag-attempt" in (w.property("class") or "")]
+    assert len(labels) == 1
+    assert "2" in labels[0].text()
+
+
+def test_project_source_step_gets_blue_class():
+    _app()
+    progress = _PlanProgress()
+    step = PlanStep(id="x.3", name={"en": "situational", "uk": "ситуативний"}, source="project")
+    row = _PhaseStepRow(step, progress, lambda *_: None, lambda _sid: None)
+    from PySide6.QtWidgets import QLabel
+
+    name_label = row.findChildren(QLabel)[0]
+    assert name_label.property("class") == "substep-name-project"
+
+
+def test_done_checkbox_persists_via_progress_overlay(tmp_path, monkeypatch):
+    _app()
+    progress = _PlanProgress()
+    assert not progress.is_done("0.1")
+    seen = {}
+
+    def _on_toggle(sid, checked):
+        seen[sid] = checked
+        progress.set_done(sid, checked)
+
+    row = _PhaseStepRow(PLAN[0].steps[0], progress, _on_toggle, lambda _sid: None)
+    from PySide6.QtWidgets import QCheckBox
+
+    checkbox = row.findChild(QCheckBox)
+    checkbox.setChecked(True)
+    assert seen == {"0.1": True}
+    assert progress.is_done("0.1")
+    # New _PlanProgress instance reads the same QSettings store -- persisted across "sessions".
+    reloaded = _PlanProgress()
+    assert reloaded.is_done("0.1")
+
+
+def test_inserted_step_appears_in_phase_and_persists():
+    _app()
+    progress = _PlanProgress()
+    progress.add_step(0, "extra situational step")
+    inserted = progress.inserted_steps(0)
+    assert len(inserted) == 1
+    assert inserted[0].source == "project"
+    assert i18n_tx(inserted[0].name) == "extra situational step"
+
+    reloaded = _PlanProgress()
+    assert len(reloaded.inserted_steps(0)) == 1
+
+
+def i18n_tx(name_dict):
+    from autosound_tcc.ui.tcc import i18n
+
+    return i18n.tx(name_dict)
+
+
 def test_measurement_panel_builds_three_columns():
     _app()
     panel = MeasurementPanel()
@@ -55,3 +133,48 @@ def test_measurement_panel_builds_three_columns():
 
     rows = panel.findChildren(_MeasRow)
     assert len(rows) == sum(len(g.items) for g in MEAS.groups)
+
+
+def test_step_with_linked_sessions_shows_measurement_icon():
+    """Step "2.3" has a mock session linked to it (user request 2026-07-28) -- its row should
+    carry the measurement icon; a step with none (e.g. "0.1") should not."""
+    _app()
+    progress = _PlanProgress()
+    assert sessions_for_step("2.3")
+    step_with = next(s for phase in PLAN for s in phase.steps if s.id == "2.3")
+    row = _PhaseStepRow(step_with, progress, lambda *_: None, lambda _sid: None)
+    from PySide6.QtWidgets import QLabel
+
+    icons = [w for w in row.findChildren(QLabel) if w.property("class") == "step-meas-icon"]
+    assert len(icons) == 1
+
+    assert not sessions_for_step("0.1")
+    step_without = next(s for phase in PLAN for s in phase.steps if s.id == "0.1")
+    row2 = _PhaseStepRow(step_without, progress, lambda *_: None, lambda _sid: None)
+    icons2 = [w for w in row2.findChildren(QLabel) if w.property("class") == "step-meas-icon"]
+    assert len(icons2) == 0
+
+
+def test_clicking_measurement_icon_invokes_callback_with_newest_session_id():
+    _app()
+    progress = _PlanProgress()
+    step = next(s for phase in PLAN for s in phase.steps if s.id == "2.3")
+    seen = []
+    row = _PhaseStepRow(step, progress, lambda *_: None, seen.append)
+    from PySide6.QtWidgets import QLabel
+
+    icon = next(w for w in row.findChildren(QLabel) if w.property("class") == "step-meas-icon")
+    icon.mousePressEvent(None)
+    assert seen == [sessions_for_step("2.3")[0].id]
+
+
+def test_plan_panel_session_requested_reaches_measurement_panel():
+    """End-to-end wiring check (main_window.py connects this the same way): PlanPanel's signal,
+    when connected to MeasurementPanel.show_session, actually switches the displayed session."""
+    _app()
+    plan = PlanPanel()
+    meas = MeasurementPanel()
+    plan.sessionRequested.connect(meas.show_session)
+    assert meas._viewing_id == "v10"
+    plan.sessionRequested.emit("v9")
+    assert meas._viewing_id == "v9"

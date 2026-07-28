@@ -33,13 +33,15 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # field token -> (column header, cell-renderer). Order here is the fallback display order when a
 # group declares a field not already covered by a fixed prototype-matching order below.
 _FIELD_COLUMNS: dict[str, str] = {
     "hp": "HPF", "lp": "LPF", "gain_db": "Gain dB", "ta_ms": "Delay ms",
-    "polarity": "Pol", "phase_deg": "Phase", "mute": "Mute", "eq_bypass": "EQ Byp", "eq": "EQ",
+    "polarity": "Pol", "phase_deg": "Phase", "mute": "Mute", "off": "Off",
+    "eq_bypass": "EQ Byp", "eq": "EQ",
 }
 
 _MATCH_PALETTE = ["#5aa9e6", "#4bbf87", "#e8973c", "#c98fe0", "#e8c34a", "#e05c5c"]
@@ -90,7 +92,9 @@ class EqBandCard(QFrame):
     """One EQ band card: Type/Freq/Q/Gain + a read-only ByPass row. `match_color`, when given,
     draws the colored top border used to flag a shared frequency between paired L/R channels."""
 
-    def __init__(self, band: EqBand, match_color: Optional[str] = None) -> None:
+    def __init__(
+        self, band: EqBand, match_color: Optional[str] = None, gain_mismatch: bool = False
+    ) -> None:
         super().__init__()
         self.setProperty("class", "band")
         self.setFixedWidth(112)
@@ -118,7 +122,10 @@ class EqBandCard(QFrame):
             fk = QLabel(label)
             fk.setProperty("class", "band-fk")
             fv = QLabel(value)
-            fv.setProperty("class", "band-fv")
+            # A shared frequency (same top-border match_color) whose L/R gain still differs looked
+            # identical to a same-freq/same-gain match -- flag the Gain value specifically so the
+            # asymmetry is visible at a glance (user request 2026-07-27).
+            fv.setProperty("class", "band-fv-mismatch" if (label == "Gain" and gain_mismatch) else "band-fv")
             row_layout.addWidget(fk)
             row_layout.addStretch(1)
             row_layout.addWidget(fv)
@@ -131,14 +138,19 @@ class EqBandCard(QFrame):
         layout.addWidget(byp)
 
 
-def _band_flow(bands: tuple[EqBand, ...], match_map: Optional[dict[float, str]] = None) -> QWidget:
+def _band_flow(
+    bands: tuple[EqBand, ...],
+    match_map: Optional[dict[float, str]] = None,
+    gain_mismatch_freqs: Optional[set] = None,
+) -> QWidget:
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
     for band in bands:
         color = (match_map or {}).get(band.freq_hz)
-        layout.addWidget(EqBandCard(band, color))
+        mismatch = band.freq_hz in (gain_mismatch_freqs or ())
+        layout.addWidget(EqBandCard(band, color, mismatch))
     layout.addStretch(1)
     return container
 
@@ -180,6 +192,12 @@ class DetailPane(QFrame):
         self._pair_btn.clicked.connect(self._on_pair_toggle)
         self._pair_btn.setVisible(False)
         head_layout.addWidget(self._pair_btn)
+        self._eq_help = QLabel("?")
+        self._eq_help.setProperty("class", "eq-help")
+        self._eq_help.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self._eq_help.setVisible(False)
+        self._eq_help_tip = attach_tip(self._eq_help)
+        head_layout.addWidget(self._eq_help)
         self._title = QLabel("")
         self._title.setProperty("class", "phead-sub")
         head_layout.addWidget(self._title)
@@ -202,6 +220,11 @@ class DetailPane(QFrame):
 
     def close_pane(self) -> None:
         self.setVisible(False)
+        # Clear what's "open" along with visibility -- otherwise `current_group_id()`/
+        # `refresh_with()` would keep reporting the just-closed group as open (`_group` isn't
+        # otherwise touched by closing), and a later reload would silently re-open a pane the user
+        # explicitly closed.
+        self._group, self._row, self._mode = None, None, None
         self.closed.emit()
 
     def open_table(self, group: ProfileGroup, select_row_id: Optional[str] = None) -> None:
@@ -229,12 +252,38 @@ class DetailPane(QFrame):
         self._sync_tabs()
         self.setVisible(True)
 
+    def current_group_id(self) -> Optional[str]:
+        """The id of the group currently shown (table or EQ), or None if nothing's open --
+        lets a caller re-fetch the up-to-date `ProfileGroup` after a project reload without this
+        module knowing anything about where groups come from."""
+        return self._group.id if self._group is not None else None
+
+    def refresh_with(self, group: ProfileGroup) -> None:
+        """Re-render whatever's currently open (table or EQ) using a freshly loaded `group` with
+        the same id. `ProfileGroup`/`GroupRow` are immutable snapshots -- without this, a table or
+        EQ view left open across a preset switch keeps showing the OLD preset's frozen values
+        (mute state and everything else) since nothing tells it a new version was loaded (user
+        report 2026-07-28). No-op if the pane isn't currently open.
+
+        Checks `self._group` rather than `self.isVisible()` -- the latter also depends on every
+        ancestor being shown, which is false in headless tests (and would make this a silent
+        no-op there) even though the pane's own open/closed state is unambiguous."""
+        if self._group is None:
+            return
+        if self._mode == "eq" and self._row is not None:
+            row = next((r for r in group.rows if r.id == self._row.id), None)
+            if row is not None:
+                self.open_eq(group, row)
+                return
+        self.open_table(group)
+
     # ---- tabs -----------------------------------------------------------
 
     def _sync_tabs(self) -> None:
         self._tab_table.set_on(self._mode == "table")
         self._tab_eq.set_on(self._mode == "eq")
         self._pair_btn.set_on(self._pair_mode)
+        self._eq_help.setVisible(self._mode == "eq")
 
     def _on_tab_table(self) -> None:
         if self._group is not None:
@@ -303,7 +352,7 @@ class DetailPane(QFrame):
         item = QTableWidgetItem(self._cell_text(field, row))
         if field in ("hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"):
             item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
-        elif field in ("polarity", "mute", "eq_bypass"):
+        elif field in ("polarity", "mute", "off", "eq_bypass"):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         else:
             item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
@@ -317,6 +366,8 @@ class DetailPane(QFrame):
             color = t.inv if row.raw.get("polarity") == "INV" else t.muted
         elif field == "eq":
             color = t.accent if row.eq_count() > 0 else t.faint
+        elif field == "off":
+            color = t.off if row.raw.get("off") else None
         elif field in ("hp", "lp") and self._cell_text(field, row) == "OFF":
             color = t.faint
         if color:
@@ -341,6 +392,8 @@ class DetailPane(QFrame):
             return raw.get("polarity") or "—"
         if field == "mute":
             return "MUTE" if raw.get("mute") else "—"
+        if field == "off":
+            return "OFF" if raw.get("off") else "—"
         if field == "eq_bypass":
             return "Y" if raw.get("eq_bypass") else "—"
         if field == "eq":
@@ -351,22 +404,21 @@ class DetailPane(QFrame):
     # ---- EQ view ----------------------------------------------------------
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
+        self._eq_help_tip.set_text(i18n.t("eqHint"))
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(8)
-
-        hint = QLabel(i18n.t("eqHint"))
-        hint.setTextFormat(Qt.TextFormat.RichText)
-        hint.setWordWrap(True)
-        hint.setProperty("class", "eq-hint")
-        layout.addWidget(hint)
 
         if self._pair_mode and sib_row:
             l_row, r_row = (row, sib_row) if _is_left(row.name) else (sib_row, row)
             l_bands, r_bands = l_row.eq_bands(), r_row.eq_bands()
             shared = sorted({b.freq_hz for b in l_bands} & {b.freq_hz for b in r_bands})
             match_map = {f: _MATCH_PALETTE[i % len(_MATCH_PALETTE)] for i, f in enumerate(shared)}
+            l_gain_by_freq = {b.freq_hz: b.gain_db for b in l_bands}
+            r_gain_by_freq = {b.freq_hz: b.gain_db for b in r_bands}
+            gain_mismatch = {f for f in shared if l_gain_by_freq.get(f) != r_gain_by_freq.get(f)}
 
             if shared:
                 legend = QWidget()
@@ -386,7 +438,7 @@ class DetailPane(QFrame):
                 row_label = QLabel(f"{label} · {r.name} ({len(r.eq_bands())})")
                 row_label.setProperty("class", "eq-rowlab")
                 layout.addWidget(row_label)
-                layout.addWidget(_band_flow(r.eq_bands(), match_map))
+                layout.addWidget(_band_flow(r.eq_bands(), match_map, gain_mismatch))
         else:
             layout.addWidget(_band_flow(row.eq_bands()))
 

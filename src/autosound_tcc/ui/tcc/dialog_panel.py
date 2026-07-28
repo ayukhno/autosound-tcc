@@ -25,8 +25,15 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.mock_data import DIALOG, DialogMessage
 from autosound_tcc.ui.tcc.theme import apply_caps
+
+# .msg-body's base font-size in theme.py -- kept in sync with that QSS literal so the dialog's own
+# A-/A+ control (below) scales from the same starting point.
+_MSG_BODY_BASE_PX = 13.0
+_DIALOG_FONT_KEY = "ui/dialog_font_scale"
+_DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
 
 
 class MessageBubble(QFrame):
@@ -39,19 +46,25 @@ class MessageBubble(QFrame):
         who_label = QLabel(role)
         who_label.setProperty("class", f"msg-who msg-who-{who}")
         layout.addWidget(who_label)
-        body = QLabel(html)
-        body.setTextFormat(Qt.TextFormat.RichText)
-        body.setWordWrap(True)
-        body.setProperty("class", "msg-body")
-        layout.addWidget(body)
+        self._body = QLabel(html)
+        self._body.setTextFormat(Qt.TextFormat.RichText)
+        self._body.setWordWrap(True)
+        self._body.setProperty("class", "msg-body")
+        layout.addWidget(self._body)
         # Width the bubble would want if its text sat on one line -- lets the panel size each
         # bubble to its content (dynamic, like the web) up to the max-width cap, instead of every
         # bubble being forced to the same width.
         plain = re.sub(r"<[^>]+>", "", html)
         self.natural_width = max(
-            body.fontMetrics().horizontalAdvance(plain),
+            self._body.fontMetrics().horizontalAdvance(plain),
             who_label.fontMetrics().horizontalAdvance(role),
         ) + 28
+
+    def apply_font_scale(self, scale: float) -> None:
+        # A widget's own stylesheet wins over the app-wide one for the same selector, so this
+        # overrides .msg-body's QSS without fighting the global A-/A+ zoom's stylesheet regex
+        # (theme.py::_scale_font_sizes), which only ever touches the app-wide stylesheet string.
+        self._body.setStyleSheet(f"QLabel {{ font-size: {_MSG_BODY_BASE_PX * scale:.1f}px; }}")
 
 
 class DialogPanel(QWidget):
@@ -67,6 +80,8 @@ class DialogPanel(QWidget):
         self._editing = False
         self._reason: str | None = None
         self._bubbles: list[MessageBubble] = []
+        self._settings = get_settings()
+        self._font_scale = float(self._settings.value(_DIALOG_FONT_KEY, 1.0))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -85,6 +100,38 @@ class DialogPanel(QWidget):
         self._sub_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._sub_label)
         head_layout.addStretch(1)
+
+        # Dialog-only font-size control, independent of the header's app-wide A-/A+ zoom -- reuses
+        # that control's QSS classes so it reads as consistent, but only ever touches bubble text
+        # (MessageBubble.apply_font_scale), never the rest of the app's stylesheet.
+        font_group = QFrame()
+        font_group.setProperty("class", "zoomgroup")
+        fg_layout = QHBoxLayout(font_group)
+        fg_layout.setContentsMargins(0, 0, 0, 0)
+        fg_layout.setSpacing(0)
+        font_out = QPushButton("A−")
+        font_out.setProperty("class", "zoomgroup-btn")
+        font_out.setCursor(Qt.CursorShape.PointingHandCursor)
+        font_out.clicked.connect(self._font_out)
+        fg_layout.addWidget(font_out)
+        div = QFrame()
+        div.setProperty("class", "zoomgroup-div")
+        div.setFixedWidth(1)
+        fg_layout.addWidget(div)
+        self._font_label = QLabel(f"{round(self._font_scale * 100)}%")
+        self._font_label.setProperty("class", "zoomgroup-label")
+        self._font_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fg_layout.addWidget(self._font_label)
+        div2 = QFrame()
+        div2.setProperty("class", "zoomgroup-div")
+        div2.setFixedWidth(1)
+        fg_layout.addWidget(div2)
+        font_in = QPushButton("A+")
+        font_in.setProperty("class", "zoomgroup-btn")
+        font_in.setCursor(Qt.CursorShape.PointingHandCursor)
+        font_in.clicked.connect(self._font_in)
+        fg_layout.addWidget(font_in)
+        head_layout.addWidget(font_group)
 
         self._edit_chip = QPushButton("✎ " + i18n.t("editChipLabel"))
         self._edit_chip.setProperty("class", "edit-chip")
@@ -181,6 +228,7 @@ class DialogPanel(QWidget):
     def _add_bubble(self, who: str, role: str, html: str) -> None:
         bubble_row = QHBoxLayout()
         bubble = MessageBubble(who, role, html)
+        bubble.apply_font_scale(self._font_scale)
         self._bubbles.append(bubble)
         self._fit(bubble)
         if who == "user":
@@ -192,6 +240,21 @@ class DialogPanel(QWidget):
             bubble_row.addWidget(bubble)
             bubble_row.addStretch(1)
         self._chat_layout.insertLayout(self._chat_layout.count() - 1, bubble_row)
+
+    # ---- dialog-only font size ---------------------------------------------
+
+    def _set_font_scale(self, scale: float) -> None:
+        self._font_scale = round(min(_DIALOG_FONT_MAX, max(_DIALOG_FONT_MIN, scale)), 2)
+        self._settings.setValue(_DIALOG_FONT_KEY, self._font_scale)
+        self._font_label.setText(f"{round(self._font_scale * 100)}%")
+        for bubble in self._bubbles:
+            bubble.apply_font_scale(self._font_scale)
+
+    def _font_out(self) -> None:
+        self._set_font_scale(self._font_scale - _DIALOG_FONT_STEP)
+
+    def _font_in(self) -> None:
+        self._set_font_scale(self._font_scale + _DIALOG_FONT_STEP)
 
     def _add_system_message(self, html: str) -> None:
         self._add_bubble("sys", "SYSTEM · ledger", html)

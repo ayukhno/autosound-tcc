@@ -1,12 +1,18 @@
-"""Read-only wrapper over the vendored REW HTTP API (`rew_api.py`).
+"""Mostly-read-only wrapper over the vendored REW HTTP API (`rew_api.py`).
 
-Exposes only the reading half of `rew_api`: measurements, curves (FR, group
-delay, impulse response, distortion), and REW's own internal filter / equaliser
-/ target-response model. The write-capable functions (`set_filters`,
+Exposes the reading half of `rew_api`: measurements, curves (FR, group delay,
+impulse response, distortion), and REW's own internal filter / equaliser /
+target-response model. The write-capable functions (`set_filters`,
 `set_equaliser`, `measurement_command`, and the phase/smoothing commands that
 create derived measurements) are deliberately NOT surfaced here, so the
 read-only guarantee is structural rather than a convention someone must
 remember. See the project brief §11 (safety gates).
+
+ONE narrow, user-approved exception: `rename_measurement` (2026-07-27, item 9 --
+the capture-order auto-naming feature). Renaming a measurement's title doesn't
+touch DSP state or REW's filter/target model, only REW's own measurement list,
+so it was judged a much smaller blast radius than the write methods above --
+still, don't add more write methods here without the same explicit sign-off.
 
 REW must be running locally; `rew_api` talks to http://localhost:4735.
 """
@@ -54,6 +60,11 @@ class RewBridge:
     def by_name(self, name: str, *, exact: bool = True):
         """(id, measurement_dict) resolved by title right now."""
         return self.api.get_measurement_by_name(name, exact=exact)
+
+    def rename_measurement(self, mid, title: str) -> dict:
+        """The one write exception -- see module docstring. UNVERIFIED against a live REW
+        instance; see `rew_api.rename_measurement`'s docstring for the caveat and fallback."""
+        return self.api.rename_measurement(mid, title)
 
     # -- curves --
     def frequency_response(self, mid):
