@@ -664,11 +664,21 @@ class MainWindow(QMainWindow):
         self._repolish_all()
 
     def _repolish_all(self) -> None:
-        # Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
-        app = QApplication.instance()
-        for widget in app.allWidgets():
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
+        """Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
+
+        Scoped to this window's own widget tree, not `QApplication.allWidgets()`. The app-wide
+        walk touched every widget in the process -- including ones this window doesn't own and
+        ones whose C++ side is already gone -- and PySide6 then hands back an object that isn't a
+        QWidget at all (`'QSpacerItem' object has no attribute 'style'`, hit in the test suite as
+        soon as other widgets existed alongside a window). Dialogs that need repolishing are
+        parented to the window, so they are in `findChildren` anyway.
+        """
+        for widget in [self, *self.findChildren(QWidget)]:
+            style = widget.style()
+            if style is None:  # widget torn down between the query and the call
+                continue
+            style.unpolish(widget)
+            style.polish(widget)
 
     def _toggle_theme(self) -> None:
         self._apply_theme("light" if self._mode == "dark" else "dark")

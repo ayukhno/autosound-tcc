@@ -239,6 +239,12 @@ def build_server(
 
         This touches REW, never the DSP: it is the equivalent of the Arbiter typing the filters
         into REW's EQ window by hand, so they can see the predicted result before deciding.
+
+        Each entry: `index` (1-based slot), `type` (`PK`/`LS`/`HS`/`None`/...), `enabled`, and for
+        a peaking filter `frequency`, `q`, and **`gaindB`**. The gain key really is `gaindB` --
+        REW accepts an entry using `gain` with a 200 and stores the filter at 0 dB, so a cut
+        written that way silently does nothing. Replaces the whole set, so send every slot you
+        want kept; clear one with `{"index": N, "type": "None", "enabled": true}`.
         """
         allowed = await _confirm(
             ConfirmRequest(
