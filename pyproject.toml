@@ -27,6 +27,7 @@ dev = ["pytest>=7"]
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"
 dsp-profile-interview = "autosound_tcc.dsp_profile_interview:main"
+tuning-session = "autosound_tcc.tuning_session_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autosound_tcc"]

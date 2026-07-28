@@ -3,14 +3,19 @@ edit flag chip (`data/private/prototype/tcc-main.html`): message bubbles (Genera
 Arbiter/system), a composer, and the "✎ Project param edit" chip + reason picker that flags the
 dialog as being about a ledger correction rather than routine tuning.
 
-Mock `DIALOG` messages only (M5 scope) — this is the main tuning-dialog surface, distinct from
-`profile_interview_dialog.py`'s onboarding-only chat. Wiring the composer to a real
-`core.agent_session`-style backend (reusing that module's QThread+asyncio pattern) is later work.
+Two modes, one widget. With no agent attached it renders the mock `DIALOG` exactly as before —
+that is what the design was built against and what most tests exercise. Call `attach_agent()` and
+it becomes the live surface: streamed Generator text, tool calls as process chips, the Arbiter's
+confirmation bar, and a composer wired to a real session.
+
+Signals *out* of the panel go through the MCP signal bus rather than straight to the session, so
+they reach whichever front-end is driving — the in-app agent or the user's own CLI in a terminal.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -24,9 +29,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import signal_bus
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
-from autosound_tcc.ui.tcc.mock_data import DIALOG, DialogMessage
+from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
+from autosound_tcc.ui.tcc.mock_data import DIALOG, CURRENT_GENERATOR_MODEL, DialogMessage
 from autosound_tcc.ui.tcc.theme import apply_caps
 
 # .msg-body's base font-size in theme.py -- kept in sync with that QSS literal so the dialog's own
@@ -60,6 +67,16 @@ class MessageBubble(QFrame):
             who_label.fontMetrics().horizontalAdvance(role),
         ) + 28
 
+    def set_html(self, html: str) -> None:
+        """Replace the body text — used while a streamed answer is still growing.
+
+        `natural_width` is recomputed so the bubble keeps hugging its content as text arrives,
+        instead of freezing at the width of the first delta.
+        """
+        self._body.setText(html)
+        plain = re.sub(r"<[^>]+>", "", html)
+        self.natural_width = self._body.fontMetrics().horizontalAdvance(plain) + 28
+
     def apply_font_scale(self, scale: float) -> None:
         # A widget's own stylesheet wins over the app-wide one for the same selector, so this
         # overrides .msg-body's QSS without fighting the global A-/A+ zoom's stylesheet regex
@@ -82,6 +99,13 @@ class DialogPanel(QWidget):
         self._bubbles: list[MessageBubble] = []
         self._settings = get_settings()
         self._font_scale = float(self._settings.value(_DIALOG_FONT_KEY, 1.0))
+        # Live-agent state. All None/False until attach_agent() is called, which is what keeps the
+        # mock rendering path byte-identical for the design and for existing tests.
+        self._worker: Optional[Any] = None
+        self._bus: Optional[signal_bus.SignalBus] = None
+        self._live_bubble: Optional[MessageBubble] = None
+        self._live_text = ""
+        self._streamed_this_turn = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -99,6 +123,14 @@ class DialogPanel(QWidget):
         self._sub_label = QLabel(i18n.t("dialogSub"))
         self._sub_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._sub_label)
+
+        # Which AI session this conversation is: phase, and whether it was resumed or started
+        # fresh. Blank until an agent is attached -- see `set_session_label`.
+        self._session_chip = QLabel("")
+        self._session_chip.setProperty("class", "pill")
+        self._session_chip.setHidden(True)
+        head_layout.addWidget(self._session_chip)
+
         head_layout.addStretch(1)
 
         # Dialog-only font-size control, independent of the header's app-wide A-/A+ zoom -- reuses
@@ -133,6 +165,17 @@ class DialogPanel(QWidget):
         fg_layout.addWidget(font_in)
         head_layout.addWidget(font_group)
 
+        # "I don't see this in the UI" — the Arbiter's way of telling the agent that something it
+        # claimed to have changed did not land. Raises a `not_visible` signal, which the skill is
+        # instructed to treat as "re-verify against disk", not "restate the claim".
+        self._not_visible_btn = QPushButton("👁 " + i18n.t("notVisible"))
+        self._not_visible_btn.setProperty("class", "edit-chip")
+        self._not_visible_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._not_visible_btn.setToolTip(i18n.t("notVisibleHint"))
+        self._not_visible_btn.clicked.connect(self._on_not_visible)
+        self._not_visible_btn.setHidden(True)  # pointless without an agent listening
+        head_layout.addWidget(self._not_visible_btn)
+
         self._edit_chip = QPushButton("✎ " + i18n.t("editChipLabel"))
         self._edit_chip.setProperty("class", "edit-chip")
         self._edit_chip.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -159,6 +202,12 @@ class DialogPanel(QWidget):
         self._reasons_bar.setHidden(True)
         outer.addWidget(self._reasons_bar)
 
+        # The Arbiter's gate. Sits directly above the transcript so the thing being approved is
+        # next to the reasoning that led to it.
+        self.confirm_bar = ConfirmBar()
+        self.confirm_bar.resolved.connect(self._on_confirmation_resolved)
+        outer.addWidget(self.confirm_bar)
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -181,12 +230,25 @@ class DialogPanel(QWidget):
         composer_layout.setContentsMargins(9, 9, 9, 9)
         composer_layout.setSpacing(8)
         self._input = QLineEdit()
-        self._input.setPlaceholderText(i18n.t("composer"))
+        # Says "prototype — doesn't send" until an agent is attached, so the mock transcript never
+        # looks like a live conversation the user can talk to.
+        self._input.setPlaceholderText(i18n.t("composerMock"))
         self._input.setProperty("class", "composer-input")
         composer_layout.addWidget(self._input, stretch=1)
         self._send_btn = QPushButton(i18n.t("send"))
         self._send_btn.setProperty("class", "composer-send")
+        self._send_btn.clicked.connect(self._on_send)
+        self._input.returnPressed.connect(self._on_send)
         composer_layout.addWidget(self._send_btn)
+
+        # Only meaningful while a turn is running, so it takes the send button's place rather than
+        # sitting next to it greyed out.
+        self._stop_btn = QPushButton(i18n.t("stop"))
+        self._stop_btn.setProperty("class", "reason-btn")
+        self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_btn.clicked.connect(self._on_stop)
+        self._stop_btn.setHidden(True)
+        composer_layout.addWidget(self._stop_btn)
         outer.addWidget(composer)
 
     def retranslate(self) -> None:
@@ -200,8 +262,11 @@ class DialogPanel(QWidget):
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
         self._reason_btns["forgot"].setText(i18n.t("reasonForgot"))
         self._reason_btns["manual"].setText(i18n.t("reasonManual"))
-        self._input.setPlaceholderText(i18n.t("composer"))
+        self._input.setPlaceholderText(i18n.t("composer" if self._worker else "composerMock"))
         self._send_btn.setText(i18n.t("send"))
+        self._stop_btn.setText(i18n.t("stop"))
+        self._not_visible_btn.setText("👁 " + i18n.t("notVisible"))
+        self._not_visible_btn.setToolTip(i18n.t("notVisibleHint"))
         if self._editing and self._reason:
             label = i18n.t("reasonForgot" if self._reason == "forgot" else "reasonManual")
             self._edit_chip.setText(f"✎ {label} ✕")
@@ -258,7 +323,146 @@ class DialogPanel(QWidget):
 
     def _add_system_message(self, html: str) -> None:
         self._add_bubble("sys", "SYSTEM · ledger", html)
-        self._scroll.verticalScrollBar().setValue(self._scroll.verticalScrollBar().maximum())
+        self._scroll_to_end()
+
+    def _scroll_to_end(self) -> None:
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    # ---- live agent --------------------------------------------------------
+
+    def attach_agent(
+        self,
+        worker: Any,
+        bus: signal_bus.SignalBus,
+        resumed: bool = False,
+        phase: Optional[str] = None,
+    ) -> None:
+        """Switch the panel from the mock transcript to a live session.
+
+        The mock bubbles are cleared rather than kept: leaving demo content above real output is
+        how a tuner ends up acting on a number that was never measured.
+        """
+        self._worker = worker
+        self._bus = bus
+        self._clear_bubbles()
+        self._not_visible_btn.setHidden(False)
+        self._input.setPlaceholderText(i18n.t("composer"))
+        self.set_session_label(resumed=resumed, phase=phase)
+
+        worker.chunk.connect(self._on_chunk)
+        worker.turn_done.connect(self._on_turn_done)
+        worker.failed.connect(self._on_failed)
+        self._set_busy(True)
+
+    def set_session_label(self, resumed: bool, phase: Optional[str]) -> None:
+        state = i18n.t("sessionResumed") if resumed else i18n.t("sessionNew")
+        label = f"{phase} · {state}" if phase else state
+        self._session_chip.setText(label)
+        self._session_chip.setHidden(False)
+
+    def _clear_bubbles(self) -> None:
+        for bubble in self._bubbles:
+            row = bubble.parentWidget()
+            bubble.setParent(None)
+            bubble.deleteLater()
+            if row is not None and row is not self._chat:
+                row.deleteLater()
+        self._bubbles.clear()
+        self._live_bubble = None
+        # The layout still holds the now-empty rows; drop everything except the trailing stretch,
+        # which _add_bubble's insert index depends on.
+        while self._chat_layout.count() > 1:
+            item = self._chat_layout.takeAt(0)
+            if item.layout() is not None:
+                item.layout().deleteLater()
+
+    def _set_busy(self, busy: bool) -> None:
+        self._input.setEnabled(not busy)
+        self._send_btn.setHidden(busy)
+        self._stop_btn.setHidden(not busy)
+        self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
+
+    def _on_send(self) -> None:
+        text = self._input.text().strip()
+        if not text or self._worker is None:
+            return
+        self._add_bubble("user", "Arbiter · you", text)
+        self._scroll_to_end()
+        self._input.clear()
+        self._set_busy(True)
+        self._worker.send(text)
+
+    def _on_stop(self) -> None:
+        """Interrupt the running turn. The worker owns the session, so ask it, don't reach in."""
+        if self._worker is not None and hasattr(self._worker, "interrupt"):
+            self._worker.interrupt()
+
+    def _on_chunk(self, item: Any) -> None:
+        """Render one item from the session: streamed text, a tool call, or a finished message."""
+        event = getattr(item, "event", None)
+        if isinstance(event, dict):  # StreamEvent — the raw Anthropic stream event
+            if event.get("type") == "content_block_delta":
+                delta = event.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    self._append_live_text(delta.get("text", ""))
+            return
+
+        content = getattr(item, "content", None)
+        if not isinstance(content, list):
+            return
+        for block in content:
+            name = getattr(block, "name", None)
+            if name:  # ToolUseBlock -- a process event, not a wall of JSON
+                self._add_chip(name)
+            elif not self._streamed_this_turn:
+                # Nothing streamed (partial messages off, or a non-text turn): fall back to the
+                # complete block so the turn is never rendered as silence.
+                text = getattr(block, "text", "")
+                if text:
+                    self._append_live_text(text)
+
+    def _append_live_text(self, text: str) -> None:
+        if not text:
+            return
+        self._streamed_this_turn = True
+        self._live_text += text
+        if self._live_bubble is None:
+            self._add_bubble("gen", f"Generator · {CURRENT_GENERATOR_MODEL}", self._live_text)
+            self._live_bubble = self._bubbles[-1]
+        else:
+            self._live_bubble.set_html(self._live_text)
+            self._fit(self._live_bubble)
+        self._scroll_to_end()
+
+    def _add_chip(self, tool_name: str) -> None:
+        """A tool call as a one-line process event ("· mcp__tcc__get_tcc_state")."""
+        pretty = tool_name.replace("mcp__tcc__", "")
+        self._add_bubble("sys", "TOOL", f"· {pretty}")
+        self._live_bubble = None  # text after a tool call starts a new bubble
+        self._live_text = ""
+        self._scroll_to_end()
+
+    def _on_turn_done(self) -> None:
+        self._live_bubble = None
+        self._live_text = ""
+        self._streamed_this_turn = False
+        self._set_busy(False)
+        self._input.setFocus()
+
+    def _on_failed(self, message: str) -> None:
+        self._add_bubble("sys", i18n.t("agentFailed"), f"⚠️ {message}")
+        self._set_busy(False)
+
+    def _on_confirmation_resolved(self, tool: str, allowed: bool) -> None:
+        key = "confirmAllowed" if allowed else "confirmDenied"
+        self._add_system_message(i18n.t(key).format(tool=tool))
+
+    def _on_not_visible(self) -> None:
+        if self._bus is None:
+            return
+        self._bus.push(signal_bus.NOT_VISIBLE, note=self._input.text().strip() or None)
+        self._add_system_message(i18n.t("notVisibleSent"))
 
     # ---- project-param-edit flag flow -------------------------------------
 
@@ -276,10 +480,16 @@ class DialogPanel(QWidget):
         self._edit_chip.setText("✎ " + i18n.t("reasonForgot" if reason == "forgot" else "reasonManual") + " ✕")
         self._restyle_chip()
         self._add_system_message(i18n.t("editStartForgot" if reason == "forgot" else "editStartManual"))
+        # Goes through the bus, not the session: the agent may be the in-app one or the user's own
+        # CLI in a terminal, and param-edit mode has to reach whichever is actually listening.
+        if self._bus is not None:
+            self._bus.push(signal_bus.PARAM_EDIT_MODE, on=True, reason=reason)
         self.editingChanged.emit(True)
 
     def _finish_editing(self) -> None:
         self._add_system_message(i18n.t("editDoneForgot" if self._reason == "forgot" else "editDoneManual"))
+        if self._bus is not None:
+            self._bus.push(signal_bus.PARAM_EDIT_MODE, on=False, reason=self._reason)
         self._editing = False
         self._reason = None
         self._edit_chip.setProperty("class", "edit-chip")

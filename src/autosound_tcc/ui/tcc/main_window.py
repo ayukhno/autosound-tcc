@@ -10,6 +10,8 @@ section gets wired to real data, but the outer structure built here should not n
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import QPoint, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
@@ -26,9 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config
+from autosound_tcc.core import config, terminal_launcher
+from autosound_tcc.core.mcp_server import TccMcpServer
+from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.agent_worker import AgentWorker
+from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
@@ -206,6 +212,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self._apply_theme(self._mode)
         self._load_project()
+        self._start_mcp_server()
 
     # ---- header / footer -------------------------------------------------
 
@@ -321,6 +328,21 @@ class MainWindow(QMainWindow):
         ai_critic = _mini_combo()
         ai_critic.addItems(AI_CRITIC_MODELS)
         layout.addWidget(ai_critic)
+
+        # Two ways to bring an AI to this project, both explicit. Neither starts on launch: one
+        # spends the user's tokens, the other opens a window on their desktop, and an app that
+        # does either just because it was opened is an app people stop opening.
+        self._session_btn = QPushButton(i18n.t("startSession"))
+        self._session_btn.setProperty("class", "reason-btn")
+        self._session_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._session_btn.clicked.connect(self._start_tuning_session)
+        layout.addWidget(self._session_btn)
+
+        self._terminal_btn = QPushButton(i18n.t("openTerminal"))
+        self._terminal_btn.setProperty("class", "reason-btn")
+        self._terminal_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._terminal_btn.clicked.connect(self._open_terminal)
+        layout.addWidget(self._terminal_btn)
 
         layout.addStretch(1)
 
@@ -666,10 +688,101 @@ class MainWindow(QMainWindow):
 
     # ---- language -----------------------------------------------------------
 
+    # ---- AI backends --------------------------------------------------------
+
+    def _start_mcp_server(self) -> None:
+        """Publish TCC over MCP so an agent -- in-app or in the user's terminal -- can reach it.
+
+        Always started, never gated behind a button: it costs nothing, spends no tokens, and being
+        up before the user launches a CLI is the whole point of writing `.mcp.json` for them.
+        A failure here is not fatal; TCC is still a usable state viewer without it.
+        """
+        self._bridge = QtUiBridge(self)
+        self._bridge.confirmationRequested.connect(self._dialog.confirm_bar.enqueue)
+        self._bridge.clipboardRequested.connect(lambda text: QGuiApplication.clipboard().setText(text))
+        self._bridge.proposalReceived.connect(self._on_proposal)
+        self._publish_snapshot()
+
+        self._mcp_server = None
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            # Opting out leaves TCC a state viewer with no local port open -- a legitimate choice
+            # for anyone who doesn't want one, and what the test suite uses to stay off the
+            # network.
+            return
+        try:
+            self._mcp_server = TccMcpServer(bridge=self._bridge)
+            self._mcp_server.start()
+        except Exception as exc:  # port taken, unwritable project folder, ...
+            self._mcp_server = None
+            self._dialog._add_system_message(f"⚠️ MCP: {exc}")
+
+    def _publish_snapshot(self) -> None:
+        """Mirror what's on screen into the bridge, for `get_tcc_state` to read off-thread."""
+        self._bridge.set_snapshot(
+            preset=self._preset_override or config.resolve_preset(),
+            project_dir=str(config.project_dir()),
+            param_edit_mode=self._dialog.is_editing,
+            theme=self._mode,
+        )
+
+    def _on_proposal(self, proposal: dict) -> None:
+        text = (
+            f"<b>{proposal.get('channel')}</b> · {proposal.get('param')}: "
+            f"{proposal.get('from')} → <b>{proposal.get('to')}</b><br>{proposal.get('rationale', '')}"
+        )
+        self._dialog._add_system_message(text)
+
+    def _start_tuning_session(self) -> None:
+        """Front-end A: run the skill in-process and stream it into the dialog panel."""
+        if getattr(self, "_agent_worker", None) is not None:
+            return
+        if self._mcp_server is None:
+            self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
+            return
+
+        server = self._mcp_server
+        probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
+        self._agent_worker = AgentWorker(
+            session_factory=lambda: TuningSession(
+                project_dir=server.project_dir,
+                mcp_url=server.url,
+                mcp_token=server.token,
+                bridge=self._bridge,
+            )
+        )
+        self._dialog.attach_agent(
+            self._agent_worker,
+            server.bus,
+            resumed=probe.resumed_from is not None,
+            phase=server.registry.current_phase(),
+        )
+        self._session_btn.setEnabled(False)
+        self._agent_worker.start()
+
+    def _open_terminal(self) -> None:
+        """Front-end B: hand the project to the user's own CLI in their own terminal."""
+        project_dir = self._mcp_server.project_dir if self._mcp_server else config.project_dir()
+        try:
+            cli = terminal_launcher.launch(project_dir)
+        except terminal_launcher.TerminalLaunchError as exc:
+            self._dialog._add_system_message(f"⚠️ {exc}")
+            return
+        self._dialog._add_system_message(i18n.t("terminalOpened").format(cli=cli))
+
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
         self._meas_panel.shutdown()
+        # Deny anything the agent is still waiting on: an unanswered confirmation would otherwise
+        # keep an MCP call parked until its timeout, long after the window it belonged to is gone.
+        self._dialog.confirm_bar.reject_all()
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            # Interrupt-then-wait, not just stop-then-wait: a worker mid-turn never reads the
+            # stop sentinel, and Qt destroying a still-running QThread is undefined behaviour.
+            worker.shutdown()
+        if getattr(self, "_mcp_server", None) is not None:
+            self._mcp_server.stop()
         super().closeEvent(event)
 
     def _on_language_selected(self, lang: str) -> None:

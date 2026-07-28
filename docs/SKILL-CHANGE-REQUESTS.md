@@ -358,3 +358,51 @@ user names/relocates their REW project file), the same class of fact as SCR-011'
 equipment list. Deferred rather than building a manual "type the path into a settings field"
 placeholder in TCC first -- decided with the user (2026-07-28) to let the skill's own intake own
 this fact if/when it's added, rather than TCC inventing a duplicate, unsynced input for it.
+
+## SCR-019 — AI-session lifecycle: when TCC starts a new Generator session vs. resumes
+
+**Status**: proposed (open design question, not yet answered -- user request 2026-07-28)
+**Target**: TCC's live AI-dialog integration (`ui/tcc/dialog_panel.py` + a `core/agent_session.py`-
+style session, once the Generator stops being `mock_data.DIALOG`) + the skill's own phase model
+(`references/core/process-control.md`, the Phase −1..6 skeleton)
+**TCC dependency**: this is the first thing to design before wiring a real AI dialog into the
+window (see [[project_tcc_qt_port_status]] M8 follow-up, "biggest risk" per the user) -- without an
+answer, every TCC launch either wastefully restarts context or silently drifts by resuming stale
+state.
+
+**Detail**: user's working hypothesis (2026-07-28), recorded as-is, not yet fully resolved:
+- One **phase** (of the skill's existing Phase −1..6 method skeleton) maps to roughly one AI
+  session -- not one session per app launch, not one session for the whole project.
+- TCC needs explicit **semaphores** -- signals for when to start a genuinely NEW session vs.
+  continue the existing one. Not yet designed: what those signals actually are.
+- What's already certain: at the end of any significant chunk of work, and on app exit, enough
+  context must be saved that a later launch (new session OR resume) can pick up correctly without
+  re-deriving it from scratch.
+- If a phase is NOT yet closed and a resumable session exists, TCC resumes it rather than starting
+  fresh.
+
+**Open questions this raises** (none answered yet):
+1. What counts as "phase closed" -- the skill's own phase-gate criteria (already in
+   `process-control.md`), or does TCC need its own separate closure signal?
+2. Where does the resume-vs-new decision surface -- automatic on launch, or does the user get
+   asked?
+3. Does "save context on exit" mean SCR-004's `process-state.json`/`journal.jsonl` is already
+   sufficient, or does TCC need an *additional* app-level snapshot (e.g. the live Agent SDK
+   session id + last N turns) on top of what the skill already persists?
+
+Likely the same underlying mechanism answers both "what's the current phase/step" (SCR-004's
+concern) and "should the AI session resume" (this one) -- flagged as its own entry because it's
+specifically about AI-session lifecycle, not just what the Plan panel displays.
+
+**Also relevant to the wider AI-integration push** (not a separate SCR, notes from the same
+conversation): the skill already has a working, non-mock Gemini "Critic"/"Advisor" channel --
+`scripts/gemini_critic.sh` / `gemini_advisor.sh` (shell out to a locally installed CLI, `agy`
+Antigravity or `@google/gemini-cli`, per `.critic-env`) and a fuller cross-platform
+`scripts/autosound_ai.py` (same two roles, plus direct cloud-API calls and a "clipboard mode" that
+copies a compiled markdown package for pasting into any web chat). TCC's Critic integration should
+call/wrap these existing, already-working entry points rather than build a fresh Gemini SDK
+integration from scratch. Confirmed scope for the Generator's v1 write access (user, 2026-07-28):
+propose solutions + write EQ into REW's own filter/target model (not the physical DSP) + write a
+Helix-format EQ string to the clipboard for the user to paste into Helix's own PC-Tool -- consistent
+with the existing "no automated DSP writes" safety gate and with `autosound_ai.py`'s own clipboard-
+mode precedent.

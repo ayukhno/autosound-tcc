@@ -1,4 +1,4 @@
-"""Resolve where the DSP-state ledger lives.
+"""Resolve where the DSP-state ledger and the tuning project live.
 
 The ledger is install-specific private data (brief §3a) — it never ships in the
 repo. During development it sits under the gitignored ``data/private/state/``.
@@ -8,6 +8,12 @@ user can point the app at their own project folder without code changes:
     AUTOSOUND_TCC_STATE_ROOT   directory holding <preset>/v_NNN.json subdirs
     AUTOSOUND_TCC_PRESET       preset name (subdir); auto-detected if unset and
                                exactly one preset directory exists
+    AUTOSOUND_PROJECT_DIR      the tuning project folder the AI session runs in
+
+**Project folder** (TCC-TZ.md §3): one project = one folder the user points at,
+with a recent-projects list and *zero* disk scanning. That folder is the agent's
+`cwd`, holds the skill's own state, and gets TCC's `.tcc/` and `.mcp.json`
+written into it.
 """
 
 from __future__ import annotations
@@ -27,15 +33,90 @@ def state_root() -> Path:
     return Path(env).expanduser() if env else DEFAULT_STATE_ROOT
 
 
-def project_dir() -> Path:
-    """Directory holding this project's `dsp_profile.json`.
+# QSettings keys for the user's project-folder choice. The chosen folder outlives a single run
+# (recent-projects list, TCC-TZ.md §3) but an env var still wins, so a dogfood/CI run can point at
+# a different project without touching the developer's saved preference.
+_PROJECT_DIR_KEY = "project/dir"
+_RECENT_PROJECTS_KEY = "project/recent"
+MAX_RECENT_PROJECTS = 8
 
-    Defaults to `state_root()` — the same tree also holds `<preset>/v_NNN.json` for now. Full
-    `project.json` + `presets/<preset>/{target,state}` nesting (TCC-TZ.md §3) is a later storage
-    migration, not required for the profile mechanism itself.
+
+def project_dir() -> Path:
+    """The tuning project folder: agent `cwd`, skill state, `.tcc/`, `dsp_profile.json`.
+
+    Resolution order — env override, then the user's persisted choice, then `state_root()` as the
+    pilot-era fallback (that tree also holds `<preset>/v_NNN.json` for now). Full `project.json` +
+    `presets/<preset>/{target,state}` nesting (TCC-TZ.md §3) is a later storage migration.
+
+    `AUTOSOUND_TCC_PROJECT_DIR` is the legacy spelling, still honoured so existing shells keep
+    working; SCR-011 wants the `AUTOSOUND_*` names converged with the skill's own convention.
     """
-    env = os.environ.get("AUTOSOUND_TCC_PROJECT_DIR")
-    return Path(env).expanduser() if env else state_root()
+    for var in ("AUTOSOUND_PROJECT_DIR", "AUTOSOUND_TCC_PROJECT_DIR"):
+        env = os.environ.get(var)
+        if env:
+            return Path(env).expanduser()
+    saved = _settings().value(_PROJECT_DIR_KEY, "")
+    if saved:
+        return Path(str(saved)).expanduser()
+    return state_root()
+
+
+def set_project_dir(path: Path) -> None:
+    """Persist the user's project choice and push it to the front of the recent list."""
+    path = Path(path).expanduser()
+    settings = _settings()
+    settings.setValue(_PROJECT_DIR_KEY, str(path))
+    recent = [str(path)] + [p for p in _recent_raw(settings) if p != str(path)]
+    settings.setValue(_RECENT_PROJECTS_KEY, recent[:MAX_RECENT_PROJECTS])
+
+
+def recent_projects() -> list[Path]:
+    """Recently opened project folders, newest first, filtered to ones that still exist."""
+    return [Path(p) for p in _recent_raw(_settings()) if Path(p).is_dir()]
+
+
+def looks_like_project(path: Path) -> bool:
+    """Whether `path` plausibly is a tuning project, for validating a folder the user picked.
+
+    Deliberately loose: a project the skill has driven has `autosound_context.md`, one TCC has
+    opened before has `.tcc/`, and one that has only been through DSP-profile onboarding has just
+    `dsp_profile.json`. Any of those counts; an empty folder the user means to start fresh in
+    doesn't, so the caller can warn rather than silently write into the wrong place.
+    """
+    path = Path(path)
+    return any(
+        (path / name).exists()
+        for name in ("autosound_context.md", ".tcc", "dsp_profile.json", "rew_analitic")
+    )
+
+
+def tcc_dir(project_dir_: Optional[Path] = None) -> Path:
+    """TCC's own per-project scratch: session registry, signal bus, UI-mode mirror.
+
+    Deliberately NOT the skill's `process/` directory (SCR-004) — that namespace belongs to the
+    skill, and squatting on it would make the eventual real `process-state.json` ambiguous.
+    """
+    return (project_dir_ or project_dir()) / ".tcc"
+
+
+def mcp_config_path(project_dir_: Optional[Path] = None) -> Path:
+    """Where TCC advertises its own MCP server so any CLI launched in the project picks it up."""
+    return (project_dir_ or project_dir()) / ".mcp.json"
+
+
+def _settings():
+    # Imported lazily so this module stays importable (and the ledger paths stay resolvable)
+    # without a Qt application object having been constructed yet.
+    from autosound_tcc.ui.tcc.app_settings import get_settings
+
+    return get_settings()
+
+
+def _recent_raw(settings) -> list[str]:
+    value = settings.value(_RECENT_PROJECTS_KEY, [])
+    if isinstance(value, str):  # QSettings collapses a 1-element list back to a bare string
+        return [value] if value else []
+    return [str(v) for v in (value or [])]
 
 
 def dsp_profile_path(project_dir_: Optional[Path] = None) -> Path:

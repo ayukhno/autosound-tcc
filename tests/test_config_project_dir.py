@@ -1,0 +1,111 @@
+"""Project-folder resolution (core/config.py) — env override, saved choice, recent list."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from autosound_tcc.core import config
+
+
+def test_canonical_env_var_wins(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path / "chosen"))
+
+    assert config.project_dir() == tmp_path / "chosen"
+
+
+def test_legacy_env_var_still_honoured(tmp_path, monkeypatch):
+    """Existing shells and scripts set `AUTOSOUND_TCC_PROJECT_DIR`; SCR-011 converges the naming
+    but must not break them on the way."""
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path / "legacy"))
+
+    assert config.project_dir() == tmp_path / "legacy"
+
+
+def test_canonical_beats_legacy_when_both_are_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path / "new"))
+    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path / "old"))
+
+    assert config.project_dir() == tmp_path / "new"
+
+
+def test_saved_choice_is_used_when_no_env_override(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PROJECT_DIR", raising=False)
+    chosen = tmp_path / "saved"
+    chosen.mkdir()
+
+    config.set_project_dir(chosen)
+
+    assert config.project_dir() == chosen
+
+
+def test_recent_list_is_newest_first_and_deduplicated(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+
+    config.set_project_dir(first)
+    config.set_project_dir(second)
+    config.set_project_dir(first)  # re-opening moves it back to the front, doesn't duplicate
+
+    assert config.recent_projects() == [first, second]
+
+
+def test_recent_list_drops_folders_that_no_longer_exist(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    config.set_project_dir(gone)
+    gone.rmdir()
+
+    assert config.recent_projects() == []
+
+
+def test_recent_list_is_capped(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    for i in range(config.MAX_RECENT_PROJECTS + 4):
+        folder = tmp_path / f"p{i}"
+        folder.mkdir()
+        config.set_project_dir(folder)
+
+    assert len(config.recent_projects()) == config.MAX_RECENT_PROJECTS
+
+
+def test_looks_like_project_accepts_any_of_the_marker_files(tmp_path):
+    for marker in ("autosound_context.md", "dsp_profile.json"):
+        folder = tmp_path / marker.replace(".", "_")
+        folder.mkdir()
+        (folder / marker).write_text("x", encoding="utf-8")
+        assert config.looks_like_project(folder)
+
+    for marker in (".tcc", "rew_analitic"):
+        folder = tmp_path / marker.strip(".")
+        folder.mkdir()
+        (folder / marker).mkdir()
+        assert config.looks_like_project(folder)
+
+
+def test_looks_like_project_rejects_an_empty_folder(tmp_path):
+    """So the caller can warn instead of silently writing `.tcc/` into the wrong directory."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    assert not config.looks_like_project(empty)
+
+
+def test_tcc_dir_does_not_squat_on_the_skills_process_namespace(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    assert config.tcc_dir() == tmp_path / ".tcc"
+    assert config.tcc_dir().name != "process"  # SCR-004's namespace belongs to the skill
+    assert config.mcp_config_path() == tmp_path / ".mcp.json"
+
+
+def test_paths_follow_an_explicit_project_dir_argument(tmp_path):
+    other = tmp_path / "other"
+
+    assert config.tcc_dir(other) == other / ".tcc"
+    assert config.mcp_config_path(other) == other / ".mcp.json"
+    assert config.dsp_profile_path(other) == other / "dsp_profile.json"

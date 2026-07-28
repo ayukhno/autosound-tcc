@@ -62,7 +62,7 @@ def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatc
     (preset_dir / "v_001.json").write_text(json.dumps(ledger))
     (preset_dir / "HEAD").write_text("v_001")
 
-    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
 
     _app()
@@ -98,7 +98,7 @@ def test_switching_preset_does_not_duplicate_tree_sections(tmp_path, monkeypatch
         (preset_dir / "v_001.json").write_text(json.dumps(ledger))
         (preset_dir / "HEAD").write_text("v_001")
 
-    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "PRESET_A")
 
@@ -135,7 +135,7 @@ def test_preset_switch_refreshes_an_already_open_table(tmp_path, monkeypatch):
         (preset_dir / "v_001.json").write_text(json.dumps(ledger))
         (preset_dir / "HEAD").write_text("v_001")
 
-    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "PRESET_A")
 
@@ -189,7 +189,7 @@ def test_project_profile_renders_extra_param_sections(tmp_path, monkeypatch):
     (preset_dir / "v_001.json").write_text(json.dumps(ledger))
     (preset_dir / "HEAD").write_text("v_001")
 
-    monkeypatch.setenv("AUTOSOUND_TCC_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
 
     _app()

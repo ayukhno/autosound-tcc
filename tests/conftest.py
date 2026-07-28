@@ -25,3 +25,23 @@ def _isolated_qsettings(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))  # IniFormat UserScope resolves under $HOME
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_project_dir(tmp_path, monkeypatch):
+    """Keep tests out of the developer's real project folder, and off the network.
+
+    Same failure mode the QSettings fixture exists for, one layer up: `config.project_dir()` falls
+    back to the real ledger root, and MainWindow writes `.mcp.json` and `.tcc/` into whatever it
+    resolves to. Without this, merely constructing a window during a test drops files into
+    `data/private/state/` -- observed, not hypothetical.
+
+    `AUTOSOUND_TCC_MCP=0` additionally keeps the tests from binding a real port: a suite that
+    starts uvicorn per window is slow, and two tests scanning for a free port at once is a race
+    nobody wants to debug later.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(project))
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "0")
+    yield
