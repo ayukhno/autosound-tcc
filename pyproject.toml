@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "autosound-tcc"
-version = "0.0.1"
+version = "0.0.2"
 description = "Read-only Tuning Command Center for car-audio DSP tuning (macOS + Windows)."
 readme = "README.md"
 requires-python = ">=3.10"
