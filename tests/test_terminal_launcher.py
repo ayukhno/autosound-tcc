@@ -142,6 +142,24 @@ def test_macos_hint_is_passed_as_the_clis_own_argument(recorded, monkeypatch, tm
     assert "exec gemini 'onboarding a Helix DSP Ultra S'" in script
 
 
+def test_macos_model_comes_before_the_hint(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+
+    launch(tmp_path, "claude", hint="onboarding a Musway M6V4", model="opus")
+
+    script = recorded[0][2]
+    assert "exec claude --model opus 'onboarding a Musway M6V4'" in script
+
+
+def test_macos_model_without_a_hint(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+
+    launch(tmp_path, "gemini", model="gemini-2.5-pro")
+
+    script = recorded[0][2]
+    assert "exec gemini --model gemini-2.5-pro" in script
+
+
 def test_macos_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
     """No hint must not append anything at all -- same command shape as before this feature."""
     monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
@@ -160,7 +178,7 @@ def test_windows_terminal_hint_is_passed_as_the_clis_own_argument(recorded, monk
 
     assert recorded[0][:2] == ["wt", "-d"]
     assert recorded[0][3:5] == ["cmd", "/k"]
-    assert recorded[0][-1] == 'codex "onboarding a Musway M6V4"'
+    assert recorded[0][-1] == '"codex" "onboarding a Musway M6V4"'
 
 
 def test_windows_terminal_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
@@ -169,3 +187,14 @@ def test_windows_terminal_without_a_hint_is_unchanged(recorded, monkeypatch, tmp
     launch(tmp_path, "claude")
 
     assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]
+
+
+def test_windows_model_alone_still_switches_to_cmd_k(recorded, monkeypatch, tmp_path):
+    """A model with no hint still needs the cmd /k wrapper -- only the truly bare case stays a
+    plain argv element."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "claude", model="opus")
+
+    assert recorded[0][3:5] == ["cmd", "/k"]
+    assert recorded[0][-1] == '"claude" --model "opus"'

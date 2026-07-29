@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSplitter,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -565,6 +566,19 @@ class MainWindow(QMainWindow):
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
+        # Shown in every _show_left_status case, not just offer_create -- there's currently no
+        # watcher for dsp_profile.json's first appearance (a terminal-driven onboarding session
+        # finishes asynchronously, with no signal back to this window), so this is the only way
+        # to notice a file that just appeared without restarting the app.
+        self._refresh_project_btn = QPushButton(i18n.t("refreshProject"))
+        self._refresh_project_btn.setProperty("class", "reason-btn")
+        self._refresh_project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh_project_btn.clicked.connect(self._load_project)
+        self._refresh_project_btn.setVisible(False)
+        self._dsp_section.body_layout().addWidget(
+            self._refresh_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -633,6 +647,7 @@ class MainWindow(QMainWindow):
         self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
+        self._refresh_project_btn.setVisible(False)
         self._tree.setVisible(True)
         self._view = view
         self._tree.set_view(view)
@@ -683,12 +698,19 @@ class MainWindow(QMainWindow):
             # opens, so there's no ordering race to wait out here.
             new_window = MainWindow()
             new_window.show()
-            hint = (
-                f"Onboarding a {dialog.onboarding_vendor} {dialog.onboarding_model} DSP -- use "
-                f"this project's TCC MCP tools (check_existing_profile first)."
+            language_name = i18n.t("langNameUk" if i18n.current_language() == "uk" else "langNameEn")
+            hint = i18n.t("npOnboardingHint").format(
+                vendor=dialog.onboarding_vendor,
+                model=dialog.onboarding_model,
+                language=language_name,
             )
             try:
-                terminal_launcher.launch(dialog.project_dir, cli=dialog.open_terminal_cli, hint=hint)
+                terminal_launcher.launch(
+                    dialog.project_dir,
+                    cli=dialog.open_terminal_cli,
+                    hint=hint,
+                    model=dialog.onboarding_ai_model,
+                )
             except terminal_launcher.TerminalLaunchError as exc:
                 new_window._status_strip.notify(str(exc), level="warn")
             self.close()
@@ -877,8 +899,15 @@ class MainWindow(QMainWindow):
         parented to the window, so they are in `findChildren` anyway.
         """
         for widget in [self, *self.findChildren(QWidget)]:
+            # findChildren(QWidget) has, more than once now (QSpacerItem, then QWidgetItem), handed
+            # back a layout-item wrapper -- and its Python-side isinstance(widget, QWidget) can
+            # still say True while its C++ identity is actually stale, so .style() itself can come
+            # back as the wrong type. Checking `style`'s own type is what actually catches it;
+            # checking `widget`'s type first was not enough.
+            if not isinstance(widget, QWidget):
+                continue
             style = widget.style()
-            if style is None:  # widget torn down between the query and the call
+            if not isinstance(style, QStyle):  # None, or a stray non-QStyle object either way
                 continue
             style.unpolish(widget)
             style.polish(widget)
@@ -988,6 +1017,9 @@ class MainWindow(QMainWindow):
         self._bridge.clipboardRequested.connect(lambda text: QGuiApplication.clipboard().setText(text))
         self._bridge.proposalReceived.connect(self._on_proposal)
         self._bridge.critiqueReceived.connect(self._on_critique)
+        # A terminal-driven onboarding session's finalize_profile lands here -- the in-app chat
+        # doesn't need this, it already restarts into a fresh window off its own signal.
+        self._bridge.profileReady.connect(self._load_project)
         self._publish_snapshot()
         self._refresh_critic_status()
 

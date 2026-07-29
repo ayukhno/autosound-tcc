@@ -76,6 +76,11 @@ class UiBridge(Protocol):
 
     def show_critique(self, critique: dict[str, Any]) -> None: ...
 
+    def notify_profile_ready(self) -> None:
+        """A DSP profile was just written (onboarding via terminal, `finalize_profile` below) --
+        the GUI should reload it. Fires only from the terminal path; the in-app onboarding chat
+        already restarts into a fresh window off its own `profile_saved` signal."""
+
 
 class HeadlessBridge:
     """No GUI: every mutation is denied, reads answer from disk.
@@ -101,8 +106,23 @@ class HeadlessBridge:
     def show_proposal(self, proposal: dict[str, Any]) -> None:
         pass
 
+    def notify_profile_ready(self) -> None:
+        pass
+
     def show_critique(self, critique: dict[str, Any]) -> None:
         pass
+
+
+def _strip_stray_dsp_profile_prefix(path: str) -> str:
+    """Defensive: `save_profile_field`/`reset_profile_field`'s `path` is relative to
+    `project_profile` (already the unwrapped profile), but an agent that also saw a bundled
+    profile's on-disk shape (`{"dsp_profile": {...}}`) can still guess a `dsp_profile.` prefix --
+    observed live (2026-07-29 dogfood: "Wrong nesting — path made dsp_profile.dsp_profile").
+    Correcting it here is more robust than hoping the tool description alone prevents every case.
+    """
+    if path.startswith("dsp_profile."):
+        return path[len("dsp_profile."):]
+    return path
 
 
 def build_server(
@@ -244,6 +264,11 @@ def build_server(
         If it returns a project profile or an exact bundled match, don't re-ask about anything it
         already confirmed -- call get_capability_checklist and ask only about what's still open,
         2-3 questions per turn (see get_capability_checklist's own note).
+
+        `project_profile` and `bundled_exact_match` are both returned UNWRAPPED (no top-level
+        `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s `path`
+        resolves against. A path like `groups.0.fields` reaches `project_profile.groups[0].fields`
+        directly; never prefix a path with `dsp_profile.`, that key does not exist at this level.
         """
         try:
             dsp_profile = vendor_loader.load_dsp_profile()
@@ -259,9 +284,9 @@ def build_server(
                 onboarding_draft["data"] = agent_session.empty_profile_draft(vendor, model)
         bundled = dsp_profile.find_bundled(vendor, model, str(config.bundled_profiles_dir()))
         out = {
-            "project_profile": onboarding_draft["data"],
+            "project_profile": onboarding_draft["data"].get("dsp_profile", onboarding_draft["data"]),
             "open_questions": dsp_profile.open_questions(onboarding_draft["data"]),
-            "bundled_exact_match": bundled,
+            "bundled_exact_match": bundled.get("dsp_profile", bundled) if bundled else None,
         }
         return json.dumps(out, ensure_ascii=False)
 
@@ -271,8 +296,11 @@ def build_server(
         check_existing_profile first). One field per call, as soon as it's confirmed -- don't
         batch everything to the end.
 
-        `path` is a dotted path from the profile root, e.g. 'sample_rate_hz' or
-        'groups.0.fields'. `groups` is a flat array, each EXACTLY
+        `path` is a dotted path relative to `project_profile` as returned by
+        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields' reach
+        `project_profile.sample_rate_hz` / `project_profile.groups[0].fields` directly. NEVER
+        prefix a path with 'dsp_profile.' -- `project_profile` already IS that object, prefixing
+        it creates a wrong nested dsp_profile.dsp_profile. `groups` is a flat array, each EXACTLY
         {{"id": "<snake_case_id>", "label": "<Human Label>", "fields": [<tokens>]}} -- `fields`
         must be a flat array of STRING TOKENS drawn ONLY from this vocabulary, nothing else:
         {json.dumps(agent_session.FIELD_VOCABULARY)}
@@ -281,6 +309,7 @@ def build_server(
         """
         if onboarding_draft["data"] is None:
             return json.dumps({"error": "call check_existing_profile first"})
+        path = _strip_stray_dsp_profile_prefix(path)
         value = agent_session.maybe_decode_json(value)
         agent_session.set_dotted_field(
             onboarding_draft["data"].setdefault("dsp_profile", {}), path, value
@@ -294,6 +323,7 @@ def build_server(
         a string), not part of the normal interview flow."""
         if onboarding_draft["data"] is None:
             return json.dumps({"error": "call check_existing_profile first"})
+        path = _strip_stray_dsp_profile_prefix(path)
         parts = path.split(".")
         node = onboarding_draft["data"].get("dsp_profile", {})
         for part in parts[:-1]:
@@ -322,6 +352,7 @@ def build_server(
         profile_path = config.dsp_profile_path(project_dir)
         dsp_profile.validate_profile(onboarding_draft["data"])
         dsp_profile.save_profile(str(profile_path), onboarding_draft["data"])
+        bridge.notify_profile_ready()
         return json.dumps({"saved_to": str(profile_path)}, ensure_ascii=False)
 
     # ---- writes (every one gated on the Arbiter) ---------------------------

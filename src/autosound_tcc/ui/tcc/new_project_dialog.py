@@ -75,6 +75,7 @@ class NewProjectDialog(QDialog):
         self.project_dir: Optional[Path] = None
         self.onboarding_vendor: str = ""
         self.onboarding_model: str = ""
+        self.onboarding_ai_model: Optional[str] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 20)
@@ -138,6 +139,15 @@ class NewProjectDialog(QDialog):
         self._ai_combo.addItems(AI_MAIN_MODELS)
         layout.addWidget(self._ai_combo)
 
+        # Terminal path's own model field: free-text, since each CLI has its own model-name
+        # vocabulary (TCC doesn't maintain a Gemini/Codex catalog the way it does for Claude) --
+        # passed through as `--model <value>` (terminal_launcher.launch), blank = CLI's own default.
+        self._terminal_model_label = _field_label(i18n.t("npTerminalModel"))
+        layout.addWidget(self._terminal_model_label)
+        self._terminal_model_edit = QLineEdit()
+        self._terminal_model_edit.setPlaceholderText(i18n.t("npTerminalModelPlaceholder"))
+        layout.addWidget(self._terminal_model_edit)
+
         actions = QHBoxLayout()
         actions.addStretch(1)
         cancel_btn = QPushButton(i18n.t("npCancel"))
@@ -157,12 +167,14 @@ class NewProjectDialog(QDialog):
         self._on_run_via_selected(self._run_via_combo.currentIndex())
 
     def _on_run_via_selected(self, _index: int) -> None:
-        """The AI-model picker only means anything for the in-app path -- a terminal CLI's own
-        model choice is between the user and their own CLI, not TCC's business (same principle
-        terminal_launcher.py's own docstring states)."""
+        """The Claude-specific AI_MAIN_MODELS picker only means anything for the in-app path;
+        a terminal CLI gets its own free-text model field instead (2026-07-29: "would be right to
+        call terminals with a model applied too")."""
         is_in_app = self._run_via_combo.currentData() is None
         self._ai_model_label.setVisible(is_in_app)
         self._ai_combo.setVisible(is_in_app)
+        self._terminal_model_label.setVisible(not is_in_app)
+        self._terminal_model_edit.setVisible(not is_in_app)
 
     def _on_profile_selected(self, _index: int) -> None:
         """A bundled pick fills vendor/model with the EXACT strings `find_bundled()` checks
@@ -209,10 +221,12 @@ class NewProjectDialog(QDialog):
         if cli is None:
             ai_model = AI_MODEL_IDS.get(self._ai_combo.currentText())
             self.interview_dialog = ProfileInterviewDialog(
-                project_dir, vendor, model, ai_model, parent=self.parent()
+                project_dir, vendor, model, ai_model, i18n.current_language(),
+                parent=self.parent(),
             )
         else:
             self.open_terminal_cli = cli
             self.onboarding_vendor = vendor
             self.onboarding_model = model
+            self.onboarding_ai_model = self._terminal_model_edit.text().strip() or None
         self.accept()

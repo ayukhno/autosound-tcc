@@ -30,6 +30,7 @@ T: dict[Lang, dict[str, str]] = {
         "rewOnlineTip": "REW: online",
         "rewOfflineTip": "REW: not reachable on this port",
         "createProject": "+ Create new project",
+        "refreshProject": "↻ Refresh",
         "noProjectMeas": "No project — nothing to capture yet.",
         "npTitle": "New project",
         "npFolder": "Project folder",
@@ -43,6 +44,14 @@ T: dict[Lang, dict[str, str]] = {
         "npRunVia": "Run onboarding via",
         "npRunInApp": "In-app (Claude)",
         "npAiModel": "AI model",
+        "npTerminalModel": "Model (optional)",
+        "npTerminalModelPlaceholder": "e.g. opus, gemini-2.5-pro — blank = CLI default",
+        "npOnboardingHint": "Use the autosound-tuning skill for DSP-profile onboarding. Connect "
+                            "to this project's 'tcc' MCP server (see .mcp.json) and call its "
+                            "check_existing_profile tool first, for vendor={vendor} model={model}. "
+                            "Please conduct the interview in {language}.",
+        "langNameEn": "English",
+        "langNameUk": "Ukrainian",
         "npCreate": "Create",
         "npCancel": "Cancel",
         "preset": "Preset",
@@ -167,6 +176,7 @@ T: dict[Lang, dict[str, str]] = {
         "rewOnlineTip": "REW: онлайн",
         "rewOfflineTip": "REW: недоступний на цьому порту",
         "createProject": "+ Створити новий проєкт",
+        "refreshProject": "↻ Оновити",
         "noProjectMeas": "Немає проєкту — знімати поки нічого.",
         "npTitle": "Новий проєкт",
         "npFolder": "Тека проєкту",
@@ -180,6 +190,14 @@ T: dict[Lang, dict[str, str]] = {
         "npRunVia": "Вести onboarding через",
         "npRunInApp": "У додатку (Claude)",
         "npAiModel": "Модель ШІ",
+        "npTerminalModel": "Модель (необовʼязково)",
+        "npTerminalModelPlaceholder": "напр. opus, gemini-2.5-pro — пусто = дефолт CLI",
+        "npOnboardingHint": "Скористайся скілом autosound-tuning для onboarding DSP-профілю. "
+                            "Підключись до MCP-сервера 'tcc' цього проєкту (див. .mcp.json) і "
+                            "виклич його тул check_existing_profile першим, для vendor={vendor} "
+                            "model={model}. Веди інтерв'ю {language}.",
+        "langNameEn": "англійською",
+        "langNameUk": "українською",
         "npCreate": "Створити",
         "npCancel": "Скасувати",
         "preset": "Пресет",

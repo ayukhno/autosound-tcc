@@ -38,13 +38,19 @@ class _AgentWorker(QThread):
     failed = Signal(str)
 
     def __init__(
-        self, project_dir: Path, vendor: str, model: str, ai_model: Optional[str] = None
+        self,
+        project_dir: Path,
+        vendor: str,
+        model: str,
+        ai_model: Optional[str] = None,
+        language: str = "en",
     ) -> None:
         super().__init__()
         self._project_dir = project_dir
         self._vendor = vendor
         self._model = model
         self._ai_model = ai_model
+        self._language = language
         self._inbox: "queue.Queue[Optional[str]]" = queue.Queue()
         self._session: Optional[OnboardingSession] = None
 
@@ -63,7 +69,7 @@ class _AgentWorker(QThread):
 
     async def _main(self) -> None:
         self._session = OnboardingSession(
-            self._project_dir, self._vendor, self._model, self._ai_model
+            self._project_dir, self._vendor, self._model, self._ai_model, self._language
         )
         try:
             async for text in self._session.start():
@@ -99,6 +105,7 @@ class ProfileInterviewDialog(QDialog):
         vendor: str,
         model: str,
         ai_model: Optional[str] = None,
+        language: str = "en",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -127,7 +134,7 @@ class ProfileInterviewDialog(QDialog):
         self._composer.returnPressed.connect(self._on_send)
         self._set_input_enabled(False)
 
-        self._worker = _AgentWorker(project_dir, vendor, model, ai_model)
+        self._worker = _AgentWorker(project_dir, vendor, model, ai_model, language)
         self._worker.chunk.connect(self._on_chunk)
         self._worker.turn_done.connect(self._on_turn_done)
         self._worker.profile_saved.connect(self._on_profile_saved)

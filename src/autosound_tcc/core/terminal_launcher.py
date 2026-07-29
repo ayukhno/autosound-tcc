@@ -46,7 +46,33 @@ def default_cli() -> Optional[str]:
     return found[0][0] if found else None
 
 
-def _posix_command(project_dir: Path, cli: str, hint: Optional[str] = None) -> str:
+def _posix_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -> str:
+    """`cli [--model M] ["hint"]`, POSIX-quoted. `--model` is assumed for every known CLI here
+    (confirmed for `claude`; `gemini`/`codex`/`agy` follow the same near-universal convention,
+    not independently verified per-CLI) -- comes before the prompt positional argument, matching
+    ordinary CLI argument-parsing order."""
+    parts = [shlex.quote(cli)]
+    if model:
+        parts += ["--model", shlex.quote(model)]
+    if hint:
+        parts.append(shlex.quote(hint))
+    return " ".join(parts)
+
+
+def _win_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -> str:
+    """Same shape as `_posix_cli_invocation`, Windows quoting (always double-quote, no escaping
+    needed for the short executable names / plain text this handles)."""
+    parts = [f'"{cli}"']
+    if model:
+        parts += ["--model", f'"{model}"']
+    if hint:
+        parts.append(f'"{hint}"')
+    return " ".join(parts)
+
+
+def _posix_command(
+    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+) -> str:
     """The shell line the terminal will run: enter the project, then hand over to the CLI.
 
     `hint`, when given, is passed as the CLI's own initial-prompt ARGUMENT (`cli "hint text"`) --
@@ -55,10 +81,7 @@ def _posix_command(project_dir: Path, cli: str, hint: Optional[str] = None) -> s
     whatever the shell printed a moment earlier -- an `echo` before `exec` was confirmed
     (2026-07-29 dogfood) to render as nothing at all once the TUI took over.
     """
-    cli_invocation = shlex.quote(cli)
-    if hint:
-        cli_invocation += f" {shlex.quote(hint)}"
-    return f"cd {shlex.quote(str(project_dir))} && exec {cli_invocation}"
+    return f"cd {shlex.quote(str(project_dir))} && exec {_posix_cli_invocation(cli, hint, model)}"
 
 
 def _applescript_literal(text: str) -> str:
@@ -71,8 +94,10 @@ def _applescript_literal(text: str) -> str:
     return f'"{escaped}"'
 
 
-def _launch_macos(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
-    command = _posix_command(project_dir, cli, hint)
+def _launch_macos(
+    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+) -> None:
+    command = _posix_command(project_dir, cli, hint, model)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     if app == "iTerm":
         script = (
@@ -90,24 +115,28 @@ def _launch_macos(project_dir: Path, cli: str, hint: Optional[str] = None) -> No
     subprocess.run(["osascript", "-e", script], check=True)
 
 
-def _launch_windows(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
+def _launch_windows(
+    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+) -> None:
     if shutil.which("wt"):
         argv = ["wt", "-d", str(project_dir)]
-        # Unhinted case stays exactly the plain-argv shape it always was; a hint needs a single
+        # Plain case stays exactly the original bare-argv shape; a hint or model needs a single
         # `wt` argument, which only cmd /k can express as one string.
-        argv += ["cmd", "/k", f'{cli} "{hint}"'] if hint else [cli]
+        argv += ["cmd", "/k", _win_cli_invocation(cli, hint, model)] if (hint or model) else [cli]
         subprocess.Popen(argv, close_fds=True)
         return
     # `start` is a cmd builtin, so this needs the shell; `/d` sets the working directory and the
     # empty "" is the window title `start` would otherwise eat from the first quoted argument.
-    inner = f'"{cli}" "{hint}"' if hint else f'"{cli}"'
+    inner = _win_cli_invocation(cli, hint, model)
     subprocess.Popen(
         f'start "" /d "{project_dir}" cmd /k {inner}', shell=True, close_fds=True
     )
 
 
-def _launch_linux(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
-    command = _posix_command(project_dir, cli, hint)
+def _launch_linux(
+    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+) -> None:
+    command = _posix_command(project_dir, cli, hint, model)
     candidates = (
         (["x-terminal-emulator", "-e"], True),
         (["gnome-terminal", "--working-directory", str(project_dir), "--"], False),
@@ -124,12 +153,21 @@ def _launch_linux(project_dir: Path, cli: str, hint: Optional[str] = None) -> No
     raise TerminalLaunchError("no supported terminal emulator found on PATH")
 
 
-def launch(project_dir: Path, cli: Optional[str] = None, hint: Optional[str] = None) -> str:
+def launch(
+    project_dir: Path,
+    cli: Optional[str] = None,
+    hint: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
 
     `hint`, if given, is passed as the CLI's own initial-prompt argument (e.g. "onboarding a Helix
     DSP Ultra S" for the "Create new project" terminal path) -- not shell output TCC prints, since
     every known CLI's full-screen TUI would swallow that before the human ever saw it.
+
+    `model`, if given, is passed as `--model <model>` before the hint -- e.g. "opus" for `claude`,
+    "gemini-2.5-pro" for `gemini`. Each CLI has its own model-name vocabulary; TCC doesn't validate
+    it, the CLI does.
 
     Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
     caller is expected to turn that into a message, since "nothing happened" after clicking a
@@ -153,11 +191,11 @@ def launch(project_dir: Path, cli: Optional[str] = None, hint: Optional[str] = N
     # semantics, so the mismatch shows up as a bogus "not a directory" rather than as itself.
     try:
         if sys.platform == "darwin":
-            _launch_macos(project_dir, cli, hint)
+            _launch_macos(project_dir, cli, hint, model)
         elif sys.platform.startswith("win"):
-            _launch_windows(project_dir, cli, hint)
+            _launch_windows(project_dir, cli, hint, model)
         else:
-            _launch_linux(project_dir, cli, hint)
+            _launch_linux(project_dir, cli, hint, model)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli

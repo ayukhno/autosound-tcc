@@ -108,6 +108,15 @@ Steps:
 """
 
 
+# Matches ui/tcc/i18n.py's language codes -- kept here rather than importing that module, since
+# core/ shouldn't depend on the ui/ layer. PL/DE are reserved there too (i18n.py: "disabled").
+LANGUAGE_NAMES = {"en": "English", "uk": "Ukrainian"}
+
+
+def language_name(code: str) -> str:
+    return LANGUAGE_NAMES.get(code, code)
+
+
 def _load_dsp_profile_module():
     return vendor_loader.load_dsp_profile()
 
@@ -244,11 +253,17 @@ class OnboardingSession:
     """
 
     def __init__(
-        self, project_dir: Path, vendor: str, model: str, ai_model: Optional[str] = None
+        self,
+        project_dir: Path,
+        vendor: str,
+        model: str,
+        ai_model: Optional[str] = None,
+        language: str = "en",
     ) -> None:
         self.project_dir = project_dir
         self.vendor = vendor
         self.model = model
+        self.language = language
         tools, self._draft = build_tools(project_dir, vendor, model)
         server = create_sdk_mcp_server(name="dsp_onboarding", version="1.0.0", tools=tools)
         allowed = [f"mcp__dsp_onboarding__{t.name}" for t in tools]
@@ -275,7 +290,8 @@ class OnboardingSession:
         self._started = True
         prompt = (
             f"Start the DSP capability-checklist interview for: vendor={self.vendor!r}, "
-            f"model={self.model!r}."
+            f"model={self.model!r}. Conduct the interview in {language_name(self.language)} -- "
+            f"the skill and its users are multilingual, match the interface language."
         )
         await self._client.query(prompt)
         async for chunk in self._drain():

@@ -19,11 +19,12 @@ def _app() -> QApplication:
 
 
 class _FakeInterviewDialog:
-    def __init__(self, project_dir, vendor, model, ai_model, parent=None):
+    def __init__(self, project_dir, vendor, model, ai_model, language="en", parent=None):
         self.project_dir = project_dir
         self.vendor = vendor
         self.model = model
         self.ai_model = ai_model
+        self.language = language
         self.parent_arg = parent
 
 

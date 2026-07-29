@@ -48,6 +48,9 @@ class RecordingBridge:
     def show_proposal(self, proposal: dict) -> None:
         self.proposals.append(proposal)
 
+    def notify_profile_ready(self) -> None:
+        pass
+
 
 def _server(tmp_path, bridge):
     bus = SignalBus(tmp_path)
@@ -287,7 +290,12 @@ def test_check_existing_profile_finds_an_exact_bundled_match(tmp_path, monkeypat
         "check_existing_profile", {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
     ))))
 
-    assert result["bundled_exact_match"]["dsp_profile"]["vendor"] == "Audiotec-Fischer"
+    # Unwrapped -- no top-level "dsp_profile" key -- so it's directly what save_profile_field's
+    # `path` resolves against, same shape as project_profile (regression: a wrapped response here
+    # is exactly what led an agent to double-nest dsp_profile.dsp_profile, 2026-07-29 dogfood).
+    assert result["bundled_exact_match"]["vendor"] == "Audiotec-Fischer"
+    assert "dsp_profile" not in result["bundled_exact_match"]
+    assert "dsp_profile" not in result["project_profile"]
 
 
 def test_check_existing_profile_is_strict_no_fuzzy_matching(tmp_path, monkeypatch):
