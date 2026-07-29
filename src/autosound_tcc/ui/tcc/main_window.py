@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config, critic, terminal_launcher
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
-from autosound_tcc.state import process_view
+from autosound_tcc.state import measurement_view, process_view
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
@@ -750,6 +750,7 @@ class MainWindow(QMainWindow):
             self._plan_panel.set_plan(None)  # nothing real yet: the mock stays
             return
         self._plan_panel.set_plan(process_view.to_plan(state))
+        self._refresh_capture_task(state)
 
         review = process_view.reviewer(state)
         if review:
@@ -765,6 +766,33 @@ class MainWindow(QMainWindow):
         path = str(process_view.state_file())
         if path not in self._process_watcher.files():
             self._process_watcher.addPath(path)
+
+    def _refresh_capture_task(self, state: dict) -> None:
+        """Derive the capture checklist from (phase x glossary x version) — SCR-004/SCR-008.
+
+        Deliberately built from the measurement titles the panel already holds rather than by
+        calling REW here: the panel owns a worker for that, and blocking the GUI thread on HTTP to
+        redraw a checklist is how a window stops responding while the car is running.
+        """
+        phase = state.get("active_phase")
+        if not phase:
+            return
+        titles = getattr(self._meas_panel, "known_titles", lambda: [])()
+        session = measurement_view.build_session(phase, self._capture_version(), titles)
+        if session is not None:
+            self._meas_panel.set_sessions((session,))
+
+    def _capture_version(self) -> int:
+        """The DSP config version measurements are named against — the ledger's HEAD.
+
+        `_N` is the config the measurement was taken under (naming-and-structure §3), so this has
+        to follow the ledger rather than count capture rounds.
+        """
+        head = getattr(self._view, "version", None) if self._view else None
+        try:
+            return int(str(head).lstrip("v_") or 1)
+        except (TypeError, ValueError):
+            return 1
 
     # ---- AI backends --------------------------------------------------------
 

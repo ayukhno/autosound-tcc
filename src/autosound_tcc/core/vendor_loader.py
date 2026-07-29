@@ -31,6 +31,7 @@ _VENDORED = {
     "rew_api.py": "autosound_tcc._vendor.rew_api",
     "state/state.py": "autosound_tcc._vendor.dsp_state",
     "state/process.py": "autosound_tcc._vendor.process",
+    "naming.py": "autosound_tcc._vendor.naming",
     "dsp_profile.py": "autosound_tcc._vendor.dsp_profile",
 }
 
@@ -89,6 +90,11 @@ def load_dsp_state() -> ModuleType:
 def load_process() -> ModuleType:
     """The process-state module (`state/process.py`, SCR-004) — phase, plan, journal."""
     return load("state/process.py")
+
+
+def load_naming() -> ModuleType:
+    """Measurement naming + the per-car glossary (`naming.py`, SCR-008)."""
+    return load("naming.py")
 
 
 def load_dsp_profile() -> ModuleType:

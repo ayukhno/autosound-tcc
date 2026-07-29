@@ -302,6 +302,24 @@ class MeasurementPanel(QWidget):
     def _session(self, session_id: str) -> MeasSession:
         return next(s for s in self._sessions if s.id == session_id)
 
+    def set_sessions(self, sessions) -> None:
+        """Replace the mock series with one derived from the glossary + REW (SCR-008).
+
+        Passing None or an empty tuple keeps the mock: a project with no glossary has no derivable
+        capture task, and an empty grid reads as "everything captured" rather than "nothing known".
+        """
+        if not sessions:
+            return
+        self._sessions = tuple(sessions)
+        self._viewing_id = self._sessions[0].id
+        self._session_combo.blockSignals(True)
+        self._session_combo.clear()
+        for session in self._sessions:
+            marker = " ●" if session.id == self._sessions[0].id else ""
+            self._session_combo.addItem(session.id + marker, session.id)
+        self._session_combo.blockSignals(False)
+        self.show_session(self._viewing_id)
+
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
         (Read/Scan/assign-names enabled) and the title banner shows what to capture; any other is
