@@ -5,12 +5,17 @@ previously a global path shared by every project, so a brand-new "Create new pro
 showed whichever ledger happened to be sitting at the old default). Both the ledger root and the
 preset can still be overridden by environment variables:
 
-    AUTOSOUND_TCC_STATE_ROOT   directory holding <preset>/v_NNN.json subdirs (overrides the
+    AUTOSOUND_STATE_ROOT       directory holding <preset>/v_NNN.json subdirs (overrides the
                                project-scoped default -- this dev checkout's own dogfood ledger at
-                               `data/private/state/` needs this set explicitly now)
+                               `data/private/state/` needs this set explicitly now). Same spelling
+                               the skill's own `rew_tool/state/state.py` CLI uses (SCR-011 --
+                               one env-var convention on both sides of the submodule boundary, no
+                               `AUTOSOUND_TCC_*` variant kept).
     AUTOSOUND_TCC_PRESET       preset name (subdir); auto-detected if unset and
-                               exactly one preset directory exists
-    AUTOSOUND_PROJECT_DIR      the tuning project folder the AI session runs in
+                               exactly one preset directory exists -- TCC-only (a multi-preset UI
+                               selector), no skill-side equivalent to converge with.
+    AUTOSOUND_PROJECT_DIR      the tuning project folder the AI session runs in -- also the
+                               skill's own convention; no `AUTOSOUND_TCC_PROJECT_DIR` fallback.
 
 **Project folder** (TCC-TZ.md §3): one project = one folder the user points at,
 with a recent-projects list and *zero* disk scanning. That folder is the agent's
@@ -36,10 +41,11 @@ def state_root() -> Path:
     Scoped under `project_dir()` (2026-07-29 fix -- previously a project-independent global/env
     path, so opening a brand-new "Create new project" folder showed whichever ledger happened to
     be sitting at the old default, e.g. this dev checkout's own dogfood data). Override with
-    `AUTOSOUND_TCC_STATE_ROOT` for pointing at a ledger tree that predates this per-project
-    scoping (this repo's own `data/private/state/` dogfood ledger included).
+    `AUTOSOUND_STATE_ROOT` for pointing at a ledger tree that predates this per-project scoping
+    (this repo's own `data/private/state/` dogfood ledger included) -- same env var the skill's
+    own CLI reads (SCR-011).
     """
-    env = os.environ.get("AUTOSOUND_TCC_STATE_ROOT")
+    env = os.environ.get("AUTOSOUND_STATE_ROOT")
     return Path(env).expanduser() if env else project_dir() / "state"
 
 
@@ -58,16 +64,16 @@ def project_dir() -> Path:
     as the last-resort fallback for a truly unconfigured install (this dev checkout's own
     `data/private/state/` dogfood location, kept as-is for continuity). Deliberately NOT
     `state_root()` -- that function now derives ITS default FROM `project_dir()` (2026-07-29 fix),
-    so falling back to it here would recurse. Full `project.json` + `presets/<preset>/{target,
-    state}` nesting (TCC-TZ.md §3) is a later storage migration.
+    so falling back to it here would recurse. `project.json` lives directly at this folder's top
+    level, `state/<preset>/v_NNN.json` under it (SKILL-SYNC-PLAN.md D1) -- the skill's own layout,
+    not a TCC-specific nesting.
 
-    `AUTOSOUND_TCC_PROJECT_DIR` is the legacy spelling, still honoured so existing shells keep
-    working; SCR-011 wants the `AUTOSOUND_*` names converged with the skill's own convention.
+    `AUTOSOUND_PROJECT_DIR` is the skill's own env var (SCR-011); no `AUTOSOUND_TCC_PROJECT_DIR`
+    fallback is kept -- the two names were never meant to coexist long-term.
     """
-    for var in ("AUTOSOUND_PROJECT_DIR", "AUTOSOUND_TCC_PROJECT_DIR"):
-        env = os.environ.get(var)
-        if env:
-            return Path(env).expanduser()
+    env = os.environ.get("AUTOSOUND_PROJECT_DIR")
+    if env:
+        return Path(env).expanduser()
     saved = _settings().value(_PROJECT_DIR_KEY, "")
     if saved:
         return Path(str(saved)).expanduser()
@@ -136,11 +142,13 @@ def dsp_profile_path(project_dir_: Optional[Path] = None) -> Path:
     return (project_dir_ or project_dir()) / "dsp_profile.json"
 
 
-def project_profile_path(project_dir_: Optional[Path] = None) -> Path:
-    """Project-level facts that don't change between presets/versions (car setup, chassis, amp
-    gains, ...) -- rendered as extra left-panel PARAMS sections (item 2, 2026-07-27). Absent by
-    default; nothing renders until this file exists."""
-    return (project_dir_ or project_dir()) / "project_profile.json"
+def project_path(project_dir_: Optional[Path] = None) -> Path:
+    """The skill-owned `project.json` -- car/equipment/glossary/hardware facts, plus the
+    `param_sections` this project's left panel renders (System/Project/Car-audio-analysis
+    sections). Replaces the TCC-only `project_profile.json` (D2, SKILL-SYNC-PLAN.md §0): one file,
+    written by the skill, instead of two files with an overlapping and easily-diverging job.
+    Absent by default; nothing renders until intake writes it."""
+    return (project_dir_ or project_dir()) / "project.json"
 
 
 def bundled_profiles_dir() -> Path:
