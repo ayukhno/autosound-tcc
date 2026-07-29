@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QPoint, QUrl, Qt
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config, critic, terminal_launcher
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
+from autosound_tcc.state import process_view
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
@@ -232,6 +233,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self._apply_theme(self._mode)
         self._load_project()
+        self._load_process()
         self._start_mcp_server()
 
     # ---- header / footer -------------------------------------------------
@@ -725,6 +727,44 @@ class MainWindow(QMainWindow):
         self._set_zoom(self._zoom + _ZOOM_STEP)
 
     # ---- language -----------------------------------------------------------
+
+    # ---- process state (SCR-004) --------------------------------------------
+
+    def _load_process(self) -> None:
+        """Render the skill's real plan when the project has one; keep the mock when it doesn't.
+
+        TCC is a consumer here — the skill owns `process/process-state.json` and is its only
+        writer (SCR-004). Watching the file rather than polling means a phase the Generator enters
+        in a terminal shows up in the panel without TCC being told.
+
+        Note the phase numbering differs from the mock's: the skill's skeleton is −1..5, the mock
+        illustrated 0..6. A project with real state legitimately looks different from the demo.
+        """
+        self._process_watcher = QFileSystemWatcher(self)
+        self._process_watcher.fileChanged.connect(self._refresh_process)
+        self._refresh_process()
+
+    def _refresh_process(self, *_args) -> None:
+        state = process_view.load_state()
+        if state is None:
+            self._plan_panel.set_plan(None)  # nothing real yet: the mock stays
+            return
+        self._plan_panel.set_plan(process_view.to_plan(state))
+
+        review = process_view.reviewer(state)
+        if review:
+            self._critic_status.setText(
+                i18n.t("criticStatus").format(
+                    model=review.get("model") or review.get("vendor") or "?",
+                    ago=_ago(review.get("at", "")),
+                )
+            )
+
+        # Re-arm: an atomic write replaces the inode, so the watcher silently drops the path it
+        # was watching. Re-adding after every change is what keeps this from firing exactly once.
+        path = str(process_view.state_file())
+        if path not in self._process_watcher.files():
+            self._process_watcher.addPath(path)
 
     # ---- AI backends --------------------------------------------------------
 

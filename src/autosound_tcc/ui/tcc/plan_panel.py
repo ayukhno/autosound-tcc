@@ -224,6 +224,10 @@ class PlanPanel(QScrollArea):
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._progress = _PlanProgress()
+        # Real plan from the skill's process-state when the project has one; the mock `PLAN`
+        # otherwise. Kept as an override rather than a hard switch so the design surface (and the
+        # tests built on it) keep working on a project that has never run.
+        self._plan: tuple[PlanPhase, ...] | None = None
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
         self._layout.setContentsMargins(8, 8, 8, 12)
@@ -231,8 +235,18 @@ class PlanPanel(QScrollArea):
         self.setWidget(self._body)
         self.retranslate()
 
+    def set_plan(self, phases: "tuple[PlanPhase, ...] | None") -> None:
+        """Swap in the real plan (or None to fall back to the mock) and rebuild."""
+        self._plan = phases
+        self.retranslate()
+
+    @property
+    def plan(self) -> "tuple[PlanPhase, ...]":
+        return self._plan if self._plan is not None else PLAN
+
     def retranslate(self) -> None:
-        """Rebuild every phase/step row from PLAN + the progress overlay in the current language --
+        """Rebuild every phase/step row from the active plan + the progress overlay in the current
+        language --
         simplest correct approach for data this small (no in-place text-swapping to keep in sync),
         same full-rebuild convention used by dsp_tree.py's set_view()."""
         while self._layout.count():
@@ -244,7 +258,7 @@ class PlanPanel(QScrollArea):
                 # event-loop pass.
                 widget.setParent(None)
                 widget.deleteLater()
-        for i, phase in enumerate(PLAN):
+        for i, phase in enumerate(self.plan):
             self._layout.addWidget(
                 _PhaseRow(phase, i, self._progress, self.retranslate, self.sessionRequested.emit)
             )
