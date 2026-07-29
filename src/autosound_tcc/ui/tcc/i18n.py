@@ -16,6 +16,7 @@ Lang = str  # "en" | "uk"
 T: dict[Lang, dict[str, str]] = {
     "en": {
         "theme": "theme",
+        "modeLabel": "mode",
         "modeView": "view",
         "modeControl": "control",
         "modeViewTip": "Read-only: TCC shows what the skill has on disk. No AI.",
@@ -148,6 +149,7 @@ T: dict[Lang, dict[str, str]] = {
     },
     "uk": {
         "theme": "тема",
+        "modeLabel": "режим",
         "modeView": "перегляд",
         "modeControl": "керування",
         "modeViewTip": "Лише читання: TCC показує, що скіл записав на диску. Без ШІ.",

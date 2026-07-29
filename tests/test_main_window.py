@@ -312,3 +312,29 @@ def test_found_profile_hides_create_button_and_leaves_mock_untouched(tmp_path, m
 
     assert window._create_project_btn.isHidden()
     assert window._meas_panel._no_project_label.isHidden()
+
+
+def test_language_switch_does_not_bring_the_mock_grid_back():
+    """Regression: MeasurementPanel.retranslate() unconditionally rebuilt the grid via
+    show_session(), silently undoing set_no_project() on every language switch.
+
+    i18n.set_language() is process-global, not per-window -- reset back to "en" (the suite's
+    implicit default, since nothing else in this file touches language) so this test can't leak
+    "uk" into whichever test happens to run next.
+    """
+    _app()
+    window = MainWindow()
+    try:
+        assert window._meas_panel._no_project_label.isHidden() is False
+
+        window._on_language_selected("en")
+
+        assert window._meas_panel._legend.isHidden()
+        assert len(window._meas_panel._rows) == 0
+        assert window._meas_panel._no_project_label.isHidden() is False
+        assert window._meas_panel._no_project_label.text() == "No project — nothing to capture yet."
+
+        window._on_language_selected("uk")
+        assert window._meas_panel._no_project_label.text() == "Немає проєкту — знімати поки нічого."
+    finally:
+        window._on_language_selected("en")

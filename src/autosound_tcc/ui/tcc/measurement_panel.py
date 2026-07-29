@@ -313,13 +313,16 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setWordWrap(True)
         self._no_project_label.setVisible(False)
         layout.addWidget(self._no_project_label)
+        self._no_project_active = False
 
         self.show_session(self._viewing_id)
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
         when there's no real project on disk at all. `set_sessions()` reverses this the moment a
-        real capture task arrives."""
+        real capture task arrives. `_no_project_active` is what stops `retranslate()` from
+        rebuilding the mock grid back in via `show_session()` on a language switch."""
+        self._no_project_active = True
         for widget in (
             self._session_combo,
             self._version,
@@ -339,6 +342,7 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setVisible(True)
 
     def _show_content(self) -> None:
+        self._no_project_active = False
         for widget in (
             self._session_combo,
             self._version,
@@ -417,7 +421,11 @@ class MeasurementPanel(QWidget):
             self._col_next_row.append(len(group.items) + 1)
 
     def retranslate(self) -> None:
-        self.show_session(self._viewing_id)  # re-renders the banner text in the new language
+        # show_session() rebuilds _cols_layout from the (mock) session data -- skip it while
+        # set_no_project() is active, or a language switch would silently bring the mock grid
+        # back over a real "no project" state.
+        if not self._no_project_active:
+            self.show_session(self._viewing_id)  # re-renders the banner text in the new language
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
 

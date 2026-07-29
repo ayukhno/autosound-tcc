@@ -335,6 +335,11 @@ class MainWindow(QMainWindow):
 
         # TCC-TZ.md §8: two modes, always switchable, independent of whether a project/profile
         # was found -- itemData carries the mode key, same pattern as the preset combo below.
+        self._mode_field_lbl = QLabel(i18n.t("modeLabel"))
+        self._mode_field_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._mode_field_lbl, spacing_px=1.2)
+        layout.addWidget(self._mode_field_lbl)
+
         self._mode_combo = _mini_combo()
         self._mode_combo.addItem(i18n.t("modeView"), "view")
         self._mode_combo.addItem(i18n.t("modeControl"), "control")
@@ -1095,6 +1100,7 @@ class MainWindow(QMainWindow):
         observer registry, since the widget count is still small enough for that to be simple
         and correct."""
         self._theme_btn.setText("◐ " + i18n.t("theme"))
+        self._mode_field_lbl.setText(i18n.t("modeLabel"))
         self._mode_combo.setItemText(0, i18n.t("modeView"))
         self._mode_combo.setItemText(1, i18n.t("modeControl"))
         self._mode_combo.setToolTip(
@@ -1122,6 +1128,13 @@ class MainWindow(QMainWindow):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()
         self._meas_panel.retranslate()
+        if not self._has_project:
+            # MeasurementPanel.retranslate() deliberately skips rebuilding its grid while
+            # set_no_project() is active (see its own comment) -- but that also means it can't
+            # re-resolve the message text itself, since it only ever sees the already-resolved
+            # string MainWindow passed in, not the i18n key.
+            self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
+        self._create_project_btn.setText(i18n.t("createProject"))
         self._dialog.retranslate()
         # The tree builds its group headers / params-row labels from i18n at set_view() time and
         # has no live binding, so rebuild it in the new language (cheap -- a handful of widgets).
