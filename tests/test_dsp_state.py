@@ -112,7 +112,8 @@ def test_no_virtual_tier_when_profile_does_not_declare_one():
         "preset": "musway-test", "sample_rate": 48000,
         "channels": {"w-L": {"hp": {"f": 80}, "lp": {"f": 4000}, "gain_db": -2.0}},
         "inputs": {
-            "Optic": {"gain_db": -3.0, "eq": ["PK 1000 -2 Q2"], "ta_ms": 0.5},
+            "Optic": {"gain_db": -3.0, "eq": [{"type": "PK", "f": 1000, "gain_db": -2, "q": 2}],
+                      "ta_ms": 0.5},
             "USB": {"gain_db": 0.0},
         },
     }
@@ -148,15 +149,19 @@ def test_rows_ordered_by_declared_order_then_name():
 
 
 def test_parse_eq_bands_real_formats():
-    bands = parse_eq_bands(["PK 1000 -9 Q2", "LS 150 +2.5 Q0.71", "PK 2800 +1.2 Q1.8 (L only)"])
+    bands = parse_eq_bands([
+        {"type": "PK", "f": 1000, "gain_db": -9, "q": 2},
+        {"type": "LSH", "f": 150, "gain_db": 2.5, "q": 0.71},
+        {"type": "PK", "f": 2800, "gain_db": 1.2, "q": 1.8, "bypass": True, "i": 3},
+    ])
     assert bands[0] == EqBand(type="PK", freq_hz=1000.0, gain_db=-9.0, q=2.0)
-    assert bands[1] == EqBand(type="LS", freq_hz=150.0, gain_db=2.5, q=0.71)
-    assert bands[2].note == "(L only)"
+    assert bands[1] == EqBand(type="LSH", freq_hz=150.0, gain_db=2.5, q=0.71)
+    assert bands[2].bypass is True and bands[2].index == 3
 
 
 def test_parse_eq_bands_no_gain_allpass():
     """An all-pass band has no gain — must parse, not raise."""
-    band = EqBand.from_string("APF2 2177 Q1.5")
+    band = EqBand.from_dict({"type": "APF2", "f": 2177, "q": 1.5})
     assert band.type == "APF2" and band.freq_hz == 2177.0 and band.gain_db is None and band.q == 1.5
 
 
@@ -174,23 +179,38 @@ def test_group_row_eq_bands_method():
 
 
 def test_slot_order_descr_and_tag_read_from_ledger():
+    """`tag` (WHICH control affects this row) stays on the ledger row -- structural. `tag_value`
+    (the control's dialled position) is resolved from `hardware_controls` (SCR-017: a DSP-level
+    fact, not per-preset ledger state), not from the ledger row any more."""
     profile = {"dsp_profile": {"groups": [
         {"id": "virtual_channels", "label": "Virtual channels", "max_count": 8,
          "fields": ["gain_db", "polarity", "eq"]},
     ]}}
     ledger = {"virtual_channels": {
         "VFL": {"slot": "A", "order": 0, "descr": "Front L Full", "polarity": "NORM",
-                "eq": ["LS 150 +2.5 Q0.71"]},
+                "eq": [{"type": "LSH", "f": 150, "gain_db": 2.5, "q": 0.71}]},
         "VRL": {"slot": "C", "order": 2, "descr": "Rear L Full", "tag": "RearRC",
-                "tag_value": "3/4", "polarity": "NORM", "eq": []},
+                "polarity": "NORM", "eq": []},
     }}
-    group = ProjectView.from_dict(ledger, profile).groups[0]
+    hardware_controls = {"RearRC": {"value": "3/4", "source": "user", "at": "…"}}
+    group = ProjectView.from_dict(ledger, profile, hardware_controls=hardware_controls).groups[0]
     assert group.max_count == 8
     rows = {r.name: r for r in group.rows}
     assert (rows["VFL"].slot, rows["VFL"].order, rows["VFL"].descr) == ("A", 0, "Front L Full")
     assert rows["VFL"].tag is None
     assert rows["VFL"].tag_value is None
     assert (rows["VRL"].slot, rows["VRL"].tag, rows["VRL"].tag_value) == ("C", "RearRC", "3/4")
+
+
+def test_tag_value_missing_from_hardware_controls_is_none():
+    """A row that names a `tag` no `hardware.controls` entry has yet -- renders bare, not an
+    error (same "lenient on absent facts" convention as everywhere else)."""
+    profile = {"dsp_profile": {"groups": [
+        {"id": "virtual_channels", "label": "Virtual channels", "fields": ["gain_db"]},
+    ]}}
+    ledger = {"virtual_channels": {"VRR": {"tag": "SubRC"}}}
+    row = ProjectView.from_dict(ledger, profile).groups[0].rows[0]
+    assert row.tag == "SubRC" and row.tag_value is None
 
 
 def test_muted_and_off_flags():
@@ -244,14 +264,14 @@ def test_param_sections_absent_is_empty_tuple():
     assert view.param_sections == ()
 
 
-def test_load_param_sections_reads_project_profile_json(tmp_path):
+def test_load_param_sections_reads_project_json(tmp_path):
     data = {
         "param_sections": [
             {"id": "car", "label": "Car setup", "params": [["Make", "VW"], ["Model", "Passat B8"]]},
             {"id": "chassis", "label": "Body / chassis", "params": [["Doors", "4"]]},
         ]
     }
-    (tmp_path / "project_profile.json").write_text(json.dumps(data))
+    (tmp_path / "project.json").write_text(json.dumps(data))
     sections = load_param_sections(tmp_path)
     assert sections == (
         ParamSection(id="car", label="Car setup", params=(("Make", "VW"), ("Model", "Passat B8"))),

@@ -21,60 +21,44 @@ a view without the submodule present; only `load_project_view` (which reads from
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-_GAIN_RE = re.compile(r"^[+-][\d.]+$")
-_Q_RE = re.compile(r"^[Qq]([\d.]+)$")
-_NUM_RE = re.compile(r"^[\d.]+$")
-
-
 @dataclass(frozen=True)
 class EqBand:
-    """One parametric-EQ band, parsed from a ledger EQ string (e.g. `"PK 1000 -9 Q2"`,
-    `"LS 150 +2.5 Q0.71"`). Gain/Q are optional — an all-pass band (e.g. `"APF2 2177 Q1.5"`)
-    has no gain. Any leftover token (e.g. `"(L only)"`) is kept as a free-text note rather than
-    dropped or raising, since the ledger already carries these informally.
+    """One parametric-EQ band, read from a ledger `eq` entry — a structured object since schema
+    v2 (`{"type": "PK", "f": 1000, "gain_db": -9, "q": 2, "bypass": false, "i": 1}`, the vendored
+    skill's `rew_tool/state/schema.md`), not the earlier inline string (`"PK 1000 -9 Q2"`) this
+    class used to parse. Gain/Q are optional — an all-pass band (e.g. `APF2`) has no gain.
     """
 
     type: str
     freq_hz: float
     gain_db: Optional[float] = None
     q: Optional[float] = None
-    note: Optional[str] = None
+    bypass: bool = False
+    index: Optional[int] = None
 
     @classmethod
-    def from_string(cls, raw: str) -> "EqBand":
-        tokens = raw.split()
-        if not tokens:
-            raise ValueError("empty EQ band string")
-        band_type, rest = tokens[0], tokens[1:]
-        freq_hz: Optional[float] = None
-        gain_db: Optional[float] = None
-        q: Optional[float] = None
-        notes: list[str] = []
-        for tok in rest:
-            if freq_hz is None and _NUM_RE.match(tok):
-                freq_hz = float(tok)
-            elif _GAIN_RE.match(tok):
-                gain_db = float(tok)
-            elif _Q_RE.match(tok):
-                q = float(_Q_RE.match(tok).group(1))
-            else:
-                notes.append(tok)
-        if freq_hz is None:
-            raise ValueError(f"could not parse a frequency from EQ band {raw!r}")
-        return cls(type=band_type, freq_hz=freq_hz, gain_db=gain_db, q=q,
-                   note=" ".join(notes) or None)
+    def from_dict(cls, raw: dict) -> "EqBand":
+        return cls(
+            type=raw["type"],
+            freq_hz=float(raw["f"]),
+            gain_db=raw.get("gain_db"),
+            q=raw.get("q"),
+            bypass=bool(raw.get("bypass", False)),
+            index=raw.get("i"),
+        )
 
 
 def parse_eq_bands(raw: Any) -> tuple[EqBand, ...]:
-    """Parse a ledger `eq` field (a list of band strings) into `EqBand`s. Anything else
-    (missing, None, not a list) yields an empty tuple rather than raising — EQ is optional."""
+    """Read a ledger `eq` field (a list of structured band objects, schema v2) into `EqBand`s.
+    Anything else (missing, None, not a list) yields an empty tuple rather than raising — EQ is
+    optional. A row inside the list that isn't itself an object is skipped, not fatal: the
+    ledger's own `state.validate()` is what enforces the shape on write; a reader stays lenient."""
     if not isinstance(raw, (list, tuple)):
         return ()
-    return tuple(EqBand.from_string(s) for s in raw)
+    return tuple(EqBand.from_dict(b) for b in raw if isinstance(b, dict))
 
 
 @dataclass(frozen=True)
@@ -159,21 +143,33 @@ class GroupRow:
     order: Optional[int] = None
     slot: Optional[str] = None
     descr: Optional[str] = None
+    hardware_controls: dict = field(default_factory=dict)
 
     @property
     def tag(self) -> Optional[str]:
         """Short feature-tag label shown as a chip next to the channel name (e.g. RearRC, SubRC,
         RC -- the last for VFC's RealCenter toggle, an unrelated feature that happens to share the
-        "RC" abbreviation with the Remote-Control-driven RearRC/SubRC tags; see `tag_value`)."""
+        "RC" abbreviation with the Remote-Control-driven RearRC/SubRC tags; see `tag_value`).
+        Structural -- which control affects THIS row -- so it stays on the ledger row."""
         return self.raw.get("tag")
 
     @property
     def tag_value(self) -> Optional[str]:
-        """The tag's configured value for this project (e.g. "3/4" for RearRC, "-4dB" for SubRC,
-        "ON"/"OFF" for VFC's RC) -- shown alongside the tag label so the chip reads as a fact,
-        not just a feature name (user request 2026-07-28). None = tag shown bare, same as before
-        this field existed."""
-        return self.raw.get("tag_value")
+        """The tag's configured value (e.g. "3/4" for RearRC, "-4dB" for SubRC, "ON"/"OFF" for
+        VFC's RC) -- shown alongside the tag label so the chip reads as a fact, not just a feature
+        name (user request 2026-07-28).
+
+        Resolved from `project.json`'s `hardware.controls` (SCR-017, `hardware_controls` passed in
+        from `ProjectView.from_dict`), NOT read off the ledger row -- a DSP hardware control is
+        constant across every preset loaded on the same device, and hand-copying its value into
+        each preset's ledger is exactly how it drifted out of sync in the field (the bug SCR-017
+        closes). None = no `tag`, or the control has no recorded value yet.
+        """
+        tag = self.tag
+        if not tag:
+            return None
+        entry = self.hardware_controls.get(tag)
+        return entry.get("value") if isinstance(entry, dict) else entry
 
     @property
     def muted(self) -> bool:
@@ -230,9 +226,10 @@ class ProfileGroup:
 class ParamSection:
     """One extra flat key/value collapsible section in the left panel, beyond the DSP feature-
     toggle PARAMS section -- e.g. car/setup + measurement params, car body/chassis params, future
-    amp-gain/second-processor/player sections (item 2, 2026-07-27). Sourced from project-level
-    config (`project_profile.json`, see core.config.project_profile_path), not the per-version
-    ledger -- these facts don't change between presets/DSP-tune versions."""
+    amp-gain/second-processor/player sections (item 2, 2026-07-27). Sourced from the skill-owned
+    `project.json`'s `param_sections` (see `core.config.project_path`; D2, SKILL-SYNC-PLAN.md --
+    replaces the earlier TCC-only `project_profile.json`), not the per-version ledger -- these
+    facts don't change between presets/DSP-tune versions."""
 
     id: str
     label: str
@@ -256,9 +253,14 @@ class ProjectView:
 
     @classmethod
     def from_dict(
-        cls, raw: dict, profile: dict, param_sections: tuple[ParamSection, ...] = ()
+        cls, raw: dict, profile: dict, param_sections: tuple[ParamSection, ...] = (),
+        hardware_controls: Optional[dict] = None,
     ) -> "ProjectView":
+        """`hardware_controls` is `project.json`'s `hardware.controls` (SCR-017) -- DSP-level
+        facts (RearRC/SubRC/RealCenter knob positions) constant across every preset, resolved into
+        each row's `tag_value` rather than read off the ledger (`GroupRow.tag_value`)."""
         prof = profile.get("dsp_profile", profile)
+        hw_controls = hardware_controls or {}
         groups = []
         for g in prof.get("groups", []):
             gid = g["id"]
@@ -267,7 +269,8 @@ class ProjectView:
             row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
             rows = tuple(
                 GroupRow(id=name, name=name, raw=row_raw, order=row_raw.get("order"),
-                         slot=row_raw.get("slot"), descr=row_raw.get("descr"))
+                         slot=row_raw.get("slot"), descr=row_raw.get("descr"),
+                         hardware_controls=hw_controls)
                 for name, row_raw in (row_source or {}).items()
             )
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
@@ -291,7 +294,7 @@ class ProjectView:
 
 
 def load_param_sections(project_dir_: Optional[Any] = None) -> tuple[ParamSection, ...]:
-    """Read `project_profile.json` (see `core.config.project_profile_path`), if present. Absent
+    """Read `project.json`'s `param_sections` (see `core.config.project_path`), if present. Absent
     file or missing `param_sections` key -> no extra sections, not an error (same convention as
     the rest of this module). `project_dir_`, if given, overrides the configured project
     directory (for tests)."""
@@ -299,7 +302,7 @@ def load_param_sections(project_dir_: Optional[Any] = None) -> tuple[ParamSectio
 
     from autosound_tcc.core import config
 
-    path = config.project_profile_path(project_dir_)
+    path = config.project_path(project_dir_)
     if not path.is_file():
         return ()
     data = json.loads(path.read_text())
@@ -308,6 +311,23 @@ def load_param_sections(project_dir_: Optional[Any] = None) -> tuple[ParamSectio
         params = tuple((str(k), str(v)) for k, v in entry.get("params", []))
         sections.append(ParamSection(id=entry["id"], label=entry.get("label", entry["id"]), params=params))
     return tuple(sections)
+
+
+def load_hardware_controls(project_dir_: Optional[Any] = None) -> dict:
+    """Read `project.json`'s `hardware.controls` (SCR-017) -- DSP-level facts (RearRC/SubRC/
+    RealCenter knob positions) constant across every preset. Absent file or key -> `{}`, not an
+    error (same convention as `load_param_sections`); a chip whose `tag` has no entry here simply
+    renders without a value (`GroupRow.tag_value`)."""
+    import json
+
+    from autosound_tcc.core import config
+
+    path = config.project_path(project_dir_)
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text())
+    controls = data.get("hardware", {}).get("controls", {})
+    return controls if isinstance(controls, dict) else {}
 
 
 def load_project_view(root: str, preset: str, profile: dict, version: Optional[str] = None) -> ProjectView:
@@ -321,4 +341,6 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     history = vstate.PresetHistory(root, preset)
     raw = history.load(version)
     param_sections = load_param_sections()
-    return ProjectView.from_dict(raw, profile, param_sections=param_sections)
+    hardware_controls = load_hardware_controls()
+    return ProjectView.from_dict(raw, profile, param_sections=param_sections,
+                                  hardware_controls=hardware_controls)

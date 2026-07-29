@@ -54,7 +54,8 @@ FIELD_VOCABULARY = {
     "phase_deg": "continuous phase/all-pass angle in degrees, a number",
     "mute": "boolean",
     "eq_bypass": "boolean",
-    "eq": "a list of PEQ band strings, e.g. [\"PK 1000 -2.0 Q2.0\"]",
+    "eq": "a list of PEQ band objects, e.g. [{\"type\": \"PK\", \"f\": 1000, \"gain_db\": -2.0, "
+          "\"q\": 2.0}] (schema v2 -- structured, not the earlier inline string form)",
 }
 
 SYSTEM_PROMPT = f"""You are the DSP-profile onboarding interviewer for the Tuning Command Center \
