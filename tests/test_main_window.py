@@ -10,7 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QSplitter  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
 
 from autosound_tcc.core import config, ui_mode  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
@@ -76,7 +76,7 @@ def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatc
     (preset_dir / "HEAD").write_text("v_001")
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
 
     _app()
     window = MainWindow()
@@ -112,7 +112,7 @@ def test_switching_preset_does_not_duplicate_tree_sections(tmp_path, monkeypatch
         (preset_dir / "HEAD").write_text("v_001")
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "PRESET_A")
 
     _app()
@@ -149,7 +149,7 @@ def test_preset_switch_refreshes_an_already_open_table(tmp_path, monkeypatch):
         (preset_dir / "HEAD").write_text("v_001")
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "PRESET_A")
 
     def _mute_column(table):
@@ -174,9 +174,10 @@ def test_preset_switch_refreshes_an_already_open_table(tmp_path, monkeypatch):
 
 def test_project_profile_renders_extra_param_sections(tmp_path, monkeypatch):
     """Item 2, 2026-07-27 (moved to the top-level "Project params" section 2026-07-28):
-    project_profile.json's `param_sections` each render as their own collapsible ParamsSection,
+    project.json's `param_sections` each render as their own collapsible ParamsSection,
     under the sidebar's Project params section -- not inside the DSP tree, since this is
-    project-level config rather than ledger-driven DSP state."""
+    project-level config rather than ledger-driven DSP state. (D2, SKILL-SYNC-PLAN.md --
+    `project_profile.json` is retired in favour of this one skill-owned file.)"""
     import json
 
     from autosound_tcc.ui.tcc.dsp_tree import ParamsSection
@@ -189,7 +190,7 @@ def test_project_profile_renders_extra_param_sections(tmp_path, monkeypatch):
         }
     }
     (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
-    (tmp_path / "project_profile.json").write_text(json.dumps({
+    (tmp_path / "project.json").write_text(json.dumps({
         "param_sections": [
             {"id": "car", "label": "Car setup", "params": [["Make", "VW"]]},
             {"id": "chassis", "label": "Body / chassis", "params": [["Doors", "4"]]},
@@ -203,13 +204,70 @@ def test_project_profile_renders_extra_param_sections(tmp_path, monkeypatch):
     (preset_dir / "HEAD").write_text("v_001")
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
 
     _app()
     window = MainWindow()
     sections = window._project_section.findChildren(ParamsSection)
     assert len(sections) == 2
     assert {s._gid for s in sections} == {"car", "chassis"}
+
+
+def _kv_texts(section) -> dict[str, str]:
+    """(key, value) pairs from every `_kv_row` in a `SidebarSection`'s body — reads the widget
+    tree by the `.pk`/`.pv` label classes `_kv_row` stamps, since those rows have no object name."""
+    keys = [w.text() for w in section.findChildren(QLabel) if w.property("class") == "pk"]
+    values = [w.text() for w in section.findChildren(QLabel) if w.property("class") == "pv"]
+    return dict(zip(keys, values))
+
+
+def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypatch):
+    """SCR-015/016 (`state/project_view.py`): System params renders `project.json`'s DSP/amp/mic
+    facts, and Project params gets an extra channel-tier-summary row plus an open-question chip --
+    none of this is re-derived from the ledger, all of it comes straight from the file."""
+    import json
+
+    profile = {
+        "dsp_profile": {
+            "name": "M6V4", "vendor": "Musway",
+            "groups": [{"id": "physical_outputs", "label": "Output channels",
+                        "fields": ["hp", "lp", "gain_db"]}],
+        }
+    }
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    (tmp_path / "project.json").write_text(json.dumps({
+        "dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
+        "amps": [{"role": "front", "make": "Helix", "model": "P Six DSP"}],
+        "mic": {"model": "UMIK-1"},
+        "channel_summary": {"virtual_channels": {"total": 8, "off": 1}},
+        "_open_questions": ["mic.calibration_file"],
+    }))
+    preset_dir = tmp_path / "TESTPRESET"
+    preset_dir.mkdir()
+    ledger = {"preset": "TESTPRESET", "sample_rate": 48000,
+              "channels": {"w_L": {"hp": {"f": 80}, "lp": {"f": 4000}, "gain_db": -2.0}}}
+    (preset_dir / "v_001.json").write_text(json.dumps(ledger))
+    (preset_dir / "HEAD").write_text("v_001")
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
+
+    _app()
+    window = MainWindow()
+
+    system_kv = _kv_texts(window._system_section)
+    assert system_kv["DSP"] == "Audiotec-Fischer Helix DSP Ultra S"
+    assert system_kv["Amp (front)"] == "Helix P Six DSP"
+    assert system_kv["Mic"] == "UMIK-1"
+
+    project_kv = _kv_texts(window._project_section)
+    assert project_kv["Virtual channels"] == "8 (1 off)"
+
+    chip_texts = [
+        w.text() for w in window._project_section.findChildren(QLabel)
+        if w.property("class") == "phead-sub"
+    ]
+    assert any("mic.calibration_file" in t for t in chip_texts)
 
 
 def test_view_mode_is_the_default_and_hides_control_only_affordances():
@@ -275,7 +333,7 @@ def test_a_broken_profile_clears_panels_but_does_not_offer_create(tmp_path, monk
     button (still no mock content, though -- there's nothing real to show either way)."""
     (tmp_path / "dsp_profile.json").write_text("{ not valid json")
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
 
     _app()
     window = MainWindow()
@@ -305,7 +363,7 @@ def test_found_profile_hides_create_button_and_leaves_mock_untouched(tmp_path, m
     (preset_dir / "v_001.json").write_text(json.dumps(ledger))
     (preset_dir / "HEAD").write_text("v_001")
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
 
     _app()
     window = MainWindow()
@@ -376,7 +434,7 @@ def test_stale_preset_override_from_a_different_project_is_ignored(tmp_path, mon
     }
     (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path / "state"))  # no presets here
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path / "state"))  # no presets here
     get_settings().setValue("ui/preset", "FULL")  # stale, from a different project entirely
 
     _app()

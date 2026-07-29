@@ -34,7 +34,7 @@ from autosound_tcc.core import config, critic, terminal_launcher, ui_mode
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
-from autosound_tcc.state import measurement_view, process_view
+from autosound_tcc.state import measurement_view, process_view, project_view
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
@@ -191,10 +191,10 @@ def _force_project_dir_env(project_dir: Path) -> None:
     """Make `config.project_dir()` resolve to `project_dir` for the rest of THIS process's life.
 
     `config.set_project_dir()` only persists to QSettings, which `config.project_dir()` checks
-    AFTER any `AUTOSOUND_PROJECT_DIR`/`AUTOSOUND_TCC_PROJECT_DIR` env var -- if this process was
-    itself launched with one set (a real, common launch pattern), a plain QSettings update would
-    be silently outranked by the still-set env var for any `MainWindow` built in this same
-    process. Only `AUTOSOUND_PROJECT_DIR` needs setting: `config.project_dir()` checks it first.
+    AFTER the `AUTOSOUND_PROJECT_DIR` env var -- if this process was itself launched with one set
+    (a real, common launch pattern), a plain QSettings update would be silently outranked by the
+    still-set env var for any `MainWindow` built in this same process. Only `AUTOSOUND_PROJECT_DIR`
+    needs setting: `config.project_dir()` checks it first.
     """
     os.environ["AUTOSOUND_PROJECT_DIR"] = str(project_dir)
 
@@ -498,12 +498,12 @@ class MainWindow(QMainWindow):
         return "done" if self._rew_online else "bad"
 
     def _rebuild_system_params(self) -> None:
-        """System params' one real fact today (REW's default local port) plus a placeholder for
-        everything else still pending the car-audio skill's equipment-config structure (see
-        SKILL-CHANGE-REQUESTS SCR-015) -- rebuilt from scratch so a language switch re-translates
-        both the "REW port" label and the placeholder text (same pattern as `_set_project_params`).
-        Rebuilds the REW-online dot too (clear_layout destroys the old instance) from
-        `self._rew_online`, which is what survives across rebuilds."""
+        """System params: REW's default local port (always shown) plus whatever equipment facts
+        `project.json` has (DSP/amps/mic/source -- SCR-015 point 1, `project_view.load_system_params`).
+        Rebuilt from scratch so a language switch re-translates the "REW port" label and a project
+        switch picks up the new project's facts (same pattern as `_set_project_params`). Rebuilds
+        the REW-online dot too (clear_layout destroys the old instance) from `self._rew_online`,
+        which is what survives across rebuilds."""
         clear_layout(self._system_section.body_layout())
         self._rew_dot = TrafficLight(self._rew_status_class())
         self._rew_dot.setToolTip(
@@ -512,7 +512,12 @@ class MainWindow(QMainWindow):
         self._system_section.body_layout().addWidget(
             _kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT, trailing=self._rew_dot)
         )
-        self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
+        rows = project_view.load_system_params() if self._has_project else ()
+        if not rows:
+            self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
+            return
+        for label, value in rows:
+            self._system_section.body_layout().addWidget(_kv_row(label, value))
 
     def _set_rew_online(self, online: bool) -> None:
         self._rew_online = online
@@ -527,8 +532,9 @@ class MainWindow(QMainWindow):
         like the DSP tree's own `.ghead` group headers (a border-bottom line, no card background --
         matching backgrounds top-to-bottom was a follow-up correction the same day). Only DSP and
         System params (partially) have real content today -- Project params comes from
-        `project_profile.json` (see `_set_project_params`), and Car audio analysis stays a
-        placeholder until the car-audio skill defines where that data comes from
+        `project.json`'s `param_sections` (see `_set_project_params`; D2, SKILL-SYNC-PLAN.md --
+        `project_profile.json` is retired, the skill writes one file), and Car audio analysis
+        stays a placeholder until the car-audio skill defines where that data comes from
         (SKILL-CHANGE-REQUESTS SCR-015). System params leads (user request 2026-07-28) since it's
         the one project-setup fact block most relevant before diving into DSP tuning."""
         panel = _panel()
@@ -652,6 +658,7 @@ class MainWindow(QMainWindow):
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
         self._tree.setVisible(True)
+        self._rebuild_system_params()
         self._view = view
         self._tree.set_view(view)
         self._set_project_params(view)
@@ -760,6 +767,7 @@ class MainWindow(QMainWindow):
         self._left_status.setText(message)
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(offer_create)
+        self._rebuild_system_params()
         self._set_project_params(None)
         self._detail.close_pane()
         self._dialog.clear_for_no_project()
@@ -768,13 +776,17 @@ class MainWindow(QMainWindow):
 
     def _set_project_params(self, view: ProjectView | None) -> None:
         """(Re)builds the "Project params" section body from `view.param_sections` (car/setup,
-        body/chassis, ... -- see `state.dsp_state.load_param_sections`). Moved out of the DSP
-        tree into its own top-level section (user request 2026-07-28): this data is project-level
-        config, not part of the DSP ledger, so it now lives next to System params / Car audio
-        analysis rather than inside the DSP tier."""
+        body/chassis, ... -- see `state.dsp_state.load_param_sections`), plus `project.json`'s
+        channel-tier summary (SCR-016, e.g. "8 virtual channels (1 off)") and any `_open_questions`
+        as onboarding TODO chips (`state.project_view`). Moved out of the DSP tree into its own
+        top-level section (user request 2026-07-28): this data is project-level config, not part
+        of the DSP ledger, so it now lives next to System params / Car audio analysis rather than
+        inside the DSP tier."""
         clear_layout(self._project_section.body_layout())
         sections = view.param_sections if view else ()
-        if not sections:
+        summary_rows = project_view.load_channel_summary() if view else ()
+        open_questions = project_view.load_open_questions() if view else ()
+        if not sections and not summary_rows and not open_questions:
             self._project_section.body_layout().addWidget(
                 self._placeholder_label(i18n.t("noDataYet"))
             )
@@ -782,6 +794,11 @@ class MainWindow(QMainWindow):
         for section in sections:
             widget = ParamsSection(section.id, section.label, section.params, self._settings)
             self._project_section.body_layout().addWidget(widget)
+        for label, value in summary_rows:
+            self._project_section.body_layout().addWidget(_kv_row(label, value))
+        for question in open_questions:
+            chip = self._placeholder_label(f"🟡 {i18n.t('openQuestions')}: {question}")
+            self._project_section.body_layout().addWidget(chip)
 
     # ---- detail-pane wiring --------------------------------------------
 
