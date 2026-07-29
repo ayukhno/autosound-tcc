@@ -333,9 +333,12 @@ class DialogPanel(QWidget):
         # own event handler -- see feedback_qt_qss_gotchas. Nothing to scroll is not an error.
         try:
             bar = self._scroll.verticalScrollBar()
+            bar.setValue(bar.maximum())
         except (AttributeError, RuntimeError):
+            # The guard has to cover the *use*, not just the lookup: `self._scroll` still resolves
+            # after teardown and hands back a wrapper whose C++ side is gone, so the failure lands
+            # on setValue rather than on the attribute.
             return
-        bar.setValue(bar.maximum())
 
     # ---- live agent --------------------------------------------------------
 
@@ -370,20 +373,32 @@ class DialogPanel(QWidget):
         self._session_chip.setHidden(False)
 
     def _clear_bubbles(self) -> None:
+        """Drop every bubble, keeping the trailing stretch `_add_bubble`'s insert index needs.
+
+        Rows are nested layouts, and an earlier version called `deleteLater()` on those. That is
+        the same `setParent(None)`+`deleteLater()` pattern used for widgets elsewhere, but a
+        *layout* deleted that way is disposed of on a later event-loop pass while its widgets are
+        already gone — which left this panel's own scroll area with stale children and made
+        `verticalScrollBar()` hand back a dead wrapper (intermittent, only once other tests spun
+        an event loop). Widgets get the established treatment; the emptied layout is simply
+        dropped and collected, with nothing queued.
+        """
         for bubble in self._bubbles:
-            row = bubble.parentWidget()
             bubble.setParent(None)
             bubble.deleteLater()
-            if row is not None and row is not self._chat:
-                row.deleteLater()
         self._bubbles.clear()
         self._live_bubble = None
-        # The layout still holds the now-empty rows; drop everything except the trailing stretch,
-        # which _add_bubble's insert index depends on.
+        self._live_text = ""
         while self._chat_layout.count() > 1:
             item = self._chat_layout.takeAt(0)
-            if item.layout() is not None:
-                item.layout().deleteLater()
+            row = item.layout()
+            if row is not None:
+                while row.count():
+                    child = row.takeAt(0)
+                    widget = child.widget()
+                    if widget is not None:
+                        widget.setParent(None)
+                        widget.deleteLater()
 
     def _set_busy(self, busy: bool) -> None:
         self._input.setEnabled(not busy)
