@@ -19,6 +19,16 @@ CURRENT_GENERATOR_MODEL = "Claude Opus 5"
 AI_MAIN_MODELS = ["Claude Opus 5", "Claude Sonnet 5", "Claude Fable 5"]
 AI_CRITIC_MODELS = ["Gemini 3.1 Pro", "Gemini 3.5 Flash", "Claude Opus 5"]
 
+# Display name -> real Claude Agent SDK model id, for the one place today that actually threads a
+# picked model into `ClaudeAgentOptions` (the DSP-profile onboarding interview, `new_project_dialog.py`
+# -> `agent_session.OnboardingSession`) -- the footer's own AI-main picker above doesn't wire its
+# selection through to `TuningSession` yet, a separate, pre-existing gap this doesn't fix.
+AI_MODEL_IDS = {
+    "Claude Opus 5": "claude-opus-5",
+    "Claude Sonnet 5": "claude-sonnet-5",
+    "Claude Fable 5": "claude-fable-5",
+}
+
 
 @dataclass(frozen=True)
 class DialogMessage:

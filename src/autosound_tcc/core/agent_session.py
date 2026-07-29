@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Optional
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -243,17 +243,22 @@ class OnboardingSession:
     is inherently back-and-forth (ask, get an answer, ask a follow-up), not a one-shot `query()`.
     """
 
-    def __init__(self, project_dir: Path, vendor: str, model: str) -> None:
+    def __init__(
+        self, project_dir: Path, vendor: str, model: str, ai_model: Optional[str] = None
+    ) -> None:
         self.project_dir = project_dir
         self.vendor = vendor
         self.model = model
         tools, self._draft = build_tools(project_dir, vendor, model)
         server = create_sdk_mcp_server(name="dsp_onboarding", version="1.0.0", tools=tools)
         allowed = [f"mcp__dsp_onboarding__{t.name}" for t in tools]
+        from autosound_tcc.core.tuning_session import DEFAULT_MODEL
+
         self._options = ClaudeAgentOptions(
             system_prompt=SYSTEM_PROMPT,
             mcp_servers={"dsp_onboarding": server},
             allowed_tools=allowed,
+            model=ai_model or DEFAULT_MODEL,
         )
         self._client = ClaudeSDKClient(options=self._options)
         self._started = False

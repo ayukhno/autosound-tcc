@@ -135,7 +135,10 @@ class _RewRenameWorker(QThread):
         self.done.emit(renamed)
 
 
-class _TrafficLight(QLabel):
+class TrafficLight(QLabel):
+    """A small colored dot, `status` one of the `tl-*` QSS classes (theme.py) -- originally this
+    panel's own legend dot, public because main_window.py reuses it for the REW-online indicator."""
+
     def __init__(self, status: str) -> None:
         super().__init__()
         self.setProperty("class", f"tl tl-{status}")
@@ -165,7 +168,7 @@ class _MeasRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
-        self._dot = _TrafficLight(item.status)
+        self._dot = TrafficLight(item.status)
         layout.addWidget(self._dot)
         self._name_label = QLabel()
         self._name_label.setTextFormat(Qt.TextFormat.RichText)
@@ -209,6 +212,10 @@ def _step_label(step_id: str) -> str:
 
 class MeasurementPanel(QWidget):
     """The card's own yellow-tinted border is applied by the caller (main_window.py) — this widget is just the content that goes inside it."""
+
+    # A real Read/Scan call is the freshest possible signal of whether REW is actually reachable --
+    # main_window.py's REW-online dot listens to this rather than polling on its own.
+    rewStatusChanged = Signal(bool)
 
     def __init__(self, preset_provider: Optional[Callable[[], str]] = None) -> None:
         """`preset_provider` returns the current preset name, so each capture method's saved order
@@ -279,11 +286,12 @@ class MeasurementPanel(QWidget):
         layout.addWidget(self._status_label)
 
         legend = QWidget()
+        self._legend = legend
         legend_layout = QHBoxLayout(legend)
         legend_layout.setContentsMargins(0, 0, 0, 0)
         legend_layout.setSpacing(10)
         for status, label in _LEGEND:
-            dot = _TrafficLight(status)
+            dot = TrafficLight(status)
             text = QLabel(label)
             text.setProperty("class", "meas-legend-label")
             legend_layout.addWidget(dot)
@@ -297,7 +305,49 @@ class MeasurementPanel(QWidget):
         self._col_next_row: list[int] = []
         layout.addLayout(self._cols_layout)
 
+        # Shown instead of the grid when there's no real project to derive a capture task from --
+        # an EMPTY grid reads as "everything captured" (see `set_sessions`), which is worse than
+        # the mock it would otherwise fall back to, so this needs its own real state.
+        self._no_project_label = QLabel("")
+        self._no_project_label.setProperty("class", "phead-sub")
+        self._no_project_label.setWordWrap(True)
+        self._no_project_label.setVisible(False)
+        layout.addWidget(self._no_project_label)
+
         self.show_session(self._viewing_id)
+
+    def set_no_project(self, message: str) -> None:
+        """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
+        when there's no real project on disk at all. `set_sessions()` reverses this the moment a
+        real capture task arrives."""
+        for widget in (
+            self._session_combo,
+            self._version,
+            self._assign_names_btn,
+            self._read_btn,
+        ):
+            widget.setVisible(False)
+        self._legend.setVisible(False)
+        while self._cols_layout.count():
+            item = self._cols_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._rows = []
+        self._no_project_label.setText(message)
+        self._no_project_label.setVisible(True)
+
+    def _show_content(self) -> None:
+        for widget in (
+            self._session_combo,
+            self._version,
+            self._assign_names_btn,
+            self._read_btn,
+        ):
+            widget.setVisible(True)
+        self._legend.setVisible(True)
+        self._no_project_label.setVisible(False)
 
     def _session(self, session_id: str) -> MeasSession:
         return next(s for s in self._sessions if s.id == session_id)
@@ -310,6 +360,7 @@ class MeasurementPanel(QWidget):
         """
         if not sessions:
             return
+        self._show_content()  # reverses a prior set_no_project(), a no-op otherwise
         self._sessions = tuple(sessions)
         self._viewing_id = self._sessions[0].id
         self._session_combo.blockSignals(True)
@@ -441,6 +492,7 @@ class MeasurementPanel(QWidget):
         self._scan_worker.start()
 
     def _on_scan_done(self, measurements: dict) -> None:
+        self.rewStatusChanged.emit(True)
         order = self._pending_order
         expected = len(order)
         found_count = len(measurements)
@@ -498,6 +550,7 @@ class MeasurementPanel(QWidget):
         self._worker.start()
 
     def _on_read_done(self, result: dict) -> None:
+        self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
         title = result.get("title", "")
         self._status_label.setText(

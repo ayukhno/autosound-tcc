@@ -347,6 +347,11 @@ class DialogPanel(QWidget):
         that quietly goes nowhere, not about preventing a send that couldn't happen anyway."""
         self._composer.setVisible(visible)
 
+    def clear_for_no_project(self) -> None:
+        """Drop the mock transcript when MainWindow finds no real project on disk -- a folder
+        with nothing real in it should never look like a live tuning conversation is underway."""
+        self._clear_bubbles()
+
     # ---- live agent --------------------------------------------------------
 
     def attach_agent(

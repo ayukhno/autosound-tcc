@@ -253,3 +253,62 @@ def test_mode_switch_is_independent_of_whether_a_profile_was_found():
 
     assert window._ui_mode == "control"
     assert not window._session_btn.isHidden()
+
+
+def test_no_project_shows_create_button_and_clears_every_mock_panel():
+    """A folder with no dsp_profile.json at all must not look like a live tuning session --
+    the AI dialog, plan, and measurement panels all default to prototype mock content, and
+    MainWindow is the only thing that knows whether a real project backs any of it."""
+    _app()
+    window = MainWindow()
+
+    assert not window._create_project_btn.isHidden()
+    assert len(window._dialog._bubbles) == 0
+    assert window._plan_panel.plan == ()
+    assert not window._meas_panel._no_project_label.isHidden()
+    assert window._meas_panel._legend.isHidden()
+
+
+def test_a_broken_profile_clears_panels_but_does_not_offer_create(tmp_path, monkeypatch):
+    """A profile that exists but fails to load is a project that's there, just broken -- offering
+    "create new" would overwrite/duplicate it, so only the true no-file-at-all case gets that
+    button (still no mock content, though -- there's nothing real to show either way)."""
+    (tmp_path / "dsp_profile.json").write_text("{ not valid json")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+
+    _app()
+    window = MainWindow()
+
+    assert window._create_project_btn.isHidden()
+    assert len(window._dialog._bubbles) == 0
+    assert window._plan_panel.plan == ()
+
+
+def test_found_profile_hides_create_button_and_leaves_mock_untouched(tmp_path, monkeypatch):
+    """The success path must not accidentally clear panels meant to stay on their mock/real
+    content -- this mirrors test_tree_renders_when_a_profile_and_ledger_are_present's fixture."""
+    import json
+
+    profile = {
+        "dsp_profile": {
+            "name": "M6V4", "vendor": "Musway",
+            "groups": [{"id": "physical_outputs", "label": "Output channels",
+                        "fields": ["hp", "lp", "gain_db"]}],
+        }
+    }
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    preset_dir = tmp_path / "TESTPRESET"
+    preset_dir.mkdir()
+    ledger = {"preset": "TESTPRESET", "sample_rate": 48000,
+              "channels": {"w_L": {"hp": {"f": 80}, "lp": {"f": 4000}, "gain_db": -2.0}}}
+    (preset_dir / "v_001.json").write_text(json.dumps(ledger))
+    (preset_dir / "HEAD").write_text("v_001")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path))
+
+    _app()
+    window = MainWindow()
+
+    assert window._create_project_btn.isHidden()
+    assert window._meas_panel._no_project_label.isHidden()

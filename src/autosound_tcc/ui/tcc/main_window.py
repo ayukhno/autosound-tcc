@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QFileSystemWatcher, QPoint, QUrl, Qt
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QThread, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import config, critic, terminal_launcher, ui_mode
 from autosound_tcc.core.mcp_server import TccMcpServer
+from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import measurement_view, process_view
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
@@ -40,8 +42,9 @@ from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget, ParamsSection
-from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS, AI_MAIN_MODELS
+from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -134,10 +137,11 @@ def _vline() -> QFrame:
     return line
 
 
-def _kv_row(key: str, value: str) -> QWidget:
+def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
     (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
-    rest of the app without depending on that module-private class."""
+    rest of the app without depending on that module-private class. `trailing` is an optional
+    extra widget after the value (the REW-online dot)."""
     row = QWidget()
     row.setProperty("class", "paramrow")
     layout = QHBoxLayout(row)
@@ -150,6 +154,8 @@ def _kv_row(key: str, value: str) -> QWidget:
     v = QLabel(value)
     v.setProperty("class", "pv")
     layout.addWidget(v)
+    if trailing is not None:
+        layout.addWidget(trailing)
     return row
 
 
@@ -194,6 +200,22 @@ def _detect_system_mode() -> str:
     return "dark"
 
 
+class _RewPingWorker(QThread):
+    """One-shot connectivity probe for the System-params REW-online dot -- mirrors
+    `measurement_panel._RewReadWorker`'s shape (a synchronous HTTP call off the GUI thread), but
+    only ever runs once per launch. Ongoing freshness comes from `MeasurementPanel.rewStatusChanged`
+    instead of a recurring poll here."""
+
+    result = Signal(bool)
+
+    def __init__(self, bridge: RewBridge) -> None:
+        super().__init__()
+        self._bridge = bridge
+
+    def run(self) -> None:
+        self.result.emit(self._bridge.is_reachable())
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -203,6 +225,8 @@ class MainWindow(QMainWindow):
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
         self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
+        self._has_project = False  # set for real by _load_project(); read by _refresh_process()
+        self._rew_online: bool | None = None  # None = not checked yet -- read before _build_left()
         self._preset_override: str | None = self._settings.value("ui/preset", None)
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
         # TCC-TZ.md §8: view/control is a property of the *project* (`.tcc/ui_mode.json`), not a
@@ -250,6 +274,17 @@ class MainWindow(QMainWindow):
         self._load_process()
         self._start_mcp_server()
         self._apply_ui_mode()
+
+        # One-shot REW-online probe (System-params dot); ongoing freshness comes from a real
+        # Read/Scan on the measurement panel instead of a recurring poll here. Same escape hatch
+        # as the MCP server just above -- this is a real outbound network call, and the test suite
+        # relies on AUTOSOUND_TCC_MCP=0 to stay off the network entirely.
+        self._rew_ping: "_RewPingWorker | None" = None
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
+            self._rew_ping = _RewPingWorker(RewBridge())
+            self._rew_ping.result.connect(self._set_rew_online)
+            self._rew_ping.start()
+        self._meas_panel.rewStatusChanged.connect(self._set_rew_online)
 
     # ---- header / footer -------------------------------------------------
 
@@ -427,14 +462,34 @@ class MainWindow(QMainWindow):
         label.setContentsMargins(12, 10, 12, 10)
         return label
 
+    def _rew_status_class(self) -> str:
+        if self._rew_online is None:
+            return "wait"  # not checked yet -- same neutral dot the measurement legend uses
+        return "done" if self._rew_online else "bad"
+
     def _rebuild_system_params(self) -> None:
         """System params' one real fact today (REW's default local port) plus a placeholder for
         everything else still pending the car-audio skill's equipment-config structure (see
         SKILL-CHANGE-REQUESTS SCR-015) -- rebuilt from scratch so a language switch re-translates
-        both the "REW port" label and the placeholder text (same pattern as `_set_project_params`)."""
+        both the "REW port" label and the placeholder text (same pattern as `_set_project_params`).
+        Rebuilds the REW-online dot too (clear_layout destroys the old instance) from
+        `self._rew_online`, which is what survives across rebuilds."""
         clear_layout(self._system_section.body_layout())
-        self._system_section.body_layout().addWidget(_kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT))
+        self._rew_dot = TrafficLight(self._rew_status_class())
+        self._rew_dot.setToolTip(
+            i18n.t("rewOnlineTip") if self._rew_online else i18n.t("rewOfflineTip")
+        )
+        self._system_section.body_layout().addWidget(
+            _kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT, trailing=self._rew_dot)
+        )
         self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
+
+    def _set_rew_online(self, online: bool) -> None:
+        self._rew_online = online
+        self._rew_dot.set_status(self._rew_status_class())
+        self._rew_dot.setToolTip(
+            i18n.t("rewOnlineTip") if online else i18n.t("rewOfflineTip")
+        )
 
     def _build_left(self) -> QFrame:
         """The left panel is a top-level accordion (user request 2026-07-28): System params /
@@ -481,6 +536,18 @@ class MainWindow(QMainWindow):
         self._left_status.setContentsMargins(12, 16, 12, 16)
         self._dsp_section.body_layout().addWidget(self._left_status)
 
+        # Only offered for the genuine "no project here at all" case (_show_left_status's
+        # offer_create=True) -- the other _show_left_status branches describe a project that
+        # exists but is broken, where "create new" would be the wrong fix.
+        self._create_project_btn = QPushButton(i18n.t("createProject"))
+        self._create_project_btn.setProperty("class", "reason-btn")
+        self._create_project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._create_project_btn.clicked.connect(self._open_new_project_dialog)
+        self._create_project_btn.setVisible(False)
+        self._dsp_section.body_layout().addWidget(
+            self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -502,9 +569,8 @@ class MainWindow(QMainWindow):
         profile_path = config.dsp_profile_path()
         if not profile_path.is_file():
             self._show_left_status(
-                f"No DSP profile found.\nLooked for {profile_path}.\n"
-                f"Run the DSP onboarding interview "
-                f"(python -m autosound_tcc.dsp_profile_interview) to create one."
+                f"No DSP profile found.\nLooked for {profile_path}.",
+                offer_create=True,
             )
             return
         try:
@@ -546,8 +612,10 @@ class MainWindow(QMainWindow):
             return
 
         prof = profile.get("dsp_profile", profile)
+        self._has_project = True
         self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
+        self._create_project_btn.setVisible(False)
         self._tree.setVisible(True)
         self._view = view
         self._tree.set_view(view)
@@ -558,6 +626,27 @@ class MainWindow(QMainWindow):
         self._save_label.setText(view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._version_label.setText(view.version or "")
+
+    def _open_new_project_dialog(self) -> None:
+        """Folder + vendor/model + AI model, then the existing onboarding interview. On a saved
+        profile, hand off to a fresh `MainWindow` pointed at the new folder rather than trying to
+        hot-reload this window's subsystems (MCP server, process watcher, DSP tree) live -- every
+        one of them already loads fresh from `config.project_dir()` in `__init__`, so a brand new
+        window is a full, correct "restart pointed at the new project" with no new teardown code
+        needed beyond the `closeEvent` this window already has."""
+        dialog = NewProjectDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.interview_dialog is None:
+            return
+        interview = dialog.interview_dialog
+
+        def _on_saved(_path: str) -> None:
+            interview.close()
+            new_window = MainWindow()
+            new_window.show()
+            self.close()
+
+        interview.profile_saved.connect(_on_saved)
+        interview.show()
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
@@ -590,12 +679,22 @@ class MainWindow(QMainWindow):
         self._settings.setValue("ui/preset", preset)
         self._load_project()
 
-    def _show_left_status(self, message: str) -> None:
+    def _show_left_status(self, message: str, offer_create: bool = False) -> None:
+        """The one place that means "there's no real, loaded project view right now" -- all four
+        `_load_project` failure branches route through here, so mock-clearing lives here rather
+        than at one call site. Only the genuine no-profile-file-at-all branch passes
+        `offer_create=True`; a broken profile/ledger is a project that exists, where "create new"
+        would be the wrong offer."""
+        self._has_project = False
         self._tree.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
+        self._create_project_btn.setVisible(offer_create)
         self._set_project_params(None)
         self._detail.close_pane()
+        self._dialog.clear_for_no_project()
+        self._plan_panel.set_plan(())
+        self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
 
     def _set_project_params(self, view: ProjectView | None) -> None:
         """(Re)builds the "Project params" section body from `view.param_sections` (car/setup,
@@ -776,7 +875,11 @@ class MainWindow(QMainWindow):
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
         if state is None:
-            self._plan_panel.set_plan(None)  # nothing real yet: the mock stays
+            # A real project that just hasn't started tuning yet keeps the mock; no project at
+            # all (self._has_project False, set by _show_left_status) must NOT re-mock a plan
+            # _load_project already cleared to real-empty -- this runs after _load_project every
+            # time (including preset switches), so it can't just default to "keep the mock".
+            self._plan_panel.set_plan(None if self._has_project else ())
             return
         self._plan_panel.set_plan(process_view.to_plan(state))
         self._refresh_capture_task(state)
@@ -929,6 +1032,11 @@ class MainWindow(QMainWindow):
         self._status_strip.notify(i18n.t("terminalOpened").format(cli=cli))
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # The one-shot ping is normally long finished by the time anyone closes the window, but
+        # Qt destroying a still-running QThread is undefined behaviour regardless of how unlikely.
+        ping = getattr(self, "_rew_ping", None)
+        if ping is not None and ping.isRunning():
+            ping.wait(2000)
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
         self._meas_panel.shutdown()

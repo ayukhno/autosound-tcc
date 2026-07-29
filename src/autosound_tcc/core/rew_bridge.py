@@ -44,6 +44,15 @@ class RewBridge:
     def base_url(self) -> str:
         return self.api.BASE_URL
 
+    def is_reachable(self) -> bool:
+        """Cheap connectivity probe for the System-params REW-online dot -- same call
+        `_RewReadWorker` already makes, just discarding the result. Call off the GUI thread."""
+        try:
+            self.measurements()
+        except Exception:  # noqa: BLE001 — any failure (REW closed, wrong port, ...) means offline
+            return False
+        return True
+
     # -- measurements --
     def measurements(self) -> dict:
         """All measurements, keyed by REW's (unstable) ordinal id."""

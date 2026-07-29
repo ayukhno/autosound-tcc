@@ -37,11 +37,14 @@ class _AgentWorker(QThread):
     profile_saved = Signal(str)  # emits the on-disk path once finalize_profile actually wrote it
     failed = Signal(str)
 
-    def __init__(self, project_dir: Path, vendor: str, model: str) -> None:
+    def __init__(
+        self, project_dir: Path, vendor: str, model: str, ai_model: Optional[str] = None
+    ) -> None:
         super().__init__()
         self._project_dir = project_dir
         self._vendor = vendor
         self._model = model
+        self._ai_model = ai_model
         self._inbox: "queue.Queue[Optional[str]]" = queue.Queue()
         self._session: Optional[OnboardingSession] = None
 
@@ -59,7 +62,9 @@ class _AgentWorker(QThread):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
     async def _main(self) -> None:
-        self._session = OnboardingSession(self._project_dir, self._vendor, self._model)
+        self._session = OnboardingSession(
+            self._project_dir, self._vendor, self._model, self._ai_model
+        )
         try:
             async for text in self._session.start():
                 self.chunk.emit(text)
@@ -83,7 +88,19 @@ class ProfileInterviewDialog(QDialog):
     """Chat panel: message list + composer, same shape as the HTML prototype's `.msg`/
     `.composer`, streaming the onboarding agent's turns from a background thread."""
 
-    def __init__(self, project_dir: Path, vendor: str, model: str, parent=None) -> None:
+    # Re-emitted (not just shown in `self._status`) so a caller -- e.g. the "Create new project"
+    # flow in main_window.py -- can react to a finished onboarding without reaching into this
+    # dialog's own worker.
+    profile_saved = Signal(str)
+
+    def __init__(
+        self,
+        project_dir: Path,
+        vendor: str,
+        model: str,
+        ai_model: Optional[str] = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"DSP profile onboarding — {vendor} {model}")
         self.resize(560, 640)
@@ -110,7 +127,7 @@ class ProfileInterviewDialog(QDialog):
         self._composer.returnPressed.connect(self._on_send)
         self._set_input_enabled(False)
 
-        self._worker = _AgentWorker(project_dir, vendor, model)
+        self._worker = _AgentWorker(project_dir, vendor, model, ai_model)
         self._worker.chunk.connect(self._on_chunk)
         self._worker.turn_done.connect(self._on_turn_done)
         self._worker.profile_saved.connect(self._on_profile_saved)
@@ -147,6 +164,7 @@ class ProfileInterviewDialog(QDialog):
 
     def _on_profile_saved(self, path: str) -> None:
         self._status.setText(f"Profile saved: {path}")
+        self.profile_saved.emit(path)
 
     def _on_failed(self, message: str) -> None:
         self._append_bubble("System", f"⚠️ {message}")
