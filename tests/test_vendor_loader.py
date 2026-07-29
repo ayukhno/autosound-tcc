@@ -30,6 +30,13 @@ def test_load_dsp_state():
     assert callable(vstate.samples_for)
 
 
+def test_load_project():
+    proj = vendor_loader.load_project()
+    assert hasattr(proj, "Project")
+    assert callable(proj.fact) and callable(proj.open_questions)
+    assert proj.__name__ == "autosound_tcc._vendor.project"
+
+
 def test_get_post_put_pass_a_timeout():
     """A real, live-triggered incident (2026-07-27): `urlopen()` with no timeout let a REW-
     unreachable call hang a QThread forever, which crashed the whole app on shutdown ("QThread:

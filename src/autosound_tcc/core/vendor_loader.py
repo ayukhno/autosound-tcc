@@ -33,7 +33,12 @@ _VENDORED = {
     "state/process.py": "autosound_tcc._vendor.process",
     "naming.py": "autosound_tcc._vendor.naming",
     "dsp_profile.py": "autosound_tcc._vendor.dsp_profile",
+    "project.py": "autosound_tcc._vendor.project",
 }
+# `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
+# deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
+# <project> --json`), and a future diagnostics panel should shell out to it (`subprocess`), the
+# same pattern TCC already uses for the Critic scripts, rather than import it in-process.
 
 
 class VendorNotInitializedError(RuntimeError):
@@ -100,3 +105,12 @@ def load_naming() -> ModuleType:
 def load_dsp_profile() -> ModuleType:
     """The DSP capability-profile module (`dsp_profile.py`)."""
     return load("dsp_profile.py")
+
+
+def load_project() -> ModuleType:
+    """The project-facts module (`project.py`, SCR-001/011/014/015/016/017) — car/equipment/
+    glossary/hardware-control facts. Not currently called by any TCC code path (`state/
+    project_view.py` reads `project.json` directly, the same degrade-gracefully-without-the-
+    submodule posture as the rest of that module); registered so a future writer-side feature
+    (e.g. an in-app "set channel driver" action) has a working loader already in place."""
+    return load("project.py")
