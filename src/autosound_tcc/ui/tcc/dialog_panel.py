@@ -226,6 +226,7 @@ class DialogPanel(QWidget):
 
         composer = QWidget()
         composer.setProperty("class", "composer")
+        self._composer = composer
         composer_layout = QHBoxLayout(composer)
         composer_layout.setContentsMargins(9, 9, 9, 9)
         composer_layout.setSpacing(8)
@@ -339,6 +340,12 @@ class DialogPanel(QWidget):
             # after teardown and hands back a wrapper whose C++ side is gone, so the failure lands
             # on setValue rather than on the attribute.
             return
+
+    def set_composer_visible(self, visible: bool) -> None:
+        """Hide the composer in `view` mode (TCC-TZ.md §8: "no AI at all") -- `_on_send` already
+        no-ops with no worker attached, so this is about not showing a live-looking input box
+        that quietly goes nowhere, not about preventing a send that couldn't happen anyway."""
+        self._composer.setVisible(visible)
 
     # ---- live agent --------------------------------------------------------
 

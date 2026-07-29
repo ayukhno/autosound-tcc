@@ -161,6 +161,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-size: 11px;
     }}
 
+    /* .status-strip — "what TCC found on disk" (MCP up/down, terminal-launch result), read-only
+    and shown in both view/control modes -- deliberately NOT a dialog bubble, see TCC-TZ.md §8.
+    One line, hidden when there's nothing to say; `status-warn` recolors it for an error. */
+    QLabel[class~="status-strip"] {{
+        background: {t.panel2};
+        border-bottom: 1px solid {t.border};
+        color: {t.info};
+        font-size: 11px;
+        padding: 5px 14px;
+    }}
+    QLabel[class~="status-strip status-warn"] {{
+        color: {t.warn};
+    }}
+
     /* .sidebar-head — the left panel's top-level accordion header bar (System params / Project
     params / Car audio analysis / DSP) -- the only rows in the app deliberately shaded darker than
     the now-uniform `.panel` gray, so the top-level accordion still reads as a distinct landmark

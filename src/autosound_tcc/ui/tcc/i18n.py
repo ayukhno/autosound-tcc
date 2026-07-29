@@ -16,6 +16,10 @@ Lang = str  # "en" | "uk"
 T: dict[Lang, dict[str, str]] = {
     "en": {
         "theme": "theme",
+        "modeView": "view",
+        "modeControl": "control",
+        "modeViewTip": "Read-only: TCC shows what the skill has on disk. No AI.",
+        "modeControlTip": "AI attached: in-app session or your own CLI, the Arbiter gate.",
         "dspPanel": "DSP",
         "projectParams": "Project params",
         "systemParams": "System params",
@@ -131,6 +135,10 @@ T: dict[Lang, dict[str, str]] = {
     },
     "uk": {
         "theme": "тема",
+        "modeView": "перегляд",
+        "modeControl": "керування",
+        "modeViewTip": "Лише читання: TCC показує, що скіл записав на диску. Без ШІ.",
+        "modeControlTip": "ШІ підʼєднано: агент у вікні або власний CLI, гейт Арбітра.",
         "dspPanel": "DSP",
         "projectParams": "Параметри проєкту",
         "systemParams": "Параметри системи",

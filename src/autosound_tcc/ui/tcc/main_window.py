@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, critic, terminal_launcher
+from autosound_tcc.core import config, critic, terminal_launcher, ui_mode
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import measurement_view, process_view
@@ -46,6 +46,7 @@ from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.sidebar_section import SidebarSection, clear_layout
+from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 
 _THEME_KEY = "ui/theme"
@@ -205,6 +206,10 @@ class MainWindow(QMainWindow):
         self._view: ProjectView | None = None
         self._preset_override: str | None = self._settings.value("ui/preset", None)
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
+        # TCC-TZ.md §8: view/control is a property of the *project* (`.tcc/ui_mode.json`), not a
+        # global app preference like theme/zoom/lang above -- deliberately not QSettings, and
+        # deliberately a differently-named attribute from `self._mode` (the light/dark theme).
+        self._ui_mode: ui_mode.Mode = ui_mode.get_mode(config.tcc_dir())
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -213,6 +218,11 @@ class MainWindow(QMainWindow):
         outer.setSpacing(8)
 
         outer.addWidget(self._build_header())
+
+        # "What TCC found on disk" (MCP status, terminal-launch result) -- shown in both modes,
+        # never a dialog bubble (TCC-TZ.md §8).
+        self._status_strip = StatusStrip()
+        outer.addWidget(self._status_strip)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -235,6 +245,7 @@ class MainWindow(QMainWindow):
         self._load_project()
         self._load_process()
         self._start_mcp_server()
+        self._apply_ui_mode()
 
     # ---- header / footer -------------------------------------------------
 
@@ -282,6 +293,19 @@ class MainWindow(QMainWindow):
         self._version_label.setProperty("class", "phead-sub")
         layout.addWidget(self._version_label)
         layout.addStretch(1)
+
+        # TCC-TZ.md §8: two modes, always switchable, independent of whether a project/profile
+        # was found -- itemData carries the mode key, same pattern as the preset combo below.
+        self._mode_combo = _mini_combo()
+        self._mode_combo.addItem(i18n.t("modeView"), "view")
+        self._mode_combo.addItem(i18n.t("modeControl"), "control")
+        idx = self._mode_combo.findData(self._ui_mode)
+        if idx >= 0:
+            self._mode_combo.setCurrentIndex(idx)
+        self._mode_combo.currentIndexChanged.connect(
+            lambda _idx: self._on_mode_selected(self._mode_combo.currentData())
+        )
+        layout.addWidget(self._mode_combo)
 
         self._lang_combo = _mini_combo()
         # Display "УК" (Cyrillic, macOS's own convention for Ukrainian) not the Latin "UK" -- that
@@ -341,6 +365,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._ai_main_lbl)
         ai_main = _mini_combo()
         ai_main.addItems(AI_MAIN_MODELS)
+        self._ai_main_combo = ai_main
         layout.addWidget(ai_main)
 
         self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
@@ -824,7 +849,7 @@ class MainWindow(QMainWindow):
             self._mcp_server.start()
         except Exception as exc:  # port taken, unwritable project folder, ...
             self._mcp_server = None
-            self._dialog._add_system_message(f"⚠️ MCP: {exc}")
+            self._status_strip.notify(f"MCP: {exc}", level="warn")
 
     def _publish_snapshot(self) -> None:
         """Mirror what's on screen into the bridge, for `get_tcc_state` to read off-thread."""
@@ -895,9 +920,9 @@ class MainWindow(QMainWindow):
         try:
             cli = terminal_launcher.launch(project_dir)
         except terminal_launcher.TerminalLaunchError as exc:
-            self._dialog._add_system_message(f"⚠️ {exc}")
+            self._status_strip.notify(str(exc), level="warn")
             return
-        self._dialog._add_system_message(i18n.t("terminalOpened").format(cli=cli))
+        self._status_strip.notify(i18n.t("terminalOpened").format(cli=cli))
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
@@ -915,6 +940,37 @@ class MainWindow(QMainWindow):
             self._mcp_server.stop()
         super().closeEvent(event)
 
+    def _on_mode_selected(self, mode: str) -> None:
+        if mode not in ("view", "control") or mode == self._ui_mode:
+            return
+        self._ui_mode = mode
+        ui_mode.set_mode(config.tcc_dir(), mode)
+        # Keeps the header combo correct even when this is reached other than by the user picking
+        # it (e.g. programmatically) -- a no-op when the combo is already the caller, since Qt
+        # only re-emits currentIndexChanged on an actual index change.
+        idx = self._mode_combo.findData(mode)
+        if idx >= 0 and self._mode_combo.currentIndex() != idx:
+            self._mode_combo.setCurrentIndex(idx)
+        self._apply_ui_mode()
+
+    def _apply_ui_mode(self) -> None:
+        """Show/hide the `control`-only affordances (TCC-TZ.md §8) -- everything else (DSP tree,
+        table, plan/measurement panels, feedback, theme/lang/zoom) is the "reader" surface and
+        stays visible in both modes."""
+        control = self._ui_mode == "control"
+        for widget in (
+            self._session_btn,
+            self._terminal_btn,
+            self._ai_main_lbl,
+            self._ai_main_combo,
+            self._ai_critic_lbl,
+            self._ai_critic_combo,
+            self._critic_status,
+        ):
+            widget.setVisible(control)
+        self._dialog.set_composer_visible(control)
+        self._mode_combo.setToolTip(i18n.t("modeControlTip" if control else "modeViewTip"))
+
     def _on_language_selected(self, lang: str) -> None:
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
@@ -927,6 +983,11 @@ class MainWindow(QMainWindow):
         observer registry, since the widget count is still small enough for that to be simple
         and correct."""
         self._theme_btn.setText("◐ " + i18n.t("theme"))
+        self._mode_combo.setItemText(0, i18n.t("modeView"))
+        self._mode_combo.setItemText(1, i18n.t("modeControl"))
+        self._mode_combo.setToolTip(
+            i18n.t("modeControlTip" if self._ui_mode == "control" else "modeViewTip")
+        )
         self._project_section.set_title(i18n.t("projectParams"))
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()
