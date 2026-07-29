@@ -47,11 +47,18 @@ def default_cli() -> Optional[str]:
 
 
 def _posix_command(project_dir: Path, cli: str, hint: Optional[str] = None) -> str:
-    """The shell line the terminal will run: enter the project, optionally echo a hint (what to
-    onboard, for the "Create new project" terminal path -- still just shell text, TCC starts
-    nothing), then hand over to the CLI."""
-    prefix = f"echo {shlex.quote(hint)} && " if hint else ""
-    return f"cd {shlex.quote(str(project_dir))} && {prefix}exec {shlex.quote(cli)}"
+    """The shell line the terminal will run: enter the project, then hand over to the CLI.
+
+    `hint`, when given, is passed as the CLI's own initial-prompt ARGUMENT (`cli "hint text"`) --
+    NOT shell output printed before it. Every known CLI here (claude, gemini, codex, agy) is a
+    full-screen TUI that switches to the terminal's alternate screen buffer on start, which wipes
+    whatever the shell printed a moment earlier -- an `echo` before `exec` was confirmed
+    (2026-07-29 dogfood) to render as nothing at all once the TUI took over.
+    """
+    cli_invocation = shlex.quote(cli)
+    if hint:
+        cli_invocation += f" {shlex.quote(hint)}"
+    return f"cd {shlex.quote(str(project_dir))} && exec {cli_invocation}"
 
 
 def _applescript_literal(text: str) -> str:
@@ -86,14 +93,14 @@ def _launch_macos(project_dir: Path, cli: str, hint: Optional[str] = None) -> No
 def _launch_windows(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
     if shutil.which("wt"):
         argv = ["wt", "-d", str(project_dir)]
-        # Unhinted case stays exactly the plain-argv shape it always was; a hint needs a shell
-        # line (echo && cli), which only cmd /k can run as a single wt argument.
-        argv += ["cmd", "/k", f"echo {hint} && {cli}"] if hint else [cli]
+        # Unhinted case stays exactly the plain-argv shape it always was; a hint needs a single
+        # `wt` argument, which only cmd /k can express as one string.
+        argv += ["cmd", "/k", f'{cli} "{hint}"'] if hint else [cli]
         subprocess.Popen(argv, close_fds=True)
         return
     # `start` is a cmd builtin, so this needs the shell; `/d` sets the working directory and the
     # empty "" is the window title `start` would otherwise eat from the first quoted argument.
-    inner = f'echo {hint} && "{cli}"' if hint else f'"{cli}"'
+    inner = f'"{cli}" "{hint}"' if hint else f'"{cli}"'
     subprocess.Popen(
         f'start "" /d "{project_dir}" cmd /k {inner}', shell=True, close_fds=True
     )
@@ -120,9 +127,9 @@ def _launch_linux(project_dir: Path, cli: str, hint: Optional[str] = None) -> No
 def launch(project_dir: Path, cli: Optional[str] = None, hint: Optional[str] = None) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
 
-    `hint`, if given, is echoed before the CLI starts (e.g. "onboarding a Helix DSP Ultra S" for
-    the "Create new project" terminal path) -- still just shell text the human reads, not a prompt
-    TCC injects into the agent.
+    `hint`, if given, is passed as the CLI's own initial-prompt argument (e.g. "onboarding a Helix
+    DSP Ultra S" for the "Create new project" terminal path) -- not shell output TCC prints, since
+    every known CLI's full-screen TUI would swallow that before the human ever saw it.
 
     Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
     caller is expected to turn that into a message, since "nothing happened" after clicking a

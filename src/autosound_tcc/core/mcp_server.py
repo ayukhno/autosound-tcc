@@ -232,8 +232,8 @@ def build_server(
     @mcp.tool()
     async def get_capability_checklist() -> str:
         """The fixed DSP capability-checklist questions to ask the human about (project-intake.md
-        §4). Ask closed questions with concrete options where you can -- a handful per turn, not a
-        wall of text."""
+        §4). Ask closed questions with concrete options where you can, 2-3 per turn -- never dump
+        the whole remaining list into one message, even when several are still open."""
         return json.dumps(agent_session.CAPABILITY_CHECKLIST, ensure_ascii=False)
 
     @mcp.tool()
@@ -242,7 +242,8 @@ def build_server(
         in-progress draft and the bundled reference library for an EXACT vendor+model match --
         never treat a different model's profile (even a platform sibling's) as fact for this one.
         If it returns a project profile or an exact bundled match, don't re-ask about anything it
-        already confirmed -- call get_capability_checklist and ask only about what's still open.
+        already confirmed -- call get_capability_checklist and ask only about what's still open,
+        2-3 questions per turn (see get_capability_checklist's own note).
         """
         try:
             dsp_profile = vendor_loader.load_dsp_profile()
