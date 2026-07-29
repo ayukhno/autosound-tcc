@@ -127,3 +127,40 @@ def test_no_clis_installed_means_no_default(monkeypatch):
 def test_this_machine_has_at_least_one_agent_cli():
     """Sanity check for the dogfood machine -- front-end B is unusable without one."""
     assert terminal_launcher.available_clis()
+
+
+def test_macos_hint_is_echoed_before_the_cli(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+
+    launch(tmp_path, "gemini", hint="onboarding a Helix DSP Ultra S")
+
+    script = recorded[0][2]
+    assert "echo 'onboarding a Helix DSP Ultra S' && exec gemini" in script
+
+
+def test_macos_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
+    """No hint must not introduce an `echo` at all -- same command shape as before this feature."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+
+    launch(tmp_path, "claude")
+
+    script = recorded[0][2]
+    assert "echo" not in script
+
+
+def test_windows_terminal_hint_wraps_in_cmd_k(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "codex", hint="onboarding a Musway M6V4")
+
+    assert recorded[0][:2] == ["wt", "-d"]
+    assert recorded[0][3:5] == ["cmd", "/k"]
+    assert recorded[0][-1] == "echo onboarding a Musway M6V4 && codex"
+
+
+def test_windows_terminal_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "claude")
+
+    assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]

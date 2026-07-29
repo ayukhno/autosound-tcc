@@ -186,6 +186,18 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
+def _force_project_dir_env(project_dir: Path) -> None:
+    """Make `config.project_dir()` resolve to `project_dir` for the rest of THIS process's life.
+
+    `config.set_project_dir()` only persists to QSettings, which `config.project_dir()` checks
+    AFTER any `AUTOSOUND_PROJECT_DIR`/`AUTOSOUND_TCC_PROJECT_DIR` env var -- if this process was
+    itself launched with one set (a real, common launch pattern), a plain QSettings update would
+    be silently outranked by the still-set env var for any `MainWindow` built in this same
+    process. Only `AUTOSOUND_PROJECT_DIR` needs setting: `config.project_dir()` checks it first.
+    """
+    os.environ["AUTOSOUND_PROJECT_DIR"] = str(project_dir)
+
+
 def _detect_system_mode() -> str:
     """Dark unless the OS explicitly prefers light — mirrors the prototype's CSS default
     (bare `:root` is dark; `@media (prefers-color-scheme: light)` is the only thing that flips
@@ -633,25 +645,53 @@ class MainWindow(QMainWindow):
         self._version_label.setText(view.version or "")
 
     def _open_new_project_dialog(self) -> None:
-        """Folder + vendor/model + AI model, then the existing onboarding interview. On a saved
-        profile, hand off to a fresh `MainWindow` pointed at the new folder rather than trying to
-        hot-reload this window's subsystems (MCP server, process watcher, DSP tree) live -- every
-        one of them already loads fresh from `config.project_dir()` in `__init__`, so a brand new
-        window is a full, correct "restart pointed at the new project" with no new teardown code
-        needed beyond the `closeEvent` this window already has."""
+        """Folder + vendor/model + (in-app Claude OR a detected terminal CLI). Either path hands
+        off to a fresh `MainWindow` pointed at the new folder rather than trying to hot-reload
+        this window's subsystems (MCP server, process watcher, DSP tree) live -- every one of them
+        already loads fresh from `config.project_dir()` in `__init__`, so a brand new window is a
+        full, correct "restart pointed at the new project" with no new teardown code needed beyond
+        the `closeEvent` this window already has."""
         dialog = NewProjectDialog(self)
-        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.interview_dialog is None:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        interview = dialog.interview_dialog
 
-        def _on_saved(_path: str) -> None:
-            interview.close()
+        if dialog.interview_dialog is not None:
+            interview = dialog.interview_dialog
+            project_dir = dialog.project_dir
+
+            def _on_saved(_path: str) -> None:
+                interview.close()
+                if project_dir is not None:
+                    _force_project_dir_env(project_dir)
+                new_window = MainWindow()
+                new_window.show()
+                self.close()
+
+            interview.profile_saved.connect(_on_saved)
+            interview.show()
+            return
+
+        if dialog.open_terminal_cli is not None and dialog.project_dir is not None:
+            # config.set_project_dir() (already called by NewProjectDialog._on_create) only
+            # updates QSettings -- if THIS process was itself launched with AUTOSOUND_PROJECT_DIR
+            # set, that env var still wins over QSettings for any MainWindow built in the same
+            # process, so the "fresh window" below would silently reopen the OLD project without
+            # this override.
+            _force_project_dir_env(dialog.project_dir)
+            # The new window's own _start_mcp_server() runs synchronously in __init__, before
+            # .show() -- .mcp.json already exists for the new project by the time the terminal
+            # opens, so there's no ordering race to wait out here.
             new_window = MainWindow()
             new_window.show()
+            hint = (
+                f"Onboarding a {dialog.onboarding_vendor} {dialog.onboarding_model} DSP -- use "
+                f"this project's TCC MCP tools (check_existing_profile first)."
+            )
+            try:
+                terminal_launcher.launch(dialog.project_dir, cli=dialog.open_terminal_cli, hint=hint)
+            except terminal_launcher.TerminalLaunchError as exc:
+                new_window._status_strip.notify(str(exc), level="warn")
             self.close()
-
-        interview.profile_saved.connect(_on_saved)
-        interview.show()
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()

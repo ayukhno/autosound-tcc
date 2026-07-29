@@ -34,7 +34,7 @@ from typing import Any, Optional, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
-from autosound_tcc.core import config, critic, vendor_loader
+from autosound_tcc.core import agent_session, config, critic, vendor_loader
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
 
@@ -215,6 +215,113 @@ def build_server(
         history = vstate.PresetHistory(str(config.state_root()), preset)
         raw = history.load(version or None)
         return json.dumps(raw, ensure_ascii=False, indent=2)
+
+    # ---- onboarding (DSP-profile capture) -----------------------------------
+    #
+    # The in-app onboarding chat (ProfileInterviewDialog) drives the SAME interview through the
+    # Claude Agent SDK's own in-process tool server (agent_session.build_tools) instead of these --
+    # that one is scoped to one vendor/model at construction time, since TCC itself supplies them.
+    # These exist so an EXTERNAL CLI (gemini, codex, claude -- "Open Terminal", provider-agnostic
+    # by construction, see terminal_launcher.py) can run the identical interview against a brand
+    # new project: there's no system_prompt= channel for an arbitrary external agent, so these tool
+    # DESCRIPTIONS are the only instructions it gets -- keep them in sync with
+    # agent_session.SYSTEM_PROMPT if that ever changes. Never touches DSP/REW (just one JSON file),
+    # so unlike the writes below, none of this needs the Arbiter gate.
+    onboarding_draft: dict[str, Any] = {"vendor": None, "model": None, "data": None}
+
+    @mcp.tool()
+    async def get_capability_checklist() -> str:
+        """The fixed DSP capability-checklist questions to ask the human about (project-intake.md
+        §4). Ask closed questions with concrete options where you can -- a handful per turn, not a
+        wall of text."""
+        return json.dumps(agent_session.CAPABILITY_CHECKLIST, ensure_ascii=False)
+
+    @mcp.tool()
+    async def check_existing_profile(vendor: str, model: str) -> str:
+        """Call this FIRST, before asking the human anything. Checks this project's own
+        in-progress draft and the bundled reference library for an EXACT vendor+model match --
+        never treat a different model's profile (even a platform sibling's) as fact for this one.
+        If it returns a project profile or an exact bundled match, don't re-ask about anything it
+        already confirmed -- call get_capability_checklist and ask only about what's still open.
+        """
+        try:
+            dsp_profile = vendor_loader.load_dsp_profile()
+        except vendor_loader.VendorNotInitializedError as exc:
+            return json.dumps({"error": str(exc)})
+        if onboarding_draft["data"] is None:
+            onboarding_draft["vendor"] = vendor
+            onboarding_draft["model"] = model
+            profile_path = config.dsp_profile_path(project_dir)
+            if profile_path.is_file():
+                onboarding_draft["data"] = dsp_profile.load_profile(str(profile_path))
+            else:
+                onboarding_draft["data"] = agent_session.empty_profile_draft(vendor, model)
+        bundled = dsp_profile.find_bundled(vendor, model, str(config.bundled_profiles_dir()))
+        out = {
+            "project_profile": onboarding_draft["data"],
+            "open_questions": dsp_profile.open_questions(onboarding_draft["data"]),
+            "bundled_exact_match": bundled,
+        }
+        return json.dumps(out, ensure_ascii=False)
+
+    @mcp.tool()
+    async def save_profile_field(path: str, value: Any) -> str:
+        f"""Save one confirmed field into the in-progress profile draft (call
+        check_existing_profile first). One field per call, as soon as it's confirmed -- don't
+        batch everything to the end.
+
+        `path` is a dotted path from the profile root, e.g. 'sample_rate_hz' or
+        'groups.0.fields'. `groups` is a flat array, each EXACTLY
+        {{"id": "<snake_case_id>", "label": "<Human Label>", "fields": [<tokens>]}} -- `fields`
+        must be a flat array of STRING TOKENS drawn ONLY from this vocabulary, nothing else:
+        {json.dumps(agent_session.FIELD_VOCABULARY)}
+        A capability that doesn't fit this vocabulary belongs in `_open_questions`, not a made-up
+        field name.
+        """
+        if onboarding_draft["data"] is None:
+            return json.dumps({"error": "call check_existing_profile first"})
+        value = agent_session.maybe_decode_json(value)
+        agent_session.set_dotted_field(
+            onboarding_draft["data"].setdefault("dsp_profile", {}), path, value
+        )
+        return json.dumps({"saved": path, "value": value}, ensure_ascii=False)
+
+    @mcp.tool()
+    async def reset_profile_field(path: str) -> str:
+        """Delete a field from the draft (by dotted path) so it can be re-saved from scratch --
+        recovery if a previous save_profile_field produced the wrong shape (e.g. a list written as
+        a string), not part of the normal interview flow."""
+        if onboarding_draft["data"] is None:
+            return json.dumps({"error": "call check_existing_profile first"})
+        parts = path.split(".")
+        node = onboarding_draft["data"].get("dsp_profile", {})
+        for part in parts[:-1]:
+            key: Any = int(part) if part.isdigit() else part
+            if isinstance(node, (dict, list)) and key in (node if isinstance(node, dict) else range(len(node))):
+                node = node[key]
+            else:
+                return json.dumps({"reset": False, "reason": f"{path} not found"})
+        last: Any = int(parts[-1]) if parts[-1].isdigit() else parts[-1]
+        if isinstance(node, dict) and last in node:
+            del node[last]
+        elif isinstance(node, list) and isinstance(last, int) and 0 <= last < len(node):
+            node[last] = None
+        return json.dumps({"reset": path}, ensure_ascii=False)
+
+    @mcp.tool()
+    async def finalize_profile() -> str:
+        """Validate and write the profile to disk. Call this when the interview is done or the
+        human says they're done -- do not just say so in text, call the tool."""
+        if onboarding_draft["data"] is None:
+            return json.dumps({"error": "call check_existing_profile first"})
+        try:
+            dsp_profile = vendor_loader.load_dsp_profile()
+        except vendor_loader.VendorNotInitializedError as exc:
+            return json.dumps({"error": str(exc)})
+        profile_path = config.dsp_profile_path(project_dir)
+        dsp_profile.validate_profile(onboarding_draft["data"])
+        dsp_profile.save_profile(str(profile_path), onboarding_draft["data"])
+        return json.dumps({"saved_to": str(profile_path)}, ensure_ascii=False)
 
     # ---- writes (every one gated on the Arbiter) ---------------------------
 

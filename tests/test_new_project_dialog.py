@@ -62,3 +62,88 @@ def test_create_mkdirs_persists_project_dir_and_builds_the_interview(tmp_path, m
     assert dlg.interview_dialog.vendor == "Musway"
     assert dlg.interview_dialog.model == "M6V4"
     assert dlg.interview_dialog.ai_model == "claude-opus-5"  # default AI_MAIN_MODELS[0]
+
+
+def test_bundled_profile_picker_defaults_to_an_exact_find_bundled_match():
+    """Regression (user report 2026-07-29): free-typing "Helix"/"Ultra S" missed the bundled
+    profile because it's actually keyed vendor="Audiotec-Fischer" name="Helix DSP Ultra S" --
+    find_bundled() is deliberately strict/no-fuzzy (project-intake.md §4), so the picker must
+    supply the exact stored strings instead of asking the user to guess them."""
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert dlg._profile_combo.count() >= 2  # at least one bundled profile + "Add new"
+    first_pair = dlg._profile_combo.itemData(0)
+    assert first_pair is not None
+    vendor, model = first_pair
+    assert dlg._vendor_edit.text() == vendor
+    assert dlg._model_edit.text() == model
+    assert dlg._vendor_edit.isHidden()
+    assert dlg._model_edit.isHidden()
+
+    # "+ Add new" is always the last item, itemData None.
+    add_new_index = dlg._profile_combo.count() - 1
+    assert dlg._profile_combo.itemData(add_new_index) is None
+    dlg._profile_combo.setCurrentIndex(add_new_index)
+
+    assert dlg._vendor_edit.text() == ""
+    assert dlg._model_edit.text() == ""
+    assert not dlg._vendor_edit.isHidden()
+    assert not dlg._model_edit.isHidden()
+
+
+def test_run_via_combo_lists_detected_clis_and_defaults_to_in_app(monkeypatch):
+    monkeypatch.setattr(
+        npd.terminal_launcher,
+        "available_clis",
+        lambda: [("gemini", "Gemini CLI"), ("codex", "Codex CLI")],
+    )
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert dlg._run_via_combo.currentData() is None  # defaults to in-app
+    assert not dlg._ai_combo.isHidden()
+    labels = [dlg._run_via_combo.itemText(i) for i in range(dlg._run_via_combo.count())]
+    assert labels[0] == "In-app (Claude)"
+    assert "Terminal — Gemini CLI" in labels
+    assert "Terminal — Codex CLI" in labels
+
+
+def test_no_detected_clis_means_only_the_in_app_option(monkeypatch):
+    monkeypatch.setattr(npd.terminal_launcher, "available_clis", lambda: [])
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert dlg._run_via_combo.count() == 1
+
+
+def test_selecting_a_terminal_cli_hides_ai_model_and_branches_on_create(tmp_path, monkeypatch):
+    """Regression path for the multi-AI onboarding request (2026-07-29): picking a detected CLI
+    must skip ProfileInterviewDialog entirely and hand the caller (main_window) enough to open a
+    terminal instead -- the AI-model picker is meaningless once a terminal CLI is in charge."""
+    monkeypatch.setattr(npd.terminal_launcher, "available_clis", lambda: [("gemini", "Gemini CLI")])
+    calls = []
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: calls.append(p))
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    idx = dlg._run_via_combo.findData("gemini")
+    assert idx >= 0
+    dlg._run_via_combo.setCurrentIndex(idx)
+    assert dlg._ai_combo.isHidden()
+    assert dlg._ai_model_label.isHidden()
+
+    project_dir = tmp_path / "term_project"
+    dlg._folder_edit.setText(str(project_dir))
+    dlg._vendor_edit.setText("Musway")
+    dlg._model_edit.setText("M6V4")
+
+    dlg._on_create()
+
+    assert project_dir.is_dir()
+    assert calls == [project_dir]
+    assert dlg.interview_dialog is None
+    assert dlg.open_terminal_cli == "gemini"
+    assert dlg.project_dir == project_dir
+    assert dlg.onboarding_vendor == "Musway"
+    assert dlg.onboarding_model == "M6V4"

@@ -112,11 +112,11 @@ def _load_dsp_profile_module():
     return vendor_loader.load_dsp_profile()
 
 
-def _empty_draft(vendor: str, model: str) -> dict:
+def empty_profile_draft(vendor: str, model: str) -> dict:
     return {"dsp_profile": {"name": model, "vendor": vendor, "groups": [], "_open_questions": []}}
 
 
-def _maybe_decode_json(value: Any) -> Any:
+def maybe_decode_json(value: Any) -> Any:
     """Some tool-calling round-trips hand back a complex value (dict/list) JSON-encoded as a
     plain string instead of the real structure — observed live: a model call that intended to
     write a whole `groups` list sometimes arrived as the STRING '[{"id": ...}]', silently
@@ -133,7 +133,7 @@ def _maybe_decode_json(value: Any) -> Any:
     return value
 
 
-def _set_dotted(root: dict, dotted_path: str, value: Any) -> None:
+def set_dotted_field(root: dict, dotted_path: str, value: Any) -> None:
     """Set `value` at a dotted path from the profile root, creating intermediate dicts/lists as
     needed. List indices in the path are plain integers, e.g. 'groups.0.fields'."""
     if not dotted_path:
@@ -170,7 +170,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
     if profile_path.is_file():
         starting = dsp_profile.load_profile(str(profile_path))
     else:
-        starting = _empty_draft(vendor, model)
+        starting = empty_profile_draft(vendor, model)
     draft: dict[str, Any] = {"data": starting}
 
     @tool("get_capability_checklist",
@@ -202,8 +202,8 @@ def build_tools(project_dir: Path, vendor: str, model: str):
            },
            "required": ["path", "value"]})
     async def save_profile_field(args: dict) -> dict:
-        value = _maybe_decode_json(args["value"])
-        _set_dotted(draft["data"].setdefault("dsp_profile", {}), args["path"], value)
+        value = maybe_decode_json(args["value"])
+        set_dotted_field(draft["data"].setdefault("dsp_profile", {}), args["path"], value)
         return {"content": [{"type": "text", "text": f"saved {args['path']} = {value!r}"}]}
 
     @tool("reset_profile_field",

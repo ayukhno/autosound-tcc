@@ -46,9 +46,12 @@ def default_cli() -> Optional[str]:
     return found[0][0] if found else None
 
 
-def _posix_command(project_dir: Path, cli: str) -> str:
-    """The shell line the terminal will run: enter the project, then hand over to the CLI."""
-    return f"cd {shlex.quote(str(project_dir))} && exec {shlex.quote(cli)}"
+def _posix_command(project_dir: Path, cli: str, hint: Optional[str] = None) -> str:
+    """The shell line the terminal will run: enter the project, optionally echo a hint (what to
+    onboard, for the "Create new project" terminal path -- still just shell text, TCC starts
+    nothing), then hand over to the CLI."""
+    prefix = f"echo {shlex.quote(hint)} && " if hint else ""
+    return f"cd {shlex.quote(str(project_dir))} && {prefix}exec {shlex.quote(cli)}"
 
 
 def _applescript_literal(text: str) -> str:
@@ -61,8 +64,8 @@ def _applescript_literal(text: str) -> str:
     return f'"{escaped}"'
 
 
-def _launch_macos(project_dir: Path, cli: str) -> None:
-    command = _posix_command(project_dir, cli)
+def _launch_macos(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
+    command = _posix_command(project_dir, cli, hint)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     if app == "iTerm":
         script = (
@@ -80,19 +83,24 @@ def _launch_macos(project_dir: Path, cli: str) -> None:
     subprocess.run(["osascript", "-e", script], check=True)
 
 
-def _launch_windows(project_dir: Path, cli: str) -> None:
+def _launch_windows(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
     if shutil.which("wt"):
-        subprocess.Popen(["wt", "-d", str(project_dir), cli], close_fds=True)
+        argv = ["wt", "-d", str(project_dir)]
+        # Unhinted case stays exactly the plain-argv shape it always was; a hint needs a shell
+        # line (echo && cli), which only cmd /k can run as a single wt argument.
+        argv += ["cmd", "/k", f"echo {hint} && {cli}"] if hint else [cli]
+        subprocess.Popen(argv, close_fds=True)
         return
     # `start` is a cmd builtin, so this needs the shell; `/d` sets the working directory and the
     # empty "" is the window title `start` would otherwise eat from the first quoted argument.
+    inner = f'echo {hint} && "{cli}"' if hint else f'"{cli}"'
     subprocess.Popen(
-        f'start "" /d "{project_dir}" cmd /k "{cli}"', shell=True, close_fds=True
+        f'start "" /d "{project_dir}" cmd /k {inner}', shell=True, close_fds=True
     )
 
 
-def _launch_linux(project_dir: Path, cli: str) -> None:
-    command = _posix_command(project_dir, cli)
+def _launch_linux(project_dir: Path, cli: str, hint: Optional[str] = None) -> None:
+    command = _posix_command(project_dir, cli, hint)
     candidates = (
         (["x-terminal-emulator", "-e"], True),
         (["gnome-terminal", "--working-directory", str(project_dir), "--"], False),
@@ -109,8 +117,12 @@ def _launch_linux(project_dir: Path, cli: str) -> None:
     raise TerminalLaunchError("no supported terminal emulator found on PATH")
 
 
-def launch(project_dir: Path, cli: Optional[str] = None) -> str:
+def launch(project_dir: Path, cli: Optional[str] = None, hint: Optional[str] = None) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
+
+    `hint`, if given, is echoed before the CLI starts (e.g. "onboarding a Helix DSP Ultra S" for
+    the "Create new project" terminal path) -- still just shell text the human reads, not a prompt
+    TCC injects into the agent.
 
     Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
     caller is expected to turn that into a message, since "nothing happened" after clicking a
@@ -134,11 +146,11 @@ def launch(project_dir: Path, cli: Optional[str] = None) -> str:
     # semantics, so the mismatch shows up as a bogus "not a directory" rather than as itself.
     try:
         if sys.platform == "darwin":
-            _launch_macos(project_dir, cli)
+            _launch_macos(project_dir, cli, hint)
         elif sys.platform.startswith("win"):
-            _launch_windows(project_dir, cli)
+            _launch_windows(project_dir, cli, hint)
         else:
-            _launch_linux(project_dir, cli)
+            _launch_linux(project_dir, cli, hint)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli

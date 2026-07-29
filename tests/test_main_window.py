@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QSplitter  # noqa: E402
 
 from autosound_tcc.core import config, ui_mode  # noqa: E402
-from autosound_tcc.ui.tcc.main_window import MainWindow  # noqa: E402
+from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -338,3 +338,20 @@ def test_language_switch_does_not_bring_the_mock_grid_back():
         assert window._meas_panel._no_project_label.text() == "Немає проєкту — знімати поки нічого."
     finally:
         window._on_language_selected("en")
+
+
+def test_force_project_dir_env_overrides_a_pre_set_env_var(tmp_path, monkeypatch):
+    """Regression: config.set_project_dir() only writes QSettings, which AUTOSOUND_PROJECT_DIR
+    always outranks. The isolated-test fixture always sets that env var (matching a real, common
+    launch pattern -- see the user's own `AUTOSOUND_PROJECT_DIR=... .venv/bin/autosound-tcc`) --
+    without this override, a fresh MainWindow built after "Create new project" in the SAME process
+    would silently reopen the OLD folder instead of the one just created."""
+    new_dir = tmp_path / "brand_new_project"
+    new_dir.mkdir()
+    # Registers the current value with monkeypatch so its teardown reverts _force_project_dir_env's
+    # raw os.environ write below, regardless of what set it originally.
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", os.environ.get("AUTOSOUND_PROJECT_DIR", ""))
+
+    _force_project_dir_env(new_dir)
+
+    assert config.project_dir() == new_dir

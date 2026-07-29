@@ -70,6 +70,11 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "get_pending_signals",
         "wait_for_signal",
         "get_ledger",
+        "get_capability_checklist",
+        "check_existing_profile",
+        "save_profile_field",
+        "reset_profile_field",
+        "finalize_profile",
         "propose_change",
         "call_critic",
         "write_rew_filters",
@@ -246,3 +251,100 @@ def test_server_starts_stops_and_advertises_itself(tmp_path, monkeypatch, write_
         server.stop()
 
     assert server._thread is None
+
+
+# ---- onboarding tools (2026-07-29) -- an external CLI's path to driving onboarding,
+# see core/agent_session.py's in-process equivalent for the Claude-SDK path ------------------
+
+
+def test_capability_checklist_matches_agent_sessions_fixed_list(tmp_path):
+    from autosound_tcc.core import agent_session
+
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("get_capability_checklist", {}))))
+
+    assert result == agent_session.CAPABILITY_CHECKLIST
+
+
+def _bundled_dir_with(tmp_path, vendor: str, name: str):
+    bundled = tmp_path / "bundled"
+    bundled.mkdir()
+    (bundled / "one.json").write_text(json.dumps(
+        {"dsp_profile": {"name": name, "vendor": vendor, "groups": []}}
+    ))
+    return bundled
+
+
+def test_check_existing_profile_finds_an_exact_bundled_match(tmp_path, monkeypatch):
+    bundled = _bundled_dir_with(tmp_path, "Audiotec-Fischer", "Helix DSP Ultra S")
+    monkeypatch.setattr(mcp_server.config, "bundled_profiles_dir", lambda: bundled)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
+    ))))
+
+    assert result["bundled_exact_match"]["dsp_profile"]["vendor"] == "Audiotec-Fischer"
+
+
+def test_check_existing_profile_is_strict_no_fuzzy_matching(tmp_path, monkeypatch):
+    """Regression context: free-typing "Helix"/"Ultra S" against a profile actually keyed
+    `Audiotec-Fischer`/`Helix DSP Ultra S` must NOT match -- that strictness is deliberate
+    (project-intake.md §4), the fix for the user's report was the picker (new_project_dialog.py),
+    not loosening this check."""
+    bundled = _bundled_dir_with(tmp_path, "Audiotec-Fischer", "Helix DSP Ultra S")
+    monkeypatch.setattr(mcp_server.config, "bundled_profiles_dir", lambda: bundled)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Helix", "model": "Ultra S"},
+    ))))
+
+    assert result["bundled_exact_match"] is None
+
+
+def test_save_reset_and_finalize_profile_round_trip(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    asyncio.run(mcp.call_tool("check_existing_profile", {"vendor": "Musway", "model": "M6V4"}))
+    asyncio.run(mcp.call_tool("save_profile_field", {"path": "sample_rate_hz", "value": 96000}))
+    asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.id", "value": "physical_outputs"}))
+    asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.label", "value": "Output channels"}))
+    asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.fields", "value": ["hp", "lp"]}))
+
+    reset_result = json.loads(
+        _text(asyncio.run(mcp.call_tool("reset_profile_field", {"path": "sample_rate_hz"})))
+    )
+    assert reset_result == {"reset": "sample_rate_hz"}
+
+    finalize_result = json.loads(_text(asyncio.run(mcp.call_tool("finalize_profile", {}))))
+
+    saved_path = project_dir / "dsp_profile.json"
+    assert finalize_result == {"saved_to": str(saved_path)}
+    saved = json.loads(saved_path.read_text())["dsp_profile"]
+    assert saved["groups"][0] == {
+        "id": "physical_outputs", "label": "Output channels", "fields": ["hp", "lp"],
+    }
+    assert "sample_rate_hz" not in saved  # reset before finalize, must not reappear
+
+
+def test_onboarding_tools_before_check_existing_profile_are_a_clean_error(tmp_path):
+    """save/reset/finalize all need the draft check_existing_profile initializes -- an agent that
+    skips it (or calls tools out of the documented order) gets a message it can act on, not a
+    KeyError/AttributeError traceback."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    for tool, args in (
+        ("save_profile_field", {"path": "x", "value": 1}),
+        ("reset_profile_field", {"path": "x"}),
+        ("finalize_profile", {}),
+    ):
+        result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+        assert "error" in result
