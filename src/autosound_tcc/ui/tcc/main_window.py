@@ -364,6 +364,18 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self._mode_combo)
 
+        # Always visible (not just in the no-project states) -- there's no watcher for a ledger
+        # or profile that appears/changes on disk (a terminal-driven session finishes with no
+        # signal back here), so this is the one manual "reload from disk" a user can always reach,
+        # regardless of which left-panel accordion section happens to be collapsed (user request
+        # 2026-07-29: the earlier left-panel version was easy to lose track of).
+        self._header_refresh_btn = QPushButton("↻")
+        self._header_refresh_btn.setProperty("class", "zoomgroup-btn")
+        self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header_refresh_btn.clicked.connect(self._load_project)
+        self._refresh_tip = attach_tip(self._header_refresh_btn, i18n.t("refreshProjectTip"))
+        layout.addWidget(self._header_refresh_btn)
+
         self._lang_combo = _mini_combo()
         # Display "УК" (Cyrillic, macOS's own convention for Ukrainian) not the Latin "UK" -- that
         # reads as United Kingdom, not Ukrainian (user request 2026-07-27). Display text is
@@ -566,19 +578,6 @@ class MainWindow(QMainWindow):
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # Shown in every _show_left_status case, not just offer_create -- there's currently no
-        # watcher for dsp_profile.json's first appearance (a terminal-driven onboarding session
-        # finishes asynchronously, with no signal back to this window), so this is the only way
-        # to notice a file that just appeared without restarting the app.
-        self._refresh_project_btn = QPushButton(i18n.t("refreshProject"))
-        self._refresh_project_btn.setProperty("class", "reason-btn")
-        self._refresh_project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._refresh_project_btn.clicked.connect(self._load_project)
-        self._refresh_project_btn.setVisible(False)
-        self._dsp_section.body_layout().addWidget(
-            self._refresh_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
-
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -652,7 +651,6 @@ class MainWindow(QMainWindow):
         self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
-        self._refresh_project_btn.setVisible(False)
         self._tree.setVisible(True)
         self._view = view
         self._tree.set_view(view)
@@ -1197,6 +1195,7 @@ class MainWindow(QMainWindow):
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))
         self._target_tip.set_text(i18n.t("targetToolTip"))
+        self._refresh_tip.set_text(i18n.t("refreshProjectTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
