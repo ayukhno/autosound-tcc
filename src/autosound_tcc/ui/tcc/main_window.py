@@ -616,9 +616,14 @@ class MainWindow(QMainWindow):
 
         root = config.state_root()
         available = config.available_presets(root)
-        preset = self._preset_override or config.resolve_preset(root) or (
-            available[0] if available else None
-        )
+        # self._preset_override ("ui/preset") is a GLOBAL QSettings value, not scoped per project
+        # (same class of bug state_root() had) -- a preset name left over from a DIFFERENT project
+        # must not be trusted here just because it's non-empty; only honor it if it's actually one
+        # of THIS project's real presets, otherwise fall through to auto-detect/None exactly as if
+        # no override were set.
+        preset = self._preset_override if self._preset_override in available else None
+        if preset is None:
+            preset = config.resolve_preset(root) or (available[0] if available else None)
         self._preset_combo.blockSignals(True)
         self._preset_combo.clear()
         for p in available:

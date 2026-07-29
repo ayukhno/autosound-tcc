@@ -355,3 +355,34 @@ def test_force_project_dir_env_overrides_a_pre_set_env_var(tmp_path, monkeypatch
     _force_project_dir_env(new_dir)
 
     assert config.project_dir() == new_dir
+
+
+def test_stale_preset_override_from_a_different_project_is_ignored(tmp_path, monkeypatch):
+    """Regression (2026-07-29, found live): "ui/preset" is a GLOBAL QSettings value, not scoped
+    per project -- a preset name left over from an EARLIER, unrelated project (e.g. "FULL") must
+    not be force-applied to a brand-new project that has no such preset, or _load_project() tries
+    to load a ledger that was never there and shows a raw load error instead of the clean
+    "no preset ledger found" state."""
+    import json
+
+    from autosound_tcc.ui.tcc.app_settings import get_settings
+
+    profile = {
+        "dsp_profile": {
+            "name": "Helix DSP Ultra S", "vendor": "Audiotec-Fischer",
+            "groups": [{"id": "physical_outputs", "label": "Output channels",
+                        "fields": ["hp", "lp", "gain_db"]}],
+        }
+    }
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(tmp_path / "state"))  # no presets here
+    get_settings().setValue("ui/preset", "FULL")  # stale, from a different project entirely
+
+    _app()
+    window = MainWindow()
+
+    assert window._left_status.text() == (
+        "Audiotec-Fischer Helix DSP Ultra S\n\n"
+        f"No preset ledger found under {tmp_path / 'state'}."
+    )
