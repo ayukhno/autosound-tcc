@@ -197,7 +197,6 @@ def _detect_system_mode() -> str:
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("autosound-tcc — Tuning Command Center")
         self.resize(1280, 820)
 
         self._settings = get_settings()
@@ -210,6 +209,11 @@ class MainWindow(QMainWindow):
         # global app preference like theme/zoom/lang above -- deliberately not QSettings, and
         # deliberately a differently-named attribute from `self._mode` (the light/dark theme).
         self._ui_mode: ui_mode.Mode = ui_mode.get_mode(config.tcc_dir())
+        # Which project folder is actually open matters the moment you run TCC against more than
+        # one (user request 2026-07-29) -- there's no in-app project switcher yet, only
+        # AUTOSOUND_PROJECT_DIR/the QSettings-persisted choice, so the title is the only place
+        # that's visible before digging into the DSP tree.
+        self.setWindowTitle(f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}")
 
         root = QWidget()
         root.setObjectName("AppRoot")
