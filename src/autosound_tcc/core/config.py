@@ -1,11 +1,13 @@
 """Resolve where the DSP-state ledger and the tuning project live.
 
-The ledger is install-specific private data (brief §3a) — it never ships in the
-repo. During development it sits under the gitignored ``data/private/state/``.
-Both the root and the preset can be overridden by environment variables so a
-user can point the app at their own project folder without code changes:
+The ledger lives under `project_dir()/state/` by default (2026-07-29: scoped per-project --
+previously a global path shared by every project, so a brand-new "Create new project" folder
+showed whichever ledger happened to be sitting at the old default). Both the ledger root and the
+preset can still be overridden by environment variables:
 
-    AUTOSOUND_TCC_STATE_ROOT   directory holding <preset>/v_NNN.json subdirs
+    AUTOSOUND_TCC_STATE_ROOT   directory holding <preset>/v_NNN.json subdirs (overrides the
+                               project-scoped default -- this dev checkout's own dogfood ledger at
+                               `data/private/state/` needs this set explicitly now)
     AUTOSOUND_TCC_PRESET       preset name (subdir); auto-detected if unset and
                                exactly one preset directory exists
     AUTOSOUND_PROJECT_DIR      the tuning project folder the AI session runs in
@@ -29,8 +31,16 @@ DEFAULT_BUNDLED_PROFILES_DIR = _REPO_ROOT / "data" / "dsp_profiles"
 
 
 def state_root() -> Path:
+    """Where `<preset>/v_NNN.json` ledgers live for the CURRENT project.
+
+    Scoped under `project_dir()` (2026-07-29 fix -- previously a project-independent global/env
+    path, so opening a brand-new "Create new project" folder showed whichever ledger happened to
+    be sitting at the old default, e.g. this dev checkout's own dogfood data). Override with
+    `AUTOSOUND_TCC_STATE_ROOT` for pointing at a ledger tree that predates this per-project
+    scoping (this repo's own `data/private/state/` dogfood ledger included).
+    """
     env = os.environ.get("AUTOSOUND_TCC_STATE_ROOT")
-    return Path(env).expanduser() if env else DEFAULT_STATE_ROOT
+    return Path(env).expanduser() if env else project_dir() / "state"
 
 
 # QSettings keys for the user's project-folder choice. The chosen folder outlives a single run
@@ -44,9 +54,12 @@ MAX_RECENT_PROJECTS = 8
 def project_dir() -> Path:
     """The tuning project folder: agent `cwd`, skill state, `.tcc/`, `dsp_profile.json`.
 
-    Resolution order — env override, then the user's persisted choice, then `state_root()` as the
-    pilot-era fallback (that tree also holds `<preset>/v_NNN.json` for now). Full `project.json` +
-    `presets/<preset>/{target,state}` nesting (TCC-TZ.md §3) is a later storage migration.
+    Resolution order — env override, then the user's persisted choice, then `DEFAULT_STATE_ROOT`
+    as the last-resort fallback for a truly unconfigured install (this dev checkout's own
+    `data/private/state/` dogfood location, kept as-is for continuity). Deliberately NOT
+    `state_root()` -- that function now derives ITS default FROM `project_dir()` (2026-07-29 fix),
+    so falling back to it here would recurse. Full `project.json` + `presets/<preset>/{target,
+    state}` nesting (TCC-TZ.md §3) is a later storage migration.
 
     `AUTOSOUND_TCC_PROJECT_DIR` is the legacy spelling, still honoured so existing shells keep
     working; SCR-011 wants the `AUTOSOUND_*` names converged with the skill's own convention.
@@ -58,7 +71,7 @@ def project_dir() -> Path:
     saved = _settings().value(_PROJECT_DIR_KEY, "")
     if saved:
         return Path(str(saved)).expanduser()
-    return state_root()
+    return DEFAULT_STATE_ROOT
 
 
 def set_project_dir(path: Path) -> None:

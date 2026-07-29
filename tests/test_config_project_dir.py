@@ -109,3 +109,37 @@ def test_paths_follow_an_explicit_project_dir_argument(tmp_path):
     assert config.tcc_dir(other) == other / ".tcc"
     assert config.mcp_config_path(other) == other / ".mcp.json"
     assert config.dsp_profile_path(other) == other / "dsp_profile.json"
+
+
+def test_state_root_is_scoped_under_the_current_project_by_default(tmp_path, monkeypatch):
+    """Regression (2026-07-29): state_root() used to be a project-INDEPENDENT global/env path --
+    a brand-new "Create new project" folder showed whichever ledger happened to sit at the old
+    default (this dev checkout's own dogfood data, in the real incident)."""
+    monkeypatch.delenv("AUTOSOUND_TCC_STATE_ROOT", raising=False)
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path / "some_project"))
+
+    assert config.state_root() == tmp_path / "some_project" / "state"
+
+
+def test_state_root_env_override_still_wins(tmp_path, monkeypatch):
+    """The escape hatch for a ledger tree that predates per-project scoping (e.g. this repo's own
+    data/private/state/ dogfood ledger) -- must still fully override, not just supply a default."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path / "some_project"))
+    override = tmp_path / "legacy_ledger"
+    monkeypatch.setenv("AUTOSOUND_TCC_STATE_ROOT", str(override))
+
+    assert config.state_root() == override
+
+
+def test_project_dir_falls_back_to_default_state_root_without_recursing(monkeypatch):
+    """project_dir()'s own last-resort fallback must NOT go through state_root() any more --
+    state_root() now derives from project_dir(), so that would recurse forever."""
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_STATE_ROOT", raising=False)
+    monkeypatch.setattr(config, "_settings", lambda: type(
+        "S", (), {"value": lambda self, *_a, **_kw: ""}
+    )())
+
+    assert config.project_dir() == config.DEFAULT_STATE_ROOT
+    assert config.state_root() == config.DEFAULT_STATE_ROOT / "state"
