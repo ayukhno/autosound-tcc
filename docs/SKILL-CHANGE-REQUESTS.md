@@ -406,3 +406,92 @@ propose solutions + write EQ into REW's own filter/target model (not the physica
 Helix-format EQ string to the clipboard for the user to paste into Helix's own PC-Tool -- consistent
 with the existing "no automated DSP writes" safety gate and with `autosound_ai.py`'s own clipboard-
 mode precedent.
+
+---
+
+SCR-020…SCR-023 come from the installer design session (2026-07-30). Full design:
+`docs/INSTALLER-TZ.md`. Framing principle: **the installer lives in TCC and the skill stays a clean
+Claude plugin** — but a plugin has to be *runnable*, and these four items are what makes it runnable
+for someone who installs the skill without TCC.
+
+## SCR-020 — `requirements.txt` for the skill's Python code
+
+**Status**: proposed — **blocker for the installer; nothing else matters until this lands**
+**Target**: `skills/autosound-tuning/requirements.txt` (new file)
+**TCC dependency**: the installer's `pip install` step and its hard-blocker preflight
+(`python3 -c "import numpy, scipy, matplotlib"`), `docs/INSTALLER-TZ.md` §0, §2.2, §5.
+
+**Detail**: `rew_tool/` and `scripts/` import `numpy`, `scipy` and `matplotlib` today
+(`rew_tool/dsp_math.py` needs scipy for the REW-exact filter math; `references/tooling/rew-tool-docs.md:43`
+documents the dependency in prose). The repo has **no `requirements.txt`, no `pyproject.toml`, and no
+`pip install` line anywhere in README/FAQ** — `FAQ.md` §"First-Time Setup" only says
+`winget install Python.Python.3.11`.
+
+Consequence today: anyone following the documented path (`/plugin marketplace add` → `/plugin install`)
+gets `ModuleNotFoundError: numpy` on the first `xover_select.py` call. This is not a new requirement —
+it is the **missing manifest for code that already ships**.
+
+Explicitly rejected alternative: declaring these deps in TCC's `pyproject.toml` instead. That does not
+"keep the skill clean" — it makes **TCC mandatory for the plugin to work at all**, which is the
+opposite of a self-contained plugin.
+
+Pin policy: loose lower bounds (`numpy>=1.24` etc.), not exact pins — the skill is a library consumed
+by TCC's venv, over-pinning would fight TCC's own resolver.
+
+## SCR-021 — `opencode_critic.sh` / `opencode_advisor.sh`
+
+**Status**: proposed
+**Target**: `skills/autosound-tuning/scripts/opencode_{critic,advisor}.sh` + `_opencode_common.sh`
+**TCC dependency**: `docs/INSTALLER-TZ.md` §1, §9. The installer makes OpenCode the default harness,
+so the reviewer channel has to exist for it.
+
+**Detail**: the wrapper family is `{gemini,claude,codex}_{critic,advisor}.sh` over shared
+`_{gemini,claude,codex}_common.sh`. OpenCode is a fourth vendor in the same family — it belongs next
+to its siblings, not in TCC, where it would be an orphan with no `_common` to source.
+
+Why this matters beyond convenience: OpenCode can invoke a *different model in the same binary*
+(`opencode run -m <other-vendor>`), which gives cross-vendor anti-anchoring from a single install, and
+satisfies the skill's own "run reviewer CLIs **outside** the driver session (inside = deadlock)" rule
+naturally, because it is a separate process.
+
+Requirements carried over from the existing wrappers:
+
+- model selectable via env var, mirroring `GEMINI_CRITIC_MODEL` / `GEMINI_ADVISOR_MODEL`, so switching
+  the Critic to a paid model is one line in `.critic-env` and never a reinstall;
+- `--doctor` with the same output contract (`✗ <problem>. Fix: <command>` per check, plus a live smoke);
+- empty-reply detection — the free Zen tier will hit limits the same way `agy`'s weekly tier does, and
+  `_gemini_common.sh:131` already documents that an empty exit-0 reply is the signature;
+- `CRITIC_BIN` must stay independent of whatever drives the session (`INSTALLER-TZ.md` §9.2).
+
+## SCR-022 — complete the Windows `.cmd` wrapper family
+
+**Status**: proposed
+**Target**: `skills/autosound-tuning/scripts/{claude,codex,opencode}_{critic,advisor}.cmd`
+**TCC dependency**: `docs/INSTALLER-TZ.md` §12 R10.
+
+**Detail**: `.cmd` wrappers exist **only for gemini** (`gemini_critic.cmd`, `gemini_advisor.cmd`).
+Every other vendor is `.sh`-only, so a Windows user cannot switch reviewer vendors at all.
+
+This is cheap now and expensive later: the scenario that forces the switch is a vendor changing its
+policy (e.g. subscription auth disallowed in third-party harnesses, API-key-only left), and that
+arrives without warning. A Windows user would then have no working reviewer channel and no way to
+build one under time pressure.
+
+## SCR-023 — README × 4 and FAQ must point at the installer
+
+**Status**: proposed — **same release as SCR-020**, not backlog
+**Target**: `README.md`, `README.uk.md`, `README.de.md`, `README.pl.md` ("Getting Started"),
+`FAQ.md` ("First-Time Setup", "Setting up the Gemini/Antigravity Critic")
+
+**Detail**: the documented install path becomes wrong in four languages at once the moment the
+installer ships. Current text walks the user through `/plugin marketplace add` → `/plugin install`
+→ `/reload-plugins`, never mentions Python dependencies, and hard-codes a two-CLI setup
+(`claude` + `agy`) that the installer replaces with a single harness plus a model menu.
+
+Minimum for this release: replace "Getting Started" in all four READMEs with a pointer to the
+installer. Full FAQ rewrite and its uk/de/pl translations are backlog (`INSTALLER-TZ.md` §13) —
+but the *wrong* instructions must not survive the release, because a newcomer who follows them
+breaks on `numpy` (SCR-020) with no error message that explains why.
+
+Note the direction of travel: install instructions move **out** of the skill repo and into TCC. The
+skill's README should own "what this is and how to tune", not "how to get a Python environment".
