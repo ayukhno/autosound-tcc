@@ -7,6 +7,60 @@ processed in a batched skill-side session.
 Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/self have agreed to do it)
 · `done` (landed in the submodule and the pin bumped).
 
+---
+
+## Status reconciliation — 2026-07-31
+
+**This table is authoritative.** The per-entry `**Status**:` lines below were written when each ask
+was raised and were never updated as work landed; where they disagree with this table, the table
+wins. Verified by reading the artifacts on the skill's `feat/tcc-sync-p0` (worktree
+`~/dev/Claude/autosound-skill-bridge`), not by trusting commit messages.
+
+| SCR | Verified status | Evidence |
+| :-- | :-- | :-- |
+| 001 | **done, but written elsewhere than asked** — see the mismatch note below | `rew_tool/project-schema.md` — drivers carry `fs_hz` as a `fact()`; **not** on the ledger row |
+| 002 | done | `state/schema.md:37-43` — `slot`, `descr`, `role`, `order`, `tag`/`tag_value` per channel |
+| 003 | done | `state/schema.md:45` — `"hidden": false` alongside `mute`/`off` |
+| 004 | done | `state/process-schema.md` + `state/process.py` — `process/journal.jsonl` + `process/process-state.json`. Already on `main` |
+| 005 | done | `state/schema.md:27` `"schema_version": 2`; one-shot `state/migrate_v2.py` |
+| 006 | done | `state/schema.md:52` — `"eq": [{"type","f","gain_db","q","bypass"}]`, plus `eq_ptr`, `status` |
+| 007 | not verified | — |
+| 008 | not verified | — |
+| 009 | not started | no `target-curves/registry.json` |
+| 010 | not verified | — |
+| 011 | done | `rew_tool/project.py` + `project-schema.md` — machine facts split out of `autosound_context.md` |
+| 012 | not started | `rew_tool` still runs as scripts, not an importable package |
+| 013 | not started | `verify_measurements` still CLI-only |
+| 014 | done | `project-schema.md` §Provenance — `fact(value, source, at)`, `_open_questions`, `config_change` events with `impact` |
+| 015 | done | `project-schema.md` header names SCR-015 among its targets |
+| 016 | done | `project.json` carries processor + channel summary |
+| 017 | answered | `project-schema.md` §"Hardware controls vs. the ledger" — `RearRC` lives in `hardware.controls`, not per preset |
+| 018 | open question | unchanged |
+| 019 | open question | unchanged |
+| 020 | **done** | landed on skill `main` 2026-07-31 |
+| 021–023 | proposed | installer work, not started |
+
+### Mismatch worth acting on first (SCR-001)
+
+TCC's `dsp_tree.py` `ChannelRow._tooltip_html` reads `raw.get("driver")` / `raw.get("fs")` **off the
+per-channel ledger row**. The skill now writes that information into **`project.json`** instead —
+driver identity and `fs_hz` as provenance-carrying `fact()` values under the project's drivers list.
+
+Both sides did what they were asked; they were asked for different shapes. Nothing populates the
+tooltip, and no error is raised — the keys are simply absent, so the UI renders empty. This is a
+concrete instance of the general symptom "the terminal session worked but TCC shows nothing".
+
+Decide the direction before writing more bridge code:
+
+- **TCC reads `project.json`** for driver/Fs (project-level facts are project-level — matches
+  SCR-011's own framing), or
+- **the ledger writer denormalizes** driver/Fs onto the channel row for consumers.
+
+The first is more consistent with the schema split that already landed; the second is cheaper for
+the UI. Either is fine — having neither is what costs.
+
+---
+
 ## SCR-001 — driver make/model + Fs per output channel
 
 **Status**: proposed
@@ -416,20 +470,32 @@ for someone who installs the skill without TCC.
 
 ## SCR-020 — `requirements.txt` for the skill's Python code
 
-**Status**: proposed — **blocker for the installer; nothing else matters until this lands**
+**Status**: **done** — landed on the skill's `main` as `skills/autosound-tuning/requirements.txt` (2026-07-31)
 **Target**: `skills/autosound-tuning/requirements.txt` (new file)
 **TCC dependency**: the installer's `pip install` step and its hard-blocker preflight
 (`python3 -c "import numpy, scipy, matplotlib"`), `docs/INSTALLER-TZ.md` §0, §2.2, §5.
 
-**Detail**: `rew_tool/` and `scripts/` import `numpy`, `scipy` and `matplotlib` today
-(`rew_tool/dsp_math.py` needs scipy for the REW-exact filter math; `references/tooling/rew-tool-docs.md:43`
-documents the dependency in prose). The repo has **no `requirements.txt`, no `pyproject.toml`, and no
-`pip install` line anywhere in README/FAQ** — `FAQ.md` §"First-Time Setup" only says
-`winget install Python.Python.3.11`.
+**Detail**: the repo had **no `requirements.txt`, no `pyproject.toml`, and no `pip install` line
+anywhere in README/FAQ** — `FAQ.md` §"First-Time Setup" only says `winget install Python.Python.3.11`.
+So there was nothing to hand an installer, or a new user, that states what the environment needs.
 
-Consequence today: anyone following the documented path (`/plugin marketplace add` → `/plugin install`)
-gets `ModuleNotFoundError: numpy` on the first `xover_select.py` call. This is not a new requirement —
-it is the **missing manifest for code that already ships**.
+**Correction to this entry's first draft** (which claimed a bare `ModuleNotFoundError` on the
+documented install path): the skill is on a **deliberate dependency diet**, and the lazy imports are
+a design choice, not an oversight. Verified in code:
+
+| Package | How it is imported | Consequence when absent |
+| :-- | :-- | :-- |
+| `numpy` | **module scope** in `curve_view`, `dsp_math`, `eq_gate`, `make_plot`, `xover_select` | those modules do not import — the one hard dependency |
+| `scipy` | lazy, 2 sites: `dsp_math.xo_response` (crossover design, what `xover_select.py` runs on) and `eq_gate._selftest` | `RuntimeError` naming the exact `pip install`; PEQ / all-pass / joint-phase unaffected; the EQ gate itself is scipy-free |
+| `matplotlib` | module scope, `make_plot.py` only | plot rendering unavailable, nothing else |
+
+So a missing extra costs one feature with a plain-language fix, not a session. The manifest exists so
+the installer can put them in **up front**, instead of the wall arriving mid-tune.
+
+Why it stayed invisible: the projects the skill has been exercised in carry their own scientific
+stack. Measured on the author's machine 2026-07-30 — research project venv: `scipy 1.13.1`,
+`matplotlib 3.9.4`; an older plain tuning project: no venv at all; system `python3` and the TCC venv:
+neither scipy nor matplotlib.
 
 Explicitly rejected alternative: declaring these deps in TCC's `pyproject.toml` instead. That does not
 "keep the skill clean" — it makes **TCC mandatory for the plugin to work at all**, which is the
