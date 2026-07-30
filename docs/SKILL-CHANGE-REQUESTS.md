@@ -39,25 +39,95 @@ wins. Verified by reading the artifacts on the skill's `feat/tcc-sync-p0` (workt
 | 019 | open question | unchanged |
 | 020 | **done** | landed on skill `main` 2026-07-31 |
 | 021–023 | proposed | installer work, not started |
+| 024 | proposed · P1 | new — raised by the SCR-001 decision below |
 
-### Mismatch worth acting on first (SCR-001)
+### Mismatch worth acting on first (SCR-001) — **resolved 2026-07-31**
 
 TCC's `dsp_tree.py` `ChannelRow._tooltip_html` reads `raw.get("driver")` / `raw.get("fs")` **off the
-per-channel ledger row**. The skill now writes that information into **`project.json`** instead —
-driver identity and `fs_hz` as provenance-carrying `fact()` values under the project's drivers list.
+per-channel ledger row**. The skill writes that information into **`project.json`** instead — driver
+identity and `fs_hz` as provenance-carrying `fact()` values on `channels[]`.
 
 Both sides did what they were asked; they were asked for different shapes. Nothing populates the
 tooltip, and no error is raised — the keys are simply absent, so the UI renders empty. This is a
 concrete instance of the general symptom "the terminal session worked but TCC shows nothing".
 
-Decide the direction before writing more bridge code:
+**Decision: TCC reads `project.json`.** The skill's model is the one to build on, for three reasons
+that are not preference:
 
-- **TCC reads `project.json`** for driver/Fs (project-level facts are project-level — matches
-  SCR-011's own framing), or
-- **the ledger writer denormalizes** driver/Fs onto the channel row for consumers.
+1. **It was designed against these very asks.** `project-schema.md` annotates its own fields with
+   SCR numbers — `channels[]` (001), `hidden` (003), `glossary` (008), `param_sections` (015),
+   `channel_summary` (016), `hardware.controls` (017). It is the answer to this file, in a different
+   shape, not a parallel invention.
+2. **It carries provenance; the ledger row cannot.** `"fs_hz": {"value": 62, "source": "datasheet",
+   "at": …}` versus a bare `"fs": 62`. Without the wrapper the UI cannot distinguish a datasheet
+   number from a measured one, and SCR-014's `config_change` `impact` has nothing to attach to.
+3. **The path already exists in TCC.** `state/project_view.py` (on `feat/tcc-sync-p0`) already loads
+   `project.json` for `load_system_params`, `load_channel_summary` and `load_open_questions`. Reading
+   `channels[]` is a fourth loader beside three that work. Denormalizing into the ledger would mean a
+   *new writer* instead.
 
-The first is more consistent with the schema split that already landed; the second is cheaper for
-the UI. Either is fine — having neither is what costs.
+### The larger problem this exposes: a second dual writer
+
+Five fields exist in both structures today:
+
+| Field | `project.json` `channels[]` | ledger `v_NNN.json` |
+| :-- | :--: | :--: |
+| `slot`, `descr`, `role`, `order`, `hidden` | ✓ | ✓ |
+| `driver`, `fs_hz`, `impedance_ohm` | ✓ | — |
+| `gain`, `delay`, `polarity`, xover, `eq` | — | ✓ |
+
+Same class of defect as the `report_phase` dual writer (TCC's session registry writing phase in
+parallel with the skill): two owners, no arbiter, divergence that grows silently. Fixing SCR-001
+field-by-field would leave the rest of the overlap in place, so fix it by rule instead:
+
+> **`project.json` owns channel identity. The ledger owns tunable state. Consumers join on `code`.**
+
+The test is mechanical: **does this field change from snapshot to snapshot?** `slot`, `descr`,
+`role`, `order`, `hidden` do not. `gain`, `delay`, `eq` do.
+
+The duplicated identity fields in the ledger stay readable for existing files, but are deprecated —
+no consumer should prefer them over `project.json`, and the writer should stop emitting them once
+SCR-024 lands.
+
+**One honest objection: history.** A pure join resolves a six-month-old snapshot against *today's*
+facts. Replace a driver — which `config_change` records explicitly, its own example being a blown
+voice coil with `impact="remeasure"` — and every historical ledger silently acquires the new speaker.
+That is what SCR-024 is for.
+
+### Follow-on work items from this decision
+
+- **TCC** — `load_channels()` in `project_view.py`, joined to ledger rows by `code`; `_tooltip_html`
+  reads driver/Fs from there. Hours.
+- **TCC** — a shared `fact()` unwrapper. `_tooltip_html` currently expects a bare number in
+  `raw["fs"]` while `project.json` supplies `{"value": …}`; `fact()` is used throughout that file, so
+  this belongs in one helper rather than at each call site.
+- **Skill** — SCR-024 below.
+- **Both** — treat the five duplicated identity fields as deprecated in the ledger.
+
+## SCR-024 — ledger snapshots must record which project revision they were taken under
+
+**Status**: proposed · **Priority**: P1 — blocks the SCR-001 join from being historically correct
+**Target**: the ledger writer (`rew_tool/state/state.py` `snapshot()`), `state/schema.md`
+**TCC dependency**: any consumer that joins ledger rows to `project.json` by `code` — i.e. everything
+that comes out of the SCR-001 decision above.
+
+**Detail**: a ledger snapshot today records `preset`, `sample_rate`, `version`, `note`, `target`,
+`slot_label`, `save` and `features` — nothing that identifies the project facts in force when it was
+taken. With identity moved to `project.json`, an old snapshot joined to the current file is
+relabelled by whatever is true now.
+
+This is not hypothetical: the skill already models driver replacement as a first-class event
+(`config_change(..., why="blown voice coil", impact="remeasure: [w-L, w-R]")`), so the case it breaks
+is one the design explicitly anticipates.
+
+Ask: stamp each snapshot with a pointer to the project revision — a monotonic `project_rev`, or the
+`at` timestamp of the newest `config_change` folded into it, whichever is cheaper for the writer.
+Consumers resolve identity against that revision; absent the field (pre-existing files), they fall
+back to the ledger's own deprecated identity fields, which is exactly what those fields become useful
+for.
+
+Not required: full history of `project.json`. A revision identifier plus the existing `config_change`
+journal is enough to reconstruct what changed and when.
 
 ---
 
