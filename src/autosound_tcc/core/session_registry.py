@@ -10,9 +10,15 @@ The mechanism is cheap because the Agent SDK already persists sessions: we only 
 hand it back as `ClaudeAgentOptions.resume`.
 
 Deliberately NOT `process/process-state.json` (SCR-004). That file is the skill's, describes the
-*process*, and will be written by the skill; this one is TCC's own bookkeeping about *sessions*
-and would be noise inside the skill's schema. `report_phase` mirroring the phase here is a
-precursor to SCR-004, not a substitute for it.
+*process*, and is written by the skill; this one is TCC's own bookkeeping about *sessions* and
+would be noise inside the skill's schema.
+
+**Which way the phase flows (D-6).** `current_phase` here is a MIRROR, never a source: it is set
+only from a value read back out of the skill's `process-state.json`, so the two files cannot
+disagree about whose answer counts. The step/status/evidence this registry used to store
+alongside it are gone — that was TCC keeping its own copy of the process, which is exactly the
+divergence (#10) the one-way-write rule closes. What stays is the part only TCC knows: which SDK
+session id belongs to which phase, and whether that session is spent.
 """
 
 from __future__ import annotations
@@ -72,18 +78,17 @@ class SessionRegistry:
 
     # ---- writes ------------------------------------------------------------
 
-    def record_phase(
-        self,
-        phase: str,
-        step: Optional[str] = None,
-        status: Optional[str] = None,
-        evidence: Optional[list[str]] = None,
-    ) -> dict[str, Any]:
-        """Mark `phase` current, updating its step/status. Called by the agent's `report_phase`.
+    def sync_phase(self, phase: str) -> dict[str, Any]:
+        """Point session bookkeeping at `phase`, closing the one before it.
 
-        Entering a *different* phase closes the previous one: that is the transition which ends an
-        AI session, and inferring it here means the agent only has to report where it is, never to
-        manage session lifetime itself.
+        `phase` must be a value READ BACK from the skill's `process-state.json`, not one an agent
+        claimed in a tool call (D-6): an agent that reports a phase it never actually entered would
+        otherwise close a live session and orphan its context. Entering a different phase is the
+        transition that ends an AI session — inferring it here means nothing has to manage session
+        lifetime explicitly.
+
+        Nothing about the process itself is stored: step, status and evidence live in the skill's
+        file, and this registry deliberately keeps no second copy.
         """
         data = self.load()
         phase = str(phase)
@@ -93,12 +98,6 @@ class SessionRegistry:
             data["phases"][previous]["updated"] = _now()
         entry = data["phases"].setdefault(phase, {"session_id": None, "closed": False})
         entry["closed"] = False
-        if step is not None:
-            entry["step"] = step
-        if status is not None:
-            entry["status"] = status
-        if evidence:
-            entry["evidence"] = sorted(set(entry.get("evidence", [])) | set(evidence))
         entry["updated"] = _now()
         data["current_phase"] = phase
         self._write(data)

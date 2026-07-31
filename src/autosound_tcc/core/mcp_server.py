@@ -18,6 +18,28 @@ to be spawned by the client, which would give a second, headless TCC with no win
 **No mock data is exposed.** The measurement panel still renders `ui/tcc/mock_data`, and a tool
 serving that to a model would invite EQ proposals computed from fabricated sweeps. Measurements
 land here only once the skill emits them for real (SCR-004/SCR-008).
+
+## D-6 audit of this surface (2026-07-31)
+
+The rule: TCC never writes DATA — not state, not project, not profile. A tool either reads, or
+carries an INTENT, or is a SIGNAL. Every tool below was checked against "does this write?":
+
+| Tool | Writes | Verdict |
+|---|---|---|
+| `get_tcc_state`, `get_ledger`, `get_capability_checklist` | — | read |
+| `get_pending_signals`, `wait_for_signal` | `.tcc/` bus | TCC's own namespace; the payload is user intent |
+| `propose_change` | — | intent, put on screen for the Arbiter |
+| `copy_helix_eq` | clipboard | hand-off to a human, gated |
+| `write_rew_filters` | REW's model | an instrument, not project data; gated |
+| `call_critic` | `.tcc/` call log | TCC's own namespace |
+| `report_phase` | — | **converted** — read-back + refresh signal, see below |
+| `check_existing_profile`, `save_profile_field`, `reset_profile_field` | in-memory draft | pending |
+| `finalize_profile` | `dsp_profile.json` | **open violation** |
+
+`finalize_profile` writes profile data, which D-6 forbids in as many words. Converting it to an
+intent is NOT a local edit: the skill's `dsp_profile.py` exposes only read commands (`validate`,
+`open-questions`, `find-bundled`, `diff`), so there is nothing for an agent to write the profile
+THROUGH yet. That needs a writer on the skill side first — raised, not silently worked around.
 """
 
 from __future__ import annotations
@@ -81,6 +103,13 @@ class UiBridge(Protocol):
         the GUI should reload it. Fires only from the terminal path; the in-app onboarding chat
         already restarts into a fresh window off its own `profile_saved` signal."""
 
+    def refresh_from_disk(self) -> None:
+        """The skill changed something on disk — re-read the project (D-6's signal direction).
+
+        Not the same as `notify_profile_ready`, which is about one file appearing for the first
+        time: this is the ordinary "the tune moved" refresh, and it is a MESSAGE, not data.
+        """
+
 
 class HeadlessBridge:
     """No GUI: every mutation is denied, reads answer from disk.
@@ -107,6 +136,9 @@ class HeadlessBridge:
         pass
 
     def notify_profile_ready(self) -> None:
+        pass
+
+    def refresh_from_disk(self) -> None:
         pass
 
     def show_critique(self, critique: dict[str, Any]) -> None:
@@ -146,6 +178,19 @@ def build_server(
         ),
     )
 
+    def _load_process_state() -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        """The skill's process state, read through the skill's own module (`state/process.py`).
+
+        The one authority on where the tune stands (D-6): TCC reads this, never writes it. Returns
+        `(state, None)` or `(None, reason)` — a project with no process yet reads as an empty
+        state, which is not an error.
+        """
+        try:
+            process = vendor_loader.load_process()
+        except vendor_loader.VendorNotInitializedError as exc:
+            return None, str(exc)
+        return process.Process(str(project_dir / "process")).load(), None
+
     async def _confirm(request: ConfirmRequest) -> bool:
         try:
             return await asyncio.wait_for(
@@ -164,12 +209,15 @@ def build_server(
         Call this before proposing anything, so a proposal refers to what they are actually
         looking at rather than to state you inferred earlier in the conversation.
         """
-        data = registry.load()
+        process_state, error = _load_process_state()
         state = {
             "project_dir": str(project_dir),
             "ui": bridge.snapshot(),
-            "current_phase": data.get("current_phase"),
-            "phases": data.get("phases", {}),
+            # The phase comes from the skill's own file, not from this server's bookkeeping: two
+            # places answering "which phase" is how they drift apart (#10, D-6).
+            "current_phase": (process_state or {}).get("active_phase"),
+            "process_state_error": error,
+            "sessions": registry.load().get("phases", {}),
             "pending_signals": bus.pending_count,
         }
         return json.dumps(state, ensure_ascii=False, indent=2)
@@ -475,22 +523,41 @@ def build_server(
         )
 
     @mcp.tool()
-    async def report_phase(
-        phase: str, step: str = "", status: str = "", evidence: Optional[list[str]] = None
-    ) -> str:
-        """Tell TCC which phase/step you are on, with evidence links for a finished step.
+    async def report_phase(phase: str = "") -> str:
+        """Tell TCC the process moved, AFTER you have written the move with the skill's own tooling
+        (`python rew_tool/state/process.py <project>/process enter-phase <n>` / `done` / ...).
 
-        TCC uses this to decide whether a later launch resumes your session or starts a fresh one
-        (one phase ≈ one session), and to show the Arbiter where the process stands. Report a
-        phase change as soon as you make it, not at the end of the turn.
+        This records nothing. It re-reads `process/process-state.json` and refreshes what the
+        Arbiter is looking at, then hands you back what that file actually says — so if your call
+        and the file disagree, you find out here rather than proposing against a phase that only
+        exists in this conversation. `phase` is optional and used only for that comparison.
+
+        Evidence, step status and the plan all belong in that file, written by the skill: there is
+        no argument here for them because TCC does not keep a second copy.
         """
-        entry = registry.record_phase(
-            phase=phase,
-            step=step or None,
-            status=status or None,
-            evidence=evidence or None,
-        )
-        return json.dumps({"recorded": True, "phase": phase, "entry": entry}, ensure_ascii=False)
+        state, error = _load_process_state()
+        if error:
+            return json.dumps({"refreshed": False, "error": error}, ensure_ascii=False)
+        active = (state or {}).get("active_phase")
+        bridge.refresh_from_disk()
+        if not active:
+            return json.dumps(
+                {
+                    "refreshed": True,
+                    "skill_phase": None,
+                    "warning": "process-state.json has no active_phase -- "
+                               "enter one with the skill's process.py before reporting it",
+                },
+                ensure_ascii=False,
+            )
+        entry = registry.sync_phase(active)
+        out = {"refreshed": True, "skill_phase": active, "session": entry}
+        if phase and str(phase) != str(active):
+            out["mismatch"] = (
+                f"you reported phase {phase!r}, but process-state.json says {active!r} -- "
+                "the file wins; write the move before reporting it"
+            )
+        return json.dumps(out, ensure_ascii=False)
 
     return mcp
 

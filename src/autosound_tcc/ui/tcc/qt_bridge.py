@@ -34,6 +34,7 @@ class QtUiBridge(QObject):
     proposalReceived = Signal(dict)
     critiqueReceived = Signal(dict)
     profileReady = Signal()
+    refreshRequested = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -73,3 +74,6 @@ class QtUiBridge(QObject):
 
     def notify_profile_ready(self) -> None:
         self.profileReady.emit()
+
+    def refresh_from_disk(self) -> None:
+        self.refreshRequested.emit()

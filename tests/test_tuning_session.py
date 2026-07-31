@@ -167,7 +167,7 @@ def test_resume_is_driven_by_the_registry(tmp_path):
     session, _ = _session(tmp_path, allow=False)
     assert session.resumed_from is None
 
-    session.registry.record_phase("2")
+    session.registry.sync_phase("2")
     session.registry.bind_session("2", "sess-xyz")
 
     assert TuningSession(project_dir=tmp_path).resumed_from == "sess-xyz"
@@ -175,7 +175,7 @@ def test_resume_is_driven_by_the_registry(tmp_path):
 
 def test_a_closed_phase_starts_a_fresh_session(tmp_path):
     session, _ = _session(tmp_path, allow=False)
-    session.registry.record_phase("2")
+    session.registry.sync_phase("2")
     session.registry.bind_session("2", "sess-xyz")
     session.registry.close_phase("2")
 

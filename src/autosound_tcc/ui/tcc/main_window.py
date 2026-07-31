@@ -1146,6 +1146,11 @@ class MainWindow(QMainWindow):
         # A terminal-driven onboarding session's finalize_profile lands here -- the in-app chat
         # doesn't need this, it already restarts into a fresh window off its own signal.
         self._bridge.profileReady.connect(self._load_project)
+        # `report_phase` no longer writes anything -- it signals that the SKILL wrote something,
+        # and this is where that signal lands (D-6). Broader than the process-state watcher in
+        # `_load_process`: a phase move usually comes with a new ledger snapshot and new project
+        # facts, which nothing else is watching.
+        self._bridge.refreshRequested.connect(self._reload_from_disk)
         self._publish_snapshot()
         self._refresh_critic_status()
 

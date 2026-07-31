@@ -51,11 +51,25 @@ class RecordingBridge:
     def notify_profile_ready(self) -> None:
         pass
 
+    def refresh_from_disk(self) -> None:
+        self.refreshes += 1
+
+    refreshes = 0
+
 
 def _server(tmp_path, bridge):
     bus = SignalBus(tmp_path)
     registry = SessionRegistry(tmp_path)
     return build_server(tmp_path, bridge, bus, registry), bus, registry
+
+
+def _write_process_state(project_dir, active_phase: str) -> None:
+    """Seed the skill-owned process state — the only place a phase legitimately comes from."""
+    process_dir = project_dir / "process"
+    process_dir.mkdir(parents=True, exist_ok=True)
+    (process_dir / "process-state.json").write_text(
+        json.dumps({"schema_version": 1, "active_phase": active_phase}), encoding="utf-8"
+    )
 
 
 def _text(result) -> str:
@@ -89,10 +103,13 @@ def test_tool_surface_is_the_documented_set(tmp_path):
     assert not any("measurement" in name for name in names)
 
 
-def test_get_tcc_state_reports_ui_phase_and_queue_depth(tmp_path):
+def test_get_tcc_state_reports_the_skills_phase_not_its_own(tmp_path):
+    """D-6: the phase is read out of `process-state.json`. TCC answering from its own bookkeeping
+    is what let the two drift (#10)."""
     bridge = RecordingBridge(allow=True)
     mcp, bus, registry = _server(tmp_path, bridge)
-    registry.record_phase("2", step="2.3")
+    _write_process_state(tmp_path, "2")
+    registry.sync_phase("4")  # stale mirror -- must NOT be what the agent is told
     bus.push(PARAM_EDIT_MODE, on=True)
 
     state = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
@@ -203,15 +220,52 @@ def test_rew_write_is_denied_before_any_rew_call(tmp_path, monkeypatch):
     assert called == []
 
 
-def test_report_phase_records_into_the_registry(tmp_path):
-    mcp, _, registry = _server(tmp_path, HeadlessBridge(tmp_path))
+def test_report_phase_reads_the_phase_back_and_refreshes(tmp_path):
+    """It is a signal, not a writer (D-6): the answer comes from the skill's file, and the GUI is
+    told to re-read disk."""
+    bridge = RecordingBridge(allow=True)
+    bridge.refreshes = 0
+    mcp, _, registry = _server(tmp_path, bridge)
+    _write_process_state(tmp_path, "2")
 
-    asyncio.run(
-        mcp.call_tool("report_phase", {"phase": "2", "step": "2.3", "status": "in_progress"})
-    )
+    result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "2"}))))
 
-    assert registry.current_phase() == "2"
-    assert registry.load()["phases"]["2"]["step"] == "2.3"
+    assert result["refreshed"] is True
+    assert result["skill_phase"] == "2"
+    assert "mismatch" not in result
+    assert bridge.refreshes == 1
+    assert registry.current_phase() == "2"  # mirrored for session resume, from the file's value
+
+
+def test_report_phase_tells_the_agent_when_it_disagrees_with_disk(tmp_path):
+    """The whole point of the read-back: a phase that exists only in the conversation gets caught
+    here instead of becoming the basis of a proposal."""
+    bridge = RecordingBridge(allow=True)
+    bridge.refreshes = 0
+    mcp, _, registry = _server(tmp_path, bridge)
+    _write_process_state(tmp_path, "2")
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "4"}))))
+
+    assert result["skill_phase"] == "2"
+    assert "mismatch" in result
+    assert registry.current_phase() == "2"  # the file wins, not the claim
+
+
+def test_report_phase_writes_nothing_when_the_skill_has_no_phase(tmp_path):
+    """No `active_phase` on disk means the move was never written — inventing one here would put
+    TCC back in the business of authoring the process."""
+    bridge = RecordingBridge(allow=True)
+    bridge.refreshes = 0
+    mcp, _, registry = _server(tmp_path, bridge)
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "2"}))))
+
+    assert result["refreshed"] is True
+    assert result["skill_phase"] is None
+    assert "warning" in result
+    assert registry.current_phase() is None
+    assert not (tmp_path / "process").exists()
 
 
 def test_write_mcp_config_merges_instead_of_clobbering(tmp_path, monkeypatch):
