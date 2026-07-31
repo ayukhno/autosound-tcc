@@ -149,3 +149,111 @@ def test_evidence_rule_is_the_skills_not_reimplemented_here(process):
 
     with pytest.raises(module.ProcessError, match="evidence"):
         process.finish_step("2.1", [])
+
+
+# ---- SCR-014: what a config change invalidated ------------------------------
+
+
+def _record_change(project, process, impact, what="driver swapped", why=None):
+    """Log a `config_change` the way the skill does — through `project.py`, not by hand."""
+    proj_module = vendor_loader.load_project()
+    proj = proj_module.Project(str(project))
+    proj.save(proj.load())  # the file has to exist for a change to be recorded against it
+    return proj.record_change(process, "project.json", what, why=why, impact=impact)
+
+
+def test_a_remeasure_change_flags_exactly_its_channels(project, process):
+    """The SCR's whole promise: name the affected captures, never flag everything and never stay
+    silent."""
+    process.enter_phase("2")
+    _record_change(project, process, "remeasure: [w-L, w-R]", why="blown voice coil")
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-L", "w-R"}
+    assert stale["w-L"]["why"] == "blown voice coil"
+
+
+def test_a_capture_recorded_after_the_change_clears_it(project, process):
+    """"Stale" means the skill has recorded no capture since the change — so a later `step_done`
+    whose evidence names the channel clears it, and one naming a different channel does not."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _record_change(project, process, "remeasure: [w-L, w-R]")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-R"}
+
+
+def test_a_capture_from_before_the_change_does_not_clear_it(project, process):
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    _record_change(project, process, "remeasure: [w-L]")
+
+    assert set(process_view.stale_channels(project)) == {"w-L"}
+
+
+def test_full_rebaseline_flags_every_active_channel(project, process):
+    """"Everything" is the glossary's active channels — the same list the capture checklist is
+    built from, not a guess."""
+    import json
+
+    (project / "glossary.json").write_text(json.dumps({
+        "channels": [{"code": "w-L", "active": True}, {"code": "w-R", "active": True},
+                     {"code": "c", "active": False}],
+    }), encoding="utf-8")
+    process.enter_phase("2")
+    _record_change(project, process, "full_rebaseline", what="mic recalibrated")
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-L", "w-R"}  # the inactive centre is not a capture anyone owes
+
+
+def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):
+    """`voicing` (written by the skill's own set_target) and free prose are real impacts a human
+    should read — but guessing which channels a sentence meant is how a checklist starts lying."""
+    process.enter_phase("2")
+    _record_change(project, process, "voicing")
+    _record_change(project, process, "check the sub once the amp is back")
+
+    assert process_view.stale_channels(project) == {}
+    assert len(process_view.config_changes(project)) == 2  # still visible as events
+
+
+def test_no_journal_reads_as_nothing_stale(project):
+    assert process_view.config_changes(project) == ()
+    assert process_view.stale_channels(project) == {}
+
+
+def test_a_done_step_whose_evidence_went_stale_is_re_chipped(project, process):
+    """The step stays done in the file — the skill owns that — but the panel must not keep showing
+    a green "ok" for work whose result no longer describes the car."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)", "w-R_10 (sw)"])
+    process.add_step("2.2", "set delays")
+    process.finish_step("2.2", ["v_003"])
+    _record_change(project, process, "remeasure: [w-L]")
+
+    stale = process_view.stale_channels(project)
+    plan = process_view.to_plan(process.load(), stale)
+    steps = {s.id: s for phase in plan for s in phase.steps}
+
+    assert steps["2.1"].tag_class == "wait" and steps["2.1"].tag["en"] == "recheck"
+    assert steps["2.2"].tag["en"] == "ok"  # evidence is a ledger version, no channel involved
+
+
+def test_without_the_stale_map_the_plan_is_unchanged(project, process):
+    """`to_plan(state)` alone still works — the mock, the tests and any caller that doesn't care
+    about staleness keep the old behaviour."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    steps = {s.id: s for phase in process_view.to_plan(process.load()) for s in phase.steps}
+
+    assert steps["2.1"].tag["en"] == "ok"

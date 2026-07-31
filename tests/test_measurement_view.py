@@ -136,3 +136,41 @@ def test_off_convention_is_empty_without_a_glossary(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
 
     assert mv.off_convention(["anything"], tmp_path) == []
+
+
+def _record_change(project, impact, what="driver swapped"):
+    """A `config_change` written the way the skill writes it, through its own modules."""
+    process_module = vendor_loader.load_process()
+    proc = process_module.Process(str(project / "process"))
+    proc.enter_phase("0")
+    proj_module = vendor_loader.load_project()
+    proj = proj_module.Project(str(project))
+    proj.save(proj.load())
+    proj.record_change(proc, "project.json", what, impact=impact)
+    return proc
+
+
+def test_a_capture_invalidated_by_a_config_change_is_unusable_not_done(project):
+    """SCR-014: the graph exists, so "missing" would be a lie — and "done" would be worse, because
+    the next step would tune on a measurement of a driver that is no longer in the car."""
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)"]
+    _record_change(project, "remeasure: [w-L]", what="blown voice coil")
+
+    session = mv.build_session("0", 1, titles, project)
+    by_name = {item.name: item.status for group in session.groups for item in group.items}
+
+    assert by_name["w-L_1 (sw)"] == mv.STATUS_STALE
+    assert by_name["w-R_1 (sw)"] == mv.STATUS_DONE   # untouched channel keeps its capture
+    assert by_name["sw_1 (sw)"] == mv.STATUS_WAIT    # never captured -- still just missing
+
+
+def test_a_recapture_after_the_change_makes_it_done_again(project):
+    titles = ["w-L_1 (sw)"]
+    proc = _record_change(project, "remeasure: [w-L]")
+    proc.add_step("0.9", "re-sweep w-L")
+    proc.finish_step("0.9", ["w-L_1 (sw)"])
+
+    session = mv.build_session("0", 1, titles, project)
+    by_name = {item.name: item.status for group in session.groups for item in group.items}
+
+    assert by_name["w-L_1 (sw)"] == mv.STATUS_DONE

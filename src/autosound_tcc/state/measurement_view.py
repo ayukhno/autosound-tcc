@@ -19,10 +19,14 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
 
 STATUS_DONE = "done"
 STATUS_WAIT = "wait"
+# The panel's own legend already calls this one "taken, unusable" -- exactly what a capture becomes
+# when the hardware under it changed (SCR-014).
+STATUS_STALE = "bad"
 
 
 def glossary_path(project_dir: Optional[Path] = None) -> Path:
@@ -81,17 +85,20 @@ def build_session(
         if entry:
             parsed[naming.name_key(entry)] = entry
 
+    # SCR-014: a capture whose channel was invalidated by a `config_change` is not "done" -- the
+    # graph exists and is unusable, which is a different thing from missing, and the panel has a
+    # colour for exactly that. Flagging it here rather than in the panel keeps the panel a renderer.
+    stale = process_view.stale_channels(project)
+
+    def status_for(name: str) -> str:
+        entry = naming.parse_name(name, glossary)
+        if naming.name_key(entry) not in parsed:
+            return STATUS_WAIT
+        return STATUS_STALE if (entry or {}).get("code") in stale else STATUS_DONE
+
     groups = []
     for spec in groups_spec:
-        items = tuple(
-            MeasItem(
-                name=name,
-                status=STATUS_DONE
-                if naming.name_key(naming.parse_name(name, glossary)) in parsed
-                else STATUS_WAIT,
-            )
-            for name in spec["names"]
-        )
+        items = tuple(MeasItem(name=name, status=status_for(name)) for name in spec["names"])
         groups.append(MeasGroup(type=spec["label"], items=items))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version)

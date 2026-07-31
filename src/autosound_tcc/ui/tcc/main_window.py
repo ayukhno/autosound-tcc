@@ -1079,8 +1079,12 @@ class MainWindow(QMainWindow):
             # time (including preset switches), so it can't just default to "keep the mock".
             self._plan_panel.set_plan(None if self._has_project else ())
             return
-        self._plan_panel.set_plan(process_view.to_plan(state))
+        # SCR-014: what a `config_change` invalidated, computed once and used by both panels --
+        # a step's "recheck" chip and a capture's unusable colour are the same fact.
+        stale = process_view.stale_channels()
+        self._plan_panel.set_plan(process_view.to_plan(state, stale))
         self._refresh_capture_task(state)
+        self._notify_stale(stale)
 
         review = process_view.reviewer(state)
         if review:
@@ -1096,6 +1100,22 @@ class MainWindow(QMainWindow):
         path = str(process_view.state_file())
         if path not in self._process_watcher.files():
             self._process_watcher.addPath(path)
+
+    def _notify_stale(self, stale: dict) -> None:
+        """Say it in the strip too. A tuner who has not opened the plan still has to learn that the
+        car changed under their measurements — §8's rule, and the reason SCR-014 says "never
+        silently"."""
+        if not stale:
+            return
+        newest = max(stale.values(), key=lambda change: str(change.get("at") or ""))
+        self._status_strip.notify(
+            i18n.t("staleStrip").format(
+                n=len(stale),
+                codes=", ".join(sorted(stale)),
+                what=newest.get("what") or newest.get("field") or "config change",
+            ),
+            level="warn",
+        )
 
     def _refresh_capture_task(self, state: dict) -> None:
         """Derive the capture checklist from (phase x glossary x version) — SCR-004/SCR-008.

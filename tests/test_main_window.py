@@ -461,3 +461,24 @@ def test_no_contract_subprocess_is_spawned_under_the_test_escape_hatch(monkeypat
 
     assert calls == []
     assert window._contract_worker is None
+
+
+def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
+    """SCR-014 says "never silently". A tuner who hasn't opened the plan still has to learn that
+    the car changed under their measurements."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    process = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    process.enter_phase("2")
+    proj = vendor_loader.load_project().Project(str(tmp_path))
+    proj.save(proj.load())
+    proj.record_change(process, "project.json", "driver replaced",
+                       impact="remeasure: [w-L, w-R]")
+
+    _app()
+    window = MainWindow()
+
+    assert not window._status_strip.isHidden()
+    text = window._status_strip.text()
+    assert "driver replaced" in text and "w-L" in text and "w-R" in text
