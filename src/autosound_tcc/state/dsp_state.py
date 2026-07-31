@@ -17,12 +17,19 @@ Ledger-key convention (by profile group id):
 `ProjectView.from_dict` works on a raw dict + a loaded profile alone, so the UI/tests can consume
 a view without the submodule present; only `load_project_view` (which reads from disk via
 `PresetHistory`) needs the vendored code.
+
+**Two files, one row (SCR-001).** The ledger owns what changes between snapshots — gain, delay,
+crossover, EQ. `project.json` owns channel IDENTITY — driver, Fs, impedance, slot, description,
+role, order, hidden. They are joined here on the channel `code`, once, so no call site downstream
+has to know which file a given field came from.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from autosound_tcc.state import project_view
 
 @dataclass(frozen=True)
 class EqBand:
@@ -144,6 +151,10 @@ class GroupRow:
     slot: Optional[str] = None
     descr: Optional[str] = None
     hardware_controls: dict = field(default_factory=dict)
+    # This row's `project.json` `channels[]` entry, matched by `code` (SCR-001). Empty for a tier
+    # whose codes aren't declared there (a virtual slot, an input) -- absence renders as "not
+    # captured", never as an error.
+    identity: dict = field(default_factory=dict)
 
     @property
     def tag(self) -> Optional[str]:
@@ -172,6 +183,38 @@ class GroupRow:
         return entry.get("value") if isinstance(entry, dict) else entry
 
     @property
+    def driver(self) -> Optional[str]:
+        """Speaker make+model for this channel, e.g. "Audiofrog GB25" — from `project.json`.
+
+        Identity, not tunable state, so it lives in the project file and is joined here by `code`
+        (SCR-001). Reading it off the ledger row is what used to leave the tooltip silently empty:
+        the skill never wrote a `driver` key there, and nothing raised.
+        """
+        return project_view.driver_label(self.identity)
+
+    @property
+    def role(self) -> Optional[str]:
+        """Speaker type (woofer/tweeter/sub). Project file first; the ledger's copy is deprecated
+        but still read for snapshots written before the split."""
+        value = project_view.fact_value(self.identity.get("role"))
+        return value if value is not None else self.raw.get("role")
+
+    @property
+    def fs_hz(self) -> Optional[float]:
+        """The driver's free-air resonance, unwrapped from its `fact()` envelope.
+
+        Wrapped precisely because it drifts mid-project (a replaced driver, a measured value
+        superseding a datasheet one), which is what `config_change`'s `impact` points back at.
+        """
+        value = project_view.fact_value(self.identity.get("fs_hz"))
+        return value if isinstance(value, (int, float)) else None
+
+    @property
+    def impedance_ohm(self) -> Optional[float]:
+        value = project_view.fact_value(self.identity.get("impedance_ohm"))
+        return value if isinstance(value, (int, float)) else None
+
+    @property
     def muted(self) -> bool:
         return bool(self.raw.get("mute"))
 
@@ -184,7 +227,12 @@ class GroupRow:
         """A virtual-channel slot the skill's intake found no physical driver assigned to (e.g.
         an unused rear-fill slot) -- written by the skill, not inferred here (see
         docs/SKILL-CHANGE-REQUESTS.md SCR-003). Not retroactive: ledgers captured before that skill
-        change simply have no `hidden` key and every row still renders."""
+        change simply have no `hidden` key and every row still renders.
+
+        Identity-first (SCR-001): whether a slot has a driver is a project fact, not something that
+        varies between snapshots of the same install."""
+        if "hidden" in self.identity:
+            return bool(project_view.fact_value(self.identity["hidden"]))
         return bool(self.raw.get("hidden"))
 
     def params(self, fields: tuple[str, ...]) -> list[str]:
@@ -205,6 +253,29 @@ class GroupRow:
 
     def eq_bands(self) -> tuple[EqBand, ...]:
         return parse_eq_bands(self.raw.get("eq"))
+
+
+def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> GroupRow:
+    """One resolved row: tunable state from the ledger, identity from `project.json` (SCR-001).
+
+    `slot`, `descr` and `order` exist in both files. The project file wins — the ledger's copies
+    are deprecated and read only when this project has no `channels[]` entry for the code (a
+    snapshot taken before the split, or a tier `project.json` doesn't describe).
+    """
+    def resolved(key: str) -> Any:
+        value = project_view.fact_value(identity.get(key))
+        return value if value is not None else row_raw.get(key)
+
+    return GroupRow(
+        id=name,
+        name=name,
+        raw=row_raw,
+        identity=identity,
+        order=resolved("order"),
+        slot=resolved("slot"),
+        descr=resolved("descr"),
+        hardware_controls=hw_controls,
+    )
 
 
 @dataclass(frozen=True)
@@ -254,13 +325,19 @@ class ProjectView:
     @classmethod
     def from_dict(
         cls, raw: dict, profile: dict, param_sections: tuple[ParamSection, ...] = (),
-        hardware_controls: Optional[dict] = None,
+        hardware_controls: Optional[dict] = None, channels: Optional[dict] = None,
     ) -> "ProjectView":
         """`hardware_controls` is `project.json`'s `hardware.controls` (SCR-017) -- DSP-level
         facts (RearRC/SubRC/RealCenter knob positions) constant across every preset, resolved into
-        each row's `tag_value` rather than read off the ledger (`GroupRow.tag_value`)."""
+        each row's `tag_value` rather than read off the ledger (`GroupRow.tag_value`).
+
+        `channels` is `project.json`'s `channels[]` keyed by `code` (SCR-001): channel IDENTITY,
+        joined onto each ledger row here so the rest of the app reads one resolved row instead of
+        deciding per call site which of the two files to believe.
+        """
         prof = profile.get("dsp_profile", profile)
         hw_controls = hardware_controls or {}
+        identities = channels or {}
         groups = []
         for g in prof.get("groups", []):
             gid = g["id"]
@@ -268,9 +345,7 @@ class ProjectView:
             # every other group id maps to a same-named top-level key (absent -> no rows yet).
             row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
             rows = tuple(
-                GroupRow(id=name, name=name, raw=row_raw, order=row_raw.get("order"),
-                         slot=row_raw.get("slot"), descr=row_raw.get("descr"),
-                         hardware_controls=hw_controls)
+                _build_row(name, row_raw, identities.get(name, {}), hw_controls)
                 for name, row_raw in (row_source or {}).items()
             )
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
@@ -342,5 +417,10 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     raw = history.load(version)
     param_sections = load_param_sections()
     hardware_controls = load_hardware_controls()
+    # The SCR-001 join resolves against `project.json` as it is NOW, which is right for the current
+    # HEAD and approximate for an old snapshot: replace a driver and every historical version reads
+    # as having had the new one. Fixing that needs the snapshot to say which project revision it was
+    # taken under (SCR-024, raised for exactly this) — not something a consumer can infer.
+    channels = project_view.load_channels()
     return ProjectView.from_dict(raw, profile, param_sections=param_sections,
-                                  hardware_controls=hardware_controls)
+                                  hardware_controls=hardware_controls, channels=channels)

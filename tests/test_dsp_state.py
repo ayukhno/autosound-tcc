@@ -281,3 +281,81 @@ def test_load_param_sections_reads_project_json(tmp_path):
 
 def test_load_param_sections_absent_file_returns_empty(tmp_path):
     assert load_param_sections(tmp_path) == ()
+
+
+# ---- SCR-001: identity from project.json, tunable state from the ledger --------------------
+
+_IDENTITY = {
+    "FL": {
+        "code": "FL",
+        "slot": "C",
+        "descr": "Front L Woofer",
+        "role": "woofer",
+        "order": 1,
+        "driver": {"make": "Audiofrog", "model": "GB25"},
+        "fs_hz": {"value": 62, "source": "datasheet", "at": "2026-07-30T10:00:00+00:00"},
+        "impedance_ohm": 4,
+    }
+}
+
+
+def test_identity_fields_are_joined_onto_the_ledger_row_by_code():
+    """The defect SCR-001 names: the tooltip read `driver`/`fs` off the ledger row, where the
+    skill never wrote them, so it rendered empty and nothing raised."""
+    view = ProjectView.from_dict(LEDGER, PROFILE, channels=_IDENTITY)
+    row = {r.name: r for r in view.groups[0].rows}["FL"]
+
+    assert row.driver == "Audiofrog GB25"
+    assert row.role == "woofer"
+    assert row.fs_hz == 62  # unwrapped from its fact() envelope
+    assert row.impedance_ohm == 4
+    assert row.slot == "C"
+    assert row.descr == "Front L Woofer"
+    assert row.order == 1
+
+
+def test_a_channel_with_no_project_entry_still_renders():
+    """SUB has no `channels[]` row here. Absence is "not captured", never an error — half-done
+    intake is the normal state of a project, not a broken one."""
+    view = ProjectView.from_dict(LEDGER, PROFILE, channels=_IDENTITY)
+    row = {r.name: r for r in view.groups[0].rows}["SUB"]
+
+    assert row.driver is None
+    assert row.fs_hz is None
+    assert row.params(("gain_db", "polarity"))  # tunable state is unaffected
+
+
+def test_project_json_wins_over_the_deprecated_ledger_copies():
+    """`slot`/`descr`/`role`/`order` exist in both files. The rule (SCR-001) is identity-first;
+    the ledger's copies stay readable only for snapshots taken before the split."""
+    ledger = json.loads(json.dumps(LEDGER))
+    ledger["channels"]["FL"].update({"slot": "STALE", "descr": "stale name", "role": "tweeter",
+                                     "order": 9})
+
+    view = ProjectView.from_dict(ledger, PROFILE, channels=_IDENTITY)
+    row = {r.name: r for r in view.groups[0].rows}["FL"]
+
+    assert (row.slot, row.descr, row.role, row.order) == ("C", "Front L Woofer", "woofer", 1)
+
+
+def test_the_ledger_copies_are_still_read_when_the_project_has_no_entry():
+    ledger = json.loads(json.dumps(LEDGER))
+    ledger["channels"]["SUB"].update({"slot": "H", "descr": "Sub", "role": "sub", "order": 5,
+                                      "hidden": True})
+
+    view = ProjectView.from_dict(ledger, PROFILE, channels=_IDENTITY)
+    row = {r.name: r for r in view.groups[0].rows}["SUB"]
+
+    assert (row.slot, row.descr, row.role, row.order) == ("H", "Sub", "sub", 5)
+    assert row.hidden is True
+
+
+def test_hidden_is_identity_first():
+    """Whether a slot has a driver assigned is a project fact (SCR-003), not something that varies
+    between snapshots of the same install."""
+    ledger = json.loads(json.dumps(LEDGER))
+    ledger["channels"]["FL"]["hidden"] = True
+
+    view = ProjectView.from_dict(ledger, PROFILE, channels={"FL": {"code": "FL", "hidden": False}})
+
+    assert {r.name: r for r in view.groups[0].rows}["FL"].hidden is False

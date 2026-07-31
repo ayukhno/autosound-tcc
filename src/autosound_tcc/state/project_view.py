@@ -27,9 +27,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from autosound_tcc.core import config
+
+
+def fact_value(x: Any) -> Any:
+    """Unwrap a `fact(value, source, at)` object, or pass a bare value through.
+
+    Mirrors `rew_tool/project.py::fact_value`, deliberately rather than importing it: this is two
+    lines of FORMAT reading (documented in `project-schema.md`'s Provenance section), and every
+    other loader in this module works without the submodule being checked out. Reading a fact is
+    not the same as owning one — the values themselves still come only from the skill's file.
+
+    A reader never needs to know which fields are wrapped, which is the point: `fs_hz` is, `role`
+    is not, and both go through here.
+    """
+    return x.get("value") if isinstance(x, dict) and "value" in x else x
 
 
 def has_project(project_dir_: Optional[Path] = None) -> bool:
@@ -100,6 +114,48 @@ def load_channel_summary(project_dir_: Optional[Path] = None) -> tuple[tuple[str
         value = f"{total}" + (f" ({off} off)" if off else "")
         rows.append((label, value))
     return tuple(rows)
+
+
+def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
+    """`project.json`'s `channels[]`, keyed by `code` — the join key ledger rows resolve against.
+
+    SCR-001, resolved 2026-07-31: **`project.json` owns channel identity, the ledger owns tunable
+    state, consumers join on `code`.** The mechanical test for which side a field belongs to is
+    "does it change from snapshot to snapshot?" — `driver`, `fs_hz`, `slot`, `descr`, `role`,
+    `order`, `hidden` do not; gain, delay, crossover and EQ do.
+
+    Five of those identity fields are also still present on ledger rows. They are deprecated, not
+    read in preference to this file (`state/dsp_state.py` resolves identity-first), and kept
+    readable only for snapshots written before the split.
+
+    Rows without a `code` are skipped rather than guessed at — an entry with no join key cannot be
+    matched to anything, and inventing one would attach a driver to the wrong channel.
+    """
+    channels = _load(project_dir_).get("channels") or []
+    if not isinstance(channels, list):
+        return {}
+    return {
+        str(entry["code"]): entry
+        for entry in channels
+        if isinstance(entry, dict) and entry.get("code")
+    }
+
+
+def driver_label(entry: dict) -> Optional[str]:
+    """`{"make": "Audiofrog", "model": "GB25"}` -> `"Audiofrog GB25"`.
+
+    Tolerates the bare string an older file (or a ledger row) might carry, and returns None when
+    there is no driver assigned — an unassigned slot renders without the line, not with an empty one.
+    """
+    driver = fact_value((entry or {}).get("driver"))
+    if isinstance(driver, str):
+        return driver or None
+    if not isinstance(driver, dict):
+        return None
+    name = " ".join(
+        str(part) for part in (driver.get("make"), driver.get("model")) if part
+    )
+    return name or None
 
 
 def load_open_questions(project_dir_: Optional[Path] = None) -> tuple[str, ...]:

@@ -188,14 +188,17 @@ class ChannelRow(QWidget):
         html = [f"<b>{head}</b>"]
 
         if is_output:
+            # Driver / role / Fs are channel IDENTITY and reach this row from `project.json` by way
+            # of the SCR-001 join (`GroupRow.driver`/`role`/`fs_hz`), not from the ledger row: the
+            # skill never wrote `driver`/`fs` keys there, so reading `raw` left this block
+            # permanently empty and raised nothing.
             meta = []
-            if raw.get("driver"):  # speaker make/model (e.g. "Hertz MP70") -- shown when captured
-                meta.append(f"<b>{raw['driver']}</b>")
-            if raw.get("role"):
-                meta.append(raw["role"])
-            fs = raw.get("fs")
-            if isinstance(fs, (int, float)):
-                meta.append(f"Fs&nbsp;{fs:g}&nbsp;Hz")
+            if row.driver:  # speaker make/model, e.g. "Audiofrog GB25" -- shown when captured
+                meta.append(f"<b>{row.driver}</b>")
+            if row.role:
+                meta.append(str(row.role))
+            if row.fs_hz is not None:
+                meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz")
             if meta:
                 html.append(c(" · ".join(meta), t.muted))
             hp = CrossoverLeg.from_raw(raw.get("hp")).label

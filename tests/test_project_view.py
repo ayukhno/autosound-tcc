@@ -58,3 +58,43 @@ def test_open_questions_passthrough(tmp_path):
 def test_has_project_true_once_the_file_exists(tmp_path):
     _write(tmp_path, {})
     assert project_view.has_project(tmp_path) is True
+
+
+def test_load_channels_keys_by_code_and_skips_entries_without_one(tmp_path):
+    """`code` is the join key (SCR-001) — an entry without one cannot be matched to a ledger row,
+    and guessing would attach a driver to the wrong channel."""
+    _write(tmp_path, {"channels": [
+        {"code": "w-L", "driver": {"make": "Audiofrog", "model": "GB25"}},
+        {"slot": "D", "descr": "no code here"},
+    ]})
+
+    channels = project_view.load_channels(tmp_path)
+
+    assert set(channels) == {"w-L"}
+    assert channels["w-L"]["driver"]["model"] == "GB25"
+
+
+def test_load_channels_tolerates_a_missing_or_malformed_key(tmp_path):
+    _write(tmp_path, {})
+    assert project_view.load_channels(tmp_path) == {}
+
+    _write(tmp_path, {"channels": {"w-L": {}}})  # object where the schema says list
+    assert project_view.load_channels(tmp_path) == {}
+
+
+def test_fact_value_unwraps_wrapped_and_passes_bare_through():
+    """`fs_hz` is wrapped, `role` is not; a reader must not have to know which (project-schema.md
+    Provenance)."""
+    assert project_view.fact_value({"value": 62, "source": "datasheet", "at": "…"}) == 62
+    assert project_view.fact_value("woofer") == "woofer"
+    assert project_view.fact_value({"value": None, "source": None, "at": None}) is None
+    # A plain dict that is NOT a fact wrapper survives intact -- `driver` is one of those.
+    assert project_view.fact_value({"make": "Audiofrog"}) == {"make": "Audiofrog"}
+
+
+def test_driver_label_joins_make_and_model_and_tolerates_older_shapes():
+    assert project_view.driver_label({"driver": {"make": "Audiofrog", "model": "GB25"}}) == "Audiofrog GB25"
+    assert project_view.driver_label({"driver": {"model": "GB25"}}) == "GB25"
+    assert project_view.driver_label({"driver": "Hertz MP70"}) == "Hertz MP70"
+    assert project_view.driver_label({}) is None
+    assert project_view.driver_label({"driver": {}}) is None
