@@ -300,20 +300,6 @@ class ProfileGroup:
 
 
 @dataclass(frozen=True)
-class ParamSection:
-    """One extra flat key/value collapsible section in the left panel, beyond the DSP feature-
-    toggle PARAMS section -- e.g. car/setup + measurement params, car body/chassis params, future
-    amp-gain/second-processor/player sections (item 2, 2026-07-27). Sourced from the skill-owned
-    `project.json`'s `param_sections` (see `core.config.project_path`; D2, SKILL-SYNC-PLAN.md --
-    replaces the earlier TCC-only `project_profile.json`), not the per-version ledger -- these
-    facts don't change between presets/DSP-tune versions."""
-
-    id: str
-    label: str
-    params: tuple[tuple[str, str], ...] = ()
-
-
-@dataclass(frozen=True)
 class ProjectView:
     """A whole project's DSP state, shaped by its profile — the read-only view the UI displays."""
 
@@ -326,12 +312,11 @@ class ProjectView:
     features: tuple[tuple[str, str], ...] = ()
     slot_label: Optional[str] = None
     save: Optional[str] = None
-    param_sections: tuple[ParamSection, ...] = ()
 
     @classmethod
     def from_dict(
-        cls, raw: dict, profile: dict, param_sections: tuple[ParamSection, ...] = (),
-        hardware_controls: Optional[dict] = None, channels: Optional[dict] = None,
+        cls, raw: dict, profile: dict, hardware_controls: Optional[dict] = None,
+        channels: Optional[dict] = None,
     ) -> "ProjectView":
         """`hardware_controls` is `project.json`'s `hardware.controls` (SCR-017) -- DSP-level
         facts (RearRC/SubRC/RealCenter knob positions) constant across every preset, resolved into
@@ -370,34 +355,13 @@ class ProjectView:
             features=features,
             slot_label=raw.get("slot_label"),
             save=raw.get("save"),
-            param_sections=param_sections,
         )
-
-
-def load_param_sections(project_dir_: Optional[Any] = None) -> tuple[ParamSection, ...]:
-    """Read `project.json`'s `param_sections` (see `core.config.project_path`), if present. Absent
-    file or missing `param_sections` key -> no extra sections, not an error (same convention as
-    the rest of this module). `project_dir_`, if given, overrides the configured project
-    directory (for tests)."""
-    import json
-
-    from autosound_tcc.core import config
-
-    path = config.project_path(project_dir_)
-    if not path.is_file():
-        return ()
-    data = json.loads(path.read_text())
-    sections = []
-    for entry in data.get("param_sections", []):
-        params = tuple((str(k), str(v)) for k, v in entry.get("params", []))
-        sections.append(ParamSection(id=entry["id"], label=entry.get("label", entry["id"]), params=params))
-    return tuple(sections)
 
 
 def load_hardware_controls(project_dir_: Optional[Any] = None) -> dict:
     """Read `project.json`'s `hardware.controls` (SCR-017) -- DSP-level facts (RearRC/SubRC/
     RealCenter knob positions) constant across every preset. Absent file or key -> `{}`, not an
-    error (same convention as `load_param_sections`); a chip whose `tag` has no entry here simply
+    error (same convention as the other loaders here); a chip whose `tag` has no entry here simply
     renders without a value (`GroupRow.tag_value`)."""
     import json
 
@@ -427,12 +391,11 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     # ledger uses. It reads `project.json` from there for `project_rev` and the settings sheet.
     history = vstate.PresetHistory(root, preset, project_dir=str(config.project_dir()))
     raw = history.load(version)
-    param_sections = load_param_sections()
     hardware_controls = load_hardware_controls()
     # The SCR-001 join resolves against `project.json` as it is NOW, which is right for the current
     # HEAD and approximate for an old snapshot: replace a driver and every historical version reads
     # as having had the new one. Fixing that needs the snapshot to say which project revision it was
     # taken under (SCR-024, raised for exactly this) — not something a consumer can infer.
     channels = project_view.load_channels()
-    return ProjectView.from_dict(raw, profile, param_sections=param_sections,
-                                  hardware_controls=hardware_controls, channels=channels)
+    return ProjectView.from_dict(raw, profile, hardware_controls=hardware_controls,
+                                  channels=channels)

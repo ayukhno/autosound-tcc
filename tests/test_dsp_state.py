@@ -11,9 +11,7 @@ from pathlib import Path
 from autosound_tcc.state.dsp_state import (
     CrossoverLeg,
     EqBand,
-    ParamSection,
     ProjectView,
-    load_param_sections,
     parse_eq_bands,
 )
 
@@ -252,35 +250,6 @@ def test_hidden_flag():
     rows = {r.name: r for r in ProjectView.from_dict(ledger, profile).groups[0].rows}
     assert rows["VRF"].hidden and not rows["VFL"].hidden
 
-
-def test_param_sections_passthrough_in_from_dict():
-    sections = (ParamSection(id="car", label="Car setup", params=(("Make", "VW"),)),)
-    view = ProjectView.from_dict({"channels": {}}, {"dsp_profile": {"groups": []}}, param_sections=sections)
-    assert view.param_sections == sections
-
-
-def test_param_sections_absent_is_empty_tuple():
-    view = _view()
-    assert view.param_sections == ()
-
-
-def test_load_param_sections_reads_project_json(tmp_path):
-    data = {
-        "param_sections": [
-            {"id": "car", "label": "Car setup", "params": [["Make", "VW"], ["Model", "Passat B8"]]},
-            {"id": "chassis", "label": "Body / chassis", "params": [["Doors", "4"]]},
-        ]
-    }
-    (tmp_path / "project.json").write_text(json.dumps(data))
-    sections = load_param_sections(tmp_path)
-    assert sections == (
-        ParamSection(id="car", label="Car setup", params=(("Make", "VW"), ("Model", "Passat B8"))),
-        ParamSection(id="chassis", label="Body / chassis", params=(("Doors", "4"),)),
-    )
-
-
-def test_load_param_sections_absent_file_returns_empty(tmp_path):
-    assert load_param_sections(tmp_path) == ()
 
 
 # ---- SCR-001: identity from project.json, tunable state from the ledger --------------------

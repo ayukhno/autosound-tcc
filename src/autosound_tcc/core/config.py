@@ -144,8 +144,8 @@ def dsp_profile_path(project_dir_: Optional[Path] = None) -> Path:
 
 def project_path(project_dir_: Optional[Path] = None) -> Path:
     """The skill-owned `project.json` -- car/equipment/glossary/hardware facts, plus the
-    `param_sections` this project's left panel renders (System/Project/Car-audio-analysis
-    sections). Replaces the TCC-only `project_profile.json` (D2, SKILL-SYNC-PLAN.md §0): one file,
+    facts this project's left panel renders in its System/Project/Car-audio-analysis
+    sections. Replaces the TCC-only `project_profile.json` (D2, SKILL-SYNC-PLAN.md §0): one file,
     written by the skill, instead of two files with an overlapping and easily-diverging job.
     Absent by default; nothing renders until intake writes it."""
     return (project_dir_ or project_dir()) / "project.json"

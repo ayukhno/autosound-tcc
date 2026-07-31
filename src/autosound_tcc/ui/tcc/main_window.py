@@ -44,7 +44,7 @@ from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
-from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget, ParamsSection
+from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS, AI_MAIN_MODELS
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
@@ -638,7 +638,7 @@ class MainWindow(QMainWindow):
         like the DSP tree's own `.ghead` group headers (a border-bottom line, no card background --
         matching backgrounds top-to-bottom was a follow-up correction the same day). Only DSP and
         System params (partially) have real content today -- Project params comes from
-        `project.json`'s `param_sections` (see `_set_project_params`; D2, SKILL-SYNC-PLAN.md --
+        `project.json`'s own facts (see `_set_project_params`; D2, SKILL-SYNC-PLAN.md --
         `project_profile.json` is retired, the skill writes one file), and Car audio analysis
         stays a placeholder until the car-audio skill defines where that data comes from
         (SKILL-CHANGE-REQUESTS SCR-015). System params leads (user request 2026-07-28) since it's
@@ -881,25 +881,23 @@ class MainWindow(QMainWindow):
         self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
 
     def _set_project_params(self, view: ProjectView | None) -> None:
-        """(Re)builds the "Project params" section body from `view.param_sections` (car/setup,
-        body/chassis, ... -- see `state.dsp_state.load_param_sections`), plus `project.json`'s
-        channel-tier summary (SCR-016, e.g. "8 virtual channels (1 off)") and any `_open_questions`
-        as onboarding TODO chips (`state.project_view`). Moved out of the DSP tree into its own
-        top-level section (user request 2026-07-28): this data is project-level config, not part
-        of the DSP ledger, so it now lives next to System params / Car audio analysis rather than
-        inside the DSP tier."""
+        """(Re)builds the "Project params" section body from `project.json`'s channel-tier summary
+        (SCR-016, e.g. "8 virtual channels (1 off)") and any `_open_questions` as onboarding TODO
+        chips (`state.project_view`). Moved out of the DSP tree into its own top-level section
+        (user request 2026-07-28): this data is project-level config, not part of the DSP ledger.
+
+        It used to also render `project.json`'s `param_sections` — ready-made label/value rows for
+        exactly these panels. Those were dropped in skill schema v3: they restated DSP/mic/source
+        values that are already fields in the same file, so the file carried one fact in two
+        shapes. Panels are built from the facts now (`_rebuild_system_params` does the same)."""
         clear_layout(self._project_section.body_layout())
-        sections = view.param_sections if view else ()
         summary_rows = project_view.load_channel_summary() if view else ()
         open_questions = project_view.load_open_questions() if view else ()
-        if not sections and not summary_rows and not open_questions:
+        if not summary_rows and not open_questions:
             self._project_section.body_layout().addWidget(
                 self._placeholder_label(i18n.t("noDataYet"))
             )
             return
-        for section in sections:
-            widget = ParamsSection(section.id, section.label, section.params, self._settings)
-            self._project_section.body_layout().addWidget(widget)
         for label, value in summary_rows:
             self._project_section.body_layout().addWidget(_kv_row(label, value))
         for question in open_questions:

@@ -172,47 +172,6 @@ def test_preset_switch_refreshes_an_already_open_table(tmp_path, monkeypatch):
     assert table.item(0, _mute_column(table)).text() == "MUTE"
 
 
-def test_project_profile_renders_extra_param_sections(tmp_path, monkeypatch):
-    """Item 2, 2026-07-27 (moved to the top-level "Project params" section 2026-07-28):
-    project.json's `param_sections` each render as their own collapsible ParamsSection,
-    under the sidebar's Project params section -- not inside the DSP tree, since this is
-    project-level config rather than ledger-driven DSP state. (D2, SKILL-SYNC-PLAN.md --
-    `project_profile.json` is retired in favour of this one skill-owned file.)"""
-    import json
-
-    from autosound_tcc.ui.tcc.dsp_tree import ParamsSection
-
-    profile = {
-        "dsp_profile": {
-            "name": "M6V4", "vendor": "Musway",
-            "groups": [{"id": "physical_outputs", "label": "Output channels",
-                        "fields": ["hp", "lp", "gain_db"]}],
-        }
-    }
-    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
-    (tmp_path / "project.json").write_text(json.dumps({
-        "param_sections": [
-            {"id": "car", "label": "Car setup", "params": [["Make", "VW"]]},
-            {"id": "chassis", "label": "Body / chassis", "params": [["Doors", "4"]]},
-        ]
-    }))
-    preset_dir = tmp_path / "TESTPRESET"
-    preset_dir.mkdir()
-    ledger = {"preset": "TESTPRESET", "sample_rate": 48000,
-              "channels": {"w_L": {"hp": {"f": 80}, "lp": {"f": 4000}, "gain_db": -2.0}}}
-    (preset_dir / "v_001.json").write_text(json.dumps(ledger))
-    (preset_dir / "HEAD").write_text("v_001")
-
-    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
-
-    _app()
-    window = MainWindow()
-    sections = window._project_section.findChildren(ParamsSection)
-    assert len(sections) == 2
-    assert {s._gid for s in sections} == {"car", "chassis"}
-
-
 def _kv_texts(section) -> dict[str, str]:
     """(key, value) pairs from every `_kv_row` in a `SidebarSection`'s body — reads the widget
     tree by the `.pk`/`.pv` label classes `_kv_row` stamps, since those rows have no object name."""

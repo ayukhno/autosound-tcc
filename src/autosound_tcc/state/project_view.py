@@ -3,7 +3,9 @@
 TCC is a schema *consumer* here too (same posture as `process_view.py`/`measurement_view.py`):
 the skill's `rew_tool/project.py` owns `project.json` and is the only writer. This module turns
 that file into flat `(label, value)` rows for two sections that used to be static placeholders
-(SKILL-CHANGE-REQUESTS.md SCR-015/016):
+(SKILL-CHANGE-REQUESTS.md SCR-015/016). Rows are built from the FACTS in that file — a
+`param_sections` key used to ship ready-made label/value rows for these same panels, and was
+dropped in skill schema v3 because it restated values already stored as fields here:
 
 * **System params** — the equipment side of the project: DSP model, amps, mic, source (SCR-015
   point 1).
@@ -19,7 +21,7 @@ acoustic-analysis facts (cabin RT60, install-quality notes) yet, and this module
 one; a loader here is a small addition once the skill defines it.
 
 Returns empty tuples when `project.json` doesn't exist yet, same convention as
-`state/dsp_state.py::load_param_sections` — a brand-new project reads as "nothing yet", not an
+`state/dsp_state.py::load_hardware_controls` — a brand-new project reads as "nothing yet", not an
 error.
 """
 
@@ -124,9 +126,9 @@ def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
     "does it change from snapshot to snapshot?" — `driver`, `fs_hz`, `slot`, `descr`, `role`,
     `order`, `hidden` do not; gain, delay, crossover and EQ do.
 
-    Five of those identity fields are also still present on ledger rows. They are deprecated, not
-    read in preference to this file (`state/dsp_state.py` resolves identity-first), and kept
-    readable only for snapshots written before the split.
+    Skill schema v3 removed those fields from the ledger row outright, so a migrated project has
+    exactly one home for each. `state/dsp_state.py` still falls back to a ledger row's copy, which
+    is a 2.x reader and nothing more.
 
     Rows without a `code` are skipped rather than guessed at — an entry with no join key cannot be
     matched to anything, and inventing one would attach a driver to the wrong channel.
