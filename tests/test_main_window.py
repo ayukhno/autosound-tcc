@@ -444,3 +444,61 @@ def test_stale_preset_override_from_a_different_project_is_ignored(tmp_path, mon
         "Audiotec-Fischer Helix DSP Ultra S\n\n"
         f"No preset ledger found under {tmp_path / 'state'}."
     )
+
+
+def test_diagnostics_button_opens_the_panel_with_the_last_report():
+    """The header's ⚕ is the one always-reachable way to the disk-state report (TCC-TZ.md §8)."""
+    from autosound_tcc.core.contract_check import ContractReport
+
+    _app()
+    window = MainWindow()
+    report = ContractReport(ok=True, project_dir="/tmp/proj", checked_at="2026-07-31T12:00:00+00:00")
+    window._on_contract_result(report)
+
+    window._diag_btn.click()
+
+    assert window._diag_dialog is not None
+    assert window._diag_dialog.isVisible()
+    assert window._diag_dialog._report is report
+
+
+def test_a_failing_contract_check_lands_in_the_status_strip_not_the_dialog():
+    """§8's whole point: disk-state facts are not chat bubbles. A problem the user hasn't opened
+    the panel for still has to be visible somewhere that isn't the conversation."""
+    from autosound_tcc.core.contract_check import ContractReport
+
+    _app()
+    window = MainWindow()
+    bubbles_before = len(window._dialog._bubbles)
+
+    window._on_contract_result(
+        ContractReport(
+            ok=False,
+            project_dir="/tmp/proj",
+            files=({"file": "project.json", "exists": True, "valid": False,
+                    "issues": ["bad schema_version"]},),
+        )
+    )
+
+    # `isVisible()` is False for any child of a window that was never shown; `isHidden()` is what
+    # actually reflects this widget's own setVisible state.
+    assert not window._status_strip.isHidden()
+    assert "1" in window._status_strip.text()
+    assert len(window._dialog._bubbles) == bubbles_before
+
+
+def test_no_contract_subprocess_is_spawned_under_the_test_escape_hatch(monkeypatch):
+    """`AUTOSOUND_TCC_MCP=0` (set by conftest) is the suite's "no background side-effects" switch —
+    a Python subprocess per constructed window belongs behind it, like the MCP server and REW ping.
+    """
+    from autosound_tcc.core import contract_check
+
+    calls = []
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: calls.append(1))
+
+    _app()
+    window = MainWindow()
+    window._start_contract_check()
+
+    assert calls == []
+    assert window._contract_worker is None

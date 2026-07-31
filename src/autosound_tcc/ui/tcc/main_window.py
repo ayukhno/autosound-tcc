@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, critic, terminal_launcher, ui_mode
+from autosound_tcc.core import config, contract_check, critic, terminal_launcher, ui_mode
+from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
@@ -40,6 +41,7 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
+from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget, ParamsSection
@@ -229,6 +231,23 @@ class _RewPingWorker(QThread):
         self.result.emit(self._bridge.is_reachable())
 
 
+class _ContractWorker(QThread):
+    """Run the skill's whole-project contract check off the GUI thread.
+
+    It spawns a Python subprocess and (unless REW is skipped) probes REW over HTTP, so the GUI
+    thread is exactly where it must not run -- same reason `_RewPingWorker` exists just above.
+    """
+
+    result = Signal(object)  # ContractReport
+
+    def __init__(self, project_dir) -> None:
+        super().__init__()
+        self._project_dir = project_dir
+
+    def run(self) -> None:
+        self.result.emit(contract_check.run(self._project_dir))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -240,6 +259,11 @@ class MainWindow(QMainWindow):
         self._view: ProjectView | None = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
         self._rew_online: bool | None = None  # None = not checked yet -- read before _build_left()
+        # Diagnostics (TCC-TZ.md §8). Set up before _build_header(), which adds the button that
+        # opens the dialog, and before _load_project(), which re-runs the check.
+        self._contract_report: ContractReport | None = None
+        self._contract_worker: _ContractWorker | None = None
+        self._diag_dialog: DiagnosticsDialog | None = None
         self._preset_override: str | None = self._settings.value("ui/preset", None)
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
         # TCC-TZ.md §8: view/control is a property of the *project* (`.tcc/ui_mode.json`), not a
@@ -298,6 +322,10 @@ class MainWindow(QMainWindow):
             self._rew_ping.result.connect(self._set_rew_online)
             self._rew_ping.start()
         self._meas_panel.rewStatusChanged.connect(self._set_rew_online)
+
+        # One contract check at launch, so the status strip can say "this project has N problems"
+        # before the user goes looking. Same escape hatch as the two workers above.
+        self._start_contract_check()
 
     # ---- header / footer -------------------------------------------------
 
@@ -372,9 +400,18 @@ class MainWindow(QMainWindow):
         self._header_refresh_btn = QPushButton("↻")
         self._header_refresh_btn.setProperty("class", "zoomgroup-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header_refresh_btn.clicked.connect(self._load_project)
+        self._header_refresh_btn.clicked.connect(self._reload_from_disk)
         self._refresh_tip = attach_tip(self._header_refresh_btn, i18n.t("refreshProjectTip"))
         layout.addWidget(self._header_refresh_btn)
+
+        # Diagnostics sits next to the reload button on purpose: both answer "what is actually on
+        # disk right now", and §8 wants that question reachable in every mode, not buried in a menu.
+        self._diag_btn = QPushButton("⚕")
+        self._diag_btn.setProperty("class", "zoomgroup-btn")
+        self._diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._diag_btn.clicked.connect(self._open_diagnostics)
+        self._diag_tip = attach_tip(self._diag_btn, i18n.t("diagBtnTip"))
+        layout.addWidget(self._diag_btn)
 
         self._lang_combo = _mini_combo()
         # Display "УК" (Cyrillic, macOS's own convention for Ukrainian) not the Latin "UK" -- that
@@ -525,6 +562,75 @@ class MainWindow(QMainWindow):
         self._rew_dot.setToolTip(
             i18n.t("rewOnlineTip") if online else i18n.t("rewOfflineTip")
         )
+
+    # ---- diagnostics (TCC-TZ.md §8) -----------------------------------------
+
+    def _reload_from_disk(self) -> None:
+        """The header's ↻: re-read the project AND re-run the contract check.
+
+        One button, because "what changed on disk" is one question — a terminal-driven session
+        that rewrote the ledger usually rewrote the process state and project facts too.
+        """
+        self._load_project()
+        self._start_contract_check()
+
+    def _start_contract_check(self) -> None:
+        """Ask the skill's own checker what this project looks like on disk (`contract.py --json`).
+
+        TCC renders that verdict, it does not compute its own: the skill owns the schemas. Skipped
+        when the vendored checker isn't there (submodule not initialised) — the panel then says so
+        instead of the window failing to open.
+
+        `AUTOSOUND_TCC_MCP=0` is the test suite's "no background side-effects" switch (it already
+        gates the MCP server and the REW ping); spawning a Python subprocess per constructed window
+        belongs behind the same one.
+        """
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            return
+        if self._contract_worker is not None and self._contract_worker.isRunning():
+            return
+        if not contract_check.is_available():
+            self._on_contract_result(
+                ContractReport(
+                    ok=False,
+                    project_dir=str(config.project_dir()),
+                    error=f"contract.py not found at {contract_check.script_path()}",
+                )
+            )
+            return
+        if self._diag_dialog is not None:
+            self._diag_dialog.set_report(None)  # "Checking…", not stale data
+        self._contract_worker = _ContractWorker(config.project_dir())
+        self._contract_worker.result.connect(self._on_contract_result)
+        self._contract_worker.start()
+
+    def _on_contract_result(self, report: ContractReport) -> None:
+        self._contract_report = report
+        if self._diag_dialog is not None:
+            self._diag_dialog.set_report(report)
+        if not report.available:
+            self._status_strip.notify(
+                i18n.t("diagStripError").format(error=report.error), level="warn"
+            )
+        elif not report.ok:
+            self._status_strip.notify(
+                i18n.t("diagStripIssues").format(n=len(report.issues())), level="warn"
+            )
+
+    def _open_diagnostics(self) -> None:
+        if self._diag_dialog is None:
+            self._diag_dialog = DiagnosticsDialog(self)
+            self._diag_dialog.refreshRequested.connect(self._start_contract_check)
+            self._diag_dialog.set_report(self._contract_report)
+        elif self._contract_report is not None:
+            self._diag_dialog.set_report(self._contract_report)
+        self._diag_dialog.show()
+        self._diag_dialog.raise_()
+        self._diag_dialog.activateWindow()
+        # A window that only ever shows a launch-time snapshot is a stale window; opening it is
+        # also the clearest signal that the user wants the CURRENT answer.
+        if self._contract_report is None:
+            self._start_contract_check()
 
     def _build_left(self) -> QFrame:
         """The left panel is a top-level accordion (user request 2026-07-28): System params /
@@ -1213,6 +1319,7 @@ class MainWindow(QMainWindow):
         self._target_field_lbl.setText(i18n.t("target"))
         self._target_tip.set_text(i18n.t("targetToolTip"))
         self._refresh_tip.set_text(i18n.t("refreshProjectTip"))
+        self._diag_tip.set_text(i18n.t("diagBtnTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
