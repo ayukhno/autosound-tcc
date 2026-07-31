@@ -22,6 +22,12 @@ a view without the submodule present; only `load_project_view` (which reads from
 crossover, EQ. `project.json` owns channel IDENTITY — driver, Fs, impedance, slot, description,
 role, order, hidden. They are joined here on the channel `code`, once, so no call site downstream
 has to know which file a given field came from.
+
+Identity is also read off the ledger row when `project.json` has no entry for a code. That is a
+**2.x reader**, not the other half of the current format: skill schema v3 removed those fields from
+the ledger outright (`state.py`'s `MOVED_TO_PROJECT_JSON`), and a 3.0 project run through
+`state/migrate.py` has none of them. It stays so that opening an un-migrated project shows its
+channels instead of a table of blanks.
 """
 
 from __future__ import annotations
@@ -258,9 +264,9 @@ class GroupRow:
 def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> GroupRow:
     """One resolved row: tunable state from the ledger, identity from `project.json` (SCR-001).
 
-    `slot`, `descr` and `order` exist in both files. The project file wins — the ledger's copies
-    are deprecated and read only when this project has no `channels[]` entry for the code (a
-    snapshot taken before the split, or a tier `project.json` doesn't describe).
+    `slot`, `descr` and `order` are read from the ledger row only when `project.json` has no entry
+    for this code — i.e. a 2.x snapshot, written before schema v3 removed identity from the ledger.
+    A migrated project never takes that branch.
     """
     def resolved(key: str) -> Any:
         value = project_view.fact_value(identity.get(key))
@@ -412,8 +418,14 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     """
     from autosound_tcc.core import vendor_loader
 
+    from autosound_tcc.core import config
+
     vstate = vendor_loader.load_dsp_state()
-    history = vstate.PresetHistory(root, preset)
+    # `project_dir` explicitly, not left to the default: `PresetHistory` otherwise assumes the
+    # canonical `<project>/state/<preset>/` layout and takes the parent of `root` — which is wrong
+    # exactly when `AUTOSOUND_STATE_ROOT` points somewhere else, the case this repo's own dogfood
+    # ledger uses. It reads `project.json` from there for `project_rev` and the settings sheet.
+    history = vstate.PresetHistory(root, preset, project_dir=str(config.project_dir()))
     raw = history.load(version)
     param_sections = load_param_sections()
     hardware_controls = load_hardware_controls()

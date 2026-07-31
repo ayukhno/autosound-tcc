@@ -48,7 +48,8 @@ def test_invalid_project_json_flips_ok_false(tmp_path):
     # Two channels with the same code -- a shape error the skill's own validator rejects (a merely
     # UNFILLED fact is deliberately not one; that's an open question, see the last test).
     (tmp_path / "project.json").write_text(
-        '{"schema_version": 1, "channels": [{"code": "w-L"}, {"code": "w-L"}]}',
+        '{"schema_version": 3, "project_rev": 1, '
+        '"channels": [{"code": "w-L"}, {"code": "w-L"}]}',
         encoding="utf-8",
     )
 
@@ -121,3 +122,16 @@ def vendored_project():
     from autosound_tcc.core import vendor_loader
 
     return vendor_loader.load_project()
+
+
+def test_a_2x_project_is_reported_as_the_wrong_format(tmp_path):
+    """3.0 is a break: a project that was never migrated must say so in the panel, in the skill's
+    own words, rather than rendering as a project with mysteriously broken files."""
+    (tmp_path / "project.json").write_text(
+        '{"schema_version": 1, "sources": [], "channels": []}', encoding="utf-8"
+    )
+
+    report = contract_check.run(tmp_path, skip_rew=True)
+
+    assert not report.ok
+    assert any("migrate.py" in issue for issue in report.issues()), report.issues()

@@ -280,7 +280,8 @@ def build_server(
             vstate = vendor_loader.load_dsp_state()
         except vendor_loader.VendorNotInitializedError as exc:
             return json.dumps({"error": str(exc)})
-        history = vstate.PresetHistory(str(config.state_root()), preset)
+        history = vstate.PresetHistory(str(config.state_root()), preset,
+                                       project_dir=str(project_dir))
         raw = history.load(version or None)
         return json.dumps(raw, ensure_ascii=False, indent=2)
 
