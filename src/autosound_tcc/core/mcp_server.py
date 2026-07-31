@@ -32,14 +32,17 @@ carries an INTENT, or is a SIGNAL. Every tool below was checked against "does th
 | `copy_helix_eq` | clipboard | hand-off to a human, gated |
 | `write_rew_filters` | REW's model | an instrument, not project data; gated |
 | `call_critic` | `.tcc/` call log | TCC's own namespace |
-| `report_phase` | — | **converted** — read-back + refresh signal, see below |
-| `check_existing_profile`, `save_profile_field`, `reset_profile_field` | in-memory draft | pending |
-| `finalize_profile` | `dsp_profile.json` | **open violation** |
+| `report_phase` | — | **converted** — read-back + refresh signal |
+| the four onboarding tools | — | **converted** — intent handed to the skill's writer |
 
-`finalize_profile` writes profile data, which D-6 forbids in as many words. Converting it to an
-intent is NOT a local edit: the skill's `dsp_profile.py` exposes only read commands (`validate`,
-`open-questions`, `find-bundled`, `diff`), so there is nothing for an agent to write the profile
-THROUGH yet. That needs a writer on the skill side first — raised, not silently worked around.
+The onboarding tools were the last thing here that authored project data, and only because the
+skill had no writer to route an interview through (`dsp_profile.py` could `validate`, `diff` and
+`find-bundled`, nothing else). SCR-025 added one; they now pass each confirmed value to it via
+`core/profile_writer.py`. The draft, the validation and the refusals all live on the skill's side
+— including `finalize` declining an incomplete profile, which this server reports verbatim rather
+than deciding for itself.
+
+Nothing on this surface writes project data any more.
 """
 
 from __future__ import annotations
@@ -56,7 +59,7 @@ from typing import Any, Optional, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
-from autosound_tcc.core import agent_session, config, critic, vendor_loader
+from autosound_tcc.core import agent_session, config, critic, profile_writer, vendor_loader
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
 
@@ -143,18 +146,6 @@ class HeadlessBridge:
 
     def show_critique(self, critique: dict[str, Any]) -> None:
         pass
-
-
-def _strip_stray_dsp_profile_prefix(path: str) -> str:
-    """Defensive: `save_profile_field`/`reset_profile_field`'s `path` is relative to
-    `project_profile` (already the unwrapped profile), but an agent that also saw a bundled
-    profile's on-disk shape (`{"dsp_profile": {...}}`) can still guess a `dsp_profile.` prefix --
-    observed live (2026-07-29 dogfood: "Wrong nesting — path made dsp_profile.dsp_profile").
-    Correcting it here is more robust than hoping the tool description alone prevents every case.
-    """
-    if path.startswith("dsp_profile."):
-        return path[len("dsp_profile."):]
-    return path
 
 
 def build_server(
@@ -294,115 +285,97 @@ def build_server(
     # by construction, see terminal_launcher.py) can run the identical interview against a brand
     # new project: there's no system_prompt= channel for an arbitrary external agent, so these tool
     # DESCRIPTIONS are the only instructions it gets -- keep them in sync with
-    # agent_session.SYSTEM_PROMPT if that ever changes. Never touches DSP/REW (just one JSON file),
-    # so unlike the writes below, none of this needs the Arbiter gate.
-    onboarding_draft: dict[str, Any] = {"vendor": None, "model": None, "data": None}
-
+    # agent_session's own prompt if that ever changes.
+    #
+    # Neither path writes the file itself any more (D-6): both hand the confirmed value to the
+    # skill's `dsp_profile.py`, which owns the draft, the validation and the schema stamp. No
+    # Arbiter gate here -- these touch neither the DSP nor REW, and the gate that matters is the
+    # skill's own refusal to finalize an incomplete profile.
     @mcp.tool()
     async def get_capability_checklist() -> str:
         """The fixed DSP capability-checklist questions to ask the human about (project-intake.md
         §4). Ask closed questions with concrete options where you can, 2-3 per turn -- never dump
         the whole remaining list into one message, even when several are still open."""
-        return json.dumps(agent_session.CAPABILITY_CHECKLIST, ensure_ascii=False)
+        return json.dumps(profile_writer.capability_checklist(), ensure_ascii=False)
 
     @mcp.tool()
     async def check_existing_profile(vendor: str, model: str) -> str:
-        """Call this FIRST, before asking the human anything. Checks this project's own
-        in-progress draft and the bundled reference library for an EXACT vendor+model match --
+        """Call this FIRST, before asking the human anything. Starts (or resumes) this project's
+        interview draft and checks the bundled reference library for an EXACT vendor+model match --
         never treat a different model's profile (even a platform sibling's) as fact for this one.
-        If it returns a project profile or an exact bundled match, don't re-ask about anything it
+        If it returns a draft with answers or an exact bundled match, don't re-ask about anything
         already confirmed -- call get_capability_checklist and ask only about what's still open,
         2-3 questions per turn (see get_capability_checklist's own note).
 
-        `project_profile` and `bundled_exact_match` are both returned UNWRAPPED (no top-level
-        `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s `path`
-        resolves against. A path like `groups.0.fields` reaches `project_profile.groups[0].fields`
-        directly; never prefix a path with `dsp_profile.`, that key does not exist at this level.
+        Resuming is real: the draft lives on disk, so an interview interrupted days ago comes back
+        with its answers. `project_profile` and `bundled_exact_match` are both UNWRAPPED (no
+        top-level `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s
+        `path` resolves against, so never prefix a path with `dsp_profile.`.
         """
         try:
-            dsp_profile = vendor_loader.load_dsp_profile()
-        except vendor_loader.VendorNotInitializedError as exc:
+            current = profile_writer.start(project_dir, vendor, model)
+            bundled = profile_writer.find_bundled(
+                vendor, model, config.bundled_profiles_dir()
+            )
+        except profile_writer.ProfileWriterError as exc:
             return json.dumps({"error": str(exc)})
-        if onboarding_draft["data"] is None:
-            onboarding_draft["vendor"] = vendor
-            onboarding_draft["model"] = model
-            profile_path = config.dsp_profile_path(project_dir)
-            if profile_path.is_file():
-                onboarding_draft["data"] = dsp_profile.load_profile(str(profile_path))
-            else:
-                onboarding_draft["data"] = agent_session.empty_profile_draft(vendor, model)
-        bundled = dsp_profile.find_bundled(vendor, model, str(config.bundled_profiles_dir()))
-        out = {
-            "project_profile": onboarding_draft["data"].get("dsp_profile", onboarding_draft["data"]),
-            "open_questions": dsp_profile.open_questions(onboarding_draft["data"]),
-            "bundled_exact_match": bundled.get("dsp_profile", bundled) if bundled else None,
-        }
-        return json.dumps(out, ensure_ascii=False)
+        return json.dumps({
+            "project_profile": current.get("draft", {}),
+            "open_questions": current.get("open_questions", []),
+            "bundled_exact_match": bundled,
+        }, ensure_ascii=False)
 
     @mcp.tool()
     async def save_profile_field(path: str, value: Any) -> str:
         f"""Save one confirmed field into the in-progress profile draft (call
         check_existing_profile first). One field per call, as soon as it's confirmed -- don't
-        batch everything to the end.
+        batch everything to the end. Each call lands on disk, so an interrupted interview keeps
+        everything answered so far.
 
         `path` is a dotted path relative to `project_profile` as returned by
-        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields' reach
-        `project_profile.sample_rate_hz` / `project_profile.groups[0].fields` directly. NEVER
-        prefix a path with 'dsp_profile.' -- `project_profile` already IS that object, prefixing
-        it creates a wrong nested dsp_profile.dsp_profile. `groups` is a flat array, each EXACTLY
-        {{"id": "<snake_case_id>", "label": "<Human Label>", "fields": [<tokens>]}} -- `fields`
-        must be a flat array of STRING TOKENS drawn ONLY from this vocabulary, nothing else:
-        {json.dumps(agent_session.FIELD_VOCABULARY)}
+        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields'. `groups` is a flat
+        array, each entry EXACTLY {{"id": "<snake_case_id>", "label": "<Human Label>",
+        "fields": [<tokens>]}} -- `fields` must be a flat array of STRING TOKENS drawn ONLY from
+        this vocabulary, nothing else:
+        {json.dumps(profile_writer.field_vocabulary())}
         A capability that doesn't fit this vocabulary belongs in `_open_questions`, not a made-up
         field name.
         """
-        if onboarding_draft["data"] is None:
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
-        path = _strip_stray_dsp_profile_prefix(path)
-        value = agent_session.maybe_decode_json(value)
-        agent_session.set_dotted_field(
-            onboarding_draft["data"].setdefault("dsp_profile", {}), path, value
-        )
-        return json.dumps({"saved": path, "value": value}, ensure_ascii=False)
+        try:
+            return json.dumps(profile_writer.set_field(project_dir, path, value),
+                               ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"saved": False, "error": str(exc)})
 
     @mcp.tool()
     async def reset_profile_field(path: str) -> str:
         """Delete a field from the draft (by dotted path) so it can be re-saved from scratch --
         recovery if a previous save_profile_field produced the wrong shape (e.g. a list written as
         a string), not part of the normal interview flow."""
-        if onboarding_draft["data"] is None:
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
-        path = _strip_stray_dsp_profile_prefix(path)
-        parts = path.split(".")
-        node = onboarding_draft["data"].get("dsp_profile", {})
-        for part in parts[:-1]:
-            key: Any = int(part) if part.isdigit() else part
-            if isinstance(node, (dict, list)) and key in (node if isinstance(node, dict) else range(len(node))):
-                node = node[key]
-            else:
-                return json.dumps({"reset": False, "reason": f"{path} not found"})
-        last: Any = int(parts[-1]) if parts[-1].isdigit() else parts[-1]
-        if isinstance(node, dict) and last in node:
-            del node[last]
-        elif isinstance(node, list) and isinstance(last, int) and 0 <= last < len(node):
-            node[last] = None
-        return json.dumps({"reset": path}, ensure_ascii=False)
+        try:
+            return json.dumps(profile_writer.reset_field(project_dir, path), ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"reset": False, "error": str(exc)})
 
     @mcp.tool()
     async def finalize_profile() -> str:
-        """Validate and write the profile to disk. Call this when the interview is done or the
-        human says they're done -- do not just say so in text, call the tool."""
-        if onboarding_draft["data"] is None:
+        """Validate the draft and write `dsp_profile.json`. Call this when the interview is done or
+        the human says they're done -- do not just say so in text, call the tool.
+
+        The skill's own writer decides: if it refuses, the reason comes back here and the draft is
+        untouched, so fix that one field and call again rather than starting over.
+        """
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
         try:
-            dsp_profile = vendor_loader.load_dsp_profile()
-        except vendor_loader.VendorNotInitializedError as exc:
-            return json.dumps({"error": str(exc)})
-        profile_path = config.dsp_profile_path(project_dir)
-        dsp_profile.validate_profile(onboarding_draft["data"])
-        dsp_profile.save_profile(str(profile_path), onboarding_draft["data"])
-        bridge.notify_profile_ready()
-        return json.dumps({"saved_to": str(profile_path)}, ensure_ascii=False)
+            return json.dumps({"saved_to": str(profile_writer.finalize(project_dir))},
+                               ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"saved": False, "error": str(exc)})
 
     # ---- writes (every one gated on the Arbiter) ---------------------------
 

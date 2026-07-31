@@ -314,14 +314,17 @@ def test_server_starts_stops_and_advertises_itself(tmp_path, monkeypatch, write_
 # see core/agent_session.py's in-process equivalent for the Claude-SDK path ------------------
 
 
-def test_capability_checklist_matches_agent_sessions_fixed_list(tmp_path):
-    from autosound_tcc.core import agent_session
+def test_capability_checklist_comes_from_the_skill(tmp_path):
+    """The interview is the skill's. TCC used to keep its own copy of the questions beside the
+    schema they fill in -- two lists, one of which would eventually be the stale one."""
+    from autosound_tcc.core import profile_writer
 
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
 
     result = json.loads(_text(asyncio.run(mcp.call_tool("get_capability_checklist", {}))))
 
-    assert result == agent_session.CAPABILITY_CHECKLIST
+    assert result == profile_writer.capability_checklist()
+    assert result, "the skill must actually supply questions"
 
 
 def _bundled_dir_with(tmp_path, vendor: str, name: str):
@@ -384,7 +387,12 @@ def test_save_reset_and_finalize_profile_round_trip(tmp_path):
     reset_result = json.loads(
         _text(asyncio.run(mcp.call_tool("reset_profile_field", {"path": "sample_rate_hz"})))
     )
-    assert reset_result == {"reset": "sample_rate_hz"}
+    assert reset_result == {"reset": "sample_rate_hz", "found": True}
+
+    # Every answer so far is already on disk, in the skill's draft -- a session that died here
+    # would resume with all of it (SCR-025).
+    draft = json.loads((project_dir / "dsp_profile.draft.json").read_text())["dsp_profile"]
+    assert draft["groups"][0]["fields"] == ["hp", "lp"], draft
 
     finalize_result = json.loads(_text(asyncio.run(mcp.call_tool("finalize_profile", {}))))
 
@@ -395,12 +403,14 @@ def test_save_reset_and_finalize_profile_round_trip(tmp_path):
         "id": "physical_outputs", "label": "Output channels", "fields": ["hp", "lp"],
     }
     assert "sample_rate_hz" not in saved  # reset before finalize, must not reappear
+    # finalize promotes the draft and clears it -- the skill's writer did the writing, not TCC.
+    assert not (project_dir / "dsp_profile.draft.json").exists()
 
 
 def test_onboarding_tools_before_check_existing_profile_are_a_clean_error(tmp_path):
-    """save/reset/finalize all need the draft check_existing_profile initializes -- an agent that
-    skips it (or calls tools out of the documented order) gets a message it can act on, not a
-    KeyError/AttributeError traceback."""
+    """save/reset/finalize all need the draft check_existing_profile starts -- an agent that skips
+    it gets a message it can act on, not a half-filled draft whose missing vendor/name only
+    surfaces much later, at finalize."""
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
 
     for tool, args in (
