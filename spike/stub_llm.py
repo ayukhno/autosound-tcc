@@ -26,12 +26,19 @@ PORT = int(os.environ.get("STUB_PORT", "8899"))
 
 # First match wins. `bash` last: it always exists, so the approval gate fires
 # even when the MCP tools never made it into the catalogue.
-PREFERRED = ["copy_helix_eq", "write_rew_filters", "get_tcc_state", "bash"]
+PREFERRED = (os.environ.get("PREFER") or "").split(",") if os.environ.get("PREFER") else [
+    "copy_helix_eq", "write_rew_filters", "get_tcc_state", "bash"]
 ARGS = {
     "copy_helix_eq": {"text": "SPIKE EQ", "note": "spike"},
     "write_rew_filters": {"measurement": "m1", "filters": []},
     "get_tcc_state": {},
     "bash": {"command": "echo spike", "i": "spike probe"},
+    # The harness's own user-question channel — the thing that decides whether a
+    # structured question reaches the host, or the window just looks hung.
+    "ask": {"i": "spike question", "questions": [{
+        "id": "seat", "question": "Reference seat for this tune?",
+        "options": [{"label": "Driver", "description": "one point, sharpest image"},
+                    {"label": "Both front", "description": "wider zone, softer image"}]}]},
 }
 
 

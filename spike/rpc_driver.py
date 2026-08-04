@@ -40,9 +40,10 @@ env = dict(os.environ)
 env["LM_STUDIO_BASE_URL"] = f"http://127.0.0.1:{os.environ.get('STUB_PORT', '8899')}/v1"
 env["OPENAI_API_KEY"] = "stub"
 
+extra = os.environ.get("OMP_CONFIG", "")
 proc = subprocess.Popen(
     ["omp", "--mode", "rpc-ui", "--no-session", "--model", "stub-model",
-     "--approval-mode", "always-ask"],
+     "--approval-mode", "always-ask", *(["--config", extra] if extra else [])],
     cwd=PROJECT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
     stderr=subprocess.PIPE, text=True, bufsize=1,
 )
