@@ -70,6 +70,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            env=vendor_loader.child_env(),
         )
     except subprocess.TimeoutExpired:
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None

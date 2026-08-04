@@ -687,3 +687,39 @@ survive in one place):
   axis. It does not weaken the finding — the defects and the compliance gap are in the skill, and
   `HANDOFF.md` already establishes that determinism is not a harness property. The numbers should be
   re-taken on omp when convenient, not treated as suspect until then.
+
+## SCR-032 — `__pycache__` is tracked, so running the skill dirties the checkout
+
+**Status**: proposed (found while cleaning the submodule after the recorder work, 2026-08-04)
+**Target**: `skills/autosound-tuning/rew_tool/__pycache__/`, `rew_tool/state/__pycache__/`,
+`rew_tool/gates/__pycache__/` — **11 tracked `.pyc` files**; plus `.gitignore`, which already
+carries careful rules for OS files and project data but nothing for build output
+**TCC dependency**: none any more, and that is the point — TCC stopped causing it from its side
+(`vendor_loader.child_env()` sets `PYTHONDONTWRITEBYTECODE` for every subprocess that runs the
+skill, `sys.dont_write_bytecode` guards the in-process loads). The ask is for everyone else.
+
+**Detail**: bytecode caches are committed to the skill repo. Any Python that imports or runs
+`rew_tool` rewrites them, so the working tree reports modifications nobody made:
+
+```
+M skills/autosound-tuning/rew_tool/__pycache__/dsp_profile.cpython-312.pyc
+M skills/autosound-tuning/rew_tool/__pycache__/naming.cpython-312.pyc
+M skills/autosound-tuning/rew_tool/state/__pycache__/process.cpython-312.pyc
+…
+```
+
+Two costs, both small and both permanent. Noise: as a submodule it shows as `m` in the parent's
+`git status` forever, which is exactly where a real pin drift would show, so the signal that
+matters sits under one that never means anything. And risk: the caches are version- and
+platform-stamped (`cpython-312`), so a contributor on another interpreter commits a wholesale
+rewrite of files that should not be in the history at all.
+
+This lands on **front-end B** specifically — the plain terminal with no TCC running, which is the
+path with no authentication question attached (SCR-029's closing note). That user gets a dirty
+checkout the first time they run anything, and no `child_env()` to protect them.
+
+Ask, both halves:
+
+1. `git rm --cached` the 11 files and add `__pycache__/` + `*.pyc` to `.gitignore`.
+2. Nothing else — no interpreter flags in prescribed commands. A repo that does not track build
+   output does not care whether the caches get written.

@@ -147,7 +147,7 @@ def run(
     if model:
         env_overrides["GEMINI_CRITIC_MODEL" if role == "critic" else "GEMINI_ADVISOR_MODEL"] = model
 
-    env = {**os.environ, **env_overrides}
+    env = vendor_loader.child_env(**env_overrides)
     try:
         proc = subprocess.run(
             argv,
@@ -245,6 +245,7 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
             capture_output=True,
             text=True,
             timeout=60,
+            env=vendor_loader.child_env(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return f"doctor failed: {exc}"

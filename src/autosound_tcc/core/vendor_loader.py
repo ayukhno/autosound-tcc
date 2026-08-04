@@ -11,6 +11,7 @@ name, keeping the vendored code physically isolated.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -53,6 +54,18 @@ def is_available() -> bool:
     return (REW_TOOL_DIR / "rew_api.py").is_file()
 
 
+def child_env(**extra: str) -> dict[str, str]:
+    """Environment for a subprocess that runs the skill's own scripts.
+
+    `PYTHONDONTWRITEBYTECODE` is the point: the skill is a git submodule, and every import of
+    it drops `__pycache__/*.pyc` into someone else's working tree. That repo tracks those files,
+    so running the skill from TCC shows up as uncommitted changes in a repo TCC does not own —
+    noise that hides real drift and invites committing build output by accident. We are the ones
+    spawning the interpreter, so we are the ones who say don't.
+    """
+    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", **extra}
+
+
 def _load_file(path: Path, module_name: str) -> ModuleType:
     if module_name in sys.modules:
         return sys.modules[module_name]
@@ -62,11 +75,17 @@ def _load_file(path: Path, module_name: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     # Register before exec so any intra-module self-reference resolves.
     sys.modules[module_name] = module
+    # Same reason as `child_env`, for the in-process half: exec_module caches bytecode next to
+    # the source, which is inside the submodule.
+    previously = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     except BaseException:
         sys.modules.pop(module_name, None)
         raise
+    finally:
+        sys.dont_write_bytecode = previously
     return module
 
 

@@ -58,6 +58,7 @@ def _run(args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            env=vendor_loader.child_env(),
         )
     except subprocess.TimeoutExpired:
         raise ProfileWriterError(f"dsp_profile.py timed out after {timeout_s:.0f}s") from None

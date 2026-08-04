@@ -154,7 +154,8 @@ def run(
         argv.append("--no-rew")
 
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
+                              env=vendor_loader.child_env())
     except subprocess.TimeoutExpired:
         return failed(f"contract.py timed out after {timeout_s:.0f}s")
     except OSError as exc:
