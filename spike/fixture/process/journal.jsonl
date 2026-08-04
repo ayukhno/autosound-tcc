@@ -1,0 +1,16 @@
+{"at": "2026-08-04T09:02:11+00:00", "type": "phase_entered", "phase": "2", "title": "EQ & acoustic alignment"}
+{"at": "2026-08-04T09:02:12+00:00", "type": "step_added", "id": "2.1", "name": "level match + baseline sweeps", "source": "skill", "phase": "2"}
+{"at": "2026-08-04T09:02:40+00:00", "type": "attempt_started", "id": "2.1", "attempt": 1, "phase": "2"}
+{"at": "2026-08-04T09:21:03+00:00", "type": "step_done", "id": "2.1", "attempt": 1, "phase": "2", "evidence": ["m-L_03", "m-R_03", "m-SW_03"]}
+{"at": "2026-08-04T09:21:30+00:00", "type": "step_added", "id": "2.2", "name": "midbass door resonance check (L door rattle reported)", "source": "project", "phase": "2"}
+{"at": "2026-08-04T09:21:44+00:00", "type": "attempt_started", "id": "2.2", "attempt": 1, "phase": "2"}
+{"at": "2026-08-04T09:38:02+00:00", "type": "step_done", "id": "2.2", "attempt": 1, "phase": "2", "evidence": ["m-L_04 (door, 1/12 oct)"]}
+{"at": "2026-08-04T09:38:20+00:00", "type": "step_added", "id": "2.3", "name": "target-match (SQ-Comp-Ref)", "source": "skill", "phase": "2"}
+{"at": "2026-08-04T09:38:31+00:00", "type": "attempt_started", "id": "2.3", "attempt": 1, "phase": "2"}
+{"at": "2026-08-04T09:52:17+00:00", "type": "critic_called", "vendor": "Gemini", "model": "Gemini 3.1 Pro (High)", "phase": "2", "step": "2.3", "outcome": "revise"}
+{"at": "2026-08-04T09:58:04+00:00", "type": "config_change", "path": "channels.c.hp.f", "from": 620, "to": 680, "impact": ["m-C_05", "v_006"], "reason": "centre HP raised after the reviewer flagged 620 Hz overlap with the door null"}
+{"at": "2026-08-04T09:58:40+00:00", "type": "attempt_started", "id": "2.3", "attempt": 2, "phase": "2"}
+{"at": "2026-08-04T10:14:52+00:00", "type": "critic_called", "vendor": "Gemini", "model": "Gemini 3.1 Pro (High)", "phase": "2", "step": "2.3", "outcome": "apply"}
+{"at": "2026-08-04T10:21:09+00:00", "type": "step_done", "id": "2.3", "attempt": 2, "phase": "2", "evidence": ["m-L_10 (sw)", "m-R_10 (sw)", "v_007"]}
+{"at": "2026-08-04T10:21:30+00:00", "type": "step_added", "id": "2.4", "name": "verify sweep after import", "source": "skill", "phase": "2"}
+{"at": "2026-08-04T10:21:33+00:00", "type": "attempt_started", "id": "2.4", "attempt": 1, "phase": "2"}

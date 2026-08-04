@@ -406,3 +406,192 @@ propose solutions + write EQ into REW's own filter/target model (not the physica
 Helix-format EQ string to the clipboard for the user to paste into Helix's own PC-Tool -- consistent
 with the existing "no automated DSP writes" safety gate and with `autosound_ai.py`'s own clipboard-
 mode precedent.
+
+## SCR-026 — `apply.propose` emits the change delta, not only the snapshot
+
+**Status**: proposed (raised 2026-08-04 while building `spike/render_dialog.py`)
+**Target**: `skills/autosound-tuning/rew_tool/state/apply.py` (`propose`), alongside the
+`v_NNN.json` snapshot it already writes
+**TCC dependency**: the settings-sheet card in the dialogue panel. The render spike
+(`spike/render_dialog.py`, `sheet_html`) had to invent `spike/fixture/proposals/v_007.json`
+because nothing on disk carries what the card needs.
+
+**Detail**: the ledger stores a full **snapshot** per version — the state after the change. The
+Arbiter's sheet is about the **change**: which channel, which parameter, what it was, what it
+becomes, and whether the EQ gate passed. Today the skill computes exactly that (it has to, to
+print the sheet in chat) and then throws it away, leaving the front-end to diff two snapshots and
+re-derive intent it can only guess at — a `gain_db` that moved could be a level-match trim or a
+banked decision, and the snapshots do not say which.
+
+Ask: `propose` writes a sibling `presets/<preset>/proposals/<v_NNN>.json` with the delta it already
+built. Minimum shape, matching what the card renders:
+
+```jsonc
+{"version": "v_007", "preset": "SQ", "at": "…", "note": "…",
+ "settings": [{"tier": "channels", "channel": "c", "param": "hp.f",
+               "was": "620 Hz LR36", "value": "680 Hz LR36"}],
+ "eq_gate": "passed (max boost +1.8 dB <= +6 dB)", "max_boost_db": 1.8}
+```
+
+**Why this is more than a rendering convenience**: SKILL.md's Core Guardrails require actionable
+params to land in chat as a legible list, which today means the model **retypes** numbers it
+already computed. That is a transcription surface with no gate on it — exactly the class of error
+that "gains as ABSOLUTE values only" exists to prevent. With a delta file the Arbiter reads the
+values the ledger banked, not the values the model re-rendered. Structurally this is the same
+argument as SCR-007 (`dsp-state-current` is generated, never hand-written), applied to the sheet.
+
+**Consequent skill-strategy change** (needs a decision, not just code): when the front-end is TCC,
+the "settings land in chat" rule should hand off to the delta file rather than prose. The terminal
+front-end keeps printing the sheet as today. TCC already tells the agent where it is running
+(`tuning_session.SYSTEM_PROMPT_APPEND`), so the skill can branch on that.
+
+## SCR-027 — `critic_called` links to the critique text
+
+**Status**: proposed (raised 2026-08-04, same spike)
+**Target**: `skills/autosound-tuning/rew_tool/state/process.py` (`record_reviewer`, event
+`critic_called`) + `scripts/autosound_ai.py` (persist its stdout instead of only returning it)
+**TCC dependency**: the Advisor bubble in the dialogue panel; `core/critic.py` already parses the
+`— [critic: <model>]` marker and holds the text in memory only for the duration of the call.
+
+**Detail**: `critic_called` records `vendor`, `model`, `phase`, `step`, `outcome` — enough for a
+process chip ("Gemini 3.1 Pro — revise"), nothing for the bubble that should carry *what the
+reviewer actually argued*. Today that text exists only in the chat stream, so a session rendered
+from disk shows that a critique happened and how it was resolved, but not the reasoning — which is
+the part worth reading back a week later, and the part an audit needs.
+
+Ask: `autosound_ai.py` writes the critique to `process/reviews/<ts>-<role>.md`, and the
+`critic_called` event carries a `review` pointer to it (relative path). Clipboard mode writes the
+compiled package to the same place with `"mode": "clipboard"` on the event, so the record shows a
+review was requested and answered by hand rather than silently looking like no review happened.
+
+**Related**: this closes the same gap SCR-004 closed for phase/plan — narrating in chat without
+writing the matching record leaves resume and any front-end with nothing real to read.
+
+## SCR-028 — prescribed commands must not invoke a bare `python`
+
+**Status**: proposed (found in the first real non-Claude-Code run, 2026-08-04)
+**Target**: **30 call sites across 8 files** (counted 2026-08-04): `rew_tool/state/schema.md` ×7,
+`rew_tool/project-schema.md` ×6, `SKILL.md` ×6, `references/core/project-intake.md` ×4,
+`references/tooling/helix-eq-export.md` ×3, `references/core/data-contract-universal.md` ×2,
+`references/tooling/installation.md` ×1, `references/phases/phase_-1_intake.md` ×1
+**TCC dependency**: none directly — this breaks the skill for every user on a stock macOS,
+whatever front-end they run.
+
+**Detail**: observed live. Running the skill under OpenCode on macOS, the agent obeyed SKILL.md and
+ran `python rew_tool/contract.py check .`, which returned `zsh:1: command not found: python`. Apple
+ships no `python` — only `python3` — and has not shipped one since Python 2 was removed. Under
+Claude Code this has been invisible because the developer's shell happens to have a `python` on
+PATH (a venv, pyenv, or Homebrew); it is not a property of the method, it is a property of one
+machine.
+
+The consequence is not cosmetic. The turn under test spent roughly ten minutes and six bash calls
+failing to reach `process.py`, and wrote **nothing** to `process/journal.jsonl` — not because the
+model declined to record the process, but because the prescribed path to the recorder does not
+exist on the machine. Every downstream guarantee that rests on the journal (resume, evidence gates,
+any front-end's plan panel) silently degrades to nothing.
+
+Ask, in order of preference:
+
+1. The project supplies the interpreter and the skill uses it — the installer already builds a venv
+   with `numpy`/`scipy` (`INSTALLER-TZ.md` §2.2), so the honest fix is a resolved path the project
+   records once, not a name the shell has to guess.
+2. Failing that, `python3` everywhere. Correct on macOS and on every current Linux; the only losers
+   are machines where `python3` is absent, which are not the target.
+
+Either way the rule to state in SKILL.md is that a prescribed command names a **resolved**
+interpreter, never a bare one.
+
+## SCR-029 — skill self-location must be portable, not `file:///skills/...`
+
+**Status**: proposed (same run)
+**Target**: **108 links across at least 12 files** (counted 2026-08-04) of the form
+`file:///skills/autosound-tuning/...` — `SKILL.md` ×47, then `phase_5_variations.md` ×7,
+`core/process-phases.md` ×7, `phase_4_listening.md` ×6, `phase_1_foundation.md` ×6,
+`core/preference-profile.md` ×5, `tooling/rew-tool-docs.md` ×3, `phase_3_control.md` ×3,
+`phase_-1_intake.md` ×3, `patterns/target-curves/target_curves_guide.md` ×3, and the rest —
+plus the implicit assumption that `rew_tool/` is reachable relative to the working directory
+**TCC dependency**: `tuning_session._read_roots_for()` already has to resolve the
+`.claude/skills/autosound-tuning` symlink to its real location so reads of the skill are not gated
+— the same resolution the model itself cannot perform from inside the conversation.
+
+**Detail**: `file:///skills/...` is Claude Code's own addressing. Under any other harness it names
+nothing. In the observed run the agent, unable to resolve it, fell back to searching:
+`find . -name "rew_tool" -type d` returned nothing, because `find` does not descend into symlinks
+by default and the skill is mounted at `<project>/.claude/skills/autosound-tuning` as a link out to
+the checkout. It recovered eventually — by resolving the symlink by hand — after about three minutes
+of hunting.
+
+This is the concrete, measured form of the port that `TCC-TZ.md` §4a called for in the abstract:
+the skill is Claude-Code-shaped, and the shape leaks through its own cross-references.
+
+Ask: the skill states its own absolute root once, at load, and every internal reference is relative
+to that. Mechanically this can be a one-line preamble the harness fills, an env var the front-end
+sets (TCC already sets several — SCR-011 converged them on `AUTOSOUND_*`), or a tiny resolver
+script. What matters is that no reference in the body depends on a URL scheme only one harness
+understands.
+
+**Related, and the reason this is worth doing rather than routing around**: when TCC's MCP server
+is up, the process-recording tools are available as MCP tools and the agent never needs to find
+`rew_tool` at all (`report_phase` already exists on that surface). But the skill must also work
+from a plain terminal with no TCC running — that is front-end B, and it is the path with no
+authentication question attached. A skill that only works when TCC is running would trade one
+lock-in for another.
+
+> **Correction, from the run with TCC's MCP server up (2026-08-04)**: the parenthesis above is
+> wrong on the facts. `report_phase` is not a recorder — its own docstring says "This records
+> nothing"; it re-reads `process-state.json` and refreshes what the Arbiter sees. `grep journal
+> core/mcp_server.py` returns nothing. There is no journal writer on the MCP surface at all, so
+> the agent still reaches the recorder through `rew_tool/state/process.py`, and this SCR is load-
+> bearing in every configuration, not only the no-TCC one.
+
+## SCR-030 — the Arbiter's answers are not events
+
+**Status**: proposed (found in the Claude run with TCC's MCP server up, 2026-08-04)
+**Target**: `rew_tool/state/process.py` + the journal vocabulary fixed in SCR-004 — one new event
+type and the command that writes it; SKILL.md states when it is mandatory
+**TCC dependency**: the dialog render (`spike/render_dialog.py`, headed for `ui/tcc/dialog_panel.py`)
+draws Orchestrator and Advisor turns from `journal.jsonl` and has nothing to draw the Arbiter with;
+`process-state.json` is what a resume reads, so a constraint the user set is invisible to the next
+session unless it happens to be re-read out of prose.
+
+**Detail**: measured, not reasoned. In the observed turn the user answered six questions across two
+rounds — session language, DSP identity, reviewer channel, system goal, reference seat, and whether
+to re-measure the baseline at 96 kHz. The journal grew by **eleven** events, and **not one of them
+records an answer as an answer.** Two of those answers are durable engineering constraints:
+*reference seat = driver's seat* binds every alignment and target-curve decision from Phase 0 on,
+and *re-measure at 96 kHz* invalidates a 12 MB baseline already on disk. Both exist only as prose,
+in `autosound_context.md` and in the chat text.
+
+The vocabulary is the reason. SCR-004 fixed `phase_entered`, `step_added`, `attempt_started`,
+`step_skipped`, `step_done`, `critic_called`, `config_change` — the Generator's moves and the
+Critic's calls. The method has three roles; the third one leaves no trace. `config_change`
+(SCR-014) is the near miss: it carries `impact`, which is exactly the shape "the 48 kHz baseline is
+now superseded" needs, but a user ruling is not a config change and forcing it there would lie
+about provenance.
+
+Two further symptoms of the same hole, both visible in the same eleven events:
+
+- the only surviving trace of an answer is a hand-typed evidence string —
+  `step_done lang ["user-answer 2026-08-04: Ukrainian (session), English (skill issues)"]`. That is
+  the transcription surface SCR-026 objects to, in a second place: the answer is retyped into prose
+  rather than referenced;
+- answers that arrive mid-step have nowhere to land at all. `interview` bundles language, goals,
+  seat, car, drivers and Fs into one step that cannot close until the last fact arrives — correctly,
+  the model refused to mark it done without evidence. So three answered facts sat inside an open
+  `attempt_started` with no way to say which of them were in.
+
+**What makes this cheap now**: under OpenCode the answers do not have to be parsed out of free text.
+The harness has a structured question channel (`GET /question`, `POST /question/{id}/reply`, SSE
+`question.asked`/`question.replied`) and the reply is a chosen option label. The machine-readable
+form already exists at the moment of the answer and is currently discarded.
+
+Ask, smallest version first:
+
+1. A `user_decision` event: the question asked, the option chosen, the step or phase it was asked
+   under, and — where it applies — `invalidates` (same field shape as `config_change.impact`, so a
+   ruling that supersedes a measurement is legible to the same reader).
+2. A `process.py` subcommand that writes it, so recording an answer is one prescribed call and not
+   a judgement about which existing event to bend.
+3. SKILL.md rule: an answer that constrains a later phase is recorded before it is acted on. Prose
+   files may repeat it; they may not be the only copy — "machine files win" is already the skill's
+   rule, and today the Arbiter's half of the conversation is not in one.

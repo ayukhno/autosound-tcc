@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "updated": "2026-08-04T10:21:33+00:00",
+  "active_phase": "2",
+  "phases": {
+    "-1": {"status": "done", "title": "Project intake & checklist"},
+    "0": {"status": "done", "title": "Baseline & hardware sanity"},
+    "1": {"status": "done", "title": "Foundation: levels, crossovers, delays"},
+    "2": {"status": "cur", "title": "EQ & acoustic alignment"},
+    "3": {"status": "todo", "title": "Advisory pass"},
+    "4": {"status": "todo", "title": "Verification"},
+    "5": {"status": "todo", "title": "Close & backup"}
+  },
+  "plan": [
+    {"id": "2.1", "name": "level match + baseline sweeps", "status": "done",
+     "source": "skill", "attempt": 1, "skip": false, "phase": "2",
+     "evidence": ["m-L_03", "m-R_03", "m-SW_03"]},
+    {"id": "2.2", "name": "midbass door resonance check (L door rattle reported)",
+     "status": "done", "source": "project", "attempt": 1, "skip": false, "phase": "2",
+     "evidence": ["m-L_04 (door, 1/12 oct)"]},
+    {"id": "2.3", "name": "target-match (SQ-Comp-Ref)", "status": "done",
+     "source": "skill", "attempt": 2, "skip": false, "phase": "2",
+     "evidence": ["m-L_10 (sw)", "m-R_10 (sw)", "v_007"]},
+    {"id": "2.4", "name": "verify sweep after import", "status": "in_progress",
+     "source": "skill", "attempt": 1, "skip": false, "phase": "2", "evidence": []}
+  ],
+  "reviewer": {
+    "vendor": "Gemini",
+    "model": "Gemini 3.1 Pro (High)",
+    "at": "2026-08-04T10:14:52+00:00",
+    "phase": "2",
+    "step": "2.3",
+    "outcome": "apply"
+  },
+  "targets": {"SQ": "SQ-Comp-Ref", "FULL": "ResoNix"}
+}

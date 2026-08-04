@@ -1,0 +1,86 @@
+<!doctype html><meta charset="utf-8"><title>TCC — діалог із журналу</title><style>
+:root{--panel:#161b22;--panel2:#1b222c;--panel3:#222a36;--border:#263040;--border2:#334055;
+--text:#dfe6ee;--muted:#8b97a6;--dim:#5f6b7a;--accent:#e8973c;--info:#5aa9e6;--ok:#4bbf87;
+--warn:#e05c5c;--yellow:#c99a12;--r:7px;
+--ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;background:#0f1318;color:var(--text);font:13px/1.5 var(--ui)}
+.wrap{max-width:860px;margin:0 auto}
+.head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+padding:10px 14px;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+margin-bottom:6px}
+.bar{display:flex;gap:8px;align-items:center;margin:10px 0 14px}
+.bar button{background:var(--panel3);border:1px solid var(--border2);color:var(--muted);
+border-radius:20px;padding:5px 13px;font:inherit;font-size:11.5px;cursor:pointer}
+.bar button.on{background:color-mix(in srgb,var(--info) 16%,var(--panel2));
+border-color:var(--info);color:var(--info);font-weight:600}
+.feed{display:flex;flex-direction:column;gap:9px}
+.msg{max-width:82%;padding:9px 12px;border-radius:10px}
+.msg .who{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+margin-bottom:3px}
+.msg.gen{align-self:flex-start;background:var(--panel2);border:1px solid var(--border);
+border-top-left-radius:3px}
+.msg.crit{align-self:flex-start;background:color-mix(in srgb,var(--info) 12%,var(--panel2));
+border:1px solid color-mix(in srgb,var(--info) 30%,var(--border));border-top-left-radius:3px}
+.msg.crit .who{color:var(--info)}
+.msg.user{align-self:flex-end;background:color-mix(in srgb,var(--accent) 16%,var(--panel2));
+border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));border-top-right-radius:3px}
+.msg .t{float:right;color:var(--dim);letter-spacing:0}
+.chip{align-self:center;max-width:96%;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+padding:5px 11px;border-radius:20px;font-size:11.5px;background:var(--panel2);
+border:1px solid var(--border);color:var(--muted)}
+.chip .t{color:var(--dim);font-family:var(--mono);font-size:10.5px}
+.chip .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+color:var(--dim);border:1px solid var(--border2);border-radius:10px;padding:0 6px}
+.chip.critic{border-color:color-mix(in srgb,var(--info) 45%,var(--border));
+background:color-mix(in srgb,var(--info) 8%,var(--panel2))}
+.chip.system{border-style:dashed;border-color:color-mix(in srgb,var(--accent) 45%,var(--border));
+background:color-mix(in srgb,var(--accent) 8%,var(--panel2))}
+.chip b{color:var(--text)}
+.ev{color:var(--dim)}
+.ev code,.chip code{font-family:var(--mono);font-size:10.5px;background:var(--panel3);
+padding:1px 5px;border-radius:3px;margin-left:4px;color:var(--muted)}
+.ok{color:var(--ok);font-weight:600}.warn{color:var(--warn);font-weight:600}
+.dim{color:var(--dim)}
+.badge{font-family:var(--mono);font-size:10.5px;background:var(--panel3);border:1px solid
+var(--border2);border-radius:4px;padding:1px 6px;color:var(--accent);margin-right:6px}
+.sheet{align-self:flex-start;max-width:92%;background:var(--panel);border:1px solid
+color-mix(in srgb,var(--accent) 40%,var(--border));border-radius:var(--r);overflow:hidden}
+.sheet-head{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);
+border-bottom:1px solid var(--border)}
+.sheet-head .t{margin-left:auto;color:var(--dim);font-family:var(--mono);font-size:10.5px}
+.sheet .note{padding:7px 12px;color:var(--muted);font-size:11.5px}
+.sheet table{width:100%;border-collapse:collapse;font-size:12px}
+.sheet td{padding:5px 12px;border-top:1px solid var(--border)}
+.sheet td code{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.sheet .gate{padding:6px 12px;color:var(--ok);font-size:11.5px;border-top:1px solid var(--border)}
+.sheet .acts{display:flex;gap:8px;padding:9px 12px;border-top:1px solid var(--border);
+background:var(--panel2)}
+.sheet .acts button{background:var(--accent);border:0;color:#1b1206;border-radius:5px;
+padding:6px 14px;font:inherit;font-weight:600;cursor:pointer}
+.sheet .acts button.ghost{background:transparent;border:1px solid var(--border2);color:var(--muted)}
+body.events-only .msg{display:none}
+</style><body class="events-only"><div class="wrap"><div class="head"><div><span class="badge">Фаза 2</span> <b>EQ &amp; acoustic alignment</b> <span class="dim">кроки 3/4</span></div><div class="dim">Радник: Gemini / Gemini 3.1 Pro (High) · 10:14 · apply</div></div><div class="bar"><button id="toggle" class="on">Показано лише події з журналу</button><span class="dim">джерело: process/journal.jsonl — прозу можна прибрати, історія лишається читабельною</span></div><div class="feed"><div class="chip system"><span class="t">09:02</span><span class="k">phase_entered</span><b>Фаза 2</b> — EQ &amp; acoustic alignment</div>
+<div class="chip generator"><span class="t">09:02</span><span class="k">step_added</span>крок <b>2.1</b> додано — level match + baseline sweeps <span class="dim">(з шаблону фази)</span></div>
+<div class="chip generator"><span class="t">09:02</span><span class="k">attempt_started</span>крок <b>2.1</b> у роботі</div>
+<div class="chip generator"><span class="t">09:21</span><span class="k">step_done</span>крок <b>2.1</b> закрито <span class="ev">evidence <code>m-L_03</code><code>m-R_03</code><code>m-SW_03</code></span></div>
+<div class="chip generator"><span class="t">09:21</span><span class="k">step_added</span>крок <b>2.2</b> додано — midbass door resonance check (L door rattle reported) <span class="dim">(ситуативний)</span></div>
+<div class="chip generator"><span class="t">09:21</span><span class="k">attempt_started</span>крок <b>2.2</b> у роботі</div>
+<div class="chip generator"><span class="t">09:38</span><span class="k">step_done</span>крок <b>2.2</b> закрито <span class="ev">evidence <code>m-L_04 (door, 1/12 oct)</code></span></div>
+<div class="chip generator"><span class="t">09:38</span><span class="k">step_added</span>крок <b>2.3</b> додано — target-match (SQ-Comp-Ref) <span class="dim">(з шаблону фази)</span></div>
+<div class="chip generator"><span class="t">09:38</span><span class="k">attempt_started</span>крок <b>2.3</b> у роботі</div>
+<div class="chip critic"><span class="t">09:52</span><span class="k">critic_called</span>Радник <b>Gemini / Gemini 3.1 Pro (High)</b> по кроку 2.3 — <span class="warn">revise</span></div>
+<div class="chip generator"><span class="t">09:58</span><span class="k">config_change</span><b>channels.c.hp.f</b> 620 → <b>680</b> <span class="ev warn">інвалідує <code>m-C_05</code><code>v_006</code></span></div>
+<div class="chip generator"><span class="t">09:58</span><span class="k">attempt_started</span>крок <b>2.3</b> у роботі <span class="warn">спроба 2</span></div>
+<div class="chip critic"><span class="t">10:14</span><span class="k">critic_called</span>Радник <b>Gemini / Gemini 3.1 Pro (High)</b> по кроку 2.3 — <span class="ok">apply</span></div>
+<div class="chip generator"><span class="t">10:21</span><span class="k">step_done</span>крок <b>2.3</b> закрито <span class="ev">evidence <code>m-L_10 (sw)</code><code>m-R_10 (sw)</code><code>v_007</code></span></div>
+<div class="sheet"><div class="sheet-head"><span class="badge">v_007</span><b>Аркуш для введення</b> · пресет SQ<span class="t">10:19</span></div><div class="note">Target-match pass 2 — post-reviewer. Absolute values, Helix DSP Ultra S, 96 kHz.</div><table><tr><td><code>virtual_channels</code></td><td><b>VFL</b></td><td>eq</td><td><span class="dim">PK 1420 -2.0 Q2.0</span> → <b>PK 1420 -2.4 Q2.0</b></td></tr><tr><td><code>virtual_channels</code></td><td><b>VFL</b></td><td>eq</td><td><span class="dim">PK 3600 +2.2 Q1.1</span> → <b>PK 3600 +1.8 Q1.1</b></td></tr><tr><td><code>virtual_channels</code></td><td><b>VFR</b></td><td>eq</td><td><span class="dim">PK 1420 -2.0 Q2.0</span> → <b>PK 1420 -2.4 Q2.0</b></td></tr><tr><td><code>channels</code></td><td><b>c</b></td><td>hp.f</td><td><span class="dim">620 Hz LR36</span> → <b>680 Hz LR36</b></td></tr><tr><td><code>channels</code></td><td><b>sw</b></td><td>gain_db</td><td><span class="dim">-2.0 dB</span> → <b>-3.5 dB</b></td></tr><tr><td><code>channels</code></td><td><b>sw</b></td><td>ta_ms</td><td><b>4.62 ms</b><span class="dim"> (без змін)</span></td></tr></table><div class="gate">✔ passed (max boost +1.8 dB &lt;= +6 dB)</div><div class="acts"><button>Застосовано в DSP</button><button class="ghost">Відкласти</button></div></div>
+<div class="chip generator"><span class="t">10:21</span><span class="k">step_added</span>крок <b>2.4</b> додано — verify sweep after import <span class="dim">(з шаблону фази)</span></div>
+<div class="chip generator"><span class="t">10:21</span><span class="k">attempt_started</span>крок <b>2.4</b> у роботі</div></div></div><script>
+const b=document.getElementById('toggle');
+b.onclick=()=>{document.body.classList.toggle('events-only');
+b.classList.toggle('on');
+b.textContent=document.body.classList.contains('events-only')
+?'Показано лише події з журналу':'Події + проза';};
+</script>

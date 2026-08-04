@@ -1,0 +1,23 @@
+{
+  "version": "v_007",
+  "preset": "SQ",
+  "at": "2026-08-04T10:19:44+00:00",
+  "banked_by": "apply.propose",
+  "note": "Target-match pass 2 — post-reviewer. Absolute values, Helix DSP Ultra S, 96 kHz.",
+  "settings": [
+    {"tier": "virtual_channels", "channel": "VFL", "param": "eq",
+     "value": "PK 1420 -2.4 Q2.0", "was": "PK 1420 -2.0 Q2.0"},
+    {"tier": "virtual_channels", "channel": "VFL", "param": "eq",
+     "value": "PK 3600 +1.8 Q1.1", "was": "PK 3600 +2.2 Q1.1"},
+    {"tier": "virtual_channels", "channel": "VFR", "param": "eq",
+     "value": "PK 1420 -2.4 Q2.0", "was": "PK 1420 -2.0 Q2.0"},
+    {"tier": "channels", "channel": "c", "param": "hp.f",
+     "value": "680 Hz LR36", "was": "620 Hz LR36"},
+    {"tier": "channels", "channel": "sw", "param": "gain_db",
+     "value": "-3.5 dB", "was": "-2.0 dB"},
+    {"tier": "channels", "channel": "sw", "param": "ta_ms",
+     "value": "4.62 ms", "was": "4.62 ms", "unchanged": true}
+  ],
+  "max_boost_db": 1.8,
+  "eq_gate": "passed (max boost +1.8 dB <= +6 dB)"
+}
