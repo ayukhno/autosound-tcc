@@ -97,6 +97,12 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "write_rew_filters",
         "copy_helix_eq",
         "report_phase",
+        "enter_phase",
+        "add_step",
+        "start_step",
+        "finish_step",
+        "skip_step",
+        "block_step",
     }
     # No measurement tool: the panel is still mock data, and serving fabricated sweeps to a model
     # invites EQ computed from numbers that were never measured.
@@ -420,3 +426,47 @@ def test_onboarding_tools_before_check_existing_profile_are_a_clean_error(tmp_pa
     ):
         result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
         assert "error" in result
+
+
+def test_the_process_tools_actually_write_the_journal(tmp_path):
+    """The hole the harness spike found: the surface offered `report_phase`, which records nothing,
+    so whether the process got recorded depended on the model shelling out to `process.py` by
+    itself. These tools drive the skill's own writer, so the journal grows without that luck."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    for tool, args in (
+        ("enter_phase", {"phase": "-1"}),
+        ("add_step", {"step_id": "lang", "name": "Set session language"}),
+        ("start_step", {"step_id": "lang"}),
+        ("finish_step", {"step_id": "lang", "evidence": ["user-answer: Ukrainian"]}),
+    ):
+        result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+        assert result["recorded"] is True, (tool, result)
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [e["type"] for e in events] == [
+        "phase_entered", "step_added", "attempt_started", "step_done"
+    ]
+    assert json.loads(
+        _text(asyncio.run(mcp.call_tool("report_phase", {})))
+    )["skill_phase"] == "-1"
+
+
+def test_finish_step_without_evidence_is_refused_by_the_skill(tmp_path):
+    """No evidence, no done (SCR-004). The gate lives in the skill and its wording comes back
+    verbatim, because the caller has to know what to supply rather than that something failed."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "-1"}))
+    asyncio.run(mcp.call_tool("add_step", {"step_id": "lang", "name": "Set session language"}))
+
+    result = json.loads(
+        _text(asyncio.run(mcp.call_tool("finish_step", {"step_id": "lang", "evidence": []})))
+    )
+
+    assert result["recorded"] is False
+    assert "evidence" in result["error"]
+    assert "step_done" not in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8")

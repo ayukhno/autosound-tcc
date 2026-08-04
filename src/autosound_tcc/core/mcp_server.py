@@ -59,7 +59,14 @@ from typing import Any, Optional, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
-from autosound_tcc.core import agent_session, config, critic, profile_writer, vendor_loader
+from autosound_tcc.core import (
+    agent_session,
+    config,
+    critic,
+    process_writer,
+    profile_writer,
+    vendor_loader,
+)
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
 
@@ -377,6 +384,64 @@ def build_server(
         except profile_writer.ProfileWriterError as exc:
             return json.dumps({"saved": False, "error": str(exc)})
 
+    # ---- process record (the skill's writer; not gated -- recording is not a change) ----
+    #
+    # These exist because `report_phase` records nothing and never did: an agent that wanted to
+    # write the move had to find `state/process.py` on disk and shell out to it, and whether it
+    # managed to was a property of the model, not of the method. The gates stay where the schema
+    # is owned -- `finish_step` without evidence is refused by the skill and the refusal is
+    # returned verbatim.
+
+    def _record(call, *args, **kwargs) -> str:
+        try:
+            line = call(project_dir, *args, **kwargs)
+        except process_writer.ProcessWriterError as exc:
+            return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
+        bridge.refresh_from_disk()
+        state, _ = _load_process_state()
+        return json.dumps({"recorded": True, "said": line,
+                           "active_phase": (state or {}).get("active_phase")},
+                          ensure_ascii=False)
+
+    @mcp.tool()
+    async def enter_phase(phase: str) -> str:
+        """Make a phase current (−1…5) and record it. Phases are the skill's fixed skeleton --
+        entering one instantiates its template steps; you do not invent phases."""
+        return await asyncio.to_thread(_record, process_writer.enter_phase, phase)
+
+    @mcp.tool()
+    async def add_step(step_id: str, name: str, situational: bool = False) -> str:
+        """Add a plan step. `situational=True` records it as this car's own insert rather than one
+        instantiated from the phase template -- the distinction is what makes a plan readable
+        later."""
+        return await asyncio.to_thread(_record, process_writer.add_step, step_id, name, situational)
+
+    @mcp.tool()
+    async def start_step(step_id: str) -> str:
+        """Begin, or re-begin, a step. Re-beginning is attempt N+1 -- a redo is recorded next to the
+        first try, never on top of it."""
+        return await asyncio.to_thread(_record, process_writer.start_step, step_id)
+
+    @mcp.tool()
+    async def finish_step(step_id: str, evidence: list[str]) -> str:
+        """Close a step. `evidence` is REQUIRED and is checked by the skill, not here: REW
+        measurement names, a ledger `vNNN`, an audit-trail entry -- what someone could go and look
+        at. A refusal comes back with the skill's own wording; supply the evidence rather than
+        retrying the same call."""
+        return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
+
+    @mcp.tool()
+    async def skip_step(step_id: str, superseded_by: str = "") -> str:
+        """Supersede a step. It stays visible in the plan -- steps are never deleted, and what
+        replaced this one is worth naming."""
+        return await asyncio.to_thread(_record, process_writer.skip_step, step_id, superseded_by)
+
+    @mcp.tool()
+    async def block_step(step_id: str, reason: str) -> str:
+        """Mark a step blocked and say what blocks it -- a gate waiting on the human, a measurement
+        that cannot be taken yet."""
+        return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
+
     # ---- writes (every one gated on the Arbiter) ---------------------------
 
     @mcp.tool()
@@ -498,8 +563,9 @@ def build_server(
 
     @mcp.tool()
     async def report_phase(phase: str = "") -> str:
-        """Tell TCC the process moved, AFTER you have written the move with the skill's own tooling
-        (`python rew_tool/state/process.py <project>/process enter-phase <n>` / `done` / ...).
+        """Re-read the process from disk and tell you what it actually says. Not a recorder --
+        record with `enter_phase` / `add_step` / `start_step` / `finish_step` on this same surface,
+        which drive the skill's own writer.
 
         This records nothing. It re-reads `process/process-state.json` and refreshes what the
         Arbiter is looking at, then hands you back what that file actually says — so if your call
@@ -520,7 +586,7 @@ def build_server(
                     "refreshed": True,
                     "skill_phase": None,
                     "warning": "process-state.json has no active_phase -- "
-                               "enter one with the skill's process.py before reporting it",
+                               "call enter_phase before reporting one",
                 },
                 ensure_ascii=False,
             )
