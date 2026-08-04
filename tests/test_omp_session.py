@@ -1,0 +1,282 @@
+"""The omp adapter: frame translation, the Arbiter gate, and the question channel.
+
+Frames here are the ones omp actually emits — captured off `--mode rpc-ui` on the spike stand
+before the adapter was written, not invented to match it. The subprocess itself is never started:
+what is under test is the translation and the gating, and those are pure given a frame.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import Future
+
+import pytest
+
+from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall, TurnEnd
+from autosound_tcc.core.mcp_server import ConfirmRequest
+from autosound_tcc.core.omp_session import OmpSession
+
+
+class RecordingBridge:
+    """A stand-in Arbiter whose verdict the test chooses up front."""
+
+    def __init__(self, allow: bool) -> None:
+        self.allow = allow
+        self.requests: list[ConfirmRequest] = []
+
+    def snapshot(self) -> dict:
+        return {}
+
+    def request_confirmation(self, request: ConfirmRequest) -> "Future[bool]":
+        self.requests.append(request)
+        future: "Future[bool]" = Future()
+        future.set_result(self.allow)
+        return future
+
+    def copy_to_clipboard(self, text: str) -> None: ...
+
+    def show_proposal(self, proposal: dict) -> None: ...
+
+    def show_critique(self, critique: dict) -> None: ...
+
+    def notify_profile_ready(self) -> None: ...
+
+    def refresh_from_disk(self) -> None: ...
+
+
+def _session(tmp_path, allow=True):
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(allow))
+    session.sent: list[dict] = []  # type: ignore[attr-defined]
+    session._send = session.sent.append  # type: ignore[assignment]
+    return session
+
+
+PERMISSION_FRAME = {
+    "type": "extension_ui_request",
+    "id": "f1",
+    "method": "select",
+    "title": "Allow tool: bash",
+    "options": ["Approve", "Deny"],
+}
+QUESTION_FRAME = {
+    "type": "extension_ui_request",
+    "id": "q1",
+    "method": "select",
+    "title": "Reference seat for this tune?",
+    "options": ["Driver", "Both front", "Other (type your own)"],
+}
+
+
+# ---- translation -----------------------------------------------------------
+
+
+def test_streamed_text_becomes_a_text_event(tmp_path):
+    session = _session(tmp_path)
+
+    events = session._handle(
+        {"type": "message_update",
+         "assistantMessageEvent": {"type": "text_delta", "delta": "Phase 2, "}}
+    )
+
+    assert events == [TextDelta("Phase 2, ")]
+
+
+def test_non_text_message_updates_are_not_rendered(tmp_path):
+    """`text_start` and `text_end` bracket the deltas and carry the same content again."""
+    session = _session(tmp_path)
+
+    assert session._handle(
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}}
+    ) == []
+
+
+def test_a_tool_execution_becomes_a_tool_call(tmp_path):
+    session = _session(tmp_path)
+
+    events = session._handle(
+        {"type": "tool_execution_start", "toolName": "mcp__tcc_get_ledger",
+         "args": {"preset": "FULL"}}
+    )
+
+    assert events == [ToolCall(name="mcp__tcc_get_ledger", arguments={"preset": "FULL"})]
+
+
+def test_the_ask_tool_is_not_also_a_process_chip(tmp_path):
+    """It arrives as the question it raises; a chip beside it would render the same act twice."""
+    session = _session(tmp_path)
+
+    assert session._handle({"type": "tool_execution_start", "toolName": "ask"}) == []
+
+
+def test_turn_end_closes_the_turn(tmp_path):
+    session = _session(tmp_path)
+
+    assert session._handle({"type": "turn_end", "message": {}}) == [TurnEnd()]
+
+
+def test_chrome_frames_are_answered_and_not_rendered(tmp_path):
+    """Unanswered chrome stalls the agent; rendered chrome is noise in the transcript."""
+    session = _session(tmp_path)
+
+    events = session._handle(
+        {"type": "extension_ui_request", "id": "c1", "method": "setTitle", "title": "omp"}
+    )
+
+    assert events == []
+    assert session.sent == [{"type": "extension_ui_response", "id": "c1", "cancelled": True}]
+
+
+# ---- telling a permission from a question ----------------------------------
+
+
+def test_a_permission_frame_is_recognised(tmp_path):
+    assert OmpSession._is_permission(PERMISSION_FRAME) is True
+
+
+def test_a_question_frame_is_not_a_permission(tmp_path):
+    assert OmpSession._is_permission(QUESTION_FRAME) is False
+
+
+def test_an_unrecognisable_select_is_treated_as_a_permission(tmp_path):
+    """A select with no options is nothing the Arbiter could answer as a question, so it goes to
+    the gate they already recognise rather than parking the turn on an unanswerable card."""
+    assert OmpSession._is_permission(
+        {"type": "extension_ui_request", "id": "x", "method": "select", "title": "?", "options": []}
+    ) is True
+
+
+def test_a_confirm_frame_is_always_a_permission(tmp_path):
+    assert OmpSession._is_permission({"method": "confirm", "title": "Proceed?"}) is True
+
+
+def test_a_question_reaches_the_dialog_with_its_options(tmp_path):
+    session = _session(tmp_path)
+
+    events = session._handle(QUESTION_FRAME)
+
+    assert len(events) == 1
+    question = events[0]
+    assert isinstance(question, Question)
+    assert question.id == "q1"
+    assert question.question == "Reference seat for this tune?"
+    assert [option.label for option in question.options] == [
+        "Driver", "Both front", "Other (type your own)"
+    ]
+    assert session.sent == []  # nothing is answered on the agent's behalf
+
+
+# ---- the gate --------------------------------------------------------------
+
+
+def test_a_multiline_title_splits_into_the_tool_and_what_it_wants(tmp_path):
+    """omp sends `Allow tool: bash\nCommand: echo spike`. Taking all of it as the tool name puts a
+    shell command in the confirmation heading and breaks the `mcp__tcc` check -- seen live."""
+    tool, detail = OmpSession._tool_and_detail(
+        {"title": "Allow tool: bash\nCommand: echo spike"}
+    )
+
+    assert tool == "bash"
+    assert detail == "Command: echo spike"
+
+
+def test_a_tcc_tool_with_arguments_in_the_title_is_still_recognised(tmp_path):
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: mcp__tcc_copy_helix_eq\nText: PK 1000"}))
+
+    assert session.bridge.requests == []
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Approve"}]
+
+
+def test_a_permission_goes_to_the_arbiter_and_is_answered(tmp_path):
+    session = _session(tmp_path, allow=True)
+
+    asyncio.run(session._gate(PERMISSION_FRAME))
+
+    assert session.bridge.requests[0].tool == "bash"
+    assert "\n" not in session.bridge.requests[0].tool
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Approve"}]
+
+
+def test_a_refused_permission_denies_the_tool(tmp_path):
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate(PERMISSION_FRAME))
+
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Deny"}]
+
+
+def test_tcc_tools_are_not_gated_twice(tmp_path):
+    """Each `mcp__tcc` tool raises its own confirmation inside the tool; prompting here as well
+    would ask the Arbiter twice for one action and train them to click through both."""
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: mcp__tcc_copy_helix_eq"}))
+
+    assert session.bridge.requests == []
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Approve"}]
+
+
+def test_a_confirm_permission_answers_in_its_own_vocabulary(tmp_path):
+    session = _session(tmp_path, allow=True)
+
+    asyncio.run(session._gate({"type": "extension_ui_request", "id": "f2", "method": "confirm",
+                               "title": "Allow tool: bash"}))
+
+    assert session.sent == [{"type": "extension_ui_response", "id": "f2", "confirmed": True}]
+
+
+# ---- answering -------------------------------------------------------------
+
+
+def test_answering_a_question_sends_the_chosen_label(tmp_path):
+    session = _session(tmp_path)
+
+    asyncio.run(session.answer("q1", "Driver"))
+
+    assert session.sent == [{"type": "extension_ui_response", "id": "q1", "value": "Driver"}]
+
+
+def test_free_text_answers_pass_through(tmp_path):
+    """omp appends "Other (type your own)" to every question and takes the typed value back."""
+    session = _session(tmp_path)
+
+    asyncio.run(session.answer("q1", "Helix DSP Ultra S"))
+
+    assert session.sent[0]["value"] == "Helix DSP Ultra S"
+
+
+def test_interrupt_uses_the_command_omp_actually_has(tmp_path):
+    """`interrupt`, `cancel` and `stop` all come back "Unknown command" — asked, not assumed."""
+    session = _session(tmp_path)
+
+    asyncio.run(session.interrupt())
+
+    assert session.sent[0]["type"] == "abort"
+
+
+# ---- process arguments -----------------------------------------------------
+
+
+def test_xdev_is_turned_off_through_an_overlay_tcc_owns(tmp_path):
+    """Without this TCC's MCP tools never enter the model's function list, and the user's own omp
+    config is not TCC's to rewrite."""
+    session = _session(tmp_path)
+
+    argv = session._argv()
+    overlay = argv[argv.index("--config") + 1]
+
+    assert "xdev: false" in open(overlay).read()
+    assert str(tmp_path) in overlay
+
+
+def test_a_fresh_session_does_not_continue_a_previous_one(tmp_path):
+    assert "--continue" not in OmpSession(project_dir=tmp_path)._argv()
+
+
+def test_resuming_continues_the_projects_own_session(tmp_path):
+    argv = OmpSession(project_dir=tmp_path, resume=True)._argv()
+
+    assert "--continue" in argv
+    assert str(tmp_path) in argv[argv.index("--session-dir") + 1]
