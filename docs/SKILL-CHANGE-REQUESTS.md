@@ -469,7 +469,9 @@ writing the matching record leaves resume and any front-end with nothing real to
 
 ## SCR-028 — prescribed commands must not invoke a bare `python`
 
-**Status**: proposed (found in the first real non-Claude-Code run, 2026-08-04)
+**Status**: accepted — fixed in `autosound-skill-bridge` `344b57e` (branch `feat/tcc-sync-p0`,
+2026-08-04), option 2 (`python3` everywhere). Not `done`: the vendored submodule is still pinned at
+`7b93b75`, which does not carry it, so the pin bump is outstanding.
 **Target**: **30 call sites across 8 files** (counted 2026-08-04): `rew_tool/state/schema.md` ×7,
 `rew_tool/project-schema.md` ×6, `SKILL.md` ×6, `references/core/project-intake.md` ×4,
 `references/tooling/helix-eq-export.md` ×3, `references/core/data-contract-universal.md` ×2,
@@ -501,9 +503,17 @@ Ask, in order of preference:
 Either way the rule to state in SKILL.md is that a prescribed command names a **resolved**
 interpreter, never a bare one.
 
+> **Re-run, same conditions, fixed skill (2026-08-04)**: the fix is in, but this run did not
+> exercise it. Gemini ran five bash calls and **not one of them invoked an interpreter** — the turn
+> ended at the intake interview before any `process.py` call was attempted. So SCR-028 is landed and
+> unfalsified, not landed and confirmed; the confirming run is one that actually reaches the
+> recorder over bash. See the re-run record under SCR-031.
+
 ## SCR-029 — skill self-location must be portable, not `file:///skills/...`
 
-**Status**: proposed (same run)
+**Status**: accepted — fixed in `autosound-skill-bridge` `dd7af76` (branch `feat/tcc-sync-p0`,
+2026-08-04): a "Resolving paths in this skill" preamble in SKILL.md declares the skill root and
+107 references were rewritten relative to it. Same outstanding pin bump as SCR-028.
 **Target**: **108 links across at least 12 files** (counted 2026-08-04) of the form
 `file:///skills/autosound-tuning/...` — `SKILL.md` ×47, then `phase_5_variations.md` ×7,
 `core/process-phases.md` ×7, `phase_4_listening.md` ×6, `phase_1_foundation.md` ×6,
@@ -543,6 +553,14 @@ lock-in for another.
 > core/mcp_server.py` returns nothing. There is no journal writer on the MCP surface at all, so
 > the agent still reaches the recorder through `rew_tool/state/process.py`, and this SCR is load-
 > bearing in every configuration, not only the no-TCC one.
+
+> **Confirmed by the re-run (2026-08-04)**, and this one is measured. With the preamble in place the
+> agent went straight to `ls -la .claude/skills/autosound-tuning/rew_tool` on its first look at the
+> skill — no `find`, no `glob` scan, no symlink hunt. The pre-fix run spent two glob passes (`*`,
+> then `**/*`, the second costing ~68 s) getting to the same place. Do **not** read the wall-clock
+> drop (320 s → 52 s) as the size of this win: the pre-fix run's first tool call did not land until
+> 198.65 s, the re-run's at 17.24 s, and that ~180 s is provider latency ahead of any skill text.
+> The honest figure attributable to SCR-029 is the eliminated scan.
 
 ## SCR-030 — the Arbiter's answers are not events
 
@@ -595,3 +613,77 @@ Ask, smallest version first:
 3. SKILL.md rule: an answer that constrains a later phase is recorded before it is acted on. Prose
    files may repeat it; they may not be the only copy — "machine files win" is already the skill's
    rule, and today the Arbiter's half of the conversation is not in one.
+
+## SCR-031 — the recorder is prescribed as a shell call even when it is a tool
+
+**Status**: proposed (found in the SCR-028/029 verification re-run, 2026-08-04)
+**Target**: every site that names the recorder as a command line — `SKILL.md` ~line 65 ("Write the
+PROCESS as it happens"), `references/core/project-intake.md` ~line 137 (`enter-phase -1` at the start
+of Phase −1), `references/core/process-control.md`
+**TCC dependency**: `src/autosound_tcc/core/process_writer.py` + the recorder tools on the MCP
+surface (`enter_phase`, `add_step`, `start_step`, `finish_step`, `skip_step`, `block_step`), landed
+in `3f75dd0`. The skill has no way to know they are there, so it prescribes the CLI unconditionally
+and the agent is left to notice the tool on its own.
+
+**Detail**: SCR-028 and SCR-029 were called blocking on the theory that the empty journal was a
+reachability problem — the agent could not reach the recorder, so of course it wrote nothing. Both
+are fixed. The re-run says reachability was **necessary and not sufficient**.
+
+Re-run record (2026-08-04, `spike/real_turn.py`, artifacts in that session's scratchpad as
+`run2-report.txt` / `run2-gemini-notcc.jsonl`). Conditions held identical to the first of the three
+runs in `spike/HANDOFF.md` §3 — `google/gemini-3.1-pro-preview`, same neutral prompt, no TCC MCP
+server (`GET /mcp` → `{}`), no `mcp` block in config. Clean project directory (`testTCC-EPY-2`)
+holding only `EPY_0db_REW.txt`, `baseline_phase0.mdat`, and the skill symlink; the three-run evidence
+directory was left untouched. One variable: the fixed skill.
+
+| | run 1 (§3) | re-run |
+| :-- | --: | --: |
+| events in `process/journal.jsonl` | 0 | **0** |
+| disk search for `rew_tool` | 2× `glob` (`*`, `**/*`) | none — direct path |
+| interpreter written | — | none written at all |
+| wall clock | 320 s | 52 s (≈180 s of it provider latency, see SCR-029) |
+| turn tokens / longest prose | 40 870 / 2088 ch | 39 570 / 1649 ch |
+
+Six tool calls: `skill`, `ls -la`, `cat EPY_0db_REW.txt`, `ls -la .claude/skills/autosound-tuning/
+rew_tool`, `cat references/phases/phase_-1_intake.md`, `cat references/core/project-intake.md`. Then
+the turn ended with a correct situation report and four intake questions in prose. Nothing was
+written to disk — no `process/`, no `autosound_context.md`.
+
+The diagnosis is sharper than "the model was lazy", and it is what makes this a skill ask rather than
+a note. The agent **read `project-intake.md`**, whose §files bullet says verbatim
+`python3 rew_tool/state/process.py <project>/process enter-phase -1` *at the start of this very
+phase*, and did not call it. Instruction delivered, path resolvable, interpreter correct, still no
+event. What is missing is not information but a default: the skill describes recording as one item in
+a list of things to do during the phase, and a model that decides to ask its questions first drops it
+without ever disobeying a sentence.
+
+Alongside, from the parallel run with TCC's recorder tools up (dirty project directory, so not a
+clean comparison): Gemini called `tcc_enter_phase` once and wrote **one** event, then went back to
+bash and prose. Presence of the tool moved 0 → 1. The grid now has one empty cell — recorder tools up
+**and** a clean directory — and that number is what tells us how thin the supervisor can be.
+
+Ask:
+
+1. Where the skill prescribes a recorder call, state the tool-first rule: if a process-recording tool
+   is on the tool surface, that is the call; the `process.py` command line is the fallback for a
+   plain terminal with no front-end. Same two-path shape SCR-029 settled for references — the skill
+   stays runnable with nothing else present, without pretending the CLI is the only door.
+2. Make the first call of a phase an entry condition rather than a checklist item: opening the phase
+   precedes asking the user anything, so an interview that runs long cannot leave the phase
+   unopened. This is the one ordering the re-run actually broke.
+
+**Parked for the TCC side** (not asks against the skill — recorded here so the re-run's conclusions
+survive in one place):
+
+- **Seed the first event from TCC.** If a session starts against a project with no `process/`, TCC
+  calls `enter_phase` itself. Event one then does not depend on which model the user brought.
+- **Reconcile at the turn boundary**, not in the prompt. The failure mode observed twice is a turn
+  that narrates a phase or a step and records neither; comparing the two at turn end is where a
+  supervisor can act, and it is `spike/HANDOFF.md` §5 item 3 with a measured shape.
+- **The question channel is implicated again** (§5 item 2). This turn ended on four unanswered
+  questions in prose. Gemini asks in prose, Claude asks structurally; either way a TCC window that
+  does not render the ask looks like a finished turn that stopped for no reason.
+- Harness note: the re-run was executed on OpenCode, which `a6690b7` rejected on the subscription
+  axis. It does not weaken the finding — the defects and the compliance gap are in the skill, and
+  `HANDOFF.md` already establishes that determinism is not a harness property. The numbers should be
+  re-taken on omp when convenient, not treated as suspect until then.
