@@ -18,6 +18,12 @@ from PySide6.QtCore import QObject, Signal  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.core import signal_bus  # noqa: E402
+from autosound_tcc.core.agent_events import (  # noqa: E402
+    Question,
+    QuestionOption,
+    TextDelta,
+    ToolCall,
+)
 from autosound_tcc.core.mcp_server import ConfirmRequest  # noqa: E402
 from autosound_tcc.core.signal_bus import SignalBus  # noqa: E402
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker  # noqa: E402
@@ -47,24 +53,6 @@ class FakeWorker(QObject):
         self.interrupted = True
 
 
-class FakeStreamEvent:
-    def __init__(self, text):
-        self.event = {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}}
-
-
-class FakeBlock:
-    def __init__(self, text=None, name=None):
-        if text is not None:
-            self.text = text
-        if name is not None:
-            self.name = name
-
-
-class FakeMessage:
-    def __init__(self, *blocks):
-        self.content = list(blocks)
-
-
 def _attached(tmp_path):
     panel = DialogPanel()
     worker = FakeWorker()
@@ -92,8 +80,8 @@ def test_attaching_an_agent_clears_the_mock_transcript(tmp_path):
 def test_streamed_deltas_grow_a_single_bubble(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
-    worker.chunk.emit(FakeStreamEvent("Phase 2, "))
-    worker.chunk.emit(FakeStreamEvent("step 2.3."))
+    worker.chunk.emit(TextDelta("Phase 2, "))
+    worker.chunk.emit(TextDelta("step 2.3."))
 
     assert len(panel._bubbles) == 1
     assert panel._live_text == "Phase 2, step 2.3."
@@ -102,7 +90,7 @@ def test_streamed_deltas_grow_a_single_bubble(tmp_path):
 def test_a_tool_call_renders_as_a_process_chip_not_raw_json(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
-    worker.chunk.emit(FakeMessage(FakeBlock(name="mcp__tcc__get_tcc_state")))
+    worker.chunk.emit(ToolCall(name="mcp__tcc__get_tcc_state"))
 
     assert len(panel._bubbles) == 1
     assert "get_tcc_state" in panel._bubbles[0]._body.text()
@@ -112,30 +100,46 @@ def test_a_tool_call_renders_as_a_process_chip_not_raw_json(tmp_path):
 def test_text_after_a_tool_call_starts_a_new_bubble(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
-    worker.chunk.emit(FakeStreamEvent("Reading state"))
-    worker.chunk.emit(FakeMessage(FakeBlock(name="get_ledger")))
-    worker.chunk.emit(FakeStreamEvent("Done."))
+    worker.chunk.emit(TextDelta("Reading state"))
+    worker.chunk.emit(ToolCall(name="get_ledger"))
+    worker.chunk.emit(TextDelta("Done."))
 
     assert len(panel._bubbles) == 3
     assert panel._live_text == "Done."
 
 
-def test_a_turn_that_never_streamed_still_renders(tmp_path):
-    """Partial messages can be off, or the turn can be non-text -- silence is not an option."""
+def test_a_question_is_rendered_rather_than_swallowed(tmp_path):
+    """Nothing can answer one yet, but a blocked turn must not read as a finished turn -- that is
+    exactly how an unanswered question looked during the spike: a window that had hung."""
     panel, worker, _ = _attached(tmp_path)
 
-    worker.chunk.emit(FakeMessage(FakeBlock(text="Complete answer.")))
+    worker.chunk.emit(
+        Question(
+            id="q1",
+            header="Reference seat",
+            question="Reference seat for this tune?",
+            options=(
+                QuestionOption("Driver", "one point, sharpest image"),
+                QuestionOption("Both front"),
+            ),
+        )
+    )
 
-    assert panel._live_text == "Complete answer."
+    body = panel._bubbles[0]._body.text()
+    assert "Reference seat for this tune?" in body
+    assert "Driver" in body and "Both front" in body
+    assert "one point, sharpest image" in body
 
 
-def test_streamed_text_is_not_duplicated_by_the_final_message(tmp_path):
+def test_text_after_a_question_starts_a_new_bubble(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
-    worker.chunk.emit(FakeStreamEvent("Hello"))
-    worker.chunk.emit(FakeMessage(FakeBlock(text="Hello")))
+    worker.chunk.emit(TextDelta("Before"))
+    worker.chunk.emit(Question(id="q1", question="Which seat?"))
+    worker.chunk.emit(TextDelta("After"))
 
-    assert panel._live_text == "Hello"
+    assert len(panel._bubbles) == 3
+    assert panel._live_text == "After"
 
 
 def test_busy_state_swaps_send_for_stop(tmp_path):

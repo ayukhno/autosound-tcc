@@ -190,3 +190,85 @@ def test_mcp_server_is_wired_with_the_token(tmp_path):
 
 def test_no_mcp_server_configured_when_none_given(tmp_path):
     assert TuningSession(project_dir=tmp_path)._mcp_servers == {}
+
+
+# ---- SDK -> agent_events translation ---------------------------------------
+#
+# This is the seam: the panel and the CLI render `core.agent_events`, so the only place that reads
+# an SDK message shape is `_translate`. What used to be duck-typing inside the dialog panel is
+# tested here, where the harness-specific knowledge now lives.
+
+
+class _StreamEvent:
+    def __init__(self, text):
+        self.event = {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}}
+
+
+class _Block:
+    def __init__(self, text=None, name=None, input=None):
+        if text is not None:
+            self.text = text
+        if name is not None:
+            self.name = name
+            self.input = input or {}
+
+
+class _Message:
+    def __init__(self, *blocks):
+        self.content = list(blocks)
+
+
+def test_stream_deltas_become_text_events(tmp_path):
+    session = TuningSession(project_dir=tmp_path)
+
+    events = session._translate(_StreamEvent("Phase 2, ")) + session._translate(_StreamEvent("done."))
+
+    assert [e.text for e in events] == ["Phase 2, ", "done."]
+
+
+def test_a_tool_block_becomes_a_tool_call_with_its_arguments(tmp_path):
+    session = TuningSession(project_dir=tmp_path)
+
+    events = session._translate(_Message(_Block(name="mcp__tcc__get_ledger", input={"preset": "FULL"})))
+
+    assert len(events) == 1
+    assert events[0].name == "mcp__tcc__get_ledger"
+    assert events[0].arguments == {"preset": "FULL"}
+
+
+def test_a_turn_that_never_streamed_still_yields_its_text(tmp_path):
+    """Partial messages can be off, or the turn can be non-text -- silence is not an option."""
+    session = TuningSession(project_dir=tmp_path)
+
+    events = session._translate(_Message(_Block(text="Complete answer.")))
+
+    assert [e.text for e in events] == ["Complete answer."]
+
+
+def test_streamed_text_is_not_repeated_by_the_final_message(tmp_path):
+    """The SDK sends both the deltas and the finished message; rendering both doubles the bubble."""
+    session = TuningSession(project_dir=tmp_path)
+
+    streamed = session._translate(_StreamEvent("Hello"))
+    final = session._translate(_Message(_Block(text="Hello")))
+
+    assert [e.text for e in streamed] == ["Hello"]
+    assert final == []
+
+
+def test_text_after_a_tool_call_is_emitted_again(tmp_path):
+    """A tool call ends the bubble, so the next block is a fresh one and must not be suppressed by
+    the fact that something streamed earlier in the same turn."""
+    session = TuningSession(project_dir=tmp_path)
+
+    session._translate(_StreamEvent("Reading state"))
+    events = session._translate(_Message(_Block(name="get_ledger"), _Block(text="Done.")))
+
+    assert [type(e).__name__ for e in events] == ["ToolCall", "TextDelta"]
+    assert events[1].text == "Done."
+
+
+def test_answering_is_a_noop_because_the_sdk_has_no_question_channel(tmp_path):
+    session = TuningSession(project_dir=tmp_path)
+
+    asyncio.run(session.answer("q1", "Driver"))  # must not raise

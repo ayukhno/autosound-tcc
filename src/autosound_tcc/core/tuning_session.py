@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from claude_agent_sdk import (
-    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     PermissionResultAllow,
@@ -34,6 +33,7 @@ from claude_agent_sdk import (
 )
 
 from autosound_tcc.core import config
+from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
 
@@ -185,6 +185,8 @@ class TuningSession:
             }
         self._client: Optional[ClaudeSDKClient] = None
         self._started = False
+        # Whether the current bubble already got its text from the stream -- see `_translate`.
+        self._streamed_this_turn = False
 
     # ---- permission gate ---------------------------------------------------
 
@@ -251,8 +253,8 @@ class TuningSession:
             resume=self.resumed_from,
         )
 
-    async def start(self, prompt: Optional[str] = None) -> AsyncIterator[Any]:
-        """Open (or resume) the session and yield raw SDK messages for the caller to render."""
+    async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
+        """Open (or resume) the session and yield `agent_events` for the caller to render."""
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
         self._started = True
@@ -267,25 +269,63 @@ class TuningSession:
         async for message in self._drain():
             yield message
 
-    async def send(self, text: str) -> AsyncIterator[Any]:
+    async def send(self, text: str) -> AsyncIterator[AgentEvent]:
         if not self._started or self._client is None:
             raise RuntimeError("call start() before send()")
         await self._client.query(text)
         async for message in self._drain():
             yield message
 
+    async def answer(self, question_id: str, value: str) -> None:
+        """No-op: the Agent SDK has no question channel, so this session never raises one."""
+
     async def interrupt(self) -> None:
         if self._client is not None:
             await self._client.interrupt()
 
-    async def _drain(self) -> AsyncIterator[Any]:
+    async def _drain(self) -> AsyncIterator[AgentEvent]:
         assert self._client is not None
         async for message in self._client.receive_response():
             if isinstance(message, ResultMessage):
                 self._remember_session(message)
-                yield message
+                yield TurnEnd(session_id=message.session_id)
                 return
-            yield message
+            for event in self._translate(message):
+                yield event
+
+    def _translate(self, message: Any) -> list[AgentEvent]:
+        """One SDK message -> zero or more events. The only place SDK shapes are read.
+
+        Two shapes carry what the panel renders, and the streaming one wins when both arrive for
+        the same turn: partial messages stream the text as it is generated, and the complete
+        `AssistantMessage` repeats it at the end. Emitting both would double every bubble, so the
+        final text is only used when nothing streamed -- a turn must never render as silence.
+        """
+        event = getattr(message, "event", None)
+        if isinstance(event, dict):  # StreamEvent -- the raw Anthropic stream event
+            if event.get("type") == "content_block_delta":
+                delta = event.get("delta") or {}
+                if delta.get("type") == "text_delta" and delta.get("text"):
+                    self._streamed_this_turn = True
+                    return [TextDelta(delta["text"])]
+            return []
+
+        content = getattr(message, "content", None)
+        if not isinstance(content, list):
+            return []
+        out: list[AgentEvent] = []
+        for block in content:
+            name = getattr(block, "name", None)
+            if name:
+                out.append(ToolCall(name=name, arguments=dict(getattr(block, "input", {}) or {})))
+                # Text after a tool call belongs to a new bubble, and whether anything streamed is
+                # judged per bubble, not per turn.
+                self._streamed_this_turn = False
+            elif not self._streamed_this_turn:
+                text = getattr(block, "text", "")
+                if text:
+                    out.append(TextDelta(text))
+        return out
 
     def _remember_session(self, result: ResultMessage) -> None:
         """Bind the SDK's session id to the current phase so a later launch can resume it."""
@@ -300,10 +340,3 @@ class TuningSession:
         if self._started and self._client is not None:
             await self._client.disconnect()
         self._started = False
-
-    @staticmethod
-    def text_of(message: Any) -> str:
-        """Concatenated text of an AssistantMessage, for callers that only want the prose."""
-        if not isinstance(message, AssistantMessage):
-            return ""
-        return "".join(getattr(block, "text", "") for block in message.content)

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import signal_bus
+from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
@@ -105,7 +106,6 @@ class DialogPanel(QWidget):
         self._bus: Optional[signal_bus.SignalBus] = None
         self._live_bubble: Optional[MessageBubble] = None
         self._live_text = ""
-        self._streamed_this_turn = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -434,33 +434,22 @@ class DialogPanel(QWidget):
             self._worker.interrupt()
 
     def _on_chunk(self, item: Any) -> None:
-        """Render one item from the session: streamed text, a tool call, or a finished message."""
-        event = getattr(item, "event", None)
-        if isinstance(event, dict):  # StreamEvent — the raw Anthropic stream event
-            if event.get("type") == "content_block_delta":
-                delta = event.get("delta") or {}
-                if delta.get("type") == "text_delta":
-                    self._append_live_text(delta.get("text", ""))
-            return
+        """Render one event from the session.
 
-        content = getattr(item, "content", None)
-        if not isinstance(content, list):
-            return
-        for block in content:
-            name = getattr(block, "name", None)
-            if name:  # ToolUseBlock -- a process event, not a wall of JSON
-                self._add_chip(name)
-            elif not self._streamed_this_turn:
-                # Nothing streamed (partial messages off, or a non-text turn): fall back to the
-                # complete block so the turn is never rendered as silence.
-                text = getattr(block, "text", "")
-                if text:
-                    self._append_live_text(text)
+        The panel speaks `core.agent_events` and nothing else: which harness produced the turn --
+        the Agent SDK for Claude, omp for everything else -- is not visible from here, and adding
+        a harness must not mean touching this method.
+        """
+        if isinstance(item, TextDelta):
+            self._append_live_text(item.text)
+        elif isinstance(item, ToolCall):
+            self._add_chip(item.name)
+        elif isinstance(item, Question):
+            self._add_question(item)
 
     def _append_live_text(self, text: str) -> None:
         if not text:
             return
-        self._streamed_this_turn = True
         self._live_text += text
         if self._live_bubble is None:
             self._add_bubble("gen", f"Generator · {CURRENT_GENERATOR_MODEL}", self._live_text)
@@ -468,6 +457,24 @@ class DialogPanel(QWidget):
         else:
             self._live_bubble.set_html(self._live_text)
             self._fit(self._live_bubble)
+        self._scroll_to_end()
+
+    def _add_question(self, question: Question) -> None:
+        """A structured question from the agent, and the turn is parked until it is answered.
+
+        Rendered rather than dropped even though nothing can answer it yet: the session that
+        raises these is the omp adapter, and its reply path lands with it. What must not happen in
+        the meantime is a blocked turn that looks like a finished one -- that is exactly how an
+        unanswered question read during the spike, as a window that had hung.
+        """
+        lines = [question.question]
+        lines += [
+            f"· {option.label}" + (f" — {option.description}" if option.description else "")
+            for option in question.options
+        ]
+        self._add_bubble("sys", question.header or "QUESTION", "<br>".join(lines))
+        self._live_bubble = None
+        self._live_text = ""
         self._scroll_to_end()
 
     def _add_chip(self, tool_name: str) -> None:
@@ -481,7 +488,6 @@ class DialogPanel(QWidget):
     def _on_turn_done(self) -> None:
         self._live_bubble = None
         self._live_text = ""
-        self._streamed_this_turn = False
         self._set_busy(False)
         self._input.setFocus()
 
