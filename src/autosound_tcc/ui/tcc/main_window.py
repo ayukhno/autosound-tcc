@@ -531,6 +531,9 @@ class MainWindow(QMainWindow):
         self._terminal_btn.setProperty("class", "reason-btn")
         self._terminal_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._terminal_btn.clicked.connect(self._open_terminal)
+        # Front-end B is real and tested, but it is not in the workflow being built right now:
+        # showing a second way in before the first one is finished only splits attention.
+        self._terminal_btn.setHidden(True)
         layout.addWidget(self._terminal_btn)
 
         layout.addStretch(1)
@@ -1438,22 +1441,17 @@ class MainWindow(QMainWindow):
         running = getattr(self, "_agent_worker", None) is not None
         if not running:
             self._dialog.set_idle_label(choice.label if choice else None)
-        if choice is None:
-            self._session_btn.setText(i18n.t("startSession"))
-            self._session_btn.setEnabled(False)
-            self._session_btn.setToolTip(i18n.t("startSessionNoModel"))
-            return
-        if running and self._running_model not in (None, choice.key):
+
+        # The button exists for one thing the composer cannot express: swapping the model of a
+        # conversation that is already running. Starting is what sending the first message does,
+        # so a second control for that is one more thing to explain -- it stays out of the way
+        # until it has something to say.
+        restart = running and choice is not None and self._running_model not in (None, choice.key)
+        self._session_btn.setHidden(not restart)
+        if restart:
             self._session_btn.setText(i18n.t("restartSession").format(model=choice.label))
             self._session_btn.setEnabled(True)
             self._session_btn.setToolTip(i18n.t("restartSessionTip"))
-            return
-        self._session_btn.setText(i18n.t("startSession"))
-        self._session_btn.setEnabled(not running)
-        self._session_btn.setToolTip(
-            i18n.t("startSessionRunning") if running
-            else i18n.t("startSessionReady").format(model=choice.label)
-        )
 
     def _open_model_config(self) -> None:
         dialog = ModelConfigDialog(self._active_omp(), self)

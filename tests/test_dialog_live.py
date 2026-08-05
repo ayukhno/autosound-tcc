@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QObject, Signal  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from autosound_tcc.core import signal_bus  # noqa: E402
 from autosound_tcc.core.agent_events import (  # noqa: E402
@@ -398,3 +398,37 @@ def test_typing_the_first_message_asks_for_a_session(tmp_path):
     assert asked == ["привіт"]
     # The text is not thrown away in favour of a canned opener; it IS the opening prompt.
     assert any("привіт" in b._body.text() for b in panel._bubbles)
+
+
+def test_the_bubble_names_the_model_that_is_answering(tmp_path):
+    """The mock transcript's Claude caption was still on live bubbles produced by a Gemini model,
+    contradicting the footer two inches below it."""
+    panel = DialogPanel()
+    worker = FakeWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path), model="Gemini 3.1 Flash Lite")
+
+    worker.chunk.emit(TextDelta("Phase 0."))
+
+    assert "Gemini 3.1 Flash Lite" in panel._bubbles[-1].findChild(QLabel).text()
+
+
+def test_markdown_from_the_model_is_rendered_not_shown(tmp_path):
+    """Models write `**bold**` and `### heads` whether or not anyone asked, and a bubble that
+    shows the asterisks makes a correct answer look like a broken one."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(TextDelta("### Next\n- **Phase 0** with `baseline.mdat`"))
+
+    body = panel._bubbles[-1]._body.text()
+    assert "<b>Next</b>" in body and "<b>Phase 0</b>" in body
+    assert "<code>baseline.mdat</code>" in body
+    assert "**" not in body and "###" not in body
+
+
+def test_markup_in_the_models_text_cannot_become_markup(tmp_path):
+    """A stray `<` in a filter string is text, not an element."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(TextDelta("HP <script>alert(1)</script> 80 Hz"))
+
+    assert "&lt;script&gt;" in panel._bubbles[-1]._body.text()

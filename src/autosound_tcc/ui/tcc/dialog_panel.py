@@ -14,6 +14,7 @@ they reach whichever front-end is driving — the in-app agent or the user's own
 
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Optional
 
@@ -42,6 +43,36 @@ from autosound_tcc.ui.tcc.theme import apply_caps
 _MSG_BODY_BASE_PX = 13.0
 _DIALOG_FONT_KEY = "ui/dialog_font_scale"
 _DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
+
+
+def _markdown(text: str) -> str:
+    """The little of Markdown a tuning answer actually uses, as Qt rich text.
+
+    Models write `**bold**`, `### headings`, `- lists` and `` `code` `` whether or not anyone asked
+    them to, and a bubble that shows the asterisks makes a correct answer look like a broken one.
+    Not a full parser on purpose: this renders what turns up in practice and escapes everything
+    else, so a stray `<` in a filter string can never become markup.
+    """
+    out = html.escape(text)
+    out = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", out)
+    out = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", out)
+    lines = []
+    for line in out.split("\n"):
+        stripped = line.strip()
+        heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if heading:
+            lines.append(f"<b>{heading.group(2)}</b>")
+            continue
+        bullet = re.match(r"^[-*]\s+(.*)$", stripped)
+        if bullet:
+            lines.append(f"&nbsp;&nbsp;• {bullet.group(1)}")
+            continue
+        numbered = re.match(r"^(\d+)[.)]\s+(.*)$", stripped)
+        if numbered:
+            lines.append(f"&nbsp;&nbsp;{numbered.group(1)}. {numbered.group(2)}")
+            continue
+        lines.append(line)
+    return "<br>".join(lines)
 
 
 class MessageBubble(QFrame):
@@ -108,6 +139,9 @@ class DialogPanel(QWidget):
         self._bus: Optional[signal_bus.SignalBus] = None
         self._live_bubble: Optional[MessageBubble] = None
         self._live_text = ""
+        # Whatever is actually answering. The mock transcript's Claude label was still on live
+        # bubbles produced by a Gemini model, which is a caption that contradicts the footer.
+        self._model_label = CURRENT_GENERATOR_MODEL
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -265,7 +299,7 @@ class DialogPanel(QWidget):
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
         self._reason_btns["forgot"].setText(i18n.t("reasonForgot"))
         self._reason_btns["manual"].setText(i18n.t("reasonManual"))
-        self._input.setPlaceholderText(i18n.t("composer" if self._worker else "composerMock"))
+        self._input.setPlaceholderText(i18n.t("composer"))
         self._send_btn.setText(i18n.t("send"))
         self._stop_btn.setText(i18n.t("stop"))
         self._not_visible_btn.setText("👁 " + i18n.t("notVisible"))
@@ -371,6 +405,7 @@ class DialogPanel(QWidget):
         """
         self._worker = worker
         self._bus = bus
+        self._model_label = model or i18n.t("generator")
         self._clear_bubbles()
         self._not_visible_btn.setHidden(False)
         self._input.setPlaceholderText(i18n.t("composer"))
@@ -482,10 +517,10 @@ class DialogPanel(QWidget):
             return
         self._live_text += text
         if self._live_bubble is None:
-            self._add_bubble("gen", f"Generator · {CURRENT_GENERATOR_MODEL}", self._live_text)
+            self._add_bubble("gen", f"Generator · {self._model_label}", _markdown(self._live_text))
             self._live_bubble = self._bubbles[-1]
         else:
-            self._live_bubble.set_html(self._live_text)
+            self._live_bubble.set_html(_markdown(self._live_text))
             self._fit(self._live_bubble)
         self._scroll_to_end()
 

@@ -230,17 +230,16 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     assert any("mic.calibration_file" in t for t in chip_texts)
 
 
-def test_every_affordance_is_present_because_v1_has_one_mode():
-    """The view/control switch is out of v1 (2026-08-05). It was meant to be the free tier's face
-    -- a reader over a project the skill drives from a terminal -- but it hid the terminal button
-    it existed for, and left "create project" visible even though the intake is an AI interview.
-    One mode until the free tier is a real product; `git log` has the switch if it comes back."""
+def test_the_composer_is_the_way_in():
+    """The view/control switch is out of v1 (2026-08-05), so nothing is hidden by mode. What is
+    hidden is hidden for its own reason: starting a session is what sending the first message
+    does, and front-end B is not in the workflow being built."""
     _app()
     window = MainWindow()
 
-    for widget in _control_only_widgets(window):
-        assert not widget.isHidden(), widget
     assert not window._dialog._composer.isHidden()
+    assert window._session_btn.isHidden()   # appears only to offer a restart
+    assert window._terminal_btn.isHidden()  # front-end B, deliberately out of the way
 
 
 def test_no_project_shows_create_button_and_clears_every_mock_panel():
@@ -490,7 +489,6 @@ def test_nothing_is_chosen_until_someone_chooses_it():
 
     assert window._generator_choice() is None
     assert window._ai_main_combo.itemData(0) == ""
-    assert not window._session_btn.isEnabled()
 
 
 def test_choosing_a_model_arms_the_button_without_starting_anything():
@@ -499,7 +497,6 @@ def test_choosing_a_model_arms_the_button_without_starting_anything():
 
     window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
 
-    assert window._session_btn.isEnabled()
     assert getattr(window, "_agent_worker", None) is None
     assert "not started" in window._dialog._session_chip.text().lower()
 
@@ -698,11 +695,11 @@ def test_changing_the_model_mid_session_offers_a_restart_not_a_silent_swap(monke
 
     window._agent_worker = _Worker()
     window._update_session_button()
-    assert not window._session_btn.isEnabled()  # same model, already running
+    assert window._session_btn.isHidden()  # same model, nothing to offer
 
     window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
 
-    assert window._session_btn.isEnabled()
+    assert not window._session_btn.isHidden()
     assert "sonnet" in window._session_btn.text().lower()
     assert "restart" in window._session_btn.text().lower()
 
