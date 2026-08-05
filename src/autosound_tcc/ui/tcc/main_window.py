@@ -30,7 +30,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, contract_check, critic, terminal_launcher
+from autosound_tcc.core import (
+    config,
+    contract_check,
+    critic,
+    model_choices,
+    omp_session,
+    terminal_launcher,
+)
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
@@ -46,7 +53,8 @@ from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
-from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS, AI_MAIN_MODELS
+from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
+from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
@@ -58,6 +66,8 @@ from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
 _LANG_KEY = "ui/lang"
+_GENERATOR_KEY = "ai/generator"        # the picked Choice.key
+_ACTIVE_OMP_KEY = "ai/active_omp"     # selectors the user marked usable
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
 # TODO(user): paste the published Google Form viewform URL here (the one built last session — see
 # memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
@@ -446,10 +456,23 @@ class MainWindow(QMainWindow):
         self._ai_main_lbl.setProperty("class", "kv-lbl")
         apply_caps(self._ai_main_lbl, spacing_px=1.2)
         layout.addWidget(self._ai_main_lbl)
+        # The generator picker is also the harness picker: Claude runs through the Agent SDK
+        # against the user's own CLI, everything else through omp (spike/HANDOFF.md 5-ter). The
+        # user picks a model; which adapter carries it follows from that, explicitly rather than
+        # by inference.
         ai_main = _mini_combo()
-        ai_main.addItems(AI_MAIN_MODELS)
         self._ai_main_combo = ai_main
+        self._reload_model_choices()
+        ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
+
+        # omp reports several hundred models and nobody has credentials for most of them, so the
+        # user marks the ones they actually use rather than TCC guessing on their behalf.
+        self._models_btn = QPushButton(i18n.t("configureModels"))
+        self._models_btn.setProperty("class", "btn")
+        self._models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._models_btn.clicked.connect(self._open_model_config)
+        layout.addWidget(self._models_btn)
 
         self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
         self._ai_critic_lbl.setProperty("class", "kv-lbl")
@@ -1206,23 +1229,75 @@ class MainWindow(QMainWindow):
             return
 
         server = self._mcp_server
+        choice = self._generator_choice()
+        if choice.harness == "omp" and not omp_session.is_available():
+            self._dialog._add_system_message(i18n.t("ompMissing"))
+            return
         probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
-        self._agent_worker = AgentWorker(
-            session_factory=lambda: TuningSession(
+        resumed = probe.resumed_from is not None
+        if choice.harness == "omp":
+            # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
+            # needs no url/token of its own.
+            factory = lambda: omp_session.OmpSession(  # noqa: E731
+                project_dir=server.project_dir,
+                bridge=self._bridge,
+                model=choice.model,
+                resume=resumed,
+            )
+        else:
+            factory = lambda: TuningSession(  # noqa: E731
                 project_dir=server.project_dir,
                 mcp_url=server.url,
                 mcp_token=server.token,
                 bridge=self._bridge,
+                model=choice.model,
             )
-        )
+        self._agent_worker = AgentWorker(session_factory=factory)
         self._dialog.attach_agent(
             self._agent_worker,
             server.bus,
-            resumed=probe.resumed_from is not None,
+            resumed=resumed,
             phase=server.registry.current_phase(),
         )
         self._session_btn.setEnabled(False)
         self._agent_worker.start()
+
+    # ---- which model, and therefore which harness --------------------------
+
+    def _active_omp(self) -> list[str]:
+        raw = self._settings.value(_ACTIVE_OMP_KEY, "")
+        return [selector for selector in str(raw).split(",") if selector]
+
+    def _reload_model_choices(self) -> None:
+        """Refill the generator picker, keeping the current selection if it survived."""
+        wanted = str(self._settings.value(_GENERATOR_KEY, "")) or None
+        self._model_choices = model_choices.choices(self._active_omp())
+        combo = self._ai_main_combo
+        blocked = combo.blockSignals(True)
+        combo.clear()
+        for choice in self._model_choices:
+            suffix = " · free" if choice.free else ""
+            combo.addItem(f"{choice.label}{suffix}", choice.key)
+        index = combo.findData(wanted) if wanted else -1
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(blocked)
+
+    def _generator_choice(self) -> model_choices.Choice:
+        key = self._ai_main_combo.currentData()
+        return (
+            model_choices.find(self._model_choices, str(key))
+            or self._model_choices[0]
+        )
+
+    def _on_generator_model_changed(self, _index: int) -> None:
+        self._settings.setValue(_GENERATOR_KEY, self._ai_main_combo.currentData())
+
+    def _open_model_config(self) -> None:
+        dialog = ModelConfigDialog(self._active_omp(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._settings.setValue(_ACTIVE_OMP_KEY, ",".join(dialog.active))
+        self._reload_model_choices()
 
     def _open_terminal(self) -> None:
         """Front-end B: hand the project to the user's own CLI in their own terminal."""

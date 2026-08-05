@@ -452,3 +452,85 @@ def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     assert not window._status_strip.isHidden()
     text = window._status_strip.text()
     assert "driver replaced" in text and "w-L" in text and "w-R" in text
+
+
+# ---- the generator picker is also the harness picker ------------------------
+
+
+def _catalogue(monkeypatch, models):
+    import json
+    import subprocess
+
+    from autosound_tcc.core import model_choices
+
+    monkeypatch.setattr(model_choices, "omp_available", lambda: True)
+    monkeypatch.setattr(
+        model_choices.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps({"models": models}), ""),
+    )
+
+
+def test_the_picker_offers_claudes_models_out_of_the_box():
+    """Nothing marked, no omp needed: TCC is usable on a machine that only has the Claude CLI."""
+    _app()
+    window = MainWindow()
+
+    keys = [window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())]
+
+    assert keys == ["sdk:claude-opus-5", "sdk:claude-sonnet-5", "sdk:claude-fable-5"]
+    assert window._generator_choice().harness == "sdk"
+
+
+def test_a_marked_omp_model_joins_the_picker_and_selects_its_harness(monkeypatch):
+    """The user picks a model; which adapter carries it follows from that, not from inference."""
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.25, "output": 10.0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
+
+    index = window._ai_main_combo.findData("omp:google/gemini-3.1-pro-preview")
+    assert index >= 0
+    window._ai_main_combo.setCurrentIndex(index)
+
+    choice = window._generator_choice()
+    assert choice.harness == "omp"
+    assert choice.model == "google/gemini-3.1-pro-preview"
+
+
+def test_a_free_model_says_so_in_the_picker(monkeypatch):
+    """Cost is the axis the harness was chosen on; it belongs where the model is chosen."""
+    _catalogue(monkeypatch, [{
+        "provider": "opencode", "selector": "opencode/nemotron-3-ultra-free",
+        "name": "Nemotron 3 Ultra", "cost": {"input": 0, "output": 0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "opencode/nemotron-3-ultra-free")
+    window._reload_model_choices()
+
+    index = window._ai_main_combo.findData("omp:opencode/nemotron-3-ultra-free")
+    assert "free" in window._ai_main_combo.itemText(index)
+
+
+def test_the_picked_model_survives_a_restart(monkeypatch):
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
+    window._ai_main_combo.setCurrentIndex(
+        window._ai_main_combo.findData("omp:google/gemini-3.1-pro-preview")
+    )
+    window._on_generator_model_changed(0)
+
+    again = MainWindow()
+
+    assert again._generator_choice().model == "google/gemini-3.1-pro-preview"
