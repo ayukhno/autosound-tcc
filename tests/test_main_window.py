@@ -479,8 +479,38 @@ def test_the_picker_offers_claudes_models_out_of_the_box():
 
     keys = [window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())]
 
-    assert keys == ["sdk:claude-opus-5", "sdk:claude-sonnet-5", "sdk:claude-fable-5"]
-    assert window._generator_choice().harness == "sdk"
+    assert keys[1:] == ["sdk:claude-opus-5", "sdk:claude-sonnet-5", "sdk:claude-fable-5"]
+
+
+def test_nothing_is_chosen_until_someone_chooses_it():
+    """Pre-selecting the first entry makes a session startable by someone who never noticed a
+    default -- and starting one costs a turn."""
+    _app()
+    window = MainWindow()
+
+    assert window._generator_choice() is None
+    assert window._ai_main_combo.itemData(0) == ""
+    assert not window._session_btn.isEnabled()
+
+
+def test_choosing_a_model_arms_the_button_without_starting_anything():
+    _app()
+    window = MainWindow()
+
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+
+    assert window._session_btn.isEnabled()
+    assert getattr(window, "_agent_worker", None) is None
+    assert "not started" in window._dialog._session_chip.text().lower()
+
+
+def test_the_placeholder_disappears_once_a_model_is_chosen():
+    _app()
+    window = MainWindow()
+
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+
+    assert window._ai_main_combo.findData("") < 0
 
 
 def test_a_marked_omp_model_joins_the_picker_and_selects_its_harness(monkeypatch):
@@ -551,7 +581,9 @@ def test_the_critic_picker_comes_from_the_same_registry(monkeypatch):
     generator = {window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())}
     reviewer = {window._ai_critic_combo.itemData(i) for i in range(window._ai_critic_combo.count())}
 
-    assert generator == reviewer
+    # The generator carries an extra "nothing chosen yet" entry; the reviewer has a working
+    # default because picking one never starts anything on its own.
+    assert generator - {""} == reviewer
     assert "omp:google/gemini-3.1-pro-preview" in reviewer
 
 
@@ -648,3 +680,28 @@ def test_the_sdk_is_named_in_the_generator_picker(monkeypatch):
 
     index = window._ai_main_combo.findData("sdk:claude-opus-5")
     assert window._ai_main_combo.itemText(index).startswith("SDK · ")
+
+
+def test_changing_the_model_mid_session_offers_a_restart_not_a_silent_swap(monkeypatch):
+    """Neither harness can change model in a live conversation — the SDK takes it at connect, omp
+    as `--model` when the process starts. So the button says restart rather than letting someone
+    find out afterwards."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+
+    class _Worker:
+        def shutdown(self, *a, **kw):
+            return True
+
+    window._agent_worker = _Worker()
+    window._update_session_button()
+    assert not window._session_btn.isEnabled()  # same model, already running
+
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+
+    assert window._session_btn.isEnabled()
+    assert "sonnet" in window._session_btn.text().lower()
+    assert "restart" in window._session_btn.text().lower()

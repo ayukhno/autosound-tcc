@@ -378,6 +378,19 @@ class DialogPanel(QWidget):
         worker.failed.connect(self._on_failed)
         self._set_busy(True)
 
+    def set_idle_label(self, model: Optional[str]) -> None:
+        """Say what will run and that it has not started, before anyone clicks anything.
+
+        Starting a session costs a turn -- roughly 30-40k input tokens of the model reading the
+        skill and the project's state -- so TCC never starts one on its own. That is only a
+        defensible default if "chosen but not running" is visible rather than inferred, which is
+        what this chip is for.
+        """
+        self._session_chip.setText(
+            i18n.t("dialogIdle").format(model=model) if model else i18n.t("dialogNoModel")
+        )
+        self._session_chip.setHidden(False)
+
     def set_session_label(self, resumed: bool, phase: Optional[str]) -> None:
         state = i18n.t("sessionResumed") if resumed else i18n.t("sessionNew")
         label = f"{phase} · {state}" if phase else state

@@ -488,6 +488,7 @@ class MainWindow(QMainWindow):
 
         # Both combos exist now, so one pass fills them from the one registry.
         self._reload_model_choices()
+        self._running_model: Optional[str] = None
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
         # panel's "engaged? which AI+model? last called when").
@@ -503,6 +504,7 @@ class MainWindow(QMainWindow):
         self._session_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._session_btn.clicked.connect(self._start_tuning_session)
         layout.addWidget(self._session_btn)
+        self._update_session_button()
 
         self._terminal_btn = QPushButton(i18n.t("openTerminal"))
         self._terminal_btn.setProperty("class", "reason-btn")
@@ -1235,14 +1237,23 @@ class MainWindow(QMainWindow):
 
     def _start_tuning_session(self) -> None:
         """Front-end A: run the skill in-process and stream it into the dialog panel."""
-        if getattr(self, "_agent_worker", None) is not None:
-            return
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            # Same model: nothing to do. A different one: the running conversation ends, because
+            # neither harness can swap a model under a live session.
+            if self._running_model == self._ai_main_combo.currentData():
+                return
+            worker.shutdown()
+            self._agent_worker = None
+            self._dialog._add_system_message(i18n.t("sessionRestarted"))
         if self._mcp_server is None:
             self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
             return
 
         server = self._mcp_server
         choice = self._generator_choice()
+        if choice is None:
+            return
         if choice.harness == "omp" and not omp_session.is_available():
             self._dialog._add_system_message(i18n.t("ompMissing"))
             return
@@ -1272,8 +1283,9 @@ class MainWindow(QMainWindow):
             resumed=resumed,
             phase=server.registry.current_phase(),
         )
-        self._session_btn.setEnabled(False)
+        self._running_model = choice.key
         self._agent_worker.start()
+        self._update_session_button()
 
     # ---- which model, and therefore which harness --------------------------
 
@@ -1312,18 +1324,58 @@ class MainWindow(QMainWindow):
             prefix = "SDK · " if choice.harness == "sdk" else ""
             combo.addItem(f"{prefix}{choice.label}{suffix}", choice.key)
         index = combo.findData(wanted) if wanted else -1
+        if index < 0 and not critic:
+            # Nothing chosen yet: say so rather than pre-selecting the first entry. A model that
+            # was never picked must not be startable by someone who did not notice a default.
+            combo.insertItem(0, i18n.t("modelUnchosen"), "")
+            index = 0
         combo.setCurrentIndex(index if index >= 0 else 0)
         combo.blockSignals(blocked)
 
-    def _generator_choice(self) -> model_choices.Choice:
+    def _generator_choice(self) -> Optional[model_choices.Choice]:
         key = self._ai_main_combo.currentData()
-        return (
-            model_choices.find(self._model_choices, str(key))
-            or self._model_choices[0]
-        )
+        return model_choices.find(self._model_choices, str(key)) if key else None
 
     def _on_generator_model_changed(self, _index: int) -> None:
-        self._settings.setValue(_GENERATOR_KEY, self._ai_main_combo.currentData())
+        choice = self._generator_choice()
+        if choice is None:
+            self._update_session_button()
+            return
+        self._settings.setValue(_GENERATOR_KEY, choice.key)
+        # The placeholder has served its purpose the moment a real model is chosen.
+        placeholder = self._ai_main_combo.findData("")
+        if placeholder >= 0:
+            self._ai_main_combo.removeItem(placeholder)
+        self._update_session_button()
+
+    def _update_session_button(self) -> None:
+        """Say what clicking will do, in the three states a session can be in.
+
+        Neither harness can change model mid-conversation -- the SDK takes it in
+        `ClaudeAgentOptions` at connect, omp as `--model` when the process starts -- so picking a
+        different model while one is running is a restart, and the button says restart rather than
+        letting someone discover it after the fact.
+        """
+        choice = self._generator_choice()
+        running = getattr(self, "_agent_worker", None) is not None
+        if not running:
+            self._dialog.set_idle_label(choice.label if choice else None)
+        if choice is None:
+            self._session_btn.setText(i18n.t("startSession"))
+            self._session_btn.setEnabled(False)
+            self._session_btn.setToolTip(i18n.t("startSessionNoModel"))
+            return
+        if running and self._running_model not in (None, choice.key):
+            self._session_btn.setText(i18n.t("restartSession").format(model=choice.label))
+            self._session_btn.setEnabled(True)
+            self._session_btn.setToolTip(i18n.t("restartSessionTip"))
+            return
+        self._session_btn.setText(i18n.t("startSession"))
+        self._session_btn.setEnabled(not running)
+        self._session_btn.setToolTip(
+            i18n.t("startSessionRunning") if running
+            else i18n.t("startSessionReady").format(model=choice.label)
+        )
 
     def _open_model_config(self) -> None:
         dialog = ModelConfigDialog(self._active_omp(), self)
@@ -1331,6 +1383,7 @@ class MainWindow(QMainWindow):
             return
         self._settings.setValue(_ACTIVE_OMP_KEY, ",".join(dialog.active))
         self._reload_model_choices()
+        self._update_session_button()
 
     def _open_terminal(self) -> None:
         """Front-end B: hand the project to the user's own CLI in their own terminal.
