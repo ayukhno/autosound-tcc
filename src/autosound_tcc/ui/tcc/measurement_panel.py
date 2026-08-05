@@ -316,6 +316,11 @@ class MeasurementPanel(QWidget):
         self._no_project_active = False
 
         self.show_session(self._viewing_id)
+        # ...and then hide it. `MEAS_SESSIONS` still builds the grid so the widget has its real
+        # shape (and the unit tests keep it as a fixture), but a project is never shown a capture
+        # series it did not take: opening one and being met with "capture series v10" over
+        # invented channel names is the plan panel's retired demo plan in a second place.
+        self.set_no_project(i18n.t("measNoTask"))
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
@@ -359,10 +364,12 @@ class MeasurementPanel(QWidget):
     def set_sessions(self, sessions) -> None:
         """Replace the mock series with one derived from the glossary + REW (SCR-008).
 
-        Passing None or an empty tuple keeps the mock: a project with no glossary has no derivable
-        capture task, and an empty grid reads as "everything captured" rather than "nothing known".
+        Passing None or an empty tuple says so in words. An empty grid would read as "everything
+        captured" rather than "nothing known", and the mock it used to fall back to read as a
+        series someone had already taken.
         """
         if not sessions:
+            self.set_no_project(i18n.t("measNoTask"))
             return
         self._show_content()  # reverses a prior set_no_project(), a no-op otherwise
         self._sessions = tuple(sessions)
@@ -425,7 +432,12 @@ class MeasurementPanel(QWidget):
         # set_no_project() is active, or a language switch would silently bring the mock grid
         # back over a real "no project" state.
         if not self._no_project_active:
-            self.show_session(self._viewing_id)  # re-renders the banner text in the new language
+            self.show_session(self._viewing_id)
+        # ...and then hide it. `MEAS_SESSIONS` still builds the grid so the widget has its real
+        # shape (and the design/unit tests keep a fixture), but a project is not shown a capture
+        # series it never took: opening one and being met with "capture series v10" over invented
+        # channel names is the plan panel's retired demo plan in a second place.
+        self.set_no_project(i18n.t("measNoTask"))  # re-renders the banner text in the new language
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
 

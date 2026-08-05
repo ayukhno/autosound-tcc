@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel  # noqa: E402
-from autosound_tcc.ui.tcc.mock_data import MEAS, PLAN, PlanStep, sessions_for_step  # noqa: E402
+from autosound_tcc.ui.tcc.mock_data import MEAS, MEAS_SESSIONS, PLAN, PlanStep, sessions_for_step  # noqa: E402
 from autosound_tcc.ui.tcc.plan_panel import (  # noqa: E402
     _PhaseRow,
     _PhaseStepRow,
@@ -165,6 +165,7 @@ def i18n_tx(name_dict):
 def test_measurement_panel_builds_three_columns():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     assert len(MEAS.groups) == 3
     # one _MeasRow per item across all groups
     from autosound_tcc.ui.tcc.measurement_panel import _MeasRow

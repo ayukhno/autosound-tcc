@@ -277,7 +277,7 @@ def test_a_broken_profile_clears_panels_but_does_not_offer_create(tmp_path, monk
     assert window._plan_panel.plan == ()
 
 
-def test_found_profile_hides_create_button_and_leaves_mock_untouched(tmp_path, monkeypatch):
+def test_found_profile_hides_create_button_and_says_there_is_no_capture_task_yet(tmp_path, monkeypatch):
     """The success path must not accidentally clear panels meant to stay on their mock/real
     content -- this mirrors test_tree_renders_when_a_profile_and_ledger_are_present's fixture."""
     import json
@@ -303,7 +303,11 @@ def test_found_profile_hides_create_button_and_leaves_mock_untouched(tmp_path, m
     window = MainWindow()
 
     assert window._create_project_btn.isHidden()
-    assert window._meas_panel._no_project_label.isHidden()
+    # A profile and a ledger are not a capture task: that is derived from the phase, the glossary
+    # and the ledger version, and saying so beats the invented "capture series v10" that used to
+    # greet anyone opening a project.
+    assert not window._meas_panel._no_project_label.isHidden()
+    assert i18n.t("measNoTask") in window._meas_panel._no_project_label.text()
 
 
 def test_language_switch_does_not_bring_the_mock_grid_back():
