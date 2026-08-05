@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
 
-from autosound_tcc.core import config, ui_mode  # noqa: E402
+from autosound_tcc.core import config  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
 
@@ -229,47 +229,17 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     assert any("mic.calibration_file" in t for t in chip_texts)
 
 
-def test_view_mode_is_the_default_and_hides_control_only_affordances():
-    """TCC-TZ.md §8: default is `view`, a read-only reader -- no AI, no Start Session/Open
-    Terminal/model pickers."""
-    _app()
-    window = MainWindow()
-    assert window._ui_mode == "view"
-    for widget in _control_only_widgets(window):
-        assert widget.isHidden(), widget
-    assert window._dialog._composer.isHidden()
-
-
-def test_switching_to_control_mode_reveals_the_ai_affordances_and_persists():
+def test_every_affordance_is_present_because_v1_has_one_mode():
+    """The view/control switch is out of v1 (2026-08-05). It was meant to be the free tier's face
+    -- a reader over a project the skill drives from a terminal -- but it hid the terminal button
+    it existed for, and left "create project" visible even though the intake is an AI interview.
+    One mode until the free tier is a real product; `git log` has the switch if it comes back."""
     _app()
     window = MainWindow()
 
-    window._on_mode_selected("control")
-
-    assert window._ui_mode == "control"
     for widget in _control_only_widgets(window):
         assert not widget.isHidden(), widget
     assert not window._dialog._composer.isHidden()
-    assert ui_mode.get_mode(config.tcc_dir()) == "control"
-
-    # A fresh window against the same project dir picks up the persisted choice on launch.
-    window2 = MainWindow()
-    assert window2._ui_mode == "control"
-    for widget in _control_only_widgets(window2):
-        assert not widget.isHidden(), widget
-
-
-def test_mode_switch_is_independent_of_whether_a_profile_was_found():
-    """§8: "is there a project" and "which mode" are two independent questions -- switching to
-    control mode must not depend on (or be blocked by) a DSP profile ever having loaded."""
-    _app()
-    window = MainWindow()
-    assert window._left_status.isHidden() is False  # no profile in the isolated tmp project dir
-
-    window._on_mode_selected("control")
-
-    assert window._ui_mode == "control"
-    assert not window._session_btn.isHidden()
 
 
 def test_no_project_shows_create_button_and_clears_every_mock_panel():

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, contract_check, critic, terminal_launcher, ui_mode
+from autosound_tcc.core import config, contract_check, critic, terminal_launcher
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
@@ -266,10 +266,6 @@ class MainWindow(QMainWindow):
         self._diag_dialog: DiagnosticsDialog | None = None
         self._preset_override: str | None = self._settings.value("ui/preset", None)
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
-        # TCC-TZ.md §8: view/control is a property of the *project* (`.tcc/ui_mode.json`), not a
-        # global app preference like theme/zoom/lang above -- deliberately not QSettings, and
-        # deliberately a differently-named attribute from `self._mode` (the light/dark theme).
-        self._ui_mode: ui_mode.Mode = ui_mode.get_mode(config.tcc_dir())
         # Which project folder is actually open matters the moment you run TCC against more than
         # one (user request 2026-07-29) -- there's no in-app project switcher yet, only
         # AUTOSOUND_PROJECT_DIR/the QSettings-persisted choice, so the title is the only place
@@ -310,7 +306,6 @@ class MainWindow(QMainWindow):
         self._load_project()
         self._load_process()
         self._start_mcp_server()
-        self._apply_ui_mode()
 
         # One-shot REW-online probe (System-params dot); ongoing freshness comes from a real
         # Read/Scan on the measurement panel instead of a recurring poll here. Same escape hatch
@@ -373,24 +368,6 @@ class MainWindow(QMainWindow):
         self._version_label.setProperty("class", "phead-sub")
         layout.addWidget(self._version_label)
         layout.addStretch(1)
-
-        # TCC-TZ.md §8: two modes, always switchable, independent of whether a project/profile
-        # was found -- itemData carries the mode key, same pattern as the preset combo below.
-        self._mode_field_lbl = QLabel(i18n.t("modeLabel"))
-        self._mode_field_lbl.setProperty("class", "kv-lbl")
-        apply_caps(self._mode_field_lbl, spacing_px=1.2)
-        layout.addWidget(self._mode_field_lbl)
-
-        self._mode_combo = _mini_combo()
-        self._mode_combo.addItem(i18n.t("modeView"), "view")
-        self._mode_combo.addItem(i18n.t("modeControl"), "control")
-        idx = self._mode_combo.findData(self._ui_mode)
-        if idx >= 0:
-            self._mode_combo.setCurrentIndex(idx)
-        self._mode_combo.currentIndexChanged.connect(
-            lambda _idx: self._on_mode_selected(self._mode_combo.currentData())
-        )
-        layout.addWidget(self._mode_combo)
 
         # Always visible (not just in the no-project states) -- there's no watcher for a ledger
         # or profile that appears/changes on disk (a terminal-driven session finishes with no
@@ -1278,37 +1255,6 @@ class MainWindow(QMainWindow):
             self._mcp_server.stop()
         super().closeEvent(event)
 
-    def _on_mode_selected(self, mode: str) -> None:
-        if mode not in ("view", "control") or mode == self._ui_mode:
-            return
-        self._ui_mode = mode
-        ui_mode.set_mode(config.tcc_dir(), mode)
-        # Keeps the header combo correct even when this is reached other than by the user picking
-        # it (e.g. programmatically) -- a no-op when the combo is already the caller, since Qt
-        # only re-emits currentIndexChanged on an actual index change.
-        idx = self._mode_combo.findData(mode)
-        if idx >= 0 and self._mode_combo.currentIndex() != idx:
-            self._mode_combo.setCurrentIndex(idx)
-        self._apply_ui_mode()
-
-    def _apply_ui_mode(self) -> None:
-        """Show/hide the `control`-only affordances (TCC-TZ.md §8) -- everything else (DSP tree,
-        table, plan/measurement panels, feedback, theme/lang/zoom) is the "reader" surface and
-        stays visible in both modes."""
-        control = self._ui_mode == "control"
-        for widget in (
-            self._session_btn,
-            self._terminal_btn,
-            self._ai_main_lbl,
-            self._ai_main_combo,
-            self._ai_critic_lbl,
-            self._ai_critic_combo,
-            self._critic_status,
-        ):
-            widget.setVisible(control)
-        self._dialog.set_composer_visible(control)
-        self._mode_combo.setToolTip(i18n.t("modeControlTip" if control else "modeViewTip"))
-
     def _on_language_selected(self, lang: str) -> None:
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
@@ -1321,12 +1267,6 @@ class MainWindow(QMainWindow):
         observer registry, since the widget count is still small enough for that to be simple
         and correct."""
         self._theme_btn.setText("◐ " + i18n.t("theme"))
-        self._mode_field_lbl.setText(i18n.t("modeLabel"))
-        self._mode_combo.setItemText(0, i18n.t("modeView"))
-        self._mode_combo.setItemText(1, i18n.t("modeControl"))
-        self._mode_combo.setToolTip(
-            i18n.t("modeControlTip" if self._ui_mode == "control" else "modeViewTip")
-        )
         self._project_section.set_title(i18n.t("projectParams"))
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()
