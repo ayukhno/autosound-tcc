@@ -172,7 +172,7 @@ T: dict[Lang, dict[str, str]] = {
         "composer": "Message the Generator…",
         "send": "Send",
         "stop": "Stop",
-        "notVisible": "Not visible",
+        "notVisible": "I don't see that change",
         "notVisibleHint": "Tell the AI that something it changed did not show up here, so it "
                           "re-checks against disk instead of restating the claim.",
         "notVisibleSent": "Flagged for the AI: <b>something it reported is not visible here</b> "
@@ -374,7 +374,7 @@ T: dict[Lang, dict[str, str]] = {
         "composer": "Написати Генератору…",
         "send": "Надіслати",
         "stop": "Стоп",
-        "notVisible": "Не видно",
+        "notVisible": "Не бачу цієї зміни",
         "notVisibleHint": "Сказати ШІ, що зміна, про яку він відзвітував, тут не з'явилась — щоб "
                           "він перевірив по диску, а не повторював твердження.",
         "notVisibleSent": "Позначено для ШІ: <b>заявленого не видно в інтерфейсі</b> — він "
