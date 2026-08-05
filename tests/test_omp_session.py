@@ -476,3 +476,46 @@ def test_the_default_asks_about_every_write(tmp_path):
     }))
 
     assert session.bridge.requests != []
+
+
+EDITOR_FRAME = {
+    "type": "extension_ui_request",
+    "id": "e1",
+    "method": "editor",
+    "promptStyle": True,
+    "title": "What car and DSP are you using?\n\n○ Helix (Recommended)\n    Sedan with Helix\n"
+             "◉ Other (type your own)\n\nEnter your response:",
+}
+
+
+def test_a_free_text_editor_is_a_question(tmp_path):
+    """omp sends this after "Other (type your own)" is chosen. Unrecognised, it rendered as a card
+    with radio glyphs inside it and the turn sat there — read straight out of the frame log."""
+    session = _session(tmp_path)
+
+    events = session._handle(EDITOR_FRAME)
+
+    assert len(events) == 1
+    assert isinstance(events[0], Question)
+    assert events[0].id == "e1"
+    assert session.sent == []
+
+
+def test_the_widget_omp_drew_is_not_part_of_the_question(tmp_path):
+    """The options were already shown as buttons and the composer already says it is waiting."""
+    session = _session(tmp_path)
+
+    question = session._handle(EDITOR_FRAME)[0]
+
+    assert question.question == "What car and DSP are you using?"
+    assert "○" not in question.question
+    assert "Enter your response" not in question.question
+
+
+def test_an_editor_is_never_mistaken_for_a_permission(tmp_path):
+    """It has no options, and option-less frames used to fall to the gate."""
+    session = _session(tmp_path)
+
+    session._handle({**EDITOR_FRAME, "title": "Allow tool: something\n\nEnter your response:"})
+
+    assert session.bridge.requests == []

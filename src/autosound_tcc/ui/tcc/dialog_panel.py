@@ -651,6 +651,10 @@ class DialogPanel(QWidget):
         holder.setLayout(row)
         self._chat_layout.insertWidget(self._chat_layout.count() - 1, holder)
 
+        # A second question replaces the first: its buttons answer a frame omp has moved past.
+        if self._question_widgets is not None:
+            self._question_widgets.setParent(None)
+            self._question_widgets.deleteLater()
         self._pending_question = question.id
         self._question_widgets = holder
         self._input.setPlaceholderText(i18n.t("composerAnswer"))

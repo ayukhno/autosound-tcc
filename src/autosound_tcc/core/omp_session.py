@@ -60,6 +60,13 @@ RPC_PROTOCOL_VERSION = 2
 # that kind of UI"; leaving them unanswered stalls the agent.
 _CHROME_METHODS = frozenset({"setWidget", "setTitle", "set_editor_text", "notify"})
 
+# Free text. omp sends this after "Other (type your own)" is chosen, and puts the whole rendered
+# widget in the title -- the question, a recap of the options as ○/◉ lines, and "Enter your
+# response:". Unrecognised, it rendered as a question card with the radio glyphs inside it and the
+# turn sat there (frame log, 2026-08-05). The question is the first line; the rest is the widget
+# drawing itself, which the panel has already drawn its own way.
+_EDITOR_METHOD = "editor"
+
 # omp's own wording on a permission prompt. Matched together with the option shape, and a frame
 # that satisfies neither is still treated as a permission -- see `_is_permission`.
 _PERMISSION_TITLE_PREFIX = "Allow tool: "
@@ -280,9 +287,23 @@ class OmpSession:
         )
         return Question(
             id=str(frame.get("id") or ""),
-            question=str(frame.get("title") or ""),
+            question=OmpSession._question_text(frame),
             options=options,
         )
+
+    @staticmethod
+    def _question_text(frame: dict[str, Any]) -> str:
+        """The question, without the widget omp drew around it.
+
+        An `editor` title carries the option recap and "Enter your response:" as text. Those are
+        omp painting a terminal UI; the panel has already shown the options as buttons and the
+        composer already says it is waiting for an answer.
+        """
+        title = str(frame.get("title") or "")
+        if frame.get("method") != _EDITOR_METHOD:
+            return title
+        head = title.split("\n\n", 1)[0].strip()
+        return head or title.strip()
 
     @staticmethod
     def _tool_and_detail(frame: dict[str, Any]) -> tuple[str, str]:
@@ -416,7 +437,7 @@ class OmpSession:
             if method in _CHROME_METHODS:
                 self._send({"type": "extension_ui_response", "id": frame.get("id"), "cancelled": True})
                 return []
-            if self._is_permission(frame):
+            if method != _EDITOR_METHOD and self._is_permission(frame):
                 task = asyncio.create_task(self._gate(frame))
                 self._pending.add(task)
                 task.add_done_callback(self._pending.discard)
