@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
@@ -881,3 +883,64 @@ def test_the_menu_explains_what_the_labels_cannot(monkeypatch):
     assert "same model" in tip or "тій самій" in tip
     assert window._save_state_action.toolTip()
     assert window._open_project_action.toolTip()
+
+
+def test_choosing_a_different_folder_relaunches_rather_than_pretending(monkeypatch, tmp_path):
+    """"Remembered for next time" is not what anyone means by choosing a folder — reported as
+    "even after Open folder it stayed where it was"."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    target = tmp_path / "other-car"
+    target.mkdir()
+    monkeypatch.setattr(
+        main_window.QFileDialog, "getExistingDirectory", lambda *a, **kw: str(target)
+    )
+    monkeypatch.setattr(MainWindow, "_confirm_switch", lambda self, folder: True)
+    started = {}
+    monkeypatch.setattr(
+        main_window.QProcess, "startDetached",
+        lambda program, argv: started.update(program=program, argv=argv) or True,
+    )
+    monkeypatch.setattr(MainWindow, "close", lambda self: started.update(closed=True))
+
+    window._choose_project_folder()
+
+    assert "--project-dir" in started["argv"]
+    assert str(target) in started["argv"]
+    assert started.get("closed") is True
+
+
+def test_a_refused_switch_changes_nothing(monkeypatch, tmp_path):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    before = config.chosen_project_dir()
+    target = tmp_path / "not-this-one"
+    target.mkdir()
+    monkeypatch.setattr(
+        main_window.QFileDialog, "getExistingDirectory", lambda *a, **kw: str(target)
+    )
+    monkeypatch.setattr(MainWindow, "_confirm_switch", lambda self, folder: False)
+    monkeypatch.setattr(
+        main_window.QProcess, "startDetached", lambda *a, **kw: pytest.fail("must not relaunch")
+    )
+
+    window._choose_project_folder()
+
+    assert config.chosen_project_dir() == before
+
+
+def test_picking_the_folder_already_open_is_a_no_op(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    current = config.chosen_project_dir()
+    monkeypatch.setattr(
+        main_window.QFileDialog, "getExistingDirectory", lambda *a, **kw: str(current)
+    )
+    monkeypatch.setattr(
+        MainWindow, "_confirm_switch", lambda self, folder: pytest.fail("nothing to confirm")
+    )
+
+    window._choose_project_folder()

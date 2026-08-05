@@ -267,9 +267,7 @@ class DialogPanel(QWidget):
         composer_layout.setContentsMargins(9, 9, 9, 9)
         composer_layout.setSpacing(8)
         self._input = QLineEdit()
-        # Says "prototype — doesn't send" until an agent is attached, so the mock transcript never
-        # looks like a live conversation the user can talk to.
-        self._input.setPlaceholderText(i18n.t("composerMock"))
+        self._input.setPlaceholderText(i18n.t("composer"))
         self._input.setProperty("class", "composer-input")
         composer_layout.addWidget(self._input, stretch=1)
         self._send_btn = QPushButton(i18n.t("send"))

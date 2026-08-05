@@ -135,13 +135,18 @@ class ProjectGateDialog(QDialog):
         self.accept()
 
 
-def ensure_project_chosen(parent=None) -> bool:
+def ensure_project_chosen(parent=None, force: bool = False) -> bool:
     """Gate the launch. True if a project is chosen (already, or now); False if the user backed out.
 
     Nothing else in the window is meaningful without one -- an unanswered gate has to stop the
     launch rather than fall through to a folder nobody picked.
+
+    `force` is `--choose-project`. Without it a remembered choice wins silently, which is right
+    almost always and surprising exactly once: launching from inside a different folder changes
+    nothing, because TCC does not read the working directory. `--project-dir .` is the answer to
+    that, and this is the answer when the remembered one should simply be re-asked.
     """
-    if config.chosen_project_dir() is not None:
+    if not force and config.chosen_project_dir() is not None:
         return True
     dialog = ProjectGateDialog(parent)
     return dialog.exec() == QDialog.DialogCode.Accepted and dialog.folder is not None

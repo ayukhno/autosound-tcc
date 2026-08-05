@@ -11,8 +11,19 @@ section gets wired to real data, but the outer structure built here should not n
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, QPoint, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import (
+    QFileSystemWatcher,
+    QPoint,
+    QProcess,
+    QThread,
+    QTimer,
+    QUrl,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +35,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QFileDialog,
     QMenu,
+    QMessageBox,
     QToolButton,
     QPushButton,
     QSplitter,
@@ -1532,15 +1544,45 @@ class MainWindow(QMainWindow):
         watchers and every panel bind to one folder at startup, so a live swap would be a partial
         teardown pretending to be a setting -- the user is told to open TCC again instead.
         """
-        start = config.chosen_project_dir() or Path.home()
+        previous = config.chosen_project_dir()
+        start = previous or Path.home()
         picked = QFileDialog.getExistingDirectory(self, i18n.t("projectOpen"), str(start))
         if not picked:
             return
-        previous = config.chosen_project_dir()
-        config.set_project_dir(Path(picked))
-        self._refresh_project_button()
-        if previous is not None and Path(picked) != previous:
+        folder = Path(picked)
+        if previous is not None and folder == previous:
+            return
+        # Switching cannot happen in place -- see the docstring -- but "remembered for next time"
+        # is not what anyone means by choosing a folder, and a line in the status strip is easy to
+        # miss: the window simply stayed where it was, which is how this was reported. So TCC
+        # relaunches itself on the new folder, once the Arbiter says it may.
+        if not self._confirm_switch(folder):
+            return
+        config.set_project_dir(folder)
+        self._relaunch_on(folder)
+
+    def _confirm_switch(self, folder: Path) -> bool:
+        answer = QMessageBox.question(
+            self,
+            i18n.t("projectSwitchTitle"),
+            i18n.t("projectSwitchBody").format(name=folder.name),
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Ok,
+        )
+        return answer == QMessageBox.StandardButton.Ok
+
+    def _relaunch_on(self, folder: Path) -> None:
+        """Start a second TCC on `folder` and close this one.
+
+        `--project-dir` rather than trusting the remembered choice, so the new process lands where
+        the user pointed even if something else rewrites the setting in between.
+        """
+        argv = [] if getattr(sys, "frozen", False) else [sys.argv[0]]
+        argv += ["--project-dir", str(folder)]
+        if not QProcess.startDetached(sys.executable, argv):
             self._status_strip.notify(i18n.t("projectReopen"), level="warn")
+            return
+        self.close()
 
     def _save_project_state(self) -> None:
         """Ask the running model to put what it knows on disk, and keep talking."""
