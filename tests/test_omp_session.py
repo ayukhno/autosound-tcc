@@ -521,13 +521,27 @@ def test_an_editor_is_never_mistaken_for_a_permission(tmp_path):
     assert session.bridge.requests == []
 
 
-def test_a_widget_omp_opens_is_named_rather_than_swallowed(tmp_path):
-    """"It went off somewhere and I don't know what it is analysing" — that was omp starting its
-    own `autoresearch`, cancelled silently by the host."""
+def test_clearing_a_widget_is_not_reported_as_activity(tmp_path):
+    """A `setWidget` with no `widgetLines` is omp's *remove this widget* branch — read out of its
+    own bridge, and the shape of all 8 in a real capture. Named on the activity line it announced
+    work starting at the exact moment omp said there was none: "⟳ omp:autoresearch…" is where the
+    belief that something was off researching came from."""
     session = _session(tmp_path)
 
     events = session._handle({"type": "extension_ui_request", "id": "w1",
                               "method": "setWidget", "widgetKey": "autoresearch"})
+
+    assert events == []
+    assert session.sent[0]["cancelled"] is True
+
+
+def test_a_widget_that_actually_shows_something_is_named(tmp_path):
+    """The other branch: static lines mean omp is displaying a panel of its own, and cancelling
+    that silently is how "it went off somewhere" would really look."""
+    session = _session(tmp_path)
+
+    events = session._handle({"type": "extension_ui_request", "id": "w2", "method": "setWidget",
+                              "widgetKey": "autoresearch", "widgetLines": ["running..."]})
 
     assert [e.name for e in events] == ["omp:autoresearch"]
     assert session.sent[0]["cancelled"] is True
@@ -548,3 +562,141 @@ def test_the_overlay_turns_off_ompsown_researcher(tmp_path):
     overlay = open(session._argv()[session._argv().index("--config") + 1]).read()
 
     assert "web_search" in overlay and "enabled: false" in overlay
+
+
+def test_a_tool_that_returned_stops_the_activity_line(tmp_path):
+    """`tool_execution_end` was on the wire and dropped, so the last tool of a turn kept spinning
+    for as long as the window was open and a stalled turn looked exactly like a busy one."""
+    from autosound_tcc.core.agent_events import ToolEnd
+
+    session = _session(tmp_path)
+
+    events = session._handle({"type": "tool_execution_end", "toolName": "read"})
+
+    assert events == [ToolEnd(name="read")]
+
+
+# ---- what the model is allowed to see ---------------------------------------
+
+
+def test_the_model_is_shown_one_skill_not_the_users_library(tmp_path):
+    """Measured off omp's own request: 75 skills and 12.5 KB of other people's descriptions in
+    every call — including a second `autosound-tuning` from `~/.claude/skills` that TCC does not
+    control and that still has the unfixed `file:///skills/...` addressing. This is the omp half
+    of the SDK adapter's `setting_sources=["project"]`."""
+    session = _session(tmp_path)
+
+    overlay = open(session._argv()[session._argv().index("--config") + 1]).read()
+
+    assert "enableClaudeUser: false" in overlay
+    assert "enableClaudeProject: true" in overlay  # the project's own link still counts
+    assert 'includeSkills: ["autosound-tuning"]' in overlay
+
+
+def test_the_session_runs_in_its_own_omp_profile(tmp_path):
+    """Its own settings, sessions and caches, so a tuning session is not affected by what the user
+    did to their own omp — and free, because the credential path is the environment.
+
+    It does *not* isolate MCP servers: a first measurement said so and was wrong (a cold profile
+    has not connected them yet). That is recorded in `_argv` rather than fixed, because omp 17.2.5
+    has no switch for the `~/.claude.json` source."""
+    argv = OmpSession(project_dir=tmp_path)._argv()
+
+    assert argv[argv.index("--profile") + 1] == omp_session_module.OMP_PROFILE
+
+
+def test_a_project_with_no_skill_is_called_out_before_the_turn(tmp_path):
+    """Without the skill a session does not fail, it improvises — which is worse. Seen whole: the
+    model followed a dead `file:///skills/...` reference, hunted the disk with three globs and an
+    eight-minute `grep`, then invented an intake of its own."""
+    session = _session(tmp_path)
+
+    warning = session.skill_warning()
+
+    assert warning is not None and ".claude/skills/autosound-tuning" in warning
+
+
+def test_a_project_with_the_skill_linked_says_nothing(tmp_path):
+    link = tmp_path / ".claude" / "skills"
+    link.mkdir(parents=True)
+    (link / "autosound-tuning").mkdir()
+    session = _session(tmp_path)
+
+    assert session.skill_warning() is None
+
+
+def test_a_google_model_with_no_key_is_flagged_before_the_turn(tmp_path, monkeypatch):
+    """The failure is silent: without a key omp returns an empty answer and no error. A bundle
+    started from the Finder inherits no shell environment, so "works in my terminal" proves
+    nothing about the shipped app."""
+    for name in omp_session_module._GOOGLE_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+    session = OmpSession(project_dir=tmp_path, model="gemini-3.1-pro-preview")
+
+    warning = session.credential_warning()
+
+    assert warning is not None and "GEMINI_API_KEY" in warning
+
+
+def test_the_key_omp_actually_reads_counts(tmp_path, monkeypatch):
+    """`GEMINI_API_KEY`, checked in omp's binary — not the `GOOGLE_GENERATIVE_AI_API_KEY` the
+    OpenCode spike needed, which is a different harness's variable."""
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    session = OmpSession(project_dir=tmp_path, model="gemini-3.1-pro-preview")
+
+    assert session.credential_warning() is None
+
+
+def test_a_non_google_model_is_not_second_guessed(tmp_path, monkeypatch):
+    """omp has its own broker for everything else; TCC does not audit it."""
+    for name in omp_session_module._GOOGLE_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    assert OmpSession(project_dir=tmp_path, model="glm-4.7").credential_warning() is None
+
+
+def test_chrome_after_the_last_round_does_not_reopen_the_turn(tmp_path):
+    """A real turn ended with prose, `turn_end`, and 30 ms later a `setWidget` clearing omp's own
+    dashboard. Under "anything that is not turn_end is work" that cancelled the grace period, and
+    nothing ever came after it — the exchange stayed open for eight minutes on a finished turn."""
+    session = _session(tmp_path)
+    session._handle({"type": "turn_end", "message": {}})
+
+    session._handle({"type": "extension_ui_request", "id": "w9", "method": "setWidget",
+                     "widgetKey": "autoresearch"})
+
+    assert session._round_ended_at > 0  # still counting down to the end
+
+
+def test_a_frame_type_nobody_knows_does_not_reopen_the_turn_either(tmp_path):
+    """The list is of activity, not of exceptions: an unknown frame that reopens a finished turn
+    is a hang, and one that lets it close early costs 2.5s of true silence."""
+    session = _session(tmp_path)
+    session._handle({"type": "turn_end", "message": {}})
+
+    session._handle({"type": "some_future_frame"})
+
+    assert session._round_ended_at > 0
+
+
+def test_real_work_still_cancels_the_grace_period(tmp_path):
+    session = _session(tmp_path)
+    session._handle({"type": "turn_end", "message": {}})
+
+    session._handle({"type": "tool_execution_start", "toolName": "read"})
+
+    assert session._round_ended_at == 0
+
+
+def test_the_harness_offers_no_plan_of_its_own(tmp_path):
+    """`todo` is omp's own checklist, and given a checklist to hold the model reached for it
+    instead of the skill's plan — that run wrote **zero** journal events while looking organised
+    in the transcript. Same model, same prompt, with `todo` gone: phase entered and eight steps
+    added through `mcp__tcc_*`, nine journal events. The plan has one home."""
+    argv = OmpSession(project_dir=tmp_path)._argv()
+
+    enabled = argv[argv.index("--tools") + 1].split(",")
+
+    assert "todo" not in enabled
+    assert "task" not in enabled and "hub" not in enabled  # no unobserved sub-agents either
+    assert {"read", "glob", "grep", "bash", "write", "edit", "ask"} <= set(enabled)

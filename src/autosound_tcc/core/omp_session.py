@@ -26,12 +26,23 @@ written (`spike/rpc_driver.py`, and the frame capture behind the constants below
 Known and deliberate: omp's permission frame and its question frame are *the same frame* —
 `method: "select"`, no discriminator — so they are told apart by shape, conservatively. See
 `_is_permission`.
+
+**The one invariant this file exists to keep: every `extension_ui_request` is answered exactly
+once.** omp blocks inside the tool that raised the frame, so an unanswered one is not a dropped
+message — it is the turn stopping forever, and it looks identical to a crash, a slow model and a
+hung window. Five separate "hangs" in one day were the same defect wearing different frames
+(`turn_end`, `setWidget`, `editor`, `cancel`, and a disabled composer), each found only after the
+fact. So the adapter no longer works from a list of frames it recognises: `_read_frames` checks,
+for every request, that it was answered, parked as a question, or handed to the gate, and anything
+left over is cancelled and **named on the activity line**. An unknown frame costs one cancelled
+widget and one visible word; it can no longer cost a session.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import shutil
 import time
@@ -41,16 +52,45 @@ from typing import Any, AsyncIterator, Optional
 from autosound_tcc.core import config, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
+    Notice,
     Question,
     QuestionOption,
+    QuestionWithdrawn,
     TextDelta,
     ToolCall,
+    ToolEnd,
     TurnEnd,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
-from autosound_tcc.core.tuning_session import bash_is_read_only
+from autosound_tcc.core.tuning_session import SKILL_NAME, bash_is_read_only
 
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
+
+# The omp profile TCC runs sessions in. Named rather than default so a tuning session cannot pick
+# up the user's own MCP servers -- see `_argv`.
+OMP_PROFILE = "tcc"
+
+# What omp reads for a Google model, checked in its binary rather than assumed: `GEMINI_API_KEY`
+# and `GOOGLE_API_KEY`, *not* the `GOOGLE_GENERATIVE_AI_API_KEY` that OpenCode wanted. Worth
+# checking before the turn because the failure is silent -- no key means an empty answer and no
+# error -- and because a double-clicked app bundle inherits almost no environment at all.
+_GOOGLE_KEY_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+# omp's built-in tools a tuning session may use. An allowlist because of what the *rest* of them
+# do to the method, and `todo` is the case that proves it: given a checklist to hold, the model
+# reached for omp's own todo list instead of the skill's plan, and a plan that lives in the
+# harness is invisible to the panel, to `process-state.json` and to the Arbiter -- the run that
+# did this wrote **zero** journal events while looking, in the transcript, like it was organised.
+# The skill's plan has exactly one home (`mcp__tcc_add_step` / `process.py`), so nothing else may
+# offer one. `task`/`hub` spawn sub-agents that would run the method unobserved, `eval`/`debug`/
+# `lsp`/`ast_edit` are code-editing tools with no meaning here, and `web_search` is the researcher
+# the overlay already turns off.
+#
+# Not filtered by this: `mcp__*` tools, which omp rejects as names here -- TCC's own surface is
+# scoped by the profile instead.
+_ENABLED_TOOLS = (
+    "read", "write", "edit", "glob", "grep", "bash", "ask", "inspect_image",
+)
 
 # The version omp actually accepts. It advertises `[1, 2]` in its `ready` frame and then rejects 1
 # with "Unsupported RPC protocol version" -- checked, not assumed.
@@ -60,12 +100,25 @@ RPC_PROTOCOL_VERSION = 2
 # that kind of UI"; leaving them unanswered stalls the agent.
 _CHROME_METHODS = frozenset({"setWidget", "setTitle", "set_editor_text", "notify"})
 
+# omp taking back a frame it raised earlier; `targetId` says which. Seen in the frame log after an
+# abort: the editor omp had opened was withdrawn, and the card for it was still on screen with
+# buttons that answered nothing. Unhandled it was worse than useless -- an unknown method fell
+# through to "this is a question", so an empty card replaced the real one and was never answered.
+_CANCEL_METHOD = "cancel"
+
+
 # Free text. omp sends this after "Other (type your own)" is chosen, and puts the whole rendered
 # widget in the title -- the question, a recap of the options as ○/◉ lines, and "Enter your
 # response:". Unrecognised, it rendered as a question card with the radio glyphs inside it and the
 # turn sat there (frame log, 2026-08-05). The question is the first line; the rest is the widget
 # drawing itself, which the panel has already drawn its own way.
 _EDITOR_METHOD = "editor"
+
+# Frames that carry something to put in front of the Arbiter. Everything outside these, the chrome
+# above and `cancel` is unknown -- and unknown is cancelled and named, never left to sit.
+_SELECT_METHOD = "select"
+_CONFIRM_METHOD = "confirm"
+_QUESTION_METHODS = frozenset({_SELECT_METHOD, _EDITOR_METHOD, _CONFIRM_METHOD})
 
 # omp's own wording on a permission prompt. Matched together with the option shape, and a frame
 # that satisfies neither is still treated as a permission -- see `_is_permission`.
@@ -90,6 +143,23 @@ _ASK_TOOL = "ask"
 _EXCHANGE_END = "agent_end"
 _ROUND_END = "turn_end"
 TURN_QUIET_S = 2.5
+
+# omp retrying the model on its own. Invisible until now, and it is minutes: seven attempts over
+# 106 seconds on `MALFORMED_FUNCTION_CALL` from a small model, with nothing on the wire but empty
+# messages. A window that shows none of that is a window that looks broken while omp is coping.
+_RETRY_START = "auto_retry_start"
+_RETRY_END = "auto_retry_end"
+
+
+# What counts as the exchange still moving, and therefore cancels the grace period above. Named
+# rather than inferred from "not `turn_end`": omp's chrome arrives *after* the last round -- a
+# `setWidget` clearing its own dashboard 30 ms behind the final `turn_end` -- and treating that as
+# work reopened a turn that was finished, with nothing else ever coming. Measured that way.
+_ACTIVITY_TYPES = frozenset({
+    "message_start", "message_update", "message_end",
+    "tool_execution_start", "tool_execution_update", "tool_execution_end",
+    "turn_start", "agent_start", _RETRY_START, _RETRY_END,
+})
 
 # Tools that only look. Auto-approved because `--approval-mode always-ask` otherwise puts a
 # dialog in front of every file the skill opens -- and the skill is built on opening files, so the
@@ -117,6 +187,10 @@ SETTLE_CAP_S = 45.0
 # frames are the only place those are visible, and they are cheap to keep.
 FRAME_LOG = "omp-frames.jsonl"
 FRAME_LOG_MAX_BYTES = 4_000_000
+# Big frames are shrunk field by field rather than by cutting the line, so every line parses --
+# see `_shrink`.
+FRAME_VALUE_MAX_CHARS = 600
+FRAME_LIST_MAX_ITEMS = 24
 
 # How long a turn may produce nothing before the window says so. Not a timeout -- nothing is
 # cancelled -- but "it has been silent for two minutes" is a fact the Arbiter can act on, and
@@ -147,6 +221,27 @@ _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.jso
                 "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
 
 
+def _shrink(value: Any, limit: int = FRAME_VALUE_MAX_CHARS, depth: int = 0) -> Any:
+    """A frame small enough to log, still valid JSON.
+
+    The first version of the log capped the *serialised line* instead, which cut it mid-string and
+    left 64 of 681 lines unparseable -- and they were the interesting ones, since only the big
+    frames reached the cap. A record that cannot be read back is not a record, and this file's own
+    replay test reads it back. So long strings are cut and long lists are cut, and the envelope
+    always closes.
+    """
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "…"
+    if depth >= 6:
+        return "…"
+    if isinstance(value, list):
+        head = [_shrink(item, limit, depth + 1) for item in value[:FRAME_LIST_MAX_ITEMS]]
+        return head + ["…"] if len(value) > FRAME_LIST_MAX_ITEMS else head
+    if isinstance(value, dict):
+        return {key: _shrink(item, limit, depth + 1) for key, item in value.items()}
+    return value
+
+
 class OmpNotInstalledError(RuntimeError):
     """`omp` is not on PATH. Fix: `brew install can1357/tap/omp`."""
 
@@ -171,12 +266,27 @@ def overlay_path(project_dir: Path) -> Path:
         "# the model's function list -- measured, see spike/HANDOFF.md 5-bis.\n"
         "#\n"
         "# web_search: a tuning session answers questions by measuring, not by reading the web.\n"
-        "# Left on, omp starts its own `autoresearch` mid-turn -- seen in the frame log as a\n"
-        "# `setWidget` for it, after which the wire goes quiet for minutes while it works. The\n"
-        "# skill has its own knowledge files and its own Critic; this is a second, unasked-for\n"
-        "# researcher spending the tokens the harness was chosen to save.\n"
+        "# The skill has its own knowledge files and its own Critic, so a second, unasked-for\n"
+        "# researcher would spend exactly the tokens this harness was chosen to save.\n"
+        "#\n"
+        "# NOT the explanation for the quiet turns, though an earlier reading of this file said so:\n"
+        "# every `setWidget autoresearch` in a real capture carries no `widgetLines`, which in\n"
+        "# omp's own bridge is the *clear the widget* branch. It was announcing the absence of a\n"
+        "# researcher, not the presence of one. Kept because the setting is right on its merits.\n"
         "tools:\n  xdev: false\n"
-        "web_search:\n  enabled: false\n",
+        "web_search:\n  enabled: false\n"
+        "#\n"
+        "# skills: the model is shown one skill, not the user's library. Measured against omp's\n"
+        "# own request: 75 skills and 12.5 KB of other people's descriptions in every call, and\n"
+        "# among them a second `autosound-tuning` from ~/.claude/skills that TCC does not control.\n"
+        "# This is the omp half of what the SDK adapter gets from `setting_sources=[\"project\"]`.\n"
+        "skills:\n"
+        "  enableClaudeUser: false\n"
+        "  enableCodexUser: false\n"
+        "  enablePiUser: false\n"
+        "  enableAgentsUser: false\n"
+        "  enableClaudeProject: true\n"
+        f"  includeSkills: [\"{SKILL_NAME}\"]\n",
         encoding="utf-8",
     )
     return path
@@ -211,6 +321,21 @@ class OmpSession:
         self._last_frame_at = 0.0
         # When the last round ended, or 0 if a round is in flight -- see `_ROUND_END`.
         self._round_ended_at = 0.0
+        # The three states a request can be in, and there is no fourth. `_answered` is done,
+        # `_parked` is with the Arbiter as a question, `_gating` is with the Arbiter as a
+        # permission. A request in none of them after `_handle` is a frame this adapter did not
+        # understand, and `_read_frames` will not let it stay that way.
+        self._answered: set[str] = set()
+        self._parked: set[str] = set()
+        self._gating: set[str] = set()
+        # The tool omp is inside right now, "" when it is between tools. A turn that goes quiet is
+        # a different fact depending on this: a model thinking, or a `grep` that has been running
+        # for eight minutes (measured, on a pattern with no path).
+        self._running_tool = ""
+        self._retrying = False
+        self._ready = asyncio.Event()
+        self._saw_ready = False
+        self._ended = asyncio.Event()
 
     # ---- wire --------------------------------------------------------------
 
@@ -223,6 +348,23 @@ class OmpSession:
             self.model,
             "--approval-mode",
             "always-ask",
+            # Its own settings, sessions and caches, so a tuning session is not affected by what
+            # the user did to their own omp. Cheap: the credential broker is per profile, but the
+            # working path is the environment (`GEMINI_API_KEY`), which every profile shares.
+            #
+            # **It does NOT isolate MCP servers, despite a first measurement that said it did.**
+            # That reading was a cold cache: a fresh profile has not connected the servers omp
+            # imports from `~/.claude.json` yet, so an early request sees a short catalogue. Once
+            # warm they are all back -- 166 foreign tools on this machine, 156 of them Home
+            # Assistant, ~600 KB of schemas in every call. omp 17.2.5 has no switch for that
+            # source: `mcp.enableProjectConfig` governs the project file only, the per-source
+            # toggles exist for skills and not for MCP, and `disabledExtensions` was tried and has
+            # no effect. What is left is the user's own `~/.claude.json` -- servers declared at the
+            # top level load in every directory, the same ones scoped to a project do not.
+            "--profile",
+            OMP_PROFILE,
+            "--tools",
+            ",".join(_ENABLED_TOOLS),
             "--config",
             str(overlay_path(self.project_dir)),
             # Sessions live with the project, so resuming is "continue this project's last one"
@@ -250,10 +392,29 @@ class OmpSession:
             if path.exists() and path.stat().st_size > FRAME_LOG_MAX_BYTES:
                 path.unlink()
             with path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"t": time.time(), "dir": direction, "frame": frame},
-                                     ensure_ascii=False)[:8000] + "\n")
+                fh.write(json.dumps({"t": time.time(), "dir": direction,
+                                     "frame": _shrink(frame)}, ensure_ascii=False) + "\n")
         except OSError:
             pass
+
+    # ---- responses ----------------------------------------------------------
+
+    def _respond(self, frame_id: Any, payload: dict[str, Any]) -> None:
+        """The only way a response leaves this adapter, so "exactly once" is a property of the
+        code and not of everyone remembering.
+
+        A second answer to the same id is dropped rather than sent: omp has moved on, and the
+        stale one lands on whatever it raised next. That is how a permission got answered with a
+        question's text.
+        """
+        key = str(frame_id or "")
+        if key and key in self._answered:
+            return
+        if key:
+            self._answered.add(key)
+            self._parked.discard(key)
+            self._gating.discard(key)
+        self._send({"type": "extension_ui_response", "id": frame_id, **payload})
 
     def _next_id(self) -> str:
         self._frame_id += 1
@@ -407,17 +568,21 @@ class OmpSession:
         return None
 
     def _answer_frame(self, frame: dict[str, Any], allowed: bool) -> None:
-        if frame.get("method") == "confirm":
-            self._send({"type": "extension_ui_response", "id": frame.get("id"), "confirmed": allowed})
+        if frame.get("method") == _CONFIRM_METHOD:
+            self._respond(frame.get("id"), {"confirmed": allowed})
         else:
-            self._send(
-                {"type": "extension_ui_response", "id": frame.get("id"),
-                 "value": "Approve" if allowed else "Deny"}
-            )
+            self._respond(frame.get("id"), {"value": "Approve" if allowed else "Deny"})
 
     # ---- reading ------------------------------------------------------------
 
     async def _read_frames(self) -> None:
+        """Own stdout, from the first byte to EOF.
+
+        Everything that reads frames reads them here. Startup used to have two readers of its own
+        -- one waiting for `ready`, one waiting for the wire to go quiet -- and both dropped every
+        frame they were not looking for, unanswered and unlogged. That is a hang that leaves no
+        trace at all: the frame is not in the log, because the log is written here.
+        """
         proc = self._proc
         assert proc is not None and proc.stdout is not None
         async for raw in proc.stdout:
@@ -432,31 +597,28 @@ class OmpSession:
             self._log("in", frame)
             for event in self._handle(frame):
                 await self._events.put(event)
+        self._ended.set()
+        self._ready.set()  # nothing more is coming; unblock a startup still waiting for it
         await self._events.put(None)  # the process ended; unblock whoever is draining
 
     def _handle(self, frame: dict[str, Any]) -> list[AgentEvent]:
         kind = frame.get("type")
-        # Any frame that is not the end of a round means the exchange is still moving, so the
-        # grace period restarts. Set here rather than at the bottom: most branches return early.
-        if kind != _ROUND_END:
+        # Only work restarts the grace period, and "work" is a list rather than "anything that is
+        # not `turn_end`". omp sends chrome after the last round -- a real turn ended with prose,
+        # `turn_end`, and then a `setWidget` clearing its own dashboard 30 ms later, which under
+        # the old rule cancelled the grace and left the exchange open forever. The window sat
+        # there for eight minutes on a turn that was complete.
+        if kind in _ACTIVITY_TYPES:
             self._round_ended_at = 0.0
 
+        if kind == "ready":
+            self._saw_ready = True
+            self._ready.set()
+            return []
+
         if kind == "extension_ui_request":
-            method = frame.get("method")
-            if method in _CHROME_METHODS:
-                self._send({"type": "extension_ui_response", "id": frame.get("id"), "cancelled": True})
-                # A widget is omp starting something of its own -- `autoresearch` is the one that
-                # turns up. Cancelling it is right (TCC is not that kind of UI) but doing so
-                # silently is how "it went off somewhere and I don't know what it is analysing"
-                # happens. Name it on the activity line instead.
-                key = str(frame.get("widgetKey") or "")
-                return [ToolCall(name=f"omp:{key}")] if key else []
-            if method != _EDITOR_METHOD and self._is_permission(frame):
-                task = asyncio.create_task(self._gate(frame))
-                self._pending.add(task)
-                task.add_done_callback(self._pending.discard)
-                return []
-            return [self._question_from(frame)]
+            events = self._handle_request(frame)
+            return events + self._ensure_answered(frame)
 
         if kind == "message_update":
             event = frame.get("assistantMessageEvent") or {}
@@ -469,7 +631,40 @@ class OmpSession:
             if not name or name == _ASK_TOOL:
                 # `ask` is rendered as the question it raises, not as a process chip as well.
                 return []
+            # Kept so a silent turn can say what it is silent *inside* -- see `_prompt`.
+            self._running_tool = name
             return [ToolCall(name=name, arguments=dict(frame.get("args") or {}))]
+
+        if kind == "tool_execution_end":
+            # What stops the activity line moving. Without it the last tool of a turn appeared to
+            # be running forever, which is how a stalled turn came to look like a busy one.
+            self._running_tool = ""
+            return [ToolEnd(name=str(frame.get("toolName") or ""))]
+
+        if kind == _RETRY_START:
+            # omp fighting the model, which it does silently: seven attempts over 106 seconds,
+            # nothing on the wire but empty messages, and a window with nothing to show. The cause
+            # is in the frame -- `MALFORMED_FUNCTION_CALL` from a small model -- and it is the
+            # difference between "this is broken" and "this is being retried".
+            attempt = frame.get("attempt")
+            self._retrying = True
+            if attempt != 1:
+                return []  # one line per storm, not one per attempt
+            reason = str(frame.get("errorMessage") or "").strip()
+            budget = frame.get("maxAttempts")
+            return [Notice(
+                f"The model's answer came back broken; omp is retrying (up to {budget}). {reason}"
+                if reason else f"omp is retrying the model (up to {budget})."
+            )]
+
+        if kind == _RETRY_END:
+            if not self._retrying:
+                return []
+            self._retrying = False
+            attempt = frame.get("attempt")
+            if frame.get("success"):
+                return [Notice(f"omp got an answer on attempt {attempt}.")]
+            return [Notice(f"omp gave up retrying after attempt {attempt}.")]
 
         if kind == _EXCHANGE_END:
             return [TurnEnd()]
@@ -478,13 +673,101 @@ class OmpSession:
             self._round_ended_at = time.time()
             return []
 
+        if kind == "response" and frame.get("success") is False:
+            # omp's answer to something TCC sent, and the only place it says no. A rejected
+            # `negotiate_protocol` is exactly this shape ("Unsupported RPC protocol version") and
+            # leaves a session that is up, connected and permanently silent -- so it gets said out
+            # loud rather than dropped for being an outbound frame's business.
+            reason = frame.get("error") or frame.get("message") or ""
+            return [Notice(f"omp refused `{frame.get('command')}`: {reason}")]
+
         return []
+
+    def _handle_request(self, frame: dict[str, Any]) -> list[AgentEvent]:
+        """One request in; the response goes out here or the frame is parked, never neither.
+
+        The methods are handled by name and the last branch is the point of the whole thing: a
+        method this adapter has never seen is cancelled and said out loud. Five hangs in a day
+        came from the opposite default -- the frame we did not recognise fell through to "this
+        must be a question", so it waited for an answer nobody could give, and the only evidence
+        was a window doing nothing.
+        """
+        method = str(frame.get("method") or "")
+
+        if method in _CHROME_METHODS:
+            self._respond(frame.get("id"), {"cancelled": True})
+            return self._widget_events(frame)
+
+        if method == _CANCEL_METHOD:
+            # omp taking its own frame back. The card for it is still on screen with buttons that
+            # answer nothing, so say so; the withdrawal itself is answered like any other request.
+            target = str(frame.get("targetId") or "")
+            self._respond(frame.get("id"), {"cancelled": True})
+            if target and target in self._parked:
+                self._parked.discard(target)
+                self._answered.add(target)
+                return [QuestionWithdrawn(id=target)]
+            return []
+
+        if method in _QUESTION_METHODS:
+            if method != _EDITOR_METHOD and self._is_permission(frame):
+                self._gating.add(str(frame.get("id") or ""))
+                task = asyncio.create_task(self._gate(frame))
+                self._pending.add(task)
+                task.add_done_callback(self._pending.discard)
+                return []
+            question = self._question_from(frame)
+            self._parked.add(question.id)
+            return [question]
+
+        self._respond(frame.get("id"), {"cancelled": True})
+        return [ToolCall(name=f"omp:{method or 'unknown'}")]
+
+    @staticmethod
+    def _widget_events(frame: dict[str, Any]) -> list[AgentEvent]:
+        """A `setWidget` is only worth a line when it *shows* something.
+
+        Read out of omp's own binary rather than guessed at, because the guess was wrong and cost
+        a commit. Its rpc-ui bridge sends the frame only when the widget is being cleared or set to
+        static lines:
+
+            setWidget(key, lines, opts) {
+              if (lines === undefined || Array.isArray(lines)) { output({ method: "setWidget", ...
+
+        A live widget is registered with a *render function*, which is neither -- so no frame goes
+        out at all. Every `setWidget` in a real capture (8 of 8) arrives with no `widgetLines`,
+        which is the `undefined` branch: **"remove the autoresearch widget"**. The activity line
+        was showing that as `⟳ omp:autoresearch...`, i.e. announcing work as starting at the exact
+        moment omp said there was none -- and the frame is fire-and-forget on omp's side, never
+        entered in its pending map, so it is not even something to answer.
+        """
+        lines = frame.get("widgetLines")
+        key = str(frame.get("widgetKey") or "")
+        if not key or not isinstance(lines, list) or not lines:
+            return []
+        return [ToolCall(name=f"omp:{key}")]
+
+    def _ensure_answered(self, frame: dict[str, Any]) -> list[AgentEvent]:
+        """The net under `_handle_request`: nothing leaves this method still waiting.
+
+        It should never fire -- every branch above answers or parks. It exists because the failure
+        it catches costs a whole session and presents as "TCC hung", and because the next frame omp
+        adds will reach a version of this file that has not heard of it.
+        """
+        key = str(frame.get("id") or "")
+        if not key or key in self._answered or key in self._parked or key in self._gating:
+            return []
+        self._respond(frame.get("id"), {"cancelled": True})
+        return [ToolCall(name=f"omp:unanswered:{frame.get('method') or '?'}")]
 
     # ---- lifecycle ----------------------------------------------------------
 
     async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
         if not is_available():
             raise OmpNotInstalledError("omp is not on PATH — install it: brew install can1357/tap/omp")
+        # Before the process starts: omp scans for skills at startup, so a link created later in
+        # the turn would not be seen until the next session.
+        vendor_loader.link_skill_into(self.project_dir)
         self._proc = await asyncio.create_subprocess_exec(
             *self._argv(),
             cwd=str(self.project_dir),
@@ -496,13 +779,19 @@ class OmpSession:
             env=vendor_loader.child_env(),
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
+        # Started before anything is awaited, so no frame is read anywhere else: whatever arrives
+        # during startup is classified, answered and logged like every other frame.
+        self._reader = asyncio.create_task(self._read_frames())
         await self._await_ready()
         self._send(
             {"id": self._next_id(), "type": "negotiate_protocol",
              "protocolVersion": RPC_PROTOCOL_VERSION}
         )
         await self._await_settled()
-        self._reader = asyncio.create_task(self._read_frames())
+        for warning in (self.skill_warning(), self.credential_warning()):
+            # After the link attempt in `start`, so a skill warning here means it actually failed.
+            if warning:
+                yield Notice(warning)
         async for event in self._prompt(prompt or self._opening()):
             yield event
 
@@ -525,49 +814,33 @@ class OmpSession:
 
         There is no "tools are loaded" frame to wait for -- `ready` fires first and MCP connection
         happens quietly afterwards -- so this reads the only signal there is: the wire going quiet.
-        Chrome frames are answered while waiting, because an unanswered one stalls the agent.
+        The reader keeps answering whatever arrives meanwhile; this only watches the clock.
 
         Capped, so a harness that chatters forever costs a slow first turn rather than a hang.
         """
-        proc = self._proc
-        assert proc is not None and proc.stdout is not None
-        deadline = asyncio.get_running_loop().time() + SETTLE_CAP_S
-        while asyncio.get_running_loop().time() < deadline:
-            try:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=SETTLE_QUIET_S)
-            except asyncio.TimeoutError:
-                return  # quiet for a full window: startup is done
-            if not line:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + SETTLE_CAP_S
+        while loop.time() < deadline:
+            if self._ended.is_set():
                 raise RuntimeError(self._why("omp exited during startup"))
-            try:
-                frame = json.loads(line.decode(errors="replace").strip())
-            except ValueError:
-                continue
-            if frame.get("type") == "extension_ui_request" and frame.get("method") in _CHROME_METHODS:
-                self._send({"type": "extension_ui_response", "id": frame.get("id"), "cancelled": True})
+            quiet_for = time.time() - self._last_frame_at
+            if quiet_for >= SETTLE_QUIET_S:
+                return
+            await asyncio.sleep(min(SETTLE_QUIET_S - quiet_for, 0.2))
 
     async def _await_ready(self) -> None:
         """Wait for omp's `ready` frame rather than sleeping at it.
 
         `ready` means the RPC channel is negotiable. It does **not** mean the tool list is built --
-        that is what `_await_settled` is for.
+        that is what `_await_settled` is for. The frame itself is seen by the reader, which is the
+        only thing holding stdout.
         """
-        proc = self._proc
-        assert proc is not None and proc.stdout is not None
-        deadline = asyncio.get_running_loop().time() + READY_TIMEOUT_S
-        while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError(self._why("omp did not report ready"))
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
-            if not line:
-                raise RuntimeError(self._why("omp exited before reporting ready"))
-            try:
-                frame = json.loads(line.decode(errors="replace").strip())
-            except ValueError:
-                continue
-            if frame.get("type") == "ready":
-                return
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout=READY_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise TimeoutError(self._why("omp did not report ready")) from None
+        if not self._saw_ready:
+            raise RuntimeError(self._why("omp exited before reporting ready"))
 
     def _opening(self) -> str:
         return (
@@ -578,7 +851,52 @@ class OmpSession:
             "get_tcc_state, then tell me where we are and what the next step is."
         )
 
+    def credential_warning(self) -> Optional[str]:
+        """Whether the model this session runs has anything to authenticate with.
+
+        Only the Google family is checked, because it is the one TCC defaults to and the one whose
+        failure is silent: without a key the turn comes back empty and nothing says why. A bundle
+        started from the Finder has no shell environment, so "it works in my terminal" is not
+        evidence that it works when double-clicked.
+        """
+        if "gemini" not in self.model.lower() and "google" not in self.model.lower():
+            return None
+        if any(os.environ.get(name) for name in _GOOGLE_KEY_VARS):
+            return None
+        return (
+            f"No {' or '.join(_GOOGLE_KEY_VARS)} in this process's environment. omp will have "
+            f"nothing to authenticate `{self.model}` with, and that failure is silent — the turn "
+            "comes back empty. Start TCC from a shell that has the key, or run "
+            f"`omp --profile {OMP_PROFILE} auth login`."
+        )
+
+    def skill_warning(self) -> Optional[str]:
+        """Whether this project has a skill at all, said before the turn rather than after it.
+
+        Called after `vendor_loader.link_skill_into`, so it fires only when TCC could not install
+        the skill itself — no submodule, or a filesystem that refuses symlinks.
+
+        A session with no `.claude/skills/autosound-tuning` does not fail -- it improvises, and
+        that is far worse than failing. Seen whole in a real run: the model read `skill://` from
+        whatever was in `~/.claude/skills`, followed a `file:///skills/...` reference that resolves
+        nowhere (SCR-029), then hunted the disk with three globs and a `grep` that ran for eight
+        minutes, and finally invented an intake of its own. Every number it wrote was made up.
+        """
+        link = self.project_dir / ".claude" / "skills" / SKILL_NAME
+        try:
+            if link.exists():
+                return None
+        except OSError:
+            pass
+        return (
+            f"This project has no `.claude/skills/{SKILL_NAME}`. The session will run without the "
+            "tuning method and improvise one — link the skill into the project before trusting "
+            "anything it says."
+        )
+
     async def _prompt(self, text: str) -> AsyncIterator[AgentEvent]:
+        self._round_ended_at = 0.0  # a round that ended before this prompt did not end this one
+        self._retrying = False  # a storm belongs to the turn it happened in
         self._send({"id": self._next_id(), "type": "prompt", "message": text})
         self._last_frame_at = time.time()
         warned = False
@@ -587,6 +905,12 @@ class OmpSession:
             try:
                 event = await asyncio.wait_for(self._events.get(), timeout=quiet)
             except asyncio.TimeoutError:
+                if self._parked:
+                    # Silence with a question on screen is not silence: omp is blocked inside
+                    # `ask`, waiting for the Arbiter, and the panel is already saying so. Ending
+                    # the turn here would drop the answer on the floor, and warning about it would
+                    # blame the harness for waiting on us.
+                    continue
                 if self._round_ended_at:
                     # A round ended and nothing followed: the model has finished talking, whether
                     # or not omp bothers to say `agent_end`.
@@ -597,10 +921,12 @@ class OmpSession:
                 # is a fact the Arbiter can act on, and an animated line saying "working" is not.
                 if not warned:
                     warned = True
-                    yield TextDelta(
-                        f"\n\n[{int(SILENCE_WARN_S)}s with no output. "
-                        f"{self._why('omp has said nothing.')}]\n\n"
-                    )
+                    # Naming the tool is the whole value: "omp has said nothing" and "still inside
+                    # grep" call for different things from the Arbiter, and the second one was
+                    # true for 510 seconds while the first was all the window said.
+                    where = (f"Still inside `{self._running_tool}`."
+                             if self._running_tool else "omp has said nothing.")
+                    yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {self._why(where)}")
                 continue
             warned = False
             if event is None:  # process ended mid-turn
@@ -618,11 +944,11 @@ class OmpSession:
     async def answer(self, question_id: str, value: str) -> None:
         """Deliver the Arbiter's answer to a parked question. Free text is passed through as-is —
         omp adds an "Other (type your own)" option to every question and accepts the typed value."""
-        self._send({"type": "extension_ui_response", "id": question_id, "value": value})
+        self._respond(question_id, {"value": value})
 
     async def cancel_question(self, question_id: str) -> None:
         """Withdraw a question. omp is blocked inside `ask`; `abort` does not reach it."""
-        self._send({"type": "extension_ui_response", "id": question_id, "cancelled": True})
+        self._respond(question_id, {"cancelled": True})
 
     async def interrupt(self) -> None:
         """`abort` is the command omp actually has; `interrupt`, `cancel` and `stop` are not

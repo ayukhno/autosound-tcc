@@ -7,13 +7,16 @@ now that somewhere was the SDK's own message objects — `dialog_panel._on_chunk
 reading `.event` for a stream delta and `.content[].name` for a tool call. That works for exactly
 one harness and silently for none of the others.
 
-So the panel is given a vocabulary instead of a vendor. Four events, chosen because both harnesses
+So the panel is given a vocabulary instead of a vendor. Seven events, chosen because both harnesses
 actually produce them and the panel actually renders them:
 
-    TextDelta   prose arriving a piece at a time -> grows the live bubble
-    ToolCall    the agent used a tool -> a one-line process chip
-    Question    a structured question for the Arbiter, and the turn is blocked on it
-    TurnEnd     the turn finished, carrying the harness's session id for resume
+    TextDelta          prose arriving a piece at a time -> grows the live bubble
+    ToolCall           the agent used a tool -> a one-line process chip
+    ToolEnd            that tool returned -> the chip stops moving
+    Question           a structured question for the Arbiter, and the turn is blocked on it
+    QuestionWithdrawn  the harness took a question back -> the card goes
+    Notice             the adapter speaking about the harness, not the model speaking
+    TurnEnd            the turn finished, carrying the harness's session id for resume
 
 `Question` has no Agent SDK equivalent today; omp raises it (`ask`) and OpenCode raises it
 (`question.asked`), and in both the turn **blocks** until the host answers. It is in this vocabulary
@@ -52,6 +55,22 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class ToolEnd:
+    """That tool returned. The activity line stops moving.
+
+    The line's whole claim is "the thing is still working" -- a static line says a tool ran, a
+    moving one says it is still running, and that difference is the only reason the line exists.
+    Without this event the dots never stopped, so the last tool of a turn appeared to be running
+    for as long as the window was open, and a stalled turn looked exactly like a busy one.
+
+    Emitted by the omp adapter (`tool_execution_end`); the SDK adapter has no equivalent yet, so
+    the panel treats its absence as "still running", which is what it assumed before.
+    """
+
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class QuestionOption:
     label: str
     description: str = ""
@@ -73,13 +92,39 @@ class Question:
 
 
 @dataclass(frozen=True)
+class Notice:
+    """Something the adapter itself has to say, and it is not the model saying it.
+
+    "120s with no output" and "omp refused `negotiate_protocol`" went out as `TextDelta`, so they
+    arrived in the transcript under the model's own name and byline -- a sentence about the harness
+    attributed to Gemini, in the same bubble style as its analysis. The distinction matters most
+    exactly when things are going wrong, which is the only time these are emitted.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
+class QuestionWithdrawn:
+    """A question the harness has taken back, so the card must go.
+
+    omp does this whenever it moves past a frame it raised -- an aborted turn withdraws the
+    editor it opened, and the frame log shows it as `method: "cancel"` carrying the id of what it
+    is withdrawing. Without this the panel keeps a card whose buttons answer a frame nobody is
+    listening to, which is the same confusion as a missing question, only quieter.
+    """
+
+    id: str
+
+
+@dataclass(frozen=True)
 class TurnEnd:
     """The turn is over. `session_id` is what a later launch resumes, when the harness has one."""
 
     session_id: Optional[str] = None
 
 
-AgentEvent = TextDelta | ToolCall | Question | TurnEnd
+AgentEvent = TextDelta | ToolCall | ToolEnd | Question | QuestionWithdrawn | Notice | TurnEnd
 
 
 @runtime_checkable
