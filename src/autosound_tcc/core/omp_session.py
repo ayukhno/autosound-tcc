@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
@@ -94,6 +95,18 @@ READY_TIMEOUT_S = 60.0
 SETTLE_QUIET_S = 1.0
 SETTLE_CAP_S = 45.0
 
+# Every frame, both directions, next to the project's other TCC state. Three hangs were diagnosed
+# by guessing at what omp had sent, and each guess cost a session: `turn_end` mistaken for the end
+# of an exchange, a transcript wiped mid-turn, a free-text question answered as a permission. The
+# frames are the only place those are visible, and they are cheap to keep.
+FRAME_LOG = "omp-frames.jsonl"
+FRAME_LOG_MAX_BYTES = 4_000_000
+
+# How long a turn may produce nothing before the window says so. Not a timeout -- nothing is
+# cancelled -- but "it has been silent for two minutes" is a fact the Arbiter can act on, and
+# staring at an animated line is not.
+SILENCE_WARN_S = 120.0
+
 
 class OmpNotInstalledError(RuntimeError):
     """`omp` is not on PATH. Fix: `brew install can1357/tap/omp`."""
@@ -144,6 +157,8 @@ class OmpSession:
         # diagnose from the transcript, and "nothing happened" was exactly how it presented.
         self._stderr_tail: list[str] = []
         self._stderr_task: Optional[asyncio.Task] = None
+        self._log_path = config.tcc_dir(self.project_dir) / FRAME_LOG
+        self._last_frame_at = 0.0
 
     # ---- wire --------------------------------------------------------------
 
@@ -171,7 +186,22 @@ class OmpSession:
         proc = self._proc
         if proc is None or proc.stdin is None:
             return
+        self._log("out", frame)
         proc.stdin.write((json.dumps(frame) + "\n").encode())
+
+    def _log(self, direction: str, frame: dict[str, Any]) -> None:
+        """Append one frame. Never raises: a diagnostic that can break the session is worse than
+        no diagnostic."""
+        try:
+            path = self._log_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > FRAME_LOG_MAX_BYTES:
+                path.unlink()
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"t": time.time(), "dir": direction, "frame": frame},
+                                     ensure_ascii=False)[:8000] + "\n")
+        except OSError:
+            pass
 
     def _next_id(self) -> str:
         self._frame_id += 1
@@ -309,6 +339,8 @@ class OmpSession:
                 frame = json.loads(line)
             except ValueError:
                 continue
+            self._last_frame_at = time.time()
+            self._log("in", frame)
             for event in self._handle(frame):
                 await self._events.put(event)
         await self._events.put(None)  # the process ended; unblock whoever is draining
@@ -446,8 +478,22 @@ class OmpSession:
 
     async def _prompt(self, text: str) -> AsyncIterator[AgentEvent]:
         self._send({"id": self._next_id(), "type": "prompt", "message": text})
+        self._last_frame_at = time.time()
+        warned = False
         while True:
-            event = await self._events.get()
+            try:
+                event = await asyncio.wait_for(self._events.get(), timeout=SILENCE_WARN_S)
+            except asyncio.TimeoutError:
+                # Not a cancellation: the turn may still be thinking. But "silent for two minutes"
+                # is a fact the Arbiter can act on, and an animated line saying "working" is not.
+                if not warned:
+                    warned = True
+                    yield TextDelta(
+                        f"\n\n[{int(SILENCE_WARN_S)}s with no output. "
+                        f"{self._why('omp has said nothing.')}]\n\n"
+                    )
+                continue
+            warned = False
             if event is None:  # process ended mid-turn
                 return
             yield event

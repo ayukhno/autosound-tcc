@@ -8,6 +8,7 @@ what is under test is the translation and the gating, and those are pure given a
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import Future
 
 import pytest
@@ -363,3 +364,26 @@ def test_writing_and_evaluating_always_ask(tmp_path):
         asyncio.run(session._gate({**PERMISSION_FRAME, "title": f"Allow tool: {tool}"}))
 
     assert [r.tool for r in session.bridge.requests] == ["write", "edit", "eval"]
+
+
+def test_every_frame_is_written_down(tmp_path):
+    """Three hangs were diagnosed by guessing at what omp had sent, and each guess cost a session.
+    The frames are the only place those are visible."""
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(True))
+
+    session._log("in", {"type": "agent_end"})
+    session._log("out", {"type": "prompt", "message": "hi"})
+
+    lines = [json.loads(line) for line in session._log_path.read_text().splitlines()]
+    assert [entry["dir"] for entry in lines] == ["in", "out"]
+    assert lines[0]["frame"]["type"] == "agent_end"
+
+
+def test_logging_never_breaks_the_session(tmp_path, monkeypatch):
+    """A diagnostic that can take the session down is worse than no diagnostic."""
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(True))
+    monkeypatch.setattr(
+        type(session._log_path), "open", lambda *a, **kw: (_ for _ in ()).throw(OSError("full"))
+    )
+
+    session._log("in", {"type": "agent_end"})  # must not raise
