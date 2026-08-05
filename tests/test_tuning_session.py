@@ -272,3 +272,40 @@ def test_answering_is_a_noop_because_the_sdk_has_no_question_channel(tmp_path):
     session = TuningSession(project_dir=tmp_path)
 
     asyncio.run(session.answer("q1", "Driver"))  # must not raise
+
+
+def test_a_tool_result_stops_the_activity_line(tmp_path):
+    """The SDK reports a finished tool as a result block in the next user message. Unmapped, the
+    activity line kept claiming the last tool was still running for as long as the window stayed
+    open — the same confusion that was fixed on the omp side."""
+    from autosound_tcc.core.agent_events import ToolEnd
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class ResultBlock:
+        tool_use_id = "toolu_1"
+        content = "ok"
+
+    class Message:
+        content = [ResultBlock()]
+
+    session = TuningSession(project_dir=tmp_path)
+
+    assert session._translate(Message()) == [ToolEnd()]
+
+
+def test_a_tool_result_is_not_mistaken_for_prose(tmp_path):
+    """It has no `.name` and no `.text`, so before this it simply vanished — which was harmless,
+    and is why it went unnoticed."""
+    from autosound_tcc.core.agent_events import TextDelta
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class ResultBlock:
+        tool_use_id = "toolu_1"
+        text = "raw tool output nobody should see as a bubble"
+
+    class Message:
+        content = [ResultBlock()]
+
+    session = TuningSession(project_dir=tmp_path)
+
+    assert not any(isinstance(e, TextDelta) for e in session._translate(Message()))

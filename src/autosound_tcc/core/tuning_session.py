@@ -33,7 +33,7 @@ from claude_agent_sdk import (
 )
 
 from autosound_tcc.core import config, vendor_loader
-from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, TurnEnd
+from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
 
@@ -323,6 +323,13 @@ class TuningSession:
             return []
         out: list[AgentEvent] = []
         for block in content:
+            if getattr(block, "tool_use_id", None) is not None:
+                # A tool result, which is what stops the activity line moving. Without it the last
+                # tool of a turn appears to be running for as long as the window is open, so a
+                # stalled turn looks exactly like a busy one -- reported that way on the omp side
+                # before `ToolEnd` existed, and true here for the same reason.
+                out.append(ToolEnd())
+                continue
             name = getattr(block, "name", None)
             if name:
                 out.append(ToolCall(name=name, arguments=dict(getattr(block, "input", {}) or {})))
