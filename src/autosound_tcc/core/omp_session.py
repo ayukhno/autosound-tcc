@@ -66,6 +66,13 @@ _PERMISSION_OPTIONS = frozenset({"Approve", "Deny"})
 # also arrive as a process chip.
 _ASK_TOOL = "ask"
 
+# What ends an exchange. NOT `turn_end`: in omp a "turn" is one round of the model, so a prompt
+# answered with eight tool calls emits nine of them, and treating the first as the end delivers
+# two or three process chips and then silence forever -- which is exactly how it presented in
+# use. `agent_end` fires once per prompt. Measured, 2026-08-05:
+#     turn_start: 9  turn_end: 9  agent_start: 1  agent_end: 1  tool_execution_start: 8
+_EXCHANGE_END = "agent_end"
+
 CONFIRM_TIMEOUT_S = 600.0
 READY_TIMEOUT_S = 60.0
 
@@ -299,7 +306,7 @@ class OmpSession:
                 return []
             return [ToolCall(name=name, arguments=dict(frame.get("args") or {}))]
 
-        if kind == "turn_end":
+        if kind == _EXCHANGE_END:
             return [TurnEnd()]
 
         return []

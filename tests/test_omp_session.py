@@ -108,10 +108,19 @@ def test_the_ask_tool_is_not_also_a_process_chip(tmp_path):
     assert session._handle({"type": "tool_execution_start", "toolName": "ask"}) == []
 
 
-def test_turn_end_closes_the_turn(tmp_path):
+def test_agent_end_closes_the_exchange(tmp_path):
     session = _session(tmp_path)
 
-    assert session._handle({"type": "turn_end", "message": {}}) == [TurnEnd()]
+    assert session._handle({"type": "agent_end", "messages": []}) == [TurnEnd()]
+
+
+def test_turn_end_does_not_close_the_exchange(tmp_path):
+    """A `turn` in omp is one round of the model, so a prompt answered with eight tool calls emits
+    nine `turn_end`s. Ending on the first delivered a few process chips and then silence forever —
+    measured in use before this was understood."""
+    session = _session(tmp_path)
+
+    assert session._handle({"type": "turn_end", "message": {}}) == []
 
 
 def test_chrome_frames_are_answered_and_not_rendered(tmp_path):
