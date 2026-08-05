@@ -46,6 +46,7 @@ from autosound_tcc.core.agent_events import (
     TurnEnd,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
+from autosound_tcc.core.tuning_session import bash_is_read_only
 
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 
@@ -72,6 +73,15 @@ _ASK_TOOL = "ask"
 # use. `agent_end` fires once per prompt. Measured, 2026-08-05:
 #     turn_start: 9  turn_end: 9  agent_start: 1  agent_end: 1  tool_execution_start: 8
 _EXCHANGE_END = "agent_end"
+
+# Tools that only look. Auto-approved because `--approval-mode always-ask` otherwise puts a
+# dialog in front of every file the skill opens -- and the skill is built on opening files, so the
+# Arbiter learns to click through, which is worse than not asking.
+_READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "ls", "list", "todo", "hub"})
+
+# Never auto-approved, whatever else is true: these can overwrite a measurement, a ledger or the
+# project's own files, which is the evidence everything else is built on.
+_ALWAYS_GATED_TOOLS = frozenset({"write", "edit", "ast_edit", "eval", "browser", "task"})
 
 CONFIRM_TIMEOUT_S = 600.0
 READY_TIMEOUT_S = 60.0
@@ -234,9 +244,7 @@ class OmpSession:
         agent's own progress frames queue up behind the question we are asking about them.
         """
         tool, detail = self._tool_and_detail(frame)
-        # TCC's own tools raise their own confirmation inside the tool, so gating here as well
-        # would prompt the Arbiter twice for one action and teach them to click through both.
-        if tool.startswith("mcp__tcc"):
+        if self._auto_allowed(tool, detail):
             self._answer_frame(frame, True)
             return
         request = ConfirmRequest(
@@ -253,6 +261,31 @@ class OmpSession:
         except Exception:
             allowed = False
         self._answer_frame(frame, allowed)
+
+    @staticmethod
+    def _auto_allowed(tool: str, detail: str) -> bool:
+        """Whether this can go through without asking.
+
+        Three things pass, and the reasoning for each is different. TCC's own tools raise their
+        own confirmation *inside* the tool, so asking here too prompts twice for one action and
+        teaches the Arbiter to click through both. Tools that only look cannot damage the evidence
+        the tune is built on. And a bash command already judged read-only by the SDK adapter's
+        allowlist -- one definition, shared -- is the same command whichever harness runs it.
+
+        Everything else asks, and a short list can never be talked into passing: anything that
+        writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
+        it can overwrite is a measurement or a ledger.
+        """
+        if tool in _ALWAYS_GATED_TOOLS:
+            return False
+        if tool.startswith("mcp__tcc"):
+            return True
+        if tool in _READ_ONLY_TOOLS:
+            return True
+        if tool == "bash":
+            command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
+            return bash_is_read_only(command)
+        return False
 
     def _answer_frame(self, frame: dict[str, Any], allowed: bool) -> None:
         if frame.get("method") == "confirm":

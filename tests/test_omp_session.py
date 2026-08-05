@@ -306,3 +306,60 @@ def test_a_free_text_question_reaches_the_dialog(tmp_path):
     assert isinstance(events[0], Question)
     assert events[0].options == ()
     assert session.sent == []  # nothing answered on the agent's behalf
+
+
+# ---- what goes through without asking --------------------------------------
+
+
+def test_reading_does_not_need_permission(tmp_path):
+    """`always-ask` otherwise puts a dialog in front of every file the skill opens — and the skill
+    is built on opening files, so the Arbiter learns to click through, which is worse."""
+    session = _session(tmp_path, allow=False)
+
+    for tool in ("read", "glob", "grep"):
+        asyncio.run(session._gate({**PERMISSION_FRAME, "title": f"Allow tool: {tool}"}))
+
+    assert session.bridge.requests == []
+    assert all(sent["value"] == "Approve" for sent in session.sent)
+
+
+def test_a_read_only_command_does_not_need_permission(tmp_path):
+    """One definition of read-only, shared with the SDK adapter: the same command is the same
+    command whichever harness runs it."""
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: ls -la process"}))
+
+    assert session.bridge.requests == []
+    assert session.sent[0]["value"] == "Approve"
+
+
+def test_a_command_that_writes_still_asks(tmp_path):
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: rm -rf process"}))
+
+    assert session.bridge.requests[0].tool == "bash"
+    assert session.sent[0]["value"] == "Deny"
+
+
+def test_a_chained_command_asks_even_when_both_halves_look_safe(tmp_path):
+    """A chain means the allowlist can no longer reason about what will run."""
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: ls; rm -rf process"}))
+
+    assert session.bridge.requests != []
+
+
+def test_writing_and_evaluating_always_ask(tmp_path):
+    """These can overwrite a measurement or a ledger — the evidence everything else rests on."""
+    session = _session(tmp_path, allow=False)
+
+    for tool in ("write", "edit", "eval"):
+        asyncio.run(session._gate({**PERMISSION_FRAME, "title": f"Allow tool: {tool}"}))
+
+    assert [r.tool for r in session.bridge.requests] == ["write", "edit", "eval"]
