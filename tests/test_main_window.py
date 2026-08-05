@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
-from autosound_tcc.ui.tcc import main_window  # noqa: E402
+from autosound_tcc.ui.tcc import i18n, main_window  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
 
@@ -244,14 +244,16 @@ def test_the_composer_is_the_way_in():
     assert window._terminal_btn.isHidden()  # front-end B, deliberately out of the way
 
 
-def test_no_project_shows_create_button_and_clears_every_mock_panel():
+def test_no_project_clears_every_mock_panel():
     """A folder with no dsp_profile.json at all must not look like a live tuning session --
     the AI dialog, plan, and measurement panels all default to prototype mock content, and
     MainWindow is the only thing that knows whether a real project backs any of it."""
     _app()
     window = MainWindow()
 
-    assert not window._create_project_btn.isHidden()
+    # "which project" lives in the header menu now; two controls for one act were what made
+    # "create" and "open" look like different things.
+    assert window._create_project_btn.isHidden()
     assert len(window._dialog._bubbles) == 0
     assert window._plan_panel.plan == ()
     assert not window._meas_panel._no_project_label.isHidden()
@@ -371,10 +373,10 @@ def test_stale_preset_override_from_a_different_project_is_ignored(tmp_path, mon
     _app()
     window = MainWindow()
 
-    assert window._left_status.text() == (
-        "Audiotec-Fischer Helix DSP Ultra S\n\n"
-        f"No preset ledger found under {tmp_path / 'state'}."
-    )
+    # The profile is known, the ledger is not — the panel names the DSP and says what is still
+    # missing, in the user's language rather than as a path.
+    assert window._left_status.text().startswith("Audiotec-Fischer Helix DSP Ultra S")
+    assert i18n.t("leftNoLedger") in window._left_status.text()
 
 
 def test_diagnostics_button_opens_the_panel_with_the_last_report():

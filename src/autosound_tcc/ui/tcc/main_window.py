@@ -760,6 +760,10 @@ class MainWindow(QMainWindow):
         # Only offered for the genuine "no project here at all" case (_show_left_status's
         # offer_create=True) -- the other _show_left_status branches describe a project that
         # exists but is broken, where "create new" would be the wrong fix.
+        # Kept, hidden: "which project" now lives in the header menu, and two controls for one
+        # act were what made "create" and "open" look like different things. The dialog behind it
+        # is still the only path that runs the DSP-profile interview, so this is a hidden seam
+        # rather than a deletion -- see the note in `_open_new_project_dialog`.
         self._create_project_btn = QPushButton(i18n.t("createProject"))
         self._create_project_btn.setProperty("class", "reason-btn")
         self._create_project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -789,10 +793,7 @@ class MainWindow(QMainWindow):
         a broken file are all things a half-set-up project can legitimately be in."""
         profile_path = config.dsp_profile_path()
         if not profile_path.is_file():
-            self._show_left_status(
-                f"No DSP profile found.\nLooked for {profile_path}.",
-                offer_create=True,
-            )
+            self._show_left_status(i18n.t("leftNoProfile"), offer_create=True)
             return
         try:
             from autosound_tcc.core import vendor_loader
@@ -828,7 +829,7 @@ class MainWindow(QMainWindow):
             prof = profile.get("dsp_profile", profile)
             self._show_left_status(
                 f"{prof.get('vendor', '?')} {prof.get('name', '?')}\n\n"
-                f"No preset ledger found under {root}."
+                + i18n.t("leftNoLedger")
             )
             return
         try:
@@ -951,7 +952,7 @@ class MainWindow(QMainWindow):
         self._tree.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
-        self._create_project_btn.setVisible(offer_create)
+        self._create_project_btn.setVisible(False)
         self._rebuild_system_params()
         self._set_project_params(None)
         self._detail.close_pane()
