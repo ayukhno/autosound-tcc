@@ -116,13 +116,35 @@ def test_agent_end_closes_the_exchange(tmp_path):
     assert session._handle({"type": "agent_end", "messages": []}) == [TurnEnd()]
 
 
-def test_turn_end_does_not_close_the_exchange(tmp_path):
+def test_turn_end_does_not_close_the_exchange_on_its_own(tmp_path):
     """A `turn` in omp is one round of the model, so a prompt answered with eight tool calls emits
     nine `turn_end`s. Ending on the first delivered a few process chips and then silence forever —
     measured in use before this was understood."""
     session = _session(tmp_path)
 
     assert session._handle({"type": "turn_end", "message": {}}) == []
+
+
+def test_a_round_that_nothing_follows_is_the_end(tmp_path):
+    """`agent_end` does not always arrive: omp keeps the agent alive between prompts, and a turn
+    whose last act is a question to the human ends with the wire going quiet. Read back from omp's
+    own session store, the hung turn was complete — tool returned, message finished, nothing
+    after."""
+    session = _session(tmp_path)
+
+    session._handle({"type": "turn_end", "message": {}})
+
+    assert session._round_ended_at > 0  # the grace period is running
+
+
+def test_more_work_cancels_the_grace_period(tmp_path):
+    """Otherwise a pause between two tool calls would be read as the end of the answer."""
+    session = _session(tmp_path)
+    session._handle({"type": "turn_end", "message": {}})
+
+    session._handle({"type": "tool_execution_start", "toolName": "read"})
+
+    assert session._round_ended_at == 0
 
 
 def test_chrome_frames_are_answered_and_not_rendered(tmp_path):

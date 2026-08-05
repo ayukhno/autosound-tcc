@@ -69,12 +69,20 @@ _PERMISSION_OPTIONS = frozenset({"Approve", "Deny"})
 # also arrive as a process chip.
 _ASK_TOOL = "ask"
 
-# What ends an exchange. NOT `turn_end`: in omp a "turn" is one round of the model, so a prompt
-# answered with eight tool calls emits nine of them, and treating the first as the end delivers
-# two or three process chips and then silence forever -- which is exactly how it presented in
-# use. `agent_end` fires once per prompt. Measured, 2026-08-05:
-#     turn_start: 9  turn_end: 9  agent_start: 1  agent_end: 1  tool_execution_start: 8
+# What ends an exchange. `agent_end` says so outright -- but it does not always arrive: omp keeps
+# the agent alive between prompts in `rpc-ui`, and a turn whose last act is a question to the human
+# can end with the wire simply going quiet. Read from omp's own session store afterwards, the
+# hung turn was complete: the tool returned, the model finished its message, nothing followed.
+#
+# `turn_end` alone is not the end either -- a turn is one round of the model, so a prompt answered
+# with eight tool calls emits nine of them, and ending on the first delivers three process chips
+# and then silence (measured: turn_start 9, turn_end 9, agent_start 1, agent_end 1).
+#
+# So: `agent_end` ends it, and so does a `turn_end` that nothing follows. The grace period is what
+# separates "the model is about to call another tool" from "the model has finished talking".
 _EXCHANGE_END = "agent_end"
+_ROUND_END = "turn_end"
+TURN_QUIET_S = 2.5
 
 # Tools that only look. Auto-approved because `--approval-mode always-ask` otherwise puts a
 # dialog in front of every file the skill opens -- and the skill is built on opening files, so the
@@ -185,6 +193,8 @@ class OmpSession:
         self._stderr_task: Optional[asyncio.Task] = None
         self._log_path = config.tcc_dir(self.project_dir) / FRAME_LOG
         self._last_frame_at = 0.0
+        # When the last round ended, or 0 if a round is in flight -- see `_ROUND_END`.
+        self._round_ended_at = 0.0
 
     # ---- wire --------------------------------------------------------------
 
@@ -396,6 +406,10 @@ class OmpSession:
 
     def _handle(self, frame: dict[str, Any]) -> list[AgentEvent]:
         kind = frame.get("type")
+        # Any frame that is not the end of a round means the exchange is still moving, so the
+        # grace period restarts. Set here rather than at the bottom: most branches return early.
+        if kind != _ROUND_END:
+            self._round_ended_at = 0.0
 
         if kind == "extension_ui_request":
             method = frame.get("method")
@@ -424,6 +438,10 @@ class OmpSession:
 
         if kind == _EXCHANGE_END:
             return [TurnEnd()]
+
+        if kind == _ROUND_END:
+            self._round_ended_at = time.time()
+            return []
 
         return []
 
@@ -530,9 +548,16 @@ class OmpSession:
         self._last_frame_at = time.time()
         warned = False
         while True:
+            quiet = TURN_QUIET_S if self._round_ended_at else SILENCE_WARN_S
             try:
-                event = await asyncio.wait_for(self._events.get(), timeout=SILENCE_WARN_S)
+                event = await asyncio.wait_for(self._events.get(), timeout=quiet)
             except asyncio.TimeoutError:
+                if self._round_ended_at:
+                    # A round ended and nothing followed: the model has finished talking, whether
+                    # or not omp bothers to say `agent_end`.
+                    self._round_ended_at = 0.0
+                    yield TurnEnd()
+                    return
                 # Not a cancellation: the turn may still be thinking. But "silent for two minutes"
                 # is a fact the Arbiter can act on, and an animated line saying "working" is not.
                 if not warned:
