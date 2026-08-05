@@ -519,3 +519,32 @@ def test_an_editor_is_never_mistaken_for_a_permission(tmp_path):
     session._handle({**EDITOR_FRAME, "title": "Allow tool: something\n\nEnter your response:"})
 
     assert session.bridge.requests == []
+
+
+def test_a_widget_omp_opens_is_named_rather_than_swallowed(tmp_path):
+    """"It went off somewhere and I don't know what it is analysing" — that was omp starting its
+    own `autoresearch`, cancelled silently by the host."""
+    session = _session(tmp_path)
+
+    events = session._handle({"type": "extension_ui_request", "id": "w1",
+                              "method": "setWidget", "widgetKey": "autoresearch"})
+
+    assert [e.name for e in events] == ["omp:autoresearch"]
+    assert session.sent[0]["cancelled"] is True
+
+
+def test_a_nameless_widget_is_still_just_cancelled(tmp_path):
+    session = _session(tmp_path)
+
+    assert session._handle({"type": "extension_ui_request", "id": "w2",
+                            "method": "setTitle", "title": "omp"}) == []
+
+
+def test_the_overlay_turns_off_ompsown_researcher(tmp_path):
+    """A tuning session answers questions by measuring, not by reading the web — and the skill
+    already has a Critic."""
+    session = _session(tmp_path)
+
+    overlay = open(session._argv()[session._argv().index("--config") + 1]).read()
+
+    assert "web_search" in overlay and "enabled: false" in overlay

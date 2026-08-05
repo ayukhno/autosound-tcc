@@ -165,9 +165,18 @@ def overlay_path(project_dir: Path) -> Path:
     path = config.tcc_dir(project_dir) / "omp-overlay.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "# Written by TCC. Without this, TCC's MCP tools are mounted under xd:// device URLs\n"
-        "# and never enter the model's function list -- measured, see spike/HANDOFF.md 5-bis.\n"
-        "tools:\n  xdev: false\n",
+        "# Written by TCC.\n"
+        "#\n"
+        "# xdev: without this, TCC's MCP tools are mounted under xd:// device URLs and never enter\n"
+        "# the model's function list -- measured, see spike/HANDOFF.md 5-bis.\n"
+        "#\n"
+        "# web_search: a tuning session answers questions by measuring, not by reading the web.\n"
+        "# Left on, omp starts its own `autoresearch` mid-turn -- seen in the frame log as a\n"
+        "# `setWidget` for it, after which the wire goes quiet for minutes while it works. The\n"
+        "# skill has its own knowledge files and its own Critic; this is a second, unasked-for\n"
+        "# researcher spending the tokens the harness was chosen to save.\n"
+        "tools:\n  xdev: false\n"
+        "web_search:\n  enabled: false\n",
         encoding="utf-8",
     )
     return path
@@ -436,7 +445,12 @@ class OmpSession:
             method = frame.get("method")
             if method in _CHROME_METHODS:
                 self._send({"type": "extension_ui_response", "id": frame.get("id"), "cancelled": True})
-                return []
+                # A widget is omp starting something of its own -- `autoresearch` is the one that
+                # turns up. Cancelling it is right (TCC is not that kind of UI) but doing so
+                # silently is how "it went off somewhere and I don't know what it is analysing"
+                # happens. Name it on the activity line instead.
+                key = str(frame.get("widgetKey") or "")
+                return [ToolCall(name=f"omp:{key}")] if key else []
             if method != _EDITOR_METHOD and self._is_permission(frame):
                 task = asyncio.create_task(self._gate(frame))
                 self._pending.add(task)
