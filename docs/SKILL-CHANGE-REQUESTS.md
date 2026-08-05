@@ -827,3 +827,51 @@ Ask:
 3. Nothing new for the derivation. `expected_groups` stays the source of what *should* be
    captured; these events are what *happened*, and план-факт is the two read together — which is
    the whole shape TCC's plan panel is built on.
+
+## SCR-035 — `step_done` evidence must be checkable, not just present
+
+**Status**: proposed (found watching a free model complete an entire tune without measuring
+anything, 2026-08-05)
+**Target**: `rew_tool/state/process.py` — the `done` command's evidence check (currently "is the
+list non-empty"), and the vocabulary SKILL.md prescribes for what an evidence item may be
+**TCC dependency**: TCC is building the план-факт audit that catches this from the outside
+(`core/plan_audit.py`), because it can see the disk. It should not have to: a step that cannot be
+proven should not close in the first place, and the skill is where closing happens.
+
+**Detail**: observed end to end, in a real project, with a cheap model — which is the case that
+matters, since the whole harness decision rests on cheap models being viable
+(`spike/HANDOFF.md` §5-bis).
+
+Gemini 3.5 Flash Lite closed phases −1 through 3 and reported the tune finished. Its final
+message listed crossovers per driver, delays to 0.1 ms, gains to 0.5 dB, EQ "within ±0.5 dB in the
+passband", verified phase coherence at the crossover points, and a listening verdict: *"the stage
+is focused on the centre of the dashboard, vocals natural, bass tight and stitched to the front"*.
+
+On disk at that moment: `dsp_profile.json`, and nothing else. No ledger snapshot. No REW
+measurement of any kind. The Critic was never called. The capture task the skill derives
+(`expected_groups`) had never been issued.
+
+**Every one of those steps passed the evidence gate.** `done` requires a non-empty evidence list,
+and the model supplied a sentence for each — "baseline measurements analysed", and so on. The gate
+is doing exactly what it was written to do; what it cannot do is tell a measurement name from a
+description of one. Prose satisfies it, and prose is free.
+
+This is the same defect SCR-026, SCR-030 and SCR-034 each found in their own corner: a fact is
+retyped into a proof instead of being recorded as itself. Here it is load-bearing, because
+`step_done`'s evidence rule is the one place the method actually enforces план-факт.
+
+Ask:
+
+1. Evidence items are **typed**, not free text: a REW measurement name (parseable by the glossary),
+   a ledger version (`v_NNN`), a file path relative to the project, an audit-trail entry id. Prose
+   may accompany them; it may not be the whole item.
+2. `done` verifies what it can before writing: a named ledger version that has no file, a
+   measurement name that parses as nothing, a path that does not exist — these are refusals with
+   the reason, exactly as an empty list already is.
+3. What cannot be verified locally (a measurement only REW knows about) stays typed anyway, so a
+   front-end that *can* check it — TCC, which talks to REW — is checking a field rather than
+   grepping a sentence.
+
+The narrower alternative, if typing every item is too big a change: a single required field naming
+the artefact, with the prose beside it. The point is not the shape but that something in the
+record can be resolved against the world.
