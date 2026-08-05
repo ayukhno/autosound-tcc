@@ -142,6 +142,9 @@ class DialogPanel(QWidget):
         # The run of identical tool calls currently on the activity line -- see `_add_chip`.
         self._chip_tool = ""
         self._chip_count = 0
+        # The question the turn is currently parked on, and the option buttons offering it.
+        self._pending_question: Optional[str] = None
+        self._question_widgets: Optional[QWidget] = None
         # Whatever is actually answering. The mock transcript's Claude label was still on live
         # bubbles produced by a Gemini model, which is a caption that contradicts the footer.
         self._model_label = CURRENT_GENERATOR_MODEL
@@ -487,6 +490,12 @@ class DialogPanel(QWidget):
         text = self._input.text().strip()
         if not text:
             return
+        if self._pending_question is not None:
+            # The turn is parked on a question; typing is the "Other (type your own)" answer both
+            # harnesses offer, not a new message queued behind a session that cannot read it.
+            self._input.clear()
+            self._answer_question(text)
+            return
         if self._worker is None:
             # A live composer that swallows what you type is worse than a disabled one. Sending
             # the first message IS the explicit start, and the text becomes the opening prompt
@@ -534,22 +543,57 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
 
     def _add_question(self, question: Question) -> None:
-        """A structured question from the agent, and the turn is parked until it is answered.
+        """A structured question from the agent. The turn is parked inside the harness until it is
+        answered, so this is not a message to reply to later -- it is the only thing that will
+        move the session forward, and it says so by being the only thing that can be clicked.
 
-        Rendered rather than dropped even though nothing can answer it yet: the session that
-        raises these is the omp adapter, and its reply path lands with it. What must not happen in
-        the meantime is a blocked turn that looks like a finished one -- that is exactly how an
-        unanswered question read during the spike, as a window that had hung.
+        Free text stays available: the composer answers the pending question instead of sending a
+        new message, which is the "Other (type your own)" both harnesses offer.
         """
         lines = [question.question]
         lines += [
-            f"· {option.label}" + (f" — {option.description}" if option.description else "")
+            f"· <b>{option.label}</b>" + (f" — {option.description}" if option.description else "")
             for option in question.options
         ]
-        self._add_bubble("sys", question.header or "QUESTION", "<br>".join(lines))
+        self._add_bubble("sys", question.header or i18n.t("questionRole"), "<br>".join(lines))
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for option in question.options:
+            button = QPushButton(option.label)
+            button.setProperty("class", "reason-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, label=option.label: self._answer_question(label)
+            )
+            row.addWidget(button)
+        row.addStretch(1)
+        holder = QWidget()
+        holder.setLayout(row)
+        self._chat_layout.insertWidget(self._chat_layout.count() - 1, holder)
+
+        self._pending_question = question.id
+        self._question_widgets = holder
+        self._input.setPlaceholderText(i18n.t("composerAnswer"))
         self._live_bubble = None
         self._live_text = ""
         self._scroll_to_end()
+
+    def _answer_question(self, value: str) -> None:
+        """Send the Arbiter's choice back through the channel the question came from."""
+        question_id, self._pending_question = self._pending_question, None
+        if question_id is None:
+            return
+        if self._question_widgets is not None:
+            self._question_widgets.setParent(None)
+            self._question_widgets.deleteLater()
+            self._question_widgets = None
+        self._input.setPlaceholderText(i18n.t("composer"))
+        self._add_bubble("user", "Arbiter · you", value)
+        self._scroll_to_end()
+        if self._worker is not None and hasattr(self._worker, "answer"):
+            self._worker.answer(question_id, value)
 
     def _add_chip(self, tool_name: str) -> None:
         """A tool call as a one-line process event ("· get_tcc_state").
@@ -578,6 +622,9 @@ class DialogPanel(QWidget):
         self._activity.setText("")
         self._chip_tool = ""
         self._chip_count = 0
+        # The question the turn is currently parked on, and the option buttons offering it.
+        self._pending_question: Optional[str] = None
+        self._question_widgets: Optional[QWidget] = None
         self._live_bubble = None
         self._live_text = ""
         self._set_busy(False)

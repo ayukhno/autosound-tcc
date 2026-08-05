@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QObject, Signal  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from autosound_tcc.core import signal_bus  # noqa: E402
 from autosound_tcc.core.agent_events import (  # noqa: E402
@@ -463,3 +463,77 @@ def test_the_line_clears_when_the_turn_ends(tmp_path):
     worker.turn_done.emit()
 
     assert panel._activity.isHidden()
+
+
+class _AnsweringWorker(FakeWorker):
+    def __init__(self):
+        super().__init__()
+        self.answers: list[tuple[str, str]] = []
+
+    def answer(self, question_id, value):
+        self.answers.append((question_id, value))
+
+
+def _asked(tmp_path):
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(
+        Question(
+            id="q1",
+            question="Reference seat?",
+            options=(QuestionOption("Driver", "one point"), QuestionOption("Both front")),
+        )
+    )
+    return panel, worker
+
+
+def test_a_question_offers_its_options_as_buttons(tmp_path):
+    """The turn is parked inside the harness until it is answered, so this is not a message to
+    reply to later — it is the only thing that moves the session forward."""
+    panel, _ = _asked(tmp_path)
+
+    labels = [b.text() for b in panel._question_widgets.findChildren(QPushButton)]
+    assert labels == ["Driver", "Both front"]
+
+
+def test_choosing_an_option_answers_through_the_same_channel(tmp_path):
+    """Not `send()`: the harness is blocked inside the question, and a new user message is not
+    what it is waiting for."""
+    panel, worker = _asked(tmp_path)
+
+    next(b for b in panel._question_widgets.findChildren(QPushButton) if b.text() == "Driver").click()
+
+    assert worker.answers == [("q1", "Driver")]
+    assert worker.sent == []
+    assert any("Driver" in b._body.text() for b in panel._bubbles)
+
+
+def test_the_buttons_go_away_once_answered(tmp_path):
+    panel, _ = _asked(tmp_path)
+
+    panel._answer_question("Driver")
+
+    assert panel._question_widgets is None
+    assert panel._pending_question is None
+
+
+def test_typing_answers_the_question_rather_than_queueing_a_message(tmp_path):
+    """Both harnesses append "Other (type your own)" to every question and take the typed value."""
+    panel, worker = _asked(tmp_path)
+
+    panel._input.setText("Helix DSP Ultra S")
+    panel._on_send()
+
+    assert worker.answers == [("q1", "Helix DSP Ultra S")]
+    assert worker.sent == []
+
+
+def test_after_answering_the_composer_sends_messages_again(tmp_path):
+    panel, worker = _asked(tmp_path)
+    panel._answer_question("Driver")
+
+    panel._input.setText("what next?")
+    panel._on_send()
+
+    assert worker.sent == ["what next?"]
