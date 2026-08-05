@@ -27,13 +27,25 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from autosound_tcc.core import vendor_loader
 
+try:  # POSIX only; Windows falls back to the thread lock alone.
+    import fcntl
+except ImportError:  # pragma: no cover - not exercised on macOS/Linux
+    fcntl = None  # type: ignore[assignment]
+
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
+
+# One writer at a time, from this process and from any other. See `_exclusive`.
+_LOCK_NAME = ".process-write.lock"
+_THREAD_LOCK = threading.Lock()
 
 
 class ProcessWriterError(RuntimeError):
@@ -58,6 +70,48 @@ def _process_dir(project_dir: Path) -> Path:
     return project_dir / "process"
 
 
+@contextmanager
+def _exclusive(project_dir: Path, timeout_s: float) -> Iterator[None]:
+    """Hold the project's process-state lock for the length of one write.
+
+    `process.py` is a read-modify-write over a single JSON file, and nothing was serialising it.
+    That is not theoretical: omp starts tool calls concurrently, and a real run fired
+    `enter_phase` and two `add_step`s before any of them returned — two came back with a traceback
+    and the third with `active_phase: null`, leaving a plan with one nameless step in it. The model
+    had done everything right.
+
+    A file lock rather than a thread lock because the other front-end is a separate process: the
+    user's own CLI can be driving the same project through the same skill (that is what
+    `signal_bus` exists for), and a lock only TCC's threads respect would not see it. The skill's
+    own CLI does not take this lock, so this narrows the window rather than closing it — closing it
+    belongs in `process.py`, as a change request.
+    """
+    lock_path = _process_dir(project_dir)
+    lock_path.mkdir(parents=True, exist_ok=True)
+    handle = (lock_path / _LOCK_NAME).open("a+")
+    try:
+        if fcntl is None:  # no flock here; the caller is still serialised by `_THREAD_LOCK`
+            yield
+            return
+        deadline = time.monotonic() + timeout_s
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise ProcessWriterError(
+                        f"another writer held {lock_path / _LOCK_NAME} for {timeout_s:.0f}s"
+                    ) from None
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
 def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
     script = script_path()
     if not script.is_file():
@@ -65,13 +119,14 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
             f"process.py not found at {script}. Run: git submodule update --init --recursive"
         )
     try:
-        proc = subprocess.run(
-            [sys.executable, str(script), str(_process_dir(project_dir)), *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            env=vendor_loader.child_env(),
-        )
+        with _THREAD_LOCK, _exclusive(project_dir, timeout_s):
+            proc = subprocess.run(
+                [sys.executable, str(script), str(_process_dir(project_dir)), *args],
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                env=vendor_loader.child_env(),
+            )
     except subprocess.TimeoutExpired:
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None
     except OSError as exc:
