@@ -774,7 +774,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.panel3};
         border: 1px solid {t.border2};
         color: {t.muted};
-        border-radius: 12px;
+        /* Under half the rendered height (22px): Qt treats a larger radius as invalid and draws
+           a square corner instead -- measured, which is why these chips looked sharp while every
+           other rounded thing in the app looked right. */
+        border-radius: 10px;
         padding: 4px 11px;
         font-size: 11px;
     }}
@@ -793,7 +796,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.panel3};
         border: 1px solid {t.border2};
         color: {t.text};
-        border-radius: 12px;
+        /* Same rule as `edit-chip`: stay under half the rendered height (22px), or Qt treats the
+           radius as invalid and draws a square corner. */
+        border-radius: 10px;
         padding: 4px 12px;
         font-size: 11.5px;
     }}

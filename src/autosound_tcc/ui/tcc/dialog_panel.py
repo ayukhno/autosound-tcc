@@ -139,6 +139,10 @@ class DialogPanel(QWidget):
         self._bus: Optional[signal_bus.SignalBus] = None
         self._live_bubble: Optional[MessageBubble] = None
         self._live_text = ""
+        # The run of identical tool calls currently being collapsed -- see `_add_chip`.
+        self._chip_bubble: Optional[MessageBubble] = None
+        self._chip_tool = ""
+        self._chip_count = 0
         # Whatever is actually answering. The mock transcript's Claude label was still on live
         # bubbles produced by a Gemini model, which is a caption that contradicts the footer.
         self._model_label = CURRENT_GENERATOR_MODEL
@@ -513,6 +517,7 @@ class DialogPanel(QWidget):
     def _append_live_text(self, text: str) -> None:
         if not text:
             return
+        self._chip_bubble = None
         self._live_text += text
         if self._live_bubble is None:
             self._add_bubble("gen", f"Generator · {self._model_label}", _markdown(self._live_text))
@@ -536,6 +541,7 @@ class DialogPanel(QWidget):
             for option in question.options
         ]
         self._add_bubble("sys", question.header or "QUESTION", "<br>".join(lines))
+        self._chip_bubble = None
         self._live_bubble = None
         self._live_text = ""
         self._scroll_to_end()
@@ -546,9 +552,24 @@ class DialogPanel(QWidget):
         Both spellings of the prefix, because the two harnesses disagree: the Agent SDK names
         TCC's tools `mcp__tcc__get_tcc_state` and omp names them `mcp__tcc_get_tcc_state`. Showing
         the raw name leaks which harness is running into every line of the transcript.
+
+        A run of the same tool collapses into one row with a count. A model working out where it
+        is calls `glob` six times in a row, and six identical full-width rows is most of a screen
+        spent saying one thing -- the transcript is meant to show the shape of the work, not
+        every call. The role caption goes too: the leading dot already says what kind of row this
+        is, and "TOOL" on eight consecutive rows is the same word eight times.
         """
         pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
-        self._add_bubble("sys", "TOOL", f"· {pretty}")
+        if self._chip_bubble is not None and self._chip_tool == pretty:
+            self._chip_count += 1
+            self._chip_bubble.set_html(f"· {pretty} ×{self._chip_count}")
+            self._fit(self._chip_bubble)
+            self._scroll_to_end()
+            return
+        self._add_bubble("sys", "", f"· {pretty}")
+        self._chip_bubble = self._bubbles[-1]
+        self._chip_tool = pretty
+        self._chip_count = 1
         self._live_bubble = None  # text after a tool call starts a new bubble
         self._live_text = ""
         self._scroll_to_end()

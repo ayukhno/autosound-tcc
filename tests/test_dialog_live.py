@@ -432,3 +432,36 @@ def test_markup_in_the_models_text_cannot_become_markup(tmp_path):
     worker.chunk.emit(TextDelta("HP <script>alert(1)</script> 80 Hz"))
 
     assert "&lt;script&gt;" in panel._bubbles[-1]._body.text()
+
+
+def test_a_run_of_the_same_tool_collapses_into_one_row(tmp_path):
+    """A model working out where it is calls `glob` six times, and six identical full-width rows
+    is most of a screen spent saying one thing."""
+    panel, worker, _ = _attached(tmp_path)
+
+    for _ in range(6):
+        worker.chunk.emit(ToolCall(name="glob"))
+
+    assert len(panel._bubbles) == 1
+    assert "×6" in panel._bubbles[0]._body.text()
+
+
+def test_a_different_tool_starts_its_own_row(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(ToolCall(name="glob"))
+    worker.chunk.emit(ToolCall(name="read"))
+    worker.chunk.emit(ToolCall(name="glob"))
+
+    assert len(panel._bubbles) == 3
+
+
+def test_text_between_two_runs_breaks_the_collapse(tmp_path):
+    """Otherwise a `glob` before the answer and a `glob` after it would count as one run."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(ToolCall(name="glob"))
+    worker.chunk.emit(TextDelta("Looking."))
+    worker.chunk.emit(ToolCall(name="glob"))
+
+    assert len(panel._bubbles) == 3

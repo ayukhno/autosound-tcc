@@ -24,7 +24,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
+from PySide6.QtGui import QCursor, QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -72,6 +72,7 @@ from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
+from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.sidebar_section import SidebarSection, clear_layout
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
@@ -388,10 +389,14 @@ class MainWindow(QMainWindow):
         self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self._project_btn)
-        # Qt hides action tooltips by default, and these three differ in ways the labels cannot
-        # carry -- particularly that starting a new session is not the same act as restarting on
-        # a different model.
-        menu.setToolTipsVisible(True)
+        # Same rounded popup the rest of the app uses -- an unstyled QMenu is square-cornered,
+        # which is the thing `rounded_tooltip` exists to stop (user report 2026-07-28).
+        menu.setProperty("class", "support-menu")
+        # NOT `setToolTipsVisible`: that shows the platform tooltip, whose window frame stays
+        # square on macOS regardless of QSS -- the exact limitation `rounded_tooltip` was written
+        # for. The menu drives the shared rounded popup itself as the highlight moves.
+        menu.hovered.connect(self._show_action_tip)
+        menu.aboutToHide.connect(rounded_tooltip.RoundedTooltip.instance().hide_tip)
         self._open_project_action = menu.addAction(i18n.t("projectOpen"))
         self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
         self._open_project_action.triggered.connect(self._choose_project_folder)
@@ -568,6 +573,7 @@ class MainWindow(QMainWindow):
         self._session_btn.setProperty("class", "reason-btn")
         self._session_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._session_btn.clicked.connect(self._start_tuning_session)
+        self._restart_tip = attach_tip(self._session_btn, "")
         layout.addWidget(self._session_btn)
         self._update_session_button()
 
@@ -1519,7 +1525,7 @@ class MainWindow(QMainWindow):
         if restart:
             self._session_btn.setText(i18n.t("restartSession").format(model=choice.label))
             self._session_btn.setEnabled(True)
-            self._session_btn.setToolTip(i18n.t("restartSessionTip"))
+            self._restart_tip.set_text(i18n.t("restartSessionTip"))
         self._refresh_project_button()
 
     def _open_model_config(self) -> None:
@@ -1531,6 +1537,14 @@ class MainWindow(QMainWindow):
         self._update_session_button()
 
     # ---- the project menu ---------------------------------------------------
+
+    def _show_action_tip(self, action) -> None:
+        tip = action.toolTip()
+        popup = rounded_tooltip.RoundedTooltip.instance()
+        if not tip or tip == action.text():
+            popup.hide_tip()
+            return
+        popup.show_at(QCursor.pos(), tip)
 
     def _refresh_project_button(self) -> None:
         chosen = config.chosen_project_dir()

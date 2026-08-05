@@ -886,6 +886,14 @@ def test_the_menu_explains_what_the_labels_cannot(monkeypatch):
     assert window._save_state_action.toolTip()
     assert window._open_project_action.toolTip()
 
+    # Shown through the app's own rounded popup, not the platform tooltip whose window frame
+    # stays square on macOS regardless of QSS (user report 2026-07-28).
+    from autosound_tcc.ui.tcc import rounded_tooltip
+
+    window._show_action_tip(window._fresh_session_action)
+    assert rounded_tooltip.RoundedTooltip.instance().isVisible()
+    assert window._project_btn.menu().property("class") == "support-menu"
+
 
 def test_choosing_a_different_folder_relaunches_rather_than_pretending(monkeypatch, tmp_path):
     """"Remembered for next time" is not what anyone means by choosing a folder — reported as
@@ -946,3 +954,23 @@ def test_picking_the_folder_already_open_is_a_no_op(monkeypatch):
     )
 
     window._choose_project_folder()
+
+
+def test_chip_buttons_actually_render_rounded():
+    """QSS said `border-radius: 12px` and Qt drew square corners, because 12 is more than half of
+    the 22px these render at — an out-of-range radius is silently ignored. Declaring it is not
+    the same as getting it, so this measures the pixels."""
+    _app()
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    QApplication.processEvents()
+
+    for button in (window._dialog._not_visible_btn, window._dialog._edit_chip, window._session_btn):
+        button.setHidden(False)
+        QApplication.processEvents()
+        image = button.grab().toImage()
+        assert image.width() > 8, button.text()
+        corner = image.pixelColor(0, 0)
+        edge = image.pixelColor(image.width() // 2, 0)
+        assert corner != edge, f"square corner on {button.property('class')}: {button.text()!r}"
