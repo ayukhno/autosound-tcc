@@ -22,7 +22,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QFileDialog,
     QMenu,
+    QToolButton,
     QPushButton,
     QSplitter,
     QStyle,
@@ -36,6 +38,7 @@ from autosound_tcc.core import (
     critic,
     model_choices,
     omp_session,
+    project_settings,
     terminal_launcher,
 )
 from autosound_tcc.core.contract_check import ContractReport
@@ -65,9 +68,12 @@ from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
 _LANG_KEY = "ui/lang"
-_GENERATOR_KEY = "ai/generator"        # the picked Choice.key
-_ACTIVE_OMP_KEY = "ai/active_omp"     # selectors the user marked usable
-_CRITIC_KEY = "ai/critic"             # the picked Choice.key for the reviewer
+# Which models drive this project lives WITH the project (`.tcc/tcc-project.json`): opening a
+# second folder must not silently re-point the first. Which omp models this machine can reach is
+# the opposite -- a fact about the user's accounts, not about any project -- so it stays global.
+_GENERATOR_KEY = "generator"          # per project: the picked Choice.key
+_CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
+_ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
 # What the outgoing model is asked to do before its session ends. Written as instructions to a
 # model, so it names the tools rather than describing the intent: an agent that "summarises the
@@ -361,6 +367,25 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(14)
+
+        # Leftmost, because it is the one control that is about *which project* rather than about
+        # what is in it. Three actions, in the order they matter: pick the folder, put what the
+        # model knows on disk, start over with an empty context.
+        self._project_btn = QToolButton()
+        self._project_btn.setProperty("class", "reason-btn")
+        self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self._project_btn)
+        self._open_project_action = menu.addAction(i18n.t("projectOpen"))
+        self._open_project_action.triggered.connect(self._choose_project_folder)
+        menu.addSeparator()
+        self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
+        self._save_state_action.triggered.connect(self._save_project_state)
+        self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
+        self._fresh_session_action.triggered.connect(self._start_fresh_session)
+        self._project_btn.setMenu(menu)
+        layout.addWidget(self._project_btn)
+        self._refresh_project_button()
 
         self._preset_field_lbl = QLabel(i18n.t("preset"))
         self._preset_field_lbl.setProperty("class", "kv-lbl")
@@ -1245,7 +1270,7 @@ class MainWindow(QMainWindow):
         choice = self._critic_choice()
         if choice is None:
             return
-        self._settings.setValue(_CRITIC_KEY, choice.key)
+        project_settings.set_value(config.tcc_dir(), _CRITIC_KEY, choice.key)
         self._bridge.set_snapshot(critic_model=choice.model)
 
     def _refresh_critic_status(self) -> None:
@@ -1283,6 +1308,9 @@ class MainWindow(QMainWindow):
     # ---- handing the project over between sessions -------------------------
 
     def _hand_off_then_restart(self, worker) -> None:
+        self._hand_off(worker, "restart")
+
+    def _hand_off(self, worker, mode: str) -> None:
         """Ask the running agent to write down where the project stands, then swap models.
 
         A conversation is disposable; the files are the record ("machine files win"). Everything
@@ -1296,6 +1324,7 @@ class MainWindow(QMainWindow):
         """
         if getattr(self, "_handoff_timer", None) is not None:
             return  # already saving; a second click must not start a second handoff
+        self._handoff_mode = mode
         self._dialog._add_system_message(i18n.t("sessionHandoff"))
         self._session_btn.setEnabled(False)
         worker.turn_done.connect(self._finish_handoff)
@@ -1313,6 +1342,7 @@ class MainWindow(QMainWindow):
         if timer is None:
             return  # already finished: whichever of turn_done/failed/timeout lost the race
         timer.stop()
+        mode = getattr(self, "_handoff_mode", "restart")
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
             for signal in (worker.turn_done, worker.failed):
@@ -1320,12 +1350,21 @@ class MainWindow(QMainWindow):
                     signal.disconnect(self._finish_handoff)
                 except (RuntimeError, TypeError):
                     pass
+        if mode == "save":
+            # The point was to get the project onto disk, not to end the conversation.
+            self._dialog._add_system_message(i18n.t("sessionSaved"))
+            self._update_session_button()
+            return
+        if worker is not None:
             worker.shutdown()
         self._agent_worker = None
-        self._dialog._add_system_message(i18n.t("sessionRestarted"))
-        self._launch_session()
+        self._running_model = None
+        self._dialog._add_system_message(
+            i18n.t("sessionFresh") if mode == "fresh" else i18n.t("sessionRestarted")
+        )
+        self._launch_session(fresh=mode == "fresh")
 
-    def _launch_session(self, opening: Optional[str] = None) -> None:
+    def _launch_session(self, opening: Optional[str] = None, fresh: bool = False) -> None:
         if self._mcp_server is None:
             self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
             return
@@ -1338,7 +1377,10 @@ class MainWindow(QMainWindow):
             self._dialog._add_system_message(i18n.t("ompMissing"))
             return
         probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
-        resumed = probe.resumed_from is not None
+        # "Start a new session" means an empty context on purpose: the project's state is on disk
+        # and the new session reads it, which is cheaper than carrying a long transcript that has
+        # already been written down.
+        resumed = probe.resumed_from is not None and not fresh
         if choice.harness == "omp":
             # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
             # needs no url/token of its own.
@@ -1367,6 +1409,7 @@ class MainWindow(QMainWindow):
         self._running_model = choice.key
         self._agent_worker.start()
         self._update_session_button()
+        self._refresh_project_button()
 
     # ---- which model, and therefore which harness --------------------------
 
@@ -1374,18 +1417,19 @@ class MainWindow(QMainWindow):
         raw = self._settings.value(_ACTIVE_OMP_KEY, "")
         return [selector for selector in str(raw).split(",") if selector]
 
+    def _project_setting(self, key: str) -> str:
+        return project_settings.get(config.tcc_dir(), key, "") or ""
+
     def _reload_model_choices(self) -> None:
         """Refill both pickers from one registry, keeping selections that survived."""
         active = self._active_omp()
         self._model_choices = model_choices.choices(active)
         self._critic_choices = model_choices.critic_choices(active)
-        self._fill_combo(
-            self._ai_main_combo, self._model_choices, str(self._settings.value(_GENERATOR_KEY, ""))
-        )
+        self._fill_combo(self._ai_main_combo, self._model_choices, self._project_setting(_GENERATOR_KEY))
         self._fill_combo(
             self._ai_critic_combo,
             self._critic_choices,
-            str(self._settings.value(_CRITIC_KEY, "")),
+            self._project_setting(_CRITIC_KEY),
             critic=True,
         )
 
@@ -1422,7 +1466,7 @@ class MainWindow(QMainWindow):
         if choice is None:
             self._update_session_button()
             return
-        self._settings.setValue(_GENERATOR_KEY, choice.key)
+        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, choice.key)
         # The placeholder has served its purpose the moment a real model is chosen.
         placeholder = self._ai_main_combo.findData("")
         if placeholder >= 0:
@@ -1452,6 +1496,7 @@ class MainWindow(QMainWindow):
             self._session_btn.setText(i18n.t("restartSession").format(model=choice.label))
             self._session_btn.setEnabled(True)
             self._session_btn.setToolTip(i18n.t("restartSessionTip"))
+        self._refresh_project_button()
 
     def _open_model_config(self) -> None:
         dialog = ModelConfigDialog(self._active_omp(), self)
@@ -1460,6 +1505,47 @@ class MainWindow(QMainWindow):
         self._settings.setValue(_ACTIVE_OMP_KEY, ",".join(dialog.active))
         self._reload_model_choices()
         self._update_session_button()
+
+    # ---- the project menu ---------------------------------------------------
+
+    def _refresh_project_button(self) -> None:
+        chosen = config.chosen_project_dir()
+        self._project_btn.setText(f"⌂ {chosen.name}" if chosen else i18n.t("projectNone"))
+        running = getattr(self, "_agent_worker", None) is not None
+        self._save_state_action.setEnabled(running)
+        self._fresh_session_action.setEnabled(running)
+
+    def _choose_project_folder(self) -> None:
+        """Pick the folder this window works on. An empty one is a valid new project.
+
+        TCC does not judge the contents: the intake fills a new folder, so choosing a folder and
+        creating a project are one act rather than two controls that can disagree.
+
+        Switching folders is not done in place. The MCP server, the session registry, the file
+        watchers and every panel bind to one folder at startup, so a live swap would be a partial
+        teardown pretending to be a setting -- the user is told to open TCC again instead.
+        """
+        start = config.chosen_project_dir() or Path.home()
+        picked = QFileDialog.getExistingDirectory(self, i18n.t("projectOpen"), str(start))
+        if not picked:
+            return
+        previous = config.chosen_project_dir()
+        config.set_project_dir(Path(picked))
+        self._refresh_project_button()
+        if previous is not None and Path(picked) != previous:
+            self._status_strip.notify(i18n.t("projectReopen"), level="warn")
+
+    def _save_project_state(self) -> None:
+        """Ask the running model to put what it knows on disk, and keep talking."""
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            self._hand_off(worker, "save")
+
+    def _start_fresh_session(self) -> None:
+        """Save, then start over with an empty context on the same project and model."""
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            self._hand_off(worker, "fresh")
 
     def _open_terminal(self) -> None:
         """Front-end B: hand the project to the user's own CLI in their own terminal.

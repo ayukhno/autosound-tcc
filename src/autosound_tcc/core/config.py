@@ -57,6 +57,24 @@ _RECENT_PROJECTS_KEY = "project/recent"
 MAX_RECENT_PROJECTS = 8
 
 
+def chosen_project_dir() -> Optional[Path]:
+    """The project folder the user actually chose, or None if they never chose one.
+
+    `project_dir()` cannot answer this: it ends in `DEFAULT_STATE_ROOT` so that every caller gets
+    *a* path, which means a fresh install silently opens this checkout's own dogfood folder. A
+    window that must not open on a folder nobody picked needs the difference.
+
+    Note what is NOT checked: whether the folder contains anything. An empty directory is a valid
+    new project -- the intake fills it -- so "choose a folder" and "create a project" are one act,
+    and judging the contents here would invent a second.
+    """
+    env = os.environ.get("AUTOSOUND_PROJECT_DIR")
+    if env:
+        return Path(env).expanduser()
+    saved = _settings().value(_PROJECT_DIR_KEY, "")
+    return Path(str(saved)).expanduser() if saved else None
+
+
 def project_dir() -> Path:
     """The tuning project folder: agent `cwd`, skill state, `.tcc/`, `dsp_profile.json`.
 

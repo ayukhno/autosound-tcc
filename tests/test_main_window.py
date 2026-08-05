@@ -758,7 +758,7 @@ def test_the_swap_happens_once_the_state_is_saved(monkeypatch):
     window._agent_worker = worker
     window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
     launched = []
-    monkeypatch.setattr(MainWindow, "_launch_session", lambda self: launched.append(True))
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(True))
 
     window._start_tuning_session()
     worker.turn_done.emit()
@@ -794,10 +794,77 @@ def test_a_failed_handoff_still_restarts(monkeypatch):
     window._agent_worker = worker
     window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
     launched = []
-    monkeypatch.setattr(MainWindow, "_launch_session", lambda self: launched.append(True))
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(True))
 
     window._start_tuning_session()
     worker.failed.emit("provider refused")
 
     assert worker.shutdowns == 1
     assert launched == [True]
+
+
+def test_the_model_choice_belongs_to_the_project_not_the_person(monkeypatch, tmp_path):
+    """Remembering it globally means opening a second folder silently re-points the first."""
+    from autosound_tcc.core import project_settings
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+
+    assert project_settings.get(config.tcc_dir(), "generator") == "sdk:claude-sonnet-5"
+
+
+def test_the_project_menu_names_the_open_folder(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    assert config.chosen_project_dir().name in window._project_btn.text()
+
+
+def test_saving_and_starting_over_need_a_running_session(monkeypatch):
+    """Both act on what the model currently knows; with nothing running there is nothing to save."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    assert not window._save_state_action.isEnabled()
+    assert not window._fresh_session_action.isEnabled()
+
+
+def test_saving_writes_the_state_and_keeps_talking(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    launched = []
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(True))
+
+    window._save_project_state()
+    worker.turn_done.emit()
+
+    assert worker.sent  # the model was asked to write it down
+    assert worker.shutdowns == 0  # ...and the conversation is still open
+    assert launched == []
+
+
+def test_a_fresh_session_saves_first_then_clears_the_context(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    launched = []
+    monkeypatch.setattr(
+        MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(kw.get("fresh"))
+    )
+
+    window._start_fresh_session()
+    worker.turn_done.emit()
+
+    assert worker.sent
+    assert worker.shutdowns == 1
+    assert launched == [True]  # not resumed: the project state is on disk to be re-read
