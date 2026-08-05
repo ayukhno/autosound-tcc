@@ -776,3 +776,54 @@ Ask, smallest first:
 
 Until at least (1), TCC's Critic picker has to mark non-Gemini choices as clipboard-mode, which is
 a front-end apologising for a method-level gap.
+
+## SCR-034 — the capture task is derived but never recorded
+
+**Status**: proposed (found reviewing what TCC already does with the capture checklist, 2026-08-05)
+**Target**: the journal vocabulary fixed in SCR-004 (`rew_tool/state/process.py`) — new event
+types and the commands that write them; `naming.expected_groups` stays as it is
+**TCC dependency**: `state/measurement_view.build_session` derives the checklist today and
+`ui/tcc/measurement_panel.py` renders it. Nothing here asks the skill to hand TCC a list — the
+derivation is right where SCR-004 put it. What TCC cannot do is show history, because there is
+none to read.
+
+**Detail**: the derivation half is done and works. `build_session(phase, version, titles)` calls
+the skill's own `naming.expected_groups(phase, glossary, version)`, matches the result against the
+measurement titles REW reports, and renders three states per item: `done`, `wait`, and `stale` for
+a capture whose channel a `config_change` invalidated (SCR-014) — "the graph exists and is
+unusable" is already distinguished from "missing". Captures that belong to this version but are
+not on the checklist get their own `additional` group rather than being dropped.
+
+What is missing is the **record**. Every one of those statuses is recomputed, on every refresh,
+from the list of titles currently open in REW. Three consequences, none of them cosmetic:
+
+* **REW closed means the panel cannot tell taken from not-taken.** The evidence for a whole
+  capture round lives in another application's session.
+* **Nothing survives.** There is no history of when a round happened, how long it took, or how
+  many attempts it needed — while `journal.jsonl` records exactly that shape of thing for every
+  other kind of work.
+* **"Deliberately skipped" is indistinguishable from "not done yet".** Both render as `wait`. A
+  tuner who decided a capture was unnecessary has no way to say so, and the next session
+  re-proposes it.
+
+There is also no session identity. The task is keyed `v{version}` — the ledger HEAD, which is
+correct for *naming* the measurements (`_N` is the config they were taken under,
+`naming-and-structure.md` §3) but wrong for identifying the round: two capture passes at the same
+config are the same key. What the Arbiter asks about is "this session's task".
+
+Measurement names do reach the journal today, as strings inside `step_done`'s evidence. That is
+the transcription surface SCR-026 and SCR-030 object to, in a third place: the fact is retyped
+into a proof rather than recorded as itself, so nothing can be counted, filtered, or re-derived
+from it.
+
+Ask:
+
+1. Capture events in the journal, against phase + ledger version + a session id the skill already
+   has: the task issued, a capture taken (title, when), a capture skipped (with the reason —
+   skipping is a decision, and SCR-030 makes the same point about the Arbiter's other decisions),
+   an unplanned capture added.
+2. `process.py` subcommands to write them, so recording a round is a prescribed call rather than a
+   judgement about which existing event to bend.
+3. Nothing new for the derivation. `expected_groups` stays the source of what *should* be
+   captured; these events are what *happened*, and план-факт is the two read together — which is
+   the whole shape TCC's plan panel is built on.
