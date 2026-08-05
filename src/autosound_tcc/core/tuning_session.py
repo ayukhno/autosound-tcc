@@ -32,7 +32,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 
-from autosound_tcc.core import config
+from autosound_tcc.core import config, vendor_loader
 from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -255,6 +255,11 @@ class TuningSession:
 
     async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
         """Open (or resume) the session and yield `agent_events` for the caller to render."""
+        # `setting_sources=["project"]` means the project's own `.claude/skills` is the *only*
+        # place the skill can come from, and nothing used to put it there -- so a project without
+        # the link ran with no method at all. TCC installs the version it ships; an existing link
+        # is left alone.
+        vendor_loader.link_skill_into(self.project_dir)
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
         self._started = True

@@ -15,17 +15,22 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Optional
+
+# The skill's own name, and the directory both adapters expect it under inside a project.
+# Duplicated from `tuning_session` on purpose: this module is imported by it, not the other way.
+SKILL_NAME = "autosound-tuning"
 
 # vendor_loader.py -> core -> autosound_tcc -> src -> <repo root>
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-REW_TOOL_DIR = (
+SKILL_DIR = (
     _REPO_ROOT
     / "vendor"
     / "autosound-tuning-skill"
     / "skills"
     / "autosound-tuning"
-    / "rew_tool"
 )
+REW_TOOL_DIR = SKILL_DIR / "rew_tool"
 
 # Vendored file (relative to REW_TOOL_DIR) -> synthetic module name we import it as.
 _VENDORED = {
@@ -52,6 +57,38 @@ class VendorNotInitializedError(RuntimeError):
 def is_available() -> bool:
     """True if the vendored `rew_tool` submodule is present on disk."""
     return (REW_TOOL_DIR / "rew_api.py").is_file()
+
+
+def link_skill_into(project_dir: Path) -> Optional[Path]:
+    """Make sure this project has the skill, and that it is *this* skill.
+
+    Both adapters assume `<project>/.claude/skills/autosound-tuning` — the SDK reads it as its
+    only setting source, omp as its only enabled skill — and until now nothing created it. A
+    project without it does not fail: whatever happens to be in `~/.claude/skills` gets used
+    instead, or nothing does, and the session improvises a tuning method of its own. That is how
+    a real run came to follow a dead reference out of an old checkout, hunt the disk for three
+    globs and an eight-minute `grep`, and then invent an intake.
+
+    So TCC installs the version it ships, by symlink rather than copy: the vendored submodule is
+    the single source of truth and a copy would drift from it silently. An existing entry is left
+    alone whatever it points at — the user may have wired a working tree there on purpose, and
+    replacing it under them would be worse than the problem this solves.
+
+    Returns the link, or None when there is nothing to link (no submodule) or the filesystem
+    refuses. Both are reported by the caller rather than raised: a session with a warning beats no
+    session.
+    """
+    link = project_dir / ".claude" / "skills" / SKILL_NAME
+    try:
+        if link.exists() or link.is_symlink():
+            return link
+        if not is_available():
+            return None
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(SKILL_DIR.resolve(), target_is_directory=True)
+        return link
+    except OSError:
+        return None
 
 
 def child_env(**extra: str) -> dict[str, str]:
