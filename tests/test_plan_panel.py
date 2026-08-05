@@ -112,26 +112,35 @@ def test_project_source_step_gets_blue_class():
     assert name_label.property("class") == "substep-name-project"
 
 
-def test_done_checkbox_persists_via_progress_overlay(tmp_path, monkeypatch):
+def test_the_checkbox_shows_what_the_skill_wrote(tmp_path):
+    """It used to read a local QSettings overlay left over from the mock, so a finished phase
+    showed unticked steps."""
     _app()
-    progress = _PlanProgress()
-    assert not progress.is_done("0.1")
-    seen = {}
-
-    def _on_toggle(sid, checked):
-        seen[sid] = checked
-        progress.set_done(sid, checked)
-
-    row = _PhaseStepRow(PLAN[0].steps[0], progress, _on_toggle, lambda _sid: None)
     from PySide6.QtWidgets import QCheckBox
 
+    done = PlanStep(id="x.1", name={"en": "done one", "uk": "зроблено"}, tag_class="ok")
+    todo = PlanStep(id="x.2", name={"en": "todo one", "uk": "треба"})
+
+    assert _PhaseStepRow(done, _PlanProgress(), lambda *_: None, lambda _s: None
+                         ).findChild(QCheckBox).isChecked()
+    assert not _PhaseStepRow(todo, _PlanProgress(), lambda *_: None, lambda _s: None
+                             ).findChild(QCheckBox).isChecked()
+
+
+def test_the_checkbox_cannot_be_clicked(tmp_path):
+    """SCR-004: v1's only writer is the skill. Ticking one here recorded nothing, contradicted the
+    file, and invited a decision against a plan that existed only in this window."""
+    _app()
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QCheckBox
+
+    row = _PhaseStepRow(
+        PlanStep(id="x.1", name={"en": "one", "uk": "один"}), _PlanProgress(),
+        lambda *_: None, lambda _s: None,
+    )
     checkbox = row.findChild(QCheckBox)
-    checkbox.setChecked(True)
-    assert seen == {"0.1": True}
-    assert progress.is_done("0.1")
-    # New _PlanProgress instance reads the same QSettings store -- persisted across "sessions".
-    reloaded = _PlanProgress()
-    assert reloaded.is_done("0.1")
+
+    assert checkbox.testAttribute(_Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
 
 def test_inserted_step_appears_in_phase_and_persists():

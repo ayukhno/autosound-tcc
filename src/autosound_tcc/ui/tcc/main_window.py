@@ -949,11 +949,18 @@ class MainWindow(QMainWindow):
         self._load_project()
 
     def _show_left_status(self, message: str, offer_create: bool = False) -> None:
-        """The one place that means "there's no real, loaded project view right now" -- all four
-        `_load_project` failure branches route through here, so mock-clearing lives here rather
-        than at one call site. Only the genuine no-profile-file-at-all branch passes
-        `offer_create=True`; a broken profile/ledger is a project that exists, where "create new"
-        would be the wrong offer."""
+        """No loaded DSP view right now -- all four `_load_project` failure branches route here.
+
+        What this means is narrow, and it used to be read far too widely: "there is no
+        `dsp_profile.json` yet" is not "there is no project". A folder mid-interview has a plan,
+        a journal and a process state and no profile, and this method was blanking all of them --
+        visibly on `↻` ("Проєкт не відкрито" over a plan that was on screen a second earlier) and
+        invisibly on every `enter_phase`/`add_step`, since recording refreshes the window.
+
+        So the panels that have their own source are no longer cleared from here; they are asked
+        to re-read it. `_has_project` keeps its old meaning -- the DSP view -- and stops being
+        consulted about the process.
+        """
         self._has_project = False
         self._tree.setVisible(False)
         self._left_status.setText(message)
@@ -963,8 +970,7 @@ class MainWindow(QMainWindow):
         self._set_project_params(None)
         self._detail.close_pane()
         self._dialog.clear_for_no_project()
-        self._plan_panel.set_plan(())
-        self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
+        self._refresh_process()
 
     def _set_project_params(self, view: ProjectView | None) -> None:
         """(Re)builds the "Project params" section body from `project.json`'s channel-tier summary
@@ -1160,11 +1166,14 @@ class MainWindow(QMainWindow):
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
         if state is None:
-            # A real project that just hasn't started tuning yet keeps the mock; no project at
-            # all (self._has_project False, set by _show_left_status) must NOT re-mock a plan
-            # _load_project already cleared to real-empty -- this runs after _load_project every
-            # time (including preset switches), so it can't just default to "keep the mock".
-            self._plan_panel.set_plan(None if self._has_project else ())
+            # "No plan yet" and "no project open" are different empty states with different fixes,
+            # and the difference is whether a folder is open -- not whether the DSP profile has
+            # been written, which happens much later and used to blank a plan that existed.
+            self._plan_panel.set_plan(None if config.chosen_project_dir() else ())
+            # The capture task is derived from the DSP view, so its empty state follows that and
+            # not the folder -- a project with a profile and no captures yet is not "no project".
+            if not self._has_project:
+                self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
             return
         # SCR-014: what a `config_change` invalidated, computed once and used by both panels --
         # a step's "recheck" chip and a capture's unusable colour are the same fact.
@@ -1184,6 +1193,10 @@ class MainWindow(QMainWindow):
 
         # Re-arm: an atomic write replaces the inode, so the watcher silently drops the path it
         # was watching. Re-adding after every change is what keeps this from firing exactly once.
+        # `_show_left_status` can reach here while the window is still being built, before the
+        # watcher exists; the refresh itself is still worth doing, the re-arming is not.
+        if getattr(self, "_process_watcher", None) is None:
+            return
         path = str(process_view.state_file())
         if path not in self._process_watcher.files():
             self._process_watcher.addPath(path)

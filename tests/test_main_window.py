@@ -6,6 +6,7 @@ CI as it does locally without a real screen.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -974,3 +975,32 @@ def test_chip_buttons_actually_render_rounded():
         corner = image.pixelColor(0, 0)
         edge = image.pixelColor(image.width() // 2, 0)
         assert corner != edge, f"square corner on {button.property('class')}: {button.text()!r}"
+
+
+def test_a_project_mid_interview_keeps_its_plan(tmp_path, monkeypatch):
+    """"No `dsp_profile.json` yet" is not "no project". A folder mid-interview has a plan, a
+    journal and a process state and no profile — and pressing ↻ used to replace the plan on screen
+    with "no project open", while every `enter_phase`/`add_step` did the same invisibly."""
+    process = tmp_path / "process"
+    process.mkdir()
+    (process / "process-state.json").write_text(
+        json.dumps({
+            "schema_version": 3,
+            "active_phase": "-1",
+            "phases": {"-1": {"status": "cur", "title": "Project intake"}},
+            "plan": [{"id": "lang", "name": "Set session language", "status": "done",
+                      "phase": "-1", "source": "skill"}],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _app()
+    window = MainWindow()
+
+    assert window._has_project is False  # no DSP profile: the tree genuinely has nothing
+    assert window._plan_panel.plan  # ...but the plan is real and stays
+
+    window._reload_from_disk()
+
+    assert window._plan_panel.plan
+    assert any("Set session language" in s.name for p in window._plan_panel.plan for s in p.steps)

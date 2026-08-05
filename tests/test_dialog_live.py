@@ -563,3 +563,48 @@ def test_clearing_with_no_session_still_clears(tmp_path):
 
     assert panel._bubbles == []
     assert panel._live_bubble is None
+
+
+def test_a_pasted_list_keeps_its_lines(tmp_path):
+    """It was a QLineEdit, which silently flattens a paste: an equipment list arrived as one
+    run-on paragraph and the structure the model needed was gone."""
+    panel, worker, _ = _attached(tmp_path)
+    pasted = "DSP:\n    Helix DSP Ultra S\n    Helix BT HD\nСаб:\n    Закритий ящик 35л"
+
+    panel._input.setText(pasted)
+    panel._on_send()
+
+    assert worker.sent == [pasted]
+    body = panel._bubbles[-1]._body.text()
+    assert body.count("<br>") == 4
+    assert "&nbsp;" in body  # the indentation is what carries the nesting
+
+
+def test_shift_enter_makes_a_line_instead_of_sending(tmp_path):
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtGui import QKeyEvent
+
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("first")
+
+    panel._input.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, _Qt.Key.Key_Return,
+                  _Qt.KeyboardModifier.ShiftModifier, "\n")
+    )
+
+    assert worker.sent == []
+
+
+def test_enter_sends(tmp_path):
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtGui import QKeyEvent
+
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("go")
+
+    panel._input.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, _Qt.Key.Key_Return,
+                  _Qt.KeyboardModifier.NoModifier, "\r")
+    )
+
+    assert worker.sent == ["go"]

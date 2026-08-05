@@ -90,7 +90,11 @@ class _StatusDot(QLabel):
 class _PhaseStepRow(QWidget):
     def __init__(self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click) -> None:
         super().__init__()
-        done = progress.is_done(step.id)
+        # Done is what the skill wrote, never what was clicked here. The checkbox used to read a
+        # local QSettings overlay left over from the mock, so a finished phase showed unticked
+        # steps *and* the Arbiter could tick one -- recording nothing, contradicting the file, and
+        # inviting a decision to be made against a plan that only existed in this window.
+        done = step.tag_class == "ok"
         if step.skip:
             self.setProperty("class", "step-skip")
         layout = QHBoxLayout(self)
@@ -99,7 +103,11 @@ class _PhaseStepRow(QWidget):
 
         check = QCheckBox()
         check.setChecked(done)
-        check.toggled.connect(lambda checked, sid=step.id: on_toggle(sid, checked))
+        # Read-only on purpose (SCR-004): v1's only writer is the skill, and the Arbiter changes
+        # the plan by saying so in the dialog -- which lands as a journal event -- not by clicking
+        # a box that writes nowhere.
+        check.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(check)
 
         name = QLabel(i18n.tx(step.name))
@@ -192,11 +200,10 @@ class _PhaseRow(QWidget):
         for step in steps:
             steps_layout.addWidget(_PhaseStepRow(step, progress, _on_toggle, on_session_click))
 
-        add_btn = QPushButton(i18n.t("addStep"))
-        add_btn.setProperty("class", "add-step-btn")
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(lambda: self._add_step(phase_index, progress, on_changed))
-        steps_layout.addWidget(add_btn)
+        # "+ add step" wrote into the same local overlay the checkbox did, so a step added here
+        # existed in this window and nowhere else -- not in the plan the model reads, not in the
+        # journal. Adding a step is `add_step` on the MCP surface; the Arbiter asks for it in the
+        # dialog. Gone rather than disabled: a control that cannot work is not a hint.
 
         self._steps_container.setHidden(collapsed)
         outer.addWidget(self._steps_container)

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -54,6 +55,8 @@ def _markdown(text: str) -> str:
     else, so a stray `<` in a filter string can never become markup.
     """
     out = html.escape(text)
+    # Leading spaces are how a pasted list shows its nesting, and HTML collapses runs of them.
+    out = re.sub(r"^ +", lambda m: "&nbsp;" * len(m.group()), out, flags=re.MULTILINE)
     out = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", out)
     out = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", out)
     lines = []
@@ -73,6 +76,50 @@ def _markdown(text: str) -> str:
             continue
         lines.append(line)
     return "<br>".join(lines)
+
+
+class ComposerInput(QPlainTextEdit):
+    """The message box. Multi-line, because what gets typed here is often pasted.
+
+    It was a `QLineEdit`, which silently flattens a paste: an equipment list arrived as one
+    run-on paragraph and the structure the model needed to read it was gone (reported with the
+    before/after, 2026-08-05). Enter sends and Shift+Enter breaks a line, which is what a chat
+    box does; the field grows with the text up to a few lines and then scrolls, so a long paste
+    does not push the transcript off screen.
+    """
+
+    submitted = Signal()
+
+    _MAX_LINES = 6
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.setTabChangesFocus(True)
+        self.document().contentsChanged.connect(self._fit_height)
+        self._fit_height()
+
+    # `QLineEdit`'s vocabulary, so call sites read the same as before.
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, value: str) -> None:  # noqa: N802 (Qt naming)
+        self.setPlainText(value)
+
+    def _fit_height(self) -> None:
+        line = self.fontMetrics().lineSpacing()
+        lines = min(max(int(self.document().size().height()), 1), self._MAX_LINES)
+        self.setFixedHeight(int(line * lines + 14))
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if enter and not event.modifiers() & (Qt.KeyboardModifier.ShiftModifier
+                                              | Qt.KeyboardModifier.KeypadModifier):
+            self.submitted.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class MessageBubble(QFrame):
@@ -287,14 +334,14 @@ class DialogPanel(QWidget):
         composer_layout = QHBoxLayout(composer)
         composer_layout.setContentsMargins(9, 9, 9, 9)
         composer_layout.setSpacing(8)
-        self._input = QLineEdit()
+        self._input = ComposerInput()
         self._input.setPlaceholderText(i18n.t("composer"))
         self._input.setProperty("class", "composer-input")
         composer_layout.addWidget(self._input, stretch=1)
         self._send_btn = QPushButton(i18n.t("send"))
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.clicked.connect(self._on_send)
-        self._input.returnPressed.connect(self._on_send)
+        self._input.submitted.connect(self._on_send)
         composer_layout.addWidget(self._send_btn)
 
         # Only meaningful while a turn is running, so it takes the send button's place rather than
@@ -526,12 +573,12 @@ class DialogPanel(QWidget):
             # A live composer that swallows what you type is worse than a disabled one. Sending
             # the first message IS the explicit start, and the text becomes the opening prompt
             # rather than being thrown away in favour of a canned one.
-            self._add_bubble("user", "Arbiter · you", text)
+            self._add_bubble("user", "Arbiter · you", _markdown(text))
             self._input.clear()
             self._set_busy(True)
             self.startRequested.emit(text)
             return
-        self._add_bubble("user", "Arbiter · you", text)
+        self._add_bubble("user", "Arbiter · you", _markdown(text))
         self._scroll_to_end()
         self._input.clear()
         self._set_busy(True)
@@ -621,7 +668,7 @@ class DialogPanel(QWidget):
             self._question_widgets.deleteLater()
             self._question_widgets = None
         self._input.setPlaceholderText(i18n.t("composer"))
-        self._add_bubble("user", "Arbiter · you", value)
+        self._add_bubble("user", "Arbiter · you", _markdown(value))
         self._scroll_to_end()
         if self._worker is not None and hasattr(self._worker, "answer"):
             self._worker.answer(question_id, value)
