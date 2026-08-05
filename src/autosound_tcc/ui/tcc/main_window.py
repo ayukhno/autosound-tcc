@@ -72,6 +72,13 @@ _CRITIC_KEY = "ai/critic"             # the picked Choice.key for the reviewer
 # What the outgoing model is asked to do before its session ends. Written as instructions to a
 # model, so it names the tools rather than describing the intent: an agent that "summarises the
 # state" into prose has saved nothing the next session can read.
+#
+# OPEN, and it applies to every string TCC sends *to* a model, not only this one: which language
+# should they be in? The skill sets a session language during intake and writes the project's
+# files in it, so a command in another language is a second voice in the conversation. Two
+# defensible answers -- follow the session language, or keep every system command in English
+# (unambiguous for the model, never mistaken for the user's own words) -- and no reason yet to
+# prefer one. English here is the status quo, not the decision.
 _HANDOFF_PROMPT = (
     "This session is ending now and a different model will continue this project. Do not "
     "summarise for me — write the state down where the next session will read it. Close or "
