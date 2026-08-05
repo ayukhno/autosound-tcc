@@ -1065,3 +1065,21 @@ def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):
     assert steps["profile"].tag_class == "ok"      # the file it names is really there
     assert steps["delays"].tag_class == "bad"      # the sentence it names is not
     assert i18n.tx(steps["delays"].tag) in ("unproven", "без доказу")
+
+
+def test_the_gate_mode_is_a_project_setting_and_defaults_to_asking(monkeypatch):
+    """"Every write" first: narrowing it is a choice someone makes after it gets in the way, not
+    a default they never saw."""
+    from autosound_tcc.core import omp_session, project_settings
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    assert window._gate_actions[omp_session.GATE_WRITES].isChecked()
+
+    window._set_gate_mode(omp_session.GATE_FOREIGN)
+
+    assert project_settings.get(config.tcc_dir(), "gate") == omp_session.GATE_FOREIGN
+    assert window._gate_actions[omp_session.GATE_FOREIGN].isChecked()
+    assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()

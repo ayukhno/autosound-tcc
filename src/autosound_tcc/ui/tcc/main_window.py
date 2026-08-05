@@ -86,6 +86,7 @@ _LANG_KEY = "ui/lang"
 # the opposite -- a fact about the user's accounts, not about any project -- so it stays global.
 _GENERATOR_KEY = "generator"          # per project: the picked Choice.key
 _CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
+_GATE_KEY = "gate"                    # per project: which writes still ask the Arbiter
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
 # What the outgoing model is asked to do before its session ends. Written as instructions to a
@@ -407,6 +408,17 @@ class MainWindow(QMainWindow):
         self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
         self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
         self._fresh_session_action.triggered.connect(self._start_fresh_session)
+        menu.addSeparator()
+        gate_menu = menu.addMenu(i18n.t("gateMode"))
+        gate_menu.setToolTipsVisible(True)
+        self._gate_actions = {}
+        for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
+                            (omp_session.GATE_FOREIGN, "gateForeign")):
+            action = gate_menu.addAction(i18n.t(label))
+            action.setCheckable(True)
+            action.setToolTip(i18n.t("gateModeTip"))
+            action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
+            self._gate_actions[mode] = action
         self._project_btn.setMenu(menu)
         layout.addWidget(self._project_btn)
         self._refresh_project_button()
@@ -1447,6 +1459,7 @@ class MainWindow(QMainWindow):
                 bridge=self._bridge,
                 model=choice.model,
                 resume=resumed,
+                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
             )
         else:
             factory = lambda: TuningSession(  # noqa: E731
@@ -1574,7 +1587,14 @@ class MainWindow(QMainWindow):
             return
         popup.show_at(QCursor.pos(), tip)
 
+    def _set_gate_mode(self, mode: str) -> None:
+        project_settings.set_value(config.tcc_dir(), _GATE_KEY, mode)
+        self._refresh_project_button()
+
     def _refresh_project_button(self) -> None:
+        current = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        for mode, action in getattr(self, "_gate_actions", {}).items():
+            action.setChecked(mode == current)
         chosen = config.chosen_project_dir()
         self._project_btn.setText(f"⌂ {chosen.name}" if chosen else i18n.t("projectNone"))
         running = getattr(self, "_agent_worker", None) is not None

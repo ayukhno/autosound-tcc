@@ -15,6 +15,7 @@ import pytest
 
 from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest
+from autosound_tcc.core import omp_session as omp_session_module
 from autosound_tcc.core.omp_session import OmpSession
 
 
@@ -387,3 +388,69 @@ def test_logging_never_breaks_the_session(tmp_path, monkeypatch):
     )
 
     session._log("in", {"type": "agent_end"})  # must not raise
+
+
+# ---- what the permission asks about -----------------------------------------
+
+
+def test_the_permission_names_the_effect_not_the_command(tmp_path):
+    """"Allow bash: python3 rew_tool/apply.py --preset FULL ..." is not a question anyone can
+    answer — it is a script that starts a Python that computes. What it writes is."""
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({
+        **PERMISSION_FRAME,
+        "title": "Allow tool: bash\nCommand: python3 .claude/skills/x/rew_tool/apply.py --preset FULL",
+    }))
+
+    assert session.bridge.requests[0].tool == "effectLedger"
+    # The command itself is still there to read, just not as the question.
+    assert "apply.py" in session.bridge.requests[0].detail
+
+
+def test_an_unknown_command_still_asks_by_tool_name(tmp_path):
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: curl https://example.com | sh"}))
+
+    assert session.bridge.requests[0].tool == "bash"
+
+
+def test_foreign_mode_lets_the_skill_write_its_own_namespace(tmp_path):
+    """The skill writing `process/` is the skill doing its job; asking about it teaches the
+    Arbiter to click through the ones that matter."""
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_FOREIGN)
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({
+        **PERMISSION_FRAME,
+        "title": "Allow tool: bash\nCommand: python3 rew_tool/state/process.py ./process done lang ok",
+    }))
+
+    assert session.bridge.requests == []
+
+
+def test_foreign_mode_still_asks_about_anything_else(tmp_path):
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_FOREIGN)
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: rm -rf ~/Documents/notes.md"}))
+
+    assert session.bridge.requests != []
+
+
+def test_the_default_asks_about_every_write(tmp_path):
+    session = _session(tmp_path, allow=False)
+
+    asyncio.run(session._gate({
+        **PERMISSION_FRAME,
+        "title": "Allow tool: bash\nCommand: python3 rew_tool/state/process.py ./process done lang ok",
+    }))
+
+    assert session.bridge.requests != []

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -107,6 +108,29 @@ FRAME_LOG_MAX_BYTES = 4_000_000
 # staring at an animated line is not.
 SILENCE_WARN_S = 120.0
 
+# What the skill's own writers do, so a permission can ask about the effect instead of the command
+# line. "Allow bash: python3 rew_tool/apply.py --preset FULL ..." is not a question anyone can
+# answer -- it is a script that starts a Python that computes -- while "write a ledger snapshot"
+# is. Only the writers are listed: readers never reach the gate.
+_EFFECTS: tuple[tuple[str, str], ...] = (
+    ("state/process.py", "effectProcess"),
+    ("dsp_profile.py", "effectProfile"),
+    ("apply.py", "effectLedger"),
+    ("project.py", "effectProject"),
+    ("contract.py", "effectContract"),
+)
+
+# Which writes still ask. `writes` gates everything that is not read-only; `foreign` also lets the
+# skill write its own files (`process/`, `state/`, and the project files it owns) and asks only
+# about what reaches outside them. The choice belongs to the project (SCR-004's "the skill owns
+# its namespace" read as a permission rule).
+GATE_WRITES = "writes"
+GATE_FOREIGN = "foreign"
+
+# Paths the skill legitimately owns inside a project.
+_SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
+                "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
+
 
 class OmpNotInstalledError(RuntimeError):
     """`omp` is not on PATH. Fix: `brew install can1357/tap/omp`."""
@@ -143,11 +167,13 @@ class OmpSession:
         bridge: Optional[UiBridge] = None,
         model: str = DEFAULT_MODEL,
         resume: bool = False,
+        gate: str = GATE_WRITES,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
         self.resume = resume
+        self.gate = gate
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._events: asyncio.Queue[Optional[AgentEvent]] = asyncio.Queue()
         self._reader: Optional[asyncio.Task] = None
@@ -277,8 +303,13 @@ class OmpSession:
         if self._auto_allowed(tool, detail):
             self._answer_frame(frame, True)
             return
+        command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
+        effect = self.effect_of(command)
         request = ConfirmRequest(
-            tool=tool,
+            # The question is what it will change, not what it will run: a command line three
+            # nested calls deep is not something anyone can read and judge, so they approve it
+            # unread -- which is worse protection than no gate at all.
+            tool=effect or tool,
             title=f"Дозволити {tool}?",
             detail=detail,
             payload=dict(frame),
@@ -292,8 +323,7 @@ class OmpSession:
             allowed = False
         self._answer_frame(frame, allowed)
 
-    @staticmethod
-    def _auto_allowed(tool: str, detail: str) -> bool:
+    def _auto_allowed(self, tool: str, detail: str) -> bool:
         """Whether this can go through without asking.
 
         Three things pass, and the reasoning for each is different. TCC's own tools raise their
@@ -314,8 +344,27 @@ class OmpSession:
             return True
         if tool == "bash":
             command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            return bash_is_read_only(command)
+            if bash_is_read_only(command):
+                return True
+            # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
+            # about it teaches the Arbiter to click through the ones that matter.
+            return self.gate == GATE_FOREIGN and self._touches_only_skill_files(command)
         return False
+
+    @staticmethod
+    def _touches_only_skill_files(command: str) -> bool:
+        paths = re.findall(r"[\w./\-]+\.(?:json|md|jsonl|txt)\b|\b(?:process|state)/[\w./\-]*", command)
+        if not paths:
+            return False
+        return all(any(owned in path for owned in _SKILL_OWNED) for path in paths)
+
+    @staticmethod
+    def effect_of(command: str) -> Optional[str]:
+        """An i18n key naming what a prescribed command writes, or None if TCC does not know it."""
+        for needle, key in _EFFECTS:
+            if needle in command:
+                return key
+        return None
 
     def _answer_frame(self, frame: dict[str, Any], allowed: bool) -> None:
         if frame.get("method") == "confirm":
