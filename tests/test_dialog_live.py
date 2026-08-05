@@ -21,11 +21,13 @@ from autosound_tcc.core import signal_bus  # noqa: E402
 from autosound_tcc.core.agent_events import (  # noqa: E402
     Question,
     QuestionOption,
+    QuestionWithdrawn,
     TextDelta,
     ToolCall,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest  # noqa: E402
 from autosound_tcc.core.signal_bus import SignalBus  # noqa: E402
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker  # noqa: E402
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel  # noqa: E402
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge  # noqa: E402
@@ -147,10 +149,12 @@ def test_text_after_a_question_starts_a_new_bubble(tmp_path):
     assert panel._live_text == "After"
 
 
-def test_busy_state_swaps_send_for_stop(tmp_path):
+def test_stop_appears_beside_send_rather_than_replacing_it(tmp_path):
+    """Send used to be hidden for the length of the turn, which left Enter as the only way to say
+    anything and nothing on screen saying so. It stays: mid-turn it queues."""
     panel, worker, _ = _attached(tmp_path)
 
-    assert panel._send_btn.isHidden() and not panel._stop_btn.isHidden()
+    assert not panel._send_btn.isHidden() and not panel._stop_btn.isHidden()
 
     worker.turn_done.emit()
 
@@ -533,13 +537,17 @@ def test_typing_answers_the_question_rather_than_queueing_a_message(tmp_path):
 
 
 def test_after_answering_the_composer_sends_messages_again(tmp_path):
+    """Not as an answer to the question that is gone. The turn is still running, so it goes out at
+    the boundary — see `test_typing_mid_turn_is_queued_rather_than_refused`."""
     panel, worker = _asked(tmp_path)
     panel._answer_question("Driver")
 
     panel._input.setText("what next?")
     panel._on_send()
+    panel._on_turn_done()
 
     assert worker.sent == ["what next?"]
+    assert worker.answers == [("q1", "Driver")]
 
 
 def test_a_live_transcript_is_not_wiped_when_the_project_looks_unfinished(tmp_path):
@@ -570,6 +578,7 @@ def test_a_pasted_list_keeps_its_lines(tmp_path):
     """It was a QLineEdit, which silently flattens a paste: an equipment list arrived as one
     run-on paragraph and the structure the model needed was gone."""
     panel, worker, _ = _attached(tmp_path)
+    panel._on_turn_done()  # the opening turn is over; this one goes straight out
     pasted = "DSP:\n    Helix DSP Ultra S\n    Helix BT HD\nСаб:\n    Закритий ящик 35л"
 
     panel._input.setText(pasted)
@@ -601,6 +610,7 @@ def test_enter_sends(tmp_path):
     from PySide6.QtGui import QKeyEvent
 
     panel, worker, _ = _attached(tmp_path)
+    panel._on_turn_done()
     panel._input.setText("go")
 
     panel._input.keyPressEvent(
@@ -660,13 +670,13 @@ def test_a_question_with_no_options_is_answered_by_typing(tmp_path):
     assert worker.sent == []
 
 
-def test_the_field_stays_usable_while_a_question_is_parked(tmp_path):
-    """The turn is "busy" and typing is exactly what moves it — the harness is blocked inside
-    `ask` waiting for the host. Disabling the field blocked the only way forward and read as a
-    hang, which is how it was reported."""
+def test_the_field_is_never_switched_off(tmp_path):
+    """It used to grey out for the length of the turn, and a turn is minutes long. The agent asks
+    for things in prose as often as through `ask` — "share your preferences and system details"
+    arrives as a paragraph — so the field was off exactly when there was something to say."""
     panel, worker, _ = _attached(tmp_path)
     panel._set_busy(True)
-    assert not panel._input.isEnabled()
+    assert panel._input.isEnabled()
 
     worker.chunk.emit(Question(id="q", question="Which car?"))
 
@@ -695,3 +705,252 @@ def test_stop_without_a_question_still_interrupts(tmp_path):
     panel._on_stop()
 
     assert worker.interrupted
+
+
+def test_a_question_with_no_options_says_it_wants_typing(tmp_path):
+    """The card for a free-text question has no buttons, so without a line saying so it is a grey
+    bubble like any other and the only cue is a placeholder in the composer. That is the question
+    a live session sat on for eight minutes before the Arbiter gave up and hit Stop — the frame
+    log has the 471-second gap."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(Question(id="q9", question="Which car and DSP?"))
+
+    body = panel._bubbles[-1]._body.text()
+    assert i18n.t("questionFreeText") in body
+    assert panel._input.isEnabled()
+
+
+def test_a_question_with_options_does_not_repeat_the_typing_hint(tmp_path):
+    """There are buttons to click; "type your answer" would be telling them to do the long thing."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(
+        Question(id="q", question="Reference seat?",
+                 options=(QuestionOption(label="Driver"), QuestionOption(label="Both front")))
+    )
+
+    assert i18n.t("questionFreeText") not in panel._bubbles[-1]._body.text()
+
+
+def test_a_parked_question_says_who_is_being_waited_on(tmp_path):
+    """"Working…" while the harness is blocked inside `ask` is the window blaming the model for
+    its own silence — and "it is working" is exactly what the Arbiter reads as a hang."""
+    panel, worker, _ = _attached(tmp_path)
+    panel._set_busy(True)
+    assert panel._sub_label.text() == i18n.t("agentThinking")
+
+    worker.chunk.emit(Question(id="q", question="Which car?"))
+
+    assert panel._sub_label.text() == i18n.t("questionWaiting")
+
+    panel._answer_question("VW Passat")
+
+    assert panel._sub_label.text() == i18n.t("agentThinking")
+
+
+def test_a_question_the_harness_takes_back_stops_asking(tmp_path):
+    """omp withdraws its own frames (`method: "cancel"`, `targetId`), and it does so on every
+    abort. Buttons that answer a frame omp has moved past are worse than no buttons: the answer is
+    taken, dropped, and the turn looks like it ignored the Arbiter."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q7", question="Which car?"))
+
+    worker.chunk.emit(QuestionWithdrawn(id="q7"))
+
+    assert panel._pending_question is None
+    assert panel._question_widgets is None
+    assert i18n.t("questionWithdrawn") in panel._bubbles[-1]._body.text()
+    panel._input.setText("VW Passat")
+    panel._on_send()
+    assert worker.answers == []  # nothing is answered against a withdrawn frame
+
+
+def test_withdrawing_a_question_that_is_not_the_live_one_changes_nothing(tmp_path):
+    """A second question replaces the first, so a late withdrawal of the first must not take the
+    card for the second with it."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q1", question="First?"))
+    worker.chunk.emit(Question(id="q2", question="Second?"))
+
+    worker.chunk.emit(QuestionWithdrawn(id="q1"))
+
+    assert panel._pending_question == "q2"
+
+
+def test_typing_mid_turn_is_queued_rather_than_refused(tmp_path):
+    """The harness takes one prompt at a time, so a message typed mid-turn waits for the boundary.
+
+    The waiting is a row that stays up, not a `SYSTEM · ledger` bubble: announced once in the
+    transcript it read as something that had happened, while the message was still sitting there.
+    """
+    panel, worker, _ = _attached(tmp_path)  # attaching starts the opening turn
+
+    panel._input.setText("the sub is out of phase")
+    panel._on_send()
+
+    assert worker.sent == []
+    assert panel._input.text() == ""
+    assert panel._bubbles[-1]._body.text() == "the sub is out of phase"  # said, not narrated
+    assert not panel._queue_row.isHidden()
+
+    worker.turn_done.emit()
+
+    assert worker.sent == ["the sub is out of phase"]
+    assert panel._queue_row.isHidden()  # the promise was kept, so it stops being made
+
+
+def test_several_queued_messages_go_out_as_one_prompt(tmp_path):
+    """Sent one after another, the second lands on a harness already busy with the first and
+    queues again behind it — the same wait with more steps."""
+    panel, worker, _ = _attached(tmp_path)
+
+    for text in ("first", "second"):
+        panel._input.setText(text)
+        panel._on_send()
+    worker.turn_done.emit()
+
+    assert worker.sent == ["first\n\nsecond"]
+
+
+def test_the_placeholder_says_the_message_will_wait(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+
+    assert panel._input.placeholderText() == i18n.t("composerQueue")
+
+    worker.turn_done.emit()
+
+    assert panel._input.placeholderText() == i18n.t("composer")
+
+
+def test_a_parked_question_beats_the_queue_for_the_field(tmp_path):
+    """Both are mid-turn, and the question is the one thing that unblocks the harness, so typing
+    answers it rather than queueing behind it."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q3", question="Which car?"))
+
+    assert panel._input.placeholderText() == i18n.t("composerAnswer")
+    panel._input.setText("VW Passat B8")
+    panel._on_send()
+
+    assert worker.answers == [("q3", "VW Passat B8")]
+    assert panel._queued == []
+
+
+def test_a_queued_message_is_handed_back_when_the_session_stops(tmp_path):
+    """There is no turn boundary coming, and dropping the words into a dead session loses them."""
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("recheck the delays")
+    panel._on_send()
+
+    worker.failed.emit("CLINotFoundError: no binary")
+
+    assert panel._input.text() == "recheck the delays"
+    assert panel._queued == []
+    assert worker.sent == []
+
+
+def test_the_queue_row_counts_what_is_waiting(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+
+    for text in ("first", "second"):
+        panel._input.setText(text)
+        panel._on_send()
+
+    assert "2" in panel._queue_label.text()
+
+
+def test_send_now_interrupts_the_turn_that_is_holding_the_queue(tmp_path):
+    """The queue's promise depends on a turn boundary arriving, and a turn silent for minutes may
+    never produce one — the state this button was added under, with "[120s with no output]" as the
+    last thing in the transcript. Interrupting makes the boundary the queue is waiting for."""
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("recheck the delays")
+    panel._on_send()
+
+    panel._queue_now_btn.click()
+
+    assert worker.interrupted
+    assert worker.sent == []  # nothing is pushed into a harness still running
+
+    worker.turn_done.emit()  # the interrupt produced the boundary
+
+    assert worker.sent == ["recheck the delays"]
+
+
+def test_send_now_with_a_parked_question_withdraws_it_instead(tmp_path):
+    """`abort` does not reach a harness blocked inside `ask`. Withdrawing the question is what
+    unblocks the turn, which is what ends it."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    worker.cancelled = []
+    worker.cancel_question = worker.cancelled.append
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q5", question="Which car?", options=(QuestionOption("Sedan"),)))
+    panel._queued.append("meanwhile, the sub is out of phase")
+    panel._show_queue_row()
+
+    panel._on_send_queued_now()
+
+    assert worker.cancelled == ["q5"]
+
+
+def test_send_now_does_nothing_with_an_empty_queue(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+
+    panel._on_send_queued_now()
+
+    assert not worker.interrupted
+
+
+def test_the_adapter_speaking_is_not_the_model_speaking(tmp_path):
+    """"[120s with no output. omp has said nothing.]" arrived under GENERATOR · GEMINI 3.5 FLASH
+    LITE, in the same bubble style as its analysis — a sentence about the harness attributed to the
+    model, at the one moment the difference matters."""
+    from autosound_tcc.core.agent_events import Notice
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("Reading the ledger"))
+
+    worker.chunk.emit(Notice("120s with no output. omp has said nothing."))
+    worker.chunk.emit(TextDelta("Back."))
+
+    roles = [b.findChild(QLabel).text() for b in panel._bubbles]
+    assert roles[1].lower().startswith("system")
+    assert "omp has said nothing" in panel._bubbles[1]._body.text()
+    assert panel._bubbles[2]._body.text() == "Back."  # a new bubble, not appended above the notice
+
+
+def test_the_activity_line_stops_moving_when_the_tool_returns(tmp_path):
+    """A static line says a tool ran, a moving one says it is still running — that difference is
+    the only reason the line exists, and nothing ever stopped the dots."""
+    from autosound_tcc.core.agent_events import ToolEnd
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(ToolCall(name="read"))
+    assert panel._activity_timer.isActive()
+
+    worker.chunk.emit(ToolEnd(name="read"))
+
+    assert not panel._activity_timer.isActive()
+    assert "⟳" not in panel._activity.text()
+    assert "read" in panel._activity.text()
+
+
+def test_the_next_tool_starts_the_line_moving_again(tmp_path):
+    from autosound_tcc.core.agent_events import ToolEnd
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(ToolCall(name="read"))
+    worker.chunk.emit(ToolEnd(name="read"))
+
+    worker.chunk.emit(ToolCall(name="glob"))
+
+    assert panel._activity_timer.isActive()
+    assert "⟳" in panel._activity.text()

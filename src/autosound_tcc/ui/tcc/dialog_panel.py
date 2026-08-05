@@ -32,7 +32,14 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import signal_bus
-from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall
+from autosound_tcc.core.agent_events import (
+    Notice,
+    Question,
+    QuestionWithdrawn,
+    TextDelta,
+    ToolCall,
+    ToolEnd,
+)
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
@@ -41,6 +48,9 @@ from autosound_tcc.ui.tcc.theme import apply_caps
 
 # .msg-body's base font-size in theme.py -- kept in sync with that QSS literal so the dialog's own
 # A-/A+ control (below) scales from the same starting point.
+# Who a system bubble is from. The ledger records what happened to the project; TCC's own lines
+# about the harness are not that, and labelling them the same made a status read as a record.
+_SYS_ROLE_TCC = "SYSTEM · TCC"
 _MSG_BODY_BASE_PX = 13.0
 _DIALOG_FONT_KEY = "ui/dialog_font_scale"
 _DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
@@ -193,6 +203,11 @@ class DialogPanel(QWidget):
         # The question the turn is currently parked on, and the option buttons offering it.
         self._pending_question: Optional[str] = None
         self._question_widgets: Optional[QWidget] = None
+        # Typed while the agent was mid-turn, waiting for a turn boundary to be sent. The field is
+        # never switched off, so a thought that arrives while the model is working is not lost to
+        # a disabled widget -- see `_on_send`.
+        self._queued: list[str] = []
+        self._busy = False
         # Whatever is actually answering. The mock transcript's Claude label was still on live
         # bubbles produced by a Gemini model, which is a caption that contradicts the footer.
         self._model_label = CURRENT_GENERATOR_MODEL
@@ -328,6 +343,28 @@ class DialogPanel(QWidget):
         self._activity_timer.setInterval(450)
         self._activity_timer.timeout.connect(self._tick_activity)
 
+        # What is waiting to be sent, and the way out of waiting. Not a transcript entry: a queued
+        # message was first announced as a SYSTEM · ledger bubble, which reads as something that
+        # happened rather than something that is still pending -- and it said "it goes out when
+        # this turn ends" under a turn that had produced nothing for two minutes, which is a
+        # promise the panel cannot keep on its own. So it lives here, stays until it is kept, and
+        # carries the button that keeps it.
+        self._queue_row = QWidget()
+        self._queue_row.setHidden(True)
+        queue_layout = QHBoxLayout(self._queue_row)
+        queue_layout.setContentsMargins(12, 0, 12, 0)
+        queue_layout.setSpacing(8)
+        self._queue_label = QLabel("")
+        self._queue_label.setProperty("class", "activity")
+        queue_layout.addWidget(self._queue_label)
+        self._queue_now_btn = QPushButton(i18n.t("queueSendNow"))
+        self._queue_now_btn.setProperty("class", "reason-btn")
+        self._queue_now_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._queue_now_btn.clicked.connect(self._on_send_queued_now)
+        queue_layout.addWidget(self._queue_now_btn)
+        queue_layout.addStretch(1)
+        outer.addWidget(self._queue_row)
+
         composer = QWidget()
         composer.setProperty("class", "composer")
         self._composer = composer
@@ -344,8 +381,9 @@ class DialogPanel(QWidget):
         self._input.submitted.connect(self._on_send)
         composer_layout.addWidget(self._send_btn)
 
-        # Only meaningful while a turn is running, so it takes the send button's place rather than
-        # sitting next to it greyed out.
+        # Only meaningful while a turn is running, so it appears beside Send rather than being
+        # there greyed out. Send stays: while the turn runs it queues instead of sending, which is
+        # still the button you press.
         self._stop_btn = QPushButton(i18n.t("stop"))
         self._stop_btn.setProperty("class", "reason-btn")
         self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -365,7 +403,9 @@ class DialogPanel(QWidget):
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
         self._reason_btns["forgot"].setText(i18n.t("reasonForgot"))
         self._reason_btns["manual"].setText(i18n.t("reasonManual"))
-        self._input.setPlaceholderText(i18n.t("composer"))
+        self._refresh_placeholder()
+        self._queue_now_btn.setText(i18n.t("queueSendNow"))
+        self._show_queue_row()
         self._send_btn.setText(i18n.t("send"))
         self._stop_btn.setText(i18n.t("stop"))
         self._not_visible_btn.setText("👁 " + i18n.t("notVisible"))
@@ -424,8 +464,14 @@ class DialogPanel(QWidget):
     def _font_in(self) -> None:
         self._set_font_scale(self._font_scale + _DIALOG_FONT_STEP)
 
-    def _add_system_message(self, html: str) -> None:
-        self._add_bubble("sys", "SYSTEM · ledger", html)
+    def _add_system_message(self, html: str, role: str = "SYSTEM · ledger") -> None:
+        """A line from TCC rather than from anyone in the conversation.
+
+        `role` because not all of them are ledger events: "omp has said nothing" and "starting
+        <model>" are TCC talking about the machinery, and filing those under the ledger makes a
+        status line look like something that was recorded.
+        """
+        self._add_bubble("sys", role, html)
         self._scroll_to_end()
 
     def _scroll_to_end(self) -> None:
@@ -485,7 +531,7 @@ class DialogPanel(QWidget):
         self._model_label = model or i18n.t("generator")
         self._clear_bubbles()
         self._not_visible_btn.setHidden(False)
-        self._input.setPlaceholderText(i18n.t("composer"))
+        self._refresh_placeholder()
         self.set_session_label(resumed=resumed, phase=phase)
 
         worker.chunk.connect(self._on_chunk)
@@ -496,7 +542,8 @@ class DialogPanel(QWidget):
         # says anything, and omp additionally waits for its own tools to come up. Without a line
         # here, a session that is working looks exactly like one that did nothing.
         if model:
-            self._add_system_message(i18n.t("sessionStarting").format(model=model))
+            self._add_system_message(i18n.t("sessionStarting").format(model=model),
+                                     role=_SYS_ROLE_TCC)
 
     def set_idle_label(self, model: Optional[str]) -> None:
         """Say what will run and that it has not started, before anyone clicks anything.
@@ -554,13 +601,26 @@ class DialogPanel(QWidget):
                         widget.deleteLater()
 
     def _set_busy(self, busy: bool) -> None:
-        # A parked question is the one case where the turn is "busy" and typing is exactly what
-        # moves it: the harness is blocked inside `ask` waiting for the host. Disabling the field
-        # there blocks the only way forward and reads as a hang -- which is how it was reported.
-        self._input.setEnabled(not busy or self._pending_question is not None)
-        self._send_btn.setHidden(busy)
+        # The field is never switched off. A turn is minutes long and the agent asks for things in
+        # prose as often as it asks through `ask` -- "share your preferences and system details"
+        # arrives as a paragraph, not a question frame -- so a composer that greys out for the
+        # length of the turn is off exactly when there is something to say. Typing is always
+        # allowed; `_on_send` decides whether it goes now or at the turn boundary.
+        self._busy = busy
+        self._input.setEnabled(True)
         self._stop_btn.setHidden(not busy)
-        self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
+        self._refresh_placeholder()
+        if self._pending_question is None:
+            self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
+
+    def _refresh_placeholder(self) -> None:
+        """What the field is for right now: answering a parked question, queueing, or talking."""
+        if self._pending_question is not None:
+            self._input.setPlaceholderText(i18n.t("composerAnswer"))
+        elif self._busy:
+            self._input.setPlaceholderText(i18n.t("composerQueue"))
+        else:
+            self._input.setPlaceholderText(i18n.t("composer"))
 
     def _on_send(self) -> None:
         text = self._input.text().strip()
@@ -582,8 +642,17 @@ class DialogPanel(QWidget):
             self.startRequested.emit(text)
             return
         self._add_bubble("user", "Arbiter · you", _markdown(text))
-        self._scroll_to_end()
         self._input.clear()
+        if self._busy:
+            # Mid-turn. The harness takes one prompt at a time, so this waits for the boundary
+            # instead of being refused -- and it says so in a row that stays up until it is sent,
+            # because a message that sits there silently is the same complaint as a field that
+            # will not take one.
+            self._queued.append(text)
+            self._show_queue_row()
+            self._scroll_to_end()
+            return
+        self._scroll_to_end()
         self._set_busy(True)
         self._worker.send(text)
 
@@ -600,7 +669,7 @@ class DialogPanel(QWidget):
                 self._question_widgets.setParent(None)
                 self._question_widgets.deleteLater()
                 self._question_widgets = None
-            self._input.setPlaceholderText(i18n.t("composer"))
+            self._refresh_placeholder()
             self._add_system_message(i18n.t("questionCancelled"))
             if self._worker is not None and hasattr(self._worker, "cancel_question"):
                 self._worker.cancel_question(question_id)
@@ -619,8 +688,18 @@ class DialogPanel(QWidget):
             self._append_live_text(item.text)
         elif isinstance(item, ToolCall):
             self._add_chip(item.name)
+        elif isinstance(item, ToolEnd):
+            self._end_chip()
         elif isinstance(item, Question):
             self._add_question(item)
+        elif isinstance(item, QuestionWithdrawn):
+            self._withdraw_question(item.id)
+        elif isinstance(item, Notice):
+            # The adapter talking about the harness. Under the model's byline it read as the model
+            # saying "omp has said nothing", which is a sentence no model would write.
+            self._live_bubble = None
+            self._live_text = ""
+            self._add_system_message(f"⚠️ {item.text}", role=_SYS_ROLE_TCC)
 
     def _append_live_text(self, text: str) -> None:
         if not text:
@@ -652,6 +731,11 @@ class DialogPanel(QWidget):
             for option in question.options
             if option.description
         ]
+        if not question.options:
+            # No options means no buttons, and without them the card is a grey bubble like any
+            # other -- the one that hung a live session for eight minutes was exactly this. The
+            # placeholder in the composer said so, and a placeholder is not where anyone looks.
+            lines.append(f"<i>{i18n.t('questionFreeText')}</i>")
         self._add_bubble("sys", question.header or i18n.t("questionRole"), "<br>".join(lines))
 
         row = QHBoxLayout()
@@ -678,15 +762,47 @@ class DialogPanel(QWidget):
         self._question_widgets = holder
         self._input.setEnabled(True)
         self._input.setFocus()
-        self._input.setPlaceholderText(i18n.t("composerAnswer"))
+        self._refresh_placeholder()
+        # "Working…" while the harness is blocked waiting for the human is the window blaming the
+        # model for its own silence. Say who is being waited on.
+        self._sub_label.setText(i18n.t("questionWaiting"))
         self._live_bubble = None
         self._live_text = ""
         self._scroll_to_end()
+
+    def _withdraw_question(self, question_id: str) -> None:
+        """The harness took the question back, so the card must go with it.
+
+        Buttons that answer a frame omp has moved past are worse than no buttons: the answer is
+        accepted, discarded, and the turn goes on looking like it ignored the Arbiter.
+        """
+        if self._pending_question != question_id:
+            return
+        self._pending_question = None
+        if self._question_widgets is not None:
+            self._question_widgets.setParent(None)
+            self._question_widgets.deleteLater()
+            self._question_widgets = None
+        self._refresh_placeholder()
+        self._sub_label.setText(i18n.t("agentThinking"))
+        self._add_system_message(i18n.t("questionWithdrawn"))
 
     def _tick_activity(self) -> None:
         self._activity_phase = (self._activity_phase + 1) % 4
         dots = "." * self._activity_phase
         self._activity.setText(f"⟳ {self._activity_label}{dots}")
+
+    def _end_chip(self) -> None:
+        """That tool returned, so the line stops claiming it is running.
+
+        The dots were the whole point of the line and nothing ever stopped them: `tool_execution_end`
+        arrived on the wire and was dropped, so the last tool of a turn kept spinning for as long as
+        the window stayed open. A stalled turn then looked exactly like a busy one -- which is how
+        "⟳ omp:autoresearch…" came to read as "it is off doing something".
+        """
+        self._activity_timer.stop()
+        if self._activity_label:
+            self._activity.setText(f"· {self._activity_label}")
 
     def _answer_question(self, value: str) -> None:
         """Send the Arbiter's choice back through the channel the question came from."""
@@ -697,7 +813,8 @@ class DialogPanel(QWidget):
             self._question_widgets.setParent(None)
             self._question_widgets.deleteLater()
             self._question_widgets = None
-        self._input.setPlaceholderText(i18n.t("composer"))
+        self._refresh_placeholder()
+        self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again
         self._add_bubble("user", "Arbiter · you", _markdown(value))
         self._scroll_to_end()
         if self._worker is not None and hasattr(self._worker, "answer"):
@@ -741,10 +858,55 @@ class DialogPanel(QWidget):
         self._live_text = ""
         self._set_busy(False)
         self._input.setFocus()
+        self._flush_queued()
+
+    def _show_queue_row(self) -> None:
+        """Say what is waiting, and keep saying it until it is not."""
+        self._queue_label.setText(i18n.t("queueWaiting").format(count=len(self._queued)))
+        self._queue_row.setHidden(not self._queued)
+
+    def _flush_queued(self) -> None:
+        """Send what was typed mid-turn, now that the turn boundary is here.
+
+        Joined into one prompt rather than sent one after another: the second would land on a
+        harness already busy with the first and queue again behind it, which is the same wait with
+        more steps.
+        """
+        if not self._queued or self._worker is None:
+            return
+        text, self._queued = "\n\n".join(self._queued), []
+        self._show_queue_row()
+        self._set_busy(True)
+        self._worker.send(text)
+
+    def _on_send_queued_now(self) -> None:
+        """Stop waiting for the turn to end and make it end.
+
+        The queue's promise depends on a turn boundary arriving, and a turn that has gone quiet
+        for minutes may not produce one -- that is exactly the state this button was added under.
+        Interrupting produces the boundary, and `_on_turn_done` then sends what is waiting; the
+        alternative, pushing a second prompt into a running harness, is not a thing omp accepts.
+        """
+        if self._worker is None or not self._queued:
+            return
+        if self._pending_question is not None:
+            # A parked question blocks the harness inside `ask`, where `abort` does not reach.
+            # Withdrawing it is what unblocks the turn, which is what ends it.
+            self._on_stop()
+            return
+        if hasattr(self._worker, "interrupt"):
+            self._worker.interrupt()
 
     def _on_failed(self, message: str) -> None:
         self._add_bubble("sys", i18n.t("agentFailed"), f"⚠️ {message}")
         self._set_busy(False)
+        if self._queued:
+            # There is no turn boundary coming. Put the words back where they can be re-sent
+            # rather than dropping them into a session that has stopped.
+            self._input.setText("\n\n".join(self._queued))
+            self._queued = []
+            self._show_queue_row()
+            self._add_system_message(i18n.t("messageNotSent"))
 
     def add_critique(self, critique: dict) -> None:
         """Render a reviewer reply as a Critic bubble — or say plainly that there isn't one yet.
