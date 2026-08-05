@@ -1008,3 +1008,29 @@ def test_a_project_mid_interview_keeps_its_plan(tmp_path, monkeypatch):
 
     assert window._plan_panel.plan
     assert any("Set session language" in s.name for p in window._plan_panel.plan for s in p.steps)
+
+
+def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypatch):
+    """The skill rewrites `process-state.json` on every step, and the watcher can read it mid-
+    write. Blanking then turns half a second of writing into "the phases disappeared" — reported
+    exactly that way, with them coming back on the next turn."""
+    process = tmp_path / "process"
+    process.mkdir()
+    (process / "process-state.json").write_text(
+        json.dumps({
+            "schema_version": 3,
+            "active_phase": "1",
+            "phases": {"1": {"status": "cur", "title": "Crossovers"}},
+            "plan": [{"id": "xo", "name": "Choose crossovers", "status": "done", "phase": "1"}],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _app()
+    window = MainWindow()
+    assert window._plan_panel.plan
+
+    (process / "process-state.json").write_text("{ half-writ", encoding="utf-8")
+    window._refresh_process()
+
+    assert window._plan_panel.plan  # the last thing known to be true stays on screen

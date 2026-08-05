@@ -1165,6 +1165,12 @@ class MainWindow(QMainWindow):
 
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
+        if state is None and process_view.has_process_state():
+            # The file is there but did not read as state: the skill is mid-write, or wrote
+            # something this version cannot parse. Either way the plan on screen is the last thing
+            # known to be true, and blanking it turns a half-second of writing into "the phases
+            # disappeared" -- reported exactly that way, with them coming back on the next turn.
+            return
         if state is None:
             # "No plan yet" and "no project open" are different empty states with different fixes,
             # and the difference is whether a folder is open -- not whether the DSP profile has
