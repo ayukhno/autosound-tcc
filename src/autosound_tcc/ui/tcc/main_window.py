@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QFileSystemWatcher, QPoint, QThread, QUrl, Qt, Signal
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QThread, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -68,6 +68,20 @@ _LANG_KEY = "ui/lang"
 _GENERATOR_KEY = "ai/generator"        # the picked Choice.key
 _ACTIVE_OMP_KEY = "ai/active_omp"     # selectors the user marked usable
 _CRITIC_KEY = "ai/critic"             # the picked Choice.key for the reviewer
+
+# What the outgoing model is asked to do before its session ends. Written as instructions to a
+# model, so it names the tools rather than describing the intent: an agent that "summarises the
+# state" into prose has saved nothing the next session can read.
+_HANDOFF_PROMPT = (
+    "This session is ending now and a different model will continue this project. Do not "
+    "summarise for me — write the state down where the next session will read it. Close or "
+    "record the current step with its evidence (finish_step / block_step / add_step as they "
+    "apply), make sure report_phase agrees with process-state.json, and put anything you learned "
+    "that is not yet on disk into autosound_context.md. Then say in one line what you wrote."
+)
+# An agent that never finishes must not strand the restart: the handoff saves what can be saved,
+# it does not make the swap conditional on saving it.
+_HANDOFF_TIMEOUT_MS = 180_000
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
 # TODO(user): paste the published Google Form viewform URL here (the one built last session — see
 # memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
@@ -1243,9 +1257,56 @@ class MainWindow(QMainWindow):
             # neither harness can swap a model under a live session.
             if self._running_model == self._ai_main_combo.currentData():
                 return
+            self._hand_off_then_restart(worker)
+            return
+        self._launch_session()
+
+    # ---- handing the project over between sessions -------------------------
+
+    def _hand_off_then_restart(self, worker) -> None:
+        """Ask the running agent to write down where the project stands, then swap models.
+
+        A conversation is disposable; the files are the record ("machine files win"). Everything
+        the outgoing model understood that is not in `process/journal.jsonl`, the process state and
+        `autosound_context.md` is lost the moment its session ends -- and the incoming one starts by
+        reading exactly those files. Killing the session first would throw away the one thing that
+        makes the restart cheap.
+
+        Costs a turn, on purpose. The alternative is a new session that rediscovers what the old
+        one already knew, which costs more.
+        """
+        if getattr(self, "_handoff_timer", None) is not None:
+            return  # already saving; a second click must not start a second handoff
+        self._dialog._add_system_message(i18n.t("sessionHandoff"))
+        self._session_btn.setEnabled(False)
+        worker.turn_done.connect(self._finish_handoff)
+        worker.failed.connect(self._finish_handoff)
+        # An agent that never finishes the turn must not strand the restart -- the point of the
+        # handoff is to save what can be saved, not to make the swap conditional on it.
+        self._handoff_timer = QTimer(self)
+        self._handoff_timer.setSingleShot(True)
+        self._handoff_timer.timeout.connect(self._finish_handoff)
+        self._handoff_timer.start(_HANDOFF_TIMEOUT_MS)
+        worker.send(_HANDOFF_PROMPT)
+
+    def _finish_handoff(self, *_args) -> None:
+        timer, self._handoff_timer = getattr(self, "_handoff_timer", None), None
+        if timer is None:
+            return  # already finished: whichever of turn_done/failed/timeout lost the race
+        timer.stop()
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None:
+            for signal in (worker.turn_done, worker.failed):
+                try:
+                    signal.disconnect(self._finish_handoff)
+                except (RuntimeError, TypeError):
+                    pass
             worker.shutdown()
-            self._agent_worker = None
-            self._dialog._add_system_message(i18n.t("sessionRestarted"))
+        self._agent_worker = None
+        self._dialog._add_system_message(i18n.t("sessionRestarted"))
+        self._launch_session()
+
+    def _launch_session(self) -> None:
         if self._mcp_server is None:
             self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
             return

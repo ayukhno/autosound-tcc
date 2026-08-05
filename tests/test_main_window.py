@@ -705,3 +705,102 @@ def test_changing_the_model_mid_session_offers_a_restart_not_a_silent_swap(monke
     assert window._session_btn.isEnabled()
     assert "sonnet" in window._session_btn.text().lower()
     assert "restart" in window._session_btn.text().lower()
+
+
+class _HandoffWorker:
+    """Enough of AgentWorker to drive the handoff: it records what it was asked to save."""
+
+    def __init__(self):
+        from PySide6.QtCore import QObject, Signal
+
+        class _Signals(QObject):
+            turn_done = Signal()
+            failed = Signal(str)
+
+        self._signals = _Signals()
+        self.turn_done = self._signals.turn_done
+        self.failed = self._signals.failed
+        self.sent: list[str] = []
+        self.shutdowns = 0
+
+    def send(self, text):
+        self.sent.append(text)
+
+    def shutdown(self, *a, **kw):
+        self.shutdowns += 1
+        return True
+
+
+def test_the_outgoing_model_is_asked_to_write_the_state_down_before_it_ends(monkeypatch):
+    """A conversation is disposable; the files are the record. Killing the session first throws
+    away the one thing that makes the restart cheap."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+
+    window._start_tuning_session()
+
+    assert worker.shutdowns == 0  # still alive: it is being asked to save
+    assert len(worker.sent) == 1
+    assert "finish_step" in worker.sent[0] and "autosound_context.md" in worker.sent[0]
+    assert not window._session_btn.isEnabled()
+
+
+def test_the_swap_happens_once_the_state_is_saved(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    launched = []
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self: launched.append(True))
+
+    window._start_tuning_session()
+    worker.turn_done.emit()
+
+    assert worker.shutdowns == 1
+    assert launched == [True]
+
+
+def test_a_second_click_does_not_start_a_second_handoff(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+
+    window._start_tuning_session()
+    window._start_tuning_session()
+
+    assert len(worker.sent) == 1
+
+
+def test_a_failed_handoff_still_restarts(monkeypatch):
+    """The handoff saves what can be saved; it does not make the swap conditional on saving it."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    launched = []
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self: launched.append(True))
+
+    window._start_tuning_session()
+    worker.failed.emit("provider refused")
+
+    assert worker.shutdowns == 1
+    assert launched == [True]
