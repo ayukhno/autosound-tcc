@@ -370,3 +370,31 @@ def test_a_failed_reviewer_call_shows_why(tmp_path):
     panel.add_critique({"mode": "error", "text": "", "detail": "reviewer timed out after 600s"})
 
     assert "timed out" in panel._bubbles[-1]._body.text()
+
+
+def test_a_tool_chip_hides_the_harness_that_produced_it(tmp_path):
+    """The SDK spells TCC's tools `mcp__tcc__x` and omp spells them `mcp__tcc_x`. Showing the raw
+    name leaks which harness is running into every line of the transcript."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(ToolCall(name="mcp__tcc__get_tcc_state"))
+    worker.chunk.emit(ToolCall(name="mcp__tcc_get_tcc_state"))
+
+    for bubble in panel._bubbles:
+        assert "get_tcc_state" in bubble._body.text()
+        assert "mcp__" not in bubble._body.text()
+
+
+def test_typing_the_first_message_asks_for_a_session(tmp_path):
+    """A live composer that swallows what you type is worse than a disabled one — observed in use:
+    the first message went nowhere and nothing said why."""
+    panel = DialogPanel()
+    asked: list[str] = []
+    panel.startRequested.connect(asked.append)
+
+    panel._input.setText("привіт")
+    panel._on_send()
+
+    assert asked == ["привіт"]
+    # The text is not thrown away in favour of a canned opener; it IS the opening prompt.
+    assert any("привіт" in b._body.text() for b in panel._bubbles)

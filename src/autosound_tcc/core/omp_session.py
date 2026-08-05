@@ -123,6 +123,10 @@ class OmpSession:
         self._reader: Optional[asyncio.Task] = None
         self._pending: set[asyncio.Task] = set()
         self._frame_id = 0
+        # Kept, not discarded: a subprocess that fails to start is the one thing the user cannot
+        # diagnose from the transcript, and "nothing happened" was exactly how it presented.
+        self._stderr_tail: list[str] = []
+        self._stderr_task: Optional[asyncio.Task] = None
 
     # ---- wire --------------------------------------------------------------
 
@@ -310,11 +314,12 @@ class OmpSession:
             cwd=str(self.project_dir),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             # omp shells out to the skill, whose scripts are in a git submodule; without this its
             # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
             env=vendor_loader.child_env(),
         )
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
         await self._await_ready()
         self._send(
             {"id": self._next_id(), "type": "negotiate_protocol",
@@ -324,6 +329,20 @@ class OmpSession:
         self._reader = asyncio.create_task(self._read_frames())
         async for event in self._prompt(prompt or self._opening()):
             yield event
+
+    async def _drain_stderr(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        async for raw in proc.stderr:
+            line = raw.decode(errors="replace").rstrip()
+            if line:
+                self._stderr_tail = (self._stderr_tail + [line])[-20:]
+
+    def _why(self, fallback: str) -> str:
+        """`fallback`, with whatever omp said on stderr — the part worth reading."""
+        tail = "\n".join(self._stderr_tail[-5:]).strip()
+        return f"{fallback}\n{tail}" if tail else fallback
 
     async def _await_settled(self) -> None:
         """Wait until omp stops emitting startup frames, i.e. until its tools exist.
@@ -343,7 +362,7 @@ class OmpSession:
             except asyncio.TimeoutError:
                 return  # quiet for a full window: startup is done
             if not line:
-                raise RuntimeError("omp exited during startup")
+                raise RuntimeError(self._why("omp exited during startup"))
             try:
                 frame = json.loads(line.decode(errors="replace").strip())
             except ValueError:
@@ -363,10 +382,10 @@ class OmpSession:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise TimeoutError("omp did not report ready")
+                raise TimeoutError(self._why("omp did not report ready"))
             line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
             if not line:
-                raise RuntimeError("omp exited before reporting ready")
+                raise RuntimeError(self._why("omp exited before reporting ready"))
             try:
                 frame = json.loads(line.decode(errors="replace").strip())
             except ValueError:
@@ -410,7 +429,7 @@ class OmpSession:
         self._send({"id": self._next_id(), "type": "abort"})
 
     async def close(self) -> None:
-        for task in list(self._pending):
+        for task in list(self._pending) + ([self._stderr_task] if self._stderr_task else []):
             task.cancel()
         if self._reader is not None:
             self._reader.cancel()

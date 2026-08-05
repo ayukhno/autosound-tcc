@@ -92,6 +92,8 @@ class DialogPanel(QWidget):
     """
 
     editingChanged = Signal(bool)
+    # Typing into the composer with no session running is a request to start one -- see `_on_send`.
+    startRequested = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -360,6 +362,7 @@ class DialogPanel(QWidget):
         bus: signal_bus.SignalBus,
         resumed: bool = False,
         phase: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> None:
         """Switch the panel from the mock transcript to a live session.
 
@@ -377,6 +380,11 @@ class DialogPanel(QWidget):
         worker.turn_done.connect(self._on_turn_done)
         worker.failed.connect(self._on_failed)
         self._set_busy(True)
+        # The first turn is slow -- the model reads the skill and the project's state before it
+        # says anything, and omp additionally waits for its own tools to come up. Without a line
+        # here, a session that is working looks exactly like one that did nothing.
+        if model:
+            self._add_system_message(i18n.t("sessionStarting").format(model=model))
 
     def set_idle_label(self, model: Optional[str]) -> None:
         """Say what will run and that it has not started, before anyone clicks anything.
@@ -433,7 +441,16 @@ class DialogPanel(QWidget):
 
     def _on_send(self) -> None:
         text = self._input.text().strip()
-        if not text or self._worker is None:
+        if not text:
+            return
+        if self._worker is None:
+            # A live composer that swallows what you type is worse than a disabled one. Sending
+            # the first message IS the explicit start, and the text becomes the opening prompt
+            # rather than being thrown away in favour of a canned one.
+            self._add_bubble("user", "Arbiter · you", text)
+            self._input.clear()
+            self._set_busy(True)
+            self.startRequested.emit(text)
             return
         self._add_bubble("user", "Arbiter · you", text)
         self._scroll_to_end()
@@ -491,8 +508,13 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
 
     def _add_chip(self, tool_name: str) -> None:
-        """A tool call as a one-line process event ("· mcp__tcc__get_tcc_state")."""
-        pretty = tool_name.replace("mcp__tcc__", "")
+        """A tool call as a one-line process event ("· get_tcc_state").
+
+        Both spellings of the prefix, because the two harnesses disagree: the Agent SDK names
+        TCC's tools `mcp__tcc__get_tcc_state` and omp names them `mcp__tcc_get_tcc_state`. Showing
+        the raw name leaks which harness is running into every line of the transcript.
+        """
+        pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
         self._add_bubble("sys", "TOOL", f"· {pretty}")
         self._live_bubble = None  # text after a tool call starts a new bubble
         self._live_text = ""

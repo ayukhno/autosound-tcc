@@ -982,6 +982,7 @@ class MainWindow(QMainWindow):
         dialog_layout = QVBoxLayout(self._dialog_frame)
         dialog_layout.setContentsMargins(0, 0, 0, 0)
         self._dialog = DialogPanel()
+        self._dialog.startRequested.connect(self._on_dialog_start_requested)
         self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
         dialog_layout.addWidget(self._dialog)
         splitter.addWidget(self._dialog_frame)
@@ -1256,7 +1257,15 @@ class MainWindow(QMainWindow):
             )
         )
 
-    def _start_tuning_session(self) -> None:
+    def _on_dialog_start_requested(self, text: str) -> None:
+        """The Arbiter typed the first message instead of clicking start — same intent."""
+        if self._generator_choice() is None:
+            self._dialog._add_system_message(i18n.t("startSessionNoModel"))
+            self._dialog._set_busy(False)
+            return
+        self._start_tuning_session(opening=text)
+
+    def _start_tuning_session(self, opening: Optional[str] = None) -> None:
         """Front-end A: run the skill in-process and stream it into the dialog panel."""
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
@@ -1266,7 +1275,7 @@ class MainWindow(QMainWindow):
                 return
             self._hand_off_then_restart(worker)
             return
-        self._launch_session()
+        self._launch_session(opening)
 
     # ---- handing the project over between sessions -------------------------
 
@@ -1313,7 +1322,7 @@ class MainWindow(QMainWindow):
         self._dialog._add_system_message(i18n.t("sessionRestarted"))
         self._launch_session()
 
-    def _launch_session(self) -> None:
+    def _launch_session(self, opening: Optional[str] = None) -> None:
         if self._mcp_server is None:
             self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
             return
@@ -1344,12 +1353,13 @@ class MainWindow(QMainWindow):
                 bridge=self._bridge,
                 model=choice.model,
             )
-        self._agent_worker = AgentWorker(session_factory=factory)
+        self._agent_worker = AgentWorker(session_factory=factory, opening_prompt=opening)
         self._dialog.attach_agent(
             self._agent_worker,
             server.bus,
             resumed=resumed,
             phase=server.registry.current_phase(),
+            model=choice.label,
         )
         self._running_model = choice.key
         self._agent_worker.start()
