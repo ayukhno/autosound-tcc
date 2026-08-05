@@ -224,9 +224,10 @@ class PlanPanel(QScrollArea):
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._progress = _PlanProgress()
-        # Real plan from the skill's process-state when the project has one; the mock `PLAN`
-        # otherwise. Kept as an override rather than a hard switch so the design surface (and the
-        # tests built on it) keep working on a project that has never run.
+        # The real plan from the skill's process-state, or None for "there isn't one yet".
+        # None used to fall back to the mock `PLAN`, which meant a real project that had not
+        # started tuning showed seven invented phases with invented progress -- the same mistake
+        # the dialog panel already refuses to make with demo bubbles. An empty plan says so.
         self._plan: tuple[PlanPhase, ...] | None = None
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
@@ -236,13 +237,13 @@ class PlanPanel(QScrollArea):
         self.retranslate()
 
     def set_plan(self, phases: "tuple[PlanPhase, ...] | None") -> None:
-        """Swap in the real plan (or None to fall back to the mock) and rebuild."""
+        """Swap in the real plan, or None when the project has no process state yet."""
         self._plan = phases
         self.retranslate()
 
     @property
     def plan(self) -> "tuple[PlanPhase, ...]":
-        return self._plan if self._plan is not None else PLAN
+        return self._plan if self._plan is not None else ()
 
     def retranslate(self) -> None:
         """Rebuild every phase/step row from the active plan + the progress overlay in the current
@@ -258,7 +259,17 @@ class PlanPanel(QScrollArea):
                 # event-loop pass.
                 widget.setParent(None)
                 widget.deleteLater()
-        for i, phase in enumerate(self.plan):
+        plan = self.plan
+        if not plan:
+            # Which of the two empty states this is matters: a project with no plan is waiting for
+            # a session, a window with no project is waiting for a folder.
+            empty = QLabel(i18n.t("planEmpty" if self._plan is None else "planNoProject"))
+            empty.setWordWrap(True)
+            empty.setProperty("class", "muted")
+            self._layout.addWidget(empty)
+            self._layout.addStretch(1)
+            return
+        for i, phase in enumerate(plan):
             self._layout.addWidget(
                 _PhaseRow(phase, i, self._progress, self.retranslate, self.sessionRequested.emit)
             )

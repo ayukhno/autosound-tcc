@@ -6,8 +6,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel  # noqa: E402
 from autosound_tcc.ui.tcc.mock_data import MEAS, PLAN, PlanStep, sessions_for_step  # noqa: E402
 from autosound_tcc.ui.tcc.plan_panel import (  # noqa: E402
@@ -36,8 +37,35 @@ def test_only_the_current_phase_starts_expanded():
 def test_plan_panel_builds_one_row_per_phase():
     _app()
     panel = PlanPanel()
+    panel.set_plan(PLAN)
     rows = panel.widget().findChildren(_PhaseRow)
     assert len(rows) == len(PLAN)
+
+
+def test_a_project_with_no_process_state_shows_no_plan_at_all():
+    """It used to fall back to the mock, so a real project that had not started tuning showed
+    seven invented phases with invented progress -- the same mistake the dialog panel already
+    refuses to make with demo bubbles."""
+    _app()
+    panel = PlanPanel()
+
+    panel.set_plan(None)
+
+    assert panel.widget().findChildren(_PhaseRow) == []
+    assert any(
+        i18n.t("planEmpty") in label.text() for label in panel.widget().findChildren(QLabel)
+    )
+
+
+def test_no_project_and_no_plan_say_different_things():
+    _app()
+    panel = PlanPanel()
+
+    panel.set_plan(())
+
+    assert any(
+        i18n.t("planNoProject") in label.text() for label in panel.widget().findChildren(QLabel)
+    )
 
 
 def test_retranslate_does_not_leave_stale_rows_behind():
@@ -46,6 +74,7 @@ def test_retranslate_does_not_leave_stale_rows_behind():
     next spins, which a synchronous retranslate() call never triggers on its own."""
     _app()
     panel = PlanPanel()
+    panel.set_plan(PLAN)
     panel.retranslate()
     assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN)
     panel.retranslate()
