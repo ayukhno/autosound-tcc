@@ -74,6 +74,13 @@ def load_system_params(project_dir_: Optional[Path] = None) -> tuple[tuple[str, 
 
     dsp = data.get("dsp") or {}
     dsp_name = " ".join(filter(None, (dsp.get("vendor"), dsp.get("model"))))
+    if not dsp_name:
+        # `project.json` arrives late: the intake asks about the car, the drivers and their Fs
+        # before it is written, and a session can legitimately spend a whole conversation short of
+        # that. `dsp_profile.json` arrives early -- it is finalised as soon as the DSP is named --
+        # so it is the first real fact a session produces, and a panel that shows nothing while it
+        # sits on disk reads as a session that did nothing.
+        dsp_name = dsp_from_profile(project_dir_) or ""
     if dsp_name:
         rows.append(("DSP", dsp_name))
 
@@ -95,6 +102,28 @@ def load_system_params(project_dir_: Optional[Path] = None) -> tuple[tuple[str, 
         rows.append(("Source", str(source)))
 
     return tuple(rows)
+
+
+def dsp_from_profile(project_dir_: Optional[Path] = None) -> Optional[str]:
+    """`vendor model` out of `dsp_profile.json`, or None.
+
+    Read as plain JSON rather than through the skill's loader: this is one label for a sidebar
+    row, and going through `vendor_loader` would make a missing submodule turn an empty panel
+    into an exception.
+    """
+    path = config.dsp_profile_path(project_dir_)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    profile = data.get("dsp_profile") if isinstance(data, dict) else None
+    if not isinstance(profile, dict):
+        return None
+    name = " ".join(
+        str(part) for part in (profile.get("vendor"), profile.get("name") or profile.get("model"))
+        if part and str(part).lower() != "unknown"
+    ).strip()
+    return name or None
 
 
 def load_channel_summary(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:

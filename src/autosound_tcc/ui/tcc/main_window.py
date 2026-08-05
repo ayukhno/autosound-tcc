@@ -624,7 +624,11 @@ class MainWindow(QMainWindow):
         self._system_section.body_layout().addWidget(
             _kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT, trailing=self._rew_dot)
         )
-        rows = project_view.load_system_params() if self._has_project else ()
+        # NOT gated on `_has_project`: that means "project.json exists", and the DSP is known
+        # from `dsp_profile.json` long before it. Hiding a fact TCC already has because a later
+        # file has not been written yet is how the panel came to say "no data" next to a profile
+        # the session had just finalised.
+        rows = project_view.load_system_params()
         if not rows:
             self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
             return

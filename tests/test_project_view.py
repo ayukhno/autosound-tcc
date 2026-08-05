@@ -98,3 +98,45 @@ def test_driver_label_joins_make_and_model_and_tolerates_older_shapes():
     assert project_view.driver_label({"driver": "Hertz MP70"}) == "Hertz MP70"
     assert project_view.driver_label({}) is None
     assert project_view.driver_label({"driver": {}}) is None
+
+
+# ---- the DSP is known before `project.json` exists --------------------------
+
+
+def _profile(project_dir, **fields):
+    (project_dir / "dsp_profile.json").write_text(
+        json.dumps({"schema_version": 3, "dsp_profile": fields}), encoding="utf-8"
+    )
+
+
+def test_the_dsp_shows_from_the_profile_before_project_json_exists(tmp_path):
+    """`project.json` arrives late — the intake asks about the car and the drivers first — while
+    `dsp_profile.json` is finalised as soon as the DSP is named. A panel that shows nothing while
+    that sits on disk reads as a session that did nothing."""
+    _profile(tmp_path, vendor="Audiotec-Fischer", name="Helix DSP Ultra S")
+
+    assert project_view.load_system_params(tmp_path) == (("DSP", "Audiotec-Fischer Helix DSP Ultra S"),)
+
+
+def test_project_json_wins_over_the_profile(tmp_path):
+    """Two sources for one fact: the project's own file is the later, fuller one."""
+    _profile(tmp_path, vendor="Audiotec-Fischer", name="Helix DSP Ultra S")
+    (tmp_path / "project.json").write_text(
+        json.dumps({"dsp": {"vendor": "Musway", "model": "D8V3"}}), encoding="utf-8"
+    )
+
+    assert project_view.load_system_params(tmp_path)[0] == ("DSP", "Musway D8V3")
+
+
+def test_an_unfinished_profile_is_not_a_dsp_name(tmp_path):
+    """`check_existing_profile` starts the draft with "unknown" placeholders; showing them as a
+    fact would be worse than showing nothing."""
+    _profile(tmp_path, vendor="unknown", name="unknown")
+
+    assert project_view.load_system_params(tmp_path) == ()
+
+
+def test_a_broken_profile_is_not_an_exception(tmp_path):
+    (tmp_path / "dsp_profile.json").write_text("{ truncated", encoding="utf-8")
+
+    assert project_view.load_system_params(tmp_path) == ()
