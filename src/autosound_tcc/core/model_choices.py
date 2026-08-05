@@ -138,3 +138,29 @@ def choices(active_omp: list[str]) -> list[Choice]:
 
 def find(entries: list[Choice], key: str) -> Choice | None:
     return next((choice for choice in entries if choice.key == key), None)
+
+
+def critic_reaches(choice: Choice) -> bool:
+    """Whether the reviewer script can actually call this model, rather than fall to the clipboard.
+
+    The Critic runs through the skill's `scripts/autosound_ai.py`, which is Gemini-shaped: one API
+    function (`call_gemini_api`), and a CLI mode that looks for `agy`/`gemini` and invokes them
+    with Gemini's argument shape. Everything else lands in clipboard mode — a designed fallback,
+    not a failure, but the user should learn that before picking rather than after waiting.
+
+    Raised as SCR-033. This function is the front-end apologising for it and should be deleted the
+    day the reviewer's transport becomes a parameter.
+    """
+    haystack = f"{choice.provider} {choice.model}".lower()
+    return "gemini" in haystack or "google" in haystack
+
+
+def critic_choices(active_omp: list[str]) -> list[Choice]:
+    """The same registry as the Generator's, so one list means one place to configure.
+
+    A different vendor from the Generator is the method's own requirement (SKILL.md, three roles),
+    not something to enforce here: the Arbiter can legitimately want the same family for a
+    second opinion on a narrow question, and a picker that silently omits options is harder to
+    reason about than one that shows them.
+    """
+    return choices(active_omp)

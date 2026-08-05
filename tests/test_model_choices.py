@@ -107,3 +107,23 @@ def test_a_choice_key_survives_a_restart():
         "omp:google/gemini-3.1-pro-preview"
     )
     assert model_choices.find(model_choices.sdk_choices(), "sdk:claude-opus-5").label == "Claude Opus 5"
+
+
+def test_the_reviewer_list_is_the_same_list(catalogue):
+    """One registry. A different vendor for the Critic is the method's requirement (SKILL.md,
+    three roles), not something a picker should enforce by hiding options."""
+    active = ["google/gemini-3.1-pro-preview"]
+
+    assert model_choices.critic_choices(active) == model_choices.choices(active)
+
+
+def test_only_gemini_is_actually_reachable_by_the_reviewer_script():
+    """`scripts/autosound_ai.py` has one API path and looks for `agy`/`gemini`. Everything else
+    falls to clipboard mode — a designed fallback, but the user learns it before picking.
+    Delete this the day SCR-033 makes the reviewer's transport a parameter."""
+    gemini = Choice(harness="omp", model="google/gemini-3.1-pro-preview", label="x",
+                    provider="google")
+    claude = Choice(harness="sdk", model="claude-opus-5", label="x", provider="anthropic")
+
+    assert model_choices.critic_reaches(gemini) is True
+    assert model_choices.critic_reaches(claude) is False

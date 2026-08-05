@@ -54,7 +54,6 @@ from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
-from autosound_tcc.ui.tcc.mock_data import AI_CRITIC_MODELS
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
@@ -68,6 +67,7 @@ _ZOOM_KEY = "ui/zoom"
 _LANG_KEY = "ui/lang"
 _GENERATOR_KEY = "ai/generator"        # the picked Choice.key
 _ACTIVE_OMP_KEY = "ai/active_omp"     # selectors the user marked usable
+_CRITIC_KEY = "ai/critic"             # the picked Choice.key for the reviewer
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
 # TODO(user): paste the published Google Form viewform URL here (the one built last session — see
 # memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
@@ -462,7 +462,6 @@ class MainWindow(QMainWindow):
         # by inference.
         ai_main = _mini_combo()
         self._ai_main_combo = ai_main
-        self._reload_model_choices()
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
 
@@ -478,11 +477,16 @@ class MainWindow(QMainWindow):
         self._ai_critic_lbl.setProperty("class", "kv-lbl")
         apply_caps(self._ai_critic_lbl, spacing_px=1.2)
         layout.addWidget(self._ai_critic_lbl)
+        # Same registry as the generator picker: one list, one place to configure. What differs
+        # is reachability -- the reviewer script is Gemini-shaped (SCR-033), so anything else
+        # lands in clipboard mode and says so here rather than after the wait.
         ai_critic = _mini_combo()
-        ai_critic.addItems(AI_CRITIC_MODELS)
-        ai_critic.currentTextChanged.connect(self._on_critic_model_changed)
         self._ai_critic_combo = ai_critic
+        ai_critic.currentIndexChanged.connect(self._on_critic_model_changed)
         layout.addWidget(ai_critic)
+
+        # Both combos exist now, so one pass fills them from the one registry.
+        self._reload_model_choices()
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
         # panel's "engaged? which AI+model? last called when").
@@ -1204,9 +1208,17 @@ class MainWindow(QMainWindow):
         self._dialog.add_critique(critique)
         self._refresh_critic_status()
 
-    def _on_critic_model_changed(self, model: str) -> None:
+    def _critic_choice(self) -> Optional[model_choices.Choice]:
+        key = self._ai_critic_combo.currentData()
+        return model_choices.find(self._critic_choices, str(key)) if key else None
+
+    def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
-        self._bridge.set_snapshot(critic_model=model)
+        choice = self._critic_choice()
+        if choice is None:
+            return
+        self._settings.setValue(_CRITIC_KEY, choice.key)
+        self._bridge.set_snapshot(critic_model=choice.model)
 
     def _refresh_critic_status(self) -> None:
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
@@ -1269,14 +1281,31 @@ class MainWindow(QMainWindow):
         return [selector for selector in str(raw).split(",") if selector]
 
     def _reload_model_choices(self) -> None:
-        """Refill the generator picker, keeping the current selection if it survived."""
-        wanted = str(self._settings.value(_GENERATOR_KEY, "")) or None
-        self._model_choices = model_choices.choices(self._active_omp())
-        combo = self._ai_main_combo
+        """Refill both pickers from one registry, keeping selections that survived."""
+        active = self._active_omp()
+        self._model_choices = model_choices.choices(active)
+        self._critic_choices = model_choices.critic_choices(active)
+        self._fill_combo(
+            self._ai_main_combo, self._model_choices, str(self._settings.value(_GENERATOR_KEY, ""))
+        )
+        self._fill_combo(
+            self._ai_critic_combo,
+            self._critic_choices,
+            str(self._settings.value(_CRITIC_KEY, "")),
+            critic=True,
+        )
+
+    @staticmethod
+    def _fill_combo(combo, entries, wanted: str, critic: bool = False) -> None:
         blocked = combo.blockSignals(True)
         combo.clear()
-        for choice in self._model_choices:
-            suffix = " · free" if choice.free else ""
+        for choice in entries:
+            notes = []
+            if choice.free:
+                notes.append(i18n.t("modelFree"))
+            if critic and not model_choices.critic_reaches(choice):
+                notes.append(i18n.t("modelClipboardOnly"))
+            suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             combo.addItem(f"{choice.label}{suffix}", choice.key)
         index = combo.findData(wanted) if wanted else -1
         combo.setCurrentIndex(index if index >= 0 else 0)

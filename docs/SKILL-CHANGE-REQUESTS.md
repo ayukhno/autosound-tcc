@@ -723,3 +723,56 @@ Ask, both halves:
 1. `git rm --cached` the 11 files and add `__pycache__/` + `*.pyc` to `.gitignore`.
 2. Nothing else — no interpreter flags in prescribed commands. A repo that does not track build
    output does not care whether the caches get written.
+
+## SCR-033 — the reviewer is Gemini-shaped; make the transport a parameter
+
+**Status**: proposed (found converging TCC's Critic picker onto the model registry, 2026-08-05)
+**Target**: `skills/autosound-tuning/scripts/autosound_ai.py` — `call_gemini_api` (the only API
+function), `detect_cli` (`agy`/`gemini` only), the CLI invocation `[bin, "--model", M, "-p",
+<path>]`, and `run_doctor`'s provider report
+**TCC dependency**: `core/critic.py` steers the script through `GEMINI_CRITIC_MODEL` /
+`GEMINI_ADVISOR_MODEL` and deliberately knows nothing about model names. TCC's Critic picker is
+being converged onto the same registry as the Generator picker (`core/model_choices.py`), and the
+moment those lists agree, the picker offers models the reviewer cannot reach.
+
+**Detail**: the method is vendor-neutral by design — SKILL.md's three roles call for a *different
+vendor's* model as Critic, and the whole point is that it is not the Generator. The script is not:
+
+* one API path exists, `call_gemini_api`. There is no Anthropic call at all;
+* `detect_cli` looks for `agy` and `gemini` (or a `GEMINI_BIN` override);
+* the CLI is invoked as `[bin, "--model", M, "-p", <temp file path>]`. Claude Code's `-p` takes a
+  **prompt string**, not a path, so `GEMINI_BIN=claude` runs and sends the model the literal
+  filename — the shape of a bug that looks like a bad review rather than a broken call;
+* `run_doctor` prints "▶ Режим роботи: АВТОМАТИЧНИЙ (через API Anthropic)" when it finds
+  `ANTHROPIC_API_KEY`, and then no code path can use it. A false green light is worse than no
+  detection: it sends someone to debug their key.
+
+**What TCC learned doing this on the Generator side, offered rather than re-derived.** The harness
+investigation (`spike/HANDOFF.md`) landed on three things that apply here unchanged:
+
+1. **Model and transport are one choice, made explicitly.** `core/model_choices.py` carries a
+   `Choice(harness, model, …)`; picking a model picks how it is reached. The reviewer needs the
+   same shape — `GEMINI_CRITIC_MODEL` names a model and silently assumes a vendor.
+2. **A one-shot reviewer needs no per-provider integration, because one already exists.** omp
+   (`spike/HANDOFF.md` §5-ter) is a single binary with a credential broker covering Anthropic
+   Pro/Max, ChatGPT/Codex, Copilot, Z.AI, local runners and the rest, and `omp -p "<prompt>"
+   --model <provider/selector>` is exactly a one-shot. One transport replaces the N provider APIs
+   this script would otherwise grow. Measured on this project: `omp models --json` returns
+   `{provider, selector, name, contextWindow, cost}` per model, so cost is known at choosing time.
+3. **The licensing line, which is the reason not to just add an Anthropic API call.** TCC's rule is
+   that it never holds credentials and never steers to a third-party client for a Claude
+   subscription (`spike/HANDOFF.md` §5-ter, and `a6690b7`). The reviewer should inherit it: reach
+   Claude through the **user's own CLI**, never through a key the skill asks for.
+
+Ask, smallest first:
+
+1. `detect_cli` and the invocation stop assuming Gemini's argument shape. A CLI entry carries how
+   it is called — Claude Code takes the prompt as a string, `gemini` takes `--skip-trust` and a
+   path — so the per-CLI difference lives in one table rather than in `extra_args`.
+2. A generic `omp` transport, tried like the others. It is the cheapest way for the reviewer to
+   become vendor-neutral for real, and it is the transport a subscription can pay for.
+3. `run_doctor` reports only what a run can actually use. Finding a key the script cannot call is
+   worth saying — as "found, unused", never as the automatic mode.
+
+Until at least (1), TCC's Critic picker has to mark non-Gemini choices as clipboard-mode, which is
+a front-end apologising for a method-level gap.

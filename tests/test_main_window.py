@@ -534,3 +534,58 @@ def test_the_picked_model_survives_a_restart(monkeypatch):
     again = MainWindow()
 
     assert again._generator_choice().model == "google/gemini-3.1-pro-preview"
+
+
+def test_the_critic_picker_comes_from_the_same_registry(monkeypatch):
+    """One list, one place to configure — the Critic used to have its own hard-coded strings."""
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
+
+    generator = {window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())}
+    reviewer = {window._ai_critic_combo.itemData(i) for i in range(window._ai_critic_combo.count())}
+
+    assert generator == reviewer
+    assert "omp:google/gemini-3.1-pro-preview" in reviewer
+
+
+def test_a_reviewer_the_script_cannot_call_is_marked_clipboard_only(monkeypatch):
+    """The reviewer script is Gemini-shaped (SCR-033). Everything else lands in clipboard mode,
+    which the user should learn before picking rather than after waiting."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    claude = window._ai_critic_combo.findData("sdk:claude-opus-5")
+    assert "clipboard" in window._ai_critic_combo.itemText(claude).lower()
+
+
+def test_a_gemini_reviewer_is_not_marked(monkeypatch):
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
+
+    index = window._ai_critic_combo.findData("omp:google/gemini-3.1-pro-preview")
+    assert "clipboard" not in window._ai_critic_combo.itemText(index).lower()
+
+
+def test_the_reviewer_model_reaches_the_subprocess_by_name(monkeypatch):
+    """`critic.run` steers the script through its env var and knows nothing about model names, so
+    what the picker publishes has to be the model, not the label."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData("sdk:claude-sonnet-5"))
+
+    assert window._bridge.snapshot()["critic_model"] == "claude-sonnet-5"
