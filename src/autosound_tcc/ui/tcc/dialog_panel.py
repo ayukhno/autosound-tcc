@@ -18,7 +18,7 @@ import html
 import re
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -142,6 +142,7 @@ class DialogPanel(QWidget):
         # The run of identical tool calls currently on the activity line -- see `_add_chip`.
         self._chip_tool = ""
         self._chip_count = 0
+        self._activity_label = ""
         # The question the turn is currently parked on, and the option buttons offering it.
         self._pending_question: Optional[str] = None
         self._question_widgets: Optional[QWidget] = None
@@ -270,9 +271,15 @@ class DialogPanel(QWidget):
         # working" -- one line of that is worth as much as eight rows of it, and eight rows was
         # most of a screen. The process record is `process/journal.jsonl`; this is a pulse.
         self._activity = QLabel("")
-        self._activity.setProperty("class", "phead-sub")
+        self._activity.setProperty("class", "activity")
         self._activity.setHidden(True)
         outer.addWidget(self._activity)
+        # The dots are the point: a static line says "a tool ran", a moving one says "it is still
+        # running", and telling those apart is the only reason this line exists.
+        self._activity_phase = 0
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(450)
+        self._activity_timer.timeout.connect(self._tick_activity)
 
         composer = QWidget()
         composer.setProperty("class", "composer")
@@ -397,7 +404,18 @@ class DialogPanel(QWidget):
 
     def clear_for_no_project(self) -> None:
         """Drop the mock transcript when MainWindow finds no real project on disk -- a folder
-        with nothing real in it should never look like a live tuning conversation is underway."""
+        with nothing real in it should never look like a live tuning conversation is underway.
+
+        Never while a session is attached. This runs whenever the project is re-read, and a live
+        session re-reads it constantly -- `enter_phase` writes to disk, the bridge asks the window
+        to reload, and a project whose profile does not exist yet takes the "no project" branch.
+        Wiping a running conversation there is wrong twice over: the transcript is real, and the
+        deleted bubbles left `_live_bubble` pointing at a destroyed C++ object, so the next
+        streamed chunk raised inside the slot and the turn froze mid-answer. Reported as "it wrote
+        the text and everything hangs, Stop does not help".
+        """
+        if self._worker is not None:
+            return
         self._clear_bubbles()
 
     # ---- live agent --------------------------------------------------------
@@ -463,6 +481,14 @@ class DialogPanel(QWidget):
         an event loop). Widgets get the established treatment; the emptied layout is simply
         dropped and collected, with nothing queued.
         """
+        # Anything pointing into the bubbles goes with them -- a dangling reference to a deleted
+        # widget is a crash in whichever slot touches it next, not a visual glitch.
+        self._live_bubble = None
+        self._live_text = ""
+        if self._question_widgets is not None:
+            self._question_widgets.setParent(None)
+            self._question_widgets.deleteLater()
+            self._question_widgets = None
         for bubble in self._bubbles:
             bubble.setParent(None)
             bubble.deleteLater()
@@ -580,6 +606,11 @@ class DialogPanel(QWidget):
         self._live_text = ""
         self._scroll_to_end()
 
+    def _tick_activity(self) -> None:
+        self._activity_phase = (self._activity_phase + 1) % 4
+        dots = "." * self._activity_phase
+        self._activity.setText(f"⟳ {self._activity_label}{dots}")
+
     def _answer_question(self, value: str) -> None:
         """Send the Arbiter's choice back through the channel the question came from."""
         question_id, self._pending_question = self._pending_question, None
@@ -611,17 +642,21 @@ class DialogPanel(QWidget):
         pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
         self._chip_count = self._chip_count + 1 if self._chip_tool == pretty else 1
         self._chip_tool = pretty
-        suffix = f" ×{self._chip_count}" if self._chip_count > 1 else ""
-        self._activity.setText(f"· {pretty}{suffix}")
+        self._activity_label = pretty + (f" ×{self._chip_count}" if self._chip_count > 1 else "")
         self._activity.setHidden(False)
+        self._tick_activity()
+        if not self._activity_timer.isActive():
+            self._activity_timer.start()
         self._live_bubble = None  # text after a tool call starts a new bubble
         self._live_text = ""
 
     def _on_turn_done(self) -> None:
+        self._activity_timer.stop()
         self._activity.setHidden(True)
         self._activity.setText("")
         self._chip_tool = ""
         self._chip_count = 0
+        self._activity_label = ""
         # The question the turn is currently parked on, and the option buttons offering it.
         self._pending_question: Optional[str] = None
         self._question_widgets: Optional[QWidget] = None

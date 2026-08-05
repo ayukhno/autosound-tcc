@@ -98,6 +98,7 @@ def test_a_tool_call_is_a_pulse_not_a_transcript_entry(tmp_path):
     assert not panel._activity.isHidden()
     assert "get_tcc_state" in panel._activity.text()
     assert "mcp__tcc__" not in panel._activity.text()
+    assert panel._activity_timer.isActive()  # a moving line is what says "still running"
 
 
 def test_text_after_a_tool_call_starts_a_new_bubble(tmp_path):
@@ -443,7 +444,8 @@ def test_a_run_of_the_same_tool_is_counted_rather_than_repeated(tmp_path):
     for _ in range(6):
         worker.chunk.emit(ToolCall(name="glob"))
 
-    assert panel._activity.text() == "· glob ×6"
+    assert panel._activity_label == "glob ×6"
+    assert "glob ×6" in panel._activity.text()
 
 
 def test_a_different_tool_replaces_the_line(tmp_path):
@@ -452,7 +454,7 @@ def test_a_different_tool_replaces_the_line(tmp_path):
     worker.chunk.emit(ToolCall(name="glob"))
     worker.chunk.emit(ToolCall(name="read"))
 
-    assert panel._activity.text() == "· read"
+    assert panel._activity_label == "read"
 
 
 def test_the_line_clears_when_the_turn_ends(tmp_path):
@@ -537,3 +539,27 @@ def test_after_answering_the_composer_sends_messages_again(tmp_path):
     panel._on_send()
 
     assert worker.sent == ["what next?"]
+
+
+def test_a_live_transcript_is_not_wiped_when_the_project_looks_unfinished(tmp_path):
+    """`enter_phase` writes to disk, the bridge asks the window to reload, and a project whose
+    profile does not exist yet takes the "no project" branch — which used to clear the bubbles of
+    a running session and leave `_live_bubble` pointing at a destroyed widget, so the next chunk
+    raised inside the slot and the turn froze mid-answer."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("Phase −1. "))
+
+    panel.clear_for_no_project()
+    worker.chunk.emit(TextDelta("Still going."))
+
+    assert panel._live_text == "Phase −1. Still going."
+    assert len(panel._bubbles) == 1
+
+
+def test_clearing_with_no_session_still_clears(tmp_path):
+    panel = DialogPanel()
+
+    panel.clear_for_no_project()
+
+    assert panel._bubbles == []
+    assert panel._live_bubble is None

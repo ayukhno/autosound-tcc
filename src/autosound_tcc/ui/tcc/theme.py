@@ -770,6 +770,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         min-height: 32px;
     }}
 
+    /* The "still working" line under the transcript -- system-grey, so it reads as chrome
+       rather than as something the model said. */
+    QLabel[class~="activity"] {{
+        color: {t.muted};
+        font-size: 11px;
+        padding: 2px 12px 0 12px;
+    }}
     QPushButton[class~="edit-chip"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
