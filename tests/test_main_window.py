@@ -868,3 +868,16 @@ def test_a_fresh_session_saves_first_then_clears_the_context(monkeypatch):
     assert worker.sent
     assert worker.shutdowns == 1
     assert launched == [True]  # not resumed: the project state is on disk to be re-read
+
+
+def test_the_menu_explains_what_the_labels_cannot(monkeypatch):
+    """"Start a new session" and "restart on a different model" are different acts, and the
+    difference is the whole reason the third action exists."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    tip = window._fresh_session_action.toolTip().lower()
+    assert "same model" in tip or "тій самій" in tip
+    assert window._save_state_action.toolTip()
+    assert window._open_project_action.toolTip()

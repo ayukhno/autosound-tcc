@@ -376,12 +376,19 @@ class MainWindow(QMainWindow):
         self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self._project_btn)
+        # Qt hides action tooltips by default, and these three differ in ways the labels cannot
+        # carry -- particularly that starting a new session is not the same act as restarting on
+        # a different model.
+        menu.setToolTipsVisible(True)
         self._open_project_action = menu.addAction(i18n.t("projectOpen"))
+        self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
         self._open_project_action.triggered.connect(self._choose_project_folder)
         menu.addSeparator()
         self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
+        self._save_state_action.setToolTip(i18n.t("projectSaveStateTip"))
         self._save_state_action.triggered.connect(self._save_project_state)
         self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
+        self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
         self._fresh_session_action.triggered.connect(self._start_fresh_session)
         self._project_btn.setMenu(menu)
         layout.addWidget(self._project_btn)
