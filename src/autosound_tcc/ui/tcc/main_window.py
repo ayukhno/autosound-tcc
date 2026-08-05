@@ -57,7 +57,7 @@ from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
-from autosound_tcc.state import measurement_view, process_view, project_view
+from autosound_tcc.state import measurement_view, plan_audit, process_view, project_view
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
@@ -1184,7 +1184,16 @@ class MainWindow(QMainWindow):
         # SCR-014: what a `config_change` invalidated, computed once and used by both panels --
         # a step's "recheck" chip and a capture's unusable colour are the same fact.
         stale = process_view.stale_channels()
-        self._plan_panel.set_plan(process_view.to_plan(state, stale))
+        plan = process_view.to_plan(state, stale)
+        # The "факт" half: a step the skill closed whose evidence names nothing that exists. The
+        # skill's gate counts evidence and cannot read it, so a model that narrates its work
+        # closes every step it touches -- watched doing exactly that, four phases in one sitting
+        # with `dsp_profile.json` alone on disk (SCR-035).
+        titles = getattr(self._meas_panel, "known_titles", lambda: [])()
+        unbacked = {u.step_id for u in plan_audit.unbacked_steps(state, rew_titles=titles)}
+        if unbacked:
+            plan = process_view.mark_unbacked(plan, unbacked)
+        self._plan_panel.set_plan(plan)
         self._refresh_capture_task(state)
         self._notify_stale(stale)
 

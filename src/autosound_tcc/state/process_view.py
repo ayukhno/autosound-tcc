@@ -16,6 +16,7 @@ the mock rather than showing an empty plan that looks like a finished one.
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
@@ -224,3 +225,28 @@ def _impact_parser():
         return vendor_loader.load_project().Project.parse_impact
     except (vendor_loader.VendorNotInitializedError, AttributeError):
         return None
+
+
+_UNBACKED_TAG = ({"en": "unproven", "uk": "без доказу"}, "bad")
+
+
+def mark_unbacked(
+    phases: tuple[PlanPhase, ...], step_ids: set[str]
+) -> tuple[PlanPhase, ...]:
+    """Re-tag closed steps whose evidence resolves to nothing on disk (`state.plan_audit`).
+
+    A chip rather than an un-tick: the skill did close the step, and pretending otherwise would
+    put TCC's opinion into a file it does not own. What the panel shows is the disagreement --
+    which is what a panel called ПЛАН — ФАКТ is for.
+    """
+    if not step_ids:
+        return phases
+    out = []
+    for phase in phases:
+        steps = tuple(
+            replace(step, tag=_UNBACKED_TAG[0], tag_class=_UNBACKED_TAG[1])
+            if step.id in step_ids else step
+            for step in phase.steps
+        )
+        out.append(replace(phase, steps=steps))
+    return tuple(out)

@@ -1034,3 +1034,34 @@ def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypat
     window._refresh_process()
 
     assert window._plan_panel.plan  # the last thing known to be true stays on screen
+
+
+def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):
+    """The observed case: a free model closed four phases and reported a finished tune — delays,
+    EQ, a listening verdict — with `dsp_profile.json` alone on disk. Every step passed the skill's
+    evidence gate, which counts evidence and cannot read it (SCR-035)."""
+    (tmp_path / "dsp_profile.json").write_text("{}", encoding="utf-8")
+    process = tmp_path / "process"
+    process.mkdir()
+    (process / "process-state.json").write_text(
+        json.dumps({
+            "schema_version": 3,
+            "active_phase": "1",
+            "phases": {"1": {"status": "cur", "title": "Crossovers"}},
+            "plan": [
+                {"id": "profile", "name": "Adopt DSP profile", "status": "done", "phase": "1",
+                 "evidence": ["dsp_profile.json (schema 3)"]},
+                {"id": "delays", "name": "Set time delays", "status": "done", "phase": "1",
+                 "evidence": ["delays aligned to the sub as 0 ms reference"]},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _app()
+    window = MainWindow()
+
+    steps = {s.id: s for p in window._plan_panel.plan for s in p.steps}
+    assert steps["profile"].tag_class == "ok"      # the file it names is really there
+    assert steps["delays"].tag_class == "bad"      # the sentence it names is not
+    assert i18n.tx(steps["delays"].tag) in ("unproven", "без доказу")
