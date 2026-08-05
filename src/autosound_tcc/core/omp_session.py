@@ -86,7 +86,7 @@ def is_available() -> bool:
     return shutil.which("omp") is not None
 
 
-def _overlay_path(project_dir: Path) -> Path:
+def overlay_path(project_dir: Path) -> Path:
     """Config overlay TCC owns, written next to the project's own TCC state.
 
     A file rather than a flag because `tools.xdev` has no command-line form, and TCC's own file
@@ -136,7 +136,7 @@ class OmpSession:
             "--approval-mode",
             "always-ask",
             "--config",
-            str(_overlay_path(self.project_dir)),
+            str(overlay_path(self.project_dir)),
             # Sessions live with the project, so resuming is "continue this project's last one"
             # and no session id has to be carried across processes.
             "--session-dir",

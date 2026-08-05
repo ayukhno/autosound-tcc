@@ -26,6 +26,7 @@ from typing import Optional
 # wrappers already prefer over `gemini` when present.
 KNOWN_CLIS: tuple[tuple[str, str], ...] = (
     ("claude", "Claude Code"),
+    ("omp", "omp"),
     ("agy", "Gemini (Antigravity)"),
     ("gemini", "Gemini CLI"),
     ("codex", "Codex CLI"),
@@ -46,12 +47,15 @@ def default_cli() -> Optional[str]:
     return found[0][0] if found else None
 
 
-def _posix_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -> str:
-    """`cli [--model M] ["hint"]`, POSIX-quoted. `--model` is assumed for every known CLI here
-    (confirmed for `claude`; `gemini`/`codex`/`agy` follow the same near-universal convention,
-    not independently verified per-CLI) -- comes before the prompt positional argument, matching
-    ordinary CLI argument-parsing order."""
+def _posix_cli_invocation(
+    cli: str, hint: Optional[str], model: Optional[str], extra: tuple[str, ...] = ()
+) -> str:
+    """`cli [extra…] [--model M] ["hint"]`, POSIX-quoted. `--model` is assumed for every known CLI
+    here (confirmed for `claude` and `omp`; `gemini`/`codex`/`agy` follow the same near-universal
+    convention, not independently verified per-CLI) -- comes before the prompt positional
+    argument, matching ordinary CLI argument-parsing order."""
     parts = [shlex.quote(cli)]
+    parts += [shlex.quote(arg) for arg in extra]
     if model:
         parts += ["--model", shlex.quote(model)]
     if hint:
@@ -59,10 +63,13 @@ def _posix_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -
     return " ".join(parts)
 
 
-def _win_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -> str:
+def _win_cli_invocation(
+    cli: str, hint: Optional[str], model: Optional[str], extra: tuple[str, ...] = ()
+) -> str:
     """Same shape as `_posix_cli_invocation`, Windows quoting (always double-quote, no escaping
     needed for the short executable names / plain text this handles)."""
     parts = [f'"{cli}"']
+    parts += [f'"{arg}"' for arg in extra]
     if model:
         parts += ["--model", f'"{model}"']
     if hint:
@@ -71,7 +78,11 @@ def _win_cli_invocation(cli: str, hint: Optional[str], model: Optional[str]) -> 
 
 
 def _posix_command(
-    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+    project_dir: Path,
+    cli: str,
+    hint: Optional[str] = None,
+    model: Optional[str] = None,
+    extra: tuple[str, ...] = (),
 ) -> str:
     """The shell line the terminal will run: enter the project, then hand over to the CLI.
 
@@ -81,7 +92,10 @@ def _posix_command(
     whatever the shell printed a moment earlier -- an `echo` before `exec` was confirmed
     (2026-07-29 dogfood) to render as nothing at all once the TUI took over.
     """
-    return f"cd {shlex.quote(str(project_dir))} && exec {_posix_cli_invocation(cli, hint, model)}"
+    return (
+        f"cd {shlex.quote(str(project_dir))} && "
+        f"exec {_posix_cli_invocation(cli, hint, model, extra)}"
+    )
 
 
 def _applescript_literal(text: str) -> str:
@@ -95,9 +109,13 @@ def _applescript_literal(text: str) -> str:
 
 
 def _launch_macos(
-    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+    project_dir: Path,
+    cli: str,
+    hint: Optional[str] = None,
+    model: Optional[str] = None,
+    extra: tuple[str, ...] = (),
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model)
+    command = _posix_command(project_dir, cli, hint, model, extra)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     if app == "iTerm":
         script = (
@@ -116,27 +134,39 @@ def _launch_macos(
 
 
 def _launch_windows(
-    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+    project_dir: Path,
+    cli: str,
+    hint: Optional[str] = None,
+    model: Optional[str] = None,
+    extra: tuple[str, ...] = (),
 ) -> None:
     if shutil.which("wt"):
         argv = ["wt", "-d", str(project_dir)]
         # Plain case stays exactly the original bare-argv shape; a hint or model needs a single
         # `wt` argument, which only cmd /k can express as one string.
-        argv += ["cmd", "/k", _win_cli_invocation(cli, hint, model)] if (hint or model) else [cli]
+        argv += (
+            ["cmd", "/k", _win_cli_invocation(cli, hint, model, extra)]
+            if (hint or model or extra)
+            else [cli]
+        )
         subprocess.Popen(argv, close_fds=True)
         return
     # `start` is a cmd builtin, so this needs the shell; `/d` sets the working directory and the
     # empty "" is the window title `start` would otherwise eat from the first quoted argument.
-    inner = _win_cli_invocation(cli, hint, model)
+    inner = _win_cli_invocation(cli, hint, model, extra)
     subprocess.Popen(
         f'start "" /d "{project_dir}" cmd /k {inner}', shell=True, close_fds=True
     )
 
 
 def _launch_linux(
-    project_dir: Path, cli: str, hint: Optional[str] = None, model: Optional[str] = None
+    project_dir: Path,
+    cli: str,
+    hint: Optional[str] = None,
+    model: Optional[str] = None,
+    extra: tuple[str, ...] = (),
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model)
+    command = _posix_command(project_dir, cli, hint, model, extra)
     candidates = (
         (["x-terminal-emulator", "-e"], True),
         (["gnome-terminal", "--working-directory", str(project_dir), "--"], False),
@@ -158,6 +188,7 @@ def launch(
     cli: Optional[str] = None,
     hint: Optional[str] = None,
     model: Optional[str] = None,
+    extra: tuple[str, ...] = (),
 ) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
 
@@ -168,6 +199,10 @@ def launch(
     `model`, if given, is passed as `--model <model>` before the hint -- e.g. "opus" for `claude`,
     "gemini-2.5-pro" for `gemini`. Each CLI has its own model-name vocabulary; TCC doesn't validate
     it, the CLI does.
+
+    `extra`, if given, is passed verbatim before `--model` -- omp needs `--config <overlay>` or
+    TCC's MCP tools stay behind `xd://` and never enter the model's function list, which would
+    make this front-end quietly weaker than the in-app one for no visible reason.
 
     Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
     caller is expected to turn that into a message, since "nothing happened" after clicking a
@@ -191,11 +226,11 @@ def launch(
     # semantics, so the mismatch shows up as a bogus "not a directory" rather than as itself.
     try:
         if sys.platform == "darwin":
-            _launch_macos(project_dir, cli, hint, model)
+            _launch_macos(project_dir, cli, hint, model, extra)
         elif sys.platform.startswith("win"):
-            _launch_windows(project_dir, cli, hint, model)
+            _launch_windows(project_dir, cli, hint, model, extra)
         else:
-            _launch_linux(project_dir, cli, hint, model)
+            _launch_linux(project_dir, cli, hint, model, extra)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli

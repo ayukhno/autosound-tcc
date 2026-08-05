@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
+from autosound_tcc.ui.tcc import main_window  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
 
@@ -589,3 +590,61 @@ def test_the_reviewer_model_reaches_the_subprocess_by_name(monkeypatch):
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData("sdk:claude-sonnet-5"))
 
     assert window._bridge.snapshot()["critic_model"] == "claude-sonnet-5"
+
+
+def test_the_terminal_opens_on_the_cli_that_carries_the_picked_model(monkeypatch):
+    """Two front-ends that disagree about which model is running would make the picker a lie in
+    one of them."""
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
+    }])
+    _app()
+    window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
+    window._ai_main_combo.setCurrentIndex(
+        window._ai_main_combo.findData("omp:google/gemini-3.1-pro-preview")
+    )
+    seen = {}
+    monkeypatch.setattr(
+        main_window.terminal_launcher,
+        "launch",
+        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
+    )
+
+    window._open_terminal()
+
+    assert seen["cli"] == "omp"
+    assert seen["model"] == "google/gemini-3.1-pro-preview"
+    # Without the overlay TCC's tools stay behind xd:// and the terminal is quietly weaker.
+    assert "--config" in seen["extra"]
+
+
+def test_a_claude_pick_opens_claude(monkeypatch):
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    seen = {}
+    monkeypatch.setattr(
+        main_window.terminal_launcher,
+        "launch",
+        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
+    )
+
+    window._open_terminal()
+
+    assert seen["cli"] == "claude"
+    assert seen["model"] == "claude-sonnet-5"
+    assert seen["extra"] == ()
+
+
+def test_the_sdk_is_named_in_the_generator_picker(monkeypatch):
+    """Which harness carries the model is the licensing split; it is named, not inferred."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    index = window._ai_main_combo.findData("sdk:claude-opus-5")
+    assert window._ai_main_combo.itemText(index).startswith("SDK · ")

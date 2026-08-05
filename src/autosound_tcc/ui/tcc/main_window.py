@@ -452,6 +452,14 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(14, 7, 14, 7)
 
+        # omp reports several hundred models and nobody has credentials for most of them, so the
+        # user marks the ones they actually use rather than TCC guessing on their behalf.
+        self._models_btn = QPushButton(i18n.t("configureModels"))
+        self._models_btn.setProperty("class", "btn")
+        self._models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._models_btn.clicked.connect(self._open_model_config)
+        layout.addWidget(self._models_btn)
+
         self._ai_main_lbl = QLabel(i18n.t("aiMain"))
         self._ai_main_lbl.setProperty("class", "kv-lbl")
         apply_caps(self._ai_main_lbl, spacing_px=1.2)
@@ -465,13 +473,6 @@ class MainWindow(QMainWindow):
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
 
-        # omp reports several hundred models and nobody has credentials for most of them, so the
-        # user marks the ones they actually use rather than TCC guessing on their behalf.
-        self._models_btn = QPushButton(i18n.t("configureModels"))
-        self._models_btn.setProperty("class", "btn")
-        self._models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._models_btn.clicked.connect(self._open_model_config)
-        layout.addWidget(self._models_btn)
 
         self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
         self._ai_critic_lbl.setProperty("class", "kv-lbl")
@@ -1306,7 +1307,10 @@ class MainWindow(QMainWindow):
             if critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
-            combo.addItem(f"{choice.label}{suffix}", choice.key)
+            # Which harness carries the model is the licensing split (spike/HANDOFF.md 5-ter), so
+            # it is named in the entry rather than left to be inferred from the vendor.
+            prefix = "SDK · " if choice.harness == "sdk" else ""
+            combo.addItem(f"{prefix}{choice.label}{suffix}", choice.key)
         index = combo.findData(wanted) if wanted else -1
         combo.setCurrentIndex(index if index >= 0 else 0)
         combo.blockSignals(blocked)
@@ -1329,14 +1333,30 @@ class MainWindow(QMainWindow):
         self._reload_model_choices()
 
     def _open_terminal(self) -> None:
-        """Front-end B: hand the project to the user's own CLI in their own terminal."""
+        """Front-end B: hand the project to the user's own CLI in their own terminal.
+
+        Same choice as the in-app session, same reasoning: the model picker decides the harness,
+        so the terminal opens on the CLI that carries it -- `claude` for an SDK choice, `omp` for
+        an omp one -- rather than on whatever happens to be first on PATH. Two front-ends that
+        disagree about which model is running would make the picker a lie in one of them.
+        """
         project_dir = self._mcp_server.project_dir if self._mcp_server else config.project_dir()
+        choice = self._generator_choice()
+        if choice.harness == "omp":
+            cli, model = "omp", choice.model
+            # Without the overlay TCC's own tools stay behind xd:// and never reach the model --
+            # the terminal would be quietly weaker than the in-app session for no visible reason.
+            extra = ("--config", str(omp_session.overlay_path(project_dir)))
+        else:
+            cli, model, extra = "claude", choice.model, ()
         try:
-            cli = terminal_launcher.launch(project_dir)
+            launched = terminal_launcher.launch(
+                project_dir, cli=cli, model=model, extra=extra
+            )
         except terminal_launcher.TerminalLaunchError as exc:
             self._status_strip.notify(str(exc), level="warn")
             return
-        self._status_strip.notify(i18n.t("terminalOpened").format(cli=cli))
+        self._status_strip.notify(i18n.t("terminalOpened").format(cli=launched))
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # The one-shot ping is normally long finished by the time anyone closes the window, but
