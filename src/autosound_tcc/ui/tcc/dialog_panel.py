@@ -139,8 +139,7 @@ class DialogPanel(QWidget):
         self._bus: Optional[signal_bus.SignalBus] = None
         self._live_bubble: Optional[MessageBubble] = None
         self._live_text = ""
-        # The run of identical tool calls currently being collapsed -- see `_add_chip`.
-        self._chip_bubble: Optional[MessageBubble] = None
+        # The run of identical tool calls currently on the activity line -- see `_add_chip`.
         self._chip_tool = ""
         self._chip_count = 0
         # Whatever is actually answering. The mock transcript's Claude label was still on live
@@ -263,6 +262,14 @@ class DialogPanel(QWidget):
             self._add_bubble(message.who, message.role, i18n.tx(message.text))
         self._scroll.setWidget(self._chat)
         outer.addWidget(self._scroll, stretch=1)
+
+        # Tool calls live here, not in the transcript. Their whole value is "the thing is still
+        # working" -- one line of that is worth as much as eight rows of it, and eight rows was
+        # most of a screen. The process record is `process/journal.jsonl`; this is a pulse.
+        self._activity = QLabel("")
+        self._activity.setProperty("class", "phead-sub")
+        self._activity.setHidden(True)
+        outer.addWidget(self._activity)
 
         composer = QWidget()
         composer.setProperty("class", "composer")
@@ -517,7 +524,6 @@ class DialogPanel(QWidget):
     def _append_live_text(self, text: str) -> None:
         if not text:
             return
-        self._chip_bubble = None
         self._live_text += text
         if self._live_bubble is None:
             self._add_bubble("gen", f"Generator · {self._model_label}", _markdown(self._live_text))
@@ -541,7 +547,6 @@ class DialogPanel(QWidget):
             for option in question.options
         ]
         self._add_bubble("sys", question.header or "QUESTION", "<br>".join(lines))
-        self._chip_bubble = None
         self._live_bubble = None
         self._live_text = ""
         self._scroll_to_end()
@@ -560,21 +565,19 @@ class DialogPanel(QWidget):
         is, and "TOOL" on eight consecutive rows is the same word eight times.
         """
         pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
-        if self._chip_bubble is not None and self._chip_tool == pretty:
-            self._chip_count += 1
-            self._chip_bubble.set_html(f"· {pretty} ×{self._chip_count}")
-            self._fit(self._chip_bubble)
-            self._scroll_to_end()
-            return
-        self._add_bubble("sys", "", f"· {pretty}")
-        self._chip_bubble = self._bubbles[-1]
+        self._chip_count = self._chip_count + 1 if self._chip_tool == pretty else 1
         self._chip_tool = pretty
-        self._chip_count = 1
+        suffix = f" ×{self._chip_count}" if self._chip_count > 1 else ""
+        self._activity.setText(f"· {pretty}{suffix}")
+        self._activity.setHidden(False)
         self._live_bubble = None  # text after a tool call starts a new bubble
         self._live_text = ""
-        self._scroll_to_end()
 
     def _on_turn_done(self) -> None:
+        self._activity.setHidden(True)
+        self._activity.setText("")
+        self._chip_tool = ""
+        self._chip_count = 0
         self._live_bubble = None
         self._live_text = ""
         self._set_busy(False)

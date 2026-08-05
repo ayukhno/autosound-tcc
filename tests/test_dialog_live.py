@@ -87,14 +87,17 @@ def test_streamed_deltas_grow_a_single_bubble(tmp_path):
     assert panel._live_text == "Phase 2, step 2.3."
 
 
-def test_a_tool_call_renders_as_a_process_chip_not_raw_json(tmp_path):
+def test_a_tool_call_is_a_pulse_not_a_transcript_entry(tmp_path):
+    """Their whole value is "the thing is still working". Eight of them was most of a screen, and
+    the process record is `process/journal.jsonl`, not this."""
     panel, worker, _ = _attached(tmp_path)
 
     worker.chunk.emit(ToolCall(name="mcp__tcc__get_tcc_state"))
 
-    assert len(panel._bubbles) == 1
-    assert "get_tcc_state" in panel._bubbles[0]._body.text()
-    assert "mcp__tcc__" not in panel._bubbles[0]._body.text()
+    assert panel._bubbles == []
+    assert not panel._activity.isHidden()
+    assert "get_tcc_state" in panel._activity.text()
+    assert "mcp__tcc__" not in panel._activity.text()
 
 
 def test_text_after_a_tool_call_starts_a_new_bubble(tmp_path):
@@ -104,7 +107,7 @@ def test_text_after_a_tool_call_starts_a_new_bubble(tmp_path):
     worker.chunk.emit(ToolCall(name="get_ledger"))
     worker.chunk.emit(TextDelta("Done."))
 
-    assert len(panel._bubbles) == 3
+    assert len(panel._bubbles) == 2
     assert panel._live_text == "Done."
 
 
@@ -434,34 +437,29 @@ def test_markup_in_the_models_text_cannot_become_markup(tmp_path):
     assert "&lt;script&gt;" in panel._bubbles[-1]._body.text()
 
 
-def test_a_run_of_the_same_tool_collapses_into_one_row(tmp_path):
-    """A model working out where it is calls `glob` six times, and six identical full-width rows
-    is most of a screen spent saying one thing."""
+def test_a_run_of_the_same_tool_is_counted_rather_than_repeated(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
     for _ in range(6):
         worker.chunk.emit(ToolCall(name="glob"))
 
-    assert len(panel._bubbles) == 1
-    assert "×6" in panel._bubbles[0]._body.text()
+    assert panel._activity.text() == "· glob ×6"
 
 
-def test_a_different_tool_starts_its_own_row(tmp_path):
+def test_a_different_tool_replaces_the_line(tmp_path):
     panel, worker, _ = _attached(tmp_path)
 
     worker.chunk.emit(ToolCall(name="glob"))
     worker.chunk.emit(ToolCall(name="read"))
-    worker.chunk.emit(ToolCall(name="glob"))
 
-    assert len(panel._bubbles) == 3
+    assert panel._activity.text() == "· read"
 
 
-def test_text_between_two_runs_breaks_the_collapse(tmp_path):
-    """Otherwise a `glob` before the answer and a `glob` after it would count as one run."""
+def test_the_line_clears_when_the_turn_ends(tmp_path):
+    """A stale tool name under the composer would say "working" about a finished turn."""
     panel, worker, _ = _attached(tmp_path)
-
-    worker.chunk.emit(ToolCall(name="glob"))
-    worker.chunk.emit(TextDelta("Looking."))
     worker.chunk.emit(ToolCall(name="glob"))
 
-    assert len(panel._bubbles) == 3
+    worker.turn_done.emit()
+
+    assert panel._activity.isHidden()
