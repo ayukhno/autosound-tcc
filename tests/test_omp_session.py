@@ -146,12 +146,14 @@ def test_a_question_frame_is_not_a_permission(tmp_path):
     assert OmpSession._is_permission(QUESTION_FRAME) is False
 
 
-def test_an_unrecognisable_select_is_treated_as_a_permission(tmp_path):
-    """A select with no options is nothing the Arbiter could answer as a question, so it goes to
-    the gate they already recognise rather than parking the turn on an unanswerable card."""
+def test_a_free_text_question_is_not_a_permission(tmp_path):
+    """omp raises questions with no options at all. Treating those as permissions put the question
+    in front of the Arbiter as "Allow <question text>?", sent omp "Approve" as the answer, and
+    wedged the turn — seen in a live session, transcript and all."""
     assert OmpSession._is_permission(
-        {"type": "extension_ui_request", "id": "x", "method": "select", "title": "?", "options": []}
-    ) is True
+        {"type": "extension_ui_request", "id": "x", "method": "select",
+         "title": "What is your car make/model?", "options": []}
+    ) is False
 
 
 def test_a_confirm_frame_is_always_a_permission(tmp_path):
@@ -289,3 +291,18 @@ def test_resuming_continues_the_projects_own_session(tmp_path):
 
     assert "--continue" in argv
     assert str(tmp_path) in argv[argv.index("--session-dir") + 1]
+
+
+def test_a_free_text_question_reaches_the_dialog(tmp_path):
+    """No options means the composer is the answer, which it already knows how to be."""
+    session = _session(tmp_path)
+
+    events = session._handle(
+        {"type": "extension_ui_request", "id": "q9", "method": "select",
+         "title": "What is your car make/model?", "options": []}
+    )
+
+    assert len(events) == 1
+    assert isinstance(events[0], Question)
+    assert events[0].options == ()
+    assert session.sent == []  # nothing answered on the agent's behalf

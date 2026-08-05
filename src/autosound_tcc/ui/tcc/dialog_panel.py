@@ -623,10 +623,15 @@ class DialogPanel(QWidget):
         Free text stays available: the composer answers the pending question instead of sending a
         new message, which is the "Other (type your own)" both harnesses offer.
         """
+        # The buttons below carry the labels, so listing them here too is the same words twice --
+        # which is what omp's questions look like, since its frame has no descriptions. When an
+        # option does explain itself (the SDK side, and omp's own `ask` when the model writes one),
+        # that explanation is worth its line and the buttons cannot hold it.
         lines = [question.question]
         lines += [
-            f"· <b>{option.label}</b>" + (f" — {option.description}" if option.description else "")
+            f"· <b>{option.label}</b> — {option.description}"
             for option in question.options
+            if option.description
         ]
         self._add_bubble("sys", question.header or i18n.t("questionRole"), "<br>".join(lines))
 

@@ -177,23 +177,25 @@ class OmpSession:
         shape: omp's own prompt is titled "Allow tool: <name>" and offers Approve/Deny, while a
         question carries the model's wording and its own options.
 
-        Ambiguity resolves to *permission*, and the reason is narrower than "be safe". Neither
-        mistake lets a tool through: a permission rendered as a question is simply never answered,
-        so the tool stays blocked. What that costs is a turn parked forever on a card nobody can
-        act on -- the hang this whole channel exists to prevent -- and a decision that never
-        reached the audited `ConfirmRequest` path. Treating the unknown as a permission puts it in
-        front of the Arbiter through the gate they already recognise; the cost is a confirmation
-        they did not expect, which they can read and refuse.
+        Recognised **positively**, and only positively. An earlier version treated an
+        option-less select as a permission on the theory that ambiguity should resolve toward the
+        gate. Observed failing: omp raises free-text questions with no options, so the model asked
+        "what is your car make/model?", TCC showed "Allow ...?" with the question as the tool name,
+        the Arbiter allowed it, and omp received "Approve" as the answer to a question. The
+        transcript recorded `Arbiter allowed What is your car make/model...` and the turn wedged.
+
+        A permission from omp always says so -- Approve/Deny among its options, or the title omp
+        writes for its own prompt. Anything else is the agent talking to the human, and a question
+        with no options is answered by typing, which the composer already does.
         """
-        if frame.get("method") == "confirm":
-            return True
         title = str(frame.get("title") or "")
         options = {str(option) for option in (frame.get("options") or [])}
         if _PERMISSION_OPTIONS & options:
             return True
-        # A question is recognised by carrying its own options; anything that offers no choice at
-        # all is not a question the Arbiter could answer.
-        return title.startswith(_PERMISSION_TITLE_PREFIX) or not options
+        if title.startswith(_PERMISSION_TITLE_PREFIX):
+            return True
+        # `confirm` is a yes/no frame, which is the shape of a permission and not of a question.
+        return frame.get("method") == "confirm"
 
     @staticmethod
     def _question_from(frame: dict[str, Any]) -> Question:

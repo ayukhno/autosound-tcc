@@ -131,8 +131,9 @@ def test_a_question_is_rendered_rather_than_swallowed(tmp_path):
 
     body = panel._bubbles[0]._body.text()
     assert "Reference seat for this tune?" in body
-    assert "Driver" in body and "Both front" in body
+    # The label that explains itself keeps its line; the bare one is left to its button.
     assert "one point, sharpest image" in body
+    assert "Both front" not in body
 
 
 def test_text_after_a_question_starts_a_new_bubble(tmp_path):
@@ -608,3 +609,52 @@ def test_enter_sends(tmp_path):
     )
 
     assert worker.sent == ["go"]
+
+
+def test_options_without_a_description_are_not_printed_twice(tmp_path):
+    """omp's question frame carries labels only, so listing them above buttons that say the same
+    words is the same words twice."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(
+        Question(id="q", question="Which language?",
+                 options=(QuestionOption("English (EN)"), QuestionOption("Українська (UK)")))
+    )
+
+    body = panel._bubbles[-1]._body.text()
+    assert "Which language?" in body
+    assert "English (EN)" not in body  # the button says it
+    labels = [b.text() for b in panel._question_widgets.findChildren(QPushButton)]
+    assert labels == ["English (EN)", "Українська (UK)"]
+
+
+def test_an_option_that_explains_itself_keeps_its_line(tmp_path):
+    """A description is worth its line and a button cannot hold it."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(
+        Question(id="q", question="Reference seat?",
+                 options=(QuestionOption("Driver", "one point, sharpest image"),
+                          QuestionOption("Both front")))
+    )
+
+    body = panel._bubbles[-1]._body.text()
+    assert "one point, sharpest image" in body
+    assert "Both front" not in body  # no description: the button is enough
+
+
+def test_a_question_with_no_options_is_answered_by_typing(tmp_path):
+    """omp asks free-text questions; the composer is the answer, and it must not queue a message
+    the blocked harness will never read."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q9", question="Which car?"))
+
+    assert panel._question_widgets.findChildren(QPushButton) == []
+
+    panel._input.setText("VW Passat B8 LHD")
+    panel._on_send()
+
+    assert worker.answers == [("q9", "VW Passat B8 LHD")]
+    assert worker.sent == []
