@@ -620,6 +620,10 @@ class OmpSession:
         omp adds an "Other (type your own)" option to every question and accepts the typed value."""
         self._send({"type": "extension_ui_response", "id": question_id, "value": value})
 
+    async def cancel_question(self, question_id: str) -> None:
+        """Withdraw a question. omp is blocked inside `ask`; `abort` does not reach it."""
+        self._send({"type": "extension_ui_response", "id": question_id, "cancelled": True})
+
     async def interrupt(self) -> None:
         """`abort` is the command omp actually has; `interrupt`, `cancel` and `stop` are not
         commands it knows -- established by asking it."""

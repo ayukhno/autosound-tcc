@@ -279,6 +279,9 @@ class TuningSession:
     async def answer(self, question_id: str, value: str) -> None:
         """No-op: the Agent SDK has no question channel, so this session never raises one."""
 
+    async def cancel_question(self, question_id: str) -> None:
+        """No-op, for the same reason as `answer`."""
+
     async def interrupt(self) -> None:
         if self._client is not None:
             await self._client.interrupt()

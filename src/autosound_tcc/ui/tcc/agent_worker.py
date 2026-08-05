@@ -130,6 +130,16 @@ class AgentWorker(QThread):
         except RuntimeError:
             pass  # loop already closing: the turn is ending anyway
 
+    def cancel_question(self, question_id: str) -> None:
+        """Withdraw a question the Arbiter will not answer. Thread-safe, same route as `answer`."""
+        session, loop = self._session, self._loop
+        if session is None or loop is None or not hasattr(session, "cancel_question"):
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(session.cancel_question(question_id), loop)
+        except RuntimeError:
+            pass
+
     def run(self) -> None:  # noqa: D102 - QThread override
         try:
             asyncio.run(self._main())

@@ -658,3 +658,40 @@ def test_a_question_with_no_options_is_answered_by_typing(tmp_path):
 
     assert worker.answers == [("q9", "VW Passat B8 LHD")]
     assert worker.sent == []
+
+
+def test_the_field_stays_usable_while_a_question_is_parked(tmp_path):
+    """The turn is "busy" and typing is exactly what moves it — the harness is blocked inside
+    `ask` waiting for the host. Disabling the field blocked the only way forward and read as a
+    hang, which is how it was reported."""
+    panel, worker, _ = _attached(tmp_path)
+    panel._set_busy(True)
+    assert not panel._input.isEnabled()
+
+    worker.chunk.emit(Question(id="q", question="Which car?"))
+
+    assert panel._input.isEnabled()
+
+
+def test_stop_withdraws_the_question_because_abort_does_not_reach_it(tmp_path):
+    """omp is blocked inside `ask`, so Stop did nothing at all — reported that way."""
+    panel = DialogPanel()
+    worker = _AnsweringWorker()
+    worker.cancelled = []
+    worker.cancel_question = worker.cancelled.append
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.chunk.emit(Question(id="q7", question="Which car?"))
+
+    panel._on_stop()
+
+    assert worker.cancelled == ["q7"]
+    assert panel._pending_question is None
+    assert panel._question_widgets is None
+
+
+def test_stop_without_a_question_still_interrupts(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+
+    panel._on_stop()
+
+    assert worker.interrupted

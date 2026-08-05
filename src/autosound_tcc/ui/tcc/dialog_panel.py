@@ -554,7 +554,10 @@ class DialogPanel(QWidget):
                         widget.deleteLater()
 
     def _set_busy(self, busy: bool) -> None:
-        self._input.setEnabled(not busy)
+        # A parked question is the one case where the turn is "busy" and typing is exactly what
+        # moves it: the harness is blocked inside `ask` waiting for the host. Disabling the field
+        # there blocks the only way forward and reads as a hang -- which is how it was reported.
+        self._input.setEnabled(not busy or self._pending_question is not None)
         self._send_btn.setHidden(busy)
         self._stop_btn.setHidden(not busy)
         self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
@@ -585,7 +588,23 @@ class DialogPanel(QWidget):
         self._worker.send(text)
 
     def _on_stop(self) -> None:
-        """Interrupt the running turn. The worker owns the session, so ask it, don't reach in."""
+        """Interrupt the running turn. The worker owns the session, so ask it, don't reach in.
+
+        A parked question is interrupted by withdrawing the question: the harness is blocked
+        inside `ask` and `abort` does not reach it, so Stop did nothing at all -- reported that
+        way. Answering "cancelled" is what unblocks it.
+        """
+        if self._pending_question is not None:
+            question_id, self._pending_question = self._pending_question, None
+            if self._question_widgets is not None:
+                self._question_widgets.setParent(None)
+                self._question_widgets.deleteLater()
+                self._question_widgets = None
+            self._input.setPlaceholderText(i18n.t("composer"))
+            self._add_system_message(i18n.t("questionCancelled"))
+            if self._worker is not None and hasattr(self._worker, "cancel_question"):
+                self._worker.cancel_question(question_id)
+            return
         if self._worker is not None and hasattr(self._worker, "interrupt"):
             self._worker.interrupt()
 
@@ -657,6 +676,8 @@ class DialogPanel(QWidget):
             self._question_widgets.deleteLater()
         self._pending_question = question.id
         self._question_widgets = holder
+        self._input.setEnabled(True)
+        self._input.setFocus()
         self._input.setPlaceholderText(i18n.t("composerAnswer"))
         self._live_bubble = None
         self._live_text = ""
