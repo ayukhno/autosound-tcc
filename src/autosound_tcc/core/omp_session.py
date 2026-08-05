@@ -333,6 +333,7 @@ class OmpSession:
         # for eight minutes (measured, on a pattern with no path).
         self._running_tool = ""
         self._retrying = False
+        self._retry_reason = ""
         self._ready = asyncio.Event()
         self._saw_ready = False
         self._ended = asyncio.Event()
@@ -648,13 +649,18 @@ class OmpSession:
             # difference between "this is broken" and "this is being retried".
             attempt = frame.get("attempt")
             self._retrying = True
+            self._retry_reason = str(frame.get("errorMessage") or "").strip()
             if attempt != 1:
                 return []  # one line per storm, not one per attempt
-            reason = str(frame.get("errorMessage") or "").strip()
             budget = frame.get("maxAttempts")
+            # omp's own words, not an interpretation of them. An earlier version opened with "the
+            # model's answer came back broken", which is true of `MALFORMED_FUNCTION_CALL` and a
+            # lie about the error that actually turned up in use -- a 429 saying the account's
+            # prepaid credits were gone. Retrying that ten times is hopeless, and telling the
+            # Arbiter their model is broken sends them to fix the wrong thing.
             return [Notice(
-                f"The model's answer came back broken; omp is retrying (up to {budget}). {reason}"
-                if reason else f"omp is retrying the model (up to {budget})."
+                f"omp is retrying the model (up to {budget}): {self._retry_reason}"
+                if self._retry_reason else f"omp is retrying the model (up to {budget})."
             )]
 
         if kind == _RETRY_END:
@@ -664,7 +670,10 @@ class OmpSession:
             attempt = frame.get("attempt")
             if frame.get("success"):
                 return [Notice(f"omp got an answer on attempt {attempt}.")]
-            return [Notice(f"omp gave up retrying after attempt {attempt}.")]
+            # The line people screenshot, so it carries the reason again: by now the first Notice
+            # has scrolled, and "gave up" on its own says nothing about what to do next.
+            gave_up = f"omp gave up after {attempt} attempts — this turn produced nothing."
+            return [Notice(f"{gave_up} {self._retry_reason}".strip())]
 
         if kind == _EXCHANGE_END:
             return [TurnEnd()]
@@ -897,6 +906,7 @@ class OmpSession:
     async def _prompt(self, text: str) -> AsyncIterator[AgentEvent]:
         self._round_ended_at = 0.0  # a round that ended before this prompt did not end this one
         self._retrying = False  # a storm belongs to the turn it happened in
+        self._retry_reason = ""
         self._send({"id": self._next_id(), "type": "prompt", "message": text})
         self._last_frame_at = time.time()
         warned = False

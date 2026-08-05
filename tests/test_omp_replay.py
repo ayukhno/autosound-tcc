@@ -477,6 +477,35 @@ def test_a_retry_storm_is_explained_once(tmp_path):
     assert rest == [[]] * 6
 
 
+def test_the_retry_line_does_not_diagnose_on_omps_behalf(tmp_path):
+    """It opened with "the model's answer came back broken", which is true of a malformed call and
+    a lie about the error that actually turned up: a 429 saying the account's prepaid credits were
+    gone. Ten retries of that are hopeless, and blaming the model sends the Arbiter to fix the
+    wrong thing."""
+    replay = Replay(tmp_path)
+
+    events = replay.session._handle(
+        {"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10,
+         "errorMessage": "Google API error (429): Your prepayment credits are depleted."}
+    )
+
+    assert "prepayment credits are depleted" in events[0].text
+    assert "broken" not in events[0].text
+
+
+def test_giving_up_says_what_it_gave_up_on(tmp_path):
+    """The line people screenshot. By then the first Notice has scrolled, and "gave up" alone says
+    nothing about what to do next."""
+    replay = Replay(tmp_path)
+    replay.session._handle({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10,
+                            "errorMessage": "Google API error (429): credits depleted."})
+
+    events = replay.session._handle({"type": "auto_retry_end", "success": False, "attempt": 10})
+
+    assert "credits depleted" in events[0].text
+    assert "produced nothing" in events[0].text
+
+
 def test_a_recovered_retry_says_so(tmp_path):
     replay = Replay(tmp_path)
     replay.session._handle({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10})
