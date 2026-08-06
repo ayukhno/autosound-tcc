@@ -217,3 +217,48 @@ def test_plan_panel_session_requested_reaches_measurement_panel():
     assert meas._viewing_id == "v10"
     plan.sessionRequested.emit("v9")
     assert meas._viewing_id == "v9"
+
+
+def test_a_run_of_baseline_steps_collapses_to_one_row():
+    """A phase-0 baseline is one step per driver — nine rows of "Baseline solo: …" bury the phase's
+    shape in the one panel whose job is to show it. The per-channel detail is in the capture task."""
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    steps = tuple(
+        PlanStep(id=f"m0-{ch}", name={"en": f"Baseline solo: {ch}_1 (sw) + {ch}_1 (rta)"},
+                 tag_class="ok" if i < 2 else "")
+        for i, ch in enumerate(("tw-L", "tw-R", "m-L"))
+    )
+
+    rows = _collapse_runs(steps)
+
+    assert len(rows) == 1
+    assert "2/3" in rows[0].name["en"]
+    assert rows[0].name["en"].startswith("Baseline solo")
+
+
+def test_a_lone_step_is_left_exactly_as_it_was():
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    step = PlanStep(id="lang", name={"en": "Language & reviewer channel confirmed"})
+
+    assert _collapse_runs((step,)) == [step]
+
+
+def test_different_prefixes_do_not_merge():
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    steps = (
+        PlanStep(id="a", name={"en": "Baseline solo: tw-L_1 (sw)"}),
+        PlanStep(id="b", name={"en": "Baseline solo: tw-R_1 (sw)"}),
+        PlanStep(id="c", name={"en": "Crossover set: tw-L"}),
+    )
+
+    rows = _collapse_runs(steps)
+
+    assert len(rows) == 2
+    assert "0/2" in rows[0].name["en"]  # neither is done; the count is honest either way
+    assert rows[1].name["en"] == "Crossover set: tw-L"

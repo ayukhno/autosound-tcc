@@ -564,6 +564,17 @@ class DialogPanel(QWidget):
         that quietly goes nowhere, not about preventing a send that couldn't happen anyway."""
         self._composer.setVisible(visible)
 
+    def clear_mock(self) -> None:
+        """Drop the demo transcript. Safe to call whenever; a no-op once a session is attached.
+
+        The mock exists for the design surface, and it is invented tuning advice -- "PK 1120 -2.5
+        Q2.2", a Critic verdict, an Arbiter reply. Sitting in a window that has a real project open
+        it is indistinguishable from history, and acting on a number nobody measured is the one
+        failure this whole application is built to prevent. So it survives exactly as long as there
+        is nothing real to be confused with.
+        """
+        self.clear_for_no_project()
+
     def clear_for_no_project(self) -> None:
         """Drop the mock transcript when MainWindow finds no real project on disk -- a folder
         with nothing real in it should never look like a live tuning conversation is underway.

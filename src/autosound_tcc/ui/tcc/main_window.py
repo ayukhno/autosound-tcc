@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QToolButton,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStyle,
@@ -897,9 +898,22 @@ class MainWindow(QMainWindow):
         (SKILL-CHANGE-REQUESTS SCR-015). System params leads (user request 2026-07-28) since it's
         the one project-setup fact block most relevant before diving into DSP tuning."""
         panel = _panel()
-        layout = QVBoxLayout(panel)
+        outer = QVBoxLayout(panel)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        # One scroll for the whole column. Each section scrolls its own body, so with two or three
+        # of them open the bottom ones were unreachable -- the DSP tree had a scrollbar and the
+        # sections above it simply ran off the panel (user, 2026-08-06).
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        left_scroll.setWidget(inner)
+        outer.addWidget(left_scroll)
 
         # Project first: it is the car in front of you. System params is the rig and the app's
         # own settings, which you set once and then stop looking at (user, 2026-08-06 -- this
@@ -970,6 +984,10 @@ class MainWindow(QMainWindow):
         """Load the DSP capability profile + the current preset's ledger, and hand the result to
         the tree. Degrades to a status message rather than crashing — no profile / no ledger /
         a broken file are all things a half-set-up project can legitimately be in."""
+        # The demo transcript goes the moment there is a real project to confuse it with. It was
+        # only dropped on the "no project" branch, so opening a real one and not starting a session
+        # left invented EQ values ("PK 1120 -2.5 Q2.2") on screen under a real project's name.
+        self._dialog.clear_mock()
         profile_path = config.dsp_profile_path()
         if not profile_path.is_file():
             self._show_left_status(i18n.t("leftNoProfile"), offer_create=True)

@@ -954,3 +954,26 @@ def test_the_next_tool_starts_the_line_moving_again(tmp_path):
 
     assert panel._activity_timer.isActive()
     assert "⟳" in panel._activity.text()
+
+
+def test_the_demo_transcript_goes_when_a_real_project_opens(tmp_path):
+    """It is invented tuning advice — "PK 1120 -2.5 Q2.2", a Critic verdict, an Arbiter reply. In a
+    window with a real project open it is indistinguishable from history, and acting on a number
+    nobody measured is the failure this whole application exists to prevent."""
+    panel = DialogPanel()
+    assert panel._bubbles  # the mock is there before anything real is
+
+    panel.clear_mock()
+
+    assert panel._bubbles == []
+
+
+def test_clearing_the_mock_never_touches_a_live_transcript(tmp_path):
+    """A running session re-reads the project constantly; wiping its bubbles there would destroy
+    real history and leave `_live_bubble` pointing at a freed object."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("Phase 0 baseline"))
+
+    panel.clear_mock()
+
+    assert panel._bubbles  # still there

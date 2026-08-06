@@ -14,6 +14,8 @@ completion UI is dogfoodable now even though the base structure itself is still 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import replace
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -85,6 +87,50 @@ class _StatusDot(QLabel):
         self.setProperty("class", f"st st-{status}")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedSize(15, 15)
+
+
+# A phase-0 baseline is one step per driver -- "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)" nine
+# times over. Each is a real step in the skill's plan and each is checked off separately, but as
+# nine rows they bury the phase's shape in the one panel whose job is to show it. The detail is
+# already in the capture task, channel by channel, which is where it belongs.
+_RUN_PREFIX = re.compile(r"^([^:]{4,}?):\s")
+
+
+def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
+    """Fold consecutive steps sharing a "Prefix: " into one row that counts them.
+
+    Only consecutive ones, and only on the prefix the skill itself wrote, so nothing is grouped
+    that the plan did not already write as a series. A run of one is left exactly as it was.
+    """
+    out: list[PlanStep] = []
+    run: list[PlanStep] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        if len(run) == 1:
+            out.append(run[0])
+        else:
+            done = sum(1 for s in run if s.tag_class == "ok")
+            prefix = _RUN_PREFIX.match(i18n.tx(run[0].name)).group(1)
+            out.append(replace(
+                run[0],
+                id=f"{run[0].id}+{len(run)}",
+                name={"en": f"{prefix} · {done}/{len(run)}", "uk": f"{prefix} · {done}/{len(run)}"},
+                tag_class="ok" if done == len(run) else run[0].tag_class,
+                skip=all(s.skip for s in run),
+            ))
+        run.clear()
+
+    for step in steps:
+        found = _RUN_PREFIX.match(i18n.tx(step.name))
+        if run and found and _RUN_PREFIX.match(i18n.tx(run[0].name)).group(1) == found.group(1):
+            run.append(step)
+            continue
+        flush()
+        run.append(step) if found else out.append(step)
+    flush()
+    return out
 
 
 class _PhaseStepRow(QWidget):
@@ -197,7 +243,7 @@ class _PhaseRow(QWidget):
         def _on_toggle(step_id: str, checked: bool) -> None:
             progress.set_done(step_id, checked)
 
-        for step in steps:
+        for step in _collapse_runs(steps):
             steps_layout.addWidget(_PhaseStepRow(step, progress, _on_toggle, on_session_click))
 
         # "+ add step" wrote into the same local overlay the checkbox did, so a step added here
