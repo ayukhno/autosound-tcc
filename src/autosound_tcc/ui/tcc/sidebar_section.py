@@ -11,6 +11,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.theme import apply_caps
 
 
@@ -49,13 +50,19 @@ class SidebarSection(QWidget):
         self._twist = QLabel()
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
-        self._title_label = QLabel(title)
+        # Both elide, for the same reason the rows below them do: a header is the widest thing in
+        # the panel as soon as its sub says something real -- `Audiotec-Fischer Helix DSP Ultra S`
+        # under "DSP" -- and a header that insists on its width makes the whole column scroll
+        # sideways, taking every row's right-hand end with it.
+        # The title asks for its natural width and keeps it whenever the panel allows -- two
+        # sections both reading "ПАРАМ…" is worse than no sub at all. The sub gives ground first.
+        self._title_label = ElidedLabel(title, min_width=70, policy=QSizePolicy.Policy.Maximum)
         self._title_label.setProperty("class", "sidebar-title")
         apply_caps(self._title_label, spacing_px=1.4)
         head_layout.addWidget(self._title_label)
-        self._sub_label = QLabel("")
+        self._sub_label = ElidedLabel("")
         self._sub_label.setProperty("class", "phead-sub")
-        head_layout.addWidget(self._sub_label)
+        head_layout.addWidget(self._sub_label, 1)
         head_layout.addStretch(1)
         self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]
         outer.addWidget(self._header, 0, Qt.AlignmentFlag.AlignTop)

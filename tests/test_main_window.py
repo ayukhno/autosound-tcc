@@ -1125,17 +1125,37 @@ def test_the_project_section_comes_before_the_system_one():
 def test_a_long_key_gives_up_its_own_text_rather_than_the_value():
     """`Amp (midbass (front) + center; 1 channel spare)` widened the panel, the panel widened the
     window, and a maximised window went past the screen edge."""
-    from autosound_tcc.ui.tcc.main_window import _ElidedLabel, _kv_row
+    from autosound_tcc.ui.tcc.labels import ElidedLabel
+    from autosound_tcc.ui.tcc.main_window import _kv_row
 
     _app()
     row = _kv_row("Amp (midbass (front) + center; 1 channel spare)", "Ground Zero GZA 125.4")
     row.resize(240, 30)
     row.show()
-    key = row.findChild(_ElidedLabel)
+    key = row.findChild(ElidedLabel)
     key.resize(90, 20)
 
     assert key.text().endswith("…")
     assert key.toolTip().startswith("Amp (midbass")
+
+
+def test_neither_side_of_a_row_can_widen_the_panel():
+    """The value used to refuse to shrink, so one model id made the whole left column scroll
+    sideways and put the channel ON/OFF switches past the visible edge."""
+    from autosound_tcc.ui.tcc.labels import ElidedLabel
+    from autosound_tcc.ui.tcc.main_window import _kv_row
+
+    _app()
+    row = _kv_row("AI generator", "google/deep-research-preview-04-2026")
+    row.resize(190, 30)
+    row.show()
+    row.layout().activate()
+
+    labels = row.findChildren(ElidedLabel)
+    assert row.minimumSizeHint().width() <= 190
+    value = labels[-1]
+    assert value.text().endswith("…")
+    assert value.toolTip() == "google/deep-research-preview-04-2026"  # nothing is lost
 
 
 def test_the_left_column_catches_up_when_the_skill_writes(tmp_path, monkeypatch):

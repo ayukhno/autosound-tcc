@@ -77,6 +77,7 @@ from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLigh
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -202,38 +203,6 @@ def _vline() -> QFrame:
     return line
 
 
-class _ElidedLabel(QLabel):
-    """A label that shortens itself instead of demanding room.
-
-    The side panels were widening on their own and pushing the right edge of a maximised window
-    off the screen, because one long row -- `Amp (midbass (front) + center; 1 channel spare)` --
-    asked for the width it wanted and Qt gave it. A key is the part that can be guessed from
-    context; the value on the right is the fact, so the key is what gets cut.
-    """
-
-    def __init__(self, text: str = "") -> None:
-        super().__init__(text)
-        self._full = text
-        self.setMinimumWidth(24)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-
-    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
-        self._full = text
-        super().setText(text)
-        self._elide()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        super().resizeEvent(event)
-        self._elide()
-
-    def _elide(self) -> None:
-        metrics = self.fontMetrics()
-        shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, max(self.width(), 24))
-        if shown != super().text():
-            super().setText(shown)
-        self.setToolTip(self._full if shown != self._full else "")
-
-
 def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
     (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
@@ -244,15 +213,19 @@ def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     layout = QHBoxLayout(row)
     layout.setContentsMargins(12, 5, 12, 5)
     layout.setSpacing(6)
-    k = _ElidedLabel(key)
+    # Both sides give ground, in proportion, and neither can widen the panel. The value used to
+    # refuse to shrink at all, on the grounds that it is the fact the row exists to show -- and one
+    # model id (`google/deep-research-preview-04-2026`, 314 px against a 198 px viewport) then made
+    # the whole left column scroll sideways, putting every row's right-hand end past the edge, the
+    # channel ON/OFF switches included. Letting the key take the whole cut is no better: "По…" and
+    # "D…" name nothing. Whatever is cut on either side is in the tooltip.
+    k = ElidedLabel(key, min_width=40)
     k.setProperty("class", "pk")
-    layout.addWidget(k, stretch=1)
-    v = QLabel(value)
+    layout.addWidget(k, stretch=5)
+    v = ElidedLabel(value, min_width=40)
     v.setProperty("class", "pv")
-    # The value never shrinks: it is the fact the row exists to show, and losing its right-hand
-    # end is what the narrow panel used to do.
-    v.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-    layout.addWidget(v, stretch=0)
+    v.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    layout.addWidget(v, stretch=6)
     if trailing is not None:
         layout.addWidget(trailing)
     return row
@@ -792,7 +765,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(12, 3, 12, 3)
         layout.setSpacing(6)
-        name = _ElidedLabel(f"{row.slot} · {row.name}" if row.slot else row.name)
+        name = ElidedLabel(f"{row.slot} · {row.name}" if row.slot else row.name)
         name.setProperty("class", "pk" if on else "pv-dim")
         layout.addWidget(name, stretch=1)
         button = QPushButton(i18n.t("chanOn") if on else i18n.t("chanOff"))

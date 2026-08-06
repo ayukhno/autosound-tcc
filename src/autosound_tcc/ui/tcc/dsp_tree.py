@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
 from autosound_tcc.ui.tcc import i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -251,9 +252,11 @@ class _ParamsOpenRow(QWidget):
         icon = QLabel("⊞")
         icon.setProperty("class", "prow-params-ic")
         layout.addWidget(icon)
-        label = QLabel(i18n.t("paramsRow"))
-        layout.addWidget(label)
-        layout.addStretch(1)
+        # Elided: "params · усі параметри таблицею" is wider than the tree's own viewport in UK,
+        # and a row that insists on its width makes the whole tree scroll sideways -- taking every
+        # channel's crossover line with it.
+        label = ElidedLabel(i18n.t("paramsRow"), min_width=60)
+        layout.addWidget(label, 1)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         event.accept()

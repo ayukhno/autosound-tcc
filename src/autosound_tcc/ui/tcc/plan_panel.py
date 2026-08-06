@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.mock_data import PLAN, PlanPhase, PlanStep, sessions_for_step
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
@@ -143,9 +144,20 @@ class _PhaseStepRow(QWidget):
         done = step.tag_class == "ok"
         if step.skip:
             self.setProperty("class", "step-skip")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 3, 6, 3)
+        # Two lines, not one: the name wraps, and the chips (attempt / evidence tag / measurement
+        # icon) sit under it rather than beside it. Beside it they took some 70 px of a ~190 px
+        # panel, leaving the name a column so narrow that one step wrapped into a dozen lines.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 3, 6, 3)
+        outer.setSpacing(2)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        outer.addLayout(layout)
+        chips = QHBoxLayout()
+        chips.setContentsMargins(0, 0, 0, 0)
+        chips.setSpacing(6)
+        chips.addStretch(1)
 
         check = QCheckBox()
         check.setChecked(done)
@@ -157,6 +169,11 @@ class _PhaseStepRow(QWidget):
         layout.addWidget(check)
 
         name = QLabel(i18n.tx(step.name))
+        # Wrapped, not elided: a step name is a sentence the skill wrote ("Bonus baseline solo:
+        # c_1 (sw) + c_1 (rta) (captured early, out of order)") and the panel has vertical room
+        # but only about 190 px of width. Unwrapped, the longest step decided the panel's width,
+        # so the whole column scrolled sideways and every other row lost its right-hand end.
+        name.setWordWrap(True)
         if done:
             name.setProperty("class", "substep-name-done")
             font = QFont(name.font())
@@ -166,19 +183,21 @@ class _PhaseStepRow(QWidget):
             name.setProperty("class", "substep-name-project")
         else:
             name.setProperty("class", "substep-name")
-        layout.addWidget(name)
-        layout.addStretch(1)
+        layout.addWidget(name, 1)
 
+        has_chip = False
         if step.attempt > 1:
             attempt = QLabel(f"{i18n.t('attempt')} {step.attempt}")
             attempt.setProperty("class", "stag stag-attempt")
-            layout.addWidget(attempt)
+            chips.addWidget(attempt)
+            has_chip = True
 
         tag_text = i18n.tx(step.tag) if step.tag else ""
         if tag_text:
             tag = QLabel(tag_text)
             tag.setProperty("class", f"stag stag-{step.tag_class}" if step.tag_class else "stag")
-            layout.addWidget(tag)
+            chips.addWidget(tag)
+            has_chip = True
 
         # Measurement icon (user request 2026-07-28): shown when this step has capture series
         # linked to it (`mock_data.sessions_for_step`); hover lists them all, click opens the
@@ -193,7 +212,11 @@ class _PhaseStepRow(QWidget):
             meas_icon.mousePressEvent = (  # type: ignore[assignment]
                 lambda _e, sid=sessions[0].id: on_session_click(sid)
             )
-            layout.addWidget(meas_icon)
+            chips.addWidget(meas_icon)
+            has_chip = True
+
+        if has_chip:
+            outer.addLayout(chips)
 
 
 class _PhaseRow(QWidget):
@@ -225,10 +248,11 @@ class _PhaseRow(QWidget):
         self._caret.setFixedWidth(12)
         head_layout.addWidget(self._caret)
         head_layout.addWidget(_StatusDot(phase.status))
-        name = QLabel(i18n.tx(phase.name))
+        # Elided, unlike the steps below it: a phase header is one line with a count chip at its
+        # right, and wrapping it would push that chip around. The full title is in the tooltip.
+        name = ElidedLabel(i18n.tx(phase.name), min_width=60)
         name.setProperty("class", "pname-current" if phase.current else "pname")
-        head_layout.addWidget(name)
-        head_layout.addStretch(1)
+        head_layout.addWidget(name, 1)
         if has_steps:
             count = QLabel(str(len(steps)))
             count.setProperty("class", "pcnt")

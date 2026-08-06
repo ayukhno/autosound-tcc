@@ -101,6 +101,29 @@ def test_attempt_gt_one_renders_attempt_chip():
     assert "2" in labels[0].text()
 
 
+def test_a_long_step_name_wraps_instead_of_widening_the_column():
+    """One step -- "Bonus baseline solo: c_1 (sw) + c_1 (rta) (captured early, normally Phase 5)"
+    -- decided the panel's width, so the whole plan column scrolled sideways and every other row
+    lost its right-hand end. The chips went to their own line to give the name the room back."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    long_name = "Bonus baseline solo: c_1 (sw) + c_1 (rta) (captured early, normally Phase 5)"
+    step = PlanStep(
+        id="x.4", name={"en": long_name, "uk": long_name}, tag="no evidence", tag_class="warn"
+    )
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+    row.resize(190, 80)
+    row.show()
+    row.layout().activate()  # geometry is nothing until the layout has run
+
+    name = row.findChildren(QLabel)[0]
+    assert name.wordWrap()
+    assert row.minimumSizeHint().width() < 200  # a plan column is about 190 px wide
+    chips = [w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or "")]
+    assert chips and chips[0].y() > name.y()  # under the name, not beside it
+
+
 def test_project_source_step_gets_blue_class():
     _app()
     progress = _PlanProgress()
