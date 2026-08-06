@@ -26,9 +26,16 @@ def project(tmp_path, monkeypatch):
 
 @pytest.fixture
 def process(project):
-    """A real `Process` writing into the project, so the test exercises the actual file format."""
+    """A real `Process` writing into the project, so the test exercises the actual file format.
+
+    The target is recorded up front because the skill now refuses a forward move out of phase 0
+    without one (SCR-036) — these tests jump straight to a mid-tune phase, which a real session
+    only reaches through phase 0.
+    """
     module = vendor_loader.load_process()
-    return module.Process(str(process_view.process_dir(project)))
+    process = module.Process(str(process_view.process_dir(project)))
+    process.set_target("FULL", "EPY")
+    return process
 
 
 def test_no_process_state_reads_as_none_so_the_mock_stays(project):
@@ -217,11 +224,14 @@ def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):
     """`voicing` (written by the skill's own set_target) and free prose are real impacts a human
     should read — but guessing which channels a sentence meant is how a checklist starts lying."""
     process.enter_phase("2")
+    before = len(process_view.config_changes(project))
     _record_change(project, process, "voicing")
     _record_change(project, process, "check the sub once the amp is back")
 
     assert process_view.stale_channels(project) == {}
-    assert len(process_view.config_changes(project)) == 2  # still visible as events
+    # Counted as a delta: recording the target is itself a `voicing` change, so the fixture starts
+    # with one. Both of these are still visible as events, which is the point.
+    assert len(process_view.config_changes(project)) == before + 2
 
 
 def test_no_journal_reads_as_nothing_stale(project):

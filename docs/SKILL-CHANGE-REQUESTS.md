@@ -878,7 +878,7 @@ record can be resolved against the world.
 
 ## SCR-036 — the target curve is chosen in conversation and never written down
 
-**Status**: proposed (found running a full phase −1 through TCC, 2026-08-06)
+**Status**: done (landed as `d0f69a0` — `enter-phase` refuses a forward move out of phase 0 with no target, phase 0 prescribes `set-target`)
 **Target**: `phase_0_baseline.md` and the phase-0 gate; `rew_tool/state/process.py set-target`
 **TCC dependency**: the header's "target curve" field and `state/process_view` read the machine
 files. TCC renders nothing because there is nothing to render — this is not a panel bug.
@@ -913,7 +913,7 @@ Ask:
 
 ## SCR-037 — intake asks about things the front-end already knows
 
-**Status**: proposed (measured across three sessions in TCC, 2026-08-06)
+**Status**: done (landed as `2989e46` — intake reads `get_tcc_state` first and treats it as answered)
 **Target**: `references/core/project-intake.md` §1 and the phase −1 step list
 **TCC dependency**: none outstanding — `get_tcc_state` now reports the reviewer the Arbiter chose
 in TCC's own UI, with `decided_by` saying it is settled rather than suggested.
@@ -931,7 +931,7 @@ contradicts the disk. When no front-end is present the current questions stay ex
 
 ## SCR-038 — a knowledge file the skill ships takes three minutes to find
 
-**Status**: proposed (timed in a live session, 2026-08-06)
+**Status**: done (landed as `5781dcd` — `knowledge/` is in the Reference Map with its naming rule, intake §4 reads the shipped checklist first)
 **Target**: `SKILL.md` (the index) and `references/tooling/rew-tool-docs.md`
 **TCC dependency**: none. TCC installs the skill as a symlink into the project, which is what makes
 `find` behave the way it does below, and that install method is not changing.
