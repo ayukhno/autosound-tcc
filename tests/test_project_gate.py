@@ -91,3 +91,53 @@ def test_backing_out_of_the_gate_stops_the_launch(monkeypatch):
     monkeypatch.setattr(ProjectGateDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
 
     assert ensure_project_chosen() is False
+
+
+def test_a_terminal_launch_from_another_folder_asks_which_project(tmp_path, monkeypatch):
+    """`cd testTCC-5 && python -m autosound_tcc.app` opened testTCC-3 and said nothing, so the
+    window and the person disagreed about which car they were tuning."""
+    from pathlib import Path
+
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
+
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path / "remembered")
+    monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: tmp_path / "here")
+    asked: list = []
+    monkeypatch.setattr(project_gate_dialog, "ProjectGateDialog",
+                        lambda parent=None, suggested=None: asked.append(suggested) or _Refused())
+
+    project_gate_dialog.ensure_project_chosen()
+
+    assert asked == [tmp_path / "here"]  # pre-filled with the folder you are standing in
+
+
+def test_the_remembered_project_still_wins_when_you_are_standing_in_it(tmp_path, monkeypatch):
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
+
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: tmp_path)
+
+    assert project_gate_dialog.ensure_project_chosen() is True
+
+
+def test_a_bundle_with_no_terminal_never_gets_gated(tmp_path, monkeypatch):
+    """A double-clicked bundle has `cwd` of `/` or home and no tty; gating that would ask about a
+    folder nobody chose, on every launch."""
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
+
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: None)
+
+    assert project_gate_dialog.ensure_project_chosen() is True
+
+
+class _Refused:
+    folder = None
+
+    def exec(self):
+        from PySide6.QtWidgets import QDialog
+
+        return QDialog.DialogCode.Rejected

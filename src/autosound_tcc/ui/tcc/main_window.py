@@ -692,10 +692,73 @@ class MainWindow(QMainWindow):
         # file has not been written yet is how the panel came to say "no data" next to a profile
         # the session had just finalised.
         rows = project_view.load_system_params()
-        if not rows:
-            return
         for label, value in rows:
             self._system_section.body_layout().addWidget(_kv_row(label, value))
+        self._add_channel_switches()
+
+    def _add_channel_switches(self) -> None:
+        """Every channel the DSP has, in use or not, each with its ON/OFF.
+
+        Not in the DSP tree: that is the working surface and shows what is being worked on (user,
+        2026-08-06). Here the point *is* to see the whole rig at once — which slots are in play,
+        which are spare — so an unused channel is a row rather than an absence, and switching one
+        is one click away from where you noticed it.
+        """
+        view = getattr(self, "_view", None)
+        if view is None:
+            return
+        for group in view.groups:
+            rows = group.rows_ordered()
+            if not rows:
+                continue
+            head = QLabel(str(group.label).upper())
+            head.setProperty("class", "kv-lbl")
+            apply_caps(head, spacing_px=1.0)
+            head.setContentsMargins(12, 6, 12, 2)
+            self._system_section.body_layout().addWidget(head)
+            for row in rows:
+                self._system_section.body_layout().addWidget(
+                    self._channel_switch_row(group.id, row)
+                )
+
+    def _channel_switch_row(self, group_id: str, row) -> QWidget:
+        on = not (row.hidden or row.off)
+        widget = QWidget()
+        widget.setProperty("class", "paramrow")
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(12, 3, 12, 3)
+        layout.setSpacing(6)
+        name = _ElidedLabel(f"{row.slot} · {row.name}" if row.slot else row.name)
+        name.setProperty("class", "pk" if on else "pv-dim")
+        layout.addWidget(name, stretch=1)
+        button = QPushButton(i18n.t("chanOn") if on else i18n.t("chanOff"))
+        button.setProperty("class", f"chan-toggle chan-toggle-{'on' if on else 'off'}")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setToolTip(i18n.t("chanToggleTip"))
+        button.clicked.connect(
+            lambda _c=False, g=group_id, n=row.name, o=on: self._ask_channel_toggle(g, n, not o)
+        )
+        layout.addWidget(button)
+        return widget
+
+    def _ask_channel_toggle(self, group_id: str, channel: str, on: bool) -> None:
+        """Confirm before asking for it — in both directions.
+
+        Switching a channel off can cost its EQ, crossover and delay, and switching one on is a
+        structural change that reaches the glossary and the virtual tier. Neither is a toggle you
+        want to fire on a mis-click, and TCC cannot undo either: the ledger is the skill's.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("chanToggleConfirmTitle"))
+        box.setText(i18n.t("chanToggleConfirmOn" if on else "chanToggleConfirmOff").format(
+            channel=channel
+        ))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        self._on_channel_toggle(group_id, channel, on)
 
     def _app_config_rows(self) -> list[tuple[str, str]]:
         """What TCC itself is set to, next to what the rig is.

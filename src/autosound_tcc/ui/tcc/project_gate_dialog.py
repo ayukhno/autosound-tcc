@@ -17,6 +17,7 @@ decided what counts as a project would be inventing a rule the method does not h
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -49,7 +50,7 @@ def _label(text: str) -> QLabel:
 class ProjectGateDialog(QDialog):
     """Answers "which project": `folder` is set once accepted, or None if the user backed out."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, suggested: Optional[Path] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(i18n.t("gateTitle"))
         self.setMinimumWidth(560)
@@ -67,6 +68,8 @@ class ProjectGateDialog(QDialog):
         row = QHBoxLayout()
         self._folder_edit = QLineEdit()
         self._folder_edit.setPlaceholderText(i18n.t("gateFolderPlaceholder"))
+        if suggested is not None:
+            self._folder_edit.setText(str(suggested))
         self._folder_edit.textChanged.connect(self._sync_ok)
         row.addWidget(self._folder_edit, 1)
         browse = QPushButton(i18n.t("gateBrowse"))
@@ -146,7 +149,31 @@ def ensure_project_chosen(parent=None, force: bool = False) -> bool:
     nothing, because TCC does not read the working directory. `--project-dir .` is the answer to
     that, and this is the answer when the remembered one should simply be re-asked.
     """
-    if not force and config.chosen_project_dir() is not None:
+    remembered = config.chosen_project_dir()
+    here = _launched_from()
+    if not force and remembered is not None and here is not None and here != remembered:
+        # Started from a shell, standing in a folder that is not the remembered project. The
+        # remembered one used to win silently, which is right for a double-clicked bundle and
+        # wrong here: `cd testTCC-5 && python -m autosound_tcc.app` opened testTCC-3 and said
+        # nothing, so the window and the person disagreed about which car they were tuning.
+        # Asking, with the folder you are standing in already filled in, costs one Enter.
+        force = True
+    if not force and remembered is not None:
         return True
-    dialog = ProjectGateDialog(parent)
+    dialog = ProjectGateDialog(parent, suggested=here if here != remembered else remembered)
     return dialog.exec() == QDialog.DialogCode.Accepted and dialog.folder is not None
+
+
+def _launched_from() -> Optional[Path]:
+    """The working directory, but only when a human typed the command.
+
+    A bundle opened from the Finder has `cwd` of `/` or the home directory and no terminal, and
+    treating that as "the project I meant" would gate every launch on a folder nobody chose. A tty
+    is the difference between the two, and it is the only signal that does not guess.
+    """
+    if not sys.stdin.isatty():
+        return None
+    here = Path.cwd()
+    if here == Path.home() or here == Path(here.root):
+        return None
+    return here

@@ -145,21 +145,6 @@ class ChannelRow(QWidget):
             line1.addWidget(tag)
 
         line1.addStretch(1)
-        # ON/OFF, on every row, because "not shown" and "off" were indistinguishable and neither
-        # could be undone from here. Clicking asks; the model writes. `hidden` (no driver assigned
-        # at intake) and `off` (disabled at the DSP) both read as OFF -- from the Arbiter's side
-        # they are the same question, "is this channel in play?"
-        self._on = not (row.hidden or row.off)
-        self._toggle = QPushButton(i18n.t("chanOn") if self._on else i18n.t("chanOff"))
-        self._toggle.setProperty("class", f"chan-toggle chan-toggle-{'on' if self._on else 'off'}")
-        self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle.setToolTip(i18n.t("chanToggleTip"))
-        self._toggle.clicked.connect(
-            lambda _c=False, name=row.name: self.toggleRequested.emit(name, not self._on)
-        )
-        line1.addWidget(self._toggle)
-        if not self._on:
-            self.setProperty("class", "chan chan-dim")
         eq_count = row.eq_count()
         self._eq_chip = _EqChip(eq_count)
         self._eq_chip.clicked.connect(self.eqRequested.emit)
@@ -383,15 +368,13 @@ class TreeGroupSection(QWidget):
         title = QLabel(_group_label(group).upper())
         apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
-        # Every row is drawn, including the slots the skill flagged as unused at intake
-        # (`GroupRow.hidden`, SCR-003). Hiding them made the panel unable to answer "is this
-        # channel off, or does TCC just not show it?" -- and it made turning one on impossible,
-        # because you cannot switch on what is not on screen (user, 2026-08-06). The count still
-        # reports the ones in use, which is the number people read it for.
-        visible_rows = group.rows_ordered()
-        in_use = [row for row in visible_rows if not row.hidden and not row.off]
+        # The working tree shows what is being worked on: unused slots stay out of it (user,
+        # 2026-08-06 -- "in the main place, only what we work with"). Every channel, in use or not,
+        # with its ON/OFF, lives in System params instead, where looking at the whole rig is the
+        # point rather than a distraction.
+        visible_rows = [row for row in group.rows_ordered() if not row.hidden]
         count_text = (
-            f"{len(in_use)}/{group.max_count}" if group.max_count else f"{len(in_use)}"
+            f"{len(visible_rows)}/{group.max_count}" if group.max_count else f"{len(visible_rows)}"
         )
         count = QLabel(count_text)
         count.setProperty("class", "cnt")

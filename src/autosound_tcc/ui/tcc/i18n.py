@@ -133,6 +133,14 @@ T: dict[Lang, dict[str, str]] = {
         "chanToggleSent": "Asked to turn <b>{channel}</b> {state}. The model records it in the "
                           "ledger; the tree follows once it is written.",
         "noSessionForSignal": "No session is running — start one and the request will reach it.",
+        "chanToggleConfirmTitle": "Switch this channel?",
+        "chanToggleConfirmOff": "Turn <b>{channel}</b> off?\n\nIts EQ, crossover and delay live "
+                                "in the ledger and may not survive being switched off. TCC cannot "
+                                "undo this — the model records the change.",
+        "chanToggleConfirmOn": "Turn <b>{channel}</b> on?\n\nThis is a structural change: the "
+                               "channel needs its place in the glossary, and a physical output "
+                               "needs its virtual counterpart. The model works that out and "
+                               "records it.",
         "pillMute": "MUTE",
         "pillOff": "OFF",
         "attempt": "attempt",
@@ -379,6 +387,13 @@ T: dict[Lang, dict[str, str]] = {
         "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в "
                           "леджер; дерево оновиться, щойно запис буде.",
         "noSessionForSignal": "Сесія не запущена — запусти, і запит до неї дійде.",
+        "chanToggleConfirmTitle": "Перемкнути канал?",
+        "chanToggleConfirmOff": "Вимкнути <b>{channel}</b>?\n\nЙого EQ, кросовер і затримка "
+                                "живуть у леджері й можуть не пережити вимкнення. TCC це не "
+                                "відкотить — зміну записує модель.",
+        "chanToggleConfirmOn": "Увімкнути <b>{channel}</b>?\n\nЦе структурна зміна: каналу "
+                               "потрібне місце в глосарії, а фізичному виходу — віртуальний "
+                               "відповідник. Модель це розрахує й запише.",
         "pillMute": "MUTE",
         "pillOff": "OFF",
         "attempt": "спроба",

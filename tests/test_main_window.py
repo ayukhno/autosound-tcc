@@ -1248,3 +1248,45 @@ def test_a_toggle_with_no_session_says_so_instead_of_vanishing(tmp_path):
     window._on_channel_toggle("virtual", "VRR", True)  # must not raise
 
     assert window._dialog._bubbles  # the Arbiter is told, not ignored
+
+
+def test_every_channel_including_the_spare_ones_is_listed_in_system_params(tmp_path):
+    """The working tree shows what is being worked on; here the point is the whole rig at once —
+    which slots are in play and which are spare (user, 2026-08-06)."""
+    from PySide6.QtWidgets import QPushButton
+
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+
+    _app()
+    window = MainWindow()
+    live = GroupRow(id="VFL", name="VFL", raw={"gain_db": 0.0}, identity={})
+    spare = GroupRow(id="VRR", name="VRR", raw={"hidden": True}, identity={})
+    group = ProfileGroup(id="virtual", label="VIRTUAL", fields=("gain_db",),
+                         rows=(live, spare))
+
+    from autosound_tcc.ui.tcc import i18n
+
+    on_row = window._channel_switch_row(group.id, live)
+    off_row = window._channel_switch_row(group.id, spare)
+
+    assert on_row.findChild(QPushButton).text() == i18n.t("chanOn")
+    assert off_row.findChild(QPushButton).text() == i18n.t("chanOff")
+
+
+def test_switching_a_channel_asks_first(tmp_path, monkeypatch):
+    """Off can cost its EQ, crossover and delay; on is a structural change. Neither is a toggle you
+    want on a mis-click, and TCC cannot undo either — the ledger is the skill's."""
+    _app()
+    window = MainWindow()
+    sent: list = []
+    monkeypatch.setattr(window, "_on_channel_toggle", lambda *a: sent.append(a))
+
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Cancel)
+    window._ask_channel_toggle("virtual", "VRR", True)
+    assert sent == []  # cancelled means nothing was asked for
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
+    window._ask_channel_toggle("virtual", "VRR", True)
+    assert sent == [("virtual", "VRR", True)]
