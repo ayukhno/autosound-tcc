@@ -53,7 +53,10 @@ def main() -> int:
         # the person who typed the flag believes they are still where they started. Reported as
         # exactly that confusion.
         config.set_project_dir(Path(chosen))
-    app = QApplication(sys.argv)
+    # Reuse whatever QApplication exists rather than constructing a second one: Qt allows exactly
+    # one per process and raises otherwise, which is how running the window tests before this
+    # module's own turned a green suite red depending on file order alone.
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("autosound-tcc")
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build

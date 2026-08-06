@@ -512,11 +512,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._version_label)
         layout.addStretch(1)
 
-        # Always visible (not just in the no-project states) -- there's no watcher for a ledger
-        # or profile that appears/changes on disk (a terminal-driven session finishes with no
-        # signal back here), so this is the one manual "reload from disk" a user can always reach,
-        # regardless of which left-panel accordion section happens to be collapsed (user request
-        # 2026-07-29: the earlier left-panel version was easy to lose track of).
+        # Always visible (not just in the no-project states). The project files and the ledger are
+        # watched now, but a watcher is a best effort -- a network or synced folder may not report,
+        # and a project opened from a path whose parents changed underneath it will not -- so this
+        # stays as the one manual "reload from disk" a user can always reach, regardless of which
+        # left-panel accordion section happens to be collapsed (user request 2026-07-29: the
+        # earlier left-panel version was easy to lose track of).
         self._header_refresh_btn = QPushButton("↻")
         self._header_refresh_btn.setProperty("class", "zoomgroup-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1375,6 +1376,7 @@ class MainWindow(QMainWindow):
         # on disk and none of them were on screen.
         self._project_watcher = QFileSystemWatcher(self)
         self._project_watcher.fileChanged.connect(self._on_project_file_changed)
+        self._project_watcher.directoryChanged.connect(self._on_project_file_changed)
         # Coalesced: the skill writes several files in a row, and each one must not cost a full
         # rebuild of the tree.
         self._project_reload = QTimer(self)
@@ -1387,7 +1389,24 @@ class MainWindow(QMainWindow):
         project_dir = config.chosen_project_dir()
         if project_dir is None:
             return []
-        return [str(project_dir / name) for name in ("project.json", "dsp_profile.json")]
+        paths = [str(project_dir / name) for name in ("project.json", "dsp_profile.json")]
+        # The ledger too: a snapshot the skill commits from a terminal is the single most visible
+        # thing a session does — a channel gains a crossover, the version in the header moves —
+        # and until now the only way to see it was the ↻ button. HEAD is a file (it is rewritten in
+        # place, so nothing but a file watch catches it); the preset dir is watched separately for
+        # the new `v_NNN.json` beside it.
+        root = config.state_root()
+        paths += [str(root / preset / "HEAD") for preset in config.available_presets(root)]
+        return paths
+
+    def _watched_project_dirs(self) -> list[str]:
+        """`state/` and each preset under it. A directory watch is what catches a file that did not
+        exist when the watcher was armed — the first `v_001.json`, or a second preset appearing —
+        which a file watch by definition cannot."""
+        root = config.state_root()
+        if config.chosen_project_dir() is None or not root.is_dir():
+            return []
+        return [str(root)] + [str(root / preset) for preset in config.available_presets(root)]
 
     def _arm_project_watcher(self) -> None:
         """(Re)watch the project's own files. Re-armed after every change: an atomic write replaces
@@ -1397,6 +1416,9 @@ class MainWindow(QMainWindow):
             return
         for path in self._watched_project_files():
             if Path(path).exists() and path not in watcher.files():
+                watcher.addPath(path)
+        for path in self._watched_project_dirs():
+            if path not in watcher.directories():
                 watcher.addPath(path)
 
     def _on_project_file_changed(self, *_args) -> None:

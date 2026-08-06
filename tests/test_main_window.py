@@ -1156,6 +1156,35 @@ def test_the_left_column_catches_up_when_the_skill_writes(tmp_path, monkeypatch)
     assert str(tmp_path / "project.json") in window._project_watcher.files()
 
 
+def test_a_new_ledger_snapshot_does_not_need_the_reload_button(tmp_path, monkeypatch):
+    """A snapshot committed from a terminal is the most visible thing a session does — a channel
+    gains a crossover, the header's version moves — and the only way to see it was ↻."""
+    from autosound_tcc.core import config
+
+    _app()
+    state = tmp_path / "state" / "FULL"
+    state.mkdir(parents=True)
+    (state / "HEAD").write_text("v_001")
+    (state / "v_001.json").write_text("{}")
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "state_root", lambda: tmp_path / "state")
+    window = MainWindow()
+    window._arm_project_watcher()
+
+    assert str(state / "HEAD") in window._project_watcher.files()
+    # The preset dir too: `v_002.json` does not exist when the watcher is armed, so only a
+    # directory watch can catch it appearing.
+    assert str(state) in window._project_watcher.directories()
+
+    reloaded: list = []
+    monkeypatch.setattr(window, "_safe_load_project", lambda: reloaded.append(1))
+    window._on_project_file_changed(str(state))
+    window._project_reload.stop()
+    window._reload_project_files()
+
+    assert reloaded == [1]
+
+
 def test_a_project_write_reloads_rather_than_rebuilding_per_file(tmp_path, monkeypatch):
     """The skill writes several files in a row; each one must not cost a full rebuild of the tree."""
     from autosound_tcc.core import config
