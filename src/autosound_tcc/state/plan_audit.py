@@ -114,3 +114,45 @@ def unbacked_steps(
             )
         )
     return tuple(out)
+
+
+@dataclass(frozen=True)
+class MissingRecord:
+    """A decision the method depends on that exists nowhere a later session can read it."""
+
+    what: str
+    why: str
+
+
+# Phases from which the target curve is load-bearing. Phase 0 is where it is chosen; everything
+# after it is measured against it, so entering 1 without one means the EQ has no reference.
+_TARGET_FROM_PHASE = 0
+
+
+def missing_records(state: dict) -> tuple[MissingRecord, ...]:
+    """Decisions that were made in conversation and never written to a machine file.
+
+    The second supervisor rule, and the same shape as the first: TCC checks the record against
+    what the method says has to be in it, and says so on screen rather than deciding anything.
+
+    Only one rule so far, because only one has been watched failing: a full phase −1 and a phase-0
+    entry in which the Arbiter named a target curve, the model repeated it back and wrote it into a
+    free-text profile field, and `process-state.json` still read `"targets": {}`. The choice lived
+    in the transcript, and a transcript does not survive `/clear`. Raised skill-side as SCR-036;
+    this half needs no skill change, because reading the file TCC already reads is enough to know.
+    """
+    try:
+        phase = int(str(state.get("active_phase")))
+    except (TypeError, ValueError):
+        return ()
+    if phase < _TARGET_FROM_PHASE:
+        return ()
+    if state.get("targets"):
+        return ()
+    return (
+        MissingRecord(
+            what="target curve",
+            why="phase 0 selects it and every later phase is measured against it — "
+                "nothing on disk records which curve was chosen",
+        ),
+    )

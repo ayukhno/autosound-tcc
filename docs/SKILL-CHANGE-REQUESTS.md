@@ -875,3 +875,83 @@ Ask:
 The narrower alternative, if typing every item is too big a change: a single required field naming
 the artefact, with the prose beside it. The point is not the shape but that something in the
 record can be resolved against the world.
+
+## SCR-036 — the target curve is chosen in conversation and never written down
+
+**Status**: proposed (found running a full phase −1 through TCC, 2026-08-06)
+**Target**: `phase_0_baseline.md` and the phase-0 gate; `rew_tool/state/process.py set-target`
+**TCC dependency**: the header's "target curve" field and `state/process_view` read the machine
+files. TCC renders nothing because there is nothing to render — this is not a panel bug.
+
+**Detail**: phase 0 is *Baseline & target selection*. In a real session the Arbiter named the
+target ("EPY") in the intake answers, the model repeated it back, wrote it into
+`dsp_profile.draft.json` as a free-text field, and moved on. Afterwards, on disk:
+
+```
+process/process-state.json   → "targets": {}
+project.json                 → no target field at all
+```
+
+`process.py` already has `set-target`, and TCC already wraps it (`core/process_writer.set_target`).
+Nothing called it. The choice exists in three places that are all prose — the transcript, the
+draft profile, and the model's memory — and in none that survive a `/clear`.
+
+This is the same shape as SCR-034 and SCR-030: a decision is *made* and then not *recorded*, so
+every later phase re-derives it from a conversation that may be gone. It matters more here than
+in either, because the target is what every EQ move in phases 2–3 is measured against. A session
+resumed after the target was chosen and not written has no way to know whether the curve it is
+matching is the one the Arbiter picked.
+
+Ask:
+
+1. **Phase 0 cannot be left without a target.** Closing the last phase-0 step, or entering phase 1,
+   refuses while `targets` is empty — the same shape as `done` refusing an empty evidence list.
+2. **One machine place.** `set-target` writes it and everything else reads it. A curve named in
+   `autosound_context.md` or in a profile field is a copy, and the copies drift.
+3. The target record carries what it is: a bundled curve name, or a path to an imported one, plus
+   the seat it was chosen for. "EPY" alone is not resolvable a month later.
+
+## SCR-037 — intake asks about things the front-end already knows
+
+**Status**: proposed (measured across three sessions in TCC, 2026-08-06)
+**Target**: `references/core/project-intake.md` §1 and the phase −1 step list
+**TCC dependency**: none outstanding — `get_tcc_state` now reports the reviewer the Arbiter chose
+in TCC's own UI, with `decided_by` saying it is settled rather than suggested.
+
+**Detail**: every intake so far has opened with the same two questions — which language, and how
+to set up the Reviewer (Critic-Advisor) channel. Both are already decided *in the front-end*, in
+controls the Arbiter used before starting the session. In the last run the model read the reviewer
+out of TCC's state and then asked the Arbiter to confirm it anyway, which is the friction the GUI
+exists to remove: a window that knows something and asks anyway is a chat with more buttons.
+
+Ask: the intake's first move is to read the front-end's state (`get_tcc_state` when a `tcc` MCP
+server is present) and to treat what it finds as answered. Ask only about what is missing or what
+contradicts the disk. When no front-end is present the current questions stay exactly as they are
+— this is an "if you are told, do not ask" rule, not a removal.
+
+## SCR-038 — a knowledge file the skill ships takes three minutes to find
+
+**Status**: proposed (timed in a live session, 2026-08-06)
+**Target**: `SKILL.md` (the index) and `references/tooling/rew-tool-docs.md`
+**TCC dependency**: none. TCC installs the skill as a symlink into the project, which is what makes
+`find` behave the way it does below, and that install method is not changing.
+
+**Detail**: the Arbiter said "Helix DSP Ultra S". The skill ships
+`knowledge/dsp/helix-dsp-ultra-s.md` — a hardware-verified capability checklist that answers most
+of intake §4 on its own. Getting to it took **06:07:59 → 06:10:50**:
+
+```
+find <skill>/ -iname "*ultra*" -o -iname "*helix*"     → nothing (symlink not followed)
+find <skill>/ \( -iname "*ultra*" -o -iname "*helix*" \) → nothing
+ls -la <skill>/..; readlink -f <skill>                  → oh, it is a symlink
+find -L <skill>/ \( ... \)                              → found it
+```
+
+SCR-029 fixed *addressing* — the skill now resolves its own root and `references/...` reads work.
+What is still missing is that the knowledge base is not indexed anywhere the model looks. It knew
+the file might exist and had no way to name it, so it searched.
+
+Ask: SKILL.md names the convention outright — `knowledge/dsp/<vendor>-<model>.md`, slug-cased —
+and lists what is currently in it. A model that has just been told the processor should be able to
+construct the path and `Read` it, with no search at all. If the index would go stale, generate it:
+a one-line `ls knowledge/dsp/` in the intake reference is worth three minutes of `find`.

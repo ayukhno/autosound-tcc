@@ -97,3 +97,36 @@ def test_the_whole_fabricated_tune_is_caught(tmp_path):
     unbacked = plan_audit.unbacked_steps(state, tmp_path)
 
     assert [u.step_id for u in unbacked] == ["baseline", "xo", "delays", "eq"]
+
+
+# ---- the second rule: decisions that were never written down ----------------
+
+
+def test_phase_zero_without_a_target_is_flagged():
+    """Watched happening: the Arbiter named "EPY", the model repeated it back and wrote it into a
+    free-text profile field, and `process-state.json` still read `"targets": {}`. The choice lived
+    in the transcript, and a transcript does not survive `/clear`."""
+    from autosound_tcc.state.plan_audit import missing_records
+
+    found = missing_records({"active_phase": "0", "targets": {}})
+
+    assert [record.what for record in found] == ["target curve"]
+
+
+def test_a_recorded_target_is_not_flagged():
+    from autosound_tcc.state.plan_audit import missing_records
+
+    assert missing_records({"active_phase": "0", "targets": {"curve": "EPY"}}) == ()
+
+
+def test_intake_is_not_expected_to_have_a_target_yet():
+    """Phase −1 is where the car is described; the curve is chosen in phase 0."""
+    from autosound_tcc.state.plan_audit import missing_records
+
+    assert missing_records({"active_phase": "-1", "targets": {}}) == ()
+
+
+def test_a_phase_that_does_not_parse_is_left_alone():
+    from autosound_tcc.state.plan_audit import missing_records
+
+    assert missing_records({"active_phase": None}) == ()

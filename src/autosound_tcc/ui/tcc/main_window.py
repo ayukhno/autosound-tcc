@@ -1327,6 +1327,7 @@ class MainWindow(QMainWindow):
         self._plan_panel.set_plan(plan)
         self._refresh_capture_task(state)
         self._notify_stale(stale)
+        self._notify_missing_records(state)
 
         review = process_view.reviewer(state)
         if review:
@@ -1346,6 +1347,22 @@ class MainWindow(QMainWindow):
         path = str(process_view.state_file())
         if path not in self._process_watcher.files():
             self._process_watcher.addPath(path)
+
+    def _notify_missing_records(self, state: dict) -> None:
+        """Say when a decision the method leans on exists only in the conversation.
+
+        The supervisor's second rule (`plan_audit.missing_records`). Said once per fact rather than
+        on every refresh: the file is polled, the Arbiter is not.
+        """
+        seen = getattr(self, "_missing_said", set())
+        for record in plan_audit.missing_records(state):
+            if record.what in seen:
+                continue
+            seen.add(record.what)
+            self._status_strip.notify(
+                i18n.t("missingRecord").format(what=record.what, why=record.why)
+            )
+        self._missing_said = seen
 
     def _notify_stale(self, stale: dict) -> None:
         """Say it in the strip too. A tuner who has not opened the plan still has to learn that the

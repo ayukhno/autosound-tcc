@@ -1156,3 +1156,18 @@ def test_a_project_write_reloads_rather_than_rebuilding_per_file(tmp_path, monke
     window._on_project_file_changed()
 
     assert window._project_reload.isActive()  # one pending reload, not two rebuilds
+
+
+def test_a_decision_that_was_never_written_down_reaches_the_strip(tmp_path, monkeypatch):
+    """The supervisor's second rule has to be visible, not just true: the target curve was chosen
+    out loud and `process-state.json` still read `"targets": {}`."""
+    _app()
+    window = MainWindow()
+    said: list[str] = []
+    monkeypatch.setattr(window._status_strip, "notify", said.append)
+
+    window._notify_missing_records({"active_phase": "0", "targets": {}})
+    window._notify_missing_records({"active_phase": "0", "targets": {}})
+
+    assert len(said) == 1  # said once per fact; the file is polled, the Arbiter is not
+    assert "target curve" in said[0]
