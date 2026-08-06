@@ -125,6 +125,30 @@ def test_get_tcc_state_reports_the_skills_phase_not_its_own(tmp_path):
     assert state["pending_signals"] == 1
 
 
+def test_the_state_says_which_language_the_arbiter_is_working_in(tmp_path):
+    """Intake's first question is "which language?" -- and the app has been speaking the answer
+    since before the session started. Top-level, not buried in `ui`: it decides what language every
+    project file the skill writes is in, which is not a screen detail."""
+
+    class _Bridge(RecordingBridge):
+        def snapshot(self) -> dict:
+            return {"preset": "FULL", "ui_language": "uk"}
+
+    mcp, _bus, _registry = _server(tmp_path, _Bridge(allow=True))
+
+    state = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+
+    assert state["language"] == "uk"
+
+
+def test_a_front_end_that_reports_no_language_says_so_rather_than_guessing(tmp_path):
+    mcp, _bus, _registry = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    state = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+
+    assert state["language"] is None  # ask, then -- exactly as with no front-end at all
+
+
 def test_get_pending_signals_drains_once(tmp_path):
     mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     bus.push(NOT_VISIBLE, note="band 3 missing")

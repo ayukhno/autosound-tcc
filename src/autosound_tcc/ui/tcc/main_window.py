@@ -1659,6 +1659,11 @@ class MainWindow(QMainWindow):
             project_dir=str(config.project_dir()),
             param_edit_mode=self._dialog.is_editing,
             theme=self._mode,
+            # The intake's first question is "which language?", and the answer has been on screen
+            # since before the session started -- the app is already speaking it. Reported so the
+            # skill can close that step instead of asking (SCR-037's rule, applied to the one fact
+            # the payload was still missing).
+            ui_language=i18n.current_language(),
         )
 
     def _on_proposal(self, proposal: dict) -> None:
@@ -2139,6 +2144,9 @@ class MainWindow(QMainWindow):
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
         self._retranslate()
+        # A running session reads the language out of `get_tcc_state`; switching it here and not
+        # republishing would leave the model writing files in the language of an hour ago.
+        self._publish_snapshot()
 
     def _retranslate(self) -> None:
         """Re-set every already-built widget's text. Header/footer labels created via `_phead`

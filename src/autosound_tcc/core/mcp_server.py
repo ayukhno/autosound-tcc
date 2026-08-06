@@ -249,9 +249,14 @@ def build_server(
         looking at rather than to state you inferred earlier in the conversation.
         """
         process_state, error = _load_process_state()
+        ui = bridge.snapshot()
         state = {
             "project_dir": str(project_dir),
-            "ui": bridge.snapshot(),
+            "ui": ui,
+            # Top-level, not left inside `ui`, because it is not a screen detail: it is the answer
+            # to the intake's first question. The Arbiter picked it in the app before the session
+            # started, and every project file the skill writes follows it.
+            "language": ui.get("ui_language"),
             # The phase comes from the skill's own file, not from this server's bookkeeping: two
             # places answering "which phase" is how they drift apart (#10, D-6).
             "current_phase": (process_state or {}).get("active_phase"),
