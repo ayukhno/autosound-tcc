@@ -196,6 +196,19 @@ def set_target(project_dir: Path, preset: str, curve: str) -> str:
     return _run(project_dir, ["target", preset, curve])
 
 
+def record_session(project_dir: Path, harness: str, model: str, resumed: bool = False) -> str:
+    """A working session was attached — the one journal event TCC writes on its own behalf.
+
+    Everything else here is the model recording its own work. This one it cannot record: only the
+    front-end knows a session started, and without it a journal that begins at some `step_done`
+    cannot tell a session that recorded nothing from a session that never happened.
+    """
+    args = ["session-start", harness or "?", model or "?"]
+    if resumed:
+        args.append("resumed")
+    return _run(project_dir, args)
+
+
 def start_capture(project_dir: Path, version: str, expected: list[str]) -> str:
     """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
 

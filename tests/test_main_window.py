@@ -1467,3 +1467,67 @@ def test_a_project_that_cannot_be_drawn_does_not_end_the_session(monkeypatch):
     window._safe_load_project()  # must not raise
 
     assert said and "QLabel" in said[0]
+
+
+def test_the_supervisor_speaks_up_at_the_end_of_a_turn(tmp_path, monkeypatch):
+    """The panels follow the files, but a watcher only fires when something is WRITTEN, and the
+    failure this exists for is the opposite: a turn that talked and recorded nothing."""
+    import json as _json
+
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    window = MainWindow()
+    process = tmp_path / "process"
+    process.mkdir(exist_ok=True)
+    (process / "process-state.json").write_text(
+        _json.dumps(
+            {
+                "schema_version": 3,
+                "active_phase": "0",
+                "plan": [
+                    {
+                        "id": "0.1",
+                        "name": "Baseline solo",
+                        "status": "done",
+                        "phase": "0",
+                        "evidence": ["baseline measurements analysed"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    before = len(window._dialog._bubbles)
+    window._supervise_turn()
+
+    assert len(window._dialog._bubbles) == before + 1
+    said = " ".join(w.text() for w in window._dialog._bubbles[-1].findChildren(QLabel))
+    assert "Baseline solo" in said  # named, so the Arbiter knows which step to look at
+
+    # Said once per step: a warning repeated every turn is a warning nobody reads.
+    window._supervise_turn()
+    assert len(window._dialog._bubbles) == before + 1
+
+
+def test_a_session_is_on_the_record_before_its_first_token(tmp_path, monkeypatch):
+    """A journal that starts at whatever the model wrote first cannot tell a session that recorded
+    nothing from a session that never happened."""
+    from autosound_tcc.core import process_writer
+
+    _app()
+    calls: list = []
+    monkeypatch.setattr(
+        process_writer,
+        "record_session",
+        lambda project_dir, harness, model, resumed=False: calls.append(
+            (harness, model, resumed)
+        ),
+    )
+
+    process_writer.record_session(tmp_path, "omp", "gemini-2.5-pro", resumed=True)
+
+    assert calls == [("omp", "gemini-2.5-pro", True)]

@@ -215,6 +215,10 @@ class DialogPanel(QWidget):
     """
 
     editingChanged = Signal(bool)
+    # A turn ended. The window reconciles the plan against the disk here rather than only on the
+    # file watcher: a turn that wrote nothing fires no watcher, and "the model talked and recorded
+    # nothing" is exactly what the supervisor is for.
+    turnFinished = Signal()
     # Typing into the composer with no session running is a request to start one -- see `_on_send`.
     startRequested = Signal(str)
 
@@ -939,6 +943,7 @@ class DialogPanel(QWidget):
         self._set_busy(False)
         self._input.setFocus()
         self._flush_queued()
+        self.turnFinished.emit()
 
     def _show_queue_row(self) -> None:
         """Say what is waiting, and keep saying it until it is not."""

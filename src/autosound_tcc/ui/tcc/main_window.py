@@ -55,6 +55,7 @@ from autosound_tcc.core import (
     critic,
     model_choices,
     omp_session,
+    process_writer,
     project_settings,
     terminal_launcher,
 )
@@ -1277,6 +1278,7 @@ class MainWindow(QMainWindow):
         dialog_layout.setContentsMargins(0, 0, 0, 0)
         self._dialog = DialogPanel()
         self._dialog.startRequested.connect(self._on_dialog_start_requested)
+        self._dialog.turnFinished.connect(self._supervise_turn)
         self._dialog.confirm_bar.alwaysAllowed.connect(self._remember_always_allowed)
         self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
         dialog_layout.addWidget(self._dialog)
@@ -1551,6 +1553,36 @@ class MainWindow(QMainWindow):
                 i18n.t("missingRecord").format(what=i18n.t(record.what), why=i18n.t(record.why))
             )
         self._missing_said = seen
+
+    def _supervise_turn(self) -> None:
+        """Reconcile the plan against the disk at the end of every turn.
+
+        The panels already follow the files, but a watcher only fires when something is WRITTEN,
+        and the failure this exists for is the opposite: a turn that talked and recorded nothing.
+        Running here means the check happens on every turn, written or not.
+
+        It reports to the Arbiter in the dialog, not only as a chip in the plan: a model that
+        closes steps it cannot prove is a fact about the conversation, and the conversation is
+        where the person deciding whether to trust it is looking. Said once per step -- a warning
+        repeated every turn is a warning nobody reads.
+        """
+        state = process_view.load_state()
+        if not state:
+            return
+        titles = getattr(self._meas_panel, "known_titles", lambda: [])()
+        unbacked = plan_audit.unbacked_steps(state, rew_titles=titles)
+        said = getattr(self, "_unbacked_said", set())
+        fresh = [entry for entry in unbacked if entry.step_id not in said]
+        if not fresh:
+            return
+        for entry in fresh:
+            said.add(entry.step_id)
+        self._unbacked_said = said
+        self._dialog._add_system_message(
+            i18n.t("supervisorUnbacked").format(
+                steps="<br>".join(f"· {entry.step_name or entry.step_id}" for entry in fresh)
+            )
+        )
 
     def _notify_stale(self, stale: dict) -> None:
         """Say it in the strip too. A tuner who has not opened the plan still has to learn that the
@@ -1832,6 +1864,16 @@ class MainWindow(QMainWindow):
             model=choice.label,
         )
         self._running_model = choice.key
+        # On the record before the first token: the journal otherwise starts at whatever the model
+        # happens to write first, and a session that ran for an hour and recorded nothing then
+        # looks exactly like one that never happened -- which is the case план-факт is for. Best
+        # effort: a project whose skill is not vendored still gets to run a session.
+        try:
+            process_writer.record_session(
+                server.project_dir, choice.harness, choice.model, resumed=resumed
+            )
+        except process_writer.ProcessWriterError as exc:
+            self._status_strip.notify(f"journal: {exc}", level="warn")
         self._agent_worker.start()
         self._update_session_button()
         self._refresh_project_button()
