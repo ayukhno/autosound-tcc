@@ -57,10 +57,18 @@ ALLOWED_TOOLS = ["mcp__tcc", "TodoWrite"]
 # would be a second, unaudited path to the same place.
 DISALLOWED_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
 
+# Harness plumbing, not work. Claude Code defers large tool catalogues, so the model has to look
+# TCC's own tools up by name before it can call them -- three times in a seven-minute session.
+# That is the harness finding its own hands; a process chip for it says nothing about the tune.
+_PLUMBING_TOOLS = frozenset({"ToolSearch"})
+
 # Read-only commands the skill runs constantly. Anything outside this set still works -- it just
 # has to be confirmed by the Arbiter first, rather than being refused outright.
 _SAFE_COMMANDS = frozenset(
-    {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "file", "stat", "pwd", "echo", "which"}
+    {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "file", "stat", "pwd", "echo", "which",
+     # Path questions the skill asks constantly, because its install is a symlink and every
+     # "where am I really" answer costs a permission dialog otherwise.
+     "readlink", "realpath", "basename", "dirname", "sort", "uniq", "cut", "column", "jq"}
 )
 _SAFE_GIT_SUBCOMMANDS = frozenset({"status", "log", "diff", "show", "branch", "remote"})
 # `rew_tool` scripts that only read REW and compute. `apply.py` is pointedly not here: it writes
@@ -85,9 +93,21 @@ _SAFE_REW_SCRIPTS = frozenset(
         "atf_eq.py",
     }
 )
-# Shell syntax that lets one approved-looking command carry another. Presence of any of these
-# means the allowlist can no longer reason about what will run, so the Arbiter decides.
-_SHELL_CHAINING = re.compile(r"[;&|><`]|\$\(")
+# Substitution hides a whole second command inside an approved-looking one, and there is no
+# reading of `$(...)` or backticks that keeps the allowlist meaningful. Always ask.
+_SUBSTITUTION = re.compile(r"`|\$\(")
+
+# Redirects that write a file. `2>&1`, `2>/dev/null` and `>/dev/null` are not among them -- they
+# move or discard a stream, which is why the model appends one to almost every command it runs.
+# Treating those as writes is what put a permission dialog in front of `ls -la … 2>&1`, and a gate
+# that fires on `ls` is a gate the Arbiter learns to click through.
+_DISCARD_REDIRECT = re.compile(r"(?:\d?>&\d|\d?>\s*/dev/null|\d?>&-)")
+_FILE_REDIRECT = re.compile(r"[<>]")
+
+# What separates one command from the next. Each part is judged on its own: a chain of read-only
+# commands is read-only, and refusing the whole chain because it *is* a chain is what made the
+# skill's own "where does this symlink point" one-liner need approval.
+_SEPARATORS = re.compile(r"\|\||&&|[;|]")
 
 SYSTEM_PROMPT_APPEND = """
 You are running inside the Tuning Command Center (TCC), the GUI the Arbiter is looking at.
@@ -134,13 +154,27 @@ def _read_roots_for(project_dir: Path) -> tuple[Path, ...]:
 def bash_is_read_only(command: str) -> bool:
     """Whether `command` is one of the read-only invocations the skill makes all day.
 
-    Conservative by construction: unparseable or chained commands are not read-only, so the
-    answer degrades to "ask the Arbiter" rather than to "allow".
+    Conservative by construction: anything unparseable, substituted or redirected into a file is
+    not read-only, so the answer degrades to "ask the Arbiter" rather than to "allow".
+
+    A chain is judged part by part rather than refused for being a chain. Refusing it outright was
+    the wrong kind of caution: `ls -la … 2>&1; echo ---; readlink -f …` is three reads and a
+    stream redirect, and putting that in front of the Arbiter teaches them to approve without
+    looking — which is worse protection than not asking. Every part must pass on its own, so the
+    chain can only be as permissive as its least permissive command.
     """
-    if _SHELL_CHAINING.search(command):
-        return False
+    if not command.strip() or _SUBSTITUTION.search(command):
+        return False  # nothing to judge is not the same as nothing to worry about
+    parts = [part for part in _SEPARATORS.split(command) if part.strip()]
+    return bool(parts) and all(_single_command_is_read_only(part) for part in parts)
+
+
+def _single_command_is_read_only(command: str) -> bool:
+    without_discards = _DISCARD_REDIRECT.sub(" ", command)
+    if _FILE_REDIRECT.search(without_discards):
+        return False  # a redirect that writes somewhere real
     try:
-        parts = shlex.split(command)
+        parts = shlex.split(without_discards)
     except ValueError:
         return False
     if not parts:
@@ -152,6 +186,10 @@ def bash_is_read_only(command: str) -> bool:
     if name == "git":
         return bool(rest) and rest[0] in _SAFE_GIT_SUBCOMMANDS
     if name.startswith("python"):
+        # `-c` is arbitrary code with a shell's reach, so it is never on this list however
+        # harmless the snippet looks; a named script from the skill's read-only set is.
+        if "-c" in rest:
+            return False
         script = next((arg for arg in rest if arg.endswith(".py")), None)
         return script is not None and Path(script).name in _SAFE_REW_SCRIPTS
     return False
@@ -331,6 +369,8 @@ class TuningSession:
                 out.append(ToolEnd())
                 continue
             name = getattr(block, "name", None)
+            if name in _PLUMBING_TOOLS:
+                continue
             if name:
                 out.append(ToolCall(name=name, arguments=dict(getattr(block, "input", {}) or {})))
                 # Text after a tool call belongs to a new bubble, and whether anything streamed is

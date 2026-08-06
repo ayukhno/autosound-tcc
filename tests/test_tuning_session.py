@@ -309,3 +309,77 @@ def test_a_tool_result_is_not_mistaken_for_prose(tmp_path):
     session = TuningSession(project_dir=tmp_path)
 
     assert not any(isinstance(e, TextDelta) for e in session._translate(Message()))
+
+
+# ---- what no longer needs the Arbiter ---------------------------------------
+
+
+def test_a_stream_redirect_is_not_a_write(tmp_path):
+    """`2>&1` moves a stream; it writes nothing. Counting it as a write put a permission dialog in
+    front of `ls -la … 2>&1`, which the model appends to almost every command it runs — and a gate
+    that fires on `ls` is a gate the Arbiter learns to click through."""
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert bash_is_read_only("ls -la /project 2>&1")
+    assert bash_is_read_only("find -L /project -iname '*.md' 2>/dev/null")
+
+
+def test_a_chain_of_reads_is_read_only(tmp_path):
+    """Reported from a live session: `ls …; echo ---; readlink -f …` needed approval because it
+    was a chain, not because of anything in it."""
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert bash_is_read_only('ls -la /p/.claude/skills/ 2>&1; echo "---"; readlink -f /p/link')
+    assert bash_is_read_only("cat profile.json | jq .groups")
+
+
+def test_a_chain_is_only_as_safe_as_its_worst_part(tmp_path):
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert not bash_is_read_only("ls; rm -rf process")
+    assert not bash_is_read_only("readlink -f x || python3 -c 'import os; print(1)'")
+
+
+def test_writing_to_a_file_still_asks(tmp_path):
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert not bash_is_read_only("ls > out.txt")
+    assert not bash_is_read_only("echo hi > /tmp/x")
+
+
+def test_substitution_always_asks(tmp_path):
+    """There is no reading of `$(...)` that keeps the allowlist meaningful."""
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert not bash_is_read_only("cat $(which ls)")
+    assert not bash_is_read_only("echo `whoami`")
+
+
+def test_inline_python_is_never_pre_approved(tmp_path):
+    """`python3 -c` is arbitrary code with a shell's reach, however harmless the snippet looks.
+    A named script from the skill's read-only set is a different thing."""
+    from autosound_tcc.core.tuning_session import bash_is_read_only
+
+    assert not bash_is_read_only('python3 -c "import os; print(os.path.realpath(\'/x\'))"')
+    assert bash_is_read_only("python3 rew_tool/analysis.py --json")
+    assert not bash_is_read_only("python3 rew_tool/apply.py --preset FULL")
+
+
+def test_the_harness_finding_its_own_hands_is_not_a_process_event(tmp_path):
+    """Claude Code defers large tool catalogues, so the model looks TCC's tools up by name before
+    calling them — three times in a seven-minute session. That is plumbing; a chip for it says
+    nothing about the tune."""
+    from autosound_tcc.core.agent_events import ToolCall
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class Block:
+        def __init__(self, name):
+            self.name = name
+            self.input = {}
+
+    class Message:
+        content = [Block("ToolSearch"), Block("mcp__tcc__get_tcc_state")]
+
+    session = TuningSession(project_dir=tmp_path)
+
+    assert session._translate(Message()) == [ToolCall(name="mcp__tcc__get_tcc_state")]
