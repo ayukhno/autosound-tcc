@@ -125,6 +125,28 @@ def test_get_tcc_state_reports_the_skills_phase_not_its_own(tmp_path):
     assert state["pending_signals"] == 1
 
 
+def test_a_step_cannot_be_closed_against_a_sentence(tmp_path):
+    """The gate is the skill's (SCR-035), and this pins that it reaches the model through TCC's
+    surface too -- a tool that swallowed the refusal would put the hole straight back."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "-1"}))
+    asyncio.run(mcp.call_tool("add_step", {"step_id": "b.1", "name": "Baseline"}))
+
+    said = json.loads(
+        _text(
+            asyncio.run(
+                mcp.call_tool(
+                    "finish_step",
+                    {"step_id": "b.1", "evidence": ["baseline measurements analysed"]},
+                )
+            )
+        )
+    )
+
+    assert said["recorded"] is False
+    assert "resolves" in said["error"]  # and the reason is the skill's own wording
+
+
 def test_the_state_says_which_language_the_arbiter_is_working_in(tmp_path):
     """Intake's first question is "which language?" -- and the app has been speaking the answer
     since before the session started. Top-level, not buried in `ui`: it decides what language every
@@ -457,12 +479,18 @@ def test_the_process_tools_actually_write_the_journal(tmp_path):
     so whether the process got recorded depended on the model shelling out to `process.py` by
     itself. These tools drive the skill's own writer, so the journal grows without that luck."""
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    # The step is closed against the file the answer was written into, not against a sentence
+    # saying it was: the skill refuses evidence that resolves to nothing (SCR-035).
+    (tmp_path / "autosound_context.md").write_text("Language: uk\n", encoding="utf-8")
 
     for tool, args in (
         ("enter_phase", {"phase": "-1"}),
         ("add_step", {"step_id": "lang", "name": "Set session language"}),
         ("start_step", {"step_id": "lang"}),
-        ("finish_step", {"step_id": "lang", "evidence": ["user-answer: Ukrainian"]}),
+        (
+            "finish_step",
+            {"step_id": "lang", "evidence": ["autosound_context.md: language uk"]},
+        ),
     ):
         result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
         assert result["recorded"] is True, (tool, result)

@@ -830,8 +830,11 @@ Ask:
 
 ## SCR-035 — `step_done` evidence must be checkable, not just present
 
-**Status**: proposed (found watching a free model complete an entire tune without measuring
-anything, 2026-08-05)
+**Status**: done (landed as `ff58abd` — `finish_step` requires at least one evidence item that
+resolves: a capture name in the grammar WITH its `(sw|rta)` method suffix, a ledger version that
+exists on disk, or a project file that exists. `check` gained the second question — done steps
+whose evidence resolves to nothing now. The narrower alternative at the bottom of this SCR is what
+landed: prose may ride along with a resolvable item, it may not be the whole list.)
 **Target**: `rew_tool/state/process.py` — the `done` command's evidence check (currently "is the
 list non-empty"), and the vocabulary SKILL.md prescribes for what an evidence item may be
 **TCC dependency**: TCC is building the план-факт audit that catches this from the outside
@@ -913,7 +916,9 @@ Ask:
 
 ## SCR-037 — intake asks about things the front-end already knows
 
-**Status**: done (landed as `2989e46` — intake reads `get_tcc_state` first and treats it as answered)
+**Status**: done (landed as `2989e46`, completed by `a925b18` + TCC `8df639e` — intake reads
+`get_tcc_state` first, treats it as answered, and **closes the step** it answers instead of leaving
+it `todo` forever; `get_tcc_state` now also reports `language`, the one fact it was missing)
 **Target**: `references/core/project-intake.md` §1 and the phase −1 step list
 **TCC dependency**: none outstanding — `get_tcc_state` now reports the reviewer the Arbiter chose
 in TCC's own UI, with `decided_by` saying it is settled rather than suggested.
@@ -955,3 +960,40 @@ Ask: SKILL.md names the convention outright — `knowledge/dsp/<vendor>-<model>.
 and lists what is currently in it. A model that has just been told the processor should be able to
 construct the path and `Read` it, with no search at all. If the index would go stale, generate it:
 a one-line `ls knowledge/dsp/` in the intake reference is worth three minutes of `find`.
+
+## SCR-039 — a channel's id is its name, so renaming one rewrites its history
+
+**Status**: proposed (raised 2026-08-06, from the ledger-schema work)
+**Target**: `rew_tool/state/schema.md` + `project.py`'s `channels[]` (`code`), `naming.py`'s
+glossary, and every consumer that joins the two on `code`
+**TCC dependency**: `state/dsp_state.py` joins `project.json`'s `channels[]` onto the ledger row by
+`code` and renders `code` as the channel's name. TCC can follow whatever the skill decides here; it
+cannot decide it, because the codes are also what REW measurement titles are built from.
+
+**Detail**: `code` is doing three jobs at once. It is the row key in the ledger, the join key
+between `project.json` and a snapshot, and the label a human reads — and it is the first half of
+every measurement title the project will ever have (`tw-L_1 (sw)`).
+
+That is fine until something is renamed, which happens for ordinary reasons: `m-L` becomes `w-L`
+after the install is corrected, a "rear" pair turns out to be a centre, a project adopts clearer
+codes halfway through. Renaming today means either rewriting every historical snapshot (losing the
+guarantee that a snapshot is immutable) or leaving the history keyed by a name nobody uses. Both
+have been done by hand in this repo's own dogfood data.
+
+The measurement titles make it worse: they are typed into REW by a human and cannot be rewritten
+retroactively at all. A renamed channel silently orphans every capture it ever had.
+
+Ask:
+
+1. A channel has a **stable id** that is never displayed and never changes once written, and a
+   **name** (the current `code`) that is what people and REW titles use. The ledger and the
+   glossary key on the id; the name is an attribute of the identity record.
+2. Renaming is then an ordinary edit to one field in `project.json`, with the old name kept as a
+   `previous_names` entry — which is exactly what a consumer needs to keep matching old captures
+   to the channel they belong to.
+3. Migration writes ids equal to today's codes, so nothing changes for an existing project until
+   somebody actually renames something.
+
+The cost is real: two keys where there is one, in a schema that has just been through a 3.0 break.
+Worth raising now rather than after the next rename, but not worth a fourth format break on its
+own — it should ride along with whatever the next one is.

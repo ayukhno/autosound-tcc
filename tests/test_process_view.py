@@ -31,7 +31,14 @@ def process(project):
     The target is recorded up front because the skill now refuses a forward move out of phase 0
     without one (SCR-036) — these tests jump straight to a mid-tune phase, which a real session
     only reaches through phase 0.
+
+    The ledger snapshot exists for the same class of reason (SCR-035): a step cannot be closed
+    against `v_003` unless `v_003` is on disk. Writing the file is what these tests were always
+    claiming had happened.
     """
+    snapshot = project / "state" / "FULL" / "v_003.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text("{}", encoding="utf-8")
     module = vendor_loader.load_process()
     process = module.Process(str(process_view.process_dir(project)))
     process.set_target("FULL", "EPY")
@@ -109,7 +116,7 @@ def test_a_redone_step_reports_its_attempt(process, project):
     process.enter_phase("2")
     process.add_step("2.3", "target-match")
     process.start_attempt("2.3")
-    process.finish_step("2.3", ["m-L_10"])
+    process.finish_step("2.3", ["m-L_10 (rta)"])  # the method suffix is what makes it a capture
     process.start_attempt("2.3")  # redo
 
     step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "2.3")

@@ -489,10 +489,13 @@ def build_server(
 
     @mcp.tool()
     async def finish_step(step_id: str, evidence: list[str]) -> str:
-        """Close a step. `evidence` is REQUIRED and is checked by the skill, not here: REW
-        measurement names, a ledger `vNNN`, an audit-trail entry -- what someone could go and look
-        at. A refusal comes back with the skill's own wording; supply the evidence rather than
-        retrying the same call."""
+        """Close a step. `evidence` is REQUIRED, and at least one item must RESOLVE rather than
+        describe: a REW capture name in the grammar (`tw-L_1 (rta)` -- the method suffix is what
+        makes it a capture), a ledger version that exists on disk (`v_003`), or a project file that
+        exists (`autosound_context.md`). Prose may ride along with one of those; prose alone is
+        refused. The skill checks this, not TCC, and a refusal comes back in the skill's own
+        wording -- write the artefact, then close the step against it, rather than retrying the
+        same call."""
         return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
 
     @mcp.tool()
