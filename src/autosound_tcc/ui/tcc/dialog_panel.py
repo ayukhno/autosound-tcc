@@ -70,8 +70,33 @@ def _markdown(text: str) -> str:
     out = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", out)
     out = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", out)
     lines = []
+    rows: list[list[str]] = []
+
+    def flush_table() -> None:
+        """Turn the pipe rows collected so far into a real table, or print them if they are not
+        one. Models answer equipment questions with a Markdown table -- "| Code | Role | Driver |"
+        -- and without this the transcript showed the pipes and dashes raw, which is a correct
+        answer looking like a broken one."""
+        if not rows:
+            return
+        body = [r for r in rows if not all(set(c) <= set("-: ") for c in r)]
+        if len(body) >= 1 and len(rows) >= 2:
+            head, *rest = body
+            cells = "".join(f"<th align='left'>{c}</th>" for c in head)
+            html = [f"<tr>{cells}</tr>"]
+            for row in rest:
+                html.append("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>")
+            lines.append("<table cellpadding='4' cellspacing='0'>" + "".join(html) + "</table>")
+        else:
+            lines.extend("|".join(r) for r in rows)
+        rows.clear()
+
     for line in out.split("\n"):
         stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
+            rows.append([c.strip() for c in stripped.strip("|").split("|")])
+            continue
+        flush_table()
         heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if heading:
             lines.append(f"<b>{heading.group(2)}</b>")
@@ -85,7 +110,9 @@ def _markdown(text: str) -> str:
             lines.append(f"&nbsp;&nbsp;{numbered.group(1)}. {numbered.group(2)}")
             continue
         lines.append(line)
-    return "<br>".join(lines)
+    flush_table()
+    # A table is a block, not a line: joining with <br> would put a blank row under it.
+    return "<br>".join(lines).replace("<br><table", "<table").replace("</table><br>", "</table>")
 
 
 class ComposerInput(QPlainTextEdit):
@@ -480,6 +507,14 @@ class DialogPanel(QWidget):
         # runs the panel may already be torn down (window closed mid-call). Touching a widget
         # whose C++ side is gone is the same class of fault as deleting a widget from inside its
         # own event handler -- see feedback_qt_qss_gotchas. Nothing to scroll is not an error.
+        # Twice: now, and again once Qt has laid the new bubble out. `maximum()` is computed from
+        # the widget's current size, and a bubble added a microsecond ago still has none -- so the
+        # immediate scroll lands short of the message that caused it, which is exactly what
+        # "after sending, autoscroll does not work" looked like.
+        QTimer.singleShot(0, self._scroll_now)
+        self._scroll_now()
+
+    def _scroll_now(self) -> None:
         try:
             bar = self._scroll.verticalScrollBar()
             bar.setValue(bar.maximum())

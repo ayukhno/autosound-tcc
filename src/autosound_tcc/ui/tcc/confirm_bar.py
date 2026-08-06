@@ -46,7 +46,7 @@ class ConfirmBar(QWidget):
         self._queue: list[tuple[ConfirmRequest, "Future[bool]"]] = []
         self._current: Optional[tuple[ConfirmRequest, "Future[bool]"]] = None
 
-        self.setProperty("class", "edit-reasons")
+        self.setProperty("class", "edit-reasons confirm-bar")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
         outer.setSpacing(4)

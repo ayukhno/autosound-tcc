@@ -1399,7 +1399,12 @@ class MainWindow(QMainWindow):
         if getattr(self, "_handoff_timer", None) is not None:
             return  # already saving; a second click must not start a second handoff
         self._handoff_mode = mode
-        self._dialog._add_system_message(i18n.t("sessionHandoff"))
+        # One handoff, three reasons, and the message has to say which: "before the model changes"
+        # under a plain Save is TCC narrating something the Arbiter did not ask for.
+        self._dialog._add_system_message(i18n.t({
+            "save": "sessionHandoffSave",
+            "fresh": "sessionHandoffFresh",
+        }.get(mode, "sessionHandoff")))
         self._session_btn.setEnabled(False)
         worker.turn_done.connect(self._finish_handoff)
         worker.failed.connect(self._finish_handoff)

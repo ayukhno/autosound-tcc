@@ -178,7 +178,11 @@ class _MeasRow(QWidget):
 
     def _render(self) -> None:
         t = current_theme()
-        base = f"{self.item_name} ({self.method_suffix})"
+        # The skill's expected names already carry the method (`c_1 (sw)`), so appending it again
+        # printed `c_1 (sw) (sw)` down the whole task -- reported from a real phase-0 task.
+        suffix = f"({self.method_suffix})"
+        name = self.item_name.strip()
+        base = name if name.endswith(suffix) else f"{name} {suffix}"
         if self._count:
             base += f" · {self._count}"
         if self._additional:

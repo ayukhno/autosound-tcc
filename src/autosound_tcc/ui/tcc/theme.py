@@ -799,6 +799,17 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.panel2};
         border-bottom: 1px solid {t.border};
     }}
+    /* The confirmation is the one thing in this window that is waiting on a person, and it used
+       to look like every other panel: same background, same border, a hairline apart from the
+       transcript. Reported as easy to miss. It gets the accent, a real border and its own tint. */
+    QWidget[class~="confirm-bar"] {{
+        background: {t.mix("accent", 0.10, "panel")};
+        border: 2px solid {t.accent};
+        border-radius: 10px;
+    }}
+    QWidget[class~="confirm-bar"] QLabel[class~="phead-title"] {{
+        color: {t.accent};
+    }}
     QPushButton[class~="reason-btn"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};

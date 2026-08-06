@@ -65,3 +65,31 @@ def test_retranslate_does_not_leave_stale_bubbles_behind():
     assert len(panel._chat.findChildren(MessageBubble)) == len(DIALOG)
     panel.retranslate()
     assert len(panel._chat.findChildren(MessageBubble)) == len(DIALOG)
+
+
+def test_a_markdown_table_is_rendered_as_a_table():
+    """Models answer equipment questions with one — "| Код | Роль | Драйвер |" — and the
+    transcript showed the pipes and dashes raw, which makes a correct answer look broken."""
+    from autosound_tcc.ui.tcc.dialog_panel import _markdown
+
+    html = _markdown("| Код | Роль |\n|---|---|\n| tw-L/R | Твітер |")
+
+    assert "<table" in html and "<th align='left'>Код</th>" in html
+    assert "<td>tw-L/R</td>" in html
+    assert "|---|" not in html  # the separator row is structure, not content
+
+
+def test_text_around_a_table_keeps_its_place():
+    from autosound_tcc.ui.tcc.dialog_panel import _markdown
+
+    html = _markdown("before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nafter")
+
+    assert html.index("before") < html.index("<table") < html.index("after")
+
+
+def test_a_stray_pipe_line_is_not_mistaken_for_a_table():
+    from autosound_tcc.ui.tcc.dialog_panel import _markdown
+
+    html = _markdown("| just one line |")
+
+    assert "<table" not in html
