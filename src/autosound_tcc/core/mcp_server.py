@@ -94,7 +94,10 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     """
     key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
     if not key:
-        return {"configured": False, "how": "ask the Arbiter to pick one in TCC's footer"}
+        return {
+            "configured": False,
+            "how": "ask the Arbiter to pick one in TCC's footer",
+        }
     known = model_choices.choices([]) + model_choices.critic_choices([])
     harness, _, model = key.partition(":")
     # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
@@ -110,6 +113,10 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         "reachable": model_choices.critic_reaches(choice),
         "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
                else "call `call_critic`; it will hand you a clipboard package for this model",
+        # Reported once and asked back: the model read this, then put "confirm that this is your
+        # independent reviewer?" to the Arbiter. Naming a field `configured` says what the value
+        # is; it does not say who decided it. This does.
+        "decided_by": "the Arbiter, in TCC's own UI — settled, not a suggestion to confirm",
     }
 
 
@@ -256,6 +263,13 @@ def build_server(
             # about a channel that is configured and one tool call away. Anything TCC already
             # knows must not be asked again -- that is the difference between a GUI and a chat.
             "reviewer": _reviewer_state(project_dir),
+            # Said in the payload rather than in a system prompt, because it has to reach both
+            # front-ends and only one of them has a system prompt TCC controls.
+            "_this_is_settled": (
+                "Everything above is TCC's own state: what the Arbiter configured in the UI and "
+                "what is on their screen right now. Act on it. Do not ask them to confirm a value "
+                "they set themselves — ask only about what is missing or contradicts the disk."
+            ),
         }
         return json.dumps(state, ensure_ascii=False, indent=2)
 

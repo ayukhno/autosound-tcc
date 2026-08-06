@@ -510,3 +510,15 @@ def test_no_reviewer_chosen_points_at_the_footer(tmp_path):
     from autosound_tcc.core.mcp_server import _reviewer_state
 
     assert _reviewer_state(tmp_path)["configured"] is False
+
+
+def test_the_reviewer_says_who_decided_it(tmp_path):
+    """Reported once and asked back: the model read the reviewer out of TCC's state and then put
+    "confirm that this is your independent reviewer?" to the Arbiter. `configured` says what the
+    value is; it does not say who decided it, and a value the Arbiter set in the UI is settled."""
+    from autosound_tcc.core import config, project_settings
+    from autosound_tcc.core.mcp_server import _reviewer_state
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "omp:google/gemini-3.1-pro")
+
+    assert "Arbiter" in _reviewer_state(tmp_path)["decided_by"]
