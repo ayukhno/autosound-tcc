@@ -14,8 +14,6 @@ being the right one — the reason is on the entry).
 |-----|-----|----------------|
 | 013 | `verify_measurements` as a library with a JSON verdict | TCC re-implements the verdict or shells out |
 | 015 | what belongs in "Car audio analysis" | that panel section is still a placeholder |
-| 026 | `apply.propose` emits the change delta, not only the snapshot | the dialog cannot show what changed |
-| 027 | `critic_called` links to the critique text | the footer says a Critic was called and cannot show what it said |
 | 033 | the reviewer's transport is a parameter, not Gemini | TCC's picker must mark non-Gemini choices clipboard-only |
 | 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
 
@@ -424,7 +422,7 @@ mode precedent.
 
 ## SCR-026 — `apply.propose` emits the change delta, not only the snapshot
 
-**Status**: proposed (raised 2026-08-04 while building `spike/render_dialog.py`)
+**Status**: done (skill `15ba1b1`, TCC `HEAD` — `propose` writes `<preset>/proposals/<v_NNN>.json` from the same `delta_rows` the settings sheet renders from, each row carrying the formatted value the Arbiter keys and the raw one beside it; `state/proposal_view.py` reads it and the window shows the card once per version. The strategy branch — TCC hands off to the delta file instead of prose — is NOT decided here; the skill still prints the sheet, and both now say the same numbers because both come from one structure.)
 **Target**: `skills/autosound-tuning/rew_tool/state/apply.py` (`propose`), alongside the
 `v_NNN.json` snapshot it already writes
 **TCC dependency**: the settings-sheet card in the dialogue panel. The render spike
@@ -462,7 +460,7 @@ front-end keeps printing the sheet as today. TCC already tells the agent where i
 
 ## SCR-027 — `critic_called` links to the critique text
 
-**Status**: proposed (raised 2026-08-04, same spike)
+**Status**: done (skill `15ba1b1`/`829a7bc`, TCC `HEAD` — `autosound_ai.py` writes every answer to `process/reviews/<ts>-<role>.md` and prints a `>> REVIEW_FILE:` marker; `critic_called` carries `review` + `mode`, TCC parses the marker and records the call itself, and the Critic bubble links the file. Clipboard mode writes the compiled package to the same place with `mode: clipboard`.)
 **Target**: `skills/autosound-tuning/rew_tool/state/process.py` (`record_reviewer`, event
 `critic_called`) + `scripts/autosound_ai.py` (persist its stdout instead of only returning it)
 **TCC dependency**: the Advisor bubble in the dialogue panel; `core/critic.py` already parses the

@@ -63,7 +63,13 @@ from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
-from autosound_tcc.state import measurement_view, plan_audit, process_view, project_view
+from autosound_tcc.state import (
+    measurement_view,
+    plan_audit,
+    process_view,
+    project_view,
+    proposal_view,
+)
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
@@ -1087,6 +1093,7 @@ class MainWindow(QMainWindow):
         self._save_label.setText(view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._version_label.setText(view.version or "")
+        self._show_banked_delta(view.version, preset)
 
     def _open_new_project_dialog(self) -> None:
         """Folder + vendor/model + (in-app Claude OR a detected terminal CLI). Either path hands
@@ -1554,6 +1561,24 @@ class MainWindow(QMainWindow):
                 i18n.t("missingRecord").format(what=i18n.t(record.what), why=i18n.t(record.why))
             )
         self._missing_said = seen
+
+    def _show_banked_delta(self, version: Optional[str], preset: Optional[str]) -> None:
+        """When a version arrives with a banked delta, put THAT on screen as the settings card.
+
+        The card the Arbiter keys from should carry the values the ledger banked, not the values a
+        model re-rendered into chat — the same argument as `dsp-state-current` being generated
+        rather than hand-written (SCR-026). Shown once per version: this runs on every project
+        reload, and the watcher fires more than once for a single commit.
+        """
+        if not version or not preset or version == getattr(self, "_delta_shown", None):
+            return
+        delta = proposal_view.load_delta(version, preset)
+        # No delta file is the ordinary case — a seeded baseline, a hand-written ledger, a project
+        # older than this. Remembered anyway, so a reload does not re-ask the disk for it.
+        self._delta_shown = version
+        if delta is None:
+            return
+        self._dialog._add_system_message(proposal_view.to_html(delta))
 
     def _record_decision(self, question: str, answer: str) -> None:
         """The Arbiter ruled on something in the dialog — put it in the journal (SCR-030).

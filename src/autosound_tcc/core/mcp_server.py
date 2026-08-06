@@ -81,6 +81,24 @@ _TOKEN_HEADER = "x-tcc-token"
 CONFIRM_TIMEOUT_S = 600.0
 
 
+def _vendor_of(model: Optional[str]) -> str:
+    """The vendor a model name implies, for the journal's `reviewer` field.
+
+    A guess by design, and a cheap one: the reviewer script reports the model it used and nothing
+    about who makes it. Wrong is better than absent here -- the field exists so a reader can see
+    that the Critic was a DIFFERENT vendor from the Generator, which is the whole anti-anchoring
+    argument, and "?" answers that question for nobody.
+    """
+    name = (model or "").lower()
+    for needle, vendor in (
+        ("gemini", "google"), ("gpt", "openai"), ("o1", "openai"), ("claude", "anthropic"),
+        ("grok", "xai"), ("llama", "meta"), ("mistral", "mistral"), ("deepseek", "deepseek"),
+    ):
+        if needle in name:
+            return vendor
+    return "unknown"
+
+
 def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     """What TCC already knows about the reviewer channel, so intake stops asking about it.
 
@@ -655,6 +673,20 @@ def build_server(
             model=model or None,
         )
         critic.log_call(result, None, project_dir)
+        # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
+        # local log answers the footer's "last called"; the journal is what a resume and any other
+        # front-end read, and until now it recorded that a review happened and lost what it argued.
+        if result.mode in (critic.MODE_API_OR_CLI, critic.MODE_CLIPBOARD):
+            try:
+                process_writer.record_reviewer(
+                    project_dir,
+                    vendor=_vendor_of(result.model),
+                    model=result.model or "?",
+                    review=result.review or "",
+                    mode="clipboard" if result.mode == critic.MODE_CLIPBOARD else "api",
+                )
+            except process_writer.ProcessWriterError:
+                pass  # a critique that ran must not fail over its own bookkeeping
         bridge.show_critique(
             {
                 "mode": result.mode,
@@ -662,6 +694,8 @@ def build_server(
                 "model": result.model,
                 "role": result.role,
                 "detail": result.detail,
+                # The bubble links the text rather than being the only copy of it.
+                "review": result.review,
             }
         )
         return json.dumps(

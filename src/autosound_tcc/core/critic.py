@@ -37,6 +37,9 @@ DEFAULT_TIMEOUT_S = 600.0
 # The script prints this as its last stdout line on a real answer: `— [critic: Gemini 3.1 Pro]`.
 _MODEL_MARKER = re.compile(r"^—\s*\[(?P<role>\w+):\s*(?P<model>.+?)\]\s*$", re.MULTILINE)
 _CLIPBOARD_MARKER = "CLIPBOARD MODE"
+# The script writes the critique to `process/reviews/<ts>-<role>.md` and says so on stderr in two
+# forms; this is the machine-readable one, so nothing here parses a translated sentence (SCR-027).
+_REVIEW_MARKER = re.compile(r"^>>\s*REVIEW_FILE:\s*(?P<path>.+?)\s*$", re.MULTILINE)
 
 MODE_API_OR_CLI = "answered"
 MODE_CLIPBOARD = "clipboard"
@@ -54,6 +57,10 @@ class CriticResult:
     detail: str  # stderr tail — why it fell back, or what failed
     duration_s: float
     called_at: str
+    # Project-relative path to the critique's own text (SCR-027). The reasoning used to live only
+    # in the chat stream, so a session rendered from disk knew a review happened and not what it
+    # argued. `None` when the script could not write it.
+    review: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -173,14 +180,18 @@ def run(
 
     # Deliberately not `proc.returncode == 0`: clipboard mode returns 0 with nothing on stdout.
     match = _MODEL_MARKER.search(stdout)
+    review_match = _REVIEW_MARKER.search(stderr)
+    review = review_match.group("path") if review_match else None
     if stdout.strip():
         text = _MODEL_MARKER.sub("", stdout).strip()
         return CriticResult(
             MODE_API_OR_CLI, text, match.group("model") if match else None, role, tail,
-            duration, called_at,
+            duration, called_at, review,
         )
     if _CLIPBOARD_MARKER in stderr:
-        return CriticResult(MODE_CLIPBOARD, "", None, role, tail, duration, called_at)
+        # The clipboard path writes the compiled PACKAGE to the same place, so a review the Arbiter
+        # works by hand is on the record rather than looking like no review at all.
+        return CriticResult(MODE_CLIPBOARD, "", None, role, tail, duration, called_at, review)
     return CriticResult(MODE_ERROR, "", None, role, tail or "reviewer produced no output",
                         duration, called_at)
 
@@ -206,6 +217,7 @@ def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Op
         "model": result.model,
         "duration_s": round(result.duration_s, 1),
         "package": str(package_path) if package_path else None,
+        "review": result.review,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

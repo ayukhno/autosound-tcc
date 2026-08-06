@@ -59,6 +59,7 @@ T: dict[Lang, dict[str, str]] = {
                                "on screen. {error}",
         "staleStrip": "{what} — {n} channel(s) need re-measuring: {codes}",
         "missingRecord": "Not written down: {what} — {why}.",
+        "criticSaved": "Text saved to {path}",
         "supervisorUnbacked": "These steps are closed, and their evidence names nothing that "
         "exists on disk or in REW:<br>{steps}<br>Either the work is recorded somewhere this "
         "cannot see, or it was not done.",
@@ -318,6 +319,7 @@ T: dict[Lang, dict[str, str]] = {
                                "останній робочий вигляд. {error}",
         "staleStrip": "{what} — перезняти каналів: {n} ({codes})",
         "missingRecord": "Не записано: {what} — {why}.",
+        "criticSaved": "Текст збережено у {path}",
         "supervisorUnbacked": "Ці кроки закриті, а їхні докази не вказують ні на що на диску "
         "чи в REW:<br>{steps}<br>Або робота записана там, куди я не бачу, або її не було.",
         "recordTargetCurve": "цільова крива",

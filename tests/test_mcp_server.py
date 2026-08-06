@@ -658,3 +658,41 @@ def test_an_arbiters_ruling_is_recorded_as_the_answer_not_as_prose(tmp_path):
     assert decision["answer"] == "96 kHz, not 48"
     assert decision["phase"] == "0"  # asked under the phase it constrains
     assert decision["invalidates"] == "sw_1 (sw)"  # same shape as config_change.impact
+
+
+def test_a_critique_reaches_the_journal_with_a_pointer_to_its_text(tmp_path, monkeypatch):
+    """`critic_called` recorded that a review happened and lost what it argued (SCR-027). The local
+    log answers the footer; the journal is what a resume and any other front-end read."""
+    from autosound_tcc.core import critic
+
+    class _Bridge(RecordingBridge):
+        critiques: list = []
+
+        def show_critique(self, critique: dict) -> None:
+            self.critiques.append(critique)
+
+    bridge = _Bridge(allow=True)
+    mcp, _, _ = _server(tmp_path, bridge)
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))
+    monkeypatch.setattr(
+        critic,
+        "run",
+        lambda *a, **k: critic.CriticResult(
+            critic.MODE_API_OR_CLI, "the sub is 3 dB hot", "gemini-2.5-pro", "critic", "",
+            1.0, "2026-08-06T21:00:00+00:00", "process/reviews/2026-08-06T21-critic.md",
+        ),
+    )
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "## proposal"}))
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    # The bubble links the file rather than being the only copy of it.
+    assert bridge.critiques[-1]["review"] == "process/reviews/2026-08-06T21-critic.md"
+    called = next(e for e in events if e["type"] == "critic_called")
+    assert called["review"] == "process/reviews/2026-08-06T21-critic.md"
+    assert called["vendor"] == "google"  # inferred from the model, so "a different vendor" is legible
+    assert called["mode"] == "api"

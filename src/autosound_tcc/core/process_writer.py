@@ -183,11 +183,28 @@ def block_step(project_dir: Path, step_id: str, reason: str) -> str:
     return _run(project_dir, ["block", step_id, reason])
 
 
-def record_reviewer(project_dir: Path, vendor: str, model: str, step: str = "") -> str:
-    """Record a reviewer/critic call against the step it was called on."""
+def record_reviewer(
+    project_dir: Path,
+    vendor: str,
+    model: str,
+    step: str = "",
+    review: str = "",
+    mode: str = "",
+) -> str:
+    """Record a reviewer/critic call against the step it was called on.
+
+    `review` is the project-relative path to the critique's own text, which the skill's reviewer
+    script writes (SCR-027) — the record used to say a review happened and lose what it argued.
+    `mode` separates a channel that ran from one the Arbiter worked by hand (`clipboard`), because
+    a review answered by paste must not read as no review at all.
+    """
     args = ["reviewer", vendor, model]
     if step:
         args.append(step)
+    if review:
+        args.append(f"--review={review}")
+    if mode:
+        args.append(f"--mode={mode}")
     return _run(project_dir, args)
 
 

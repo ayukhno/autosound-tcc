@@ -1014,10 +1014,15 @@ class DialogPanel(QWidget):
         """
         mode = critique.get("mode")
         model = critique.get("model") or "?"
+        # Where the text itself was written (SCR-027). Said in the bubble because the bubble is not
+        # the copy of record any more: the file is, and a session read back from disk next week is
+        # reading that file rather than this window.
+        review = critique.get("review")
+        note = f"<br><i>{i18n.t('criticSaved').format(path=review)}</i>" if review else ""
         if mode == "answered":
-            self._add_bubble("crit", f"Critic · {model}", critique.get("text", ""))
+            self._add_bubble("crit", f"Critic · {model}", critique.get("text", "") + note)
         elif mode == "clipboard":
-            self._add_system_message(i18n.t("criticClipboard"))
+            self._add_system_message(i18n.t("criticClipboard") + note)
         else:
             self._add_system_message(
                 i18n.t("criticFailed").format(detail=critique.get("detail", "?"))
