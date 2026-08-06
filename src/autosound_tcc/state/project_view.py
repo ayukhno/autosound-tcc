@@ -28,10 +28,14 @@ error.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
 from autosound_tcc.core import config
+
+# A panel row is not worth a stall: a slow mount answers "say nothing".
+_GIT_TIMEOUT_S = 2.0
 
 
 def fact_value(x: Any) -> Any:
@@ -194,3 +198,45 @@ def load_open_questions(project_dir_: Optional[Path] = None) -> tuple[str, ...]:
     `_open_questions`, the same convention `dsp_profile.json` and the skill's own
     `rew_tool/project.py::open_questions` use."""
     return tuple(str(q) for q in (_load(project_dir_).get("_open_questions") or []))
+
+
+def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
+    """Branch and working-tree state of the project folder, when it is a git repo.
+
+    The skill makes a new project a git repo on purpose -- the tune's history is the point, and
+    `naming-and-structure.md §4a` says which files are tracked. TCC showed none of it, so "am I on
+    the branch I think, and is anything unsaved?" meant leaving the app. Two rows, read-only, and
+    silent when the folder is not a repo: not every project is one, and saying "not a git repo"
+    would be noise on the ones that are not.
+
+    Never raises and never blocks for long: a missing `git`, a repo mid-rebase or a folder on a
+    slow mount all resolve to "say nothing" rather than to a spinner in a panel.
+    """
+    project = Path(project_dir_ or config.project_dir())
+    if not (project / ".git").exists():
+        return ()
+    rows: list[tuple[str, str]] = []
+    # `rev-parse HEAD` fails on a repo with no commits yet -- which a project is for its whole
+    # first session -- so the branch comes from the ref itself, with rev-parse as the fallback for
+    # a detached head.
+    branch = _git(project, "symbolic-ref", "--short", "HEAD") or _git(
+        project, "rev-parse", "--short", "HEAD"
+    )
+    if branch:
+        rows.append(("Git", branch))
+    status = _git(project, "status", "--porcelain")
+    if status is not None:
+        changed = len([line for line in status.splitlines() if line.strip()])
+        rows.append(("Git changes", str(changed) if changed else "clean"))
+    return tuple(rows)
+
+
+def _git(project: Path, *args: str) -> Optional[str]:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(project), *args],
+            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None

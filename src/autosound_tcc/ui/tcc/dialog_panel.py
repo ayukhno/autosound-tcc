@@ -177,21 +177,29 @@ class MessageBubble(QFrame):
         # Width the bubble would want if its text sat on one line -- lets the panel size each
         # bubble to its content (dynamic, like the web) up to the max-width cap, instead of every
         # bubble being forced to the same width.
-        plain = re.sub(r"<[^>]+>", "", html)
-        self.natural_width = max(
-            self._body.fontMetrics().horizontalAdvance(plain),
-            who_label.fontMetrics().horizontalAdvance(role),
-        ) + 28
+        self._who_label = who_label
+        self._role = role
+        self._plain = re.sub(r"<[^>]+>", "", html)
+
+    @property
+    def natural_width(self) -> int:
+        """Width this bubble would want on one line, measured with the fonts it *currently* has.
+
+        Computed on demand rather than stored at construction: the stylesheet has not been applied
+        yet when a widget is built, so `.msg-who`'s `letter-spacing: 1px` was missing from the
+        measurement and the role line came out ~13px short -- "ARBITER · YOU" rendered with the U
+        cut off. Measuring later, and again after a font-scale change, costs one text advance.
+        """
+        # The role line is measured with an allowance for `.msg-who`'s `letter-spacing: 1px`,
+        # which Qt renders but does not report through `fontMetrics()` -- so the measurement came
+        # out about one pixel per character short and "ARBITER · YOU" lost its U to the border.
+        role_width = self._who_label.fontMetrics().horizontalAdvance(self._role) + len(self._role)
+        return max(self._body.fontMetrics().horizontalAdvance(self._plain), role_width) + 28
 
     def set_html(self, html: str) -> None:
-        """Replace the body text — used while a streamed answer is still growing.
-
-        `natural_width` is recomputed so the bubble keeps hugging its content as text arrives,
-        instead of freezing at the width of the first delta.
-        """
+        """Replace the body text — used while a streamed answer is still growing."""
         self._body.setText(html)
-        plain = re.sub(r"<[^>]+>", "", html)
-        self.natural_width = self._body.fontMetrics().horizontalAdvance(plain) + 28
+        self._plain = re.sub(r"<[^>]+>", "", html)
 
     def apply_font_scale(self, scale: float) -> None:
         # A widget's own stylesheet wins over the app-wide one for the same selector, so this
@@ -354,8 +362,15 @@ class DialogPanel(QWidget):
         for message in DIALOG:
             self._add_bubble(message.who, message.role, i18n.tx(message.text))
         self._scroll.setWidget(self._chat)
-        self._scroll_pending = False
-        self._scroll.verticalScrollBar().rangeChanged.connect(self._on_scroll_range_changed)
+        # Stick to the bottom, the way a chat window does, instead of scrolling once and hoping.
+        # A bubble's height settles over several layout passes -- the label wraps, the font scale
+        # applies, the rich text re-flows -- so a single scroll lands at whatever the height was
+        # one pass ago. A long message ended up with only its top edge on screen; a short one was
+        # fine, which is exactly the shape of "scrolled too early".
+        self._stick_to_bottom = True
+        bar = self._scroll.verticalScrollBar()
+        bar.rangeChanged.connect(self._on_scroll_range_changed)
+        bar.valueChanged.connect(self._on_scroll_value_changed)
         outer.addWidget(self._scroll, stretch=1)
 
         # Tool calls live here, not in the transcript. Their whole value is "the thing is still
@@ -513,14 +528,25 @@ class DialogPanel(QWidget):
         # and its `_fit` runs, which can be a second layout pass later, so `maximum()` was still
         # short. Arm the scrollbar's own `rangeChanged` instead -- it fires exactly when the thing
         # we are waiting for happens -- and disarm after one shot so scrolling back stays sticky.
-        self._scroll_pending = True
+        self._stick_to_bottom = True
         QTimer.singleShot(0, self._scroll_now)
         self._scroll_now()
 
     def _on_scroll_range_changed(self, _min: int, _max: int) -> None:
-        if getattr(self, "_scroll_pending", False):
-            self._scroll_pending = False
+        if getattr(self, "_stick_to_bottom", True):
             self._scroll_now()
+
+    def _on_scroll_value_changed(self, value: int) -> None:
+        """Scrolling up by hand means "I am reading something", and the panel stops chasing.
+
+        Coming back to the bottom re-arms it. The tolerance is a few pixels because a wheel notch
+        rarely lands exactly on the maximum.
+        """
+        try:
+            bar = self._scroll.verticalScrollBar()
+        except (AttributeError, RuntimeError):
+            return
+        self._stick_to_bottom = value >= bar.maximum() - 8
 
     def _scroll_now(self) -> None:
         try:

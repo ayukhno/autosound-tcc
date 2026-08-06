@@ -1142,6 +1142,10 @@ class MainWindow(QMainWindow):
         # the amps, the mic, the REW port. They were in the wrong section (user, 2026-08-06).
         for label, value in self._app_config_rows():
             self._project_section.body_layout().addWidget(_kv_row(label, value))
+        # The project folder is a git repo by the skill's own design, and none of it was visible:
+        # "am I on the branch I think, is anything unsaved?" meant leaving the app.
+        for label, value in project_view.git_facts():
+            self._project_section.body_layout().addWidget(_kv_row(label, value))
         summary_rows = project_view.load_channel_summary() if view else ()
         open_questions = project_view.load_open_questions() if view else ()
         for label, value in summary_rows:
