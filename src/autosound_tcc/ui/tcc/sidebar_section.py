@@ -95,6 +95,84 @@ class SidebarSection(QWidget):
         self._twist.setText("▸" if collapsed else "▾")
 
 
+def _group_collapsed_key(group_id: str) -> str:
+    return f"ui/sidebar_group_collapsed/{group_id}"
+
+
+class CollapsibleGroup(QWidget):
+    """A second-level collapsible group *inside* a `SidebarSection` — styled like the DSP tree's
+    `.ghead` group headers so the two panels read as the same hierarchy, but owning nothing but
+    the chrome: callers fill `body_layout()`.
+
+    Its collapse state lives under its own QSettings prefix, deliberately not the tree's
+    `ui/tree_collapsed/...`: the same group id (`physical_outputs`) appears in both panels and
+    they are looked at for different reasons — the tree is the working surface, this is the whole
+    rig — so collapsing one must not fold the other.
+    """
+
+    def __init__(
+        self,
+        group_id: str,
+        title: str,
+        settings: QSettings,
+        count: str = "",
+        default_collapsed: bool = True,
+    ) -> None:
+        super().__init__()
+        self._id = group_id
+        self._settings = settings
+        collapsed = settings.value(
+            _group_collapsed_key(group_id), default_collapsed, type=bool
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._header = QWidget()
+        self._header.setProperty("class", "ghead")
+        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        head_layout = QHBoxLayout(self._header)
+        head_layout.setContentsMargins(8, 4, 8, 4)
+        head_layout.setSpacing(6)
+        self._twist = QLabel()
+        self._twist.setProperty("class", "tw")
+        head_layout.addWidget(self._twist)
+        title_label = QLabel(title.upper())
+        apply_caps(title_label, spacing_px=1.0)
+        head_layout.addWidget(title_label)
+        if count:
+            count_label = QLabel(count)
+            count_label.setProperty("class", "cnt")
+            head_layout.addWidget(count_label)
+        head_layout.addStretch(1)
+        self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]
+        outer.addWidget(self._header)
+
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(0)
+        outer.addWidget(self._body)
+
+        self._set_collapsed(collapsed)
+
+    def body_layout(self) -> QVBoxLayout:
+        return self._body_layout
+
+    def is_collapsed(self) -> bool:
+        return self._body.isHidden()
+
+    def _on_header_clicked(self, event) -> None:
+        self._set_collapsed(not self._body.isHidden())
+        self._settings.setValue(_group_collapsed_key(self._id), self._body.isHidden())
+
+    def _set_collapsed(self, collapsed: bool) -> None:
+        self._body.setHidden(collapsed)
+        self._twist.setText("▸" if collapsed else "▾")
+
+
 def clear_layout(layout: QVBoxLayout) -> None:
     """Remove and dispose of every widget in `layout` -- shared by callers that rebuild a
     section's body from scratch on project load (same setParent(None)+deleteLater() pattern as

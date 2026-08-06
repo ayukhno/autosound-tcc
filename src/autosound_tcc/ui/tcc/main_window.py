@@ -78,7 +78,11 @@ from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.sidebar_section import SidebarSection, clear_layout
+from autosound_tcc.ui.tcc.sidebar_section import (
+    CollapsibleGroup,
+    SidebarSection,
+    clear_layout,
+)
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 
@@ -705,6 +709,11 @@ class MainWindow(QMainWindow):
         2026-08-06). Here the point *is* to see the whole rig at once — which slots are in play,
         which are spare — so an unused channel is a row rather than an absence, and switching one
         is one click away from where you noticed it.
+
+        Each group folds. A Helix Ultra lists every slot of every tier, and unfolded that is some
+        forty rows pushing the REW port and the equipment facts — the rest of this section — off
+        the top of the panel. The header carries `on/total` so a folded group still answers "how
+        much of this tier is in play".
         """
         view = getattr(self, "_view", None)
         if view is None:
@@ -713,15 +722,16 @@ class MainWindow(QMainWindow):
             rows = group.rows_ordered()
             if not rows:
                 continue
-            head = QLabel(str(group.label).upper())
-            head.setProperty("class", "kv-lbl")
-            apply_caps(head, spacing_px=1.0)
-            head.setContentsMargins(12, 6, 12, 2)
-            self._system_section.body_layout().addWidget(head)
+            live = sum(1 for row in rows if not (row.hidden or row.off))
+            section = CollapsibleGroup(
+                f"sys/{group.id}",
+                str(group.label),
+                self._settings,
+                count=f"{live}/{len(rows)}",
+            )
             for row in rows:
-                self._system_section.body_layout().addWidget(
-                    self._channel_switch_row(group.id, row)
-                )
+                section.body_layout().addWidget(self._channel_switch_row(group.id, row))
+            self._system_section.body_layout().addWidget(section)
 
     def _channel_switch_row(self, group_id: str, row) -> QWidget:
         on = not (row.hidden or row.off)

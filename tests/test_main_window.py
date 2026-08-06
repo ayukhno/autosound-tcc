@@ -1282,6 +1282,59 @@ def test_every_channel_including_the_spare_ones_is_listed_in_system_params(tmp_p
     assert off_row.findChild(QPushButton).text() == i18n.t("chanOff")
 
 
+def test_a_channel_group_in_system_params_folds_and_says_how_many_are_in_play(tmp_path):
+    """Every slot of every tier is forty-odd rows on a Helix Ultra, which pushed the REW port and
+    the equipment facts off the panel. Folded, the header still answers how much of the tier is
+    live."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup, ProjectView
+    from autosound_tcc.ui.tcc.sidebar_section import CollapsibleGroup
+
+    _app()
+    window = MainWindow()
+    live = GroupRow(id="VFL", name="VFL", raw={"gain_db": 0.0}, identity={})
+    spare = GroupRow(id="VRR", name="VRR", raw={"hidden": True}, identity={})
+    window._view = ProjectView(
+        preset="FULL",
+        sample_rate=None,
+        groups=(
+            ProfileGroup(
+                id="virtual", label="VIRTUAL", fields=("gain_db",), rows=(live, spare)
+            ),
+        ),
+    )
+    window._rebuild_system_params()
+
+    groups = window._system_section.findChildren(CollapsibleGroup)
+    assert len(groups) == 1
+    labels = [lbl.text() for lbl in groups[0].findChildren(QLabel)]
+    assert "1/2" in labels  # one of two slots in play
+    assert groups[0].is_collapsed()  # folded until asked for
+
+    groups[0]._on_header_clicked(None)
+    assert not groups[0].is_collapsed()
+
+
+def test_folding_a_group_in_system_params_does_not_fold_the_same_group_in_the_tree(tmp_path):
+    """`physical_outputs` appears in both panels and they are looked at for different reasons —
+    the tree is the working surface, System params is the whole rig."""
+    from PySide6.QtCore import QSettings
+
+    from autosound_tcc.ui.tcc import dsp_tree, sidebar_section
+
+    _app()
+    settings = QSettings("autosound-tcc-test", "collapse-keys")
+    settings.clear()
+    group = sidebar_section.CollapsibleGroup(
+        "sys/physical_outputs", "OUTPUT", settings, default_collapsed=True
+    )
+    group._on_header_clicked(None)  # opened here
+
+    assert settings.value(
+        dsp_tree._collapsed_key("physical_outputs"), None
+    ) is None  # the tree's own key was never touched
+    settings.clear()
+
+
 def test_switching_a_channel_asks_first(tmp_path, monkeypatch):
     """Off can cost its EQ, crossover and delay; on is a structural change. Neither is a toggle you
     want on a mis-click, and TCC cannot undo either — the ledger is the skill's."""
