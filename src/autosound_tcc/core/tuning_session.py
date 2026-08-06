@@ -30,6 +30,7 @@ from claude_agent_sdk import (
     PermissionResultAllow,
     PermissionResultDeny,
     ResultMessage,
+    UserMessage,
 )
 
 from autosound_tcc.core import config, vendor_loader
@@ -359,6 +360,16 @@ class TuningSession:
         content = getattr(message, "content", None)
         if not isinstance(content, list):
             return []
+        if isinstance(message, UserMessage):
+            # Nothing on the user side of the wire is the Generator talking, and rendering it as
+            # such is how **the whole of SKILL.md** ended up in the transcript as a bubble under
+            # the model's byline: the `Skill` tool delivers the method as a user-role message, and
+            # a text block with no `.name` fell through to "this must be prose". Tool results and
+            # system reminders arrive the same way. The Arbiter's own messages are drawn by the
+            # panel when they are typed, so the only thing worth reading here is that a tool
+            # returned.
+            return [ToolEnd() for block in content
+                    if getattr(block, "tool_use_id", None) is not None]
         out: list[AgentEvent] = []
         for block in content:
             if getattr(block, "tool_use_id", None) is not None:

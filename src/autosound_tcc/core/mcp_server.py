@@ -63,8 +63,10 @@ from autosound_tcc.core import (
     agent_session,
     config,
     critic,
+    model_choices,
     process_writer,
     profile_writer,
+    project_settings,
     vendor_loader,
 )
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -77,6 +79,38 @@ _TOKEN_HEADER = "x-tcc-token"
 # user can walk to the car and back, short enough that a forgotten dialog doesn't pin an MCP call
 # open forever.
 CONFIRM_TIMEOUT_S = 600.0
+
+
+def _reviewer_state(project_dir: Path) -> dict[str, Any]:
+    """What TCC already knows about the reviewer channel, so intake stops asking about it.
+
+    The Arbiter picks a Critic in the footer and it is stored per project. The skill, having no
+    way to see that, opens every intake with "how would you like to set up the Reviewer
+    (Critic-Advisor) channel?" -- about a channel that is configured and one `call_critic` away.
+    A GUI that knows something and asks anyway is just a chat window with more buttons.
+
+    `reachable` is the honest half: the reviewer script is Gemini-shaped, so a non-Gemini choice
+    is clipboard-only until SCR-033 lands (`model_choices.critic_reaches`).
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    if not key:
+        return {"configured": False, "how": "ask the Arbiter to pick one in TCC's footer"}
+    known = model_choices.choices([]) + model_choices.critic_choices([])
+    harness, _, model = key.partition(":")
+    # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
+    # choice is often not in it. Judge the key itself rather than reporting "unreachable" for a
+    # reviewer that works.
+    choice = model_choices.find(known, key) or model_choices.Choice(
+        harness=harness or "omp", model=model or key, label=key, provider=""
+    )
+    return {
+        "configured": True,
+        "model": choice.model,
+        "label": choice.label,
+        "reachable": model_choices.critic_reaches(choice),
+        "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
+               else "call `call_critic`; it will hand you a clipboard package for this model",
+    }
 
 
 @dataclass(frozen=True)
@@ -217,6 +251,11 @@ def build_server(
             "process_state_error": error,
             "sessions": registry.load().get("phases", {}),
             "pending_signals": bus.pending_count,
+            # The Arbiter already chose a reviewer in the footer, and without this the skill
+            # cannot see it: intake asks "how would you like to set up the Reviewer channel?"
+            # about a channel that is configured and one tool call away. Anything TCC already
+            # knows must not be asked again -- that is the difference between a GUI and a chat.
+            "reviewer": _reviewer_state(project_dir),
         }
         return json.dumps(state, ensure_ascii=False, indent=2)
 

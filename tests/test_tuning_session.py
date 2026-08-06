@@ -383,3 +383,38 @@ def test_the_harness_finding_its_own_hands_is_not_a_process_event(tmp_path):
     session = TuningSession(project_dir=tmp_path)
 
     assert session._translate(Message()) == [ToolCall(name="mcp__tcc__get_tcc_state")]
+
+
+def test_the_skill_text_is_not_rendered_as_the_model_talking(tmp_path):
+    """The `Skill` tool delivers the method as a *user-role* message, and a text block with no
+    `.name` fell through to "this must be prose" — so the whole of SKILL.md appeared in the
+    transcript as a Generator bubble. Reported as "багато зайвого на виводі"."""
+    from claude_agent_sdk import UserMessage
+
+    from autosound_tcc.core.agent_events import TextDelta
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class Block:
+        type = "text"
+        text = "# Autosound Tuning Orchestrator\n\nEvery path below is relative to the skill root…"
+
+    session = TuningSession(project_dir=tmp_path)
+
+    events = session._translate(UserMessage(content=[Block()]))
+
+    assert not any(isinstance(e, TextDelta) for e in events)
+
+
+def test_a_tool_result_inside_a_user_message_still_stops_the_line(tmp_path):
+    from claude_agent_sdk import UserMessage
+
+    from autosound_tcc.core.agent_events import ToolEnd
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class ResultBlock:
+        tool_use_id = "toolu_1"
+        content = "ok"
+
+    session = TuningSession(project_dir=tmp_path)
+
+    assert session._translate(UserMessage(content=[ResultBlock()])) == [ToolEnd()]
