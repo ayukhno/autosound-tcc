@@ -62,6 +62,22 @@ def test_phase_titles_come_from_the_skill(process, project):
 
     assert "EQ & acoustic alignment" in current.name["en"]
     assert current.name["uk"].startswith("Фаза 2")
+    # The skeleton is the method's, the same in every project, so its titles are translated here
+    # rather than written translated into the file -- where the intake's language would stick.
+    assert "EQ та акустичне узгодження" in current.name["uk"]
+
+
+def test_a_phase_title_someone_wrote_themselves_is_left_alone(process, project):
+    """Only the skill's own skeleton has a translation. A title this version has not seen is
+    somebody's decision, and inventing a translation for it would be inventing content."""
+    process.enter_phase("2")
+    state = process.load()
+    state["phases"]["2"]["title"] = "EQ, but only above 300 Hz (see the notes)"
+    process._write(state)
+
+    current = next(p for p in process_view.load_plan(project) if p.current)
+
+    assert current.name["uk"] == "Фаза 2 · EQ, but only above 300 Hz (see the notes)"
 
 
 def test_steps_land_under_their_phase(process, project):

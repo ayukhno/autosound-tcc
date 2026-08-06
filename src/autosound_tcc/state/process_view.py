@@ -35,6 +35,22 @@ _STATUS_TAGS = {
 # matters -- what it produced can no longer be trusted.
 _STALE_TAG = ({"en": "recheck", "uk": "перезняти"}, "wait")
 
+# The skill's fixed phase skeleton, in the languages TCC speaks. Translated HERE rather than
+# written translated into `process-state.json`: the phases are the method's, identical in every
+# project, and a title translated at write time freezes the file into whatever language the intake
+# happened to run in -- after which switching the app to EN leaves half the panel in UK. Keyed by
+# the skill's own English title, so a phase whose title has been changed on purpose (or a skeleton
+# this version has not seen) is left exactly as the file has it.
+_PHASE_TITLES_UK = {
+    "Project intake & checklist": "Прийом проєкту та чеклист",
+    "Baseline & target selection": "Базовий замір і вибір цілі",
+    "Crossovers, levels & delays": "Кросовери, рівні та затримки",
+    "EQ & acoustic alignment": "EQ та акустичне узгодження",
+    "Technical verdict & lock": "Технічний вердикт і фіксація",
+    "Targeted listening → feedback → close": "Цільове прослуховування → фідбек → закриття",
+    "Variations (cyclical)": "Варіації (циклічно)",
+}
+
 
 def process_dir(project_dir: Optional[Path] = None) -> Path:
     """`<project>/process` — the skill's namespace, which TCC reads and never writes."""
@@ -90,7 +106,10 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
             PlanPhase(
                 status=meta.get("status", "todo"),
                 current=key == active,
-                name={"en": f"Phase {key} · {title}", "uk": f"Фаза {key} · {title}"},
+                name={
+                    "en": f"Phase {key} · {title}",
+                    "uk": f"Фаза {key} · {_PHASE_TITLES_UK.get(title, title)}",
+                },
                 steps=tuple(_to_step(s, stale or {}) for s in steps_by_phase.get(key, [])),
             )
         )
