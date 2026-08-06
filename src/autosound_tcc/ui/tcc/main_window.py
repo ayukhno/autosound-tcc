@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QToolButton,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStyle,
     QVBoxLayout,
@@ -192,6 +193,38 @@ def _vline() -> QFrame:
     return line
 
 
+class _ElidedLabel(QLabel):
+    """A label that shortens itself instead of demanding room.
+
+    The side panels were widening on their own and pushing the right edge of a maximised window
+    off the screen, because one long row -- `Amp (midbass (front) + center; 1 channel spare)` --
+    asked for the width it wanted and Qt gave it. A key is the part that can be guessed from
+    context; the value on the right is the fact, so the key is what gets cut.
+    """
+
+    def __init__(self, text: str = "") -> None:
+        super().__init__(text)
+        self._full = text
+        self.setMinimumWidth(24)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._full = text
+        super().setText(text)
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        metrics = self.fontMetrics()
+        shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, max(self.width(), 24))
+        if shown != super().text():
+            super().setText(shown)
+        self.setToolTip(self._full if shown != self._full else "")
+
+
 def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
     (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
@@ -202,13 +235,15 @@ def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     layout = QHBoxLayout(row)
     layout.setContentsMargins(12, 5, 12, 5)
     layout.setSpacing(6)
-    k = QLabel(key)
+    k = _ElidedLabel(key)
     k.setProperty("class", "pk")
-    layout.addWidget(k)
-    layout.addStretch(1)
+    layout.addWidget(k, stretch=1)
     v = QLabel(value)
     v.setProperty("class", "pv")
-    layout.addWidget(v)
+    # The value never shrinks: it is the fact the row exists to show, and losing its right-hand
+    # end is what the narrow panel used to do.
+    v.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+    layout.addWidget(v, stretch=0)
     if trailing is not None:
         layout.addWidget(trailing)
     return row
@@ -349,6 +384,12 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
         splitter.setSizes([260, 900, 300])
+        # A side panel is a fixed column with a handle, not something that resizes itself. Without
+        # this a single long row grew the panel, the panel grew the window, and a maximised window
+        # grew past the screen edge -- reported exactly that way. The handle still works.
+        for side in (self._left, self._right):
+            side.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            side.setMinimumWidth(200)
         outer.addWidget(splitter, stretch=1)
 
         outer.addWidget(self._build_footer())
@@ -649,12 +690,43 @@ class MainWindow(QMainWindow):
         # from `dsp_profile.json` long before it. Hiding a fact TCC already has because a later
         # file has not been written yet is how the panel came to say "no data" next to a profile
         # the session had just finalised.
+        for label, value in self._app_config_rows():
+            self._system_section.body_layout().addWidget(_kv_row(label, value))
         rows = project_view.load_system_params()
         if not rows:
-            self._system_section.body_layout().addWidget(self._placeholder_label(i18n.t("noDataYet")))
             return
         for label, value in rows:
             self._system_section.body_layout().addWidget(_kv_row(label, value))
+
+    def _app_config_rows(self) -> list[tuple[str, str]]:
+        """What TCC itself is set to, next to what the rig is.
+
+        These were only visible in the footer and the menus, so "which model is answering me"
+        meant hunting for the control that sets it. They are system params in the same sense the
+        mic is: chosen once, then relied on.
+        """
+        generator = self._project_setting(_GENERATOR_KEY)
+        critic = self._project_setting(_CRITIC_KEY)
+        entries = model_choices.choices([]) + model_choices.critic_choices([])
+
+        def label_for(key: str) -> str:
+            if not key:
+                return i18n.t("modelUnchosen")
+            choice = model_choices.find(entries, key)
+            return choice.label if choice else key.split(":", 1)[-1]
+
+        gate = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        return [
+            (i18n.t("cfgLanguage"), i18n.t("langNameUk") if i18n.current_language() == "uk"
+                                    else i18n.t("langNameEn")),
+            (i18n.t("cfgGenerator"), label_for(generator)),
+            (i18n.t("cfgCritic"), label_for(critic)),
+            (i18n.t("cfgTheme"), i18n.t("cfgThemeDark" if self._mode == "dark"
+                                        else "cfgThemeLight")),
+            (i18n.t("cfgGate"), i18n.t({omp_session.GATE_WRITES: "gateWrites",
+                                        omp_session.GATE_FOREIGN: "gateForeign",
+                                        omp_session.GATE_AUTO: "gateAuto"}.get(gate, "gateWrites"))),
+        ]
 
     def _set_rew_online(self, online: bool) -> None:
         self._rew_online = online
@@ -748,16 +820,20 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Project first: it is the car in front of you. System params is the rig and the app's
+        # own settings, which you set once and then stop looking at (user, 2026-08-06 -- this
+        # reverses the 2026-07-28 order, which put the setup block on top before there was any
+        # project content to compete with it).
+        self._project_section = SidebarSection(
+            "project_params", i18n.t("projectParams"), self._settings, default_collapsed=True
+        )
+        layout.addWidget(self._project_section)
+
         self._system_section = SidebarSection(
             "system_params", i18n.t("systemParams"), self._settings, default_collapsed=True
         )
         self._rebuild_system_params()
         layout.addWidget(self._system_section)
-
-        self._project_section = SidebarSection(
-            "project_params", i18n.t("projectParams"), self._settings, default_collapsed=True
-        )
-        layout.addWidget(self._project_section)
 
         self._audio_section = SidebarSection(
             "audio_analysis", i18n.t("audioAnalysis"), self._settings, default_collapsed=True

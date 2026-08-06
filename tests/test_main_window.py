@@ -1083,3 +1083,44 @@ def test_the_gate_mode_is_a_project_setting_and_defaults_to_asking(monkeypatch):
     assert project_settings.get(config.tcc_dir(), "gate") == omp_session.GATE_FOREIGN
     assert window._gate_actions[omp_session.GATE_FOREIGN].isChecked()
     assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
+
+
+def test_system_params_shows_what_tcc_itself_is_set_to():
+    """Language, the two models, theme and the permission mode were only visible in the footer and
+    the menus, so "which model is answering me" meant hunting for the control that sets it. They
+    are system params in the same sense the mic is: chosen once, then relied on."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    window = MainWindow()
+    labels = [label for label, _ in window._app_config_rows()]
+
+    assert labels == [i18n.t("cfgLanguage"), i18n.t("cfgGenerator"), i18n.t("cfgCritic"),
+                      i18n.t("cfgTheme"), i18n.t("cfgGate")]
+
+
+def test_the_project_section_comes_before_the_system_one():
+    """The car in front of you first; the rig and the app's own settings after (user, 2026-08-06)."""
+    _app()
+    window = MainWindow()
+    panel = window._left
+    sections = [w for w in panel.findChildren(type(window._project_section))]
+    order = [s for s in sections if s in (window._project_section, window._system_section)]
+
+    assert order.index(window._project_section) < order.index(window._system_section)
+
+
+def test_a_long_key_gives_up_its_own_text_rather_than_the_value():
+    """`Amp (midbass (front) + center; 1 channel spare)` widened the panel, the panel widened the
+    window, and a maximised window went past the screen edge."""
+    from autosound_tcc.ui.tcc.main_window import _ElidedLabel, _kv_row
+
+    _app()
+    row = _kv_row("Amp (midbass (front) + center; 1 channel spare)", "Ground Zero GZA 125.4")
+    row.resize(240, 30)
+    row.show()
+    key = row.findChild(_ElidedLabel)
+    key.resize(90, 20)
+
+    assert key.text().endswith("…")
+    assert key.toolTip().startswith("Amp (midbass")
