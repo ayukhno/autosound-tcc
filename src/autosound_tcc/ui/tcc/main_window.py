@@ -10,9 +10,11 @@ section gets wired to real data, but the outer structure built here should not n
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import sys
+import weakref
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -337,15 +339,57 @@ class _ContractWorker(QThread):
     def __init__(self, project_dir) -> None:
         super().__init__()
         self._project_dir = project_dir
+        self._child = None
 
     def run(self) -> None:
-        self.result.emit(contract_check.run(self._project_dir))
+        self.result.emit(contract_check.run(self._project_dir, register=self._took_child))
+
+    def _took_child(self, child) -> None:
+        self._child = child
+
+    def cancel(self) -> None:
+        """End the check now rather than at its 30 s timeout.
+
+        Killing the child is the only lever that works: this thread is blocked reading the child's
+        output, so it reads no interrupt flag. Waiting the full timeout instead would freeze a
+        window on its way out for half a minute, and NOT waiting means Qt destroys a running
+        QThread -- which is not a warning but a `qFatal`, i.e. the whole process aborts. Seen
+        exactly that way, as a macOS crash report with `_ContractWorker` still in `poll`.
+        """
+        child = self._child
+        if child is not None and child.poll() is None:
+            child.kill()
+
+
+# Every window ever built, weakly. The point is the `atexit` hook below: a process that ends
+# without closing its window -- a script, a test, anything driving the window headlessly -- gets
+# its threads stopped anyway. Weak so that holding this list never keeps a window alive.
+_live_windows: "weakref.WeakSet[MainWindow]" = weakref.WeakSet()
+
+
+def _stop_all_workers() -> None:
+    """Stop every live window's background threads at interpreter exit.
+
+    Registered here rather than only on the window because PySide's own shutdown -- which destroys
+    the QThread objects, and calls `qFatal` if one is still running -- is itself an `atexit`
+    handler, registered when QtCore is imported. `atexit` runs last-registered-first, and this is
+    registered later, so it runs before PySide gets there.
+    """
+    for window in list(_live_windows):
+        try:
+            window.stop_workers()
+        except RuntimeError:
+            pass  # its C++ side is already gone; nothing left to stop
+
+
+atexit.register(_stop_all_workers)
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1280, 820)
+        _live_windows.add(self)
 
         self._settings = get_settings()
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
@@ -421,6 +465,13 @@ class MainWindow(QMainWindow):
         # One contract check at launch, so the status strip can say "this project has N problems"
         # before the user goes looking. Same escape hatch as the two workers above.
         self._start_contract_check()
+
+        # Quitting is not closing: Cmd-Q, a signal, or `QApplication.quit()` end the loop without
+        # any window's `closeEvent` necessarily running, and whatever is still on a thread then is
+        # destroyed under Qt -- which aborts. Both routes lead to the same cleanup.
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.stop_workers)
 
     # ---- header / footer -------------------------------------------------
 
@@ -2071,12 +2122,31 @@ class MainWindow(QMainWindow):
             return
         self._status_strip.notify(i18n.t("terminalOpened").format(cli=launched))
 
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        # The one-shot ping is normally long finished by the time anyone closes the window, but
-        # Qt destroying a still-running QThread is undefined behaviour regardless of how unlikely.
+    def stop_workers(self) -> None:
+        """Bring every background thread this window owns to a stop.
+
+        Called from `closeEvent` and again from the application's `aboutToQuit`, because the two
+        do not imply each other: a window can be closed while the app lives on, and an app can be
+        quit (Cmd-Q, a signal) without any window being closed. Safe to run twice -- each branch
+        checks whether its thread is still running.
+
+        Not optional tidiness. Qt destroying a still-running QThread is a `qFatal`, which aborts
+        the process, and that is not hypothetical: a crash report with `_ContractWorker` blocked
+        in `poll` during interpreter shutdown (2026-08-06) is what prompted this.
+        """
         ping = getattr(self, "_rew_ping", None)
         if ping is not None and ping.isRunning():
             ping.wait(2000)
+        # The contract check is the worker most likely to still be going: it starts at launch and
+        # takes as long as a Python subprocess plus a REW probe. Cancel first, then wait -- waiting
+        # out its own 30 s timeout would freeze a window on its way out.
+        contract = getattr(self, "_contract_worker", None)
+        if contract is not None and contract.isRunning():
+            contract.cancel()
+            contract.wait(3000)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self.stop_workers()
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
         self._meas_panel.shutdown()

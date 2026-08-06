@@ -104,6 +104,19 @@ def test_timeout_is_reported_not_raised(tmp_path, monkeypatch):
     assert "timed out" in report.error
 
 
+def test_a_caller_can_end_the_check_early(tmp_path, monkeypatch):
+    """Waiting out the 30 s timeout is not an option for a window on its way out, and returning
+    without waiting means Qt destroys a running QThread — a `qFatal`, i.e. the process aborts."""
+    fake = tmp_path / "slow_contract.py"
+    fake.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    monkeypatch.setattr(contract_check, "script_path", lambda: fake)
+
+    report = contract_check.run(tmp_path, register=lambda child: child.kill())
+
+    assert not report.available
+    assert "cancelled" in report.error
+
+
 def test_open_questions_are_surfaced_but_are_not_issues(tmp_path):
     """An unanswered intake fact is work the skill hasn't finished, not a broken file."""
     project = vendored_project()

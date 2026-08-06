@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from autosound_tcc.core import config, vendor_loader
 
@@ -117,11 +117,17 @@ def run(
     skip_rew: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     python_executable: Optional[str] = None,
+    register: Optional[Callable[[subprocess.Popen], None]] = None,
 ) -> ContractReport:
     """Check one project and parse the JSON report. Never raises.
 
     `skip_rew` maps to the CLI's `--no-rew`, for a purely static audit (the REW leg is best-effort
     on the checker's side already: REW not running is REPORTED, not an error).
+
+    `register` is handed the child process as soon as it exists, so a caller running this on a
+    thread can end it early. Without that the only way out is the 30 s timeout, and a window
+    closed mid-check would have to be waited on for that long -- or the thread destroyed under
+    Qt, which aborts the process.
     """
     project_dir = Path(project_dir or config.project_dir())
     started = time.monotonic()
@@ -154,12 +160,23 @@ def run(
         argv.append("--no-rew")
 
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
-                              env=vendor_loader.child_env())
-    except subprocess.TimeoutExpired:
-        return failed(f"contract.py timed out after {timeout_s:.0f}s")
+        child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 env=vendor_loader.child_env())
     except OSError as exc:
         return failed(str(exc))
+    if register is not None:
+        register(child)
+    try:
+        stdout, stderr = child.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.communicate()
+        return failed(f"contract.py timed out after {timeout_s:.0f}s")
+    proc = subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
+    if proc.returncode is not None and proc.returncode < 0:
+        # Killed rather than finished -- a cancel from `register`'s owner. Not an error the user
+        # needs told about; the caller that cancelled is on its way out.
+        return failed("contract.py was cancelled")
 
     # Exit code 1 is the checker's "issues found", not a run failure — the report on stdout is the
     # answer either way. Only an unparseable stdout means we genuinely have nothing.

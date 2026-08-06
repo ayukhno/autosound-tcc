@@ -1156,6 +1156,27 @@ def test_the_left_column_catches_up_when_the_skill_writes(tmp_path, monkeypatch)
     assert str(tmp_path / "project.json") in window._project_watcher.files()
 
 
+def test_closing_the_window_stops_the_contract_worker(tmp_path, monkeypatch):
+    """Qt destroying a still-running QThread is a `qFatal`, not a warning: the process aborts.
+    Observed as a macOS crash report with `_ContractWorker` blocked in `poll` (2026-08-06)."""
+    from autosound_tcc.core import contract_check
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    slow = tmp_path / "slow_contract.py"
+    slow.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    monkeypatch.setattr(contract_check, "script_path", lambda: slow)
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # the switch the launch-time check is gated on
+
+    window = mw.MainWindow()
+    assert window._contract_worker is not None and window._contract_worker.isRunning()
+
+    worker = window._contract_worker
+    window.stop_workers()
+
+    assert not worker.isRunning()  # cancelled, not waited out for 30 s
+
+
 def test_a_new_ledger_snapshot_does_not_need_the_reload_button(tmp_path, monkeypatch):
     """A snapshot committed from a terminal is the most visible thing a session does — a channel
     gains a crossover, the header's version moves — and the only way to see it was ↻."""
