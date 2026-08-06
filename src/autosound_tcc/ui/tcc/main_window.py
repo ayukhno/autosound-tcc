@@ -59,6 +59,7 @@ from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import measurement_view, plan_audit, process_view, project_view
+from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
@@ -876,6 +877,7 @@ class MainWindow(QMainWindow):
         self._tree.tableRequested.connect(self._on_table_requested)
         self._tree.channelClicked.connect(self._on_channel_clicked)
         self._tree.eqRequested.connect(self._on_eq_requested)
+        self._tree.toggleRequested.connect(self._on_channel_toggle)
         self._dsp_section.body_layout().addWidget(self._tree, stretch=1)
 
         return panel
@@ -1345,6 +1347,26 @@ class MainWindow(QMainWindow):
         path = str(process_view.state_file())
         if path not in self._process_watcher.files():
             self._process_watcher.addPath(path)
+
+    def _on_channel_toggle(self, group_id: str, channel: str, on: bool) -> None:
+        """The Arbiter asked for a channel to be switched on or off.
+
+        A SIGNAL, not a write. Enabling a channel changes the ledger, and the ledger is the skill's
+        to write (D-6) -- so this goes on the bus, the model picks it up with `get_pending_signals`,
+        and the tree follows once the change is recorded. The alternative, writing it here, would
+        be TCC's first edit to project data and a second author for the one file whose whole value
+        is having one.
+        """
+        server = self._mcp_server
+        if server is None:
+            self._dialog._add_system_message(i18n.t("noSessionForSignal"))
+            return
+        server.bus.push(signal_bus.CHANNEL_TOGGLE, group=group_id, channel=channel, on=on)
+        self._dialog._add_system_message(
+            i18n.t("chanToggleSent").format(
+                channel=channel, state=i18n.t("chanOn" if on else "chanOff")
+            )
+        )
 
     def _notify_missing_records(self, state: dict) -> None:
         """Say when a decision the method leans on exists only in the conversation.

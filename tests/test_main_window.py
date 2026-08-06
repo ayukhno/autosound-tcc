@@ -1214,3 +1214,37 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
 
     assert Worker.session.gate == omp_session.GATE_AUTO
     assert "Bash" in Worker.session.always_allowed
+
+
+def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypatch):
+    """Enabling a channel changes the ledger, and the ledger is the skill's to write (D-6). TCC
+    says what was asked for; the model records it and the tree follows."""
+    from autosound_tcc.core import signal_bus
+
+    _app()
+    window = MainWindow()
+    pushed: list[tuple] = []
+
+    class Bus:
+        def push(self, kind, **payload):
+            pushed.append((kind, payload))
+
+    class Server:
+        bus = Bus()
+
+    window._mcp_server = Server()
+
+    window._on_channel_toggle("virtual", "VRR", True)
+
+    assert pushed == [(signal_bus.CHANNEL_TOGGLE,
+                       {"group": "virtual", "channel": "VRR", "on": True})]
+
+
+def test_a_toggle_with_no_session_says_so_instead_of_vanishing(tmp_path):
+    _app()
+    window = MainWindow()
+    window._mcp_server = None
+
+    window._on_channel_toggle("virtual", "VRR", True)  # must not raise
+
+    assert window._dialog._bubbles  # the Arbiter is told, not ignored

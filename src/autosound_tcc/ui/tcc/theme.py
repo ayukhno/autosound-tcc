@@ -847,6 +847,28 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         subcontrol-position: right center;
         width: 10px;
     }}
+    /* .chan-toggle — the per-channel ON/OFF in the DSP tree. Small, legible at a glance, and
+    unmistakably a state rather than a button that does something else. */
+    QPushButton[class~="chan-toggle"] {{
+        border: 1px solid {t.border2};
+        border-radius: 4px;
+        padding: 0px 6px;
+        font-size: 9.5px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="chan-toggle-on"] {{
+        background: {t.mix("ok", 0.16, "panel")};
+        border-color: {t.ok};
+        color: {t.ok};
+    }}
+    QPushButton[class~="chan-toggle-off"] {{
+        background: transparent;
+        color: {t.faint};
+    }}
+    QPushButton[class~="chan-toggle"]:hover {{
+        border-color: {t.accent};
+        color: {t.accent};
+    }}
     QPushButton[class~="reason-btn"]:hover {{
         border-color: {t.info};
         color: {t.info};

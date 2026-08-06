@@ -281,6 +281,13 @@ def build_server(
         param-edit mode, flagging that something you claimed to have changed is not visible, or
         moving attention to another channel. Check this at the start of a turn and before any
         proposal; a `not_visible` signal means re-verify against disk, not restate your claim.
+
+        A `channel_toggle` signal (`{group, channel, on}`) is the Arbiter asking for a channel to
+        be switched on or off in the tree. TCC does not write the ledger, so nothing has changed
+        yet: record it the way any other agreed change is recorded (`apply.propose`), and say so.
+        Turning one **on** usually means more than a flag -- a physical output needs its virtual
+        counterpart and its place in the glossary -- so treat it as a request to make that channel
+        real, not as a single field edit.
         """
         signals = [s.as_dict() for s in bus.drain()]
         return json.dumps({"signals": signals, "count": len(signals)}, ensure_ascii=False, indent=2)

@@ -63,3 +63,46 @@ def test_a_fact_wrapper_never_leaks_into_the_markup():
 
     assert "datasheet" not in html
     assert "'value'" not in html
+
+
+def test_an_unused_channel_still_gets_a_row_and_says_it_is_off(tmp_path):
+    """"Not shown" and "off" were indistinguishable, and neither could be undone from here — you
+    cannot switch on what the panel refuses to draw (user, 2026-08-06)."""
+    from autosound_tcc.state.dsp_state import ProfileGroup
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    group = ProfileGroup(id="virtual", label="VIRTUAL", fields=("gain_db",))
+    unused = GroupRow(id="VRR", name="VRR", raw={"hidden": True}, identity={})
+
+    row = ChannelRow(group, unused)
+
+    assert row._toggle.text() == i18n.t("chanOff")
+
+
+def test_a_channel_in_use_reads_on(tmp_path):
+    from autosound_tcc.state.dsp_state import ProfileGroup
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    group = ProfileGroup(id="virtual", label="VIRTUAL", fields=("gain_db",))
+    live = GroupRow(id="VFL", name="VFL", raw={"gain_db": 0.0}, identity={})
+
+    row = ChannelRow(group, live)
+
+    assert row._toggle.text() == i18n.t("chanOn")
+
+
+def test_flipping_a_channel_asks_rather_than_writes(tmp_path):
+    """The ledger is the skill's to write (D-6). TCC says what was asked for; the model records it."""
+    from autosound_tcc.state.dsp_state import ProfileGroup
+
+    _app()
+    group = ProfileGroup(id="virtual", label="VIRTUAL", fields=("gain_db",))
+    row = ChannelRow(group, GroupRow(id="VRR", name="VRR", raw={"hidden": True}, identity={}))
+    asked: list[tuple[str, bool]] = []
+    row.toggleRequested.connect(lambda name, on: asked.append((name, on)))
+
+    row._toggle.click()
+
+    assert asked == [("VRR", True)]  # off -> the request is to turn it on

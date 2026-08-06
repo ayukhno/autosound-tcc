@@ -126,6 +126,13 @@ T: dict[Lang, dict[str, str]] = {
         "legWait": "waiting",
         "legDone": "done",
         "legBad": "taken, unusable",
+        "chanOn": "ON",
+        "chanOff": "OFF",
+        "chanToggleTip": "Ask the model to switch this channel on or off. TCC does not write the "
+                         "ledger — the request goes to the session, which records the change.",
+        "chanToggleSent": "Asked to turn <b>{channel}</b> {state}. The model records it in the "
+                          "ledger; the tree follows once it is written.",
+        "noSessionForSignal": "No session is running — start one and the request will reach it.",
         "pillMute": "MUTE",
         "pillOff": "OFF",
         "attempt": "attempt",
@@ -365,6 +372,13 @@ T: dict[Lang, dict[str, str]] = {
         "legWait": "чекаю",
         "legDone": "готово",
         "legBad": "знятий, не підходить",
+        "chanOn": "УВІМК",
+        "chanOff": "ВИМК",
+        "chanToggleTip": "Попросити модель увімкнути або вимкнути канал. TCC не пише леджер — "
+                         "запит іде в сесію, і зміну записує вона.",
+        "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в "
+                          "леджер; дерево оновиться, щойно запис буде.",
+        "noSessionForSignal": "Сесія не запущена — запусти, і запит до неї дійде.",
         "pillMute": "MUTE",
         "pillOff": "OFF",
         "attempt": "спроба",

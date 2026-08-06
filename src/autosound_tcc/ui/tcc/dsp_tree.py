@@ -21,6 +21,7 @@ from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -89,6 +90,8 @@ class ChannelRow(QWidget):
 
     clicked = Signal()
     eqRequested = Signal()
+    # (channel name, wanted state). A request, not a change: the ledger is the skill's to write.
+    toggleRequested = Signal(str, bool)
 
     def __init__(self, group: ProfileGroup, row: GroupRow) -> None:
         super().__init__()
@@ -142,6 +145,21 @@ class ChannelRow(QWidget):
             line1.addWidget(tag)
 
         line1.addStretch(1)
+        # ON/OFF, on every row, because "not shown" and "off" were indistinguishable and neither
+        # could be undone from here. Clicking asks; the model writes. `hidden` (no driver assigned
+        # at intake) and `off` (disabled at the DSP) both read as OFF -- from the Arbiter's side
+        # they are the same question, "is this channel in play?"
+        self._on = not (row.hidden or row.off)
+        self._toggle = QPushButton(i18n.t("chanOn") if self._on else i18n.t("chanOff"))
+        self._toggle.setProperty("class", f"chan-toggle chan-toggle-{'on' if self._on else 'off'}")
+        self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle.setToolTip(i18n.t("chanToggleTip"))
+        self._toggle.clicked.connect(
+            lambda _c=False, name=row.name: self.toggleRequested.emit(name, not self._on)
+        )
+        line1.addWidget(self._toggle)
+        if not self._on:
+            self.setProperty("class", "chan chan-dim")
         eq_count = row.eq_count()
         self._eq_chip = _EqChip(eq_count)
         self._eq_chip.clicked.connect(self.eqRequested.emit)
@@ -339,6 +357,7 @@ class TreeGroupSection(QWidget):
     channelClicked = Signal(str, str)  # group_id, row_id
     eqRequested = Signal(str, str)
     tableRequested = Signal(str)
+    toggleRequested = Signal(str, str, bool)  # group_id, channel name, wanted state
 
     def __init__(self, group: ProfileGroup, settings: QSettings) -> None:
         super().__init__()
@@ -364,12 +383,15 @@ class TreeGroupSection(QWidget):
         title = QLabel(_group_label(group).upper())
         apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
-        # Hidden rows (unused virtual-channel slots the skill flagged at intake, see GroupRow.hidden
-        # / docs/SKILL-CHANGE-REQUESTS.md SCR-003) are excluded from both the row count and the
-        # rendered list below.
-        visible_rows = [row for row in group.rows_ordered() if not row.hidden]
+        # Every row is drawn, including the slots the skill flagged as unused at intake
+        # (`GroupRow.hidden`, SCR-003). Hiding them made the panel unable to answer "is this
+        # channel off, or does TCC just not show it?" -- and it made turning one on impossible,
+        # because you cannot switch on what is not on screen (user, 2026-08-06). The count still
+        # reports the ones in use, which is the number people read it for.
+        visible_rows = group.rows_ordered()
+        in_use = [row for row in visible_rows if not row.hidden and not row.off]
         count_text = (
-            f"{len(visible_rows)}/{group.max_count}" if group.max_count else f"{len(visible_rows)}"
+            f"{len(in_use)}/{group.max_count}" if group.max_count else f"{len(in_use)}"
         )
         count = QLabel(count_text)
         count.setProperty("class", "cnt")
@@ -391,6 +413,9 @@ class TreeGroupSection(QWidget):
             chan = ChannelRow(group, row)
             chan.clicked.connect(lambda r=row: self.channelClicked.emit(group.id, r.id))
             chan.eqRequested.connect(lambda r=row: self.eqRequested.emit(group.id, r.id))
+            chan.toggleRequested.connect(
+                lambda name, on, gid=group.id: self.toggleRequested.emit(gid, name, on)
+            )
             children_layout.addWidget(chan)
 
         outer.addWidget(self._children)
@@ -412,6 +437,7 @@ class DspTreeWidget(QScrollArea):
     channelClicked = Signal(str, str)
     eqRequested = Signal(str, str)
     tableRequested = Signal(str)
+    toggleRequested = Signal(str, str, bool)  # (group id, channel name, wanted state)
 
     def __init__(self) -> None:
         super().__init__()
@@ -447,4 +473,5 @@ class DspTreeWidget(QScrollArea):
             section.channelClicked.connect(self.channelClicked.emit)
             section.eqRequested.connect(self.eqRequested.emit)
             section.tableRequested.connect(self.tableRequested.emit)
+            section.toggleRequested.connect(self.toggleRequested.emit)
             self._layout.insertWidget(self._layout.count() - 1, section)
