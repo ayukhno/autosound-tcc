@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from autosound_tcc.core import config
 from autosound_tcc.ui.tcc.main_window import MainWindow
 from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
 
@@ -44,7 +45,14 @@ def main() -> int:
         # Into the environment rather than a private variable: `AUTOSOUND_PROJECT_DIR` is the
         # skill's own (SCR-011), so every subprocess TCC starts -- the reviewer, the recorder, an
         # agent CLI -- lands on the same folder without being told separately.
-        os.environ["AUTOSOUND_PROJECT_DIR"] = str(args.project_dir.expanduser().resolve())
+        chosen = str(args.project_dir.expanduser().resolve())
+        os.environ["AUTOSOUND_PROJECT_DIR"] = chosen
+        # Remembered as well, not only exported. Otherwise the flag and the saved choice are two
+        # sources of truth that agree until they do not: TCC restarts itself on a project switch,
+        # the restart carries no flag, and the window comes back on the *previous* folder while
+        # the person who typed the flag believes they are still where they started. Reported as
+        # exactly that confusion.
+        config.set_project_dir(Path(chosen))
     app = QApplication(sys.argv)
     app.setApplicationName("autosound-tcc")
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session

@@ -1173,4 +1173,44 @@ def test_a_decision_that_was_never_written_down_reaches_the_strip(tmp_path, monk
     window._notify_missing_records({"active_phase": "0", "targets": {}})
 
     assert len(said) == 1  # said once per fact; the file is polled, the Arbiter is not
-    assert "target curve" in said[0]
+    assert i18n.t("recordTargetCurve") in said[0]
+
+
+def test_the_line_goes_away_once_the_record_exists(tmp_path, monkeypatch):
+    """A warning that outlives its cause teaches people to ignore the strip."""
+    _app()
+    window = MainWindow()
+    cleared: list[bool] = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda *_: None)
+    monkeypatch.setattr(window._status_strip, "clear", lambda: cleared.append(True))
+
+    window._notify_missing_records({"active_phase": "0", "targets": {}})
+    window._notify_missing_records({"active_phase": "0", "targets": {"FULL": "EPY"}})
+
+    assert cleared == [True]
+
+
+def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monkeypatch):
+    """Both dials were read once, when the session was built. The Arbiter switched to "do not ask",
+    ticked "stop asking about Bash", and was asked about Bash again — a setting that only takes
+    effect next launch is a setting that does not work."""
+    from autosound_tcc.core import config, omp_session, project_settings
+
+    _app()
+    window = MainWindow()
+
+    class Session:
+        gate = omp_session.GATE_WRITES
+        always_allowed = frozenset()
+
+    class Worker:
+        session = Session()
+
+    window._agent_worker = Worker()
+    monkeypatch.setattr(config, "tcc_dir", lambda *_a, **_k: tmp_path)
+    project_settings.set_value(tmp_path, "always_allowed", "Bash")
+
+    window._set_gate_mode(omp_session.GATE_AUTO)
+
+    assert Worker.session.gate == omp_session.GATE_AUTO
+    assert "Bash" in Worker.session.always_allowed

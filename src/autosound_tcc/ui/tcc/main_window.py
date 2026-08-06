@@ -428,7 +428,7 @@ class MainWindow(QMainWindow):
         # what is in it. Three actions, in the order they matter: pick the folder, put what the
         # model knows on disk, start over with an empty context.
         self._project_btn = QToolButton()
-        self._project_btn.setProperty("class", "reason-btn")
+        self._project_btn.setProperty("class", "reason-btn project-btn")
         self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self._project_btn)
@@ -690,8 +690,6 @@ class MainWindow(QMainWindow):
         # from `dsp_profile.json` long before it. Hiding a fact TCC already has because a later
         # file has not been written yet is how the panel came to say "no data" next to a profile
         # the session had just finalised.
-        for label, value in self._app_config_rows():
-            self._system_section.body_layout().addWidget(_kv_row(label, value))
         rows = project_view.load_system_params()
         if not rows:
             return
@@ -1074,13 +1072,13 @@ class MainWindow(QMainWindow):
         values that are already fields in the same file, so the file carried one fact in two
         shapes. Panels are built from the facts now (`_rebuild_system_params` does the same)."""
         clear_layout(self._project_section.body_layout())
+        # Which models answer, which language, which permissions -- those are decisions about
+        # *this project*, kept in its own `tcc-project.json`. System params is the rig: the DSP,
+        # the amps, the mic, the REW port. They were in the wrong section (user, 2026-08-06).
+        for label, value in self._app_config_rows():
+            self._project_section.body_layout().addWidget(_kv_row(label, value))
         summary_rows = project_view.load_channel_summary() if view else ()
         open_questions = project_view.load_open_questions() if view else ()
-        if not summary_rows and not open_questions:
-            self._project_section.body_layout().addWidget(
-                self._placeholder_label(i18n.t("noDataYet"))
-            )
-            return
         for label, value in summary_rows:
             self._project_section.body_layout().addWidget(_kv_row(label, value))
         for question in open_questions:
@@ -1354,13 +1352,21 @@ class MainWindow(QMainWindow):
         The supervisor's second rule (`plan_audit.missing_records`). Said once per fact rather than
         on every refresh: the file is polled, the Arbiter is not.
         """
+        missing = plan_audit.missing_records(state)
         seen = getattr(self, "_missing_said", set())
-        for record in plan_audit.missing_records(state):
+        if not missing:
+            # It was recorded. The strip was telling the truth and has stopped being true, and a
+            # warning that outlives its cause teaches people to ignore the strip.
+            if seen:
+                self._status_strip.clear()
+                self._missing_said = set()
+            return
+        for record in missing:
             if record.what in seen:
                 continue
             seen.add(record.what)
             self._status_strip.notify(
-                i18n.t("missingRecord").format(what=record.what, why=record.why)
+                i18n.t("missingRecord").format(what=i18n.t(record.what), why=i18n.t(record.why))
             )
         self._missing_said = seen
 
@@ -1646,6 +1652,26 @@ class MainWindow(QMainWindow):
         allowed = set(self._always_allowed()) | {tool}
         project_settings.set_value(config.tcc_dir(), _ALWAYS_KEY, ",".join(sorted(allowed)))
         self._dialog._add_system_message(i18n.t("autoAllowed").format(tool=tool))
+        self._push_gate_to_session()
+
+    def _push_gate_to_session(self) -> None:
+        """Apply the permission settings to the session that is already running.
+
+        Both dials were read once, when the session object was built, so changing them mid-turn
+        changed a file and nothing else: the Arbiter switched to "do not ask", ticked "stop asking
+        about Bash", and was asked about Bash again. A setting that only takes effect next launch
+        is a setting that does not work.
+        """
+        worker = getattr(self, "_agent_worker", None)
+        session = getattr(worker, "session", None) if worker is not None else None
+        if session is None:
+            return
+        # Plain attributes on both adapters, read at the moment a permission is judged, so
+        # assigning them is the whole of "apply now" -- no restart, no queue, no thread hop.
+        if hasattr(session, "gate"):
+            session.gate = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        if hasattr(session, "always_allowed"):
+            session.always_allowed = self._always_allowed()
 
     def _reload_model_choices(self) -> None:
         """Refill both pickers from one registry, keeping selections that survived."""
@@ -1746,6 +1772,10 @@ class MainWindow(QMainWindow):
     def _set_gate_mode(self, mode: str) -> None:
         project_settings.set_value(config.tcc_dir(), _GATE_KEY, mode)
         self._refresh_project_button()
+        self._push_gate_to_session()
+        # The panel shows the mode, so it must not lag the menu. `None` is the honest argument:
+        # the config rows do not depend on the DSP view, and the project facts are re-read anyway.
+        self._set_project_params(getattr(self, "_view", None))
 
     def _refresh_project_button(self) -> None:
         current = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES

@@ -57,6 +57,9 @@ T: dict[Lang, dict[str, str]] = {
         "diagStripError": "Contract check unavailable: {error}",
         "staleStrip": "{what} — {n} channel(s) need re-measuring: {codes}",
         "missingRecord": "Not written down: {what} — {why}.",
+        "recordTargetCurve": "the target curve",
+        "recordTargetCurveWhy": "phase 0 chooses it and every later phase is measured against it, "
+                                "so nothing on disk says which curve was picked",
         "measNoTask": "No capture task yet. It is derived from the phase, the naming glossary and the current ledger version — so it appears once the intake has settled the channel names.",
         "noProjectMeas": "No project — nothing to capture yet.",
         "npTitle": "New project",
@@ -293,6 +296,9 @@ T: dict[Lang, dict[str, str]] = {
         "diagStripError": "Перевірка контракту недоступна: {error}",
         "staleStrip": "{what} — перезняти каналів: {n} ({codes})",
         "missingRecord": "Не записано: {what} — {why}.",
+        "recordTargetCurve": "цільова крива",
+        "recordTargetCurveWhy": "фаза 0 її обирає, і всі наступні фази міряються проти неї, "
+                                "тож на диску не лишилось, яку саме криву взяли",
         "measNoTask": "Завдання на зняття ще немає. Воно виводиться з фази, глосарія імен і поточної версії леджера — тож з'явиться, коли інтейк закріпить назви каналів.",
         "noProjectMeas": "Немає проєкту — знімати поки нічого.",
         "npTitle": "Новий проєкт",

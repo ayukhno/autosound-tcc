@@ -120,8 +120,8 @@ def unbacked_steps(
 class MissingRecord:
     """A decision the method depends on that exists nowhere a later session can read it."""
 
-    what: str
-    why: str
+    what: str   # an i18n key naming the record, not a sentence
+    why: str    # an i18n key explaining why it matters
 
 
 # Phases from which the target curve is load-bearing. Phase 0 is where it is chosen; everything
@@ -149,10 +149,7 @@ def missing_records(state: dict) -> tuple[MissingRecord, ...]:
         return ()
     if state.get("targets"):
         return ()
-    return (
-        MissingRecord(
-            what="target curve",
-            why="phase 0 selects it and every later phase is measured against it — "
-                "nothing on disk records which curve was chosen",
-        ),
-    )
+    # Keys, not prose: this is read out in the window, and the window speaks the project's
+    # language. An English sentence assembled here would arrive untranslated whatever the app is
+    # set to -- which is exactly how it turned up on screen.
+    return (MissingRecord(what="recordTargetCurve", why="recordTargetCurveWhy"),)

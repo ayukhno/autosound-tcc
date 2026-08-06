@@ -126,3 +126,25 @@ def test_project_dir_falls_back_to_default_state_root_without_recursing(monkeypa
 
     assert config.project_dir() == config.DEFAULT_STATE_ROOT
     assert config.state_root() == config.DEFAULT_STATE_ROOT / "state"
+
+
+def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
+    """The flag and the saved choice were two sources of truth that agree until they do not: TCC
+    restarts itself on a project switch, the restart carries no flag, and the window comes back on
+    the previous folder while the person who typed the flag believes otherwise."""
+    import os
+    import sys
+
+    from autosound_tcc import app
+    from autosound_tcc.core import config
+
+    remembered: list = []
+    monkeypatch.setattr(config, "set_project_dir", remembered.append)
+    monkeypatch.setattr(app, "config", config)
+    monkeypatch.setattr(sys, "argv", ["autosound-tcc", "--project-dir", str(tmp_path)])
+    monkeypatch.setattr(app, "ensure_project_chosen", lambda **_: False)  # stop before the window
+
+    app.main()
+
+    assert [str(p) for p in remembered] == [str(tmp_path.resolve())]
+    assert os.environ["AUTOSOUND_PROJECT_DIR"] == str(tmp_path.resolve())

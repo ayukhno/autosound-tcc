@@ -296,7 +296,18 @@ class ProfileGroup:
     max_count: Optional[int] = None
 
     def rows_ordered(self) -> list[GroupRow]:
-        return sorted(self.rows, key=lambda r: (r.order if r.order is not None else 99, r.name))
+        """Ledger order first, then the hardware slot, then the name.
+
+        The slot is the tie-breaker rather than the name because the slot letter is the channel's
+        ID badge and the order the DSP's own software lists them in -- a tree sorted `c, m-L, r-L,
+        sw, tw-L, w-L` reads as alphabetical noise next to a processor showing `B, C, E, F, G, I`.
+        `order` still wins when the ledger states one; this only decides what happens when it does
+        not, which is every ledger written so far.
+        """
+        return sorted(
+            self.rows,
+            key=lambda r: (r.order if r.order is not None else 99, r.slot or "~", r.name),
+        )
 
 
 @dataclass(frozen=True)

@@ -354,6 +354,8 @@ class DialogPanel(QWidget):
         for message in DIALOG:
             self._add_bubble(message.who, message.role, i18n.tx(message.text))
         self._scroll.setWidget(self._chat)
+        self._scroll_pending = False
+        self._scroll.verticalScrollBar().rangeChanged.connect(self._on_scroll_range_changed)
         outer.addWidget(self._scroll, stretch=1)
 
         # Tool calls live here, not in the transcript. Their whole value is "the thing is still
@@ -507,12 +509,18 @@ class DialogPanel(QWidget):
         # runs the panel may already be torn down (window closed mid-call). Touching a widget
         # whose C++ side is gone is the same class of fault as deleting a widget from inside its
         # own event handler -- see feedback_qt_qss_gotchas. Nothing to scroll is not an error.
-        # Twice: now, and again once Qt has laid the new bubble out. `maximum()` is computed from
-        # the widget's current size, and a bubble added a microsecond ago still has none -- so the
-        # immediate scroll lands short of the message that caused it, which is exactly what
-        # "after sending, autoscroll does not work" looked like.
+        # A deferred call was not enough either: a bubble's height settles after its label wraps
+        # and its `_fit` runs, which can be a second layout pass later, so `maximum()` was still
+        # short. Arm the scrollbar's own `rangeChanged` instead -- it fires exactly when the thing
+        # we are waiting for happens -- and disarm after one shot so scrolling back stays sticky.
+        self._scroll_pending = True
         QTimer.singleShot(0, self._scroll_now)
         self._scroll_now()
+
+    def _on_scroll_range_changed(self, _min: int, _max: int) -> None:
+        if getattr(self, "_scroll_pending", False):
+            self._scroll_pending = False
+            self._scroll_now()
 
     def _scroll_now(self) -> None:
         try:

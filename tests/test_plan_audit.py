@@ -110,7 +110,8 @@ def test_phase_zero_without_a_target_is_flagged():
 
     found = missing_records({"active_phase": "0", "targets": {}})
 
-    assert [record.what for record in found] == ["target curve"]
+    # i18n keys, not prose: the window says this out loud and speaks the project's language.
+    assert [record.what for record in found] == ["recordTargetCurve"]
 
 
 def test_a_recorded_target_is_not_flagged():
