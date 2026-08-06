@@ -5,11 +5,29 @@ but does not own. TCC's own code never edits the submodule directly — these ar
 processed in a batched skill-side session.
 
 Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/self have agreed to do it)
-· `done` (landed in the submodule and the pin bumped).
+· `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
+being the right one — the reason is on the entry).
+
+**Open as of 2026-08-06** — everything not listed here is done, superseded or rejected:
+
+| SCR | ask | where it bites |
+|-----|-----|----------------|
+| 013 | `verify_measurements` as a library with a JSON verdict | TCC re-implements the verdict or shells out |
+| 015 | what belongs in "Car audio analysis" | that panel section is still a placeholder |
+| 026 | `apply.propose` emits the change delta, not only the snapshot | the dialog cannot show what changed |
+| 027 | `critic_called` links to the critique text | the footer says a Critic was called and cannot show what it said |
+| 030 | the Arbiter's answers are not events | decisions live only in the transcript |
+| 031 | the recorder is prescribed as a shell call even when it is a tool | the model shells out with the wrong path instead of calling the MCP tool |
+| 033 | the reviewer's transport is a parameter, not Gemini | TCC's picker must mark non-Gemini choices clipboard-only |
+| 034 | the capture task is derived but never recorded | status is recomputed from open REW titles; skipped ≠ not-done |
+| 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
+
+The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
+they were checked against the code and corrected on 2026-08-06. Most of that batch had landed.
 
 ## SCR-001 — driver make/model + Fs per output channel
 
-**Status**: proposed
+**Status**: done (v3 — `project.json` `channels[]` carries `driver.make/model` and `fs_hz` as a `fact()` with its source)
 **Target**: skill intake flow (`skills/autosound-tuning/references/core/project-intake.md` §1.5,
 `phase_-1_intake.md`)
 **TCC dependency**: `src/autosound_tcc/ui/tcc/dsp_tree.py`, `ChannelRow._tooltip_html` (~line 180-186),
@@ -24,7 +42,7 @@ Need a bridge from that intake step into the ledger's per-channel `driver` (stri
 
 ## SCR-002 — ledger writer must emit slot/order/descr/tag/role
 
-**Status**: proposed
+**Status**: superseded by the 3.0 break — identity (`slot`/`order`/`descr`/`role`/`hidden`) LEFT the ledger instead of being emitted into it; `project.json` owns it and consumers join on `code` (SCR-001/017). `validate` refuses a row still carrying those, so the migration is loud rather than lossy
 **Target**: the vendored skill's ledger-writing code (state writer, wherever `v_NNN.json` files are
 produced)
 **TCC dependency**: `state/dsp_state.py`'s `GroupRow` (slot/order/descr/tag) and the tree's `role`
@@ -37,7 +55,7 @@ and `role` per channel to match what TCC now renders.
 
 ## SCR-003 — explicit `hidden`/`unused` flag on unused virtual channels
 
-**Status**: proposed
+**Status**: done (`hidden` on a `project.json` channel entry — `{"code": "vrf", "slot": "F", "hidden": true}`)
 **Target**: skill intake flow, same area as SCR-001 (wherever the skill decides a virtual-channel
 slot has no physical driver assigned)
 **TCC dependency**: `state/dsp_state.py`'s `GroupRow.hidden` property (new, added alongside this doc)
@@ -66,7 +84,7 @@ SCR-004..006 (without these TCC's process UI stays mock), P2 = SCR-007..011 + SC
 
 ## SCR-004 — machine-readable process state: `process-state.json` + `journal.jsonl`
 
-**Status**: proposed · **Priority**: P1 — the single biggest gap
+**Status**: done — `rew_tool/state/process.py` writes `process-state.json` + `journal.jsonl`; TCC reads both (`state/process_view.py`, the plan panel)
 **Target**: new module alongside the ledger (`rew_tool/state/`, same design pattern as
 `PresetHistory`); written by the skill after every transition
 **TCC dependency**: `ui/tcc/plan_panel.py`, `ui/tcc/measurement_panel.py`, footer critic status,
@@ -105,7 +123,7 @@ process history. Minimum event types: `phase_entered`, `step_added`, `attempt_st
 
 ## SCR-005 — formalize ledger schema v2 + `schema_version`
 
-**Status**: proposed · **Priority**: P1
+**Status**: done, and gone past it: v2 landed, then the 3.0 format break. One `schema_version: 3` across every machine file, `contract.py` checks it
 **Target**: `rew_tool/state/schema.md` + `state.py` `validate()` + the ledger writer
 **TCC dependency**: `state/dsp_state.py` reads `slot`, `order`, `descr`, `tag`, `hidden`, `features`,
 `target`, `slot_label`, `save`, and the tree passes through `role` — all of which exist only because
@@ -120,7 +138,7 @@ Also reconcile the naming split: skill schema says `helix_ch`, TCC ledgers say `
 
 ## SCR-006 — structured EQ bands in the snapshot
 
-**Status**: proposed · **Priority**: P1
+**Status**: done (`"eq": [{"type": "PK", "f": 1000, "gain_db": -9, "q": 2, "bypass": false}]` — `state/schema.md`)
 **Target**: ledger writer + `schema.md` (channel `eq` field)
 **TCC dependency**: `state/dsp_state.py::EqBand.from_string` regex-parses the informal string
 micro-format (`"PK 1000 -9 Q2"`); the planned EQ panel (30 bands, per-band bypass, TCC-Concept §7)
@@ -133,7 +151,7 @@ needs real per-band values, not a display string. The skill's own canon is the o
 
 ## SCR-007 — `dsp-state-current` is always generated, never hand-written
 
-**Status**: proposed · **Priority**: P2
+**Status**: done — `state.py` renders the `dsp-state-current` view and says so: generated-only, never hand-edited
 **Target**: `SKILL.md` guardrails + `naming-and-structure.md` + phase docs
 **TCC dependency**: indirect but structural — TCC treats the JSON ledger as the single source of
 truth; any workflow where `dsp-state-current` (markdown) is maintained by hand can fork from the
@@ -146,7 +164,7 @@ HEAD, full stop. Edit the JSON (via `apply.propose`), re-render the markdown.
 
 ## SCR-008 — machine-readable channel glossary + naming-grammar functions
 
-**Status**: proposed · **Priority**: P2
+**Status**: done — `naming.py` carries the `Glossary` plus `parse_name`/`generate_name`/`expected_series`/`expected_groups`; TCC calls them rather than re-deriving the grammar
 **Target**: intake flow (`project-intake.md §5`) + a small `rew_tool` naming module
 **TCC dependency**: the measurement panel needs to compute an expected capture series (channels,
 pairs `Ws/Ms/TWs`, combos `ALL/ALL+C`, joints `SW+Ws`, types `sw`/`rta`) and validate existing REW
@@ -160,7 +178,7 @@ implementation both the skill and TCC call, instead of two readings of the same 
 
 ## SCR-009 — target-curves registry (active curve + curve↔preset) as JSON
 
-**Status**: proposed · **Priority**: P2
+**Status**: done for the pointer — `process-state.json` `targets` is `{preset: curve}` and `set-target` is the only writer (SCR-036 gates on it). NOT done for the catalogue: the curves themselves are still code (`target_curves.py`), not data
 **Target**: `naming-and-structure.md §6` convention + project scaffolding (`project-intake.md §5`)
 **TCC dependency**: the header's `TARGET curve: <name>` per preset (TCC-Concept §4) and SCR-004's
 "active target curve per preset" field. Today the ACTIVE curve + curve↔preset mapping live in a
@@ -173,7 +191,7 @@ pointer.
 
 ## SCR-010 — one canonical DSP capability profile; skill owns the field vocabulary
 
-**Status**: proposed · **Priority**: P2
+**Status**: done — `dsp_profile.py` + a project's `dsp_profile.json`; the skill owns the field vocabulary and TCC renders whatever tiers it declares
 **Target**: `rew_tool/dsp_profile.py` + `knowledge/dsp/` templates
 **TCC dependency**: TCC renders entirely from `dsp_profile.json` (`state/dsp_state.py` generic
 groups), and its onboarding interviewer (`dsp_profile_interview.py`) carries its own copy of the
@@ -190,7 +208,7 @@ captured at onboarding, not hardcoded.
 
 ## SCR-011 — split `autosound_context.md`: machine facts → `project.json`
 
-**Status**: proposed · **Priority**: P2
+**Status**: done — `project.json` holds the machine facts, `autosound_context.md` stays the prose profile
 **Target**: intake flow (`project-intake.md §1, §5`) + project scaffolding
 **TCC dependency**: TCC-TZ §3's target layout (`project.json` + `presets/<preset>/{target,state}`)
 needs a machine entry point; today equipment/routing/paths/driver-per-channel facts exist only as
@@ -205,7 +223,7 @@ vs TCC (`AUTOSOUND_TCC_STATE_ROOT`) should converge on one convention rooted at 
 
 ## SCR-012 — package `rew_tool` as an importable library (`autosound-core`)
 
-**Status**: proposed · **Priority**: P3
+**Status**: **rejected** — two repos, forever, and no third (see the repo-boundary decision in `docs/TCC-TZ.md` §7). TCC vendors the skill as a submodule and loads `rew_tool` by explicit path (`core/vendor_loader.py`); an `autosound-core` package would be a third thing to version for no gain
 **Target**: repo structure — `rew_tool/` flat script dir → a proper package with semver
 **TCC dependency**: `core/vendor_loader.py` exists solely because `rew_tool` is a flat, `__init__`-less
 directory whose module names (`state`, `analysis`) would collide on `sys.path`; TCC loads three files
@@ -218,7 +236,7 @@ the package. Already anticipated in TCC's brief ("later pip package `autosound-c
 
 ## SCR-013 — `verify_measurements` as a library function with a JSON verdict
 
-**Status**: proposed · **Priority**: P3
+**Status**: open — `verify_measurements.py` is still the one-off script it says it is (no `--json`, no importable verdict). The library half of the ask never happened; `analysis.py`/`rew_api.py` are shared, this file is not
 **Target**: `rew_tool/verify_measurements.py`
 **TCC dependency**: the measurement task card must show, per expected measurement: exists / valid /
 drifted (TCC-TZ §4 "валідність свіпу"). The current file is a one-off Passat session script with
@@ -231,7 +249,7 @@ through the vendored/packaged module and lights the indicator.
 
 ## SCR-014 — config lifecycle: provenance, `_open_questions`, change events with `impact`
 
-**Status**: proposed · **Priority**: P2
+**Status**: done — `fact()` wraps a value with `source`/`at`, `_open_questions` lists what is unanswered, and `project.py record-change` writes a `config_change` event with `impact`. TCC reads the impact (`state/plan_audit.stale_channels`)
 **Target**: intake flow + every machine config file (`project.json`, `dsp_profile.json`,
 `glossary.json`, `presets/*/target.json`) + the journal (SCR-004)
 **TCC dependency**: TCC renders `_open_questions` as onboarding TODO chips (incremental intake right
@@ -260,7 +278,7 @@ What the skill must add:
 
 ## SCR-015 — data-source structure for the left panel's Project / System / Car-audio-analysis sections
 
-**Status**: proposed · **Priority**: P2
+**Status**: half done — System params now reads `project.json` (`project_view.load_system_params`: DSP, amps, mic, source) and every channel of every tier is listed there with its ON/OFF. **Car audio analysis is still a placeholder**: nothing has defined what belongs in it
 **Target**: intake flow + whatever config file(s) end up owning this (likely `project.json` per
 SCR-011, or a dedicated `system_profile.json` alongside `dsp_profile.json`)
 **TCC dependency**: `ui/tcc/main_window.py`/`ui/tcc/sidebar_section.py` (new 2026-07-28): the left
@@ -292,7 +310,7 @@ a schema for either section -- they stay static placeholders by design, not an o
 
 ## SCR-016 — Project params: processor type + channel-config summary (project data, not just knowledge base)
 
-**Status**: proposed · **Priority**: P2
+**Status**: done, in a different place than the ask — the processor's identity is a System-params row, and the per-tier channel summary is the group header there (`OUTPUT 6/12`), built 2026-08-06. Project params kept its own scope (car/setup, body/chassis)
 **Target**: skill intake flow, Phase −1 (intake + install) -- the same step that already resolves
 the DSP model and channel layout to write `dsp_profile.json`/`knowledge/dsp/<slug>.md` (SCR-010)
 **TCC dependency**: `ui/tcc/main_window.py`'s **Project params** sidebar section (SCR-015). Today it
@@ -318,7 +336,7 @@ summary fact the skill wrote, not duplicate the counting logic client-side.
 
 ## SCR-017 — open question: RearRC belongs in a DSP config file, not duplicated per preset ledger
 
-**Status**: proposed (open question, not yet a concrete ask) · **Priority**: P3
+**Status**: done — `project.json` `hardware.controls` is the single DSP-level home; a ledger row carries only `tag`, naming WHICH control affects it, and the value is resolved on read (`GroupRow.tag_value`)
 **Target**: wherever the skill ends up putting DSP hardware-level config (new file, or a section of
 `dsp_profile.json`) vs. the per-preset ledger (`state/state.py`'s `v_NNN.json`)
 **TCC dependency**: `ui/tcc/dsp_tree.py`'s `tag`/`tag_value` chip (`ChannelRow`/`GroupRow.tag_value`,
@@ -344,7 +362,7 @@ skill decides where "DSP hardware config, constant across this DSP's presets" be
 
 ## SCR-018 — where does the REW project file's name + full path come from?
 
-**Status**: proposed (open question) · **Priority**: P3
+**Status**: done as a field — `project.json` `paths.rew_project`, filled when intake records it. Whether intake actually asks is a flow question, not a schema one
 **Target**: intake flow / project config (`project.json` per SCR-011, or a dedicated field
 alongside `dsp_profile.json`)
 **TCC dependency**: user request 2026-07-28: show the REW project file's (`.mdat`) name and full
@@ -361,7 +379,7 @@ this fact if/when it's added, rather than TCC inventing a duplicate, unsynced in
 
 ## SCR-019 — AI-session lifecycle: when TCC starts a new Generator session vs. resumes
 
-**Status**: proposed (open design question, not yet answered -- user request 2026-07-28)
+**Status**: answered by implementation — `core/session_registry.py` binds one session per phase and resumes it (`resumable_session`), which is the hypothesis this SCR recorded. Reopen if the phase↔session mapping turns out wrong in use
 **Target**: TCC's live AI-dialog integration (`ui/tcc/dialog_panel.py` + a `core/agent_session.py`-
 style session, once the Generator stops being `mock_data.DIALOG`) + the skill's own phase model
 (`references/core/process-control.md`, the Phase −1..6 skeleton)
@@ -690,7 +708,7 @@ survive in one place):
 
 ## SCR-032 — `__pycache__` is tracked, so running the skill dirties the checkout
 
-**Status**: proposed (found while cleaning the submodule after the recorder work, 2026-08-04)
+**Status**: done — `__pycache__/` is in the skill repo's `.gitignore` and nothing matching it is tracked
 **Target**: `skills/autosound-tuning/rew_tool/__pycache__/`, `rew_tool/state/__pycache__/`,
 `rew_tool/gates/__pycache__/` — **11 tracked `.pyc` files**; plus `.gitignore`, which already
 carries careful rules for OS files and project data but nothing for build output
@@ -726,7 +744,11 @@ Ask, both halves:
 
 ## SCR-033 — the reviewer is Gemini-shaped; make the transport a parameter
 
-**Status**: proposed (found converging TCC's Critic picker onto the model registry, 2026-08-05)
+**Status**: proposed, narrowed on 2026-08-06 — the CLI half is largely there (`scripts/` ships
+`claude_critic.sh`, `codex_critic.sh` and `gemini_critic.sh` with per-vendor common files), so what
+is left is the API path: `autosound_ai.py` still has exactly one `call_gemini_api`, and TCC's
+`model_choices.critic_reaches` still answers "gemini or google" because that is the path it can
+count on
 **Target**: `skills/autosound-tuning/scripts/autosound_ai.py` — `call_gemini_api` (the only API
 function), `detect_cli` (`agy`/`gemini` only), the CLI invocation `[bin, "--model", M, "-p",
 <path>]`, and `run_doctor`'s provider report
