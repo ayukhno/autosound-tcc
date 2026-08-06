@@ -196,6 +196,23 @@ def set_target(project_dir: Path, preset: str, curve: str) -> str:
     return _run(project_dir, ["target", preset, curve])
 
 
+def record_decision(
+    project_dir: Path, question: str, answer: str, step: str = "", invalidates: str = ""
+) -> str:
+    """What the Arbiter ruled, as the answer rather than as prose about it (SCR-030).
+
+    TCC has the machine-readable form at the moment it happens — an option the Arbiter clicked, a
+    confirmation they allowed or denied — and used to discard it. The skill's own writer is still
+    the only writer.
+    """
+    args = ["decision", question, answer]
+    if step:
+        args.append(step)
+    if invalidates:
+        args.append(f"--invalidates={invalidates}")
+    return _run(project_dir, args)
+
+
 def record_session(project_dir: Path, harness: str, model: str, resumed: bool = False) -> str:
     """A working session was attached — the one journal event TCC writes on its own behalf.
 

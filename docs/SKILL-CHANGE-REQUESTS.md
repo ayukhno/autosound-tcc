@@ -16,8 +16,6 @@ being the right one — the reason is on the entry).
 | 015 | what belongs in "Car audio analysis" | that panel section is still a placeholder |
 | 026 | `apply.propose` emits the change delta, not only the snapshot | the dialog cannot show what changed |
 | 027 | `critic_called` links to the critique text | the footer says a Critic was called and cannot show what it said |
-| 030 | the Arbiter's answers are not events | decisions live only in the transcript |
-| 031 | the recorder is prescribed as a shell call even when it is a tool | the model shells out with the wrong path instead of calling the MCP tool |
 | 033 | the reviewer's transport is a parameter, not Gemini | TCC's picker must mark non-Gemini choices clipboard-only |
 | 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
 
@@ -581,7 +579,7 @@ lock-in for another.
 
 ## SCR-030 — the Arbiter's answers are not events
 
-**Status**: proposed (found in the Claude run with TCC's MCP server up, 2026-08-04)
+**Status**: done (skill `fed5464`, TCC `HEAD` — a `user_decision` event carrying the question, the answer as given, the phase/step it was asked under and `invalidates`; a `decision` subcommand and a `record_decision` MCP tool write it, and TCC writes one itself whenever the Arbiter clicks an option, which is where the answer is machine-readable. SKILL.md: record a ruling before acting on it.)
 **Target**: `rew_tool/state/process.py` + the journal vocabulary fixed in SCR-004 — one new event
 type and the command that writes it; SKILL.md states when it is mandatory
 **TCC dependency**: the dialog render (`spike/render_dialog.py`, headed for `ui/tcc/dialog_panel.py`)
@@ -633,7 +631,7 @@ Ask, smallest version first:
 
 ## SCR-031 — the recorder is prescribed as a shell call even when it is a tool
 
-**Status**: proposed (found in the SCR-028/029 verification re-run, 2026-08-04)
+**Status**: done (skill `fed5464`, TCC `HEAD` — the prescription sites now say tool-first: where a process-recording tool is on the surface that is the call, the command lines stay exact for a plain terminal. Opening the phase became an entry condition, before the first question. TCC seeds `enter_phase(-1)` itself when a session starts against a project with no process state, and writes `session_started` on every attach.)
 **Target**: every site that names the recorder as a command line — `SKILL.md` ~line 65 ("Write the
 PROCESS as it happens"), `references/core/project-intake.md` ~line 137 (`enter-phase -1` at the start
 of Phase −1), `references/core/process-control.md`

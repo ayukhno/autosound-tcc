@@ -219,6 +219,9 @@ class DialogPanel(QWidget):
     # file watcher: a turn that wrote nothing fires no watcher, and "the model talked and recorded
     # nothing" is exactly what the supervisor is for.
     turnFinished = Signal()
+    # (question, answer) -- the Arbiter ruled on something. The window writes it to the journal
+    # (SCR-030); the panel does not touch disk itself.
+    arbiterAnswered = Signal(str, str)
     # Typing into the composer with no session running is a request to start one -- see `_on_send`.
     startRequested = Signal(str)
 
@@ -821,6 +824,9 @@ class DialogPanel(QWidget):
             # placeholder in the composer said so, and a placeholder is not where anyone looks.
             lines.append(f"<i>{i18n.t('questionFreeText')}</i>")
         self._add_bubble("sys", question.header or i18n.t("questionRole"), "<br>".join(lines))
+        # Kept so the answer can be recorded against the question as PUT, not against its id: an
+        # id means nothing to the next session reading the journal.
+        self._pending_question_text = question.question
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -903,6 +909,11 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
         if self._worker is not None and hasattr(self._worker, "answer"):
             self._worker.answer(question_id, value)
+        # The machine-readable form of the answer exists exactly here and was thrown away
+        # (SCR-030): the option the Arbiter clicked, against the question as put.
+        asked = getattr(self, "_pending_question_text", "") or i18n.t("questionRole")
+        self._pending_question_text = ""
+        self.arbiterAnswered.emit(asked, value)
 
     def _add_chip(self, tool_name: str) -> None:
         """A tool call as a one-line process event ("· get_tcc_state").

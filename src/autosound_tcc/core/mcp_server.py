@@ -511,6 +511,20 @@ def build_server(
         return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
 
     @mcp.tool()
+    async def record_decision(
+        question: str, answer: str, step: str = "", invalidates: str = ""
+    ) -> str:
+        """Record what the Arbiter ruled — the question as put, the answer as given (SCR-030).
+
+        Their half of the conversation is in no machine file otherwise, so a constraint they set is
+        invisible to the next session unless somebody re-reads it out of the transcript. Call this
+        BEFORE acting on a ruling that constrains a later phase. `invalidates` names what the
+        ruling supersedes (channels, captures) when it supersedes anything."""
+        return await asyncio.to_thread(
+            _record, process_writer.record_decision, question, answer, step, invalidates
+        )
+
+    @mcp.tool()
     async def start_capture(version: str, expected: list[str]) -> str:
         """Open a capture round before measuring: the ledger version being captured at, and the
         titles the phase asks for (SCR-034).

@@ -105,6 +105,7 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "block_step",
         # The capture round (SCR-034) -- recording one is a tool, like every other process write,
         # rather than a shell-out the model has to remember the path for.
+        "record_decision",
         "start_capture",
         "record_capture",
         "skip_capture",
@@ -624,3 +625,36 @@ def test_skipping_a_capture_without_a_reason_is_refused(tmp_path):
 
     assert said["recorded"] is False
     assert "reason" in said["error"]
+
+
+def test_an_arbiters_ruling_is_recorded_as_the_answer_not_as_prose(tmp_path):
+    """Their half of the conversation was in no machine file: the only trace of an answer was a
+    hand-typed evidence string, so a constraint they set was invisible to the next session."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
+
+    said = json.loads(
+        _text(
+            asyncio.run(
+                mcp.call_tool(
+                    "record_decision",
+                    {
+                        "question": "Sample rate for the baseline?",
+                        "answer": "96 kHz, not 48",
+                        "invalidates": "sw_1 (sw)",
+                    },
+                )
+            )
+        )
+    )
+    assert said["recorded"] is True
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    decision = next(e for e in events if e["type"] == "user_decision")
+    assert decision["answer"] == "96 kHz, not 48"
+    assert decision["phase"] == "0"  # asked under the phase it constrains
+    assert decision["invalidates"] == "sw_1 (sw)"  # same shape as config_change.impact

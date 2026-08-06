@@ -1279,6 +1279,7 @@ class MainWindow(QMainWindow):
         self._dialog = DialogPanel()
         self._dialog.startRequested.connect(self._on_dialog_start_requested)
         self._dialog.turnFinished.connect(self._supervise_turn)
+        self._dialog.arbiterAnswered.connect(self._record_decision)
         self._dialog.confirm_bar.alwaysAllowed.connect(self._remember_always_allowed)
         self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
         dialog_layout.addWidget(self._dialog)
@@ -1553,6 +1554,24 @@ class MainWindow(QMainWindow):
                 i18n.t("missingRecord").format(what=i18n.t(record.what), why=i18n.t(record.why))
             )
         self._missing_said = seen
+
+    def _record_decision(self, question: str, answer: str) -> None:
+        """The Arbiter ruled on something in the dialog — put it in the journal (SCR-030).
+
+        Written by TCC because TCC is where the answer is machine-readable: an option they clicked,
+        against the question as it was put. The model can record one too (`record_decision` on the
+        MCP surface), but only if it thinks to; the click is not in doubt.
+
+        Best effort, and quiet about failing: a ruling that could not be journalled must not eat the
+        answer the session is waiting on. The strip says so, the turn continues.
+        """
+        project = config.chosen_project_dir()
+        if project is None or not (question or "").strip() or not (answer or "").strip():
+            return
+        try:
+            process_writer.record_decision(project, question, answer)
+        except process_writer.ProcessWriterError as exc:
+            self._status_strip.notify(f"journal: {exc}", level="warn")
 
     def _supervise_turn(self) -> None:
         """Reconcile the plan against the disk at the end of every turn.
@@ -1872,6 +1891,12 @@ class MainWindow(QMainWindow):
             process_writer.record_session(
                 server.project_dir, choice.harness, choice.model, resumed=resumed
             )
+            # A project with no process state at all starts in intake, and TCC opening it means
+            # event one does not depend on which model the user brought (SCR-031: the re-run
+            # watched a model read `enter-phase -1` verbatim and ask its questions instead). Only
+            # when there is nothing — an existing phase is the skill's to move, never TCC's.
+            if not process_view.has_process_state(server.project_dir):
+                process_writer.enter_phase(server.project_dir, "-1")
         except process_writer.ProcessWriterError as exc:
             self._status_strip.notify(f"journal: {exc}", level="warn")
         self._agent_worker.start()

@@ -1531,3 +1531,42 @@ def test_a_session_is_on_the_record_before_its_first_token(tmp_path, monkeypatch
     process_writer.record_session(tmp_path, "omp", "gemini-2.5-pro", resumed=True)
 
     assert calls == [("omp", "gemini-2.5-pro", True)]
+
+
+def test_an_answer_clicked_in_the_dialog_reaches_the_journal(tmp_path, monkeypatch):
+    """TCC is where the answer is machine-readable — the option the Arbiter clicked, against the
+    question as put. That form existed at the moment of the answer and was discarded (SCR-030)."""
+    from autosound_tcc.core import config, process_writer
+
+    _app()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+    written: list = []
+    monkeypatch.setattr(
+        process_writer,
+        "record_decision",
+        lambda project, question, answer, step="", invalidates="": written.append(
+            (question, answer)
+        ),
+    )
+
+    window._record_decision("Reference seat?", "driver only")
+    window._record_decision("", "an answer to nothing")  # not a ruling, nothing to record
+
+    assert written == [("Reference seat?", "driver only")]
+
+
+def test_a_journal_that_cannot_be_written_does_not_eat_the_answer(tmp_path, monkeypatch):
+    """The session is waiting on that answer; a failed record is a warning, not a dropped turn."""
+    from autosound_tcc.core import config, process_writer
+
+    _app()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    def _boom(*_a, **_k):
+        raise process_writer.ProcessWriterError("no skill vendored")
+
+    monkeypatch.setattr(process_writer, "record_decision", _boom)
+
+    window._record_decision("Reference seat?", "driver only")  # must not raise
