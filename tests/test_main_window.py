@@ -513,14 +513,23 @@ def test_choosing_a_model_arms_the_button_without_starting_anything():
     assert "not started" in window._dialog._session_chip.text().lower()
 
 
-def test_the_placeholder_disappears_once_a_model_is_chosen():
+def test_the_placeholder_disappears_once_a_model_is_chosen(tmp_path, monkeypatch):
+    """It goes *after* the signal has been delivered: removing an item from a combo inside that
+    combo's own `currentIndexChanged` frees the view's internals mid-walk, which segfaulted."""
     _app()
     window = MainWindow()
+    combo = window._ai_main_combo
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("— choose —", "")
+    combo.addItem("Claude Sonnet 5", "sdk:claude-sonnet-5")
+    combo.setCurrentIndex(1)
+    combo.blockSignals(False)
 
-    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._on_generator_model_changed(1)
+    window._drop_model_placeholder()
 
-    assert window._ai_main_combo.findData("") < 0
-
+    assert combo.findData("") < 0
 
 def test_a_marked_omp_model_joins_the_picker_and_selects_its_harness(monkeypatch):
     """The user picks a model; which adapter carries it follows from that, not from inference."""

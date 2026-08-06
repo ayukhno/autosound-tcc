@@ -1805,11 +1805,23 @@ class MainWindow(QMainWindow):
             self._update_session_button()
             return
         project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, choice.key)
-        # The placeholder has served its purpose the moment a real model is chosen.
-        placeholder = self._ai_main_combo.findData("")
-        if placeholder >= 0:
-            self._ai_main_combo.removeItem(placeholder)
+        # The placeholder has served its purpose the moment a real model is chosen -- but it is
+        # dropped *after* this signal has finished being delivered. Removing an item from a combo
+        # inside that combo's own `currentIndexChanged` frees the view's internals while Qt is
+        # still walking them: a segfault, reported after picking a model (2026-08-06), and the
+        # same shape as deleting a widget from its own event handler.
+        QTimer.singleShot(0, self._drop_model_placeholder)
         self._update_session_button()
+        # The panel names the model, so it must not lag the picker.
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+
+    def _drop_model_placeholder(self) -> None:
+        try:
+            placeholder = self._ai_main_combo.findData("")
+            if placeholder >= 0:
+                self._ai_main_combo.removeItem(placeholder)
+        except RuntimeError:
+            return  # the window closed between the signal and this callback
 
     def _update_session_button(self) -> None:
         """Say what clicking will do, in the three states a session can be in.
@@ -1841,8 +1853,17 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._settings.setValue(_ACTIVE_OMP_KEY, ",".join(dialog.active))
-        self._reload_model_choices()
-        self._update_session_button()
+        # Deferred out of the dialog's own accept path: refilling both combos tears down and
+        # rebuilds their item views, and doing that while the dialog is still unwinding is the
+        # same class of fault as the placeholder removal above.
+        QTimer.singleShot(0, self._reload_after_model_config)
+
+    def _reload_after_model_config(self) -> None:
+        try:
+            self._reload_model_choices()
+            self._update_session_button()
+        except RuntimeError:
+            return
 
     # ---- the project menu ---------------------------------------------------
 

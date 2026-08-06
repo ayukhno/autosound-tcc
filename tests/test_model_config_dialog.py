@@ -97,3 +97,32 @@ def test_an_unreadable_catalogue_keeps_the_existing_marks(monkeypatch):
     dialog._accept()
 
     assert dialog.active == ["google/gemini-3.1-pro-preview"]
+
+
+def test_choosing_a_model_does_not_mutate_the_combo_while_the_signal_runs(tmp_path, monkeypatch):
+    """Removing an item from a combo inside that combo's own `currentIndexChanged` frees the view's
+    internals while Qt is still walking them — a segfault, reported after picking a model
+    (2026-08-06), and the same shape as deleting a widget from its own event handler."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    combo = window._ai_main_combo
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("— choose —", "")
+    combo.addItem("Claude Sonnet 5", "sdk:claude-sonnet-5")
+    combo.setCurrentIndex(1)
+    combo.blockSignals(False)
+    before = combo.count()
+
+    window._on_generator_model_changed(1)
+
+    assert combo.count() == before  # nothing removed yet: it happens after the signal returns
+    window._drop_model_placeholder()
+    assert combo.count() == before - 1

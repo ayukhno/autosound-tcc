@@ -820,11 +820,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 4px 12px;
         font-size: 11.5px;
     }}
-    /* .project-btn — the header's project picker. It owns a QMenu, and a QPushButton with a menu
-    keeps drawing native sub-controls unless every state is covered: in dark mode it came out as a
-    pale pill with pale text, unreadable, with square corners showing through. Explicit, all
-    states, theme tokens only. */
-    QPushButton[class~="project-btn"] {{
+    /* .project-btn — the header's project picker. It is a **QToolButton** with an instant popup,
+    which is the whole reason the first attempt at this did nothing: the rules said QPushButton and
+    matched no widget, so macOS kept drawing its native pale pill with pale text on a dark header,
+    unreadable. Both types are named now, every state is covered, theme tokens only. */
+    QToolButton[class~="project-btn"], QPushButton[class~="project-btn"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
         border-radius: 8px;
@@ -833,15 +833,17 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-size: 11.5px;
         text-align: left;
     }}
-    QPushButton[class~="project-btn"]:hover {{
+    QToolButton[class~="project-btn"]:hover, QPushButton[class~="project-btn"]:hover {{
         border-color: {t.accent};
         color: {t.accent};
     }}
+    QToolButton[class~="project-btn"]:pressed, QToolButton[class~="project-btn"]:checked,
     QPushButton[class~="project-btn"]:pressed, QPushButton[class~="project-btn"]:checked {{
         background: {t.mix("accent", 0.14, "panel")};
         border-color: {t.accent};
         color: {t.text};
     }}
+    QToolButton[class~="project-btn"]::menu-indicator,
     QPushButton[class~="project-btn"]::menu-indicator {{
         subcontrol-origin: padding;
         subcontrol-position: right center;
