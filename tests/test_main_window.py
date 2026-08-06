@@ -1299,3 +1299,48 @@ def test_switching_a_channel_asks_first(tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
     window._ask_channel_toggle("virtual", "VRR", True)
     assert sent == [("virtual", "VRR", True)]
+
+
+def test_the_capture_series_comes_from_the_plan_not_the_ledger():
+    """Naming the virtual-channel tier bumped the ledger `v_001 → v_002`, and the checklist jumped
+    to series 2 before series 1 had been captured — watched twice, on two projects. The skill's own
+    phase-0 steps say which round they mean: "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"."""
+    _app()
+    window = MainWindow()
+    window._view = None
+    state = {
+        "active_phase": "0",
+        "plan": [
+            {"id": "m0-tw-L", "phase": "0", "name": "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"},
+        ],
+    }
+
+    assert window._capture_version(state) == 1
+
+
+def test_a_plan_that_names_no_series_falls_back_to_the_ledger():
+    _app()
+    window = MainWindow()
+
+    class View:
+        version = "v_003"
+
+    window._view = View()
+
+    assert window._capture_version({"active_phase": "0", "plan": []}) == 3
+
+
+def test_a_project_that_cannot_be_drawn_does_not_end_the_session(monkeypatch):
+    """A rendering fault used to abort the process, because an exception in a Qt slot does not
+    propagate. The last good view stays on screen and the strip says what happened — TCC does not
+    repair the file either; it does not write project data."""
+    _app()
+    window = MainWindow()
+    said: list[str] = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, level="info": said.append(text))
+    monkeypatch.setattr(window, "_load_project",
+                        lambda: (_ for _ in ()).throw(TypeError("QLabel called with int")))
+
+    window._safe_load_project()  # must not raise
+
+    assert said and "QLabel" in said[0]

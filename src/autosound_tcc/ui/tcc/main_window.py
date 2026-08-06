@@ -11,6 +11,7 @@ section gets wired to real data, but the outer structure built here should not n
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -805,8 +806,26 @@ class MainWindow(QMainWindow):
         One button, because "what changed on disk" is one question — a terminal-driven session
         that rewrote the ledger usually rewrote the process state and project facts too.
         """
-        self._load_project()
+        self._safe_load_project()
         self._start_contract_check()
+
+    def _safe_load_project(self) -> None:
+        """Re-read the project without letting a bad file take the window with it.
+
+        The ledger is written by a language model, and one wrote `slot: 1` where the schema says a
+        letter. `QLabel(int)` raised inside a Qt slot -- which does not propagate, it aborts the
+        process -- and the whole app went with it mid-session, after eight measurements.
+
+        Nothing here decides the file is wrong or repairs it: TCC does not write project data. It
+        keeps the last good view on screen and says what happened, which is the difference between
+        a panel that cannot draw and a session that ends.
+        """
+        try:
+            self._load_project()
+        except Exception as exc:  # noqa: BLE001 - a rendering fault must not end the session
+            self._status_strip.notify(
+                i18n.t("projectRenderFailed").format(error=str(exc)[:200]), level="warn"
+            )
 
     def _start_contract_check(self) -> None:
         """Ask the skill's own checker what this project looks like on disk (`contract.py --json`).
@@ -1359,7 +1378,7 @@ class MainWindow(QMainWindow):
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
         self._arm_project_watcher()
-        self._load_project()
+        self._safe_load_project()
 
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
@@ -1486,16 +1505,33 @@ class MainWindow(QMainWindow):
         if not phase:
             return
         titles = getattr(self._meas_panel, "known_titles", lambda: [])()
-        session = measurement_view.build_session(phase, self._capture_version(), titles)
+        session = measurement_view.build_session(phase, self._capture_version(state), titles)
         if session is not None:
             self._meas_panel.set_sessions((session,))
 
-    def _capture_version(self) -> int:
-        """The DSP config version measurements are named against — the ledger's HEAD.
+    _CAPTURE_SERIES = re.compile(r"_(\d+)\s*\((?:sw|rta)\)", re.IGNORECASE)
 
-        `_N` is the config the measurement was taken under (naming-and-structure §3), so this has
-        to follow the ledger rather than count capture rounds.
+    def _capture_version(self, state: Optional[dict] = None) -> int:
+        """The series the current phase's captures are named with.
+
+        `_N` is the config a measurement was taken under (naming-and-structure §3), so this used to
+        read the ledger's HEAD. That is wrong whenever the ledger moves for a reason that is not a
+        config change: naming the virtual-channel tier bumped `v_001 → v_002`, and the checklist
+        jumped to series 2 before series 1 had been captured. Watched twice, on two projects.
+
+        The plan already carries the answer. The skill writes its phase-0 steps as
+        "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)" — the round it means, in its own words — so
+        when a step in the active phase names a series, that wins. The ledger stays the fallback
+        for a plan that names none.
         """
+        for step in (state or {}).get("plan") or []:
+            if not isinstance(step, dict) or str(step.get("phase")) != str(
+                (state or {}).get("active_phase")
+            ):
+                continue
+            found = self._CAPTURE_SERIES.search(str(step.get("name") or ""))
+            if found:
+                return int(found.group(1))
         head = getattr(self._view, "version", None) if self._view else None
         try:
             return int(str(head).lstrip("v_") or 1)

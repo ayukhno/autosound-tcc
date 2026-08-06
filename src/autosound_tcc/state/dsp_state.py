@@ -146,6 +146,14 @@ def _field_label(field_name: str, raw_value: Any) -> Optional[str]:
     return f"{field_name}: {raw_value}"
 
 
+def _as_text(value) -> Optional[str]:
+    """A ledger value rendered as a label, or None. Never raises, never returns a non-string."""
+    if value is None or isinstance(value, (dict, list)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 @dataclass(frozen=True)
 class GroupRow:
     """One row (channel/input/whatever) inside a profile-declared group."""
@@ -278,8 +286,12 @@ def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> G
         raw=row_raw,
         identity=identity,
         order=resolved("order"),
-        slot=resolved("slot"),
-        descr=resolved("descr"),
+        # Text, whatever the ledger says. A model wrote `slot: 1` instead of `"A"` and
+        # `QLabel(int)` raised inside a Qt slot, which does not raise -- it takes the process with
+        # it. The ledger is written by a language model; nothing read from it may be trusted to
+        # have the type this code expects.
+        slot=_as_text(resolved("slot")),
+        descr=_as_text(resolved("descr")),
         hardware_controls=hw_controls,
     )
 

@@ -328,3 +328,17 @@ def test_hidden_is_identity_first():
     view = ProjectView.from_dict(ledger, PROFILE, channels={"FL": {"code": "FL", "hidden": False}})
 
     assert {r.name: r for r in view.groups[0].rows}["FL"].hidden is False
+
+
+def test_a_numeric_slot_is_rendered_as_text():
+    """A model wrote `slot: 1` where the schema says a letter. `QLabel(int)` raised inside a Qt
+    slot — which does not propagate, it aborts the process — and the app went down mid-session
+    after eight measurements. The ledger is written by a language model; nothing read from it may
+    be trusted to have the type this code expects."""
+    from autosound_tcc.state.dsp_state import _as_text
+
+    assert _as_text(1) == "1"
+    assert _as_text("A") == "A"
+    assert _as_text(None) is None
+    assert _as_text("") is None
+    assert _as_text({"nested": "object"}) is None  # not a label, and not a crash either

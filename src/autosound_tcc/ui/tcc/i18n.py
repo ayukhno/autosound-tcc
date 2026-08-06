@@ -55,6 +55,8 @@ T: dict[Lang, dict[str, str]] = {
         "diagClose": "Close",
         "diagStripIssues": "Project contract: {n} issue(s) — see Diagnostics (⚕)",
         "diagStripError": "Contract check unavailable: {error}",
+        "projectRenderFailed": "Could not draw the project from disk — the last good view is still "
+                               "on screen. {error}",
         "staleStrip": "{what} — {n} channel(s) need re-measuring: {codes}",
         "missingRecord": "Not written down: {what} — {why}.",
         "recordTargetCurve": "the target curve",
@@ -309,6 +311,8 @@ T: dict[Lang, dict[str, str]] = {
         "diagClose": "Закрити",
         "diagStripIssues": "Контракт проєкту: проблем {n} — див. Діагностику (⚕)",
         "diagStripError": "Перевірка контракту недоступна: {error}",
+        "projectRenderFailed": "Не вдалося намалювати проєкт із диска — на екрані лишився "
+                               "останній робочий вигляд. {error}",
         "staleStrip": "{what} — перезняти каналів: {n} ({codes})",
         "missingRecord": "Не записано: {what} — {why}.",
         "recordTargetCurve": "цільова крива",
