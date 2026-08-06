@@ -174,3 +174,63 @@ def test_a_recapture_after_the_change_makes_it_done_again(project):
     by_name = {item.name: item.status for group in session.groups for item in group.items}
 
     assert by_name["w-L_1 (sw)"] == mv.STATUS_DONE
+
+
+def _round(project, **fields):
+    """Write a capture round the way the skill would (SCR-034), through the skill's own writer."""
+    from autosound_tcc.state import process_view
+
+    module = vendor_loader.load_process()
+    process = module.Process(str(process_view.process_dir(project)))
+    process.enter_phase("0")
+    process.start_capture(fields.pop("version", 1), expected=fields.pop("expected", ()))
+    for title in fields.pop("taken", ()):
+        process.record_capture(title)
+    for title, reason in (fields.pop("skipped", {}) or {}).items():
+        process.skip_capture(title, reason)
+    return process
+
+
+def test_a_recorded_capture_survives_rew_being_closed(project):
+    """Every status used to be recomputed from REW's open measurements, so quitting REW turned a
+    finished round back into an empty checklist."""
+    _round(project, version=1, expected=["sw_1 (sw)"], taken=["sw_1 (sw)"])
+
+    session = mv.build_session("0", 1, [], project)  # REW holds nothing
+
+    statuses = {item.name: item.status for group in session.groups for item in group.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
+    assert statuses["sw_1 (rta)"] == mv.STATUS_WAIT  # not recorded, and REW cannot vouch for it
+
+
+def test_a_capture_decided_against_is_not_a_capture_still_waiting(project):
+    """Both rendered as `wait` before the round was recorded, so the next session proposed the one
+    the tuner had ruled out."""
+    _round(project, version=1, expected=["sw_1 (sw)"], skipped={"sw_1 (sw)": "sub disconnected"})
+
+    session = mv.build_session("0", 1, [], project)
+
+    statuses = {item.name: item.status for group in session.groups for item in group.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_SKIPPED
+
+
+def test_the_open_round_names_the_task_rather_than_the_ledger_version(project):
+    """Two passes at the same config were the same key; "this session's task" is what gets asked
+    about."""
+    _round(project, version=1, expected=["sw_1 (sw)"])
+
+    session = mv.build_session("0", 1, [], project)
+
+    assert session.id == "cap_001"
+    assert "cap_001" in session.version["en"]
+
+
+def test_a_closed_round_stops_being_the_live_task(project):
+    process = _round(project, version=1, expected=["sw_1 (sw)"], taken=["sw_1 (sw)"])
+    process.close_capture("session ended")
+
+    session = mv.build_session("0", 1, [], project)
+
+    assert session.id == "v1"  # back to the version, since no round is open
+    statuses = {item.name: item.status for group in session.groups for item in group.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE  # what it produced is still on the record

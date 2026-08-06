@@ -700,6 +700,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
     QLabel[class~="tl-done"] {{ background: {t.ok}; }}
     QLabel[class~="tl-bad"] {{ background: {t.warn}; }}
+    /* A capture somebody decided against (SCR-034). Grey, not yellow: waiting is work outstanding,
+       this is work that will not happen -- and until the skill recorded the decision the two were
+       the same colour, so the next session proposed it again. */
+    QLabel[class~="tl-skip"] {{ background: {t.off}; }}
     QLabel[class~="mcol-h"] {{
         font-size: 9.5px;
         letter-spacing: 1px;

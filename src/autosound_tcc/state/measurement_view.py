@@ -27,6 +27,10 @@ STATUS_WAIT = "wait"
 # The panel's own legend already calls this one "taken, unusable" -- exactly what a capture becomes
 # when the hardware under it changed (SCR-014).
 STATUS_STALE = "bad"
+# Decided against, with a reason, and recorded as such by the skill (SCR-034). Distinct from
+# waiting: before the round was recorded these were the same colour, so a capture the tuner had
+# ruled out came back on the checklist every session.
+STATUS_SKIPPED = "skip"
 
 
 def glossary_path(project_dir: Optional[Path] = None) -> Path:
@@ -90,9 +94,19 @@ def build_session(
     # colour for exactly that. Flagging it here rather than in the panel keeps the panel a renderer.
     stale = process_view.stale_channels(project)
 
+    # The round the skill recorded, if there is one (SCR-034). REW's open-measurement list is what
+    # this panel used to be built on entirely, which meant closing REW turned a finished round back
+    # into an empty checklist. What was recorded is a fact; what REW happens to have open is a
+    # snapshot of another application's session.
+    round_ = process_view.capture_round(project) or {}
+    recorded_taken = {str(t) for t in (round_.get("taken") or {})}
+    recorded_skipped = {str(t) for t in (round_.get("skipped") or {})}
+
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
-        if naming.name_key(entry) not in parsed:
+        if name in recorded_skipped:
+            return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
+        if naming.name_key(entry) not in parsed and name not in recorded_taken:
             return STATUS_WAIT
         return STATUS_STALE if (entry or {}).get("code") in stale else STATUS_DONE
 
@@ -107,11 +121,16 @@ def build_session(
         # phase doesn't ask for. Shown, flagged blue, never silently dropped.
         groups.append(MeasGroup(type="additional", items=extras))
 
+    # The round's own id when there is one: the ledger version names the config the measurements
+    # were taken under and cannot tell two passes at the same config apart, which is exactly what
+    # "this session's task" means (SCR-034).
+    round_id = str(round_.get("id") or "") if not round_.get("closed") else ""
     return MeasSession(
-        id=f"v{version}",
+        id=round_id or f"v{version}",
         version={
-            "en": f"Capture series v{version} · phase {phase}",
-            "uk": f"Серія v{version} · фаза {phase}",
+            "en": f"Capture series v{version} · phase {phase}"
+            + (f" · {round_id}" if round_id else ""),
+            "uk": f"Серія v{version} · фаза {phase}" + (f" · {round_id}" if round_id else ""),
         },
         groups=tuple(groups),
     )

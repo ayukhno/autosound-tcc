@@ -76,6 +76,18 @@ def load_state(project_dir: Optional[Path] = None) -> Optional[dict]:
     return process.Process(str(process_dir(project_dir))).load()
 
 
+def capture_round(project_dir: Optional[Path] = None) -> Optional[dict]:
+    """The capture round the skill has open, or None (SCR-034).
+
+    Only the OPEN one is in `process-state.json`; every round that ever happened is in the journal,
+    the same split the active phase uses. A closed round is returned as it stands — the panel still
+    wants to show what the last pass produced, it just must not treat it as the live task.
+    """
+    state = load_state(project_dir)
+    round_ = (state or {}).get("capture")
+    return round_ if isinstance(round_, dict) else None
+
+
 def load_plan(project_dir: Optional[Path] = None) -> Optional[tuple[PlanPhase, ...]]:
     """The real plan as `PlanPhase` tuples, or None when there is no process state to read."""
     state = load_state(project_dir)

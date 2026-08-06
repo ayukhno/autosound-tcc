@@ -510,6 +510,38 @@ def build_server(
         that cannot be taken yet."""
         return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
 
+    @mcp.tool()
+    async def start_capture(version: str, expected: list[str]) -> str:
+        """Open a capture round before measuring: the ledger version being captured at, and the
+        titles the phase asks for (SCR-034).
+
+        A round, not a version. The version names the config the measurements were taken under and
+        cannot tell two passes at the same config apart -- and the round is what makes a finished
+        pass survive REW being closed, since otherwise its status lives only in REW's own list of
+        open measurements."""
+        return await asyncio.to_thread(
+            _record, process_writer.start_capture, version, expected
+        )
+
+    @mcp.tool()
+    async def record_capture(title: str) -> str:
+        """A measurement came back, by its REW title. One that was not on the round's list is
+        recorded as unplanned rather than refused -- the derivation can only say what SHOULD have
+        been taken, so "this came back and nobody asked for it" has nowhere else to live."""
+        return await asyncio.to_thread(_record, process_writer.record_capture, title)
+
+    @mcp.tool()
+    async def skip_capture(title: str, reason: str) -> str:
+        """A capture deliberately NOT taken, and why. The reason is required: skipped and
+        not-yet-taken render identically without it, and the next session proposes it again."""
+        return await asyncio.to_thread(_record, process_writer.skip_capture, title, reason)
+
+    @mcp.tool()
+    async def close_capture(reason: str = "") -> str:
+        """Close the open capture round. Whatever is neither taken nor skipped is recorded as
+        outstanding rather than quietly dropped."""
+        return await asyncio.to_thread(_record, process_writer.close_capture, reason)
+
     # ---- writes (every one gated on the Arbiter) ---------------------------
 
     @mcp.tool()

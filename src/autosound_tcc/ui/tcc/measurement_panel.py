@@ -55,7 +55,14 @@ _METHOD_KEYS = ("sw", "rta", "rta_group")
 # (user request 2026-07-28: "SW+Ws_10 (rta)", not "SW+Ws_10 (rta_group)").
 _METHOD_SUFFIX = {"sw": "sw", "rta": "rta", "rta_group": "rta"}
 
-_LEGEND = (("wait", "waiting"), ("done", "done"), ("bad", "taken, unusable"))
+_LEGEND = (
+    ("wait", "waiting"),
+    ("done", "done"),
+    ("bad", "taken, unusable"),
+    # Recorded as decided against, with a reason (SCR-034) -- not the same as outstanding, which is
+    # what it looked like before the skill kept a record of the round.
+    ("skip", "skipped"),
+)
 
 
 class _RewReadWorker(QThread):

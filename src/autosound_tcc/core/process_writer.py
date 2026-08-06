@@ -196,6 +196,39 @@ def set_target(project_dir: Path, preset: str, curve: str) -> str:
     return _run(project_dir, ["target", preset, curve])
 
 
+def start_capture(project_dir: Path, version: str, expected: list[str]) -> str:
+    """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
+
+    A round, not a version — the version names the config the measurements were taken under and
+    cannot tell two passes at the same config apart.
+    """
+    return _run(project_dir, ["capture-start", str(version), *[str(t) for t in expected or []]])
+
+
+def record_capture(project_dir: Path, title: str) -> str:
+    """A measurement came back. One that was not on the round's list is recorded as unplanned
+    rather than rejected — the derivation can only say what should have been taken."""
+    return _run(project_dir, ["capture-taken", title])
+
+
+def skip_capture(project_dir: Path, title: str, reason: str) -> str:
+    """A capture deliberately not taken. The skill requires the reason and this does not soften
+    that: skipped and not-yet-taken looked identical until the decision was recorded."""
+    if not (reason or "").strip():
+        raise ProcessWriterError(
+            f"skipping {title!r} needs a reason -- it is a decision, not a gap"
+        )
+    return _run(project_dir, ["capture-skip", title, reason])
+
+
+def close_capture(project_dir: Path, reason: str = "") -> str:
+    """Close the open round. What is neither taken nor skipped is named as outstanding."""
+    args = ["capture-close"]
+    if reason:
+        args.append(reason)
+    return _run(project_dir, args)
+
+
 def check(project_dir: Path) -> str:
     """List done steps that carry no evidence — the skill's own план-факт reconciliation."""
     return _run(project_dir, ["check"])

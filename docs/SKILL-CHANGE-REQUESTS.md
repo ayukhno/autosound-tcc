@@ -19,7 +19,6 @@ being the right one — the reason is on the entry).
 | 030 | the Arbiter's answers are not events | decisions live only in the transcript |
 | 031 | the recorder is prescribed as a shell call even when it is a tool | the model shells out with the wrong path instead of calling the MCP tool |
 | 033 | the reviewer's transport is a parameter, not Gemini | TCC's picker must mark non-Gemini choices clipboard-only |
-| 034 | the capture task is derived but never recorded | status is recomputed from open REW titles; skipped ≠ not-done |
 | 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
@@ -801,7 +800,7 @@ a front-end apologising for a method-level gap.
 
 ## SCR-034 — the capture task is derived but never recorded
 
-**Status**: proposed (found reviewing what TCC already does with the capture checklist, 2026-08-05)
+**Status**: done (skill `9eee08d`, TCC `HEAD` — four journal events (`capture_task_issued` / `capture_taken` / `capture_skipped` / `capture_round_closed`), four `process.py` subcommands and the matching MCP tools; the open round lives in `process-state.json` under `capture`. `measurement_view` reads it, so a finished round survives REW being closed and a skip is its own status rather than another `wait`.)
 **Target**: the journal vocabulary fixed in SCR-004 (`rew_tool/state/process.py`) — new event
 types and the commands that write them; `naming.expected_groups` stays as it is
 **TCC dependency**: `state/measurement_view.build_session` derives the checklist today and

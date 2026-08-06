@@ -103,6 +103,12 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "finish_step",
         "skip_step",
         "block_step",
+        # The capture round (SCR-034) -- recording one is a tool, like every other process write,
+        # rather than a shell-out the model has to remember the path for.
+        "start_capture",
+        "record_capture",
+        "skip_capture",
+        "close_capture",
     }
     # No measurement tool: the panel is still mock data, and serving fabricated sweeps to a model
     # invites EQ computed from numbers that were never measured.
@@ -574,3 +580,47 @@ def test_the_reviewer_says_who_decided_it(tmp_path):
     project_settings.set_value(config.tcc_dir(tmp_path), "critic", "omp:google/gemini-3.1-pro")
 
     assert "Arbiter" in _reviewer_state(tmp_path)["decided_by"]
+
+
+def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
+    """SCR-034 through the surface the model actually has: without these it would have to shell out
+    to `process.py` for the one kind of process write that has no tool."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
+
+    for tool, args in (
+        ("start_capture", {"version": "3", "expected": ["sw_1 (sw)", "sw_1 (rta)"]}),
+        ("record_capture", {"title": "sw_1 (sw)"}),
+        ("skip_capture", {"title": "sw_1 (rta)", "reason": "sub is disconnected"}),
+        ("close_capture", {"reason": "round done"}),
+    ):
+        result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+        assert result["recorded"] is True, (tool, result)
+
+    types = [
+        json.loads(line)["type"]
+        for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert types == [
+        "phase_entered",
+        "capture_task_issued",
+        "capture_taken",
+        "capture_skipped",
+        "capture_round_closed",
+    ]
+
+
+def test_skipping_a_capture_without_a_reason_is_refused(tmp_path):
+    """A skip with no reason is a gap wearing a decision's clothes: the next session proposes it
+    again, which is the thing SCR-034 exists to stop."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
+    asyncio.run(mcp.call_tool("start_capture", {"version": "3", "expected": ["sw_1 (sw)"]}))
+
+    said = json.loads(
+        _text(asyncio.run(mcp.call_tool("skip_capture", {"title": "sw_1 (sw)", "reason": " "})))
+    )
+
+    assert said["recorded"] is False
+    assert "reason" in said["error"]
