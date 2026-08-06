@@ -53,10 +53,17 @@ SKILL_NAME = "autosound-tuning"
 # `can_use_tool`, which is where the real decision is made.
 ALLOWED_TOOLS = ["mcp__tcc", "TodoWrite"]
 
-# Hard-blocked: never offered, never promptable. TCC's sanctioned writes all go through its own
-# gated MCP tools, where the Arbiter sees exactly what changes; a general-purpose file writer
-# would be a second, unaudited path to the same place.
-DISALLOWED_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
+# Hard-blocked: never offered, never promptable. Reaching outside the machine for content, or
+# editing in ways nobody can read back, has no place in a tuning session.
+#
+# `Write` and `Edit` used to be here, on the theory that TCC's own gated MCP tools were the only
+# sanctioned path to disk. In practice the skill writes project files it owns -- the context file,
+# the changelog, the audit trail -- and the block did not stop it: the model announced "Write is
+# disabled in this session, I will create the files through Bash" and did exactly that, with a
+# `python3 - <<EOF` heredoc. So the policy bought nothing and cost the one thing that mattered:
+# `Write path=... content=...` is a card the Arbiter can read, and a heredoc three screens long is
+# not. They are gated now, like Bash, rather than blocked.
+DISALLOWED_TOOLS = ["MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
 
 # Harness plumbing, not work. Claude Code defers large tool catalogues, so the model has to look
 # TCC's own tools up by name before it can call them -- three times in a seven-minute session.

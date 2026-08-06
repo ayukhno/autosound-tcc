@@ -1124,3 +1124,35 @@ def test_a_long_key_gives_up_its_own_text_rather_than_the_value():
 
     assert key.text().endswith("…")
     assert key.toolTip().startswith("Amp (midbass")
+
+
+def test_the_left_column_catches_up_when_the_skill_writes(tmp_path, monkeypatch):
+    """Only the plan was watched, so the left column said "no data yet" beside a `project.json`
+    the session had just written — it caught up on the next launch. Reported after a completed
+    phase −1: the car, the amps and the open questions were all on disk and none on screen."""
+    import json
+
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    (tmp_path / "project.json").write_text(json.dumps({"schema_version": 3, "car": {"make": "VW"}}))
+    window._arm_project_watcher()
+
+    assert str(tmp_path / "project.json") in window._project_watcher.files()
+
+
+def test_a_project_write_reloads_rather_than_rebuilding_per_file(tmp_path, monkeypatch):
+    """The skill writes several files in a row; each one must not cost a full rebuild of the tree."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    window._on_project_file_changed()
+    window._on_project_file_changed()
+
+    assert window._project_reload.isActive()  # one pending reload, not two rebuilds

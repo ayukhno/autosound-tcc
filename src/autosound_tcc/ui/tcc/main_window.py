@@ -1255,6 +1255,45 @@ class MainWindow(QMainWindow):
         self._process_watcher.fileChanged.connect(self._refresh_process)
         self._refresh_process()
 
+        # The plan was the only thing watched, so the left column kept saying "no data yet" beside
+        # a `project.json` the session had just written -- it only caught up on the next launch.
+        # Reported after a completed phase -1: the car, the amps and the open questions were all
+        # on disk and none of them were on screen.
+        self._project_watcher = QFileSystemWatcher(self)
+        self._project_watcher.fileChanged.connect(self._on_project_file_changed)
+        # Coalesced: the skill writes several files in a row, and each one must not cost a full
+        # rebuild of the tree.
+        self._project_reload = QTimer(self)
+        self._project_reload.setSingleShot(True)
+        self._project_reload.setInterval(400)
+        self._project_reload.timeout.connect(self._reload_project_files)
+        self._arm_project_watcher()
+
+    def _watched_project_files(self) -> list[str]:
+        project_dir = config.chosen_project_dir()
+        if project_dir is None:
+            return []
+        return [str(project_dir / name) for name in ("project.json", "dsp_profile.json")]
+
+    def _arm_project_watcher(self) -> None:
+        """(Re)watch the project's own files. Re-armed after every change: an atomic write replaces
+        the inode and the watcher silently drops the path, which is why this is not a one-off."""
+        watcher = getattr(self, "_project_watcher", None)
+        if watcher is None:
+            return
+        for path in self._watched_project_files():
+            if Path(path).exists() and path not in watcher.files():
+                watcher.addPath(path)
+
+    def _on_project_file_changed(self, *_args) -> None:
+        self._arm_project_watcher()
+        self._project_reload.start()
+
+    def _reload_project_files(self) -> None:
+        """Re-read what the skill wrote and put it on screen."""
+        self._arm_project_watcher()
+        self._load_project()
+
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
         if state is None and process_view.has_process_state():

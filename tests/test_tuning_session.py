@@ -142,10 +142,12 @@ def test_denial_tells_the_model_why(tmp_path):
     assert "allowlist" in result.message
 
 
-def test_write_tools_are_hard_blocked(tmp_path):
+def test_the_tools_that_reach_outside_are_hard_blocked(tmp_path):
+    """`Write` and `Edit` used to be here too; they are gated now — see
+    `test_writing_a_file_is_gated_rather_than_blocked` for why blocking them backfired."""
     from autosound_tcc.core.tuning_session import ALLOWED_TOOLS, DISALLOWED_TOOLS
 
-    for tool in ("Write", "Edit", "MultiEdit"):
+    for tool in ("MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"):
         assert tool in DISALLOWED_TOOLS
         assert tool not in ALLOWED_TOOLS
 
@@ -418,3 +420,49 @@ def test_a_tool_result_inside_a_user_message_still_stops_the_line(tmp_path):
     session = TuningSession(project_dir=tmp_path)
 
     assert session._translate(UserMessage(content=[ResultBlock()])) == [ToolEnd()]
+
+
+def test_writing_a_file_is_gated_rather_than_blocked(tmp_path):
+    """Blocking `Write` did not stop the model writing: it announced "Write is disabled in this
+    session, I will create the files through Bash" and used a `python3 - <<EOF` heredoc. The block
+    bought nothing and cost readability — `Write path=… content=…` is a card the Arbiter can read,
+    a three-screen heredoc is not."""
+    from autosound_tcc.core.tuning_session import DISALLOWED_TOOLS
+
+    assert "Write" not in DISALLOWED_TOOLS and "Edit" not in DISALLOWED_TOOLS
+    assert "WebSearch" in DISALLOWED_TOOLS  # reaching outside the machine still has no place here
+
+
+def test_a_write_still_stops_for_the_arbiter(tmp_path):
+    """Gated, not allowed: it falls through to `can_use_tool` like Bash does."""
+    import asyncio
+    from concurrent.futures import Future
+
+    from autosound_tcc.core.mcp_server import ConfirmRequest
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    class Bridge:
+        def __init__(self):
+            self.asked: list[ConfirmRequest] = []
+
+        def snapshot(self):
+            return {}
+
+        def request_confirmation(self, request):
+            self.asked.append(request)
+            future: "Future[bool]" = Future()
+            future.set_result(False)
+            return future
+
+        def copy_to_clipboard(self, text): ...
+        def show_proposal(self, proposal): ...
+        def show_critique(self, critique): ...
+        def notify_profile_ready(self): ...
+        def refresh_from_disk(self): ...
+
+    bridge = Bridge()
+    session = TuningSession(project_dir=tmp_path, bridge=bridge)
+
+    asyncio.run(session._can_use_tool("Write", {"file_path": "x.md", "content": "hi"}, None))
+
+    assert [r.tool for r in bridge.asked] == ["Write"]
