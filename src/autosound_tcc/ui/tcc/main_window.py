@@ -87,6 +87,7 @@ _LANG_KEY = "ui/lang"
 _GENERATOR_KEY = "generator"          # per project: the picked Choice.key
 _CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
 _GATE_KEY = "gate"                    # per project: which writes still ask the Arbiter
+_ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
 # What the outgoing model is asked to do before its session ends. Written as instructions to a
@@ -413,10 +414,12 @@ class MainWindow(QMainWindow):
         gate_menu.setToolTipsVisible(True)
         self._gate_actions = {}
         for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
-                            (omp_session.GATE_FOREIGN, "gateForeign")):
+                            (omp_session.GATE_FOREIGN, "gateForeign"),
+                            (omp_session.GATE_AUTO, "gateAuto")):
             action = gate_menu.addAction(i18n.t(label))
             action.setCheckable(True)
-            action.setToolTip(i18n.t("gateModeTip"))
+            action.setToolTip(i18n.t("gateAutoTip" if mode == omp_session.GATE_AUTO
+                                     else "gateModeTip"))
             action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
             self._gate_actions[mode] = action
         self._project_btn.setMenu(menu)
@@ -1059,6 +1062,7 @@ class MainWindow(QMainWindow):
         dialog_layout.setContentsMargins(0, 0, 0, 0)
         self._dialog = DialogPanel()
         self._dialog.startRequested.connect(self._on_dialog_start_requested)
+        self._dialog.confirm_bar.alwaysAllowed.connect(self._remember_always_allowed)
         self._dialog.editingChanged.connect(self._on_dialog_editing_changed)
         dialog_layout.addWidget(self._dialog)
         splitter.addWidget(self._dialog_frame)
@@ -1460,6 +1464,7 @@ class MainWindow(QMainWindow):
                 model=choice.model,
                 resume=resumed,
                 gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
+                always_allowed=self._always_allowed(),
             )
         else:
             factory = lambda: TuningSession(  # noqa: E731
@@ -1468,6 +1473,8 @@ class MainWindow(QMainWindow):
                 mcp_token=server.token,
                 bridge=self._bridge,
                 model=choice.model,
+                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
+                always_allowed=self._always_allowed(),
             )
         self._agent_worker = AgentWorker(session_factory=factory, opening_prompt=opening)
         self._dialog.attach_agent(
@@ -1490,6 +1497,18 @@ class MainWindow(QMainWindow):
 
     def _project_setting(self, key: str) -> str:
         return project_settings.get(config.tcc_dir(), key, "") or ""
+
+    def _always_allowed(self) -> frozenset[str]:
+        """Tools the Arbiter ticked "don't ask again" on, for this project."""
+        raw = self._project_setting(_ALWAYS_KEY)
+        return frozenset(part for part in raw.split(",") if part)
+
+    def _remember_always_allowed(self, tool: str) -> None:
+        """One tick, one kind, and it survives the session -- Claude Code's own prompt works this
+        way. Narrowing the gate deliberately is the opposite of learning to click through it."""
+        allowed = set(self._always_allowed()) | {tool}
+        project_settings.set_value(config.tcc_dir(), _ALWAYS_KEY, ",".join(sorted(allowed)))
+        self._dialog._add_system_message(i18n.t("autoAllowed").format(tool=tool))
 
     def _reload_model_choices(self) -> None:
         """Refill both pickers from one registry, keeping selections that survived."""

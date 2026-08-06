@@ -215,6 +215,11 @@ _EFFECTS: tuple[tuple[str, str], ...] = (
 # its namespace" read as a permission rule).
 GATE_WRITES = "writes"
 GATE_FOREIGN = "foreign"
+# Nothing from the harness asks. Chosen by the Arbiter, and narrower than it sounds: TCC's own
+# tools raise their confirmations *inside* the tool, so a DSP or REW write still stops for a
+# human. What this turns off is the shell-and-file traffic, which is where the noise was -- and a
+# gate that fires on `ls` is a gate that gets clicked through, which protects nothing.
+GATE_AUTO = "auto"
 
 # Paths the skill legitimately owns inside a project.
 _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
@@ -302,12 +307,15 @@ class OmpSession:
         model: str = DEFAULT_MODEL,
         resume: bool = False,
         gate: str = GATE_WRITES,
+        always_allowed: Optional[frozenset[str]] = None,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
         self.resume = resume
         self.gate = gate
+        # Tools the Arbiter ticked "don't ask again" on, per project.
+        self.always_allowed = always_allowed or frozenset()
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._events: asyncio.Queue[Optional[AgentEvent]] = asyncio.Queue()
         self._reader: Optional[asyncio.Task] = None
@@ -538,6 +546,10 @@ class OmpSession:
         writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
         it can overwrite is a measurement or a ledger.
         """
+        if self.gate == GATE_AUTO:
+            return True
+        if tool in self.always_allowed:
+            return True
         if tool in _ALWAYS_GATED_TOOLS:
             return False
         if tool.startswith("mcp__tcc"):

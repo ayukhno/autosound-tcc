@@ -700,3 +700,31 @@ def test_the_harness_offers_no_plan_of_its_own(tmp_path):
     assert "todo" not in enabled
     assert "task" not in enabled and "hub" not in enabled  # no unobserved sub-agents either
     assert {"read", "glob", "grep", "bash", "write", "edit", "ask"} <= set(enabled)
+
+
+def test_auto_mode_stops_asking_about_the_harness(tmp_path):
+    """The Arbiter's own choice: shell and file traffic runs without a dialog. Narrower than it
+    sounds — TCC's tools raise their confirmations inside the tool, so a DSP or REW write still
+    stops for a human."""
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_AUTO)
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({**PERMISSION_FRAME,
+                               "title": "Allow tool: bash\nCommand: rm -rf process"}))
+
+    assert session.bridge.requests == []
+    assert session.sent[0]["value"] == "Approve"
+
+
+def test_a_remembered_tool_stops_asking_without_turning_the_gate_off(tmp_path):
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         always_allowed=frozenset({"write"}))
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: write"}))
+    asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: edit"}))
+
+    assert [r.tool for r in session.bridge.requests] == ["edit"]  # only the one not remembered

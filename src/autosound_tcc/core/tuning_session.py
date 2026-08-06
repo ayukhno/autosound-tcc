@@ -206,11 +206,18 @@ class TuningSession:
         mcp_token: Optional[str] = None,
         bridge: Optional[UiBridge] = None,
         model: str = DEFAULT_MODEL,
+        gate: str = "writes",
+        always_allowed: Optional[frozenset[str]] = None,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
+        # Same two dials as the omp adapter, so "stop asking" means one thing whichever harness is
+        # driving. `auto` turns off the harness's own permission traffic; TCC's `mcp__tcc__*` tools
+        # keep their own confirmations, which is where a change to the car is actually attested.
+        self.gate = gate
+        self.always_allowed = always_allowed or frozenset()
         self.session_id: Optional[str] = None
         self._read_roots = _read_roots_for(self.project_dir)
         self.resumed_from: Optional[str] = self.registry.resumable_session()
@@ -237,6 +244,9 @@ class TuningSession:
         the same action trains the Arbiter to click through both.
         """
         if tool_name.startswith("mcp__tcc"):
+            return PermissionResultAllow()
+
+        if self.gate == "auto" or tool_name in self.always_allowed:
             return PermissionResultAllow()
 
         if tool_name in ("Read", "Grep", "Glob"):

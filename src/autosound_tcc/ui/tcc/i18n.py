@@ -179,6 +179,11 @@ T: dict[Lang, dict[str, str]] = {
         "planSub": "phases + steps",
         "focus": "◆ IN FOCUS NOW",
         "measSub": "measurement task",
+        "confirmAlways": "Don't ask again for this in this project",
+        "gateAuto": "Don't ask at all (auto)",
+        "gateAutoTip": "Harness tools (shell, file reads, edits) run without asking. TCC's own "
+                       "DSP and REW writes still ask — those are the ones that change the car.",
+        "autoAllowed": "Auto-allowed <code>{tool}</code> — asking about it is off for this project.",
         "questionCancelled": "Question withdrawn — the turn can continue.",
         "questionWithdrawn": "The agent took that question back.",
         "questionWaiting": "Waiting for your answer",
@@ -401,6 +406,11 @@ T: dict[Lang, dict[str, str]] = {
         "planSub": "фази + кроки",
         "focus": "◆ У ФОКУСІ ЗАРАЗ",
         "measSub": "задача на замір",
+        "confirmAlways": "Більше не питати про це в цьому проєкті",
+        "gateAuto": "Не питати взагалі (авто)",
+        "gateAutoTip": "Інструменти харнеса (шел, читання, правки) працюють без запиту. Власні "
+                       "записи TCC у DSP і REW усе одно питають — саме вони міняють машину.",
+        "autoAllowed": "Авто-дозвіл <code>{tool}</code> — питання про нього вимкнено для проєкту.",
         "questionCancelled": "Питання знято — хід може йти далі.",
         "questionWithdrawn": "Агент забрав це питання назад.",
         "questionWaiting": "Чекає на твою відповідь",
