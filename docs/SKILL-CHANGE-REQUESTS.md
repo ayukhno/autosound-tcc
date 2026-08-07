@@ -8,13 +8,11 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Nothing is open as of 2026-08-07** — every SCR in this file is done, superseded or rejected.
-SCR-039, the last one, landed the same day; the table it used to sit in is kept below so a new
-entry has a shape to follow.
+**Open as of 2026-08-07** — everything not listed here is done, superseded or rejected:
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
-| — | — | — |
+| 041 | README/FAQ must name the supported pair | any other model reads as equally fine, and a downgrade fails by agreeing rather than by erroring |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
 they were checked against the code and corrected on 2026-08-06. Most of that batch had landed.
@@ -1064,3 +1062,37 @@ Decided:
 Ask: `capture-check` on the process writer — run the skill's own verdict over the open round's
 expected titles, record `{ok, uuid, at, issues}` per capture, append a `capture_verified` event;
 `capture-start --step <id>`; and `finish_step` refusing a step whose bound round is not clean.
+
+## SCR-041 — the README and FAQ must name the pair that is actually supported
+
+**Status**: proposed (user, 2026-08-07)
+**Target**: the skill's `README.md` (and its translations) + `FAQ.md`
+**TCC dependency**: none — TCC already marks the same pair in its picker
+(`model_choices.RECOMMENDED_GENERATOR` / `RECOMMENDED_CRITIC_MARKERS`) and now runs it at a stated
+effort. This ask is that the skill's own front door say the same thing, for the reader who never
+opens TCC.
+
+**Detail**: the skill is usable with any model the reader has, and the docs currently read that
+way. That is true and, on its own, misleading: the method has been driven end to end with exactly
+one combination, and the failure mode of the others is not an error message — it is a plausible,
+confident, wrong tune. The documented case is a cheap model that closed phases −1..3 in one
+sitting and reported crossovers, delays to 0.1 ms, EQ "within ±0.5 dB" and a listening verdict
+about a car nobody had sat in.
+
+State, as of **August 2026**:
+
+- **Generator: Claude Opus, at `xhigh` effort.**
+- **Reviewer/Advisor: Gemini Pro (High).** In `agy` the effort tier IS the model name, so `(High)`
+  is the whole instruction; `(Low)` is a different reviewer.
+- **Everything else is at the reader's own risk** — a different model, a different vendor, or the
+  same model at a lower effort. Say it plainly rather than as a preference: a downgrade does not
+  announce itself, it agrees with you.
+
+Two things the wording has to avoid: pretending the skill only works with that pair (it does not
+depend on it, and the free/clipboard paths are deliberate), and burying the recommendation in a
+table of options where it reads as one row among many. It is the supported configuration; the rest
+is experiment.
+
+**Also date it.** "As of August 2026" is part of the claim — the pair is a snapshot of what has
+been driven, and an undated recommendation is the thing that goes stale silently
+(the same reasoning as `SDK_MODELS_VERIFIED`).
