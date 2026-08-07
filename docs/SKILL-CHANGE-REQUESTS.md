@@ -1008,3 +1008,46 @@ Ask:
 The cost is real: two keys where there is one, in a schema that has just been through a 3.0 break.
 Worth raising now rather than after the next rename, but not worth a fourth format break on its
 own — it should ride along with whatever the next one is.
+
+## SCR-040 — verification is a deterministic phase TCC runs, and "done" means "verified"
+
+**Status**: accepted (user decision 2026-08-07; supersedes the "TCC consumes `verify.py`" follow-up
+left open by SCR-013)
+**Target**: `rew_tool/state/process.py` (the capture round: bind it to a plan step, record a
+verdict per capture) + `rew_tool/verify.py` (already the math) + the `finish_step` gate
+**TCC dependency**: TCC runs the phase — it is the party that can talk to REW, hold a loop, and
+put a retake in front of the Arbiter. It writes nothing itself (D-6): the skill's writer records
+the verdict, exactly as it records the round and the journal.
+
+**Detail**: checking a curve needs no model. Does REW hold it; is it in the band asked for; is the
+level a signal rather than silence or a loopback; is a THD spike real or a null artifact — all of
+it is arithmetic, and the skill already owns that arithmetic (`analysis.py`, `rew_api.py`,
+`eq_gate.py`, `verify.py`). A model reading FR arrays to answer it burns tokens on a job an `if`
+does better, and can report a verdict it did not compute.
+
+The panel today says "taken" when a title with the right name exists. A sweep that never finished,
+a muted channel, a mic in the wrong input — all read as captured, and the analysis that follows is
+computed on them.
+
+Decided:
+
+1. **No separate "verify curves" step.** The plan step IS the ask ("capture the baseline solo");
+   verification is what makes it *done*. A step bound to a capture round cannot close while any
+   expected capture is missing or unusable — the same shape as SCR-035's evidence gate and
+   SCR-036's target gate: the refusal belongs to the record, not to the model's judgement.
+2. **The round binds to the step** (`capture-start … --step <id>`), so the front-end can go from a
+   step to the captures that satisfy it and back, and so a retake is visibly attempt N of that
+   step rather than a loose measurement.
+3. **A verdict is pinned to REW's `uuid`**, not to the title. REW gives every measurement a stable
+   `uuid` (`9ff4deb9-…`) while its ordinal id is explicitly unstable. Without the pin, "verified"
+   outlives the graph it verified: re-take `sw_1 (sw)`, same name, different data, status still
+   green.
+4. **The retake is proposed, not automatic.** A sweep is a physical act in a car with a person and
+   drivers in it, not a write to a file. TCC surfaces "unusable: silence in band — re-take?" and
+   one click runs it; an automatic loop lives behind an explicit per-project toggle, default off.
+5. **No TCC, no change.** `verify.py` stays the skill's own CLI, and a session with no status file
+   verifies as it does today. The statuses are an accelerator, never a prerequisite.
+
+Ask: `capture-check` on the process writer — run the skill's own verdict over the open round's
+expected titles, record `{ok, uuid, at, issues}` per capture, append a `capture_verified` event;
+`capture-start --step <id>`; and `finish_step` refusing a step whose bound round is not clean.
