@@ -120,7 +120,11 @@ def build_session(
             return STATUS_STALE
         if naming.name_key(entry) not in parsed and name not in recorded_taken:
             return STATUS_WAIT
-        return STATUS_STALE if (entry or {}).get("code") in stale else STATUS_DONE
+        # Both names a renamed channel answers to (SCR-039): a `config_change` names whichever the
+        # session was using, and the capture's title carries whichever it was typed under. Either
+        # side alone would leave a real invalidation looking like a clean capture.
+        codes = {(entry or {}).get("code"), (entry or {}).get("code_current")} - {None}
+        return STATUS_STALE if codes & set(stale) else STATUS_DONE
 
     def issues_for(name: str) -> Optional[str]:
         """Why a capture is unusable, in the checker's own words — the panel shows it on hover."""

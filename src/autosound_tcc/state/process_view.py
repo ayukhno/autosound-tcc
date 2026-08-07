@@ -20,6 +20,7 @@ from dataclasses import replace
 from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.state import project_view
 from autosound_tcc.ui.tcc.mock_data import PlanPhase, PlanStep
 
 # process-state's step status -> the tag chip the panel already styles.
@@ -110,6 +111,9 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
     for step in state.get("plan", []):
         steps_by_phase.setdefault(str(step.get("phase")), []).append(step)
 
+    # Read once, not per step: a rename is the only thing that makes this map interesting, and it
+    # is a whole-project fact either way.
+    aliases = _channel_aliases() if stale else {}
     out: list[PlanPhase] = []
     for key in process.PHASES:
         meta = phases_meta.get(key, {})
@@ -122,16 +126,24 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
                     "en": f"Phase {key} · {title}",
                     "uk": f"Фаза {key} · {_PHASE_TITLES_UK.get(title, title)}",
                 },
-                steps=tuple(_to_step(s, stale or {}) for s in steps_by_phase.get(key, [])),
+                steps=tuple(_to_step(s, stale or {}, aliases)
+                            for s in steps_by_phase.get(key, [])),
             )
         )
     return tuple(out)
 
 
-def _to_step(step: dict, stale: Optional[dict] = None) -> PlanStep:
+def _to_step(step: dict, stale: Optional[dict] = None,
+             aliases: Optional[dict] = None) -> PlanStep:
     tag, tag_class = _STATUS_TAGS.get(step.get("status", "todo"), ("", ""))
     evidence = " ".join(str(item) for item in step.get("evidence") or [])
-    if evidence and any(code in evidence for code in (stale or {})):
+    # Any name the channel answers to (SCR-039) — the evidence is a REW title typed under whichever
+    # name was current that day, which need not be the one the `config_change` used.
+    if evidence and any(
+        name in evidence
+        for code in (stale or {})
+        for name in (aliases or {}).get(code, (code,))
+    ):
         tag, tag_class = _STALE_TAG
     return PlanStep(
         id=str(step.get("id", "")),
@@ -207,12 +219,18 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     the honest claim, and the one a tuner can act on. `full_rebaseline` invalidates every channel
     the glossary knows; an impact the parser cannot act on (`voicing`, free text) flags nothing,
     since guessing which channels a sentence meant is how a checklist starts lying.
+
+    Every name a channel answers to counts as naming it (SCR-039): a `config_change` says whatever
+    the session was calling the channel, while the evidence that clears it is a REW title typed
+    under whichever name was current the day of the capture. Matching the two literally would let a
+    rename either hide a real invalidation or leave one that no capture can ever clear.
     """
     process = _process_module()
     if process is None or not (process_dir(project_dir) / "journal.jsonl").is_file():
         return {}
     proc = process.Process(str(process_dir(project_dir)))
     parse = _impact_parser()
+    aliases = _channel_aliases(project_dir)
 
     stale: dict[str, dict] = {}
     for event in proc.events():  # oldest first
@@ -228,9 +246,29 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
             # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so a substring
             # match on the code is what actually works against what the skill writes.
             evidence = " ".join(str(item) for item in event.get("evidence") or [])
-            for code in [c for c in stale if c in evidence]:
+            cleared = [
+                c for c in stale
+                if any(name in evidence for name in aliases.get(c, (c,)))
+            ]
+            for code in cleared:
                 del stale[code]
     return stale
+
+
+def _channel_aliases(project_dir: Optional[Path] = None) -> dict[str, tuple[str, ...]]:
+    """`{any name of a channel: every name that channel answers to}` — SCR-039.
+
+    Built from `project.json`'s `channels[]`, which is the only place that knows a rename happened.
+    A project with no renames maps each code to just itself, which is what every caller assumed
+    before this existed.
+    """
+    out: dict[str, tuple[str, ...]] = {}
+    for key, entry in project_view.load_channels(project_dir).items():
+        previous = entry.get("previous_names")
+        names = [entry.get("id"), entry.get("code")]
+        names += list(previous) if isinstance(previous, list) else []
+        out[key] = tuple(dict.fromkeys(str(n) for n in names if n))
+    return out
 
 
 def _known_channel_codes(project_dir: Optional[Path] = None) -> tuple[str, ...]:

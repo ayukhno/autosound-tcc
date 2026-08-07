@@ -102,6 +102,46 @@ def test_zero_padded_versions_count_as_captured(project):
     assert statuses["sw_1 (sw)"] == "done"
 
 
+def _renamed_glossary(project, was, now):
+    """The glossary after `was` was renamed to `now` — what `project.py rename_channel` writes."""
+    channels = [
+        {**c, "code": now, "previous_names": [was]} if c["code"] == was else c
+        for c in GLOSSARY["channels"]
+    ]
+    (project / "glossary.json").write_text(
+        json.dumps({**GLOSSARY, "channels": channels}), encoding="utf-8"
+    )
+
+
+def test_a_capture_taken_before_a_rename_still_counts_as_taken(project):
+    """SCR-039. A REW title is typed by hand and cannot be rewritten, so a channel renamed
+    mid-project keeps its captures under the old name — and they are still that channel's, at that
+    DSP config version. Asking for them again would be the checker sending somebody back into the
+    car for a measurement already on disk."""
+    _renamed_glossary(project, "w-L", "wf-L")
+
+    session = mv.build_session("0", 1, ["w-L_1 (sw)"], project)
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+
+    assert statuses["wf-L_1 (sw)"] == mv.STATUS_DONE
+    # and it is not ALSO reported as an off-checklist extra: one capture, one row.
+    assert not any(i.additional for g in session.groups for i in g.items)
+
+
+def test_a_config_change_naming_the_new_code_still_invalidates_the_old_capture(project):
+    """The two names meet here: the journal event says `wf-L` (what the session was calling it)
+    and the capture's title says `w-L` (what it was called when it was taken). Matching on one
+    side only lets a measurement of a driver that is no longer in the car read as done."""
+    _renamed_glossary(project, "w-L", "wf-L")
+    _record_change(project, "remeasure: [wf-L]", what="blown voice coil")
+
+    session = mv.build_session("0", 1, ["w-L_1 (sw)", "w-R_1 (sw)"], project)
+    by_name = {item.name: item.status for group in session.groups for item in group.items}
+
+    assert by_name["wf-L_1 (sw)"] == mv.STATUS_STALE
+    assert by_name["w-R_1 (sw)"] == mv.STATUS_DONE
+
+
 def test_ours_but_unasked_for_shows_as_additional_not_dropped(project):
     """An experiment tag or an off-checklist channel is information, not noise."""
     session = mv.build_session("0", 1, ["w-L INV_1 (sw)"], project)

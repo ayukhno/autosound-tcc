@@ -217,6 +217,44 @@ def test_a_capture_recorded_after_the_change_clears_it(project, process):
     assert set(stale) == {"w-R"}
 
 
+def _rename(project, was, now):
+    """Rename a channel the way the skill does — `project.py`, not a hand-edited file."""
+    proj_module = vendor_loader.load_project()
+    proj = proj_module.Project(str(project))
+    proj.set_channel(was, slot="C")
+    proj.rename_channel(was, now)
+
+
+def test_a_capture_under_the_old_name_clears_a_change_that_named_the_new_one(project, process):
+    """SCR-039. The change says `wf-L` (what the session calls it) and the capture that answers it
+    says `w-L` (what it was called when the title was typed). Matching those literally would leave
+    a channel stale forever — no capture could ever clear it, because the title is not editable."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _rename(project, "w-L", "wf-L")
+    _record_change(project, process, "remeasure: [wf-L]")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    assert process_view.stale_channels(project) == {}
+
+
+def test_a_done_step_evidenced_under_the_old_name_is_still_re_chipped(project, process):
+    """The same two names meeting in the plan panel instead of the checklist: a step closed with a
+    capture taken before the rename must still go "recheck" when that channel is invalidated."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    _rename(project, "w-L", "wf-L")
+    _record_change(project, process, "remeasure: [wf-L]")
+
+    stale = process_view.stale_channels(project)
+    plan = process_view.to_plan(process_view.load_state(project), stale)
+    step = next(s for phase in plan for s in phase.steps if s.id == "2.1")
+
+    assert set(stale) == {"wf-L"}
+    assert step.tag["en"] == "recheck", step
+
+
 def test_a_capture_from_before_the_change_does_not_clear_it(project, process):
     process.enter_phase("2")
     process.add_step("2.1", "sweep the fronts")

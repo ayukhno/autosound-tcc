@@ -156,7 +156,13 @@ def _as_text(value) -> Optional[str]:
 
 @dataclass(frozen=True)
 class GroupRow:
-    """One row (channel/input/whatever) inside a profile-declared group."""
+    """One row (channel/input/whatever) inside a profile-declared group.
+
+    `id` is the ledger's row key — the channel's stable id (SCR-039), what a delta or a proposal
+    addresses and what every snapshot ever written uses. `name` is what the channel is CALLED
+    today. They are the same string until somebody renames a channel, which is why the two fields
+    existed as a pair long before either had different values.
+    """
 
     id: str
     name: str
@@ -165,9 +171,10 @@ class GroupRow:
     slot: Optional[str] = None
     descr: Optional[str] = None
     hardware_controls: dict = field(default_factory=dict)
-    # This row's `project.json` `channels[]` entry, matched by `code` (SCR-001). Empty for a tier
-    # whose codes aren't declared there (a virtual slot, an input) -- absence renders as "not
-    # captured", never as an error.
+    # This row's `project.json` `channels[]` entry, matched by `code` (SCR-001) or, after a rename,
+    # by the id/previous name the ledger still uses (SCR-039). Empty for a tier whose codes aren't
+    # declared there (a virtual slot, an input) -- absence renders as "not captured", never as an
+    # error.
     identity: dict = field(default_factory=dict)
 
     @property
@@ -275,6 +282,12 @@ def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> G
     `slot`, `descr` and `order` are read from the ledger row only when `project.json` has no entry
     for this code — i.e. a 2.x snapshot, written before schema v3 removed identity from the ledger.
     A migrated project never takes that branch.
+
+    `name` here is the ledger's row key, which is the channel's **id** (SCR-039) — stable, and for
+    every project that has never renamed anything simply its code. The row's `name` is the code
+    `project.json` carries TODAY, so a rename shows up in the tree while the snapshots it came from
+    keep the key they were written with. `id` stays the key, because that is what a proposal, a
+    delta and every earlier snapshot address.
     """
     def resolved(key: str) -> Any:
         value = project_view.fact_value(identity.get(key))
@@ -282,7 +295,7 @@ def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> G
 
     return GroupRow(
         id=name,
-        name=name,
+        name=project_view.channel_name(identity) or name,
         raw=row_raw,
         identity=identity,
         order=resolved("order"),

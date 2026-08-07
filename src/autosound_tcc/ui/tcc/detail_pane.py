@@ -444,4 +444,7 @@ class DetailPane(QFrame):
 
         layout.addStretch(1)
         self._scroll.setWidget(container)
-        self._title.setText(f"EQ · {row.id} · {row.name}")
+        # `id` and `name` are the same string until a channel is renamed (SCR-039), and repeating
+        # it reads as a bug in the header rather than as two facts.
+        self._title.setText(f"EQ · {row.name}" if row.id == row.name
+                            else f"EQ · {row.name} ({row.id})")

@@ -74,6 +74,36 @@ def test_load_channels_keys_by_code_and_skips_entries_without_one(tmp_path):
     assert channels["w-L"]["driver"]["model"] == "GB25"
 
 
+def test_load_channels_reaches_one_channel_by_id_current_name_and_old_name(tmp_path):
+    """SCR-039: the ledger's row key is the channel's id, which snapshots keep forever, while
+    `code` is what it is called today. Both, plus every retired name, must land on one entry —
+    otherwise a rename turns a channel TCC has full identity for into an unknown row."""
+    _write(tmp_path, {"channels": [
+        {"code": "w-L", "id": "m-L", "previous_names": ["m-L"], "slot": "C", "descr": "Front L"},
+        {"code": "tw-L", "slot": "D"},
+    ]})
+
+    channels = project_view.load_channels(tmp_path)
+
+    assert channels["m-L"] is channels["w-L"], "id and current name are one channel"
+    assert project_view.channel_name(channels["m-L"]) == "w-L", "the label is today's name"
+    assert set(channels) == {"m-L", "w-L", "tw-L"}
+
+
+def test_load_channels_lets_a_live_code_win_over_another_channels_history(tmp_path):
+    """A name handed on belongs to whoever holds it now, whatever the row order says. The skill
+    refuses to write this shape (`project.py.validate`), so it only arrives hand-edited — and row
+    order deciding identity is the kind of bug that shows up as one wrong driver."""
+    _write(tmp_path, {"channels": [
+        {"code": "w-L", "previous_names": ["m-L"], "descr": "the woofer"},
+        {"code": "m-L", "descr": "a genuinely new mid"},
+    ]})
+
+    channels = project_view.load_channels(tmp_path)
+
+    assert channels["m-L"]["descr"] == "a genuinely new mid"
+
+
 def test_load_channels_tolerates_a_missing_or_malformed_key(tmp_path):
     _write(tmp_path, {})
     assert project_view.load_channels(tmp_path) == {}

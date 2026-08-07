@@ -200,6 +200,39 @@ def test_slot_order_descr_and_tag_read_from_ledger():
     assert (rows["VRL"].slot, rows["VRL"].tag, rows["VRL"].tag_value) == ("C", "RearRC", "3/4")
 
 
+def test_a_renamed_channel_shows_its_new_name_and_keeps_its_ledger_key():
+    """SCR-039. The snapshot below was written when the channel was called `m-L` and is immutable,
+    so its row key stays `m-L` forever. What the tree must show is the name the channel goes by
+    today, and what every delta/proposal must keep addressing is the key — hence `id` and `name`
+    are separate fields on the row.
+    """
+    profile = {"dsp_profile": {"groups": [
+        {"id": "physical_outputs", "label": "Outputs", "fields": ["gain_db"]},
+    ]}}
+    ledger = {"channels": {"m-L": {"gain_db": -3.0}}}
+    channels = {  # what project_view.load_channels returns after a rename: three keys, one entry
+        "m-L": {"code": "w-L", "id": "m-L", "previous_names": ["m-L"], "slot": "C",
+                "descr": "Front L Woofer", "role": "woofer"},
+    }
+    channels["w-L"] = channels["m-L"]
+
+    row = ProjectView.from_dict(ledger, profile, channels=channels).groups[0].rows[0]
+
+    assert row.name == "w-L", "the tree shows what the channel is called now"
+    assert row.id == "m-L", "the ledger key is what a proposal still addresses"
+    assert (row.slot, row.descr, row.role) == ("C", "Front L Woofer", "woofer")
+
+
+def test_a_row_with_no_project_entry_still_shows_its_ledger_key_as_the_name():
+    """Mid-intake, or a tier whose codes were never declared in `project.json`. The key is the only
+    name there is, and rendering nothing would hide a channel that exists."""
+    profile = {"dsp_profile": {"groups": [
+        {"id": "physical_outputs", "label": "Outputs", "fields": ["gain_db"]},
+    ]}}
+    row = ProjectView.from_dict({"channels": {"w-R": {"gain_db": 0}}}, profile).groups[0].rows[0]
+    assert (row.id, row.name) == ("w-R", "w-R")
+
+
 def test_tag_value_missing_from_hardware_controls_is_none():
     """A row that names a `tag` no `hardware.controls` entry has yet -- renders bare, not an
     error (same "lenient on absent facts" convention as everywhere else)."""

@@ -151,8 +151,19 @@ def load_channel_summary(project_dir_: Optional[Path] = None) -> tuple[tuple[str
     return tuple(rows)
 
 
+def channel_name(entry: dict) -> Optional[str]:
+    """The name a channel goes by today — its `code` (SCR-039).
+
+    A ledger row's key is the channel's *id*, so the key is not the label: after a rename they are
+    the old name and the new one. Every renderer asks here rather than showing the key, which is
+    what makes a rename visible in the app without rewriting a single snapshot.
+    """
+    code = fact_value((entry or {}).get("code"))
+    return str(code) if code else None
+
+
 def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
-    """`project.json`'s `channels[]`, keyed by `code` — the join key ledger rows resolve against.
+    """`project.json`'s `channels[]`, keyed by every name a ledger row might use.
 
     SCR-001, resolved 2026-07-31: **`project.json` owns channel identity, the ledger owns tunable
     state, consumers join on `code`.** The mechanical test for which side a field belongs to is
@@ -165,15 +176,29 @@ def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
 
     Rows without a `code` are skipped rather than guessed at — an entry with no join key cannot be
     matched to anything, and inventing one would attach a driver to the wrong channel.
+
+    **The ledger's row key is the channel's `id`, not its name** (SCR-039). The id defaults to the
+    code, so for a project that has never renamed a channel this map is exactly what it always was:
+    one key per channel. After a rename the same entry answers to three — the id every snapshot was
+    written with, the name it goes by now, and each name it went by before — because a snapshot is
+    immutable and an old REW title cannot be edited at all. A live code always wins over another
+    channel's history, so a name handed on resolves to whoever holds it now rather than to whoever
+    happens to come first in the file.
     """
     channels = _load(project_dir_).get("channels") or []
     if not isinstance(channels, list):
         return {}
-    return {
-        str(entry["code"]): entry
-        for entry in channels
-        if isinstance(entry, dict) and entry.get("code")
-    }
+    out: dict[str, dict] = {}
+    for entry in channels:
+        if not isinstance(entry, dict) or not entry.get("code"):
+            continue
+        previous = entry.get("previous_names")
+        keys = [entry.get("id"), entry.get("code")]
+        keys += list(previous) if isinstance(previous, list) else []
+        for key in keys:
+            if key and (str(key) not in out or key == entry.get("code")):
+                out[str(key)] = entry
+    return out
 
 
 def driver_label(entry: dict) -> Optional[str]:

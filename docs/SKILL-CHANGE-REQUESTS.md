@@ -8,11 +8,13 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-06** — everything not listed here is done, superseded or rejected:
+**Nothing is open as of 2026-08-07** — every SCR in this file is done, superseded or rejected.
+SCR-039, the last one, landed the same day; the table it used to sit in is kept below so a new
+entry has a shape to follow.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
-| 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
+| — | — | — |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
 they were checked against the code and corrected on 2026-08-06. Most of that batch had landed.
@@ -973,7 +975,13 @@ a one-line `ls knowledge/dsp/` in the intake reference is worth three minutes of
 
 ## SCR-039 — a channel's id is its name, so renaming one rewrites its history
 
-**Status**: proposed (raised 2026-08-06, from the ledger-schema work)
+**Status**: done (skill `29d29a3`, TCC `HEAD`, 2026-08-07) — a channel has an `id` that never moves
+and a `code` that is what it is called today. **The id defaults to the code**, so nothing migrated
+and no format broke: the two diverge only after a rename. `rename_channel` materialises the id,
+sets the new code, appends the old to `previous_names` and renames the glossary entry; snapshots
+and REW titles are left alone, and `Glossary.resolve_code`/`name_key` make `m-L_2 (sw)` and
+`w-L_2 (sw)` one measurement. `apply.propose` resolves too, so a delta addressed to the current
+name lands on the id row instead of banking a second one. TCC shows `code`, addresses `id`.
 **Target**: `rew_tool/state/schema.md` + `project.py`'s `channels[]` (`code`), `naming.py`'s
 glossary, and every consumer that joins the two on `code`
 **TCC dependency**: `state/dsp_state.py` joins `project.json`'s `channels[]` onto the ledger row by
@@ -1007,6 +1015,12 @@ Ask:
 The cost is real: two keys where there is one, in a schema that has just been through a 3.0 break.
 Worth raising now rather than after the next rename, but not worth a fourth format break on its
 own — it should ride along with whatever the next one is.
+
+**How it landed without one** (2026-08-07): the id is resolved, not stored — `channel_id(row)`
+returns `row["id"] or row["code"]`, so every existing project already has ids and no file was
+touched. `id`/`previous_names` are written by the first rename and by nothing else. What point 1
+above called "never displayed" is exactly what happened: TCC renders `code`, and `id` only ever
+appears as a ledger row key, where it reads as the name anyway until somebody renames something.
 
 ## SCR-040 — verification is a deterministic phase TCC runs, and "done" means "verified"
 
