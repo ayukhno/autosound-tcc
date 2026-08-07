@@ -704,6 +704,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
        this is work that will not happen -- and until the skill recorded the decision the two were
        the same colour, so the next session proposed it again. */
     QLabel[class~="tl-skip"] {{ background: {t.off}; }}
+    /* The flaw map's verdicts (SCR-015). Two answers matter more than six colours: `done` = this
+       one you may correct, `bad` = the boost this map exists to forbid, `off` = a fact of the car,
+       `info` = the fix exists but is not EQ. */
+    QLabel[class~="tl-off"] {{ background: {t.off}; }}
+    QLabel[class~="tl-info"] {{ background: {t.info}; }}
     QLabel[class~="mcol-h"] {{
         font-size: 9.5px;
         letter-spacing: 1px;

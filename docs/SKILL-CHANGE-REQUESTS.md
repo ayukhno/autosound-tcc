@@ -12,7 +12,6 @@ being the right one — the reason is on the entry).
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
-| 015 | what belongs in "Car audio analysis" | that panel section is still a placeholder |
 | 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
@@ -271,7 +270,7 @@ What the skill must add:
 
 ## SCR-015 — data-source structure for the left panel's Project / System / Car-audio-analysis sections
 
-**Status**: half done — System params now reads `project.json` (`project_view.load_system_params`: DSP, amps, mic, source) and every channel of every tier is listed there with its ON/OFF. **Car audio analysis is still a placeholder**: nothing has defined what belongs in it
+**Status**: done (skill `c2aeafb`, TCC `HEAD`) — System params reads `project.json`, and **Car audio analysis renders the phase-0 Acoustic Flaw Map** (user's own framing, 2026-08-07): what this cabin does to the sound, one row per finding — frequency · width · the feature's own height/depth — and, load-bearing, what may and may not be done about it. `project.py flaw` writes it into `project.json` under `acoustics.flaws[]` with closed `kind`/`action` lists, and refuses a dip recorded as notchable. TCC colours by `action`: correctable · leave alone · never boost · fixable but not with EQ.
 **Target**: intake flow + whatever config file(s) end up owning this (likely `project.json` per
 SCR-011, or a dedicated `system_profile.json` alongside `dsp_profile.json`)
 **TCC dependency**: `ui/tcc/main_window.py`/`ui/tcc/sidebar_section.py` (new 2026-07-28): the left

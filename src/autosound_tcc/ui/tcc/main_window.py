@@ -64,6 +64,7 @@ from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import (
+    acoustics_view,
     measurement_view,
     plan_audit,
     process_view,
@@ -757,6 +758,57 @@ class MainWindow(QMainWindow):
             self._system_section.body_layout().addWidget(_kv_row(label, value))
         self._add_channel_switches()
 
+    def _rebuild_acoustics(self) -> None:
+        """The car's acoustic flaw map — what this cabin does, and what may be done about it.
+
+        Rebuilt from scratch on project load and language switch, same pattern as System params.
+        The rows are the skill's measurements; the colour is its verdict. Nothing here judges a
+        curve — `project.py flaw` already refused to record a null as notchable, which is the one
+        rule in this map with teeth (SCR-015).
+        """
+        clear_layout(self._audio_section.body_layout())
+        flaws = acoustics_view.load_flaws()
+        if not flaws:
+            # Before phase 0 there is nothing measured, and that is the ordinary state of a new
+            # project rather than a fault: the intake fills this in.
+            self._audio_placeholder = self._placeholder_label(i18n.t("acousticsNone"))
+            self._audio_section.body_layout().addWidget(self._audio_placeholder)
+            return
+        for flaw in flaws:
+            self._audio_section.body_layout().addWidget(self._flaw_row(flaw))
+
+    def _flaw_row(self, flaw) -> QWidget:
+        """`188 Hz · Q5 · +5.5 dB` on one line, the verdict on the next, the reason on hover."""
+        widget = QWidget()
+        widget.setProperty("class", "paramrow")
+        outer = QVBoxLayout(widget)
+        outer.setContentsMargins(12, 4, 12, 4)
+        outer.setSpacing(1)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        # The dot IS the verdict: correctable, leave alone, never boost, or fixed by something
+        # that is not EQ. A reader scanning the column should not have to read words to see it.
+        top.addWidget(TrafficLight(flaw.tone))
+        head = ElidedLabel(flaw.headline, min_width=60)
+        head.setProperty("class", "pk")
+        top.addWidget(head, 1)
+        action = QLabel(i18n.t(f"flawAction_{flaw.action}"))
+        action.setProperty("class", "stag")
+        top.addWidget(action)
+        outer.addLayout(top)
+
+        detail = ", ".join(flaw.channels) if flaw.channels else i18n.t("flawAllChannels")
+        line = ElidedLabel(f"{i18n.t('flawKind_' + flaw.kind)} · {detail}", min_width=60)
+        line.setProperty("class", "cline2")
+        outer.addWidget(line)
+
+        why = flaw.why or ""
+        evidence = ", ".join(flaw.evidence)
+        attach_tip(widget, "<br>".join(x for x in (why, evidence) if x))
+        return widget
+
     def _add_channel_switches(self) -> None:
         """Every channel the DSP has, in use or not, each with its ON/OFF.
 
@@ -998,8 +1050,7 @@ class MainWindow(QMainWindow):
         self._audio_section = SidebarSection(
             "audio_analysis", i18n.t("audioAnalysis"), self._settings, default_collapsed=True
         )
-        self._audio_placeholder = self._placeholder_label(i18n.t("noDataYet"))
-        self._audio_section.body_layout().addWidget(self._audio_placeholder)
+        self._rebuild_acoustics()
         layout.addWidget(self._audio_section)
 
         self._dsp_section = SidebarSection(
@@ -2322,6 +2373,7 @@ class MainWindow(QMainWindow):
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()
         self._audio_section.set_title(i18n.t("audioAnalysis"))
+        self._rebuild_acoustics()
         self._audio_placeholder.setText(i18n.t("noDataYet"))
         self._dsp_section.set_title(i18n.t("dspPanel"))
         self._set_project_params(self._view)

@@ -1592,3 +1592,44 @@ def test_a_journal_that_cannot_be_written_does_not_eat_the_answer(tmp_path, monk
     monkeypatch.setattr(process_writer, "record_decision", _boom)
 
     window._record_decision("Reference seat?", "driver only")  # must not raise
+
+
+def test_the_flaw_map_renders_with_its_verdict(tmp_path, monkeypatch):
+    """The map's point is the second half of every row — not "there is a dip at 250 Hz" but "and
+    you must never EQ it up" (SCR-015)."""
+    import json as _json
+
+    from autosound_tcc.core import config
+
+    _app()
+    (tmp_path / "project.json").write_text(
+        _json.dumps({
+            "schema_version": 3,
+            "acoustics": {"flaws": [
+                {"f_hz": 250, "level_db": -12, "kind": "cabin_null", "action": "no_boost",
+                 "channels": ["w-R"], "why": "interference, not min-phase",
+                 "evidence": ["w-R_1 (sw)"]},
+            ]},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    texts = " ".join(w.text() for w in window._audio_section.findChildren(QLabel))
+    assert "250 Hz" in texts and "-12 dB" in texts
+    assert i18n.t("flawAction_no_boost") in texts  # the verdict, in words as well as colour
+    assert i18n.t("flawKind_cabin_null") in texts
+
+
+def test_a_project_with_no_flaw_map_says_so_rather_than_showing_nothing(tmp_path, monkeypatch):
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    texts = " ".join(w.text() for w in window._audio_section.findChildren(QLabel))
+    assert i18n.t("acousticsNone")[:20] in texts
