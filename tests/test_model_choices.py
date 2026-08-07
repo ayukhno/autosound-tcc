@@ -109,12 +109,59 @@ def test_a_choice_key_survives_a_restart():
     assert model_choices.find(model_choices.sdk_choices(), "sdk:claude-opus-5").label == "Claude Opus 5"
 
 
-def test_the_reviewer_list_is_the_same_list(catalogue):
-    """One registry. A different vendor for the Critic is the method's requirement (SKILL.md,
-    three roles), not something a picker should enforce by hiding options."""
-    active = ["google/gemini-3.1-pro-preview"]
+def test_the_reviewer_list_is_the_generator_list_plus_the_local_clis(catalogue, monkeypatch):
+    """One registry, and then the routes only a reviewer can use.
 
-    assert model_choices.critic_choices(active) == model_choices.choices(active)
+    A CLI route appears for the Critic and not for the Generator because the reviewer is a
+    one-shot call the skill's own script already knows how to make, while a Generator has to hold
+    a session and talk to TCC's MCP server — which nothing has wired for `agy`/`codex` yet.
+    """
+    from autosound_tcc.core import model_choices as mc
+
+    active = ["google/gemini-3.1-pro-preview"]
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": [
+        mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
+                  provider="google")
+    ]})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+
+    generator = model_choices.choices(active)
+    reviewer = model_choices.critic_choices(active)
+
+    assert reviewer[: len(generator)] == generator
+    routes = {c.harness for c in reviewer[len(generator):]}
+    assert routes == {"agy", "codex"}
+    assert all(c.harness in ("sdk", "omp") for c in generator)
+
+
+def test_every_route_is_labelled_and_says_whose_bill_it_is(catalogue):
+    """The same model reached two ways is two different accounts. An unlabelled entry reads as
+    "the normal one", which is the assumption that quietly spends money."""
+    from autosound_tcc.core import model_choices as mc
+
+    sdk = mc.Choice(harness="sdk", model="claude-opus-5", label="Claude Opus 5")
+    omp = mc.Choice(harness="omp", model="google/gemini-3.1-pro-preview", label="Gemini")
+    agy = mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")
+
+    assert (sdk.route, omp.route, agy.route) == ("SDK", "OMP", "AGY")
+    assert "metered" in omp.route_note  # the one that spends without being noticed
+    assert "subscription" in agy.route_note
+
+
+def test_the_recommended_pair_is_marked_on_both_sides(catalogue):
+    """Claude Opus as Generator, a Gemini Pro through a subscription as Critic — the one
+    combination the method has been driven with end to end."""
+    from autosound_tcc.core import model_choices as mc
+
+    opus = mc.Choice(harness="sdk", model="claude-opus-5", label="Claude Opus 5")
+    sonnet = mc.Choice(harness="sdk", model="claude-sonnet-5", label="Claude Sonnet 5")
+    gemini_pro = mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")
+    gemini_flash = mc.Choice(harness="agy", model="gemini-3.6-flash-low", label="Gemini 3.6 Flash (Low)")
+
+    assert mc.recommended(opus) and not mc.recommended(sonnet)
+    assert mc.recommended(gemini_pro, critic=True)
+    assert not mc.recommended(gemini_flash, critic=True)
+    assert not mc.recommended(opus, critic=True)  # the Critic must not be the Generator's vendor
 
 
 def test_the_reviewer_vendor_is_read_off_the_model_name():
@@ -152,3 +199,61 @@ def test_reachability_is_the_vendors_key_or_cli_not_the_vendors_name(monkeypatch
         mc.shutil, "which", lambda binary: "/usr/bin/claude" if binary == "claude" else None
     )
     assert mc.critic_reaches(claude) is True  # the CLI is a transport too
+
+
+def test_the_agy_catalogue_is_retried_and_read_off_both_streams(monkeypatch):
+    """`agy models` fetches over the network: the first call in a fresh process comes back empty
+    often enough to matter, and part of its output can land on stderr. Read one stream, ask once,
+    and the whole route disappears between launches — indistinguishable from "not installed"."""
+    from autosound_tcc.core import model_choices as mc
+
+    calls: list = []
+
+    class _Proc:
+        def __init__(self, out: str, err: str = "") -> None:
+            self.returncode, self.stdout, self.stderr = 0, out, err
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        if len(calls) == 1:
+            return _Proc("")  # the cold call, exit 0 and nothing to show for it
+        return _Proc("", "Fetching available models...\ngemini-3.1-pro-high\tGemini 3.1 Pro (High)")
+
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(mc.subprocess, "run", fake_run)
+
+    rows = mc._fetch_agy_choices()
+
+    assert len(calls) == 2  # asked again rather than believing the empty answer
+    assert [(c.model, c.label) for c in rows] == [
+        ("gemini-3.1-pro-high", "Gemini 3.1 Pro (High)")
+    ]
+
+
+def test_a_cli_that_answers_with_nothing_keeps_its_last_good_list(monkeypatch):
+    """A network hiccup must not empty the picker: the route the user configured is still there,
+    and re-rendering it as absent is what teaches people to reach for the metered one."""
+    from autosound_tcc.core import model_choices as mc
+
+    good = [mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")]
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": list(good)})
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+
+    assert mc.agy_choices() == good
+    assert mc.cli_routes_without_models() == []  # it did answer, once; nothing to warn about
+
+
+def test_an_installed_cli_that_never_answered_is_named_rather_than_hidden(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+
+    assert mc.agy_choices() == []
+    assert mc.cli_routes_without_models() == ["agy"]

@@ -366,6 +366,23 @@ def _stop_all_workers() -> None:
 atexit.register(_stop_all_workers)
 
 
+class _CliCatalogueWorker(QThread):
+    """Ask the local CLIs what they can run, off the GUI thread.
+
+    `agy models` fetches over the network. The pickers are built while the window is being
+    constructed, so asking there would freeze the launch — and a route that answers slowly must
+    not be a route that looks absent.
+    """
+
+    done = Signal()
+
+    def run(self) -> None:
+        model_choices.refresh_cli_catalogue()
+        self.done.emit()
+
+    quiet = Signal(list)  # routes that are installed and answered with nothing
+
+
 class _CaptureCheckWorker(QThread):
     """Run the skill's capture verdict off the GUI thread (SCR-040).
 
@@ -469,6 +486,13 @@ class MainWindow(QMainWindow):
         # One contract check at launch, so the status strip can say "this project has N problems"
         # before the user goes looking. Same escape hatch as the two workers above.
         self._start_contract_check()
+
+        # What the local CLIs offer, fetched in the background and folded into the pickers when it
+        # lands. Until then those routes are simply absent rather than the window being late.
+        self._cli_catalogue = _CliCatalogueWorker()
+        self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
+            self._cli_catalogue.start()
 
         # Quitting is not closing: Cmd-Q, a signal, or `QApplication.quit()` end the loop without
         # any window's `closeEvent` necessarily running, and whatever is still on a thread then is
@@ -1654,6 +1678,19 @@ class MainWindow(QMainWindow):
             return
         self._dialog._add_system_message(proposal_view.to_html(delta))
 
+    def _on_cli_catalogue_ready(self) -> None:
+        """Fold the local CLIs into the pickers, and say so when one answered with nothing.
+
+        Silence would read as "that route does not exist on this machine", which is the belief
+        that sends somebody to the metered one — the whole reason the routes are labelled at all.
+        """
+        self._reload_model_choices()
+        quiet = model_choices.cli_routes_without_models()
+        if quiet:
+            self._status_strip.notify(
+                i18n.t("cliRouteQuiet").format(routes=", ".join(quiet)), level="warn"
+            )
+
     def _on_rew_titles_changed(self) -> None:
         """REW's list changed — redraw the checklist, and check what the round asked for (SCR-040).
 
@@ -2106,15 +2143,25 @@ class MainWindow(QMainWindow):
         combo.clear()
         for choice in entries:
             notes = []
+            if model_choices.recommended(choice, critic=critic):
+                # First note, because it is the one a first-time Arbiter needs: two hundred rows
+                # and one combination the method has actually been driven with end to end.
+                notes.append(i18n.t("modelRecommended"))
             if choice.free:
                 notes.append(i18n.t("modelFree"))
             if critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
-            # Which harness carries the model is the licensing split (spike/HANDOFF.md 5-ter), so
-            # it is named in the entry rather than left to be inferred from the vendor.
-            prefix = "SDK · " if choice.harness == "sdk" else ""
-            combo.addItem(f"{prefix}{choice.label}{suffix}", choice.key)
+            # EVERY route is prefixed, not just the SDK. The same model reached two ways is two
+            # different accounts -- a subscription CLI and a metered broker -- and an unlabelled
+            # entry reads as "the normal one", which is the assumption that quietly spends money
+            # (reported 2026-08-07: an API balance gone negative next to an unused subscription).
+            combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
+            combo.setItemData(
+                combo.count() - 1,
+                f"{choice.route_note}\n{choice.model}",
+                Qt.ItemDataRole.ToolTipRole,
+            )
         index = combo.findData(wanted) if wanted else -1
         if index < 0 and not critic:
             # Nothing chosen yet: say so rather than pre-selecting the first entry. A model that
@@ -2336,6 +2383,9 @@ class MainWindow(QMainWindow):
         check = getattr(self, "_capture_check", None)
         if check is not None and check.isRunning():
             check.wait(5000)
+        catalogue = getattr(self, "_cli_catalogue", None)
+        if catalogue is not None and catalogue.isRunning():
+            catalogue.wait(5000)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         self.stop_workers()

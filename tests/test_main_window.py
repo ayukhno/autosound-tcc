@@ -585,12 +585,20 @@ def test_the_picked_model_survives_a_restart(monkeypatch):
     assert again._generator_choice().model == "google/gemini-3.1-pro-preview"
 
 
-def test_the_critic_picker_comes_from_the_same_registry(monkeypatch):
-    """One list, one place to configure — the Critic used to have its own hard-coded strings."""
+def test_the_critic_picker_carries_the_generator_list_plus_local_clis(monkeypatch):
+    """One registry, and then the routes only a reviewer can use — a one-shot CLI call is
+    something the skill's script can already make, a Generator session is not."""
+    from autosound_tcc.core import model_choices as mc
+
     _catalogue(monkeypatch, [{
         "provider": "google", "selector": "google/gemini-3.1-pro-preview",
         "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
     }])
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": [
+        mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
+                  provider="google")
+    ]})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
     _app()
     window = MainWindow()
     window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
@@ -599,25 +607,36 @@ def test_the_critic_picker_comes_from_the_same_registry(monkeypatch):
     generator = {window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())}
     reviewer = {window._ai_critic_combo.itemData(i) for i in range(window._ai_critic_combo.count())}
 
-    # The generator carries an extra "nothing chosen yet" entry; the reviewer has a working
-    # default because picking one never starts anything on its own.
-    assert generator - {""} == reviewer
-    assert "omp:google/gemini-3.1-pro-preview" in reviewer
+    assert "agy:gemini-3.1-pro-high" in reviewer
+    assert "agy:gemini-3.1-pro-high" not in generator
+    assert generator - {""} <= reviewer  # everything the Generator offers, the Critic offers too
 
 
-def test_a_reviewer_this_machine_cannot_call_is_marked_clipboard_only(monkeypatch):
-    """Since SCR-033 the reviewer script speaks three transports, so the mark is about THIS
-    machine — no key and no CLI for that vendor — not about the model being non-Gemini."""
+def test_every_entry_says_which_route_it_takes(monkeypatch):
+    """The pain this fixes: an API balance gone negative next to an unused subscription, because
+    two rows with the same model name were two different accounts."""
     from autosound_tcc.core import model_choices as mc
 
-    _catalogue(monkeypatch, [])
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
+    _catalogue(monkeypatch, [{
+        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
+    }])
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
     _app()
     window = MainWindow()
+    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
+    window._reload_model_choices()
 
-    claude = window._ai_critic_combo.findData("sdk:claude-opus-5")
-    assert "clipboard" in window._ai_critic_combo.itemText(claude).lower()
+    labels = [
+        window._ai_main_combo.itemText(i)
+        for i in range(window._ai_main_combo.count())
+        if window._ai_main_combo.itemData(i)
+    ]
+    assert labels, "the picker should have entries to label"
+    assert all(label.split(" · ")[0] in ("SDK", "OMP", "AGY", "CODEX") for label in labels), labels
+    assert any(label.startswith("OMP · ") for label in labels)
+    assert any(i18n.t("modelRecommended") in label for label in labels)
 
 
 def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch):

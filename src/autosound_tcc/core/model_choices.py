@@ -25,7 +25,22 @@ import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
-Harness = Literal["sdk", "omp"]
+# How a model is reached — and, more to the point, WHOSE BILL it lands on. This is the axis the
+# picker was missing: "Gemini 3.1 Pro" through a desktop subscription and the same model through
+# omp's broker are the same words and two different accounts, and the one that quietly spends API
+# credit is the one nobody notices until the balance goes negative (reported 2026-08-07, on a
+# Google AI Studio account, by a user who also had a subscription and free OAuth access).
+Harness = Literal["sdk", "omp", "agy", "codex"]
+
+#: Prefix shown in front of every picker entry, and what it means for billing. Every route is
+#: labelled, not just the SDK: an unlabelled entry reads as "the normal one", which is exactly the
+#: assumption that costs money.
+ROUTES: dict[str, tuple[str, str]] = {
+    "sdk": ("SDK", "your own Claude login, through the Agent SDK"),
+    "agy": ("AGY", "the Antigravity CLI on this machine — its own subscription"),
+    "codex": ("CODEX", "the Codex CLI on this machine — its own ChatGPT login"),
+    "omp": ("OMP", "omp's broker — whichever API credentials omp holds, metered"),
+}
 
 # What TCC drives through the Agent SDK. Claude only, and deliberately not read from a catalogue:
 # these are the models this front-end is tested against, and the SDK resolves credentials from the
@@ -36,7 +51,23 @@ SDK_MODELS: tuple[tuple[str, str], ...] = (
     ("Claude Fable 5", "claude-fable-5"),
 )
 
+# The pair that is worth running today. Everything else in the picker is a real option and an
+# experiment; this is the one combination the method has been driven with end to end, and it is
+# marked so a first-time Arbiter does not have to infer it from a list of two hundred models.
+RECOMMENDED_GENERATOR = "sdk:claude-opus-5"
+RECOMMENDED_CRITIC_MARKERS = ("gemini", "pro")
+#: …but not a reduced-effort tier of it. `agy` publishes Pro at several efforts, and "Pro (Low)"
+#: is not the reviewer the pair was judged on.
+RECOMMENDED_CRITIC_EXCLUDES = ("low", "flash", "lite")
+
 CATALOGUE_TIMEOUT_S = 20.0
+# Long enough for a CLI that shells out to list its own models, short enough that a hung binary
+# does not hold the picker open.
+CLI_TIMEOUT_S = 15.0
+
+#: What Codex offers. Hardcoded because `codex models` needs a terminal (it answers "stdin is not
+#: a terminal" when driven), unlike `agy models` which prints a plain list.
+CODEX_MODELS: tuple[str, ...] = ("gpt-5.2-codex", "gpt-5.2")
 
 
 @dataclass(frozen=True)
@@ -54,6 +85,16 @@ class Choice:
         """Stable identity for persistence — `omp:google/gemini-3.1-pro-preview`."""
         return f"{self.harness}:{self.model}"
 
+    @property
+    def route(self) -> str:
+        """The prefix a reader sees: SDK / AGY / CODEX / OMP."""
+        return ROUTES.get(self.harness, (self.harness.upper(), ""))[0]
+
+    @property
+    def route_note(self) -> str:
+        """Whose bill this lands on, in one clause, for the tooltip."""
+        return ROUTES.get(self.harness, ("", ""))[1]
+
 
 class OmpCatalogueError(RuntimeError):
     """`omp models` could not be read. Carries its own message; usually omp is not installed."""
@@ -68,6 +109,107 @@ def sdk_choices() -> list[Choice]:
 
 def omp_available() -> bool:
     return shutil.which("omp") is not None
+
+
+def cli_available(harness: str) -> bool:
+    """Is this route's binary on PATH. Cheap: no subprocess, so the picker can ask per entry."""
+    return shutil.which({"agy": "agy", "codex": "codex"}.get(harness, "")) is not None
+
+
+#: Last good answer from each CLI that has to be asked over the network. Populated by
+#: `refresh_cli_catalogue()` on a background thread; read by the picker, which must never block.
+#: A failed refresh keeps the previous answer rather than emptying the list — `agy models` fetches
+#: over the network, and a picker that drops a whole route because one call timed out is a picker
+#: that teaches people the route does not exist.
+_CLI_CACHE: dict[str, list[Choice]] = {}
+
+
+def agy_choices() -> list[Choice]:
+    """What the Antigravity CLI says it can run, from cache. Never blocks, never fetches."""
+    return list(_CLI_CACHE.get("agy", []))
+
+
+def cli_routes_without_models() -> list[str]:
+    """CLIs that are installed and told us nothing.
+
+    Worth saying out loud rather than rendering as absence: `agy models` fetches over the network
+    and has been seen come back empty, and a route that silently disappears is exactly how a user
+    ends up believing it does not exist and paying for the metered one instead.
+    """
+    return [
+        harness
+        for harness in ("agy",)
+        if cli_available(harness) and not _CLI_CACHE.get(harness)
+    ]
+
+
+def refresh_cli_catalogue() -> dict[str, list[Choice]]:
+    """Ask every CLI that needs asking, and cache the answer. **Call this off the GUI thread.**
+
+    `agy models` fetches over the network and has been seen take seconds; the picker is built on
+    the GUI thread at window construction, so asking there would freeze the window on launch.
+    """
+    fetched = _fetch_agy_choices()
+    if fetched or "agy" not in _CLI_CACHE:
+        _CLI_CACHE["agy"] = fetched
+    return dict(_CLI_CACHE)
+
+
+def _fetch_agy_choices() -> list[Choice]:
+    """Asked rather than hardcoded, because `agy models` prints its own list and a stale hardcoded
+    selector is a model that fails at call time instead of being absent at pick time. An agy model
+    is reached through a subscription the user already pays for, which is the whole reason it
+    belongs in this picker beside omp's metered catalogue.
+    """
+    if not cli_available("agy"):
+        return []
+    # Twice, because the FIRST `agy models` in a fresh process comes back empty often enough to
+    # matter (it prints "Fetching available models..." and returns 0 with nothing on either
+    # stream); a second call moments later answers. Without the retry the route appeared and
+    # disappeared between launches, which is indistinguishable from "not installed" and sends
+    # somebody to the metered catalogue instead.
+    proc = None
+    for _ in range(2):
+        try:
+            proc = subprocess.run(
+                ["agy", "models"], capture_output=True, text=True, timeout=CLI_TIMEOUT_S
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return []
+        if proc.returncode == 0 and (proc.stdout or "").strip():
+            break
+    if proc is None or proc.returncode != 0:
+        return []
+    # Both streams: with stdout on a pipe rather than a terminal, `agy` puts part of its output on
+    # stderr -- including, sometimes, the catalogue itself next to its "Fetching available
+    # models..." progress line. Reading stdout alone made the whole route vanish at random, which
+    # looked exactly like "this CLI is not installed".
+    out: list[Choice] = []
+    for line in ((proc.stdout or "") + "\n" + (proc.stderr or "")).splitlines():
+        # `<selector>\t<display name>` -- the display name carries agy's own wording for the
+        # effort tier ("Gemini 3.1 Pro (High)"), which is what the user recognises, while the
+        # selector is what the CLI is actually invoked with.
+        selector, _, label = line.partition("\t")
+        selector, label = selector.strip(), label.strip()
+        if not selector or " " in selector:
+            continue
+        provider = "google" if "gemini" in selector else (
+            "anthropic" if "claude" in selector else ""
+        )
+        out.append(
+            Choice(harness="agy", model=selector, label=label or selector, provider=provider)
+        )
+    return out
+
+
+def codex_choices() -> list[Choice]:
+    """What the Codex CLI offers. Hardcoded — `codex models` refuses without a terminal."""
+    if not cli_available("codex"):
+        return []
+    return [
+        Choice(harness="codex", model=model, label=model, provider="openai")
+        for model in CODEX_MODELS
+    ]
 
 
 def omp_catalogue() -> list[Choice]:
@@ -186,11 +328,33 @@ def critic_reaches(choice: Choice) -> bool:
 
 
 def critic_choices(active_omp: list[str]) -> list[Choice]:
-    """The same registry as the Generator's, so one list means one place to configure.
+    """The Generator's registry PLUS whatever CLI is installed on this machine.
 
     A different vendor from the Generator is the method's own requirement (SKILL.md, three roles),
     not something to enforce here: the Arbiter can legitimately want the same family for a
     second opinion on a narrow question, and a picker that silently omits options is harder to
     reason about than one that shows them.
+
+    The CLI routes appear HERE and not in the Generator list because the reviewer is a one-shot
+    call the skill's own script already knows how to make (`autosound_ai.py`, SCR-033), while a
+    Generator has to hold a session and talk to TCC's MCP server — which `agy` and `codex` may
+    well be able to do, but not by anything TCC has wired yet.
     """
-    return choices(active_omp)
+    return choices(active_omp) + agy_choices() + codex_choices()
+
+
+def recommended(choice: Choice, critic: bool = False) -> bool:
+    """Is this the combination the method has actually been driven with end to end.
+
+    Claude Opus through the user's own login as Generator, a Gemini Pro through a subscription CLI
+    as Critic. Everything else in the picker is a real option and an experiment — worth offering,
+    not worth a first-time Arbiter having to infer the answer from two hundred rows.
+    """
+    if not critic:
+        return choice.key == RECOMMENDED_GENERATOR
+    if choice.harness not in ("agy", "omp"):
+        return False
+    name = f"{choice.model} {choice.label}".lower()
+    if any(marker in name for marker in RECOMMENDED_CRITIC_EXCLUDES):
+        return False
+    return all(marker in name for marker in RECOMMENDED_CRITIC_MARKERS)
