@@ -52,7 +52,7 @@ class _PlanProgress:
         except (TypeError, ValueError):
             data = {}
         self.done: dict[str, bool] = dict(data.get("done", {}))
-        # phase index (str) -> list of inserted-step dicts (id/name/tag/tag_class)
+        # phase index (str) -> list of inserted-step dicts (id/name/tag/tag_class)  # noqa: E501
         self.inserted: dict[str, list[dict]] = dict(data.get("inserted", {}))
 
     def _save(self) -> None:
@@ -94,6 +94,16 @@ class _StatusDot(QLabel):
 # times over. Each is a real step in the skill's plan and each is checked off separately, but as
 # nine rows they bury the phase's shape in the one panel whose job is to show it. The detail is
 # already in the capture task, channel by channel, which is where it belongs.
+#: What each status chip means, keyed by its class. The tick and the chip answer two different
+#: questions and were being read as one: the tick is whether the SKILL closed the step, the chip is
+#: whether anything on disk stands behind it. A step can be closed and unproven at the same time,
+#: which is the whole reason the panel is called plan-versus-fact.
+_TAG_HINTS = {
+    "ok": "stepTagOkTip",
+    "bad": "stepTagUnprovenTip",
+    "wait": "stepTagWaitTip",
+}
+
 _RUN_PREFIX = re.compile(r"^([^:]{4,}?):\s")
 
 
@@ -144,9 +154,11 @@ class _PhaseStepRow(QWidget):
         done = step.tag_class == "ok"
         if step.skip:
             self.setProperty("class", "step-skip")
-        # Two lines, not one: the name wraps, and the chips (attempt / evidence tag / measurement
-        # icon) sit under it rather than beside it. Beside it they took some 70 px of a ~190 px
-        # panel, leaving the name a column so narrow that one step wrapped into a dozen lines.
+        # One line, with the chips right-aligned on it (user, 2026-08-07). They used to sit on a
+        # second line of their own -- which kept the name column wide, at the cost of a status that
+        # floated under the step it belonged to and read as a separate entry. The name still wraps,
+        # so what the chips take is width from a sentence that has somewhere to go, not a truncated
+        # one; and a step's status belongs beside the step.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 3, 6, 3)
         outer.setSpacing(2)
@@ -157,7 +169,6 @@ class _PhaseStepRow(QWidget):
         chips = QHBoxLayout()
         chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(6)
-        chips.addStretch(1)
 
         check = QCheckBox()
         check.setChecked(done)
@@ -196,6 +207,13 @@ class _PhaseStepRow(QWidget):
         if tag_text:
             tag = QLabel(tag_text)
             tag.setProperty("class", f"stag stag-{step.tag_class}" if step.tag_class else "stag")
+            # What the chip means, and — for the two that are easy to read as "not done" — how it
+            # differs from an unticked box (user, 2026-08-07: "what is 'unproven', and how is it
+            # different from no tick?"). The tick says the skill closed the step; the chip says
+            # whether anything on disk stands behind it.
+            hint = _TAG_HINTS.get(str(step.tag_class or ""))
+            if hint:
+                attach_tip(tag, i18n.t(hint))
             chips.addWidget(tag)
             has_chip = True
 
@@ -216,7 +234,7 @@ class _PhaseStepRow(QWidget):
             has_chip = True
 
         if has_chip:
-            outer.addLayout(chips)
+            layout.addLayout(chips)
 
 
 class _PhaseRow(QWidget):

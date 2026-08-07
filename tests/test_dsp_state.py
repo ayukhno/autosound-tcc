@@ -129,21 +129,58 @@ def test_no_virtual_tier_when_profile_does_not_declare_one():
     assert usb_params == ["Gain: +0.0 dB"]  # no eq/ta_ms present -> not shown, not an error
 
 
-def test_rows_ordered_by_declared_order_then_name():
+def test_rows_are_ordered_by_the_hardware_slot_whatever_order_says():
+    """The slot is the channel's ID badge and the order the processor's own software shows. A real
+    rig came out `G, H, E, F, C, D, B, I, J, K` once `project.json` started carrying `order` — the
+    skill's logical grouping (tweeters, mids, woofers, …), which nobody can scan for a slot
+    (user, 2026-08-07)."""
     profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
         {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]}]}}
     ledger = {
         "preset": "x", "sample_rate": 96000,
         "channels": {
-            "tw_R": {"gain_db": 0}, "sub": {"gain_db": 0, "order": 0},
-            "w_L": {"gain_db": 0, "order": 1}, "tw_L": {"gain_db": 0},
-            "w_R": {"gain_db": 0, "order": 1},
+            "tw-L": {"gain_db": 0}, "tw-R": {"gain_db": 0}, "w-L": {"gain_db": 0},
+            "c": {"gain_db": 0}, "sw": {"gain_db": 0},
         },
     }
-    view = ProjectView.from_dict(ledger, profile)
-    order = [r.name for r in view.groups[0].rows_ordered()]
-    # order-tagged rows come first (0, then 1/1 tied -> alphabetical), untagged (99) rows last.
-    assert order == ["sub", "w_L", "w_R", "tw_L", "tw_R"]
+    channels = {  # the slots the skill really wrote, with its own `order` on top
+        "tw-L": {"code": "tw-L", "slot": "G", "order": 1},
+        "tw-R": {"code": "tw-R", "slot": "H", "order": 2},
+        "w-L": {"code": "w-L", "slot": "C", "order": 5},
+        "c": {"code": "c", "slot": "B", "order": 7},
+        "sw": {"code": "sw", "slot": "K", "order": 10},
+    }
+    view = ProjectView.from_dict(ledger, profile, channels=channels)
+
+    assert [r.name for r in view.groups[0].rows_ordered()] == ["c", "w-L", "tw-L", "tw-R", "sw"]
+
+
+def test_a_numbered_processor_sorts_by_number_not_by_text():
+    """Different DSPs number their slots instead of lettering them, and `10` sorts before `2` as
+    text — a MUSWAY-style rig would read 1, 10, 11, 2."""
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]}]}}
+    ledger = {"preset": "x", "sample_rate": 96000,
+              "channels": {name: {"gain_db": 0} for name in ("a", "b", "c", "d")}}
+    channels = {name: {"code": name, "slot": slot}
+                for name, slot in (("a", "10"), ("b", "2"), ("c", "1"), ("d", "11"))}
+
+    view = ProjectView.from_dict(ledger, profile, channels=channels)
+
+    assert [r.slot for r in view.groups[0].rows_ordered()] == ["1", "2", "10", "11"]
+
+
+def test_a_channel_with_no_slot_sorts_last_rather_than_first():
+    """An unlabelled channel is the exception; putting the exceptions on top pushes the rig down."""
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]}]}}
+    ledger = {"preset": "x", "sample_rate": 96000,
+              "channels": {"nameless": {"gain_db": 0}, "sub": {"gain_db": 0}}}
+    channels = {"sub": {"code": "sub", "slot": "K"}}
+
+    view = ProjectView.from_dict(ledger, profile, channels=channels)
+
+    assert [r.name for r in view.groups[0].rows_ordered()] == ["sub", "nameless"]
 
 
 def test_parse_eq_bands_real_formats():
@@ -375,3 +412,39 @@ def test_a_numeric_slot_is_rendered_as_text():
     assert _as_text(None) is None
     assert _as_text("") is None
     assert _as_text({"nested": "object"}) is None  # not a label, and not a crash either
+
+
+def test_a_spare_slot_appears_even_though_it_has_no_ledger_row():
+    """A slot with nothing wired to it has no tuning state, so the ledger has no row for it — and
+    building rows from the ledger alone made every spare slot vanish from the panel whose job is
+    showing the rig entire (user, 2026-08-07). `project.json` records them; TCC renders them."""
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]}]}}
+    ledger = {"preset": "x", "sample_rate": 96000, "channels": {"sw": {"gain_db": 0}}}
+    channels = {
+        "sw": {"code": "sw", "slot": "K", "tier": "channels"},
+        "off-out-A": {"code": "off-out-A", "slot": "A", "tier": "channels",
+                      "hidden": True, "role": "unused"},
+    }
+
+    rows = ProjectView.from_dict(ledger, profile, channels=channels).groups[0].rows_ordered()
+
+    assert [r.name for r in rows] == ["off-out-A", "sw"]  # slot A before slot K
+    assert rows[0].hidden is True and rows[1].hidden is False
+
+
+def test_a_channel_that_does_not_name_its_tier_is_left_out_rather_than_guessed_into_one():
+    """Slot letters repeat across tiers — a Helix uses A..H for virtual and B..K for outputs — so
+    there is nothing in a bare `role: unused` entry that says where it belongs. Until the skill
+    says (SCR-042), inventing a tier would put a spare output among the virtual channels."""
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]}]}}
+    ledger = {"preset": "x", "sample_rate": 96000, "channels": {"sw": {"gain_db": 0}}}
+    channels = {
+        "sw": {"code": "sw", "slot": "K"},
+        "off-virt-F": {"code": "off-virt-F", "slot": "F", "hidden": True, "role": "unused"},
+    }
+
+    rows = ProjectView.from_dict(ledger, profile, channels=channels).groups[0].rows_ordered()
+
+    assert [r.name for r in rows] == ["sw"]

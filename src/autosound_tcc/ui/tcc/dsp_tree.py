@@ -17,6 +17,8 @@ without them still renders.
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -44,9 +46,25 @@ _GROUP_LABEL_KEY = {
 }
 
 
-def _group_label(group: ProfileGroup) -> str:
+_LABEL_PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def group_label(group: ProfileGroup) -> str:
+    """A tier's name for a section header — its own name, and nothing else.
+
+    A profile is free to describe its tier in full (`Virtual channels (Front L/R, Center, Rear,
+    Sub, Link L+R)`), and that reads fine in the file it was written in. In a header, next to a
+    count, it is a paragraph where a title should be — and the list it spells out is exactly the
+    rows underneath (user, 2026-08-07). The known tiers use TCC's own translated names; anything
+    else keeps the profile's wording with the trailing aside dropped.
+    """
     key = _GROUP_LABEL_KEY.get(group.id)
-    return i18n.t(key) if key else group.label
+    if key:
+        return i18n.t(key)
+    return _LABEL_PARENTHETICAL.sub("", str(group.label or "")).strip() or str(group.label or "")
+
+
+_group_label = group_label  # the name this module's own call sites already use
 
 
 def _collapsed_key(group_id: str) -> str:

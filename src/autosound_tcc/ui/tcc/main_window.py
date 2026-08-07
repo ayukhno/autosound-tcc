@@ -81,6 +81,7 @@ from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
+from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
@@ -609,7 +610,7 @@ class MainWindow(QMainWindow):
         # left-panel accordion section happens to be collapsed (user request 2026-07-29: the
         # earlier left-panel version was easy to lose track of).
         self._header_refresh_btn = QPushButton("↻")
-        self._header_refresh_btn.setProperty("class", "zoomgroup-btn")
+        self._header_refresh_btn.setProperty("class", "icon-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header_refresh_btn.clicked.connect(self._reload_from_disk)
         self._refresh_tip = attach_tip(self._header_refresh_btn, i18n.t("refreshProjectTip"))
@@ -618,7 +619,7 @@ class MainWindow(QMainWindow):
         # Diagnostics sits next to the reload button on purpose: both answer "what is actually on
         # disk right now", and §8 wants that question reachable in every mode, not buried in a menu.
         self._diag_btn = QPushButton("⚕")
-        self._diag_btn.setProperty("class", "zoomgroup-btn")
+        self._diag_btn.setProperty("class", "icon-btn")
         self._diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._diag_btn.clicked.connect(self._open_diagnostics)
         self._diag_tip = attach_tip(self._diag_btn, i18n.t("diagBtnTip"))
@@ -897,7 +898,9 @@ class MainWindow(QMainWindow):
             live = sum(1 for row in rows if not (row.hidden or row.off))
             section = CollapsibleGroup(
                 f"sys/{group.id}",
-                str(group.label),
+                # The tree's own naming, so the two panels call a tier the same thing and neither
+                # prints the profile's parenthetical list of the rows just below it.
+                dsp_tree.group_label(group),
                 self._settings,
                 count=f"{live}/{len(rows)}",
             )
@@ -915,8 +918,13 @@ class MainWindow(QMainWindow):
         name = ElidedLabel(f"{row.slot} · {row.name}" if row.slot else row.name)
         name.setProperty("class", "pk" if on else "pv-dim")
         layout.addWidget(name, stretch=1)
-        button = QPushButton(i18n.t("chanOn") if on else i18n.t("chanOff"))
-        button.setProperty("class", f"chan-toggle chan-toggle-{'on' if on else 'off'}")
+        # The label is the ACTION, not the state (user, 2026-08-07): a live channel showed a green
+        # "ON", which reads as a status badge until you press it and are asked to switch it off.
+        # The state is on the row itself -- an off channel's name is dimmed -- and the colour here
+        # previews the result rather than reporting the present: switching one on is the accented
+        # move, switching one off is the quiet one.
+        button = QPushButton(i18n.t("chanTurnOff") if on else i18n.t("chanTurnOn"))
+        button.setProperty("class", f"chan-toggle chan-toggle-{'off' if on else 'on'}")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setToolTip(i18n.t("chanToggleTip"))
         button.clicked.connect(
@@ -1226,8 +1234,13 @@ class MainWindow(QMainWindow):
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
         self._tree.setVisible(True)
-        self._rebuild_system_params()
+        # BEFORE the rebuild, not after: System params renders its channel switches off `_view`
+        # (`_add_channel_switches`), so rebuilding first read the previous load's view -- absent on
+        # the first one. That is why the channel sections were missing at startup and appeared
+        # after "Refresh" (user, 2026-08-07): the second load found the first load's view. They
+        # were also a load behind ever after, which nobody could see because the two agreed.
         self._view = view
+        self._rebuild_system_params()
         self._tree.set_view(view)
         self._set_project_params(view)
         self._refresh_open_detail()
@@ -2022,6 +2035,7 @@ class MainWindow(QMainWindow):
         self._dialog._add_system_message(i18n.t({
             "save": "sessionHandoffSave",
             "fresh": "sessionHandoffFresh",
+            "quit": "sessionHandoffQuit",
         }.get(mode, "sessionHandoff")))
         self._session_btn.setEnabled(False)
         worker.turn_done.connect(self._finish_handoff)
@@ -2051,6 +2065,11 @@ class MainWindow(QMainWindow):
             # The point was to get the project onto disk, not to end the conversation.
             self._dialog._add_system_message(i18n.t("sessionSaved"))
             self._update_session_button()
+            return
+        if mode == "quit":
+            # The window is already on its way out and only waited for this turn. `_quitting` is
+            # what stops the second `close()` asking the same question again.
+            self.close()
             return
         if worker is not None:
             worker.shutdown()
@@ -2432,14 +2451,54 @@ class MainWindow(QMainWindow):
             return
         self.close()
 
+    def _flush_own_state(self) -> str:
+        """Everything TCC itself decides, on disk now. Returns the label of what it wrote.
+
+        These are written as they change, so this is normally a no-op — which is exactly why it is
+        worth doing on demand: "normally" is not "always", and a setting whose write is spread
+        across a dozen handlers has a dozen chances to be the one that got missed. Re-asserting the
+        pickers costs a file write and removes the whole class of question.
+        """
+        tcc_dir = config.tcc_dir()
+        for key, value in (
+            (_GENERATOR_KEY, self._ai_main_combo.currentData()),
+            (_CRITIC_KEY, self._ai_critic_combo.currentData()),
+            (_EFFORT_KEY, self._ai_effort_combo.currentData()),
+        ):
+            # An empty selection is the "nothing chosen yet" placeholder, not a choice to record —
+            # writing it would turn "I have not picked a model" into "I picked no model".
+            if value:
+                project_settings.set_value(tcc_dir, key, str(value))
+        # Window-level preferences (collapse states, font scale, capture order) live in QSettings,
+        # which writes on its own schedule; a Save that returns before that happened is a Save that
+        # did not.
+        self._settings.sync()
+        choice = self._generator_choice()
+        return choice.label if choice else ""
+
     def _save_project_state(self) -> None:
-        """Ask the running model to put what it knows on disk, and keep talking."""
+        """Save what TCC owns, then ask the model to save what it knows.
+
+        In that order, and the first half unconditionally (user, 2026-08-07). Save used to be
+        nothing BUT the handoff, so with no session running it did nothing at all — no write, no
+        message, no way to tell the difference between "saved" and "ignored" — and with one running
+        it only ever asked the model, never settling TCC's own choices.
+        """
+        self._flush_own_state()
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
             self._hand_off(worker, "save")
+            return
+        # No session to ask, and that is not a failure: what TCC owns is now on disk, and saying so
+        # is the difference between a button that did nothing and one that had nothing more to do.
+        self._dialog._add_system_message(i18n.t("savedTccOnly"))
+        self._status_strip.notify(i18n.t("savedTccOnly"))
 
     def _start_fresh_session(self) -> None:
         """Save, then start over with an empty context on the same project and model."""
+        # Same order as a plain Save: the new session is built from these settings, so settling
+        # them first is what makes "start fresh" pick up a model chosen a moment ago.
+        self._flush_own_state()
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
             self._hand_off(worker, "fresh")
@@ -2501,6 +2560,23 @@ class MainWindow(QMainWindow):
             catalogue.wait(5000)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # A live session holds things only the model can write down. Quitting used to shut it down
+        # mid-thought without a word (user, 2026-08-07): whatever it had not yet put on disk was
+        # gone, and nothing said so. Asking rather than saving on its own is deliberate — the save
+        # costs a model turn, and a quit that silently blocks on one reads as a hang.
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None and not getattr(self, "_quitting", False):
+            answer = self._ask_save_before_quit()
+            if answer == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            self._flush_own_state()  # instant and free either way
+            if answer == QMessageBox.StandardButton.Save:
+                self._quitting = True
+                self._hand_off(worker, "quit")
+                event.ignore()  # `_finish_handoff` closes the window once the turn lands
+                return
+        self._flush_own_state()
         self.stop_workers()
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
@@ -2516,6 +2592,21 @@ class MainWindow(QMainWindow):
         if getattr(self, "_mcp_server", None) is not None:
             self._mcp_server.stop()
         super().closeEvent(event)
+
+    def _ask_save_before_quit(self):
+        """Save, discard, or stay. Discard is not the default — losing a turn's worth of tuning is
+        cheaper to avoid than to explain afterwards."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("quitSaveTitle"))
+        box.setText(i18n.t("quitSaveBody"))
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        return box.exec()
 
     def _on_language_selected(self, lang: str) -> None:
         i18n.set_language(lang)

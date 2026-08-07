@@ -1413,8 +1413,10 @@ def test_every_channel_including_the_spare_ones_is_listed_in_system_params(tmp_p
     on_row = window._channel_switch_row(group.id, live)
     off_row = window._channel_switch_row(group.id, spare)
 
-    assert on_row.findChild(QPushButton).text() == i18n.t("chanOn")
-    assert off_row.findChild(QPushButton).text() == i18n.t("chanOff")
+    # The button offers the action, not the state (user, 2026-08-07): a live channel used to carry
+    # a green "ON", which reads as a badge right up until pressing it asks to switch it off.
+    assert on_row.findChild(QPushButton).text() == i18n.t("chanTurnOff")
+    assert off_row.findChild(QPushButton).text() == i18n.t("chanTurnOn")
 
 
 def test_a_channel_group_in_system_params_folds_and_says_how_many_are_in_play(tmp_path):
@@ -1720,3 +1722,76 @@ def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
     MainWindow()
 
     assert model_overrides.load()["aliases"] == {}
+
+
+def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_path):
+    """Save used to be nothing but the model handoff, so with no session running it did nothing at
+    all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07)."""
+    from autosound_tcc.core import project_settings
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    combo = window._ai_main_combo
+    pick = next(i for i in range(combo.count()) if combo.itemData(i))
+    combo.setCurrentIndex(pick)
+    project_settings.set_value(config.tcc_dir(), "generator", "")  # as if the write was missed
+
+    window._save_project_state()
+
+    assert project_settings.get(config.tcc_dir(), "generator") == combo.itemData(pick)
+
+
+def test_save_does_not_record_a_model_nobody_picked(monkeypatch, tmp_path):
+    """The empty entry is the "not chosen yet" placeholder. Writing it would turn "I have not
+    picked a model" into "I picked no model", and the Start button reads that setting."""
+    from autosound_tcc.core import project_settings
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    window._save_project_state()
+
+    assert project_settings.get(config.tcc_dir(), "generator") is None
+
+
+def test_closing_with_a_live_session_asks_instead_of_dropping_the_turn(monkeypatch, tmp_path):
+    """Quitting shut the session down mid-thought without a word: whatever the model had not yet
+    written was gone, and nothing said so. Asking rather than saving unprompted is deliberate — the
+    save costs a model turn, and a quit that silently blocks on one reads as a hang."""
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    class _Worker:
+        def __init__(self) -> None:
+            self.shut = False
+
+        def shutdown(self) -> None:
+            self.shut = True
+
+    window._agent_worker = _Worker()
+    asked: list[bool] = []
+    handed: list[str] = []
+    monkeypatch.setattr(window, "_hand_off", lambda w, mode: handed.append(mode))
+
+    # Cancel keeps the window open and touches nothing.
+    monkeypatch.setattr(window, "_ask_save_before_quit",
+                        lambda: (asked.append(True), QMessageBox.StandardButton.Cancel)[1])
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert asked and not event.isAccepted() and handed == []
+
+    # Save defers the close until the handoff lands, rather than quitting first and saving never.
+    monkeypatch.setattr(window, "_ask_save_before_quit",
+                        lambda: QMessageBox.StandardButton.Save)
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert handed == ["quit"] and not event.isAccepted()

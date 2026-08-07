@@ -128,6 +128,8 @@ T: dict[Lang, dict[str, str]] = {
         "projectFreshSession": "Start a new session (saves, then clears the context)",
         "projectReopen": "Folder changed — open TCC again to work on it.",
         "sessionSaved": "Project state written to disk. The session continues.",
+        "savedTccOnly": "TCC's own settings are on disk. No session is running, so there is "
+                        "nothing to ask the model to write.",
         "sessionFresh": "Session ended and state saved — starting a new one with an empty context.",
         "generator": "Generator",
         "preset": "Preset",
@@ -152,8 +154,22 @@ T: dict[Lang, dict[str, str]] = {
         "legWait": "waiting",
         "legDone": "done",
         "legBad": "taken, unusable",
+        "stepTagOkTip": "Closed, and its evidence is really on disk — the file or capture it names "
+                        "was found.",
+        "stepTagUnprovenTip": "Closed by the skill, but the evidence it named resolves to nothing "
+                              "on disk: no such file, and no capture by that name.\n\nThis is not "
+                              "the same as an unticked step. An unticked one was never finished; "
+                              "this one was reported finished and has nothing behind it.",
+        "stepTagWaitTip": "Either still in progress, or closed and since invalidated — a config "
+                          "change means what it produced can no longer be trusted, so it needs "
+                          "re-taking.",
         "chanOn": "ON",
         "chanOff": "OFF",
+        # The BUTTON says what pressing it does; `chanOn`/`chanOff` above stay the state words the
+        # confirmation and the transcript use. A control labelled with the state it is already in
+        # reads as "this channel is on" and gets pressed by someone who wanted exactly that.
+        "chanTurnOn": "TURN ON",
+        "chanTurnOff": "TURN OFF",
         "chanToggleTip": "Ask the model to switch this channel on or off. TCC does not write the "
                          "ledger — the request goes to the session, which records the change.",
         "chanToggleSent": "Asked to turn <b>{channel}</b> {state}. The model records it in the "
@@ -291,6 +307,11 @@ T: dict[Lang, dict[str, str]] = {
         "sessionStarting": "Starting {model} — the first turn reads the skill and the project state, so it is slow.",
         "sessionHandoff": "Saving the project state before the model changes…",
         "sessionHandoffSave": "Asking the model to write what it knows to the project files…",
+        "sessionHandoffQuit": "Saving before closing — asking the model to write what it knows "
+                              "to the project files…",
+        "quitSaveTitle": "Save before closing?",
+        "quitSaveBody": "A session is running.\n\nWhat it has learned this turn is not on disk "
+                        "until it writes it — closing now loses that. Saving costs one turn.",
         "sessionHandoffFresh": "Saving first, then starting a new session with an empty context…",
         "sessionRestarted": "Session ended: restarting on the newly picked model.",
         "dialogIdle": "not started · {model}",
@@ -429,6 +450,8 @@ T: dict[Lang, dict[str, str]] = {
         "projectFreshSession": "Почати нову сесію (збереже й обнулить контекст)",
         "projectReopen": "Теку змінено — відкрий TCC заново, щоб працювати з нею.",
         "sessionSaved": "Стан проєкту записано на диск. Сесія триває.",
+        "savedTccOnly": "Власні налаштування TCC на диску. Сесія не запущена, тож просити модель "
+                        "щось записати немає про що.",
         "sessionFresh": "Сесію закрито, стан збережено — починаю нову з порожнім контекстом.",
         "generator": "Генератор",
         "preset": "Пресет",
@@ -453,8 +476,17 @@ T: dict[Lang, dict[str, str]] = {
         "legWait": "чекаю",
         "legDone": "готово",
         "legBad": "знятий, не підходить",
+        "stepTagOkTip": "Закрито, і доказ справді є на диску — названий файл або захват знайдено.",
+        "stepTagUnprovenTip": "Скіл закрив крок, але доказ, який він назвав, ні на що на диску не "
+                              "вказує: такого файлу немає, і захвату з такою назвою теж.\n\nЦе не "
+                              "те саме, що крок без галочки. Той просто не завершено; цей "
+                              "відзвітовано як завершений, і за ним нічого немає.",
+        "stepTagWaitTip": "Або ще в роботі, або закрито й відтоді знецінено — зміна конфігурації "
+                          "означає, що результату більше не можна довіряти, тож треба перезняти.",
         "chanOn": "УВІМК",
         "chanOff": "ВИМК",
+        "chanTurnOn": "УВІМКНУТИ",
+        "chanTurnOff": "ВИМКНУТИ",
         "chanToggleTip": "Попросити модель увімкнути або вимкнути канал. TCC не пише леджер — "
                          "запит іде в сесію, і зміну записує вона.",
         "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в "
@@ -587,6 +619,11 @@ T: dict[Lang, dict[str, str]] = {
         "sessionStarting": "Запускаю {model} — перший хід читає скіл і стан проєкту, тому повільний.",
         "sessionHandoff": "Зберігаю стан проєкту перед зміною моделі…",
         "sessionHandoffSave": "Прошу модель записати те, що вона знає, у файли проєкту…",
+        "sessionHandoffQuit": "Зберігаю перед закриттям — прошу модель записати те, що вона знає, "
+                              "у файли проєкту…",
+        "quitSaveTitle": "Зберегти перед закриттям?",
+        "quitSaveBody": "Сесія працює.\n\nТе, що вона дізналась цього ходу, не на диску, доки не "
+                        "запише — закриття зараз це втратить. Збереження коштує один хід.",
         "sessionHandoffFresh": "Спершу зберігаю, потім починаю нову сесію з порожнім контекстом…",
         "sessionRestarted": "Сесію закрито: перезапуск на щойно обраній моделі.",
         "dialogIdle": "не запущено · {model}",

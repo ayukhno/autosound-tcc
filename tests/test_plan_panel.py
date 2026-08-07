@@ -104,7 +104,7 @@ def test_attempt_gt_one_renders_attempt_chip():
 def test_a_long_step_name_wraps_instead_of_widening_the_column():
     """One step -- "Bonus baseline solo: c_1 (sw) + c_1 (rta) (captured early, normally Phase 5)"
     -- decided the panel's width, so the whole plan column scrolled sideways and every other row
-    lost its right-hand end. The chips went to their own line to give the name the room back."""
+    lost its right-hand end. Wrapping is what keeps it in the column."""
     from PySide6.QtWidgets import QLabel
 
     _app()
@@ -120,8 +120,43 @@ def test_a_long_step_name_wraps_instead_of_widening_the_column():
     name = row.findChildren(QLabel)[0]
     assert name.wordWrap()
     assert row.minimumSizeHint().width() < 200  # a plan column is about 190 px wide
-    chips = [w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or "")]
-    assert chips and chips[0].y() > name.y()  # under the name, not beside it
+
+
+def test_the_status_chip_sits_on_the_steps_own_line():
+    """The chips had a line of their own, which kept the name column wide and left the status
+    floating under the step it belonged to, reading as a separate entry (user, 2026-08-07)."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    step = PlanStep(id="x.5", name={"en": "Sweep the fronts", "uk": "Заміряти фронт"},
+                    tag={"en": "unproven", "uk": "без доказу"}, tag_class="bad")
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+    row.resize(190, 60)
+    row.show()
+    row.layout().activate()
+
+    name = row.findChildren(QLabel)[0]
+    chip = next(w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or ""))
+    assert chip.y() == name.y()          # same line
+    assert chip.x() > name.x()           # and to its right
+
+
+def test_a_status_chip_explains_itself_and_how_it_differs_from_no_tick():
+    """"What is 'unproven', and how is it different from an unticked box?" (user, 2026-08-07) —
+    the tick says the skill closed the step, the chip says whether anything on disk backs it."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    step = PlanStep(id="x.6", name={"en": "Sweep", "uk": "Заміри"},
+                    tag={"en": "unproven", "uk": "без доказу"}, tag_class="bad")
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    chip = next(w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or ""))
+
+    assert chip.hover_tip.text() == i18n.t("stepTagUnprovenTip")
+    assert "unticked" in i18n.T["en"]["stepTagUnprovenTip"]  # it names the distinction asked about
 
 
 def test_project_source_step_gets_blue_class():

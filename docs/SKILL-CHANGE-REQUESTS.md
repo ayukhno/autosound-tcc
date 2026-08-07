@@ -13,6 +13,7 @@ being the right one — the reason is on the entry).
 | SCR | ask | where it bites |
 |-----|-----|----------------|
 | 041 | README/FAQ must name the supported pair | any other model reads as equally fine, and a downgrade fails by agreeing rather than by erroring |
+| 042 | a spare slot does not say which tier it is spare in | the panel meant to show the whole rig cannot show the unused slots at all |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
 they were checked against the code and corrected on 2026-08-06. Most of that batch had landed.
@@ -1096,3 +1097,36 @@ is experiment.
 **Also date it.** "As of August 2026" is part of the claim — the pair is a snapshot of what has
 been driven, and an undated recommendation is the thing that goes stale silently
 (the same reasoning as `SDK_MODELS_VERIFIED`).
+
+## SCR-042 — a spare slot does not say which tier it belongs to
+
+**Status**: proposed (user, 2026-08-07 — "there are no OFF channels in the lists")
+**Target**: `project.py`'s `channels[]` (a `tier` field), and `dsp_profile.json`'s groups
+(`max_count`)
+**TCC dependency**: `state/dsp_state.py` `ProjectView.from_dict` now joins identity-only channels
+into their tier and renders them as spare rows — **already built, and inert until this lands**:
+it places a channel only when the entry names its tier, and skips it otherwise rather than
+guessing. `main_window._add_channel_switches` is the panel that shows them.
+
+**Detail**: rows are built from the ledger, and a slot with nothing wired to it has no ledger row —
+there is no tuning state to record for it. `project.json` *does* carry those slots, correctly
+marked (a real project: `off-out-A`, `off-out-L`, `off-virt-F`, `off-virt-H`, each `hidden: true`,
+`role: "unused"`). What no entry says is which tier it is a spare slot OF, and that cannot be
+inferred: **slot letters repeat across tiers.** On this Helix the virtual tier uses A–H and the
+outputs use B–K, so `slot: "F"` is a legal address in both. Guessing would put a spare output among
+the virtual channels — a wrong row in the one panel whose job is showing the rig as it is.
+
+Ask:
+
+1. **`tier` on each `channels[]` entry** — the ledger tier key the channel belongs to (`channels`,
+   `virtual_channels`, `inputs`, whatever that DSP's profile declares). Cheap for the entries that
+   have a ledger row (it is the key they already sit under) and load-bearing for the ones that do
+   not. `role: "virtual"` is not a substitute: an unused virtual slot is written `role: "unused"`,
+   which is what loses the tier in the first place.
+2. **`max_count` per group in `dsp_profile.json`** — how many slots that tier physically has. The
+   real profile leaves it null, so the panel can only count what it was given: a Helix Ultra S
+   reads `PHYSICAL OUTPUTS 10/10` when it is a 12-output processor with two slots spare. With the
+   count declared it reads 10/12, and the two spares are visible as spares whether or not (1) has
+   landed.
+
+Neither is retroactive: a project without them renders exactly as it does today.

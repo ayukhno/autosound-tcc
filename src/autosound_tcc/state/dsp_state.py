@@ -32,6 +32,7 @@ channels instead of a table of blanks.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -309,6 +310,29 @@ def _build_row(name: str, row_raw: dict, identity: dict, hw_controls: dict) -> G
     )
 
 
+_SLOT_PARTS = re.compile(r"(\d+)")
+
+
+def slot_key(slot: Optional[str]) -> tuple:
+    """Sort key for a hardware slot, which is a letter on some processors and a number on others.
+
+    Compared as text, `10` sorts before `2` — so a MUSWAY-style numbered rig would read 1, 10, 11,
+    2. Digit runs are compared as numbers and everything else as text, which orders `A < B < K` and
+    `1 < 2 < 10` alike, and `A1 < A2 < A10` for a processor that mixes them.
+
+    A row with no slot sorts last rather than first: an unlabelled channel is the exception, and
+    putting the exceptions on top pushes the rig itself down.
+    """
+    text = (slot or "").strip()
+    if not text:
+        return (1,)
+    parts = tuple(
+        (0, int(part), "") if part.isdigit() else (1, 0, part.upper())
+        for part in _SLOT_PARTS.split(text) if part
+    )
+    return (0, parts)
+
+
 @dataclass(frozen=True)
 class ProfileGroup:
     """One DSP-profile-declared tier (e.g. virtual_channels, physical_outputs, inputs),
@@ -321,18 +345,17 @@ class ProfileGroup:
     max_count: Optional[int] = None
 
     def rows_ordered(self) -> list[GroupRow]:
-        """Ledger order first, then the hardware slot, then the name.
+        """By the hardware slot, ascending. Always (user, 2026-08-07).
 
-        The slot is the tie-breaker rather than the name because the slot letter is the channel's
-        ID badge and the order the DSP's own software lists them in -- a tree sorted `c, m-L, r-L,
-        sw, tw-L, w-L` reads as alphabetical noise next to a processor showing `B, C, E, F, G, I`.
-        `order` still wins when the ledger states one; this only decides what happens when it does
-        not, which is every ledger written so far.
+        The slot is the channel's ID badge and the order the processor's own software lists them
+        in, so it is the order a person reads a rig in. `order` used to win when a project stated
+        one — and once `project.json` started carrying it, a real rig came out `G, H, E, F, C, D,
+        B, I, J, K`: the skill's idea of a logical grouping (tweeters, mids, woofers, centre,
+        rears, sub) rather than anything the DSP shows. A list nobody can scan for a slot is worse
+        than one that ignores an intended grouping, so the slot wins now and `order` is only a
+        tie-break between two rows sharing one.
         """
-        return sorted(
-            self.rows,
-            key=lambda r: (r.order if r.order is not None else 99, r.slot or "~", r.name),
-        )
+        return sorted(self.rows, key=lambda r: (slot_key(r.slot), r.order or 0, r.name))
 
 
 @dataclass(frozen=True)
@@ -371,10 +394,25 @@ class ProjectView:
             # convention: physical_outputs maps to the ledger's required `channels` key;
             # every other group id maps to a same-named top-level key (absent -> no rows yet).
             row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
-            rows = tuple(
+            tier_key = "channels" if gid == "physical_outputs" else gid
+            rows = [
                 _build_row(name, row_raw, identities.get(name, {}), hw_controls)
                 for name, row_raw in (row_source or {}).items()
-            )
+            ]
+            # A slot the rig HAS but nothing is wired to has no ledger row -- there is no tuning
+            # state to record for it -- so building rows from the ledger alone made the spare slots
+            # vanish from a panel whose whole job is showing the rig entire (user, 2026-08-07:
+            # "there are no OFF channels in the lists"). `project.json` does carry them, marked
+            # `hidden`; what it does not yet say is WHICH tier a spare slot belongs to, and slot
+            # letters repeat across tiers, so a channel that does not name its tier is left out
+            # rather than guessed into one (SCR-042).
+            seen = {row.id for row in rows}
+            for key, entry in sorted(identities.items()):
+                if key in seen or entry.get("tier") != tier_key:
+                    continue
+                rows.append(_build_row(key, {}, entry, hw_controls))
+                seen.add(key)
+            rows = tuple(rows)
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
                                         fields=tuple(g.get("fields", ())), rows=rows,
                                         max_count=g.get("max_count")))

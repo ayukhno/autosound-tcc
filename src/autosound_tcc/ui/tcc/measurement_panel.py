@@ -55,6 +55,19 @@ _METHOD_KEYS = ("sw", "rta", "rta_group")
 # (user request 2026-07-28: "SW+Ws_10 (rta)", not "SW+Ws_10 (rta_group)").
 _METHOD_SUFFIX = {"sw": "sw", "rta": "rta", "rta_group": "rta"}
 
+
+def with_method(name: str, suffix: str) -> str:
+    """`"c_1"` or `"c_1 (sw)"` in, `"c_1 (sw)"` out.
+
+    The skill's expected names already carry the method, so appending it unconditionally prints
+    `c_1 (sw) (sw)`. The row rendering learned that once; the capture-order dialog was built from
+    the same names later and had to learn it again (user, 2026-08-07) — so the rule lives here now
+    rather than at each call site that formats one.
+    """
+    name = (name or "").strip()
+    tail = f"({suffix})"
+    return name if name.endswith(tail) else f"{name} {tail}"
+
 _LEGEND = (
     ("wait", "waiting"),
     ("done", "done"),
@@ -185,11 +198,7 @@ class _MeasRow(QWidget):
 
     def _render(self) -> None:
         t = current_theme()
-        # The skill's expected names already carry the method (`c_1 (sw)`), so appending it again
-        # printed `c_1 (sw) (sw)` down the whole task -- reported from a real phase-0 task.
-        suffix = f"({self.method_suffix})"
-        name = self.item_name.strip()
-        base = name if name.endswith(suffix) else f"{name} {suffix}"
+        base = with_method(self.item_name, self.method_suffix)
         if self._count:
             base += f" · {self._count}"
         if self._additional:
@@ -246,6 +255,9 @@ class MeasurementPanel(QWidget):
         self._known_titles: set[str] = set()
         self._rename_worker: "_RewRenameWorker | None" = None
         self._rows: list[_MeasRow] = []
+        # The project's naming glossary, read once and kept: `_classify_title` asks it per title,
+        # and it is what tells `L w+m` (a joint) from `L` plus a stray modifier.
+        self._glossary = None
         self._preset_provider = preset_provider
         self._settings = get_settings()
         self._pending_order: list[str] = []
@@ -488,7 +500,7 @@ class MeasurementPanel(QWidget):
             # -- not just the bare channel id (user request 2026-07-28); the id itself (first tuple
             # element) stays bare so previously-saved orders keyed by it are unaffected.
             suffix = _METHOD_SUFFIX[key]
-            meas_pairs = [(item.name, f"{item.name} ({suffix})") for item in group.items]
+            meas_pairs = [(item.name, with_method(item.name, suffix)) for item in group.items]
             if not meas_pairs:
                 continue
             saved = self._saved_order(key)
@@ -636,12 +648,44 @@ class MeasurementPanel(QWidget):
         col = self._guess_column_for_new_title(title)
         self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
 
+    def _title_key(self, title: str):
+        """A title's identity in the naming grammar, or None if it is not one of ours.
+
+        The grammar's own answer to "are these the same measurement", which is not the same as "are
+        these the same characters": `_01` and `_1` are one DSP config version, because REW titles
+        are typed by hand and zero-padding is a habit, not a distinction.
+        """
+        try:
+            from autosound_tcc.core import vendor_loader
+
+            naming = vendor_loader.load_naming()
+        except Exception:  # noqa: BLE001 - no submodule: fall back to matching characters
+            return None
+        if self._glossary is None:
+            from autosound_tcc.core import config
+
+            self._glossary = naming.Glossary.for_project(str(config.project_dir()))
+        parsed = naming.parse_name(title, self._glossary)
+        return naming.name_key(parsed) if parsed else None
+
     def _classify_title(self, title: str) -> tuple[Optional["_MeasRow"], Optional[str]]:
         """Match a REW measurement title against the known rows. Returns `(row, extra)`: `extra`
         is any qualifier text trailing the row's own expected `"<name> (<method>)"` pattern (a
         capture-mode modifier REW or the user added, e.g. a re-take note) -- None if it matches
         exactly. `(None, None)` means the title doesn't correspond to any expected channel at all
-        (see `_on_read_done` for what happens then)."""
+        (see `_on_read_done` for what happens then).
+
+        Identity comes from the grammar first and from the characters only as a fallback. Matching
+        on the characters alone is what put one capture in two places at once (user, 2026-08-07):
+        REW held `c_01 (sw)`, the expected row said `c_1 (sw)`, so this returned no match and the
+        read added an "additional" graph — while the derived checklist, which does parse, marked
+        the expected row done off the very same title.
+        """
+        key = self._title_key(title)
+        if key is not None:
+            for row in self._rows:
+                if self._title_key(row.item_name) == key:
+                    return row, None
         for row in self._rows:
             if not title.startswith(row.item_name):
                 continue

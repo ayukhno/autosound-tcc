@@ -250,6 +250,24 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('info', 20)};
     }}
 
+    /* .icon-btn — a single-glyph header button that stands ON ITS OWN. `.zoomgroup-btn` is
+    deliberately transparent and borderless because it sits INSIDE the zoom group's frame, which
+    supplies the border; the header's refresh and diagnostics buttons had borrowed that class and
+    so rendered as bare glyphs next to buttons that all have a body (user, 2026-08-07). Same shell
+    as `.theme-btn`, squared up for one character. */
+    QPushButton[class~="icon-btn"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 5px;
+        padding: 4px 9px;
+        font-size: 13px;
+    }}
+    QPushButton[class~="icon-btn"]:hover {{
+        color: {t.text};
+        border-color: {t.accent};
+    }}
+
     /* .zoomgroup — A-/percent/A+ as one bordered block with divider lines, ported from the
     prototype's disconnected three-pill look at the user's request (2026-07-26 feedback). */
     QFrame[class~="zoomgroup"] {{
@@ -858,8 +876,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         subcontrol-position: right center;
         width: 10px;
     }}
-    /* .chan-toggle — the per-channel ON/OFF in the DSP tree. Small, legible at a glance, and
-    unmistakably a state rather than a button that does something else. */
+    /* .chan-toggle — the per-channel switch. It reads as the ACTION it performs, so the colour
+    previews the result rather than reporting the present state: `-on` (accented) is offered on a
+    channel that is currently off, `-off` (quiet) on one that is live. The state itself is the
+    row's own name, dimmed when the channel is not in play. */
     QPushButton[class~="chan-toggle"] {{
         border: 1px solid {t.border2};
         border-radius: 4px;

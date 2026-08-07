@@ -5,6 +5,7 @@ real QThread."""
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -13,8 +14,10 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog  # noqa: E402
 from autosound_tcc.ui.tcc.mock_data import MEAS_SESSIONS  # noqa: E402
+from autosound_tcc.state import measurement_view  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import (  # noqa: E402
     MeasurementPanel,
+    with_method,
     _RewReadWorker,
     _RewRenameWorker,
     _RewScanWorker,
@@ -397,3 +400,36 @@ def test_replacing_a_running_worker_does_not_abort_the_process():
     assert not first.isRunning()  # waited out before being dropped
     assert panel._worker is second
     second.wait(2000)
+
+
+# ---- title identity and the method suffix (user, 2026-08-07) -----------------
+
+
+def test_a_zero_padded_rew_title_matches_the_row_that_expects_it(tmp_path, monkeypatch):
+    """REW held `c_01 (sw)` while the expected row said `c_1 (sw)`, so matching on the characters
+    found nothing and the read added an "additional" graph — beside the very same capture, which
+    the derived checklist had already marked done off that title. One capture, two rows."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "glossary.json").write_text(
+        json.dumps({"schema_version": 1,
+                    "channels": [{"code": "c", "active": True}, {"code": "sw", "active": True}]}),
+        encoding="utf-8",
+    )
+    _app()
+    panel = MeasurementPanel()
+    session = measurement_view.build_session("0", 1, [], tmp_path)
+    assert session is not None
+    panel.set_sessions((session,))
+
+    row, extra = panel._classify_title("c_01 (sw)")
+
+    assert row is not None and row.item_name == "c_1 (sw)"
+    assert extra is None  # padding is not a qualifier, it is the same measurement
+
+
+def test_the_method_is_not_appended_to_a_name_that_already_carries_it():
+    """`c_1 (sw) (sw)` — the row rendering learned this once, then the capture-order dialog was
+    built from the same names and printed it all over again."""
+    assert with_method("tw-L_1 (sw)", "sw") == "tw-L_1 (sw)"
+    assert with_method("tw-L_1", "sw") == "tw-L_1 (sw)"
+    assert with_method("  tw-L_1  ", "rta") == "tw-L_1 (rta)"
