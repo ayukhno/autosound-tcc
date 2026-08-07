@@ -728,3 +728,24 @@ def test_a_remembered_tool_stops_asking_without_turning_the_gate_off(tmp_path):
     asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: edit"}))
 
     assert [r.tool for r in session.bridge.requests] == ["edit"]  # only the one not remembered
+
+
+# ---- effort (2026-08-07) ----------------------------------------------------
+
+
+def test_the_thinking_level_is_stated_on_the_command_line(tmp_path):
+    """omp is the metered route — the one the route prefixes exist to make visible — so how hard
+    it thinks is how much it costs. Accepting the broker's default would put that number outside
+    the Arbiter's view, which is the same failure the prefixes were built for."""
+    argv = OmpSession(project_dir=tmp_path, effort="max")._argv()
+
+    assert "--thinking" in argv
+    assert argv[argv.index("--thinking") + 1] == "max"
+
+
+def test_auto_is_not_a_level_tcc_will_pass_to_a_metered_route(tmp_path):
+    """omp offers `auto` — "decide for yourself how much to spend". On a metered route with nobody
+    watching that is the one setting worth refusing; it falls back to the stated default."""
+    argv = OmpSession(project_dir=tmp_path, effort="auto")._argv()
+
+    assert argv[argv.index("--thinking") + 1] == "xhigh"

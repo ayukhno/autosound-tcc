@@ -1138,6 +1138,26 @@ def test_the_gate_mode_is_a_project_setting_and_defaults_to_asking(monkeypatch):
     assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
 
 
+def test_the_effort_picker_offers_three_levels_and_none_of_them_is_cheap(monkeypatch):
+    """The Arbiter's rule (2026-08-07): below `high` is not a tuning setting. `max` is on the list
+    because nothing escalates on its own — the model varies its own depth, but only under the level
+    the session was started with, so a hard step is a choice made before it starts."""
+    from autosound_tcc.core import model_choices, project_settings
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    combo = window._ai_effort_combo
+
+    levels = [combo.itemData(i) for i in range(combo.count())]
+    assert levels == ["high", "xhigh", "max"]
+    assert combo.currentData() == model_choices.EFFORT_DEFAULT
+
+    combo.setCurrentIndex(levels.index("max"))
+
+    assert project_settings.get(config.tcc_dir(), "effort") == "max"
+
+
 def test_system_params_shows_what_tcc_itself_is_set_to():
     """Language, the two models, theme and the permission mode were only visible in the footer and
     the menus, so "which model is answering me" meant hunting for the control that sets it. They
@@ -1148,8 +1168,12 @@ def test_system_params_shows_what_tcc_itself_is_set_to():
     window = MainWindow()
     labels = [label for label, _ in window._app_config_rows()]
 
-    assert labels == [i18n.t("cfgLanguage"), i18n.t("cfgGenerator"), i18n.t("cfgCritic"),
-                      i18n.t("cfgTheme"), i18n.t("cfgGate")]
+    assert labels == [i18n.t("cfgLanguage"), i18n.t("cfgGenerator"), i18n.t("cfgEffort"),
+                      i18n.t("cfgCritic"), i18n.t("cfgTheme"), i18n.t("cfgGate")]
+    # Effort sits beside the model because it is half of the same fact: naming the model without
+    # saying how hard it was asked to think does not describe what ran (2026-08-07).
+    rows = dict(window._app_config_rows())
+    assert rows[i18n.t("cfgEffort")] == i18n.t("effort_xhigh")
 
 
 def test_the_project_section_comes_before_the_system_one():

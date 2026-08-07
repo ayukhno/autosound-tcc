@@ -107,6 +107,7 @@ _LANG_KEY = "ui/lang"
 _GENERATOR_KEY = "generator"          # per project: the picked Choice.key
 _CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
 _GATE_KEY = "gate"                    # per project: which writes still ask the Arbiter
+_EFFORT_KEY = "effort"                # per project: how hard the Generator is asked to think
 _ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
@@ -687,6 +688,23 @@ class MainWindow(QMainWindow):
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
 
+        # Beside the model, because it is fixed for the session exactly like the model is: the
+        # Agent SDK takes effort at client construction, so this is a choice made when a session
+        # starts and not one the Arbiter can reach for halfway through a hard step. Nothing below
+        # `high` is offered -- it is not a tuning setting -- and nothing escalates on its own.
+        self._ai_effort_lbl = QLabel(i18n.t("aiEffort"))
+        self._ai_effort_lbl.setProperty("class", "kv-lbl")
+        apply_caps(self._ai_effort_lbl, spacing_px=1.2)
+        layout.addWidget(self._ai_effort_lbl)
+        ai_effort = _mini_combo()
+        for level in model_choices.EFFORT_LEVELS:
+            ai_effort.addItem(i18n.t(f"effort_{level}"), level)
+            ai_effort.setItemData(
+                ai_effort.count() - 1, i18n.t(f"effortTip_{level}"), Qt.ItemDataRole.ToolTipRole
+            )
+        self._ai_effort_combo = ai_effort
+        ai_effort.currentIndexChanged.connect(self._on_effort_changed)
+        layout.addWidget(ai_effort)
 
         self._ai_critic_lbl = QLabel(i18n.t("aiCritic"))
         self._ai_critic_lbl.setProperty("class", "kv-lbl")
@@ -922,10 +940,14 @@ class MainWindow(QMainWindow):
             return choice.label if choice else key.split(":", 1)[-1]
 
         gate = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
         return [
             (i18n.t("cfgLanguage"), i18n.t("langNameUk") if i18n.current_language() == "uk"
                                     else i18n.t("langNameEn")),
             (i18n.t("cfgGenerator"), label_for(generator)),
+            # Beside the model, because it is half of the same fact: a record that names the model
+            # but not how hard it was asked to think does not say what actually ran.
+            (i18n.t("cfgEffort"), i18n.t(f"effort_{effort}")),
             (i18n.t("cfgCritic"), label_for(critic)),
             (i18n.t("cfgTheme"), i18n.t("cfgThemeDark" if self._mode == "dark"
                                         else "cfgThemeLight")),
@@ -2034,6 +2056,9 @@ class MainWindow(QMainWindow):
         # and the new session reads it, which is cheaper than carrying a long transcript that has
         # already been written down.
         resumed = probe.resumed_from is not None and not fresh
+        # Fixed for the session's whole life on both routes (the SDK takes it at client
+        # construction), so it is read here, once, at the moment the session is built.
+        effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
         if choice.harness == "omp":
             # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
             # needs no url/token of its own.
@@ -2044,6 +2069,7 @@ class MainWindow(QMainWindow):
                 resume=resumed,
                 gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
                 always_allowed=self._always_allowed(),
+                effort=effort,
             )
         else:
             factory = lambda: TuningSession(  # noqa: E731
@@ -2054,6 +2080,7 @@ class MainWindow(QMainWindow):
                 model=choice.model,
                 gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
                 always_allowed=self._always_allowed(),
+                effort=effort,
             )
         self._agent_worker = AgentWorker(session_factory=factory, opening_prompt=opening)
         self._dialog.attach_agent(
@@ -2140,6 +2167,12 @@ class MainWindow(QMainWindow):
         critic = self._project_setting(_CRITIC_KEY)
         self._fill_combo(self._ai_main_combo, self._model_choices, generator)
         self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True)
+        # An unset project reads as the default rather than as an empty row: unlike the model,
+        # there is no honest "not chosen yet" here -- some level always runs.
+        level = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
+        blocked = self._ai_effort_combo.blockSignals(True)
+        self._ai_effort_combo.setCurrentIndex(max(0, self._ai_effort_combo.findData(level)))
+        self._ai_effort_combo.blockSignals(blocked)
         for key, entries in ((generator, self._model_choices), (critic, self._critic_choices)):
             if key and not model_choices.resolve(entries, str(key)).ok:
                 self._offer_replacement(str(key), entries)
@@ -2234,6 +2267,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._drop_model_placeholder)
         self._update_session_button()
         # The panel names the model, so it must not lag the picker.
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+
+    def _on_effort_changed(self, _index: int) -> None:
+        """The Arbiter changed how hard the Generator thinks.
+
+        Takes effect on the NEXT session, not this one — both adapters fix the level when the
+        session is built. Said out loud rather than left to be discovered: a control that looks
+        live and is not is worse than one that says when it applies.
+        """
+        level = model_choices.resolve_effort(self._ai_effort_combo.currentData())
+        project_settings.set_value(config.tcc_dir(), _EFFORT_KEY, level)
+        if self._agent_worker is not None:
+            self._dialog._add_system_message(i18n.t("effortNextSession"))
         QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
 
     def _drop_model_placeholder(self) -> None:

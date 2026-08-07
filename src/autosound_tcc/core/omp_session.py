@@ -49,7 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, model_choices, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -308,10 +308,14 @@ class OmpSession:
         resume: bool = False,
         gate: str = GATE_WRITES,
         always_allowed: Optional[frozenset[str]] = None,
+        effort: Optional[str] = None,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
+        # See `_argv`: on a metered route the thinking level is a price, so it is chosen rather
+        # than inherited. Same three words as the SDK route (`model_choices.EFFORT_LEVELS`).
+        self.effort = model_choices.resolve_effort(effort)
         self.resume = resume
         self.gate = gate
         # Tools the Arbiter ticked "don't ask again" on, per project.
@@ -355,6 +359,13 @@ class OmpSession:
             "rpc-ui",
             "--model",
             self.model,
+            # Stated, not inherited. This is the METERED route -- the one the route prefixes exist
+            # to make visible -- so how hard it thinks is how much it costs, and accepting the
+            # broker's default would put that number outside the Arbiter's view. omp also offers
+            # `auto`, which TCC does not: "let it decide how much to spend" is the one setting a
+            # metered route should never hold while nobody is watching.
+            "--thinking",
+            self.effort,
             "--approval-mode",
             "always-ask",
             # Its own settings, sessions and caches, so a tuning session is not affected by what

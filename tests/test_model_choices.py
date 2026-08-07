@@ -385,3 +385,26 @@ def test_without_a_key_the_shipped_list_is_what_there_is(tmp_path, monkeypatch):
 
     assert mc._fetch_sdk_choices() == []
     assert [c.model for c in mc.sdk_choices()] == [m for _, m in mc.SDK_MODELS]
+
+
+# ---- effort (2026-08-07) ----------------------------------------------------
+
+
+def test_below_high_is_not_offered_because_it_is_not_a_tuning_setting():
+    """The Arbiter's rule: a cheap pass reads as competence. The case the harness exists for is a
+    model that closed four phases in one sitting and reported a finished tune on a car nobody sat
+    in — which is what a model that agrees too easily looks like from the outside."""
+    assert model_choices.EFFORT_LEVELS == ("high", "xhigh", "max")
+    assert model_choices.EFFORT_DEFAULT == "xhigh"
+
+
+def test_an_unknown_or_unset_effort_reads_as_the_default_not_as_itself():
+    """These strings become a subprocess argument and a model API field. "The level I typed is not
+    a level" must not be discovered there — and `auto`, which omp offers, is deliberately not one
+    of ours: letting a metered route decide how much to spend is the setting to never leave on."""
+    assert model_choices.resolve_effort(None) == "xhigh"
+    assert model_choices.resolve_effort("") == "xhigh"
+    assert model_choices.resolve_effort("low") == "xhigh"
+    assert model_choices.resolve_effort("auto") == "xhigh"
+    assert model_choices.resolve_effort("  MAX ") == "max"
+    assert model_choices.resolve_effort("high") == "high"

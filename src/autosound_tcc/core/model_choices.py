@@ -66,6 +66,37 @@ RECOMMENDED_CRITIC_MARKERS = ("gemini", "pro")
 #: is not the reviewer the pair was judged on.
 RECOMMENDED_CRITIC_EXCLUDES = ("low", "flash", "lite")
 
+# How hard the Generator is asked to think. Three levels, not the full ladder the CLIs expose:
+# **below `high` is not a tuning setting** (user, 2026-08-07). A cheap pass reads as competence —
+# the case this whole harness is built around is a model that closed phases -1..3 in one sitting and
+# reported a finished tune, crossovers and delays and a listening verdict, on a car nobody sat in.
+#
+# `xhigh` is the default because it has margin; `max` exists because some steps genuinely need it
+# and **nothing escalates on its own**. Claude varies its own thinking depth per turn (adaptive
+# thinking), but only UNDER the level set here — a session started at `xhigh` never reaches `max`,
+# however hard the work turns out to be. So `max` is a choice made when the session starts, which
+# is also the only time it CAN be made: the Agent SDK takes effort at client construction, so
+# changing it mid-tune means dropping the session.
+#
+# The same three words mean the same thing on both routes that take a flag (`ClaudeAgentOptions`
+# and `omp --thinking`). `agy` is not one of them — it publishes each tier as its own model
+# (`gemini-3.1-pro-high`), so there the effort IS the model name and `critic_choices` already picks
+# the only sensible one. Codex is the skill's to set (`AUTOSOUND_CRITIC_EFFORT`).
+EFFORT_LEVELS: tuple[str, ...] = ("high", "xhigh", "max")
+EFFORT_DEFAULT = "xhigh"
+
+
+def resolve_effort(value: Optional[str]) -> str:
+    """One reading of a stored effort, for every consumer.
+
+    An unset or unrecognised value reads as the default rather than being passed through: these
+    strings reach a subprocess argument and a model API, and "the level I typed is not a level"
+    should not be discovered there.
+    """
+    level = (value or "").strip().lower()
+    return level if level in EFFORT_LEVELS else EFFORT_DEFAULT
+
+
 CATALOGUE_TIMEOUT_S = 20.0
 # Long enough for a CLI that shells out to list its own models, short enough that a hung binary
 # does not hold the picker open.

@@ -287,6 +287,14 @@ def build_server(
             "process_state_error": error,
             "sessions": registry.load().get("phases", {}),
             "pending_signals": bus.pending_count,
+            # How hard this session was asked to think, so a record can say it. A journal entry
+            # that names the model but not its effort does not describe what ran -- the same model
+            # at `high` and at `max` is two different reviewers of its own work. Fixed for the
+            # session: both adapters take it when the session is built, so it cannot have changed
+            # since this session started, whatever the picker shows now.
+            "effort": model_choices.resolve_effort(
+                project_settings.get(config.tcc_dir(project_dir), "effort", "")
+            ),
             # The Arbiter already chose a reviewer in the footer, and without this the skill
             # cannot see it: intake asks "how would you like to set up the Reviewer channel?"
             # about a channel that is configured and one tool call away. Anything TCC already

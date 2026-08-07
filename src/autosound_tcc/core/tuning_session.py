@@ -33,7 +33,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, model_choices, vendor_loader
 from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -215,11 +215,16 @@ class TuningSession:
         model: str = DEFAULT_MODEL,
         gate: str = "writes",
         always_allowed: Optional[frozenset[str]] = None,
+        effort: Optional[str] = None,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
+        # Stated, never inherited (`model_choices.EFFORT_LEVELS`). Whatever the harness's own
+        # default happens to be, a record that says which model answered but not how hard it was
+        # asked to think is the same half-truth as one that names a model that did not run.
+        self.effort = model_choices.resolve_effort(effort)
         # Same two dials as the omp adapter, so "stop asking" means one thing whichever harness is
         # driving. `auto` turns off the harness's own permission traffic; TCC's `mcp__tcc__*` tools
         # keep their own confirmations, which is where a change to the car is actually attested.
@@ -295,6 +300,11 @@ class TuningSession:
         return ClaudeAgentOptions(
             cwd=str(self.project_dir),
             model=self.model,
+            # Set here and only here: the SDK takes effort at client construction, so this is the
+            # session's level for its whole life. Raising it mid-tune would mean reconnecting, and
+            # the session is the thing being preserved -- which is why `max` is offered where the
+            # model is picked rather than as a control the Arbiter can reach for mid-conversation.
+            effort=self.effort,
             system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_PROMPT_APPEND},
             # Project scope only: the skill must come from this project's own
             # `.claude/skills/autosound-tuning` symlink (the TCC worktree branch), not from

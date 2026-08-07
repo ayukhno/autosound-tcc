@@ -179,6 +179,22 @@ def test_a_front_end_that_reports_no_language_says_so_rather_than_guessing(tmp_p
     assert state["language"] is None  # ask, then -- exactly as with no front-end at all
 
 
+def test_the_state_says_how_hard_this_session_was_asked_to_think(tmp_path):
+    """A record that names the model but not its effort does not say what ran: the same model at
+    `high` and at `max` is two different reviewers of its own work. Unlike the model, there is no
+    honest "not chosen" here — some level always runs, so an unset project reads as the default."""
+    from autosound_tcc.core import config, project_settings
+
+    mcp, _bus, _registry = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    state = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+    assert state["effort"] == "xhigh"
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "effort", "max")
+    state = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+    assert state["effort"] == "max"
+
+
 def test_get_pending_signals_drains_once(tmp_path):
     mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     bus.push(NOT_VISIBLE, note="band 3 missing")
