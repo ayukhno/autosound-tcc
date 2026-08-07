@@ -214,6 +214,14 @@ T: dict[Lang, dict[str, str]] = {
         "cliRouteQuiet": "{routes} is installed but listed no models — its own login may have expired. Its entries are missing from the reviewer picker, not gone.",
         "modelFree": "free",
         "ompMissing": "⚠️ omp is not installed — brew install can1357/tap/omp, or pick a Claude model.",
+        # Right-click to copy. A hint gets its own item because in this app the tooltip carries
+        # what the panel could not fit and what the screen does not say at all — whose bill a route
+        # is, what an effort level costs, why a reviewer is clipboard-only.
+        "copyValue": "Copy value",
+        "copyRow": "Copy row",
+        "copyHint": "Copy hint",
+        "copySelection": "Copy selection",
+        "copyMessage": "Copy message",
         "aiMain": "AI main",
         "aiEffort": "Effort",
         "aiCritic": "AI critic",
@@ -507,6 +515,11 @@ T: dict[Lang, dict[str, str]] = {
         "cliRouteQuiet": "{routes} встановлено, але моделей не віддав — можливо, протух його власний логін. У списку рецензента його рядків немає, але це не означає, що маршруту немає.",
         "modelFree": "безкоштовно",
         "ompMissing": "⚠️ omp не встановлено — brew install can1357/tap/omp, або обери модель Claude.",
+        "copyValue": "Копіювати значення",
+        "copyRow": "Копіювати рядок",
+        "copyHint": "Копіювати підказку",
+        "copySelection": "Копіювати виділене",
+        "copyMessage": "Копіювати повідомлення",
         "aiMain": "ШІ main",
         "aiEffort": "Зусилля",
         "aiCritic": "ШІ critic",

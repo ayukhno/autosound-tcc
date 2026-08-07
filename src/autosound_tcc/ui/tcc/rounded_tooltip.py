@@ -100,6 +100,11 @@ class HoverTip:
     def set_text(self, text: str) -> None:
         self._text = text
 
+    def text(self) -> str:
+        """The hint as it stands. These tips are not Qt tooltips — `widget.toolTip()` is empty on
+        anything using this — so a reader that wants the hint (copy_menu) has to ask the tip."""
+        return self._text
+
 
 def attach(widget: QWidget, text: str = "") -> HoverTip:
     """Shorthand for `HoverTip(widget, text)` -- reads better at call sites replacing a

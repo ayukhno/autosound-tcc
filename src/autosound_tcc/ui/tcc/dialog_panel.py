@@ -19,6 +19,7 @@ import re
 from typing import Any, Optional
 
 from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtGui import QTextDocumentFragment
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -42,6 +43,7 @@ from autosound_tcc.core.agent_events import (
 )
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc import copy_menu
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
 from autosound_tcc.ui.tcc.mock_data import DIALOG, CURRENT_GENERATOR_MODEL, DialogMessage
 from autosound_tcc.ui.tcc.theme import apply_caps
@@ -173,13 +175,36 @@ class MessageBubble(QFrame):
         self._body.setTextFormat(Qt.TextFormat.RichText)
         self._body.setWordWrap(True)
         self._body.setProperty("class", "msg-body")
+        # Selectable here and nowhere in the panels: a selectable QLabel captures mouse events, and
+        # a bubble has nothing under it to capture them from. On a channel row it would eat the
+        # click that opens the detail pane.
+        self._body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._body)
+        self._html = html
         # Width the bubble would want if its text sat on one line -- lets the panel size each
         # bubble to its content (dynamic, like the web) up to the max-width cap, instead of every
         # bubble being forced to the same width.
         self._who_label = who_label
         self._role = role
         self._plain = re.sub(r"<[^>]+>", "", html)
+        copy_menu.enable_copy(
+            self,
+            # Selection first: it is the more specific of the two, and it only appears when there
+            # is one — right-clicking a bubble you have not selected in offers just the message.
+            extra=[("copySelection", self._body.selectedText),
+                   ("copyMessage", self.plain_text)],
+            hint="",  # a bubble has no tooltip, and its own text is not a hint about itself
+        )
+
+    def plain_text(self) -> str:
+        """The message as text a person can paste — not the markup, and not `_plain`.
+
+        `_plain` is a tag strip kept for width measurement, where the whole message on one line is
+        the point. It is the wrong thing to put on a clipboard twice over: `&amp;` and `&nbsp;`
+        survive it verbatim, and `<br>` between two paragraphs comes out as a missing space.
+        Qt's own converter answers both, and it is the same engine that rendered the bubble.
+        """
+        return QTextDocumentFragment.fromHtml(self._html).toPlainText().strip()
 
     @property
     def natural_width(self) -> int:
@@ -200,6 +225,9 @@ class MessageBubble(QFrame):
         """Replace the body text — used while a streamed answer is still growing."""
         self._body.setText(html)
         self._plain = re.sub(r"<[^>]+>", "", html)
+        # Copy reads this, and a streamed answer replaces its body on every delta: without this
+        # line the clipboard would hand back the first chunk of a finished message.
+        self._html = html
 
     def apply_font_scale(self, scale: float) -> None:
         # A widget's own stylesheet wins over the app-wide one for the same selector, so this

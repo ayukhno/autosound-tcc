@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
-from autosound_tcc.ui.tcc import i18n, rounded_tooltip
+from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
@@ -176,7 +176,17 @@ class ChannelRow(QWidget):
 
         # rounded_tooltip.attach(), not setToolTip() -- native QToolTip's window frame stays
         # square on macOS regardless of its own QSS border-radius (user request 2026-07-28).
-        rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
+        # Kept rather than discarded: these are not Qt tooltips, so `toolTip()` is empty here and
+        # "copy hint" has to read the tip itself. The hint is where the driver and Fs live -- the
+        # facts the row has no room to show.
+        self._tip = rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
+        summary = " · ".join(row.params(group.fields))
+        copy_menu.enable_copy(
+            self,
+            value=row.name,
+            row=lambda: f"{row.name}: {summary}" if summary else row.name,
+            hint=lambda: copy_menu.plain(self._tip.text()),
+        )
 
     @staticmethod
     def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:
@@ -234,7 +244,10 @@ class ChannelRow(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().mousePressEvent(event)
-        self.clicked.emit()
+        # Left button only. It used to fire on any press, which was invisible until the row gained
+        # a right-click copy menu: one right-click then opened the detail pane AND the menu.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 
 class _ParamsOpenRow(QWidget):
@@ -279,6 +292,11 @@ class _ParamRow(QWidget):
         v = QLabel(value)
         v.setProperty("class", "pv")
         layout.addWidget(v)
+        copy_menu.enable_copy(
+            self,
+            value=lambda: copy_menu.full_text(v),
+            row=lambda: f"{copy_menu.full_text(k)}: {copy_menu.full_text(v)}",
+        )
 
 
 class ParamsSection(QWidget):

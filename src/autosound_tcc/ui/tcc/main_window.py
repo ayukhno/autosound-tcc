@@ -74,7 +74,7 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import copy_menu, i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
@@ -238,6 +238,15 @@ def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     layout.addWidget(v, stretch=6)
     if trailing is not None:
         layout.addWidget(trailing)
+    # Right-click, not selection: a selectable label captures the mouse, and these rows sit in
+    # panels where a click means something. `ElidedLabel` is asked for its FULL text, so what lands
+    # on the clipboard is the fact rather than whatever survived the elide.
+    copy_menu.enable_copy(
+        row,
+        value=lambda: copy_menu.full_text(v),
+        row=lambda: f"{copy_menu.full_text(k)}: {copy_menu.full_text(v)}",
+        hint=lambda: v.toolTip() or k.toolTip(),
+    )
     return row
 
 
@@ -849,7 +858,20 @@ class MainWindow(QMainWindow):
 
         why = flaw.why or ""
         evidence = ", ".join(flaw.evidence)
-        attach_tip(widget, "<br>".join(x for x in (why, evidence) if x))
+        tip = attach_tip(widget, "<br>".join(x for x in (why, evidence) if x))
+        # The row that most needs copying: the whole point of the flaw map is that "do not EQ-boost
+        # this null" outlives the session that found it, and the reason and the captures it was
+        # read off are on hover. A verdict that can only be hovered cannot be quoted to anyone.
+        copy_menu.enable_copy(
+            widget,
+            value=lambda: copy_menu.full_text(head),
+            row=lambda: " · ".join((
+                copy_menu.full_text(head),
+                i18n.t(f"flawAction_{flaw.action}"),
+                copy_menu.full_text(line),
+            )),
+            hint=lambda: copy_menu.plain(tip.text()),
+        )
         return widget
 
     def _add_channel_switches(self) -> None:
