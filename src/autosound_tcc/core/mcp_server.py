@@ -122,12 +122,17 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
     # choice is often not in it. Judge the key itself rather than reporting "unreachable" for a
     # reviewer that works.
-    choice = model_choices.find(known, key) or model_choices.Choice(
+    resolved = model_choices.resolve(known, key)
+    choice = resolved.choice or model_choices.Choice(
         harness=harness or "omp", model=model or key, label=key, provider=""
     )
     return {
         "configured": True,
         "model": choice.model,
+        # What the Arbiter picked, versus what this machine will actually run. Empty unless the
+        # install has an alias — and when it does, the model must not be able to report the
+        # project's stored name as if it were the one that answered.
+        "substituted": resolved.note,
         "label": choice.label,
         "reachable": model_choices.critic_reaches(choice),
         "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)

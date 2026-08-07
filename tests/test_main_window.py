@@ -1652,3 +1652,47 @@ def test_a_project_with_no_flaw_map_says_so_rather_than_showing_nothing(tmp_path
 
     texts = " ".join(w.text() for w in window._audio_section.findChildren(QLabel))
     assert i18n.t("acousticsNone")[:20] in texts
+
+
+def test_a_project_whose_model_retired_is_offered_a_replacement(tmp_path, monkeypatch):
+    """Models retire and the name in a project's settings outlives them. Silence here is a Start
+    button that does nothing; picking the first row silently is a reviewer nobody chose."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.core import config, model_choices as mc, model_overrides, project_settings
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+
+    _app()
+    window = MainWindow()
+
+    alias = model_overrides.load()["aliases"].get("sdk:claude-opus-4-1")
+    assert alias, "the replacement should be recorded as an alias, not by editing this project"
+    # And the alias reaches the key everywhere it appears, not just in this project's settings.
+    assert mc.resolve(window._model_choices, "sdk:claude-opus-4-1").ok
+
+
+def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
+    """The model may come back, or the Arbiter may want to choose deliberately later."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.core import config, model_choices as mc, model_overrides, project_settings
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Cancel)
+
+    _app()
+    MainWindow()
+
+    assert model_overrides.load()["aliases"] == {}

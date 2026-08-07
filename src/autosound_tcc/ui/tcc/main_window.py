@@ -54,6 +54,7 @@ from autosound_tcc.core import (
     contract_check,
     critic,
     model_choices,
+    model_overrides,
     omp_session,
     process_writer,
     project_settings,
@@ -1910,7 +1911,7 @@ class MainWindow(QMainWindow):
 
     def _critic_choice(self) -> Optional[model_choices.Choice]:
         key = self._ai_critic_combo.currentData()
-        return model_choices.find(self._critic_choices, str(key)) if key else None
+        return model_choices.resolve(self._critic_choices, str(key)).choice
 
     def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
@@ -2125,17 +2126,61 @@ class MainWindow(QMainWindow):
             session.always_allowed = self._always_allowed()
 
     def _reload_model_choices(self) -> None:
-        """Refill both pickers from one registry, keeping selections that survived."""
+        """Refill both pickers from one registry, keeping selections that survived.
+
+        A stored choice that no longer exists is the case this whole path is built around: models
+        retire, and the name in a project's settings outlives them. It must not resolve to silence
+        (a Start button that does nothing) or to the first row (a reviewer nobody picked) — see
+        `_offer_replacement`.
+        """
         active = self._active_omp()
         self._model_choices = model_choices.choices(active)
         self._critic_choices = model_choices.critic_choices(active)
-        self._fill_combo(self._ai_main_combo, self._model_choices, self._project_setting(_GENERATOR_KEY))
-        self._fill_combo(
-            self._ai_critic_combo,
-            self._critic_choices,
-            self._project_setting(_CRITIC_KEY),
-            critic=True,
+        generator = self._project_setting(_GENERATOR_KEY)
+        critic = self._project_setting(_CRITIC_KEY)
+        self._fill_combo(self._ai_main_combo, self._model_choices, generator)
+        self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True)
+        for key, entries in ((generator, self._model_choices), (critic, self._critic_choices)):
+            if key and not model_choices.resolve(entries, str(key)).ok:
+                self._offer_replacement(str(key), entries)
+
+    def _offer_replacement(self, key: str, entries: list) -> None:
+        """A model this project uses is gone. Say so, and let the Arbiter map it to another.
+
+        The mapping is stored as an ALIAS rather than by rewriting this project's setting, because
+        the dead name is written down in more places than TCC can reach — other projects, journal
+        entries, whatever the skill prescribed. One indirection fixes all of them at once; editing
+        one project's setting fixes exactly one.
+
+        Asked once per key per session: a dialog that reappears on every reload is a dialog people
+        dismiss without reading.
+        """
+        asked = getattr(self, "_replacement_asked", set())
+        if key in asked or not entries:
+            return
+        asked.add(key)
+        self._replacement_asked = asked
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(i18n.t("modelGoneTitle"))
+        box.setText(i18n.t("modelGone").format(model=key))
+        combo = QComboBox(box)
+        for choice in entries:
+            combo.addItem(f"{choice.route} · {choice.label}", choice.key)
+        box.layout().addWidget(combo, 1, 1)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
         )
+        if box.exec() != QMessageBox.StandardButton.Ok:
+            # Declining is a real answer: the model may come back, or the Arbiter may want to pick
+            # deliberately later. Nothing is written, and the picker keeps saying nothing is chosen.
+            return
+        model_overrides.set_alias(key, str(combo.currentData()), why=i18n.t("modelGoneWhy"))
+        self._status_strip.notify(
+            i18n.t("modelAliased").format(old=key, new=str(combo.currentData()))
+        )
+        self._reload_model_choices()
 
     @staticmethod
     def _fill_combo(combo, entries, wanted: str, critic: bool = False) -> None:
@@ -2173,7 +2218,7 @@ class MainWindow(QMainWindow):
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:
         key = self._ai_main_combo.currentData()
-        return model_choices.find(self._model_choices, str(key)) if key else None
+        return model_choices.resolve(self._model_choices, str(key)).choice
 
     def _on_generator_model_changed(self, _index: int) -> None:
         choice = self._generator_choice()

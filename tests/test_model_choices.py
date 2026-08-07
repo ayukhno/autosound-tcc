@@ -257,3 +257,131 @@ def test_an_installed_cli_that_never_answered_is_named_rather_than_hidden(monkey
 
     assert mc.agy_choices() == []
     assert mc.cli_routes_without_models() == ["agy"]
+
+
+def test_a_retired_key_resolves_through_the_local_alias(tmp_path, monkeypatch):
+    """The name in a project's settings outlives the model. One indirection reaches every place
+    that name was written down — other projects, journal entries, whatever the skill prescribed."""
+    from autosound_tcc.core import model_choices as mc, model_overrides as mo
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    entries = mc.sdk_choices()
+
+    gone = mc.resolve(entries, "sdk:claude-opus-4-1")
+    assert not gone.ok and gone.note == ""  # named, not swallowed
+
+    mo.set_alias("sdk:claude-opus-4-1", "sdk:claude-opus-5", why="no longer offered")
+    now = mc.resolve(entries, "sdk:claude-opus-4-1")
+
+    assert now.ok and now.choice.model == "claude-opus-5"
+    # The record must be able to say what actually ran, not just what was asked for.
+    assert "sdk:claude-opus-4-1 → sdk:claude-opus-5" in now.note
+    assert "no longer offered" in now.note
+
+
+def test_an_alias_cycle_does_not_hang_the_picker(tmp_path, monkeypatch):
+    """A hand-edited file can say `a -> b -> a`, and a resolver that loops is a window that never
+    opens."""
+    from autosound_tcc.core import model_choices as mc, model_overrides as mo
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    mo.set_alias("sdk:a", "sdk:b")
+    mo.set_alias("sdk:b", "sdk:a")
+
+    assert mc.resolve(mc.sdk_choices(), "sdk:a").ok is False
+
+
+def test_this_machine_can_add_and_hide_models(tmp_path, monkeypatch):
+    """A model no catalogue reports (a private deployment, a preview) and one this machine should
+    stop offering — the other half of surviving a generation nobody shipped an update for."""
+    import json
+
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "models.json").write_text(json.dumps({
+        "schema_version": 1,
+        "hidden": ["sdk:claude-fable-5"],
+        "added": [{"harness": "sdk", "model": "claude-opus-6", "label": "Claude Opus 6"}],
+    }), encoding="utf-8")
+
+    keys = [c.key for c in mc.choices([])]
+
+    assert "sdk:claude-fable-5" not in keys
+    assert "sdk:claude-opus-6" in keys
+
+
+def test_an_addition_never_shadows_a_real_catalogue_entry(tmp_path, monkeypatch):
+    """A hand-written row that replaced the real one would be a silent lie about which model runs."""
+    import json
+
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "models.json").write_text(json.dumps({
+        "schema_version": 1,
+        "added": [{"harness": "sdk", "model": "claude-opus-5", "label": "NOT the real one"}],
+    }), encoding="utf-8")
+
+    labels = [c.label for c in mc.choices([]) if c.model == "claude-opus-5"]
+
+    assert labels == ["Claude Opus 5"]
+
+
+def test_a_malformed_overrides_file_does_not_stop_the_app(tmp_path, monkeypatch):
+    """This is the file that keeps a machine working when a model retires; a typo in it must not
+    be the thing that stops the app from opening."""
+    from autosound_tcc.core import model_choices as mc, model_overrides as mo
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "models.json").write_text("{ not json", encoding="utf-8")
+
+    assert mo.load()["aliases"] == {}
+    assert [c.key for c in mc.sdk_choices()]  # and the ordinary list still builds
+
+
+def test_the_models_api_refreshes_the_claude_list_when_a_key_exists(tmp_path, monkeypatch):
+    """The shipped list is a floor that ages. Where the machine has a key, the list is asked
+    rather than believed — the same pattern as `agy models`, for the route where it is possible."""
+    import io
+    import json
+
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    payload = json.dumps({"data": [
+        {"id": "claude-opus-6", "display_name": "Claude Opus 6"},
+        {"id": "claude-opus-5", "display_name": "Claude Opus 5"},
+    ]}).encode()
+
+    class _Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(mc.urllib.request, "urlopen", lambda *a, **k: _Response(payload))
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+
+    mc.refresh_cli_catalogue()
+    models = [c.model for c in mc.sdk_choices()]
+
+    assert models[0] == "claude-opus-6"  # a model nobody shipped an update for
+    # The shipped names stay available too: they are a floor, not a competing answer.
+    assert "claude-sonnet-5" in models
+    assert models.count("claude-opus-5") == 1  # and are not duplicated by the refresh
+
+
+def test_without_a_key_the_shipped_list_is_what_there_is(tmp_path, monkeypatch):
+    """Most SDK installs run on the user's own `claude` login and have no API key — those survive
+    a retirement through the overrides file, not through this."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    assert mc._fetch_sdk_choices() == []
+    assert [c.model for c in mc.sdk_choices()] == [m for _, m in mc.SDK_MODELS]

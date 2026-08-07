@@ -22,8 +22,11 @@ import json
 import os
 import shutil
 import subprocess
+import urllib.request
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
+
+from autosound_tcc.core import model_overrides
 
 # How a model is reached — and, more to the point, WHOSE BILL it lands on. This is the axis the
 # picker was missing: "Gemini 3.1 Pro" through a desktop subscription and the same model through
@@ -45,6 +48,9 @@ ROUTES: dict[str, tuple[str, str]] = {
 # What TCC drives through the Agent SDK. Claude only, and deliberately not read from a catalogue:
 # these are the models this front-end is tested against, and the SDK resolves credentials from the
 # user's own installation.
+#: When this list was last checked against what Anthropic actually serves. It is a floor for
+#: installs that cannot ask (no API key), and it is expected to age — see `sdk_choices`.
+SDK_MODELS_VERIFIED = "2026-08"
 SDK_MODELS: tuple[tuple[str, str], ...] = (
     ("Claude Opus 5", "claude-opus-5"),
     ("Claude Sonnet 5", "claude-sonnet-5"),
@@ -101,10 +107,61 @@ class OmpCatalogueError(RuntimeError):
 
 
 def sdk_choices() -> list[Choice]:
-    return [
-        Choice(harness="sdk", model=model, label=label, provider="anthropic")
-        for label, model in SDK_MODELS
-    ]
+    """Claude models: what the Models API reported if it could be asked, then the shipped list.
+
+    The shipped list is a floor, not the answer. It is dated (`SDK_MODELS_VERIFIED`) and it will
+    go stale — every name in it retires eventually. Three things keep an install working past that
+    without anybody shipping an update: the API refresh below when this machine has a key, the
+    local overrides file, and the replacement offered when a stored choice stops resolving.
+    """
+    fetched = list(_CLI_CACHE.get("sdk", []))
+    known = {choice.model for choice in fetched}
+    for label, model in SDK_MODELS:
+        if model not in known:
+            fetched.append(
+                Choice(harness="sdk", model=model, label=label, provider="anthropic")
+            )
+    return fetched
+
+
+def _fetch_sdk_choices() -> list[Choice]:
+    """Ask the Models API which Claude models exist — when this machine has a key.
+
+    A **bonus layer, not the mechanism**: the SDK route deliberately runs on the user's own `claude`
+    login rather than an API key (TCC authenticates to nothing — that is the licensing position),
+    so most installs will not have `ANTHROPIC_API_KEY` set and this returns nothing. Those installs
+    survive a retirement through the overrides file instead. Where a key does exist, this keeps the
+    list current for free.
+
+    Raw HTTP on purpose: TCC has no Anthropic SDK dependency, and taking one on for a single list
+    call would be a package to maintain in exchange for a GET.
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return []
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/models?limit=100",
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=CLI_TIMEOUT_S) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 — no key, no network, a 401: all mean "cannot refresh"
+        return []
+    out: list[Choice] = []
+    for entry in payload.get("data") or []:
+        model = str(entry.get("id") or "")
+        if not model:
+            continue
+        out.append(
+            Choice(
+                harness="sdk",
+                model=model,
+                label=str(entry.get("display_name") or model),
+                provider="anthropic",
+            )
+        )
+    return out
 
 
 def omp_available() -> bool:
@@ -149,9 +206,12 @@ def refresh_cli_catalogue() -> dict[str, list[Choice]]:
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
     the GUI thread at window construction, so asking there would freeze the window on launch.
     """
-    fetched = _fetch_agy_choices()
-    if fetched or "agy" not in _CLI_CACHE:
-        _CLI_CACHE["agy"] = fetched
+    for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
+        fetched = fetch()
+        # A failed refresh keeps the previous answer; only a first-ever failure stores the empty
+        # list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`).
+        if fetched or route not in _CLI_CACHE:
+            _CLI_CACHE[route] = fetched
     return dict(_CLI_CACHE)
 
 
@@ -265,22 +325,96 @@ def choices(active_omp: list[str]) -> list[Choice]:
     errors when used) is louder and easier to act on.
     """
     entries = sdk_choices()
-    if not active_omp:
-        return entries
-    try:
-        catalogue = {choice.model: choice for choice in omp_catalogue()}
-    except OmpCatalogueError:
-        catalogue = {}
-    for selector in active_omp:
-        entries.append(
-            catalogue.get(selector)
-            or Choice(harness="omp", model=selector, label=selector, provider="")
+    if active_omp:
+        try:
+            catalogue = {choice.model: choice for choice in omp_catalogue()}
+        except OmpCatalogueError:
+            catalogue = {}
+        for selector in active_omp:
+            entries.append(
+                catalogue.get(selector)
+                or Choice(harness="omp", model=selector, label=selector, provider="")
+            )
+    return _apply_overrides(entries)
+
+
+def _apply_overrides(entries: list[Choice]) -> list[Choice]:
+    """Fold in what this machine says: models it can run that no catalogue reports, and ones it
+    should stop offering (`model_overrides`).
+
+    Additions come last and never replace a catalogue entry of the same key — a hand-written row
+    that shadowed the real one would be a silent lie about which model is being run.
+    """
+    data = model_overrides.load()
+    hidden = model_overrides.hidden_keys(data)
+    out = [choice for choice in entries if choice.key not in hidden]
+    known = {choice.key for choice in out}
+    for row in model_overrides.added_entries(data):
+        harness = str(row.get("harness") or "omp")
+        model = str(row["model"])
+        key = f"{harness}:{model}"
+        if key in known or key in hidden:
+            continue
+        out.append(
+            Choice(
+                harness=harness,  # type: ignore[arg-type]
+                model=model,
+                label=str(row.get("label") or model),
+                provider=str(row.get("provider") or ""),
+            )
         )
-    return entries
+        known.add(key)
+    return out
 
 
 def find(entries: list[Choice], key: str) -> Choice | None:
     return next((choice for choice in entries if choice.key == key), None)
+
+
+@dataclass(frozen=True)
+class Resolved:
+    """What a stored model key turned out to mean on THIS machine.
+
+    Three answers, and the caller must be able to tell them apart:
+
+    * `choice` set, `alias` None — the ordinary case.
+    * `choice` set, `alias` set — the machine sends this key somewhere else. The caller should say
+      so rather than quietly run a different model than the record names.
+    * `choice` None — the key names nothing this install can run. Not an error to swallow: it is
+      the moment to tell the user and offer a replacement, which is what fills the overrides file.
+    """
+
+    key: str
+    choice: Optional[Choice] = None
+    alias: "Optional[model_overrides.Alias]" = None
+
+    @property
+    def ok(self) -> bool:
+        return self.choice is not None
+
+    @property
+    def note(self) -> str:
+        """One clause for a record or a strip: what was asked for, and what will actually run."""
+        if self.alias is None or self.choice is None:
+            return ""
+        return (
+            f"{self.alias.from_key} → {self.choice.key}"
+            + (f" ({self.alias.why})" if self.alias.why else "")
+        )
+
+
+def resolve(entries: list[Choice], key: str) -> Resolved:
+    """Turn a stored key into something this machine can actually run — the one indirection.
+
+    Every consumer goes through here (the pickers, session start, the Critic call, `get_tcc_state`)
+    so that a model retiring is handled in ONE place. Without it, each call site reads the key its
+    own way and there is nowhere to put a substitution — which is how a stored name that no longer
+    exists becomes a dead button in one place and silently the first entry in another.
+    """
+    if not key:
+        return Resolved(key="")
+    resolved, alias = model_overrides.resolve_key(key)
+    return Resolved(key=resolved, choice=find(entries, resolved), alias=alias)
 
 
 # What the skill's reviewer script needs per vendor, mirroring its own provider table (SCR-033):
@@ -340,7 +474,7 @@ def critic_choices(active_omp: list[str]) -> list[Choice]:
     Generator has to hold a session and talk to TCC's MCP server — which `agy` and `codex` may
     well be able to do, but not by anything TCC has wired yet.
     """
-    return choices(active_omp) + agy_choices() + codex_choices()
+    return _apply_overrides(choices(active_omp) + agy_choices() + codex_choices())
 
 
 def recommended(choice: Choice, critic: bool = False) -> bool:
