@@ -1066,7 +1066,16 @@ expected titles, record `{ok, uuid, at, issues}` per capture, append a `capture_
 
 ## SCR-041 — the README and FAQ must name the pair that is actually supported
 
-**Status**: proposed (user, 2026-08-07)
+**Status**: done (skill `70c27ca`, 2026-08-07) — a named subsection heads "Recommended Models,
+Modes & My Take" in all four READMEs, dated in the heading itself, stating Generator = Claude Opus
+at `xhigh` and Reviewer = Gemini Pro (High), followed by the paragraph that the rest is the reader's
+own experiment and the documented phases-−1..3-in-one-sitting failure. Explicitly not a requirement:
+the free/clipboard/web-chat paths are named and linked in the same breath. Mode A in the options
+table now IS that pair rather than a competing row, and the two "my experience" bullets that used to
+undercut it (Sonnet's token thrift, Fable as an unqualified best) were reconciled instead of deleted.
+FAQ gets its own dated section placed immediately *before* the cost options, since that is where the
+downgrade is actually chosen, plus cross-links from Options 1 and 2. Also fixed a pre-existing dead
+link to the removed `audit-fable-2026-07-11.md` in all four READMEs.
 **Target**: the skill's `README.md` (and its translations) + `FAQ.md`
 **TCC dependency**: none — TCC already marks the same pair in its picker
 (`model_choices.RECOMMENDED_GENERATOR` / `RECOMMENDED_CRITIC_MARKERS`) and now runs it at a stated
@@ -1100,7 +1109,20 @@ been driven, and an undated recommendation is the thing that goes stale silently
 
 ## SCR-042 — a spare slot does not say which tier it belongs to
 
-**Status**: proposed (user, 2026-08-07 — "there are no OFF channels in the lists")
+**Status**: done (skill `bbab835`, TCC needed no change, 2026-08-07 — "there are no OFF channels
+in the lists").
+Both fields shipped, and verified end to end against TCC's already-built half: a fixture with
+`off-out-A`/`off-out-L` on `tier: "channels"` and `off-virt-F`/`off-virt-H` on
+`tier: "virtual_channels"` renders slot `F` into the virtual tier and the spare outputs into the
+output tier, reading `3/12` and `3/8`; stripping both fields reproduces today's render exactly.
+The trap worth knowing: `tier` is the **ledger** key, so physical outputs are `channels`, never the
+profile's group id `physical_outputs` — `dsp_profile.ledger_tier()` is now the single home for that
+conversion (`contract.py` was duplicating it inline), `project.validate()` refuses the group-id
+spelling by name, and `contract.py` flags a `tier` no profile group declares, because a spare slot
+has no ledger row to contradict a typo. `max_count` validates as a positive int or null and stays
+null-until-confirmed, so `open_questions()` surfaces it. Intake §4's checklist and
+`knowledge/dsp/helix-dsp-ultra-s.md` now carry the slot-count question and its Helix answer
+(outputs 12/A–L, virtual 8/A–H — user-confirmed 2026-08-07).
 **Target**: `project.py`'s `channels[]` (a `tier` field), and `dsp_profile.json`'s groups
 (`max_count`)
 **TCC dependency**: `state/dsp_state.py` `ProjectView.from_dict` now joins identity-only channels
