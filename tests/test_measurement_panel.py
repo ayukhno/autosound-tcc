@@ -354,3 +354,46 @@ def test_picking_session_via_combo_switches_the_grid():
     panel._session_combo.setCurrentIndex(panel._session_combo.findData("v8"))
     assert panel._viewing_id == "v8"
     assert panel._rows[0].item_name == "sw_8"
+
+
+def test_the_panel_remembers_what_rew_holds():
+    """`known_titles()` was called by the checklist and by the supervisor's audit, and the panel
+    never defined it — so both silently ran on "REW holds nothing": a checklist that could not
+    mark anything captured from REW, and an audit that could not back a step with a measurement."""
+    _app()
+    panel = MeasurementPanel()
+    seen: list = []
+    panel.titlesChanged.connect(lambda: seen.append(1))
+
+    panel._remember_titles(["sw_1 (sw)", "tw-L_1 (rta)", ""])
+
+    assert panel.known_titles() == ["sw_1 (sw)", "tw-L_1 (rta)"]  # blanks are not titles
+    assert seen  # and the window is told, so the checklist can be rebuilt
+
+    seen.clear()
+    panel._remember_titles(["sw_1 (sw)"])
+    assert not seen  # nothing new: no signal, and no needless capture check
+
+
+def test_replacing_a_running_worker_does_not_abort_the_process():
+    """Assigning over an attribute that holds a RUNNING QThread destroys it on the spot, and Qt
+    answers that with `qFatal` — the whole process aborts, mid-session (real crash report,
+    2026-08-07: `QThread::~QThread()` reached through `Sbk_QWidget_setattro`)."""
+    from PySide6.QtCore import QThread
+
+    class _Slow(QThread):
+        def run(self) -> None:
+            self.msleep(120)
+
+    _app()
+    panel = MeasurementPanel()
+    first = _Slow()
+    panel._replace_worker("_worker", first)
+    first.start()
+
+    second = _Slow()
+    panel._replace_worker("_worker", second)  # must not raise, and must not abort
+
+    assert not first.isRunning()  # waited out before being dropped
+    assert panel._worker is second
+    second.wait(2000)

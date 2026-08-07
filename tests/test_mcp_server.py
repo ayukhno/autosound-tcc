@@ -106,6 +106,7 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         # The capture round (SCR-034) -- recording one is a tool, like every other process write,
         # rather than a shell-out the model has to remember the path for.
         "record_decision",
+        "check_captures",
         "start_capture",
         "record_capture",
         "skip_capture",

@@ -234,3 +234,45 @@ def test_a_closed_round_stops_being_the_live_task(project):
     assert session.id == "v1"  # back to the version, since no round is open
     statuses = {item.name: item.status for group in session.groups for item in group.items}
     assert statuses["sw_1 (sw)"] == mv.STATUS_DONE  # what it produced is still on the record
+
+
+def test_a_capture_that_failed_the_check_is_not_done(project):
+    """A sweep that never finished and a muted channel both leave a title behind. Before the
+    verdict was recorded, both read as captured and every later phase computed on them."""
+    from autosound_tcc.state import process_view
+
+    module = vendor_loader.load_process()
+    process = module.Process(str(process_view.process_dir(project)))
+    process.enter_phase("0")
+    process.start_capture(1, expected=["sw_1 (sw)"], step="0.1")
+    process.record_capture("sw_1 (sw)")
+    state = process.load()
+    state["capture"]["taken"]["sw_1 (sw)"]["verified"] = {
+        "ok": False, "exists": True, "uuid": "9ff4deb9",
+        "issues": ["in-band mean -94.0 dB — silence, not a sweep"],
+    }
+    process._write(state)
+
+    session = mv.build_session("0", 1, ["sw_1 (sw)"], project)  # REW holds the title
+
+    item = next(i for g in session.groups for i in g.items if i.name == "sw_1 (sw)")
+    assert item.status == mv.STATUS_STALE  # the legend's "taken, unusable"
+    assert "silence" in (item.extra or "")  # and the reason travels with it
+
+
+def test_a_capture_that_passed_reads_as_done(project):
+    from autosound_tcc.state import process_view
+
+    module = vendor_loader.load_process()
+    process = module.Process(str(process_view.process_dir(project)))
+    process.enter_phase("0")
+    process.start_capture(1, expected=["sw_1 (sw)"], step="0.1")
+    process.record_capture("sw_1 (sw)")
+    state = process.load()
+    state["capture"]["taken"]["sw_1 (sw)"]["verified"] = {"ok": True, "exists": True, "issues": []}
+    process._write(state)
+
+    session = mv.build_session("0", 1, [], project)  # and REW need not even be open
+
+    item = next(i for g in session.groups for i in g.items if i.name == "sw_1 (sw)")
+    assert item.status == mv.STATUS_DONE

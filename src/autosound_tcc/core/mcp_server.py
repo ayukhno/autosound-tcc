@@ -544,16 +544,32 @@ def build_server(
         )
 
     @mcp.tool()
-    async def start_capture(version: str, expected: list[str]) -> str:
+    async def check_captures(titles: list[str] = []) -> str:
+        """Check the open round's captures against REW and record the verdict (SCR-040).
+
+        Arithmetic, not judgement: does REW hold each measurement, is it in the band asked for, is
+        the level a signal rather than silence or a loopback. Do NOT read frequency-response arrays
+        to answer this yourself — this computes it, records it against REW's own `uuid`, and the
+        step's gate reads what it recorded.
+
+        A step that asked for captures will not close until they pass. `titles` defaults to
+        everything the round expects."""
+        return await asyncio.to_thread(_record, process_writer.check_captures, titles or None)
+
+    @mcp.tool()
+    async def start_capture(version: str, expected: list[str], step: str = "") -> str:
         """Open a capture round before measuring: the ledger version being captured at, and the
         titles the phase asks for (SCR-034).
 
         A round, not a version. The version names the config the measurements were taken under and
         cannot tell two passes at the same config apart -- and the round is what makes a finished
         pass survive REW being closed, since otherwise its status lives only in REW's own list of
-        open measurements."""
+        open measurements.
+
+        `step` binds the round to the plan step it satisfies, which is what lets that step's gate
+        refuse to close while a capture it asked for is unusable (SCR-040)."""
         return await asyncio.to_thread(
-            _record, process_writer.start_capture, version, expected
+            _record, process_writer.start_capture, version, expected, step
         )
 
     @mcp.tool()

@@ -243,13 +243,38 @@ def record_session(project_dir: Path, harness: str, model: str, resumed: bool = 
     return _run(project_dir, args)
 
 
-def start_capture(project_dir: Path, version: str, expected: list[str]) -> str:
+def start_capture(
+    project_dir: Path, version: str, expected: list[str], step: str = ""
+) -> str:
     """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
 
     A round, not a version — the version names the config the measurements were taken under and
     cannot tell two passes at the same config apart.
+
+    `step` binds the round to the plan step it satisfies (SCR-040): that is what makes a re-take
+    visibly attempt N of the step that asked for it, and what lets the step's own gate read the
+    verdict on those captures.
     """
-    return _run(project_dir, ["capture-start", str(version), *[str(t) for t in expected or []]])
+    args = ["capture-start", str(version), *[str(t) for t in expected or []]]
+    if step:
+        args += ["--step", step]
+    return _run(project_dir, args)
+
+
+def check_captures(project_dir: Path, titles: list[str] | None = None) -> str:
+    """Run the skill's verdict over the open round and record it (SCR-040).
+
+    TCC runs this phase because TCC is what can reach REW and hold a loop — but the arithmetic is
+    the skill's, and so is the writing. Nothing here decides whether a curve is usable; it asks.
+
+    Slower than the other writes: it pulls every expected measurement out of REW. Call it off the
+    GUI thread.
+    """
+    return _run(
+        project_dir,
+        ["capture-check", *[str(t) for t in titles or []]],
+        timeout_s=max(DEFAULT_TIMEOUT_S, 120.0),
+    )
 
 
 def record_capture(project_dir: Path, title: str) -> str:

@@ -365,6 +365,27 @@ def _stop_all_workers() -> None:
 atexit.register(_stop_all_workers)
 
 
+class _CaptureCheckWorker(QThread):
+    """Run the skill's capture verdict off the GUI thread (SCR-040).
+
+    It pulls every expected measurement out of REW through the skill's own checker, so it is the
+    slowest of TCC's background calls and the one that must never run inline: the window would
+    freeze for seconds while somebody is sitting in a car waiting to move the mic.
+    """
+
+    result = Signal(str)  # the checker's own output, or the refusal verbatim
+
+    def __init__(self, project_dir) -> None:
+        super().__init__()
+        self._project_dir = project_dir
+
+    def run(self) -> None:
+        try:
+            self.result.emit(process_writer.check_captures(self._project_dir))
+        except process_writer.ProcessWriterError as exc:
+            self.result.emit(str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -441,6 +462,8 @@ class MainWindow(QMainWindow):
             self._rew_ping.result.connect(self._set_rew_online)
             self._rew_ping.start()
         self._meas_panel.rewStatusChanged.connect(self._set_rew_online)
+        self._meas_panel.titlesChanged.connect(self._on_rew_titles_changed)
+        self._capture_check: "_CaptureCheckWorker | None" = None
 
         # One contract check at launch, so the status strip can say "this project has N problems"
         # before the user goes looking. Same escape hatch as the two workers above.
@@ -1580,6 +1603,50 @@ class MainWindow(QMainWindow):
             return
         self._dialog._add_system_message(proposal_view.to_html(delta))
 
+    def _on_rew_titles_changed(self) -> None:
+        """REW's list changed — redraw the checklist, and check what the round asked for (SCR-040).
+
+        Checking is arithmetic and needs no model, so it runs here rather than waiting for one to
+        think of it. Only while a round is open and only when something it expects has actually
+        turned up: the check pulls every expected measurement out of REW, and doing that on every
+        scan of an unrelated project would make the panel expensive to look at.
+        """
+        state = process_view.load_state()
+        if state:
+            self._refresh_capture_task(state)
+        round_ = process_view.capture_round() or {}
+        if not round_ or round_.get("closed"):
+            return
+        titles = set(self._meas_panel.known_titles())
+        outstanding = [
+            title
+            for title in round_.get("expected", [])
+            if title in titles
+            and not (((round_.get("taken") or {}).get(title) or {}).get("verified") or {}).get("ok")
+        ]
+        if not outstanding:
+            return
+        if self._capture_check is not None and self._capture_check.isRunning():
+            return  # one check at a time; the next title change re-triggers it
+        self._capture_check = _CaptureCheckWorker(config.project_dir())
+        self._capture_check.result.connect(self._on_capture_check_done)
+        self._capture_check.start()
+
+    def _on_capture_check_done(self, output: str) -> None:
+        """Put the verdict on screen. The checker's own words, not a paraphrase.
+
+        An unusable capture is a retake the Arbiter has to decide on, and deciding it needs the
+        reason -- "silence in band" and "covers 200-2000 Hz, asked for 20-20000" lead to different
+        actions at the car.
+        """
+        bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")]
+        if bad:
+            self._status_strip.notify("<br>".join(bad), level="warn")
+        # The panel reads the recorded verdict, not this text.
+        state = process_view.load_state()
+        if state:
+            self._refresh_capture_task(state)
+
     def _record_decision(self, question: str, answer: str) -> None:
         """The Arbiter ruled on something in the dialog — put it in the journal (SCR-030).
 
@@ -2214,6 +2281,10 @@ class MainWindow(QMainWindow):
         if contract is not None and contract.isRunning():
             contract.cancel()
             contract.wait(3000)
+        # Same rule as the contract worker: a running QThread destroyed by Qt is a `qFatal`.
+        check = getattr(self, "_capture_check", None)
+        if check is not None and check.isRunning():
+            check.wait(5000)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         self.stop_workers()

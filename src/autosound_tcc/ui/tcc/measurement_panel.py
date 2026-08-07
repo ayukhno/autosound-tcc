@@ -227,6 +227,9 @@ class MeasurementPanel(QWidget):
     # A real Read/Scan call is the freshest possible signal of whether REW is actually reachable --
     # main_window.py's REW-online dot listens to this rather than polling on its own.
     rewStatusChanged = Signal(bool)
+    # REW's own list of titles changed (a scan, or a read that named one). The window rebuilds the
+    # checklist off this and runs the capture check; the panel itself decides nothing about them.
+    titlesChanged = Signal()
 
     def __init__(self, preset_provider: Optional[Callable[[], str]] = None) -> None:
         """`preset_provider` returns the current preset name, so each capture method's saved order
@@ -235,6 +238,12 @@ class MeasurementPanel(QWidget):
         self._bridge = RewBridge()
         self._worker: "_RewReadWorker | None" = None
         self._scan_worker: "_RewScanWorker | None" = None
+        # Every title this panel has seen REW hold, this session. There was no such collection at
+        # all: `known_titles()` was called by the checklist and by the supervisor's own audit, and
+        # the panel never defined it, so both silently ran on "REW holds nothing" -- a checklist
+        # that could never mark anything captured from REW, and an audit that could never back a
+        # step with a measurement.
+        self._known_titles: set[str] = set()
         self._rename_worker: "_RewRenameWorker | None" = None
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
@@ -517,13 +526,26 @@ class MeasurementPanel(QWidget):
         self._status_label.setHidden(False)
         self._status_label.setText(i18n.t("measReading"))
         self._pending_order = order
-        self._scan_worker = _RewScanWorker(self._bridge)
+        self._replace_worker("_scan_worker", _RewScanWorker(self._bridge))
         self._scan_worker.done.connect(self._on_scan_done)
         self._scan_worker.failed.connect(self._on_read_failed)
         self._scan_worker.start()
 
+    def known_titles(self) -> list[str]:
+        """What REW held, last time this panel looked. Sorted, so callers are order-stable."""
+        return sorted(self._known_titles)
+
+    def _remember_titles(self, titles) -> None:
+        before = len(self._known_titles)
+        self._known_titles.update(t for t in titles if str(t).strip())
+        if len(self._known_titles) != before:
+            self.titlesChanged.emit()
+
     def _on_scan_done(self, measurements: dict) -> None:
         self.rewStatusChanged.emit(True)
+        self._remember_titles(
+            (m or {}).get("title", "") for m in (measurements or {}).values()
+        )
         order = self._pending_order
         expected = len(order)
         found_count = len(measurements)
@@ -545,7 +567,7 @@ class MeasurementPanel(QWidget):
         # convention). Extend here once a "current capture version/method" concept exists.
         pairs = list(zip(newest_ids, order))
         self._status_label.setText(i18n.t("captureRenaming").format(n=len(pairs)))
-        self._rename_worker = _RewRenameWorker(self._bridge, pairs)
+        self._replace_worker("_rename_worker", _RewRenameWorker(self._bridge, pairs))
         self._rename_worker.done.connect(self._on_rename_done)
         self._rename_worker.failed.connect(self._on_rename_failed)
         self._rename_worker.start()
@@ -557,6 +579,21 @@ class MeasurementPanel(QWidget):
         self._status_label.setText(
             i18n.t("captureRenameFail").format(error=message, n=len(renamed))
         )
+
+    def _replace_worker(self, attr: str, worker: QThread) -> QThread:
+        """Put `worker` in `self.<attr>`, waiting out whatever was there.
+
+        Assigning over an attribute that still holds a RUNNING QThread destroys it on the spot,
+        and Qt answers that with `qFatal` -- the process aborts, mid-session, with a crash report
+        (seen: `QThread::~QThread()` reached through `Sbk_QWidget_setattro`). The read button
+        guards itself; scan and rename did not, so a second scan while the first was in flight, or
+        a rename started from a scan that was still running, could take the window out.
+        """
+        previous = getattr(self, attr, None)
+        if previous is not None and previous.isRunning():
+            previous.wait(6000)
+        setattr(self, attr, worker)
+        return worker
 
     def shutdown(self) -> None:
         """Block briefly for any in-flight REW worker before the window closes -- Qt aborts the
@@ -575,7 +612,7 @@ class MeasurementPanel(QWidget):
         self._read_btn.setEnabled(False)
         self._status_label.setHidden(False)
         self._status_label.setText(i18n.t("measReading"))
-        self._worker = _RewReadWorker(self._bridge)
+        self._replace_worker("_worker", _RewReadWorker(self._bridge))
         self._worker.done.connect(self._on_read_done)
         self._worker.failed.connect(self._on_read_failed)
         self._worker.start()
@@ -584,6 +621,7 @@ class MeasurementPanel(QWidget):
         self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
         title = result.get("title", "")
+        self._remember_titles([title])
         self._status_label.setText(
             i18n.t("measReadOk").format(title=title, n=result.get("n_points", 0))
         )

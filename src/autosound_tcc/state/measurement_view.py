@@ -101,18 +101,38 @@ def build_session(
     round_ = process_view.capture_round(project) or {}
     recorded_taken = {str(t) for t in (round_.get("taken") or {})}
     recorded_skipped = {str(t) for t in (round_.get("skipped") or {})}
+    # What the arithmetic said about each curve (SCR-040). A verdict outranks "a title exists":
+    # a sweep that never finished and a muted channel both leave a title behind, and every later
+    # phase used to compute on them.
+    verdicts = {
+        str(title): (entry or {}).get("verified") or {}
+        for title, entry in (round_.get("taken") or {}).items()
+    }
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
         if name in recorded_skipped:
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
+        verdict = verdicts.get(name)
+        if verdict and not verdict.get("ok"):
+            # The panel's own legend already calls this "taken, unusable" -- which is exactly what
+            # a capture that came back and failed the check is.
+            return STATUS_STALE
         if naming.name_key(entry) not in parsed and name not in recorded_taken:
             return STATUS_WAIT
         return STATUS_STALE if (entry or {}).get("code") in stale else STATUS_DONE
 
+    def issues_for(name: str) -> Optional[str]:
+        """Why a capture is unusable, in the checker's own words — the panel shows it on hover."""
+        issues = (verdicts.get(name) or {}).get("issues") or []
+        return "; ".join(str(i) for i in issues) or None
+
     groups = []
     for spec in groups_spec:
-        items = tuple(MeasItem(name=name, status=status_for(name)) for name in spec["names"])
+        items = tuple(
+            MeasItem(name=name, status=status_for(name), extra=issues_for(name))
+            for name in spec["names"]
+        )
         groups.append(MeasGroup(type=spec["label"], items=items))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version)
