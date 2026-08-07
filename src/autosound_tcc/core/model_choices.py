@@ -19,6 +19,7 @@ That is the axis the harness was chosen on and it belongs in front of the person
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -140,19 +141,48 @@ def find(entries: list[Choice], key: str) -> Choice | None:
     return next((choice for choice in entries if choice.key == key), None)
 
 
+# What the skill's reviewer script needs per vendor, mirroring its own provider table (SCR-033):
+# an API key in the environment, or one of that vendor's CLIs on PATH. Kept here rather than read
+# out of the script because this runs on the GUI thread while a combo box is being filled — the
+# answer has to be instant, and it decides a label, not a call.
+_CRITIC_TRANSPORTS = {
+    "google": (("GEMINI_API_KEY",), ("agy", "gemini")),
+    "anthropic": (("ANTHROPIC_API_KEY",), ("claude",)),
+    "openai": (("OPENAI_API_KEY",), ("codex",)),
+}
+_CRITIC_VENDOR_MARKERS = (
+    ("gemini", "google"), ("google", "google"),
+    ("claude", "anthropic"), ("opus", "anthropic"), ("sonnet", "anthropic"),
+    ("haiku", "anthropic"), ("fable", "anthropic"),
+    ("gpt", "openai"), ("o1", "openai"), ("o3", "openai"), ("codex", "openai"),
+)
+
+
+def critic_vendor(choice: Choice) -> str:
+    """Which vendor's transport the reviewer script would use for this model.
+
+    Same resolution the script does, by the same markers — an unrecognised name falls to google,
+    which is what every setup predating the parameter already meant.
+    """
+    haystack = f"{choice.provider} {choice.model}".lower()
+    for marker, vendor in _CRITIC_VENDOR_MARKERS:
+        if marker in haystack:
+            return vendor
+    return "google"
+
+
 def critic_reaches(choice: Choice) -> bool:
     """Whether the reviewer script can actually call this model, rather than fall to the clipboard.
 
-    The Critic runs through the skill's `scripts/autosound_ai.py`, which is Gemini-shaped: one API
-    function (`call_gemini_api`), and a CLI mode that looks for `agy`/`gemini` and invokes them
-    with Gemini's argument shape. Everything else lands in clipboard mode — a designed fallback,
-    not a failure, but the user should learn that before picking rather than after waiting.
-
-    Raised as SCR-033. This function is the front-end apologising for it and should be deleted the
-    day the reviewer's transport becomes a parameter.
+    Since SCR-033 the script's transport is a parameter, so this is no longer "is it Gemini" — it
+    is "does this machine have that vendor's key or CLI". Clipboard mode stays a designed fallback
+    rather than a failure; the point is that the Arbiter learns which it will be before picking,
+    not after waiting.
     """
-    haystack = f"{choice.provider} {choice.model}".lower()
-    return "gemini" in haystack or "google" in haystack
+    keys, binaries = _CRITIC_TRANSPORTS.get(critic_vendor(choice), ((), ()))
+    if any(os.environ.get(name) for name in keys):
+        return True
+    return any(shutil.which(binary) for binary in binaries)
 
 
 def critic_choices(active_omp: list[str]) -> list[Choice]:

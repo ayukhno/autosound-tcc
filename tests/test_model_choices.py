@@ -117,13 +117,38 @@ def test_the_reviewer_list_is_the_same_list(catalogue):
     assert model_choices.critic_choices(active) == model_choices.choices(active)
 
 
-def test_only_gemini_is_actually_reachable_by_the_reviewer_script():
-    """`scripts/autosound_ai.py` has one API path and looks for `agy`/`gemini`. Everything else
-    falls to clipboard mode — a designed fallback, but the user learns it before picking.
-    Delete this the day SCR-033 makes the reviewer's transport a parameter."""
+def test_the_reviewer_vendor_is_read_off_the_model_name():
+    """Same resolution the skill's script does, by the same markers — the front-end must not
+    disagree with it about whose transport a model belongs to (SCR-033)."""
     gemini = Choice(harness="omp", model="google/gemini-3.1-pro-preview", label="x",
                     provider="google")
     claude = Choice(harness="sdk", model="claude-opus-5", label="x", provider="anthropic")
+    gpt = Choice(harness="omp", model="openai/gpt-5.2", label="x", provider="openai")
+    unknown = Choice(harness="omp", model="some/local-model", label="x", provider="")
 
-    assert model_choices.critic_reaches(gemini) is True
-    assert model_choices.critic_reaches(claude) is False
+    assert model_choices.critic_vendor(gemini) == "google"
+    assert model_choices.critic_vendor(claude) == "anthropic"
+    assert model_choices.critic_vendor(gpt) == "openai"
+    # What every setup predating the parameter already meant.
+    assert model_choices.critic_vendor(unknown) == "google"
+
+
+def test_reachability_is_the_vendors_key_or_cli_not_the_vendors_name(monkeypatch):
+    """Before SCR-033 this answered "is it Gemini" and marked everything else clipboard-only.
+    Now the reviewer script speaks three transports, so the question is whether THIS machine has
+    the one the chosen model needs."""
+    from autosound_tcc.core import model_choices as mc
+
+    claude = Choice(harness="sdk", model="claude-opus-5", label="x", provider="anthropic")
+    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert mc.critic_reaches(claude) is False
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert mc.critic_reaches(claude) is True
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        mc.shutil, "which", lambda binary: "/usr/bin/claude" if binary == "claude" else None
+    )
+    assert mc.critic_reaches(claude) is True  # the CLI is a transport too

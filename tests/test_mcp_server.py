@@ -534,7 +534,7 @@ def test_finish_step_without_evidence_is_refused_by_the_skill(tmp_path):
 # ---- what TCC already knows and must not ask twice --------------------------
 
 
-def test_the_state_carries_the_reviewer_the_arbiter_picked(tmp_path):
+def test_the_state_carries_the_reviewer_the_arbiter_picked(tmp_path, monkeypatch):
     """Intake opened every session with "how would you like to set up the Reviewer channel?" —
     about a channel already configured in TCC's footer and one `call_critic` away. A GUI that
     knows something and asks anyway is a chat window with more buttons."""
@@ -542,22 +542,25 @@ def test_the_state_carries_the_reviewer_the_arbiter_picked(tmp_path):
     from autosound_tcc.core.mcp_server import _reviewer_state
 
     project_settings.set_value(config.tcc_dir(tmp_path), "critic", "omp:google/gemini-3.1-pro")
+    monkeypatch.setenv("GEMINI_API_KEY", "key")  # reachability is now about this machine
 
     state = _reviewer_state(tmp_path)
 
     assert state["configured"] is True
     assert "gemini" in state["model"]
-    assert state["reachable"] is True  # the reviewer script is Gemini-shaped
+    assert state["reachable"] is True  # this machine has the vendor's key
     assert "call_critic" in state["how"]
 
 
-def test_an_unreachable_reviewer_says_so_rather_than_promising(tmp_path):
-    """Non-Gemini choices are clipboard-only until SCR-033; the model needs to know that before
-    it plans a round around an automatic review."""
-    from autosound_tcc.core import config, project_settings
+def test_an_unreachable_reviewer_says_so_rather_than_promising(tmp_path, monkeypatch):
+    """A reviewer whose vendor has neither a key nor a CLI on this machine is clipboard-only, and
+    the model needs to know before it plans a round around an automatic review."""
+    from autosound_tcc.core import config, model_choices, project_settings
     from autosound_tcc.core.mcp_server import _reviewer_state
 
     project_settings.set_value(config.tcc_dir(tmp_path), "critic", "sdk:claude-opus-5")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(model_choices.shutil, "which", lambda _binary: None)
 
     state = _reviewer_state(tmp_path)
 

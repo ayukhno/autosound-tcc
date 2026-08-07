@@ -605,10 +605,14 @@ def test_the_critic_picker_comes_from_the_same_registry(monkeypatch):
     assert "omp:google/gemini-3.1-pro-preview" in reviewer
 
 
-def test_a_reviewer_the_script_cannot_call_is_marked_clipboard_only(monkeypatch):
-    """The reviewer script is Gemini-shaped (SCR-033). Everything else lands in clipboard mode,
-    which the user should learn before picking rather than after waiting."""
+def test_a_reviewer_this_machine_cannot_call_is_marked_clipboard_only(monkeypatch):
+    """Since SCR-033 the reviewer script speaks three transports, so the mark is about THIS
+    machine — no key and no CLI for that vendor — not about the model being non-Gemini."""
+    from autosound_tcc.core import model_choices as mc
+
     _catalogue(monkeypatch, [])
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
     _app()
     window = MainWindow()
 
@@ -616,11 +620,29 @@ def test_a_reviewer_the_script_cannot_call_is_marked_clipboard_only(monkeypatch)
     assert "clipboard" in window._ai_critic_combo.itemText(claude).lower()
 
 
+def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch):
+    """The same Claude entry, on a machine that has the key — the label follows the transport."""
+    from autosound_tcc.core import model_choices as mc
+
+    _catalogue(monkeypatch, [])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
+    _app()
+    window = MainWindow()
+
+    claude = window._ai_critic_combo.findData("sdk:claude-opus-5")
+    assert "clipboard" not in window._ai_critic_combo.itemText(claude).lower()
+
+
 def test_a_gemini_reviewer_is_not_marked(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
     _catalogue(monkeypatch, [{
         "provider": "google", "selector": "google/gemini-3.1-pro-preview",
         "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
     }])
+    monkeypatch.setenv("GEMINI_API_KEY", "key")
+    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
     _app()
     window = MainWindow()
     window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")

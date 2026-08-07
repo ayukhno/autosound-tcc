@@ -107,8 +107,9 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     (Critic-Advisor) channel?" -- about a channel that is configured and one `call_critic` away.
     A GUI that knows something and asks anyway is just a chat window with more buttons.
 
-    `reachable` is the honest half: the reviewer script is Gemini-shaped, so a non-Gemini choice
-    is clipboard-only until SCR-033 lands (`model_choices.critic_reaches`).
+    `reachable` is the honest half, and since SCR-033 it is a real question rather than a vendor
+    check: the reviewer script speaks three transports, so this asks whether THIS machine has the
+    chosen vendor's key or CLI. False means clipboard-only — a designed fallback, not a failure.
     """
     key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
     if not key:

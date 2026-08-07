@@ -12,9 +12,7 @@ being the right one — the reason is on the entry).
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
-| 013 | `verify_measurements` as a library with a JSON verdict | TCC re-implements the verdict or shells out |
 | 015 | what belongs in "Car audio analysis" | that panel section is still a placeholder |
-| 033 | the reviewer's transport is a parameter, not Gemini | TCC's picker must mark non-Gemini choices clipboard-only |
 | 039 | a channel's id is its name | a rename rewrites history or orphans every REW title |
 
 The statuses of SCR-001…019 were written before the 3.0 format break and had not been revisited;
@@ -231,7 +229,7 @@ the package. Already anticipated in TCC's brief ("later pip package `autosound-c
 
 ## SCR-013 — `verify_measurements` as a library function with a JSON verdict
 
-**Status**: open — `verify_measurements.py` is still the one-off script it says it is (no `--json`, no importable verdict). The library half of the ask never happened; `analysis.py`/`rew_api.py` are shared, this file is not
+**Status**: done (skill `7807114` — `rew_tool/verify.py`: `verdict()` / `verify()` / `summary()` return `{name, exists, valid, issues, stats}` per REW title, plus a `--json` CLI whose exit code is 0 only when every title is usable. `verify_measurements.py` stays as the one-off Passat script it says it is. Validity is FR-side (empty / flat to under a dB / silence / truncated); the impulse stats are reported and never judged — gating on `pre_ringing_dB` marked both of this project's real sweeps unusable, since on a car sweep everything before the peak includes the loopback reference.)
 **Target**: `rew_tool/verify_measurements.py`
 **TCC dependency**: the measurement task card must show, per expected measurement: exists / valid /
 drifted (TCC-TZ §4 "валідність свіпу"). The current file is a one-off Passat session script with
@@ -739,11 +737,7 @@ Ask, both halves:
 
 ## SCR-033 — the reviewer is Gemini-shaped; make the transport a parameter
 
-**Status**: proposed, narrowed on 2026-08-06 — the CLI half is largely there (`scripts/` ships
-`claude_critic.sh`, `codex_critic.sh` and `gemini_critic.sh` with per-vendor common files), so what
-is left is the API path: `autosound_ai.py` still has exactly one `call_gemini_api`, and TCC's
-`model_choices.critic_reaches` still answers "gemini or google" because that is the path it can
-count on
+**Status**: done (skill `7807114`, TCC `HEAD` — `autosound_ai.py` resolves the vendor from the model name and takes that vendor's API or CLI: google (`agy`/`gemini`), anthropic (`claude`), openai (`codex`), each raw-HTTP because the script must run with nothing installed. `AUTOSOUND_CRITIC_MODEL` is the vendor-neutral name; `GEMINI_CRITIC_MODEL` still works and means the same thing. `critic_reaches` stopped asking "is it Gemini" and now asks whether this machine has the chosen vendor's key or CLI.)
 **Target**: `skills/autosound-tuning/scripts/autosound_ai.py` — `call_gemini_api` (the only API
 function), `detect_cli` (`agy`/`gemini` only), the CLI invocation `[bin, "--model", M, "-p",
 <path>]`, and `run_doctor`'s provider report
