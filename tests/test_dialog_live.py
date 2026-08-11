@@ -361,6 +361,26 @@ def test_an_answered_critique_becomes_a_critic_bubble(tmp_path):
     assert bubble.property("class") == "msg msg-crit"
 
 
+def test_a_critique_is_rendered_as_markdown_like_every_other_bubble(tmp_path):
+    """User, 2026-08-11: a structured three-page critique arrived as one flat paragraph with its
+    asterisks showing. `add_critique` was the one call site passing raw model output in as rich
+    text — so newlines collapsed, `**bold**` stayed literal, and a `<` would have been markup."""
+    panel, _, _ = _attached(tmp_path)
+
+    panel.add_critique({
+        "mode": "answered",
+        "model": "Gemini 3.1 Pro",
+        "text": "**Strongest objection:** the 9.67 ms peak\n- anchor on `tw-L`\n- a < b",
+    })
+
+    body = panel._bubbles[-1]._body.text()
+    assert "<b>Strongest objection:</b>" in body
+    assert "**" not in body
+    assert "<br>" in body            # the line structure survived
+    assert "<code>tw-L</code>" in body
+    assert "a &lt; b" in body        # ...and nothing in the reply can become markup
+
+
 def test_clipboard_mode_is_never_rendered_as_an_empty_critique(tmp_path):
     """The loop's value is that somebody pushed back; showing nothing as a critique hides that
     nobody has yet."""

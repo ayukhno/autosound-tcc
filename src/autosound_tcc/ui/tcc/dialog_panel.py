@@ -1048,7 +1048,11 @@ class DialogPanel(QWidget):
         review = critique.get("review")
         note = f"<br><i>{i18n.t('criticSaved').format(path=review)}</i>" if review else ""
         if mode == "answered":
-            self._add_bubble("crit", f"Critic · {model}", critique.get("text", "") + note)
+            # Through `_markdown`, like every other bubble. It was the one call site passing raw
+            # model output in as rich text: asterisks and hashes showed literally, every newline
+            # collapsed, so a three-page structured critique arrived as one flat paragraph (user,
+            # 2026-08-11) — and an unescaped `<` in it would have been markup, not text.
+            self._add_bubble("crit", f"Critic · {model}", _markdown(critique.get("text", "")) + note)
         elif mode == "clipboard":
             self._add_system_message(i18n.t("criticClipboard") + note)
         else:

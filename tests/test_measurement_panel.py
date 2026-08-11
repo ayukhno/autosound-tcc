@@ -515,3 +515,43 @@ def test_language_switch_keeps_the_no_project_message_when_there_is_no_task():
         assert panel._no_project_label.text() == i18n.t("measNoTask")
     finally:
         i18n.set_language(before)
+
+
+def _no_capture_session():
+    from autosound_tcc.ui.tcc.mock_data import MeasSession
+
+    return [MeasSession(id="v3", version={"en": "Phase 1 · no capture",
+                                          "uk": "Фаза 1 · без замірів"}, groups=())]
+
+
+def test_a_phase_that_captures_nothing_says_so_instead_of_showing_an_empty_grid():
+    """User, 2026-08-11: phase 1 rendered as a live legend over no rows, which reads as a mock left
+    on screen. `measurement_view.build_session` returns that session deliberately — it is an answer,
+    so it has to look like one."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session())
+    assert panel._rows == []
+    assert panel._no_project_label.text() == i18n.t("measPhaseNoCapture")
+    assert not panel._legend.isVisibleTo(panel)  # no rows, so no colours to explain
+
+
+def test_read_on_a_phase_with_no_columns_does_not_blow_up():
+    """`_col_next_row` is empty there, and indexing it inside a signal handler is a printed
+    traceback plus a half-updated panel."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session())
+    panel._on_read_done({"titles": ["sub_3 (sw)", "m-L_3 (sw)"]})
+    assert panel._rows == []
+    assert panel._status_label.text() == i18n.t("measReadOk").format(n=2, matched=0, extra=0)
+
+
+def test_switching_session_drops_a_status_line_about_the_previous_grid():
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
+    assert panel._status_label.text()
+    panel.set_sessions(_no_capture_session())
+    assert panel._status_label.text() == ""

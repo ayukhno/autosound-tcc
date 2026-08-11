@@ -289,6 +289,10 @@ class MeasurementPanel(QWidget):
         # difference only ever mattered on a language switch, which is exactly where it was
         # missing -- see `retranslate`.
         self._has_real_sessions = False
+        # Which session the grid was last actually BUILT for. Distinct from `_viewing_id`, which
+        # `set_sessions` assigns before it renders anything -- comparing against that one would
+        # answer "unchanged" for every switch that arrives with new data.
+        self._shown_id: Optional[str] = None
         # The last status line as (i18n key, format args) rather than as finished text, so a
         # language switch re-renders it instead of leaving a Ukrainian sentence under an English
         # window. None = nothing to say yet, which is not the same as an empty string.
@@ -460,11 +464,19 @@ class MeasurementPanel(QWidget):
         request 2026-07-28). Called by picking this panel's own session dropdown and, from the
         other direction, `ui/tcc/plan_panel.py`'s per-step measurement icon."""
         session = self._session(session_id)
-        self._viewing_id = session_id
+        if session_id != self._shown_id:
+            # A count of what matched belongs to the grid it was counted against. Carrying "16
+            # matched" over to a phase showing different rows -- or none -- states something false
+            # about what is on screen (user, 2026-08-11).
+            self._status = None
+            self._status_label.setText("")
+        self._viewing_id = self._shown_id = session_id
         is_live = session_id == self._sessions[0].id
         if is_live:
             self._version.setText(i18n.tx(session.version))
-            self._version_tip.set_text("")
+            # The banner elides ("Phase 1 · no capt…") long before this text runs out, and the
+            # part it drops is the part that says what is going on.
+            self._version_tip.set_text(i18n.tx(session.version))
         else:
             steps = ", ".join(session.used_in_steps) or "—"
             self._version.setText(i18n.t("measUsedInStep").format(steps=steps))
@@ -486,6 +498,16 @@ class MeasurementPanel(QWidget):
         self._rows = []
         self._additional_titles = set()
         self._col_next_row = []
+        # A phase that captures nothing (phase 1 analyses the series phase 0 took) is a real
+        # answer, and `measurement_view` already returns it as a session with no groups. It was
+        # rendered as an empty grid under a live legend, which reads as a mock left on screen
+        # rather than as an answer (user, 2026-08-11) — and the legend explains colours that no
+        # row has. Say it in words instead, and keep the header: the series is still selectable.
+        empty_phase = not session.groups
+        self._legend.setVisible(not empty_phase)
+        self._no_project_label.setVisible(empty_phase)
+        if empty_phase:
+            self._no_project_label.setText(i18n.t("measPhaseNoCapture"))
         for c, group in enumerate(session.groups):
             header = QLabel(group.type)
             header.setProperty("class", "mcol-h")
@@ -703,7 +725,8 @@ class MeasurementPanel(QWidget):
                 continue  # a second Read must not stack a duplicate row for the same graph
             base = title.split(" (")[0].strip()
             col = self._guess_column_for_new_title(title)
-            self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
+            if not self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True)):
+                continue  # nowhere to put it (a phase with no capture columns); do not claim one
             self._additional_titles.add(title)
             added += 1
         self._set_status("measReadOk", n=len(titles), matched=matched, extra=added)
@@ -775,13 +798,22 @@ class MeasurementPanel(QWidget):
             return 2
         return 1
 
-    def _add_dynamic_row(self, col: int, item: MeasItem) -> None:
+    def _add_dynamic_row(self, col: int, item: MeasItem) -> bool:
+        """Place an "additional" row, or answer False if this session has no column to place it in.
+
+        A phase that captures nothing has no columns at all, and `self._col_next_row[col]` on an
+        empty list is an IndexError raised inside a signal handler -- which Qt turns into a printed
+        traceback and a half-updated panel, from pressing Read on phase 1.
+        """
+        if col >= len(self._col_next_row):
+            return False
         method_suffix = _METHOD_SUFFIX[_METHOD_KEYS[col]]
         row = _MeasRow(item, method_suffix)
         self._rows.append(row)
         r = self._col_next_row[col]
         self._col_next_row[col] = r + 1
         self._cols_layout.addWidget(row, r, col)
+        return True
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)

@@ -87,6 +87,7 @@ T: dict[Lang, dict[str, str]] = {
         "recordTargetCurveWhy": "phase 0 chooses it and every later phase is measured against it, "
                                 "so nothing on disk says which curve was picked",
         "measNoTask": "No capture task yet. It is derived from the phase, the naming glossary and the current ledger version — so it appears once the intake has settled the channel names.",
+        "measPhaseNoCapture": "This phase takes no measurements — it works on the series already captured. The next capture task appears with the phase that needs one.",
         "noProjectMeas": "No project — nothing to capture yet.",
         "npTitle": "New project",
         "npFolder": "Project folder",
@@ -409,6 +410,7 @@ T: dict[Lang, dict[str, str]] = {
         "recordTargetCurveWhy": "фаза 0 її обирає, і всі наступні фази міряються проти неї, "
                                 "тож на диску не лишилось, яку саме криву взяли",
         "measNoTask": "Завдання на зняття ще немає. Воно виводиться з фази, глосарія імен і поточної версії леджера — тож з'явиться, коли інтейк закріпить назви каналів.",
+        "measPhaseNoCapture": "Ця фаза не робить замірів — вона працює з уже знятою серією. Наступне завдання на зняття зʼявиться разом із фазою, якій воно потрібне.",
         "noProjectMeas": "Немає проєкту — знімати поки нічого.",
         "npTitle": "Новий проєкт",
         "npFolder": "Тека проєкту",
