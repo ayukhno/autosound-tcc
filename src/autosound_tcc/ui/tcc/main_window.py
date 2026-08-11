@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import (
+    app_log,
     config,
     contract_check,
     critic,
@@ -417,8 +418,14 @@ class _CaptureCheckWorker(QThread):
 
 
 class MainWindow(QMainWindow):
+    # An error was written to the log. A plain signal because `threading.excepthook` fires on the
+    # thread that failed, and touching a widget from there is undefined behaviour -- Qt marshals
+    # it back onto the GUI thread for us.
+    loggedError = Signal(str, str)
+
     def __init__(self) -> None:
         super().__init__()
+        self.loggedError.connect(self._show_logged_error)
         self.resize(1280, 820)
         _live_windows.add(self)
 
@@ -453,6 +460,10 @@ class MainWindow(QMainWindow):
         # never a dialog bubble (TCC-TZ.md §8).
         self._status_strip = StatusStrip()
         outer.addWidget(self._status_strip)
+        # An unhandled exception now goes to a log file rather than to the terminal TCC was
+        # launched from (core/app_log.py). Silence would be worse than the terminal was, though:
+        # a failure the user cannot see is a failure they report as "it just did nothing".
+        app_log.set_ui_sink(self._on_logged_error)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -2553,6 +2564,17 @@ class MainWindow(QMainWindow):
             return
         self._status_strip.notify(i18n.t("terminalOpened").format(cli=launched))
 
+    def _on_logged_error(self, message: str, path) -> None:
+        """Called from `app_log` when something was written to the log. Never from a worker
+        thread's own stack -- `threading.excepthook` runs on the failing thread, so this touches
+        widgets via a queued signal rather than directly."""
+        self.loggedError.emit(f"{message}", str(path))
+
+    def _show_logged_error(self, message: str, path: str) -> None:
+        self._status_strip.notify(
+            i18n.t("logError").format(error=message, path=path), level="warn"
+        )
+
     def stop_workers(self) -> None:
         """Bring every background thread this window owns to a stop.
 
@@ -2565,6 +2587,9 @@ class MainWindow(QMainWindow):
         the process, and that is not hypothetical: a crash report with `_ContractWorker` blocked
         in `poll` during interpreter shutdown (2026-08-06) is what prompted this.
         """
+        # Before the threads: the sink holds a bound method of this window, and a log line
+        # arriving after Qt has torn the window down would call into a deleted C++ object.
+        app_log.set_ui_sink(None)
         ping = getattr(self, "_rew_ping", None)
         if ping is not None and ping.isRunning():
             ping.wait(2000)

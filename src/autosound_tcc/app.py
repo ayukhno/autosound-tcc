@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from autosound_tcc.core import config
+from autosound_tcc.core import app_log, config
 from autosound_tcc.ui.tcc.main_window import MainWindow
 from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
 
@@ -40,6 +40,10 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 def main() -> int:
     """Start the Qt event loop. Returns the process exit code."""
+    # First, before anything can fail: an exception raised from here on lands in a file instead of
+    # in the terminal TCC was launched from. On macOS a line arriving there while the window is a
+    # full-screen space switches the user out of the app mid-tune (see core/app_log.py).
+    app_log.setup()
     args = _parse(sys.argv)
     if args.project_dir is not None:
         # Into the environment rather than a private variable: `AUTOSOUND_PROJECT_DIR` is the
@@ -58,6 +62,7 @@ def main() -> int:
     # module's own turned a green suite red depending on file order alone.
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("autosound-tcc")
+    app_log.install_qt_handler()  # Qt's own warnings, into the same file
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build
     # until that folder is known. Backing out of the gate exits rather than falling through to a
