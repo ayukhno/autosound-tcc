@@ -11,8 +11,11 @@ license terms are listed here.
 - `src/autosound_tcc/assets/icons/reorder.svg` — the `arrow-up-down` icon from
   [Lucide](https://lucide.dev) (stroke color changed to `#888888`), used for the measurement
   panel's "Assign names" button.
+- `src/autosound_tcc/assets/icons/image.svg` — the `image` icon from
+  [Lucide](https://lucide.dev) (stroke color changed to `#888888`), used for the dialog composer's
+  "Attach a screenshot" button.
 
-Both used under the ISC License:
+All used under the ISC License:
 
 > ISC License
 >

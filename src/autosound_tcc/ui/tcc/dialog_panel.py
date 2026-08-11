@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import html
 import re
+from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QTextDocumentFragment
+from PySide6.QtCore import QSize, QTimer, Qt, Signal
+from PySide6.QtGui import QIcon, QTextDocumentFragment
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -46,7 +48,11 @@ from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc import copy_menu
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
 from autosound_tcc.ui.tcc.mock_data import DIALOG, CURRENT_GENERATOR_MODEL, DialogMessage
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps
+
+# Same Lucide set the measurement panel uses (NOTICE.md).
+_ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
 
 # .msg-body's base font-size in theme.py -- kept in sync with that QSS literal so the dialog's own
 # A-/A+ control (below) scales from the same starting point.
@@ -454,6 +460,19 @@ class DialogPanel(QWidget):
         self._input.setPlaceholderText(i18n.t("composer"))
         self._input.setProperty("class", "composer-input")
         composer_layout.addWidget(self._input, stretch=1)
+        # A screenshot goes to the model as a FILE in the project, not as an inline image — see
+        # `attach_image.py` for why (three front-ends, only one of which could carry one; and a
+        # capture of a REW window is evidence that should outlive the conversation).
+        self._attach_btn = QPushButton()
+        self._attach_btn.setIcon(QIcon(str(_ICONS_DIR / "image.svg")))
+        self._attach_btn.setIconSize(QSize(16, 16))
+        self._attach_btn.setProperty("class", "reason-btn")
+        self._attach_btn.setFixedWidth(30)
+        self._attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._attach_tip = attach_tip(self._attach_btn, i18n.t("attachTip"))
+        self._attach_btn.clicked.connect(self._on_attach_image)
+        composer_layout.addWidget(self._attach_btn)
+
         self._send_btn = QPushButton(i18n.t("send"))
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.clicked.connect(self._on_send)
@@ -471,6 +490,26 @@ class DialogPanel(QWidget):
         composer_layout.addWidget(self._stop_btn)
         outer.addWidget(composer)
 
+    def _on_attach_image(self) -> None:
+        """Paste a screenshot; TCC saves it in the project and writes the path into the composer.
+
+        The path is appended to whatever is already typed rather than replacing it: the sentence
+        that says WHY the picture matters is usually already half-written when the Arbiter reaches
+        for this button.
+        """
+        from autosound_tcc.core import config
+        from autosound_tcc.ui.tcc.attach_image import AttachImageDialog
+
+        dialog = AttachImageDialog(config.project_dir(), parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        line = dialog.line()
+        if not line:
+            return
+        existing = self._input.text().rstrip()
+        self._input.setText(f"{existing}\n{line}" if existing else line)
+        self._input.setFocus()
+
     def retranslate(self) -> None:
         """Re-set the panel's own *chrome* (title, chip, composer) into the new UI language.
 
@@ -478,6 +517,7 @@ class DialogPanel(QWidget):
         user output, produced in one language, not a UI string. Flipping the interface language
         must leave the actual conversation exactly as it happened (user feedback 2026-07-26)."""
         self._title_label.setText(i18n.t("dialog"))
+        self._attach_tip.set_text(i18n.t("attachTip"))
         self._sub_label.setText(i18n.t("dialogSub"))
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
         self._reason_btns["forgot"].setText(i18n.t("reasonForgot"))
