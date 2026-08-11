@@ -301,3 +301,47 @@ def test_switching_to_levels_only_keeps_the_positions_already_placed():
     view.set_axes_mode("vh")
 
     assert view.positions() == pytest.approx([4.52, 4.78])
+
+
+def test_in_sync_mode_one_point_gives_both_coordinates():
+    """VHs: the level is not a second thing to place — it IS the curve's value where the vertical
+    marker stands, and it follows when that marker moves."""
+    view = _view()
+    view.set_unit("Hz")
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_axes_mode("vhs")
+    view._markers[0].setValue(5.30)
+
+    assert view.levels()[0] == pytest.approx(view._y_at(0, 5.30), abs=1e-9)
+    # ...and it cannot be dragged apart from its own vertical, which would let one reading
+    # disagree with itself.
+    assert view._h_markers[0].movable is False
+
+
+def test_plain_vh_still_places_the_two_halves_independently():
+    view = _view()
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode("vh")
+
+    view._h_markers[0].setValue(0.25)
+    view._markers[0].setValue(5.30)
+
+    assert view.levels()[0] == pytest.approx(0.25), "VH must not follow the curve"
+    assert view._h_markers[0].movable is True
+
+
+def test_the_unit_sits_with_the_numbers_not_under_the_axis():
+    """A whole row of window was going on one centred word; the readout wanted it."""
+    view = _view()
+    view.set_unit("Hz")
+    view.set_y_unit("dB")
+    view.set_markers([100.0, 200.0], tokens=["accent", "info"])
+
+    view.set_axes_mode("v")
+    assert view._unit_label.text() == "Hz"
+    view.set_axes_mode("vh")
+    assert view._unit_label.text() == "Hz/dB"
+    view.set_axes_mode("h")
+    assert view._unit_label.text() == "dB"

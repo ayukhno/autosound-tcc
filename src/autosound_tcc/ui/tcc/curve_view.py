@@ -145,7 +145,9 @@ class CurveView(QWidget):
         self._hz_axis = LogHzAxis(orientation="bottom")
         self._plot = pg.PlotWidget(background=theme.panel)
         self._plot.showGrid(x=True, y=True, alpha=0.18)
-        self._plot.setLabel("bottom", x_label)
+        # No axis label under the ticks: it is a whole row of window spent centring one word, and
+        # the readout wants that row (user, 2026-08-11). The unit moves to the right end of the
+        # readout, where it labels the numbers rather than the axis.
         # The two settings that make a quarter-million points usable: draw a peak-preserving
         # decimation instead of every sample, and only the samples inside the current view. Peak
         # mode rather than mean because the thing being looked for IS the extreme — a mean-
@@ -166,11 +168,15 @@ class CurveView(QWidget):
         row.setContentsMargins(2, 0, 2, 0)
         row.setSpacing(6)
         row.addWidget(self._readout, stretch=1)
+        # The axis's own unit, at the right end of the numbers it applies to.
+        self._unit_label = QLabel("")
+        self._unit_label.setProperty("class", "phead-sub")
+        row.addWidget(self._unit_label)
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
-        for mode in ("v", "h", "vh"):
-            button = QPushButton(mode.upper())
+        for mode in ("v", "h", "vh", "vhs"):
+            button = QPushButton("VHs" if mode == "vhs" else mode.upper())
             button.setProperty("class", "zoom-btn")
             button.setCheckable(True)
             button.setChecked(mode == self._axes_mode)
@@ -206,6 +212,7 @@ class CurveView(QWidget):
         self._markers: list[pg.InfiniteLine] = []
         self._h_markers: list[pg.InfiniteLine] = []
         self._marker_tokens: list[str] = []
+        self._syncing = False
         self._marker_names: list[str] = []
         self._render_readout()
 
@@ -291,7 +298,6 @@ class CurveView(QWidget):
         axis.setPen(pg.mkPen(theme.border2))
         axis.setTextPen(pg.mkPen(theme.muted))
         self._plot.setAxisItems({"bottom": axis})
-        self._plot.setLabel("bottom", self._unit)
 
     def _to_view(self, x: float) -> float:
         return math.log10(x) if self._log_x and x > 0 else float(x)
@@ -302,7 +308,6 @@ class CurveView(QWidget):
     def set_unit(self, unit: str) -> None:
         """What the marker positions are IN. Wrong units in a reading are worse than no reading."""
         self._unit = unit
-        self._plot.setLabel("bottom", unit)
         self._render_readout()
 
     def focus_x(self, low: float, high: float) -> None:
@@ -348,7 +353,7 @@ class CurveView(QWidget):
         The same markers either way — a horizontal line is added beside each vertical one rather
         than replacing it, so switching to VH does not lose a position already placed.
         """
-        self._axes_mode = mode if mode in ("v", "h", "vh") else "v"
+        self._axes_mode = mode if mode in ("v", "h", "vh", "vhs") else "v"
         for button, value in self._axes_buttons:
             button.setChecked(value == self._axes_mode)
         self._rebuild_h_markers()
@@ -374,7 +379,11 @@ class CurveView(QWidget):
                 _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
             )
             line = pg.InfiniteLine(
-                pos=self._y_at(index, x), angle=0, movable=True,
+                pos=self._y_at(index, x), angle=0,
+                # In sync mode the level is not a second thing to place: it IS the curve's value
+                # where the vertical marker stands. Making it draggable there would let the two
+                # halves of one reading disagree.
+                movable=self._axes_mode != "vhs",
                 pen=pg.mkPen(getattr(theme, token), width=1.2, style=Qt.PenStyle.DotLine),
             )
             line.sigPositionChanged.connect(self._on_marker_moved)
@@ -439,10 +448,34 @@ class CurveView(QWidget):
     # ---- internals -------------------------------------------------------
 
     def _on_marker_moved(self) -> None:
+        self._sync_levels()
         self._render_readout()
         self.markersChanged.emit()
 
+    def _sync_levels(self) -> None:
+        """In `vhs`, follow the curve: one point, both coordinates.
+
+        Guarded against re-entry because moving a marker emits the same signal that brought us
+        here, and a line that chases its own move never settles.
+        """
+        if self._axes_mode != "vhs" or self._syncing:
+            return
+        self._syncing = True
+        try:
+            for index, x in enumerate(self.positions()):
+                if index < len(self._h_markers):
+                    self._h_markers[index].setValue(self._y_at(index, x))
+        finally:
+            self._syncing = False
+
     def _render_readout(self) -> None:
+        unit = getattr(self, "_unit_label", None)
+        if unit is not None:
+            axes = "/".join(
+                part for part in (self._unit if "v" in self._axes_mode else "",
+                                  self._y_unit if "h" in self._axes_mode else "") if part
+            )
+            unit.setText(axes)
         text = self.reading()
         self._readout.setText(text or i18n.t("curveNoMarkers"))
         self._send_btn.setEnabled(bool(text))
