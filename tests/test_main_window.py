@@ -1906,3 +1906,33 @@ def test_the_critic_warning_does_not_widen_the_window_off_the_screen(tmp_path, m
     assert footer.minimumSizeHint().width() - quiet < 60
     # ...and nothing is lost: what got cut is on the hover, which is not a Qt tooltip.
     assert window._critic_warn.toolTip() == "", "two hints on one widget"
+
+
+def test_a_replacement_is_offered_from_the_same_vendor_first(tmp_path, monkeypatch):
+    """A replacement is meant to be the nearest thing that still runs. The list was ordered by
+    route, so the default selection was whatever sorted first — which is how a Gemini reviewer
+    became a Claude one, ending cross-vendor review by combo box (user, 2026-08-11)."""
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc.main_window import _replacements_for
+
+    entries = [
+        mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5", provider="anthropic"),
+        mc.Choice(harness="codex", model="gpt-5.2", label="GPT-5.2", provider="openai"),
+        mc.Choice(harness="agy", model="gemini-3.6-flash-high", label="Flash", provider="google"),
+    ]
+
+    ordered = _replacements_for("agy:gemini-3.1-pro-high", entries)
+
+    assert ordered[0].key == "agy:gemini-3.6-flash-high"
+    assert {c.key for c in ordered} == {c.key for c in entries}, "nothing is dropped, only ordered"
+
+
+def test_an_unrecognised_key_leaves_the_replacement_list_as_it_was(tmp_path):
+    """No marker matched means we know nothing about the vendor — and guessing an order would be
+    presenting a preference we do not have."""
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc.main_window import _replacements_for
+
+    entries = [mc.Choice(harness="omp", model="mistral-large", label="M", provider="mistral")]
+
+    assert _replacements_for("omp:something-unknown", entries) == entries

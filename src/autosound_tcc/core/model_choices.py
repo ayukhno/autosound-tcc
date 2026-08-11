@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Optional
 
 from autosound_tcc.core import model_overrides
@@ -209,11 +210,87 @@ def cli_available(harness: str) -> bool:
 #: A failed refresh keeps the previous answer rather than emptying the list — `agy models` fetches
 #: over the network, and a picker that drops a whole route because one call timed out is a picker
 #: that teaches people the route does not exist.
+#:
+#: "Previous answer" used to mean previous IN THIS PROCESS, which is the same as no memory at all:
+#: every launch started empty, the worker filled it a second or two later, and any launch where
+#: the fetch was slow or came back empty ran the whole session with the route missing. What that
+#: looks like from the outside is a picker with empty lists, then a recommended pair that reports
+#: itself absent (user, 2026-08-11) — and worse, downstream: the stored critic key stops
+#: resolving, TCC offers a replacement, and the reviewer quietly becomes the Generator's own
+#: vendor. So the cache is on disk now, and a route that has ever answered never silently
+#: disappears again.
 _CLI_CACHE: dict[str, list[Choice]] = {}
+#: Entries served from the file rather than confirmed this launch. The picker marks them: an
+#: option that may not work is a different thing from one that will, and both are different from
+#: an option that is not shown at all.
+_UNCONFIRMED: set[str] = set()
+
+
+def catalogue_cache_path() -> Path:
+    """Beside `models.json` — same directory, same reason: a fact about this machine, not about
+    any one project."""
+    return model_overrides.config_dir() / "cli-catalogue.json"
+
+
+def _load_cached_catalogue() -> None:
+    """Seed `_CLI_CACHE` from disk. Called once, lazily, before the first read.
+
+    Forgiving in the same way `model_overrides.load()` is: this file exists to keep a picker
+    populated, so a malformed one must read as "no memory" rather than stop the window opening.
+    """
+    if _CLI_CACHE:
+        return
+    try:
+        data = json.loads(catalogue_cache_path().read_text(encoding="utf-8"))
+        routes = data["routes"] if isinstance(data, dict) else {}
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    for route, rows in (routes or {}).items():
+        entries = [
+            Choice(
+                harness=str(row.get("harness") or route),
+                model=str(row.get("model") or ""),
+                label=str(row.get("label") or ""),
+                provider=str(row.get("provider") or ""),
+            )
+            for row in rows or []
+            if isinstance(row, dict) and row.get("model")
+        ]
+        if entries:
+            _CLI_CACHE[str(route)] = entries
+            _UNCONFIRMED.update(choice.key for choice in entries)
+
+
+def _save_cached_catalogue() -> None:
+    path = catalogue_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "routes": {
+                route: [
+                    {"harness": c.harness, "model": c.model,
+                     "label": c.label, "provider": c.provider}
+                    for c in entries
+                ]
+                for route, entries in _CLI_CACHE.items()
+            },
+        }
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass  # a cache that cannot be written is a slower picker, not a broken one
+
+
+def unconfirmed(choice: Choice) -> bool:
+    """Was this entry remembered from a previous launch rather than confirmed by the CLI now."""
+    return choice.key in _UNCONFIRMED
 
 
 def agy_choices() -> list[Choice]:
     """What the Antigravity CLI says it can run, from cache. Never blocks, never fetches."""
+    _load_cached_catalogue()
     return list(_CLI_CACHE.get("agy", []))
 
 
@@ -237,12 +314,17 @@ def refresh_cli_catalogue() -> dict[str, list[Choice]]:
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
     the GUI thread at window construction, so asking there would freeze the window on launch.
     """
+    _load_cached_catalogue()
     for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
         fetched = fetch()
         # A failed refresh keeps the previous answer; only a first-ever failure stores the empty
         # list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`).
         if fetched or route not in _CLI_CACHE:
             _CLI_CACHE[route] = fetched
+        if fetched:
+            # Confirmed by the CLI just now: these stop being "remembered from last time".
+            _UNCONFIRMED.difference_update(choice.key for choice in fetched)
+    _save_cached_catalogue()
     return dict(_CLI_CACHE)
 
 

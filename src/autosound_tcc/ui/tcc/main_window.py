@@ -279,6 +279,26 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
+def _replacements_for(key: str, entries: list) -> list:
+    """`entries`, ordered so the sensible stand-ins for `key` come first.
+
+    Same vendor first (user, 2026-08-11). A replacement is meant to be the nearest thing that
+    still runs, and the list is alphabetical by route otherwise — so the default selection was
+    whatever happened to sort first. That is how a Gemini reviewer became a Claude one, which is
+    not a replacement at all: it is the end of cross-vendor review, chosen by a combo box.
+    """
+    wanted = key.partition(":")[2] or key
+    marker = next(
+        (vendor for token, vendor in model_choices._CRITIC_VENDOR_MARKERS if token in wanted.lower()),
+        "",
+    )
+    if not marker:
+        return list(entries)
+    same = [c for c in entries if model_choices.vendor_of(c) == marker]
+    other = [c for c in entries if model_choices.vendor_of(c) != marker]
+    return same + other
+
+
 def _force_project_dir_env(project_dir: Path) -> None:
     """Make `config.project_dir()` resolve to `project_dir` for the rest of THIS process's life.
 
@@ -2315,7 +2335,7 @@ class MainWindow(QMainWindow):
                 self._offer_replacement(str(key), entries)
         self._refresh_critic_warning()
 
-    def _offer_replacement(self, key: str, entries: list) -> None:
+    def _offer_replacement(self, key: str, entries: list) -> None:  # noqa: D401
         """A model this project uses is gone. Say so, and let the Arbiter map it to another.
 
         The mapping is stored as an ALIAS rather than by rewriting this project's setting, because
@@ -2337,7 +2357,7 @@ class MainWindow(QMainWindow):
         box.setWindowTitle(i18n.t("modelGoneTitle"))
         box.setText(i18n.t("modelGone").format(model=key))
         combo = QComboBox(box)
-        for choice in entries:
+        for choice in _replacements_for(key, entries):
             combo.addItem(f"{choice.route} · {choice.label}", choice.key)
         box.layout().addWidget(combo, 1, 1)
         box.setStandardButtons(
@@ -2367,6 +2387,13 @@ class MainWindow(QMainWindow):
                 notes.append(i18n.t("modelFree"))
             if critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
+            if model_choices.unconfirmed(choice):
+                # Remembered from a previous launch, not confirmed by the CLI this time. Shown and
+                # marked rather than dropped (user, 2026-08-11): an option that may not work is a
+                # different thing from one that will, and both are different from an option that
+                # is not in the list — which is how the recommended pair came to report itself
+                # absent while `agy models` was answering perfectly well from a terminal.
+                notes.append(i18n.t("modelUnconfirmed"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             # EVERY route is prefixed, not just the SDK. The same model reached two ways is two
             # different accounts -- a subscription CLI and a metered broker -- and an unlabelled

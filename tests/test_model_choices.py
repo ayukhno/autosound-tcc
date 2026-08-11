@@ -12,6 +12,7 @@ import subprocess
 import pytest
 
 from autosound_tcc.core import model_choices
+from autosound_tcc.core import model_choices as mc
 from autosound_tcc.core.model_choices import Choice, OmpCatalogueError
 
 CATALOGUE = {
@@ -408,3 +409,46 @@ def test_an_unknown_or_unset_effort_reads_as_the_default_not_as_itself():
     assert model_choices.resolve_effort("auto") == "xhigh"
     assert model_choices.resolve_effort("  MAX ") == "max"
     assert model_choices.resolve_effort("high") == "high"
+
+
+# ---- a route that answered once must not silently disappear (user, 2026-08-11) ----------------
+
+
+def test_the_catalogue_survives_a_launch_where_the_cli_says_nothing(tmp_path, monkeypatch):
+    """`_CLI_CACHE` was per-process, which is the same as no memory: every launch started empty,
+    and a launch where `agy models` was slow or came back blank ran the whole session with the
+    route missing. From the outside that is empty pickers and a recommended pair reporting itself
+    absent — and downstream, a stored critic key that stops resolving and gets aliased onto the
+    Generator's own vendor."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_UNCONFIRMED", set())
+    real = [mc.Choice(harness="agy", model="gemini-3.1-pro-high",
+                      label="Gemini 3.1 Pro (High)", provider="google")]
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: real)
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+
+    mc.refresh_cli_catalogue()
+    assert mc.catalogue_cache_path().is_file()
+    assert not mc.unconfirmed(real[0]), "confirmed just now"
+
+    # Next launch: nothing in memory, and the CLI answers nothing at all.
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_UNCONFIRMED", set())
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+
+    offered = mc.agy_choices()
+
+    assert [c.key for c in offered] == ["agy:gemini-3.1-pro-high"]
+    assert mc.unconfirmed(offered[0]), "shown, and marked as remembered rather than confirmed"
+
+
+def test_a_malformed_cache_reads_as_no_memory(tmp_path, monkeypatch):
+    """This file exists to keep a picker populated; a typo in it must not stop the window."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_UNCONFIRMED", set())
+    mc.catalogue_cache_path().parent.mkdir(parents=True, exist_ok=True)
+    mc.catalogue_cache_path().write_text("{not json", encoding="utf-8")
+
+    assert mc.agy_choices() == []
