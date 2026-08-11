@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-07** — everything not listed here is done, superseded or rejected:
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07, SCR-043 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1152,3 +1152,31 @@ Ask:
    landed.
 
 Neither is retroactive: a project without them renders exactly as it does today.
+
+## SCR-043 — the field vocabulary is closed, so something must close it
+
+**Status**: done (skill `1b8a343`, 2026-08-11 — `_validate_group` enforces `FIELD_VOCABULARY`,
+`FIELD_NEAR_MISSES` names the wanted spelling, three selftest fixtures corrected)
+**Target**: `skills/autosound-tuning/rew_tool/dsp_profile.py`
+**TCC dependency**: none new. `state/dsp_state.py::_field_label` is the consumer this protects —
+it renders exactly the vocabulary's tokens and falls through to a raw `"<token>: <value>"` for
+anything else, which is invisible in practice because an unknown token also never carries a value.
+
+**Detail**: not an ask from TCC, but from the 2026-08-07 architecture review (`ARCHITECTURE-NOTES.md`
+§1, hole 1) — the cheapest useful item on that list, done first for that reason.
+
+`FIELD_VOCABULARY` had declared itself "the ONLY field-name tokens a group's `fields` may contain"
+since SCR-010 and was referenced in exactly one place: the `checklist` printout. `_validate_group`
+never compared anything to it. So a group declaring `delay_ms` instead of `ta_ms` validated clean,
+saved clean, and rendered as nothing in every consumer — the same silent-wrong class as SCR-042,
+with no error anywhere on the path.
+
+The fix is the SCR-042 lever, not a documentation lever: an unknown token is a hard refusal, and
+the message names the token that was wanted (`FIELD_NEAR_MISSES` for the synonyms `difflib` cannot
+reach — `delay`, `time_alignment`, `level_db`, `invert`, `crossover` — difflib for the typos). A
+non-string token is refused too: that is `maybe_decode_json`'s tool-call round-trip failure
+arriving one level deeper.
+
+Nothing on disk changed meaning: the bundled Helix profile, the live project's profile and both TCC
+fixtures already used `ta_ms`. The only `delay_ms` declarations anywhere were three fixtures inside
+the module's own selftest, which is how it had gone unnoticed for so long.
