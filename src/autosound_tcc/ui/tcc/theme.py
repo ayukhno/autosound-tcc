@@ -319,6 +319,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('warn', 14, 'panel3')};
         border-color: {t.warn};
     }}
+    /* .zoom-btn — the curve panel's A / D / − / + . Narrow enough that four of them fit beside
+    the readout, and padded so the glyph is not clipped by the ordinary button padding. */
+    QPushButton[class~="zoom-btn"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 2px 0;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QPushButton[class~="zoom-btn"]:hover {{
+        border-color: {t.accent_dim};
+    }}
     /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
     clickable; hover says what, click says why. */
     QPushButton[class~="warn-mark"] {{

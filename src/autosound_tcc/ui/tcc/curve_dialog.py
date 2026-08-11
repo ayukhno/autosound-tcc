@@ -26,8 +26,12 @@ from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
 #: where the argument that prompted this happened; the others are the same widget with a different
 #: reader, added when they are actually asked for rather than because a menu looked incomplete.
 KINDS = {
-    "impulse": {"label_x": "ms", "scale_x": 1000.0, "log_x": False},
-    "fr": {"label_x": "Hz", "scale_x": 1.0, "log_x": True},
+    "impulse": {"label_x": "ms", "scale_x": 1000.0, "log_x": False, "label_y": ""},
+    "fr": {"label_x": "Hz", "scale_x": 1.0, "log_x": True, "label_y": "dB"},
+    # Phase is where a crossover argument actually gets settled (Δφ at the joint, then Δt from
+    # it), and reading it off a picture is the thing this window exists to replace. Only a sweep
+    # carries one -- REW returns no phase for an MMM capture.
+    "phase": {"label_x": "Hz", "scale_x": 1.0, "log_x": True, "label_y": "°"},
 }
 #: How far either side of the peak the impulse view opens on. A REW impulse spans −995 ms to
 #: +1735 ms (measured); the arrival argument happens inside a couple of milliseconds of the peak,
@@ -46,9 +50,11 @@ def kind_for(titles: Sequence[str], asked: str = "") -> str:
     kind a measurement is, so the window can pick rather than fail: any sweep in the selection
     means an impulse is available, all-RTA means frequency response.
     """
-    if asked in KINDS and not all(str(t).rstrip().endswith("(rta)") for t in titles):
+    all_rta = bool(titles) and all(str(t).rstrip().endswith("(rta)") for t in titles)
+    if asked in KINDS and not all_rta:
         return asked
-    if titles and all(str(t).rstrip().endswith("(rta)") for t in titles):
+    if all_rta:
+        # An MMM capture has a magnitude and nothing else: no impulse, no phase.
         return "fr"
     return asked if asked in KINDS else "impulse"
 
@@ -92,9 +98,13 @@ class _CurveWorker(QThread):
                     x = np.asarray(times, dtype=float) * KINDS["impulse"]["scale_x"]
                     traces.append(Trace(title, x, np.asarray(samples, dtype=float)))
                 else:
-                    freqs, mag, _phase = self._bridge.frequency_response(mid)
+                    freqs, mag, phase = self._bridge.frequency_response(mid)
+                    values = phase if self._kind == "phase" else mag
+                    if values is None:
+                        raise ValueError("no phase in this measurement")
                     traces.append(
-                        Trace(title, np.asarray(freqs, dtype=float), np.asarray(mag, dtype=float))
+                        Trace(title, np.asarray(freqs, dtype=float),
+                              np.asarray(values, dtype=float))
                     )
             except Exception as exc:  # noqa: BLE001 — a REW failure is a message, not a crash
                 problems.append(f"{title}: {type(exc).__name__}")
@@ -194,7 +204,11 @@ class CurveDialog(QDialog):
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
         self._view.set_unit(str(spec["label_x"]))
+        self._view.set_y_unit(str(spec["label_y"]))
         self._view.set_log_x(bool(spec["log_x"]))
+        # A frequency response is as often read for its level as for its frequency, so it opens
+        # with both; an impulse is an arrival time and nothing else.
+        self._view.set_axes_mode("vh" if self._kind in ("fr", "phase") else "v")
 
     def _chosen(self) -> list[str]:
         if not self._pickers:
@@ -226,7 +240,7 @@ class CurveDialog(QDialog):
 
     def _frame(self, traces: list, positions: list) -> None:
         """Open on the part being argued about rather than on everything REW recorded."""
-        if self._kind == "fr":
+        if self._kind in ("fr", "phase"):
             self._view.focus_x(*_FR_BAND_HZ)
         elif positions:
             centre = sum(positions) / len(positions)

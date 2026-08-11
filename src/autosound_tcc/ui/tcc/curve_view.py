@@ -28,6 +28,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
 # The two trace colours, in order. Deliberately the theme's own accent + info rather than
@@ -38,6 +39,68 @@ _TRACE_TOKENS = ("accent", "info")
 # whole point of the panel is showing that these two are different numbers.
 _MODEL_TOKEN = "muted"
 _ARBITER_TOKEN = "ok"
+
+
+class LogHzAxis(pg.AxisItem):
+    """A frequency axis a human reads: 20 · 30 · 50 · 100 · 200 · 1k · 2k · 10k · 20k.
+
+    pyqtgraph's own log axis prints `2·10¹`, `3·10¹`, `4·10¹` … and at audio widths they collide
+    into an unreadable smear (user, 2026-08-11, with the picture). REW has had this right forever
+    and it is not a matter of taste: the numbers on this axis are the vocabulary the whole trade
+    speaks in — nobody says "the null at four times ten to the second".
+
+    Ticks are chosen from the 1-2-3-5 series per decade, most significant first, and thinned to
+    whatever the axis is actually wide enough to print.
+    """
+
+    _MAJOR = (1, 2, 5)
+    _MINOR = (3, 4, 6, 8)
+    #: Pixels a label needs before another one may be placed. Measured against the widest string
+    #: this axis ever prints ("20kHz"), with room to breathe.
+    _MIN_LABEL_PX = 34
+
+    def tickValues(self, minVal, maxVal, size):  # noqa: N802 (Qt/pyqtgraph naming)
+        # Values arrive in LOG10 space because the plot is in log mode.
+        low, high = 10.0 ** min(minVal, maxVal), 10.0 ** max(minVal, maxVal)
+        decades = range(int(math.floor(math.log10(max(low, 1e-9)))),
+                        int(math.ceil(math.log10(max(high, 1e-9)))) + 1)
+        out = []
+        for step, group in ((0, self._MAJOR), (1, self._MINOR)):
+            values = [
+                math.log10(mult * 10 ** decade)
+                for decade in decades
+                for mult in group
+                if low <= mult * 10 ** decade <= high
+            ]
+            if values:
+                out.append((step, self._thin(values, size, minVal, maxVal, out)))
+        return out
+
+    def _thin(self, values, size, minVal, maxVal, already):
+        """Drop what will not fit. Crowding is what made the default unreadable, and a tick with
+        no room is worse than no tick: it overprints the one that had room."""
+        span = abs(maxVal - minVal) or 1.0
+        per_unit = (size or 1.0) / span
+        taken = [v for _, group in already for v in group]
+        kept = []
+        for value in sorted(values):
+            near = taken + kept
+            if all(abs(value - other) * per_unit >= self._MIN_LABEL_PX for other in near):
+                kept.append(value)
+        return kept
+
+    def tickStrings(self, values, scale, spacing):  # noqa: N802 (Qt/pyqtgraph naming)
+        out = []
+        for value in values:
+            hz = 10.0 ** value
+            if hz >= 1000:
+                thousands = hz / 1000.0
+                out.append(f"{thousands:g}k")
+            elif hz >= 1:
+                out.append(f"{hz:.0f}")
+            else:
+                out.append(f"{hz:.2g}")
+        return out
 
 
 @dataclass(frozen=True)
@@ -67,12 +130,19 @@ class CurveView(QWidget):
         # the line is a solid block of pixels anyway.
         pg.setConfigOptions(antialias=False)
         self._unit = x_label
+        self._y_unit = ""
         self._log_x = False
+        # Which way the markers read. On an FR the question is as often "how many dB is that dip"
+        # as "at what frequency" (user, 2026-08-11), and on a joint it is both at once.
+        self._axes_mode = "v"
+        self._zoom_buttons: list[tuple[QPushButton, str]] = []
+        self._axes_buttons: list[tuple[QPushButton, str]] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
+        self._hz_axis = LogHzAxis(orientation="bottom")
         self._plot = pg.PlotWidget(background=theme.panel)
         self._plot.showGrid(x=True, y=True, alpha=0.18)
         self._plot.setLabel("bottom", x_label)
@@ -94,16 +164,48 @@ class CurveView(QWidget):
 
         row = QHBoxLayout()
         row.setContentsMargins(2, 0, 2, 0)
-        row.setSpacing(8)
+        row.setSpacing(6)
         row.addWidget(self._readout, stretch=1)
+        # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
+        # window is used in a car). "All" is everything the capture holds; "Detail" is the span
+        # the window opened on, which is the one worth coming back to after wandering.
+        for mode in ("v", "h", "vh"):
+            button = QPushButton(mode.upper())
+            button.setProperty("class", "zoom-btn")
+            button.setCheckable(True)
+            button.setChecked(mode == self._axes_mode)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedSize(30, 24)
+            attach_tip(button, i18n.t(f"curveAxes_{mode}"))
+            button.clicked.connect(lambda _checked, m=mode: self.set_axes_mode(m))
+            row.addWidget(button)
+            self._axes_buttons.append((button, mode))
+
+        for key, handler in (
+            ("curveZoomAll", self.show_all),
+            ("curveZoomDetail", self.show_detail),
+            ("curveZoomOut", lambda: self.zoom(1.6)),
+            ("curveZoomIn", lambda: self.zoom(1 / 1.6)),
+        ):
+            button = QPushButton(i18n.t(key + "Short"))
+            button.setProperty("class", "zoom-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFixedSize(30, 24)
+            attach_tip(button, i18n.t(key))
+            button.clicked.connect(handler)
+            row.addWidget(button)
+            self._zoom_buttons.append((button, key))
         self._send_btn = QPushButton(i18n.t("curveSend"))
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(self._send_btn)
         layout.addLayout(row)
 
+        self._detail_range: Optional[tuple[float, float]] = None
         self._traces: list[Trace] = []
         self._markers: list[pg.InfiniteLine] = []
+        self._h_markers: list[pg.InfiniteLine] = []
+        self._marker_tokens: list[str] = []
         self._marker_names: list[str] = []
         self._render_readout()
 
@@ -165,9 +267,12 @@ class CurveView(QWidget):
                 labelOpts={"color": getattr(theme, token),
                            "position": 0.94 - 0.07 * index},
             )
+            line.setVisible("v" in self._axes_mode)
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._markers.append(line)
+        self._marker_tokens = list(tokens)
+        self._rebuild_h_markers()
         self._render_readout()
 
     def set_log_x(self, on: bool) -> None:
@@ -180,6 +285,13 @@ class CurveView(QWidget):
         """
         self._log_x = bool(on)
         self._plot.setLogMode(x=self._log_x, y=False)
+        # The frequency axis only makes sense in log mode; time keeps pyqtgraph's own.
+        theme = current_theme()
+        axis = self._hz_axis if self._log_x else pg.AxisItem(orientation="bottom")
+        axis.setPen(pg.mkPen(theme.border2))
+        axis.setTextPen(pg.mkPen(theme.muted))
+        self._plot.setAxisItems({"bottom": axis})
+        self._plot.setLabel("bottom", self._unit)
 
     def _to_view(self, x: float) -> float:
         return math.log10(x) if self._log_x and x > 0 else float(x)
@@ -200,16 +312,94 @@ class CurveView(QWidget):
         about are a vertical line. The full sweep is still there — zoom out and it is all present.
         """
         if high > low:
+            self._detail_range = (low, high)
             self._plot.setXRange(self._to_view(low), self._to_view(high), padding=0.02)
 
     def autoscale_y(self) -> None:
         self._plot.enableAutoRange(axis="y")
+
+    def show_all(self) -> None:
+        """Everything the capture holds — for an impulse that is seconds of room, on purpose."""
+        self._plot.getViewBox().autoRange(padding=0.02)
+
+    def show_detail(self) -> None:
+        """Back to the span the window opened on."""
+        if self._detail_range:
+            low, high = self._detail_range
+            self._plot.setXRange(self._to_view(low), self._to_view(high), padding=0.02)
+        self.autoscale_y()
+
+    def zoom(self, factor: float) -> None:
+        """Scale the x view about its centre. `>1` shows more, `<1` shows less."""
+        view = self._plot.getViewBox()
+        (low, high), _ = view.viewRange()
+        centre = (low + high) / 2.0
+        half = (high - low) * factor / 2.0
+        view.setXRange(centre - half, centre + half, padding=0)
+
+    def set_y_unit(self, unit: str) -> None:
+        """dB on a frequency response, degrees on a phase, nothing on an impulse."""
+        self._y_unit = unit
+        self._render_readout()
+
+    def set_axes_mode(self, mode: str) -> None:
+        """`v` reads frequencies, `h` reads levels, `vh` reads both.
+
+        The same markers either way — a horizontal line is added beside each vertical one rather
+        than replacing it, so switching to VH does not lose a position already placed.
+        """
+        self._axes_mode = mode if mode in ("v", "h", "vh") else "v"
+        for button, value in self._axes_buttons:
+            button.setChecked(value == self._axes_mode)
+        self._rebuild_h_markers()
+        for line in self._markers:
+            line.setVisible("v" in self._axes_mode)
+        self._render_readout()
+
+    def _rebuild_h_markers(self) -> None:
+        """One horizontal marker per vertical one, on its own curve's value at that x.
+
+        Starting them ON the curve is what makes them useful immediately: the first thing anybody
+        wants from a level marker is "what is this trace doing here", and a line parked at zero
+        answers nothing.
+        """
+        for line in self._h_markers:
+            self._plot.removeItem(line)
+        self._h_markers = []
+        if "h" not in self._axes_mode:
+            return
+        theme = current_theme()
+        for index, x in enumerate(self.positions()):
+            token = self._marker_tokens[index] if index < len(self._marker_tokens) else (
+                _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
+            )
+            line = pg.InfiniteLine(
+                pos=self._y_at(index, x), angle=0, movable=True,
+                pen=pg.mkPen(getattr(theme, token), width=1.2, style=Qt.PenStyle.DotLine),
+            )
+            line.sigPositionChanged.connect(self._on_marker_moved)
+            self._plot.addItem(line)
+            self._h_markers.append(line)
+
+    def _y_at(self, index: int, x: float) -> float:
+        """The value of trace `index` at `x`, or 0 when there is no such trace."""
+        if index >= len(self._traces):
+            return 0.0
+        trace = self._traces[index]
+        xs = np.asarray(trace.x, dtype=float)
+        if not xs.size:
+            return 0.0
+        return float(np.asarray(trace.y, dtype=float)[int(np.abs(xs - x).argmin())])
 
     # ---- what the Arbiter is saying --------------------------------------
 
     def positions(self) -> list[float]:
         """In the unit the axis is labelled with — Hz, not log10(Hz)."""
         return [self._from_view(float(line.value())) for line in self._markers]
+
+    def levels(self) -> list[float]:
+        """Where the horizontal markers sit, in the y axis's own unit."""
+        return [float(line.value()) for line in self._h_markers]
 
     def reading(self) -> str:
         """The markers as a sentence a model can parse — names, positions, and the delta.
@@ -221,16 +411,27 @@ class CurveView(QWidget):
             return ""
         names = [t.name for t in self._traces] or [""]
         digits = 3 if self._unit == "ms" else 1
+        lines = []
+        if "v" in self._axes_mode:
+            lines.append(self._axis_reading(self.positions(), self._unit, digits))
+        if "h" in self._axes_mode:
+            lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
+        body = "; ".join(part for part in lines if part)
+        return f"{' / '.join(names)} — {body}" if body else ""
+
+    def _axis_reading(self, values: list[float], unit: str, digits: int) -> str:
+        if not values:
+            return ""
+        suffix = f" {unit}" if unit else ""
         parts = [
             f"{self._marker_names[i] if i < len(self._marker_names) else i}: "
-            f"{p:.{digits}f} {self._unit}"
-            for i, p in enumerate(self.positions())
+            f"{value:.{digits}f}{suffix}"
+            for i, value in enumerate(values)
         ]
-        line = ", ".join(parts)
-        if len(self._markers) >= 2:
-            positions = self.positions()
-            line += f" (Δ {abs(positions[1] - positions[0]):.{digits}f} {self._unit})"
-        return f"{' / '.join(names)} — {line}"
+        out = ", ".join(parts)
+        if len(values) >= 2:
+            out += f" (Δ {abs(values[1] - values[0]):.{digits}f}{suffix})"
+        return out
 
     def on_send(self, handler: Callable[[str], None]) -> None:
         self._send_btn.clicked.connect(lambda: handler(self.reading()))
@@ -248,4 +449,11 @@ class CurveView(QWidget):
 
     def retranslate(self) -> None:
         self._send_btn.setText(i18n.t("curveSend"))
+        for button, mode in self._axes_buttons:
+            if getattr(button, "hover_tip", None) is not None:
+                button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))
+        for button, key in self._zoom_buttons:
+            button.setText(i18n.t(key + "Short"))
+            if getattr(button, "hover_tip", None) is not None:
+                button.hover_tip.set_text(i18n.t(key))
         self._render_readout()

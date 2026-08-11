@@ -248,3 +248,56 @@ def test_the_impulse_opens_on_the_arrival_not_on_three_seconds_of_room():
     low, high = dialog._view._plot.viewRange()[0]
     assert high - low < 12, "the view must open on the peak, not on the whole capture"
     assert low < 4.52 < high
+
+
+# ---- reading the axis, and reading levels off it (user, 2026-08-11) ---------------------------
+
+
+def test_the_frequency_axis_speaks_the_trade_s_own_numbers():
+    """pyqtgraph's log axis prints `2·10¹`, `3·10¹`, `4·10¹` … which at audio widths collide into
+    a smear. Nobody says "the null at four times ten to the second"."""
+    from autosound_tcc.ui.tcc.curve_view import LogHzAxis
+
+    axis = LogHzAxis(orientation="bottom")
+
+    strings = axis.tickStrings([math.log10(v) for v in (20, 100, 1000, 2000, 20000)], 1, 1)
+
+    assert strings == ["20", "100", "1k", "2k", "20k"]
+
+
+def test_the_axis_thins_ticks_rather_than_overprinting_them():
+    from autosound_tcc.ui.tcc.curve_view import LogHzAxis
+
+    axis = LogHzAxis(orientation="bottom")
+    lo, hi = math.log10(20), math.log10(20000)
+
+    roomy = sum(len(group) for _, group in axis.tickValues(lo, hi, 1400))
+    cramped = sum(len(group) for _, group in axis.tickValues(lo, hi, 200))
+
+    assert cramped < roomy, "a tick with no room overprints the one that had room"
+
+
+def test_horizontal_markers_read_the_level_and_start_on_the_curve():
+    """On an FR the question is as often "how many dB is that dip" as "at what frequency"."""
+    view = _view()
+    view.set_unit("Hz")
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_axes_mode("vh")
+
+    assert len(view.levels()) == 2
+    # Each one sits on ITS OWN curve's value at that x — a line parked at zero answers nothing.
+    assert view.levels()[0] == pytest.approx(view._y_at(0, 4.52), abs=1e-9)
+    reading = view.reading()
+    assert "Hz" in reading and "dB" in reading
+
+
+def test_switching_to_levels_only_keeps_the_positions_already_placed():
+    view = _view()
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_axes_mode("h")
+    view.set_axes_mode("vh")
+
+    assert view.positions() == pytest.approx([4.52, 4.78])

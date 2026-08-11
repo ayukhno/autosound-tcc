@@ -154,6 +154,13 @@ class AttachImageDialog(QDialog):
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        # Pasting the wrong capture is the ordinary mistake here, and without this the only way
+        # back was Cancel and reopen (user, 2026-08-11).
+        self._clear_btn = self._buttons.addButton(
+            i18n.t("attachClear"), QDialogButtonBox.ButtonRole.ResetRole
+        )
+        self._clear_btn.clicked.connect(self.clear)
+        self._clear_btn.setAutoDefault(False)
         self._buttons.accepted.connect(self.accept)
         self._buttons.rejected.connect(self.reject)
         layout.addWidget(self._buttons)
@@ -203,6 +210,14 @@ class AttachImageDialog(QDialog):
         self._preview.repaint()  # the paste is a keystroke, not a resize: ask for the redraw
         self._set_ok_enabled(True)
         return True
+
+    def clear(self) -> None:
+        """Drop the pasted image and go back to the instructions. The caption is left alone: it is
+        usually still the right caption for the shot that was meant."""
+        self._image = None
+        self._preview.setPixmap(QPixmap())
+        self._preview.setText(i18n.t(capture_hint_key()))
+        self._set_ok_enabled(False)
 
     def _set_ok_enabled(self, enabled: bool) -> None:
         button = self._buttons.button(QDialogButtonBox.StandardButton.Ok)

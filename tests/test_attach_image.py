@@ -169,3 +169,22 @@ def test_the_hint_names_the_shortcut_this_platform_actually_uses(monkeypatch):
 
     monkeypatch.setattr(attach_image.sys, "platform", "linux")
     assert "Ctrl+V" in i18n.t(attach_image.capture_hint_key())
+
+
+def test_clearing_drops_the_wrong_capture_without_closing_the_window(tmp_path):
+    """Pasting the wrong screenshot is the ordinary mistake; the only way back was Cancel and
+    reopen (user, 2026-08-11)."""
+    app = _app()
+    app.clipboard().setImage(_image(900))
+    dialog = attach_image.AttachImageDialog(tmp_path)
+    dialog._caption.setText("w-L impulse")
+    assert dialog._image is not None
+
+    dialog.clear()
+
+    assert dialog._image is None
+    assert not dialog._buttons.button(dialog._buttons.StandardButton.Ok).isEnabled()
+    # The caption survives: it is usually still right for the shot that was meant.
+    assert dialog._caption.text() == "w-L impulse"
+    dialog.accept()
+    assert dialog.saved_path is None

@@ -1181,7 +1181,20 @@ class MainWindow(QMainWindow):
         # The reading lands in the composer rather than being sent: it is the Arbiter's statement,
         # and they get to see and edit it before it goes out. Nothing is recorded behind them.
         dialog.readingSent.connect(self._dialog.put_in_composer)
-        dialog.exec()
+        # Not modal, and above the window (user, 2026-08-11): the whole point is reading a curve
+        # WHILE talking about it, and a modal window makes you close the evidence to answer. Kept
+        # on `self` so Python does not collect it the moment this method returns.
+        dialog.setWindowFlag(Qt.WindowType.Tool, True)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        previous = getattr(self, "_curve_dialog", None)
+        if previous is not None:
+            try:
+                previous.close()
+            except RuntimeError:
+                pass  # already destroyed by WA_DeleteOnClose
+        self._curve_dialog = dialog
+        dialog.show()
+        dialog.raise_()
 
     def _open_diagnostics(self) -> None:
         if self._diag_dialog is None:

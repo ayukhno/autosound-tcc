@@ -331,11 +331,18 @@ class MeasurementPanel(QWidget):
         self._session_combo.currentIndexChanged.connect(
             lambda _idx: self.show_session(self._session_combo.currentData())
         )
-        head_row.addWidget(self._session_combo, 1)
+        # A round id is `cap_001` plus the live-marker dot, and at stretch 1 against the banner's
+        # 4 it was eliding to "cap_00…" — a picker whose entries cannot be told apart (user,
+        # 2026-08-11). Sized to its own contents instead of to a share of the row.
+        self._session_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._session_combo.setMinimumContentsLength(11)
+        head_row.addWidget(self._session_combo)
         self._version = QLabel("")
         self._version.setProperty("class", "meas-head")
         self._version_tip = attach_tip(self._version)
-        head_row.addWidget(self._version, 4)
+        head_row.addWidget(self._version, 1)
         # Icon-only, not full-text buttons -- the text labels ate too much of this header row next
         # to the version banner (user request 2026-07-27). Full label moved to the tooltip. Real
         # SVG icons (Lucide, ISC-licensed -- NOTICE.md), not unicode glyphs, for a sharper look.

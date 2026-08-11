@@ -555,3 +555,21 @@ def test_switching_session_drops_a_status_line_about_the_previous_grid():
     assert panel._status_label.text()
     panel.set_sessions(_no_capture_session())
     assert panel._status_label.text() == ""
+
+
+def test_the_session_picker_shows_a_whole_round_id():
+    """`cap_001 ●` was eliding to "cap_00…" — a picker whose entries cannot be told apart from one
+    another (user, 2026-08-11)."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session()[:1] + [
+        __import__("autosound_tcc.ui.tcc.mock_data", fromlist=["MeasSession"]).MeasSession(
+            id="cap_001", version={"en": "past", "uk": "минула"}, groups=()
+        )
+    ])
+
+    combo = panel._session_combo
+    hint = combo.sizeHint().width()
+    metrics = combo.fontMetrics().horizontalAdvance("cap_001 ●")
+
+    assert hint >= metrics, f"picker asks for {hint}px, the id needs {metrics}px"
