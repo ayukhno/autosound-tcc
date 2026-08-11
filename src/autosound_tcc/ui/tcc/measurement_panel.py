@@ -56,6 +56,21 @@ _METHOD_KEYS = ("sw", "rta", "rta_group")
 _METHOD_SUFFIX = {"sw": "sw", "rta": "rta", "rta_group": "rta"}
 
 
+def _method_suffix_for(group, column: int) -> str:
+    """The `(method)` suffix a column's rows are named with.
+
+    A group that states its own method is believed. The index fallback is the mock's convention,
+    and it is only safe for the mock: a derived phase-2 task has five groups, and `_METHOD_KEYS[3]`
+    is an IndexError raised while drawing the panel.
+    """
+    method = getattr(group, "method", None)
+    if method:
+        return _METHOD_SUFFIX.get(method, method)
+    if column < len(_METHOD_KEYS):
+        return _METHOD_SUFFIX[_METHOD_KEYS[column]]
+    return "rta"
+
+
 def with_method(name: str, suffix: str) -> str:
     """`"c_1"` or `"c_1 (sw)"` in, `"c_1 (sw)"` out.
 
@@ -498,6 +513,7 @@ class MeasurementPanel(QWidget):
         self._rows = []
         self._additional_titles = set()
         self._col_next_row = []
+        self._col_methods: list[str] = []
         # A phase that captures nothing (phase 1 analyses the series phase 0 took) is a real
         # answer, and `measurement_view` already returns it as a session with no groups. It was
         # rendered as an empty grid under a live legend, which reads as a mock left on screen
@@ -512,7 +528,8 @@ class MeasurementPanel(QWidget):
             header = QLabel(group.type)
             header.setProperty("class", "mcol-h")
             self._cols_layout.addWidget(header, 0, c)
-            method_suffix = _METHOD_SUFFIX[_METHOD_KEYS[c]]
+            method_suffix = _method_suffix_for(group, c)
+            self._col_methods.append(method_suffix)
             for r, item in enumerate(group.items, start=1):
                 row = _MeasRow(item, method_suffix)
                 self._rows.append(row)
@@ -786,17 +803,23 @@ class MeasurementPanel(QWidget):
 
     def _guess_column_for_new_title(self, title: str) -> int:
         """Which column an "additional" graph (unmatched by `_classify_title`) should land in.
-        Heuristic, not authoritative -- `(sw)` is unambiguous, but `(rta)` covers both the plain
-        RTA column and RTA-GROUP (same suffix, see `_METHOD_SUFFIX`), so group-shaped names
-        (combined-driver tokens, matching the mock RTA-GROUP column's own Ws/Ms/TWs/SW+Ws/L/R/ALL
-        convention) route there; anything else defaults to the plain RTA column. A wrong guess
-        just means a two-second manual re-check, not lost data."""
-        if title.rstrip().endswith("(sw)"):
-            return 0
+
+        Matched against the columns this session actually has, not against a fixed three: a
+        derived task has as many columns as the phase has scopes, and a round read back from the
+        journal has one per method. `(sw)` is unambiguous; `(rta)` can be the plain RTA column or
+        a group one (same suffix), so a group-shaped name -- a combined-driver token, the
+        Ws/Ms/TWs/SW+Ws/L/R/ALL convention -- takes the LAST rta column, which is where the group
+        scopes sit in both the derived order and the mock. A wrong guess costs a two-second manual
+        re-check, not data; -1 (no column of that method at all) drops the row, which
+        `_add_dynamic_row` reports rather than crashing on.
+        """
+        wanted = "sw" if title.rstrip().endswith("(sw)") else "rta"
+        columns = [c for c, method in enumerate(self._col_methods) if method == wanted]
+        if not columns:
+            return -1
         base = title.split(" (")[0].strip()
-        if "+" in base or base in {"L", "R", "ALL"} or base.startswith(("Ws", "Ms", "TWs")):
-            return 2
-        return 1
+        grouped = "+" in base or base in {"L", "R", "ALL"} or base.startswith(("Ws", "Ms", "TWs"))
+        return columns[-1] if (grouped and wanted == "rta") else columns[0]
 
     def _add_dynamic_row(self, col: int, item: MeasItem) -> bool:
         """Place an "additional" row, or answer False if this session has no column to place it in.
@@ -805,9 +828,9 @@ class MeasurementPanel(QWidget):
         empty list is an IndexError raised inside a signal handler -- which Qt turns into a printed
         traceback and a half-updated panel, from pressing Read on phase 1.
         """
-        if col >= len(self._col_next_row):
+        if not 0 <= col < len(self._col_next_row):
             return False
-        method_suffix = _METHOD_SUFFIX[_METHOD_KEYS[col]]
+        method_suffix = self._col_methods[col]
         row = _MeasRow(item, method_suffix)
         self._rows.append(row)
         r = self._col_next_row[col]

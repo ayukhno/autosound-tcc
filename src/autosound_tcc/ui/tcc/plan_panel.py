@@ -145,7 +145,10 @@ def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
 
 
 class _PhaseStepRow(QWidget):
-    def __init__(self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click) -> None:
+    def __init__(
+        self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click,
+        sessions_for=sessions_for_step,
+    ) -> None:
         super().__init__()
         # Done is what the skill wrote, never what was clicked here. The checkbox used to read a
         # local QSettings overlay left over from the mock, so a finished phase showed unticked
@@ -218,10 +221,11 @@ class _PhaseStepRow(QWidget):
             has_chip = True
 
         # Measurement icon (user request 2026-07-28): shown when this step has capture series
-        # linked to it (`mock_data.sessions_for_step`); hover lists them all, click opens the
-        # newest in the measurement panel below (PlanPanel.sessionRequested -> main_window.py ->
-        # MeasurementPanel.show_session).
-        sessions = sessions_for_step(step.id)
+        # linked to it; hover lists them all, click opens the newest in the measurement panel
+        # below (PlanPanel.sessionRequested -> main_window.py -> MeasurementPanel.show_session).
+        # `sessions_for` used to be `mock_data.sessions_for_step` directly, so the icon could only
+        # ever appear on mock step ids — invisible on every real project (user, 2026-08-11).
+        sessions = sessions_for(step.id)
         if sessions:
             meas_icon = QLabel("▤")
             meas_icon.setProperty("class", "step-meas-icon")
@@ -240,7 +244,7 @@ class _PhaseStepRow(QWidget):
 class _PhaseRow(QWidget):
     def __init__(
         self, phase: PlanPhase, phase_index: int, progress: _PlanProgress, on_changed,
-        on_session_click,
+        on_session_click, sessions_for=sessions_for_step,
     ) -> None:
         super().__init__()
         steps = phase.steps + progress.inserted_steps(phase_index)
@@ -286,7 +290,9 @@ class _PhaseRow(QWidget):
             progress.set_done(step_id, checked)
 
         for step in _collapse_runs(steps):
-            steps_layout.addWidget(_PhaseStepRow(step, progress, _on_toggle, on_session_click))
+            steps_layout.addWidget(
+                _PhaseStepRow(step, progress, _on_toggle, on_session_click, sessions_for)
+            )
 
         # "+ add step" wrote into the same local overlay the checkbox did, so a step added here
         # existed in this window and nowhere else -- not in the plan the model reads, not in the
@@ -319,6 +325,7 @@ class PlanPanel(QScrollArea):
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._progress = _PlanProgress()
+        self._sessions: tuple = ()
         # The real plan from the skill's process-state, or None for "there isn't one yet".
         # None used to fall back to the mock `PLAN`, which meant a real project that had not
         # started tuning showed seven invented phases with invented progress -- the same mistake
@@ -335,6 +342,20 @@ class PlanPanel(QScrollArea):
         """Swap in the real plan, or None when the project has no process state yet."""
         self._plan = phases
         self.retranslate()
+
+    def set_sessions(self, sessions) -> None:
+        """The project's real capture series, live first (see `measurement_view.build_sessions`).
+
+        Until they arrive the per-step measurement icon falls back to the mock's own linkage, which
+        is what the design fixture needs and what a real project never matches.
+        """
+        self._sessions = tuple(sessions or ())
+        self.retranslate()
+
+    def _sessions_for_step(self, step_id: str):
+        if not self._sessions:
+            return sessions_for_step(step_id)
+        return tuple(s for s in self._sessions if step_id in s.used_in_steps)
 
     @property
     def plan(self) -> "tuple[PlanPhase, ...]":
@@ -366,6 +387,7 @@ class PlanPanel(QScrollArea):
             return
         for i, phase in enumerate(plan):
             self._layout.addWidget(
-                _PhaseRow(phase, i, self._progress, self.retranslate, self.sessionRequested.emit)
+                _PhaseRow(phase, i, self._progress, self.retranslate,
+                          self.sessionRequested.emit, self._sessions_for_step)
             )
         self._layout.addStretch(1)

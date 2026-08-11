@@ -1903,9 +1903,12 @@ class MainWindow(QMainWindow):
         if not phase:
             return
         titles = getattr(self._meas_panel, "known_titles", lambda: [])()
-        session = measurement_view.build_session(phase, self._capture_version(state), titles)
-        if session is not None:
-            self._meas_panel.set_sessions((session,))
+        sessions = measurement_view.build_sessions(phase, self._capture_version(state), titles)
+        if sessions:
+            self._meas_panel.set_sessions(sessions)
+            # The plan's per-step measurement icon reads the same list: a step gets one when a
+            # round's captures are named in its evidence (SCR-035 makes sure they are).
+            self._plan_panel.set_sessions(sessions)
 
     _CAPTURE_SERIES = re.compile(r"_(\d+)\s*\((?:sw|rta)\)", re.IGNORECASE)
 

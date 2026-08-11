@@ -15,6 +15,7 @@ the mock rather than showing an empty plan that looks like a finished one.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from dataclasses import replace
 from typing import Optional
@@ -87,6 +88,101 @@ def capture_round(project_dir: Optional[Path] = None) -> Optional[dict]:
     state = load_state(project_dir)
     round_ = (state or {}).get("capture")
     return round_ if isinstance(round_, dict) else None
+
+
+def journal_file(project_dir: Optional[Path] = None) -> Path:
+    return process_dir(project_dir) / "journal.jsonl"
+
+
+def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
+    """Every capture round this project ever ran, newest first (SCR-034).
+
+    `process-state.json` keeps only the round that is open; the journal keeps them all, which is
+    the same split the active phase uses. Nothing read this until now, so the panel's session
+    picker could only ever offer the series being captured right now — the history it was built
+    for (and the plan's per-step measurement icon that links into it) had no supplier at all
+    (user, 2026-08-11).
+
+    Folded back into the same shape `capture_round()` returns, so one renderer serves both.
+    """
+    project = Path(project_dir or config.project_dir())
+    rounds: dict[str, dict] = {}
+    try:
+        lines = journal_file(project).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    order: list[str] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # a half-written line at the tail is normal while the skill is mid-write
+        rid = str(event.get("capture") or "")
+        if not rid:
+            continue
+        round_ = rounds.get(rid)
+        if round_ is None:
+            round_ = rounds[rid] = {"id": rid, "expected": [], "taken": {}, "skipped": {}}
+            order.append(rid)
+        kind = event.get("type")
+        if kind == "capture_task_issued":
+            round_["phase"] = event.get("phase")
+            round_["version"] = event.get("version")
+            round_["issued"] = event.get("at")
+            round_["step"] = event.get("step")
+            round_["expected"] = [str(t) for t in (event.get("expected") or [])]
+        elif kind == "capture_taken":
+            round_["taken"][str(event.get("title"))] = {
+                "at": event.get("at"),
+                "planned": event.get("planned"),
+            }
+        elif kind == "capture_skipped":
+            round_["skipped"][str(event.get("title"))] = {"reason": event.get("reason")}
+        elif kind == "capture_verified":
+            # The arithmetic's own verdict per title (SCR-040), folded onto the entry the panel
+            # reads. `bad` carries no issue list here — the open round in state does, and for a
+            # closed one "it did not pass" is the part that still matters.
+            for title in event.get("ok") or []:
+                round_["taken"].setdefault(str(title), {})["verified"] = {"ok": True}
+            for title in event.get("bad") or []:
+                round_["taken"].setdefault(str(title), {})["verified"] = {"ok": False}
+        elif kind == "capture_round_closed":
+            round_["closed"] = event.get("at") or True
+
+    # The open round as `process-state.json` has it wins: the journal is append-only history, the
+    # state file is the live record, and only it carries the full `verified` payload with issues.
+    live = capture_round(project)
+    if live and live.get("id"):
+        rid = str(live["id"])
+        if rid not in rounds:
+            order.append(rid)
+        rounds[rid] = {**rounds.get(rid, {}), **live}
+
+    return [rounds[rid] for rid in reversed(order)]
+
+
+def steps_using(state: Optional[dict], titles) -> tuple[str, ...]:
+    """Ids of closed steps whose evidence names any of `titles`.
+
+    The link between a capture round and the plan steps it served is not written down as a field —
+    but SCR-035 forces every closed step to cite something real, and a capture is cited by its REW
+    title. So the link already exists in the evidence, and this reads it rather than asking the
+    skill for a new one.
+    """
+    wanted = {str(t) for t in titles if str(t).strip()}
+    if not wanted or not state:
+        return ()
+    out = []
+    for step in state.get("plan") or []:
+        if not isinstance(step, dict):
+            continue
+        evidence = " ".join(str(item) for item in (step.get("evidence") or []))
+        if any(title in evidence for title in wanted):
+            out.append(str(step.get("id")))
+    return tuple(out)
 
 
 def load_plan(project_dir: Optional[Path] = None) -> Optional[tuple[PlanPhase, ...]]:

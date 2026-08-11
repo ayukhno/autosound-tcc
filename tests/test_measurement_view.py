@@ -12,6 +12,7 @@ import json
 import pytest
 
 from autosound_tcc.core import vendor_loader
+from autosound_tcc.state import measurement_view, process_view
 from autosound_tcc.state import measurement_view as mv
 
 pytestmark = pytest.mark.skipif(
@@ -316,3 +317,112 @@ def test_a_capture_that_passed_reads_as_done(project):
 
     item = next(i for g in session.groups for i in g.items if i.name == "sw_1 (sw)")
     assert item.status == mv.STATUS_DONE
+
+
+# ---- capture history (user, 2026-08-11) -------------------------------------
+
+
+def _journal(project, events):
+    process = project / "process"
+    process.mkdir(parents=True, exist_ok=True)
+    (process / "journal.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+
+
+def _round_events(rid="cap_001", phase="0", version="v_003"):
+    return [
+        {"at": "2026-08-11T15:48:06+00:00", "type": "capture_task_issued", "capture": rid,
+         "phase": phase, "version": version,
+         "expected": ["w-L_01 (sw)", "w-L_01 (rta)", "r-L_01 (sw)"]},
+        {"at": "2026-08-11T15:48:08+00:00", "type": "capture_taken", "capture": rid,
+         "title": "w-L_01 (sw)", "planned": True},
+        {"at": "2026-08-11T15:48:09+00:00", "type": "capture_taken", "capture": rid,
+         "title": "w-L_01 (rta)", "planned": True},
+        {"at": "2026-08-11T15:48:21+00:00", "type": "capture_skipped", "capture": rid,
+         "title": "r-L_01 (sw)", "reason": "Rear deferred by the Arbiter for this pass"},
+        {"at": "2026-08-11T15:48:29+00:00", "type": "capture_verified", "capture": rid,
+         "ok": ["w-L_01 (sw)"], "bad": ["w-L_01 (rta)"]},
+        {"at": "2026-08-11T15:48:34+00:00", "type": "capture_round_closed", "capture": rid},
+    ]
+
+
+def test_rounds_are_folded_back_out_of_the_journal(tmp_path):
+    """`process-state.json` keeps only the OPEN round; every round that ever ran is in the journal,
+    and nothing read it — so the panel's history had no supplier at all."""
+    _journal(tmp_path, _round_events())
+
+    rounds = process_view.capture_rounds(tmp_path)
+
+    assert len(rounds) == 1
+    round_ = rounds[0]
+    assert round_["id"] == "cap_001" and round_["phase"] == "0"
+    assert round_["closed"]
+    assert set(round_["taken"]) == {"w-L_01 (sw)", "w-L_01 (rta)"}
+    assert round_["taken"]["w-L_01 (rta)"]["verified"] == {"ok": False}
+    assert "Rear deferred" in round_["skipped"]["r-L_01 (sw)"]["reason"]
+
+
+def test_a_past_round_becomes_a_read_only_session_with_its_own_verdicts(tmp_path):
+    _journal(tmp_path, _round_events())
+
+    session = measurement_view._session_for_round(
+        process_view.capture_rounds(tmp_path)[0], None
+    )
+
+    by_name = {i.name: i for g in session.groups for i in g.items}
+    assert session.id == "cap_001"
+    assert by_name["w-L_01 (sw)"].status == measurement_view.STATUS_DONE
+    # The checker said no, and that outranks "a title of that name exists" here too.
+    assert by_name["w-L_01 (rta)"].status == measurement_view.STATUS_STALE
+    assert by_name["r-L_01 (sw)"].status == measurement_view.STATUS_SKIPPED
+    # Why a human decided against it, not the checker's "no measurement titled ..." — a skipped
+    # capture is always also missing, and only one of those two facts is worth reading.
+    assert "Rear deferred" in by_name["r-L_01 (sw)"].extra
+    assert [g.method for g in session.groups] == ["sw", "rta"]
+
+
+def test_a_round_is_linked_to_the_steps_whose_evidence_names_its_captures(tmp_path):
+    """No field records that link — but SCR-035 makes every closed step cite something real, and a
+    capture is cited by its REW title."""
+    _journal(tmp_path, _round_events())
+    state = {"plan": [
+        {"id": "m0-w-L", "evidence": ["w-L_01 (sw) captured and verified"]},
+        {"id": "lang", "evidence": ["autosound_context.md"]},
+    ]}
+
+    session = measurement_view._session_for_round(
+        process_view.capture_rounds(tmp_path)[0], state
+    )
+
+    assert session.used_in_steps == ("m0-w-L",)
+
+
+def test_a_phase_whose_plan_captures_nothing_still_shows_a_round_the_session_opened(project):
+    """The skill's `_CAPTURE_PLAN["1"]` is literally `[]`, and `build_session` used to return on
+    that before ever looking at the record. A round is a fact; a phase plan is a prediction about
+    one, and the fact has to win."""
+    (project / "process").mkdir(exist_ok=True)
+    (project / "process" / "process-state.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "active_phase": "1",
+            "plan": [],
+            "capture": {"id": "cap_002", "phase": "1", "version": "v_004",
+                        "expected": ["w-L_04 (sw)", "w-R_04 (sw)"],
+                        "taken": {"w-L_04 (sw)": {"planned": True}}},
+        }),
+        encoding="utf-8",
+    )
+
+    session = mv.build_session("1", 4, ["w-L_04 (sw)"], project)
+
+    assert _names(session) == ["w-L_04 (sw)", "w-R_04 (sw)"]
+    assert session.id == "cap_002"
+
+
+def test_a_phase_that_really_captures_nothing_still_says_so(project):
+    session = mv.build_session("1", 4, [], project)
+
+    assert session.groups == ()
+    assert "no capture" in session.version["en"]
