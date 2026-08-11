@@ -466,3 +466,16 @@ def test_a_write_still_stops_for_the_arbiter(tmp_path):
     asyncio.run(session._can_use_tool("Write", {"file_path": "x.md", "content": "hi"}, None))
 
     assert [r.tool for r in bridge.asked] == ["Write"]
+
+
+def test_the_stdout_line_limit_is_raised_above_one_image(tmp_path):
+    """A live tune ended mid-turn on "JSON message exceeded maximum buffer size of 1048576 bytes"
+    (2026-08-11). The SDK reads the CLI's stdout as one JSON object per line and refuses a line
+    over 1 MiB; a tool result carrying an image is base64, so a ~1 MB screenshot arrives as ~1.4 MB
+    on a single line. Nothing exceptional about that — a long file read gets there the same way."""
+    session = TuningSession(project_dir=tmp_path, model="claude-opus-5")
+
+    options = session._options()
+
+    assert options.max_buffer_size is not None, "the 1 MiB default kills a session on one image"
+    assert options.max_buffer_size >= 8 * 1024 * 1024

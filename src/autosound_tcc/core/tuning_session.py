@@ -316,6 +316,14 @@ class TuningSession:
             mcp_servers=self._mcp_servers,
             can_use_tool=self._can_use_tool,
             include_partial_messages=True,
+            # The SDK reads the CLI's stdout as one JSON object per line and refuses a line over
+            # `_DEFAULT_MAX_BUFFER_SIZE` = 1 MiB, which kills the session outright: "Failed to
+            # decode JSON: JSON message exceeded maximum buffer size of 1048576 bytes". A tool
+            # result carrying an image is base64, so a ~1 MB screenshot arrives as ~1.4 MB on one
+            # line — the Arbiter handed over a REW screenshot, the model read it, and the tune
+            # ended mid-turn (2026-08-11). Nothing about that is exceptional: a long file read or
+            # a large measurement export gets there the same way.
+            max_buffer_size=32 * 1024 * 1024,
             resume=self.resumed_from,
         )
 
