@@ -1145,7 +1145,24 @@ class MainWindow(QMainWindow):
                 i18n.t("diagStripIssues").format(n=len(report.issues())), level="warn"
             )
 
-    def _open_curves(self, titles: list, markers: Optional[list] = None) -> None:
+    def _on_curves_requested(self, request: dict) -> None:
+        """`show_curves` from the model. Arrives on the GUI thread — the bridge's signal is queued.
+
+        The note is appended to the composer rather than shown and forgotten: it is the model
+        saying what it wants looked at, and it belongs in the transcript beside the answer.
+        """
+        note = str(request.get("note") or "").strip()
+        if note:
+            self._dialog.put_in_composer(note)
+        self._open_curves(
+            list(request.get("titles") or []),
+            markers=list(request.get("markers") or []),
+            kind=str(request.get("kind") or "impulse"),
+        )
+
+    def _open_curves(
+        self, titles: list, markers: Optional[list] = None, kind: str = "impulse"
+    ) -> None:
         """Open the curve window over `titles`, with the model's reading marked if there is one.
 
         Signature is the one an MCP tool will call: titles the model names, and where it read the
@@ -1157,8 +1174,9 @@ class MainWindow(QMainWindow):
         if not titles:
             self._status_strip.notify(i18n.t("curveNothing"), level="warn")
             return
+        available = sorted(set(titles) | set(self._meas_panel.known_titles()))
         dialog = CurveDialog(
-            titles[:2], markers=markers or [], available=titles, parent=self
+            titles[:2], markers=markers or [], kind=kind, available=available, parent=self
         )
         # The reading lands in the composer rather than being sent: it is the Arbiter's statement,
         # and they get to see and edit it before it goes out. Nothing is recorded behind them.
@@ -2034,6 +2052,7 @@ class MainWindow(QMainWindow):
         self._bridge.clipboardRequested.connect(lambda text: QGuiApplication.clipboard().setText(text))
         self._bridge.proposalReceived.connect(self._on_proposal)
         self._bridge.critiqueReceived.connect(self._on_critique)
+        self._bridge.curvesReceived.connect(self._on_curves_requested)
         # A terminal-driven onboarding session's finalize_profile lands here -- the in-app chat
         # doesn't need this, it already restarts into a fresh window off its own signal.
         self._bridge.profileReady.connect(self._load_project)

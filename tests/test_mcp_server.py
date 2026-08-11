@@ -93,6 +93,7 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "reset_profile_field",
         "finalize_profile",
         "propose_change",
+        "show_curves",
         "call_critic",
         "write_rew_filters",
         "copy_helix_eq",
@@ -716,3 +717,60 @@ def test_a_critique_reaches_the_journal_with_a_pointer_to_its_text(tmp_path, mon
     assert called["review"] == "process/reviews/2026-08-06T21-critic.md"
     assert called["vendor"] == "google"  # inferred from the model, so "a different vendor" is legible
     assert called["mode"] == "api"
+
+
+# ---- show_curves: a disagreement about a number, without a picture in it ----------------------
+
+
+class _CurveBridge(HeadlessBridge):
+    def __init__(self, project_dir) -> None:
+        super().__init__(project_dir)
+        self.shown: list[dict] = []
+
+    def show_curves(self, request):
+        self.shown.append(request)
+
+
+def test_show_curves_puts_the_measurement_and_the_models_reading_on_screen(tmp_path):
+    bridge = _CurveBridge(tmp_path)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool("show_curves", {
+        "titles": ["w-L_01 (sw)", "w-R_01 (sw)"],
+        "markers": [4.52, 4.78],
+        "note": "which of these is the arrival?",
+    }))))
+
+    assert out["shown"] is True
+    assert bridge.shown[-1]["titles"] == ["w-L_01 (sw)", "w-R_01 (sw)"]
+    assert bridge.shown[-1]["markers"] == [4.52, 4.78]
+    assert bridge.shown[-1]["note"] == "which of these is the arrival?"
+
+
+def test_show_curves_returns_at_once_and_says_the_answer_comes_as_a_message(tmp_path):
+    """It must not be waited on in a loop: the reply is a human dragging a marker, and it arrives
+    as an ordinary message so they can see and edit it first."""
+    bridge = _CurveBridge(tmp_path)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool("show_curves", {"titles": ["sub_01 (sw)"]}))))
+
+    assert "message" in out["next"] and "end your turn" in out["next"]
+
+
+def test_show_curves_refuses_an_empty_request_rather_than_opening_an_empty_window(tmp_path):
+    bridge = _CurveBridge(tmp_path)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool("show_curves", {"titles": ["", "  "]}))))
+
+    assert out["shown"] is False and bridge.shown == []
+
+
+def test_an_unknown_curve_kind_falls_back_to_the_impulse_rather_than_failing(tmp_path):
+    bridge = _CurveBridge(tmp_path)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    asyncio.run(mcp.call_tool("show_curves", {"titles": ["sub_01 (sw)"], "kind": "waterfall"}))
+
+    assert bridge.shown[-1]["kind"] == "impulse"

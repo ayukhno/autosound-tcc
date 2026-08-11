@@ -173,6 +173,14 @@ class UiBridge(Protocol):
 
     def show_critique(self, critique: dict[str, Any]) -> None: ...
 
+    def show_curves(self, request: dict[str, Any]) -> None:
+        """Open the curve panel over named REW measurements, with the model's own reading marked.
+
+        The one channel that carries a disagreement about a NUMBER in both directions, without an
+        image anywhere in it: the model says where it read the answer, the Arbiter drags a marker
+        to where they read it, and what comes back is a value rather than a picture of one.
+        """
+
     def notify_profile_ready(self) -> None:
         """A DSP profile was just written (onboarding via terminal, `finalize_profile` below) --
         the GUI should reload it. Fires only from the terminal path; the in-app onboarding chat
@@ -217,6 +225,9 @@ class HeadlessBridge:
         pass
 
     def show_critique(self, critique: dict[str, Any]) -> None:
+        pass
+
+    def show_curves(self, request: dict[str, Any]) -> None:
         pass
 
 
@@ -678,6 +689,43 @@ def build_server(
             return json.dumps({"copied": False, "reason": "Arbiter denied or timed out"})
         bridge.copy_to_clipboard(text)
         return json.dumps({"copied": True, "chars": len(text)})
+
+    @mcp.tool()
+    async def show_curves(
+        titles: list[str], markers: list[float] | None = None,
+        kind: str = "impulse", note: str = "",
+    ) -> str:
+        """Put a measurement on screen with YOUR reading marked, and ask the Arbiter for theirs.
+
+        Use this the moment a number is in dispute — an IR onset, where a joint sums, which peak is
+        the arrival. Do not ask for a screenshot: a picture is an image of an opinion, it cannot be
+        computed on, and pushing one back through this transport has ended a session before.
+
+        `titles` are REW measurement names (`w-L_01 (sw)`), one or two — a disagreement is nearly
+        always about a pair. `markers` is where YOU read the answer, in the plot's own units
+        (milliseconds for `impulse`, Hz for `fr`); the Arbiter's marker starts on yours, so any
+        distance between them afterwards is deliberate. `note` says what you are asking them to
+        look at.
+
+        Returns as soon as the panel is open. The Arbiter's reading arrives as an ordinary message
+        from them — they see it and can edit it first, which is the same rule every other statement
+        of theirs follows. Do not wait for it in a loop; finish your turn.
+        """
+        request = {
+            "titles": [str(t) for t in (titles or []) if str(t).strip()],
+            "markers": [float(m) for m in (markers or [])],
+            "kind": kind if kind in ("impulse", "fr") else "impulse",
+            "note": note,
+        }
+        if not request["titles"]:
+            return json.dumps({"shown": False, "reason": "no measurement titles given"})
+        bridge.show_curves(request)
+        return json.dumps({
+            "shown": True,
+            "titles": request["titles"],
+            "markers": request["markers"],
+            "next": "the Arbiter's reading will arrive as a message; end your turn and wait for it",
+        })
 
     @mcp.tool()
     async def call_critic(package: str, trace_path: str = "", model: str = "") -> str:
