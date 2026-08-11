@@ -12,8 +12,8 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "ayukhno" }]
 dependencies = [
     "PySide6>=6.6",
-    # Declared now because the very next milestone (curve plotting) needs it;
-    # pulls numpy transitively. No app code imports it yet.
+    # Curve plotting: `ui/tcc/curve_view.py`, the panel a disagreement about a number gets
+    # pointed at. Pulls numpy transitively.
     "pyqtgraph>=0.13",
     # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to the
     # locally-authenticated `claude` CLI session — no separate API key needed
