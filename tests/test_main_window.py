@@ -1883,3 +1883,26 @@ def test_two_unknown_models_are_not_reported_as_a_matched_pair(tmp_path, monkeyp
     unknown = mc.Choice(harness="omp", model="mistral-large", label="Mistral", provider="mistral")
     assert mc.vendor_of(unknown) == ""
     assert mc.critic_vendor(unknown) == "google"
+
+
+def test_the_critic_warning_does_not_widen_the_window_off_the_screen(tmp_path, monkeypatch):
+    """The warning added yesterday was a plain QLabel, so it asked for its full natural width and
+    Qt gave it — the window jumped past the right edge of the screen (user, 2026-08-11). Same
+    failure `ElidedLabel` was written for, in a row that had not needed it yet."""
+    from autosound_tcc.core import config
+
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    _app()
+    window = MainWindow()
+    footer = window._critic_warn.parentWidget()
+
+    window._critic_warn.setVisible(False)
+    quiet = footer.minimumSizeHint().width()
+    window._critic_warn.setText("⚠ substituted · same vendor as the Generator")
+    window._critic_warn.setVisible(True)
+
+    # A few pixels for the label's own floor and the layout spacing, not the width of the sentence.
+    assert footer.minimumSizeHint().width() - quiet < 60
+    # ...and nothing is lost: what got cut is on the hover, which is not a Qt tooltip.
+    assert window._critic_warn.toolTip() == "", "two hints on one widget"

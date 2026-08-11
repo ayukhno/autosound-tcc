@@ -53,7 +53,11 @@ class ElidedLabel(QLabel):
         )
         if shown != super().text():
             super().setText(shown)
-        self.setToolTip(self._full if shown != self._full else "")
+        # Not when the widget already has one of the app's own rounded tips (`rounded_tooltip.
+        # attach` leaves it as `hover_tip`): those are not Qt tooltips, so setting a native one
+        # here would put TWO hints on the same widget, in two different shapes.
+        if getattr(self, "hover_tip", None) is None:
+            self.setToolTip(self._full if shown != self._full else "")
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().resizeEvent(event)

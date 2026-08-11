@@ -364,6 +364,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
         font-weight: 600;
     }}
+    /* .kv-warn — a footer value that is a warning rather than a fact (the reviewer being
+    substituted or sharing the Generator's vendor). Its own class rather than inline HTML,
+    because the label has to be an `ElidedLabel` and that one measures plain text. */
+    QLabel[class~="kv-warn"] {{
+        color: {t.warn};
+        font-weight: 600;
+    }}
     /* .kv-val-link — the header's "Target curve" value, clickable through to the skill's online
     target-curve tool (user request 2026-07-28). Looks like a link even before hovering (an
     accent color + the ↗ suffix main_window.py appends to the text) always, not just on hover --

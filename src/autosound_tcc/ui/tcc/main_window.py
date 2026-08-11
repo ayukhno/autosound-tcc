@@ -98,7 +98,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
     clear_layout,
 )
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
-from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
+from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
@@ -748,15 +748,22 @@ class MainWindow(QMainWindow):
         # while the footer read "AGY · Gemini 3.1 Pro (High) · recommended pair" (2026-08-11).
         # Empty and hidden when there is nothing to report -- a permanently-visible caveat is a
         # caveat nobody reads.
-        self._critic_warn = QLabel("")
-        self._critic_warn.setProperty("class", "kv-val")
+        # An `ElidedLabel`, not a QLabel: this text is as long as the reason is, and a footer
+        # label that demands its natural width pushes the window's right edge off the screen --
+        # which is exactly what it did (user, 2026-08-11). The full reason is on the tooltip,
+        # which this label maintains itself whenever it had to cut.
+        self._critic_warn = ElidedLabel("", min_width=18)
+        self._critic_warn.setProperty("class", "kv-warn")
         self._critic_warn.setVisible(False)
         self._critic_warn_tip = attach_tip(self._critic_warn, "")
         layout.addWidget(self._critic_warn)
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
         # panel's "engaged? which AI+model? last called when").
-        self._critic_status = QLabel(i18n.t("criticNever"))
+        # Elides for the same reason as the warning beside it: a model name plus "4 h ago" is as
+        # long as the model's name happens to be, and a footer that asks for its natural width
+        # takes the window's right edge off the screen with it.
+        self._critic_status = ElidedLabel(i18n.t("criticNever"), min_width=40)
         self._critic_status.setProperty("class", "kv-val")
         layout.addWidget(self._critic_status)
 
@@ -2059,12 +2066,12 @@ class MainWindow(QMainWindow):
             if vendor and vendor == model_choices.vendor_of(generator):
                 notes.append(i18n.t("criticSameVendor"))
                 tips.append(i18n.t("criticSameVendorTip").format(vendor=vendor))
-        theme = current_theme()
-        warn.setText(
-            f'<span style="color:{theme.warn}">⚠ {" · ".join(notes)}</span>' if notes else ""
-        )
+        headline = f'⚠ {" · ".join(notes)}' if notes else ""
+        warn.setText(headline)
         warn.setVisible(bool(notes))
-        self._critic_warn_tip.set_text("<br>".join(tips))
+        # The headline leads the tip as well: the label elides, so the hover has to be able to
+        # show what was cut as well as why it matters.
+        self._critic_warn_tip.set_text("<br>".join(([headline] if headline else []) + tips))
 
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
