@@ -2673,10 +2673,9 @@ class MainWindow(QMainWindow):
         self._plan_panel.retranslate()
         self._meas_panel.retranslate()
         if not self._has_project:
-            # MeasurementPanel.retranslate() deliberately skips rebuilding its grid while
-            # set_no_project() is active (see its own comment) -- but that also means it can't
-            # re-resolve the message text itself, since it only ever sees the already-resolved
-            # string MainWindow passed in, not the i18n key.
+            # The panel's own empty state is "no capture task derived yet", which is a different
+            # sentence from "no project open" -- and it cannot resolve the latter itself, since it
+            # only ever sees the already-resolved string MainWindow passed in, not the i18n key.
             self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
         self._create_project_btn.setText(i18n.t("createProject"))
         self._dialog.retranslate()

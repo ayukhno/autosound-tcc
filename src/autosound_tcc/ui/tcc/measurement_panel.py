@@ -285,6 +285,14 @@ class MeasurementPanel(QWidget):
         # names always act on the live session regardless (see `_on_read_clicked` etc.'s guard).
         self._sessions = MEAS_SESSIONS
         self._viewing_id = self._sessions[0].id
+        # Whether `_sessions` is a REAL derived capture task or still the mock fixture. The
+        # difference only ever mattered on a language switch, which is exactly where it was
+        # missing -- see `retranslate`.
+        self._has_real_sessions = False
+        # The last status line as (i18n key, format args) rather than as finished text, so a
+        # language switch re-renders it instead of leaving a Ukrainian sentence under an English
+        # window. None = nothing to say yet, which is not the same as an empty string.
+        self._status: Optional[tuple[str, dict]] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -364,7 +372,6 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setWordWrap(True)
         self._no_project_label.setVisible(False)
         layout.addWidget(self._no_project_label)
-        self._no_project_active = False
 
         self.show_session(self._viewing_id)
         # ...and then hide it. `MEAS_SESSIONS` still builds the grid so the widget has its real
@@ -373,12 +380,22 @@ class MeasurementPanel(QWidget):
         # invented channel names is the plan panel's retired demo plan in a second place.
         self.set_no_project(i18n.t("measNoTask"))
 
+    def _set_status(self, key: str, **kwargs) -> None:
+        """Show a status line, remembering WHICH line it is so `retranslate` can redraw it."""
+        self._status = (key, kwargs)
+        self._render_status()
+
+    def _render_status(self) -> None:
+        if self._status is None:
+            return
+        key, kwargs = self._status
+        self._status_label.setText(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
+
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
         when there's no real project on disk at all. `set_sessions()` reverses this the moment a
-        real capture task arrives. `_no_project_active` is what stops `retranslate()` from
-        rebuilding the mock grid back in via `show_session()` on a language switch."""
-        self._no_project_active = True
+        real capture task arrives."""
+        self._has_real_sessions = False  # whatever was derived is gone; do not redraw it later
         for widget in (
             self._session_combo,
             self._version,
@@ -399,7 +416,6 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setVisible(True)
 
     def _show_content(self) -> None:
-        self._no_project_active = False
         for widget in (
             self._session_combo,
             self._version,
@@ -424,6 +440,7 @@ class MeasurementPanel(QWidget):
             self.set_no_project(i18n.t("measNoTask"))
             return
         self._show_content()  # reverses a prior set_no_project(), a no-op otherwise
+        self._has_real_sessions = True
         self._sessions = tuple(sessions)
         self._viewing_id = self._sessions[0].id
         self._session_combo.blockSignals(True)
@@ -481,16 +498,23 @@ class MeasurementPanel(QWidget):
             self._col_next_row.append(len(group.items) + 1)
 
     def retranslate(self) -> None:
-        # show_session() rebuilds _cols_layout from the (mock) session data -- skip it while
-        # set_no_project() is active, or a language switch would silently bring the mock grid
-        # back over a real "no project" state.
-        if not self._no_project_active:
+        """Re-render whatever this panel is currently showing, in the new language.
+
+        It used to end with an unconditional `set_no_project()`. That was written when the mock was
+        the only thing the panel could hold, and the line's own job was to hide it -- but `set_
+        sessions()` (SCR-008) later gave the panel a REAL capture task to hold, and the language
+        switch went on wiping it. Sixteen captures read from REW, switch to English, empty card
+        (user, 2026-08-11). What a panel shows must not depend on which language it shows it in.
+        """
+        if self._has_real_sessions:
             self.show_session(self._viewing_id)
-        # ...and then hide it. `MEAS_SESSIONS` still builds the grid so the widget has its real
-        # shape (and the design/unit tests keep a fixture), but a project is not shown a capture
-        # series it never took: opening one and being met with "capture series v10" over invented
-        # channel names is the plan panel's retired demo plan in a second place.
-        self.set_no_project(i18n.t("measNoTask"))  # re-renders the banner text in the new language
+        else:
+            # No real task derived yet. `MEAS_SESSIONS` is still the widget's shape fixture, but a
+            # project is never SHOWN a capture series it did not take: being met with "capture
+            # series v10" over invented channel names is the plan panel's retired demo plan in a
+            # second place.
+            self.set_no_project(i18n.t("measNoTask"))
+        self._render_status()  # the last Read/Scan result, in the new language too
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
 
@@ -557,7 +581,7 @@ class MeasurementPanel(QWidget):
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return
         self._status_label.setHidden(False)
-        self._status_label.setText(i18n.t("measReading"))
+        self._set_status("measReading")
         self._pending_order = order
         self._replace_worker("_scan_worker", _RewScanWorker(self._bridge))
         self._scan_worker.done.connect(self._on_scan_done)
@@ -583,9 +607,7 @@ class MeasurementPanel(QWidget):
         expected = len(order)
         found_count = len(measurements)
         if found_count < expected:
-            self._status_label.setText(
-                i18n.t("captureScanMismatch").format(found=found_count, expected=expected)
-            )
+            self._set_status("captureScanMismatch", found=found_count, expected=expected)
             return
         # The `expected` highest-ordinal ids are treated as "the newest batch" -- same "highest
         # ordinal = most recent" heuristic as _RewReadWorker (rew-api-quirks.md: REW's own ordinal
@@ -599,19 +621,17 @@ class MeasurementPanel(QWidget):
         # button yet (see naming-and-structure.md §3 for the fuller `<channel>_<version> (method)`
         # convention). Extend here once a "current capture version/method" concept exists.
         pairs = list(zip(newest_ids, order))
-        self._status_label.setText(i18n.t("captureRenaming").format(n=len(pairs)))
+        self._set_status("captureRenaming", n=len(pairs))
         self._replace_worker("_rename_worker", _RewRenameWorker(self._bridge, pairs))
         self._rename_worker.done.connect(self._on_rename_done)
         self._rename_worker.failed.connect(self._on_rename_failed)
         self._rename_worker.start()
 
     def _on_rename_done(self, renamed: list) -> None:
-        self._status_label.setText(i18n.t("captureRenameOk").format(n=len(renamed)))
+        self._set_status("captureRenameOk", n=len(renamed))
 
     def _on_rename_failed(self, message: str, renamed: list) -> None:
-        self._status_label.setText(
-            i18n.t("captureRenameFail").format(error=message, n=len(renamed))
-        )
+        self._set_status("captureRenameFail", error=message, n=len(renamed))
 
     def _replace_worker(self, attr: str, worker: QThread) -> QThread:
         """Put `worker` in `self.<attr>`, waiting out whatever was there.
@@ -644,7 +664,7 @@ class MeasurementPanel(QWidget):
             return
         self._read_btn.setEnabled(False)
         self._status_label.setHidden(False)
-        self._status_label.setText(i18n.t("measReading"))
+        self._set_status("measReading")
         self._replace_worker("_worker", _RewReadWorker(self._bridge))
         self._worker.done.connect(self._on_read_done)
         self._worker.failed.connect(self._on_read_failed)
@@ -686,9 +706,7 @@ class MeasurementPanel(QWidget):
             self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
             self._additional_titles.add(title)
             added += 1
-        self._status_label.setText(
-            i18n.t("measReadOk").format(n=len(titles), matched=matched, extra=added)
-        )
+        self._set_status("measReadOk", n=len(titles), matched=matched, extra=added)
 
     def _title_key(self, title: str):
         """A title's identity in the naming grammar, or None if it is not one of ours.
@@ -767,4 +785,4 @@ class MeasurementPanel(QWidget):
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)
-        self._status_label.setText(i18n.t("measReadFail").format(error=message))
+        self._set_status("measReadFail", error=message)

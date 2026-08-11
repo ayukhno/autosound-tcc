@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog  # noqa: E402
 from autosound_tcc.ui.tcc.mock_data import MEAS_SESSIONS  # noqa: E402
 from autosound_tcc.state import measurement_view  # noqa: E402
@@ -474,3 +475,43 @@ def test_the_method_is_not_appended_to_a_name_that_already_carries_it():
     assert with_method("tw-L_1 (sw)", "sw") == "tw-L_1 (sw)"
     assert with_method("tw-L_1", "sw") == "tw-L_1 (sw)"
     assert with_method("  tw-L_1  ", "rta") == "tw-L_1 (rta)"
+
+
+def test_language_switch_keeps_a_real_capture_task_on_screen():
+    """The 2026-08-11 bug: sixteen captures read from REW, switch to English, empty card.
+
+    `retranslate()` ended with an unconditional `set_no_project()` -- written when the mock was the
+    only thing the panel could hold, and never revisited when `set_sessions()` gave it a real task.
+    """
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
+    rows_before = len(panel._rows)
+    assert rows_before
+
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en" if before == "uk" else "uk")
+        panel.retranslate()
+        assert len(panel._rows) == rows_before
+        assert not panel._no_project_label.isVisible()
+        # ...and the status line speaks the new language rather than staying frozen mid-sentence.
+        assert panel._status_label.text() == i18n.t("measReadOk").format(n=1, matched=1, extra=0)
+    finally:
+        i18n.set_language(before)
+
+
+def test_language_switch_keeps_the_no_project_message_when_there_is_no_task():
+    """The other half: without a derived task the card must stay empty, not fall back to the mock
+    grid -- a project has never taken "capture series v10" over invented channel names."""
+    _app()
+    panel = MeasurementPanel()  # constructor ends in set_no_project()
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en" if before == "uk" else "uk")
+        panel.retranslate()
+        assert panel._rows == []
+        assert panel._no_project_label.text() == i18n.t("measNoTask")
+    finally:
+        i18n.set_language(before)
