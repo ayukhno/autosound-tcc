@@ -18,9 +18,11 @@ driver against its joint partner). Markers are draggable and their delta is the 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -60,7 +62,12 @@ class CurveView(QWidget):
     def __init__(self, x_label: str = "ms", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         theme = current_theme()
-        pg.setConfigOptions(antialias=True)
+        # Antialiasing off: a REW impulse is 262 144 points per trace (measured, not estimated),
+        # and smoothing every segment of that is most of the cost of drawing it. At this density
+        # the line is a solid block of pixels anyway.
+        pg.setConfigOptions(antialias=False)
+        self._unit = x_label
+        self._log_x = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -69,6 +76,12 @@ class CurveView(QWidget):
         self._plot = pg.PlotWidget(background=theme.panel)
         self._plot.showGrid(x=True, y=True, alpha=0.18)
         self._plot.setLabel("bottom", x_label)
+        # The two settings that make a quarter-million points usable: draw a peak-preserving
+        # decimation instead of every sample, and only the samples inside the current view. Peak
+        # mode rather than mean because the thing being looked for IS the extreme — a mean-
+        # downsampled impulse loses the very onset the argument is about.
+        self._plot.setDownsampling(auto=True, mode="peak")
+        self._plot.setClipToView(True)
         for axis in ("bottom", "left"):
             self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
@@ -107,17 +120,26 @@ class CurveView(QWidget):
         for index, trace in enumerate(self._traces):
             token = _TRACE_TOKENS[index % len(_TRACE_TOKENS)]
             self._plot.plot(
-                list(trace.x), list(trace.y),
-                pen=pg.mkPen(getattr(theme, token), width=1.4), name=trace.name,
+                # Arrays, not Python lists: pyqtgraph converts a list element by element, and a
+                # list comprehension over 262 144 floats had already been paid for upstream.
+                np.asarray(trace.x, dtype=float), np.asarray(trace.y, dtype=float),
+                pen=pg.mkPen(getattr(theme, token), width=1.0), name=trace.name,
             )
         for line in self._markers:
             self._plot.addItem(line)
         self._render_readout()
 
-    def set_markers(self, positions: Sequence[float], names: Sequence[str] = ()) -> None:
-        """Place markers at `positions`. The FIRST is the model's reading, the rest are the
-        Arbiter's — coloured apart, because a panel that shows two numbers as one colour is a panel
-        that lets them be confused for each other."""
+    def set_markers(
+        self, positions: Sequence[float], names: Sequence[str] = (),
+        tokens: Sequence[str] = (),
+    ) -> None:
+        """Place markers at `positions`.
+
+        By default the FIRST is the model's reading and the rest are the Arbiter's, coloured apart
+        because a panel that shows two numbers in one colour lets them be confused for each other.
+        `tokens` overrides that: when the markers are one-per-curve rather than model-versus-you,
+        each takes its own curve's colour, and calling one of them "the model's" would be a lie.
+        """
         for line in self._markers:
             self._plot.removeItem(line)
         self._markers = []
@@ -127,11 +149,15 @@ class CurveView(QWidget):
         ]
         theme = current_theme()
         for index, position in enumerate(positions):
-            token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
+            if index < len(tokens):
+                token = tokens[index]
+            else:
+                token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
             line = pg.InfiniteLine(
-                pos=float(position), angle=90, movable=True,
+                pos=self._to_view(float(position)), angle=90, movable=True,
                 pen=pg.mkPen(getattr(theme, token), width=1.6,
-                             style=Qt.PenStyle.DashLine if index == 0 else Qt.PenStyle.SolidLine),
+                             style=Qt.PenStyle.DashLine if index == 0 and not tokens
+                             else Qt.PenStyle.SolidLine),
                 label=self._marker_names[index] if index < len(self._marker_names) else "",
                 # Staggered heights: the two markers START on top of each other (that is the
                 # point — the Arbiter drags away from the model's reading), and labels printed at
@@ -144,10 +170,46 @@ class CurveView(QWidget):
             self._markers.append(line)
         self._render_readout()
 
+    def set_log_x(self, on: bool) -> None:
+        """Frequency is read on a log axis; time is not.
+
+        pyqtgraph's log mode transforms the DATA and leaves everything else in view coordinates —
+        so a marker placed at 96.6 lands at 10^96.6 and the axis runs to 1e+27 (seen, 2026-08-11).
+        Every position that crosses this class's boundary is therefore converted here rather than
+        by each caller, who would otherwise have to know which mode the plot happens to be in.
+        """
+        self._log_x = bool(on)
+        self._plot.setLogMode(x=self._log_x, y=False)
+
+    def _to_view(self, x: float) -> float:
+        return math.log10(x) if self._log_x and x > 0 else float(x)
+
+    def _from_view(self, x: float) -> float:
+        return 10.0 ** x if self._log_x else float(x)
+
+    def set_unit(self, unit: str) -> None:
+        """What the marker positions are IN. Wrong units in a reading are worse than no reading."""
+        self._unit = unit
+        self._plot.setLabel("bottom", unit)
+        self._render_readout()
+
+    def focus_x(self, low: float, high: float) -> None:
+        """Show this span, and no padding around it.
+
+        A REW impulse spans −995 ms to +1735 ms; auto-ranged, the two millimetres the argument is
+        about are a vertical line. The full sweep is still there — zoom out and it is all present.
+        """
+        if high > low:
+            self._plot.setXRange(self._to_view(low), self._to_view(high), padding=0.02)
+
+    def autoscale_y(self) -> None:
+        self._plot.enableAutoRange(axis="y")
+
     # ---- what the Arbiter is saying --------------------------------------
 
     def positions(self) -> list[float]:
-        return [float(line.value()) for line in self._markers]
+        """In the unit the axis is labelled with — Hz, not log10(Hz)."""
+        return [self._from_view(float(line.value())) for line in self._markers]
 
     def reading(self) -> str:
         """The markers as a sentence a model can parse — names, positions, and the delta.
@@ -158,14 +220,16 @@ class CurveView(QWidget):
         if not self._markers:
             return ""
         names = [t.name for t in self._traces] or [""]
+        digits = 3 if self._unit == "ms" else 1
         parts = [
-            f"{self._marker_names[i] if i < len(self._marker_names) else i}: {p:.3f} ms"
+            f"{self._marker_names[i] if i < len(self._marker_names) else i}: "
+            f"{p:.{digits}f} {self._unit}"
             for i, p in enumerate(self.positions())
         ]
         line = ", ".join(parts)
         if len(self._markers) >= 2:
             positions = self.positions()
-            line += f" (Δ {abs(positions[1] - positions[0]):.3f} ms)"
+            line += f" (Δ {abs(positions[1] - positions[0]):.{digits}f} {self._unit})"
         return f"{' / '.join(names)} — {line}"
 
     def on_send(self, handler: Callable[[str], None]) -> None:

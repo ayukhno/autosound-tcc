@@ -11,6 +11,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -186,3 +187,64 @@ def test_one_curve_is_a_legitimate_thing_to_argue_about():
     dialog._worker.wait(4000)
 
     assert dialog._chosen() == ["w-L_01 (sw)"]
+
+
+# ---- what a measurement can actually show (user, 2026-08-11) ----------------------------------
+
+
+def test_an_rta_capture_is_plotted_as_frequency_response_not_asked_for_an_impulse():
+    """An MMM/RTA capture has no impulse response — REW answers HTTP 400 — so asking for one is a
+    broken window. The method suffix already says which kind a measurement is."""
+    from autosound_tcc.ui.tcc.curve_dialog import kind_for
+
+    assert kind_for(["w-L_01 (rta)", "w-R_01 (rta)"]) == "fr"
+    assert kind_for(["w-L_01 (sw)", "w-R_01 (sw)"]) == "impulse"
+    # A mixed pair keeps the impulse: the sweep can provide one, and the caller asked.
+    assert kind_for(["w-L_01 (sw)", "w-R_01 (rta)"], "impulse") == "impulse"
+    # ...but an explicit `impulse` over an all-RTA selection is a request that cannot be honoured.
+    assert kind_for(["w-L_01 (rta)"], "impulse") == "fr"
+
+
+def test_marker_positions_are_hz_not_log_hz():
+    """pyqtgraph's log mode transforms the DATA and leaves markers in view coordinates, so a
+    marker placed at 96.6 Hz landed at 10^96.6 and the axis ran to 1e+27 (seen on the first RTA
+    plot)."""
+    view = _view()
+    view.set_unit("Hz")
+    view.set_log_x(True)
+    view.set_markers([100.0, 1000.0])
+
+    assert view.positions() == pytest.approx([100.0, 1000.0], rel=1e-6)
+    assert "100.0 Hz" in view.reading() and "Δ 900.0 Hz" in view.reading()
+
+
+def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
+    _app()
+
+    class _HalfBroken(_FakeBridge):
+        def impulse_response(self, mid):
+            if "rta" in mid:
+                raise RuntimeError("HTTP Error 400: Bad Request")
+            return super().impulse_response(mid)
+
+    dialog = CurveDialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_HalfBroken(), kind="impulse")
+    dialog._worker.wait(4000)
+    got = []
+    dialog._worker.done.connect(got.append)
+    dialog._worker.run()
+
+    assert [t.name for t in got[-1]] == ["w-L_01 (sw)"]
+
+
+def test_the_impulse_opens_on_the_arrival_not_on_three_seconds_of_room():
+    """A REW impulse spans −995 ms to +1735 ms. Auto-ranged, the two millimetres the argument is
+    about are a vertical line."""
+    _app()
+    dialog = CurveDialog(["w-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52, n=4000, span=200.0))])
+
+    low, high = dialog._view._plot.viewRange()[0]
+    assert high - low < 12, "the view must open on the peak, not on the whole capture"
+    assert low < 4.52 < high

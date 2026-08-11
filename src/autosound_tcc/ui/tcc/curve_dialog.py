@@ -13,29 +13,55 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
+import numpy as np
+
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
-from autosound_tcc.ui.tcc.curve_view import CurveView, Trace
+from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
 
 #: What can be plotted, and how each one is fetched and labelled. Impulse first because that is
 #: where the argument that prompted this happened; the others are the same widget with a different
 #: reader, added when they are actually asked for rather than because a menu looked incomplete.
 KINDS = {
-    "impulse": {"label_x": "ms", "scale_x": 1000.0},
-    "fr": {"label_x": "Hz", "scale_x": 1.0},
+    "impulse": {"label_x": "ms", "scale_x": 1000.0, "log_x": False},
+    "fr": {"label_x": "Hz", "scale_x": 1.0, "log_x": True},
 }
+#: How far either side of the peak the impulse view opens on. A REW impulse spans −995 ms to
+#: +1735 ms (measured); the arrival argument happens inside a couple of milliseconds of the peak,
+#: and everything else is there for whoever zooms out.
+_IMPULSE_WINDOW_MS = 4.0
+#: What an FR view opens on. REW reports out to 47 kHz and down to 4 Hz; outside the audible band
+#: it is measurement noise, and auto-ranging over it flattens the part being argued about.
+_FR_BAND_HZ = (20.0, 20000.0)
+
+
+def kind_for(titles: Sequence[str], asked: str = "") -> str:
+    """Which curve these measurements can actually show.
+
+    An MMM/RTA capture has NO impulse response — REW answers 400 — so asking for one is an error
+    the Arbiter sees as a broken window (user, 2026-08-11). The method suffix already says which
+    kind a measurement is, so the window can pick rather than fail: any sweep in the selection
+    means an impulse is available, all-RTA means frequency response.
+    """
+    if asked in KINDS and not all(str(t).rstrip().endswith("(rta)") for t in titles):
+        return asked
+    if titles and all(str(t).rstrip().endswith("(rta)") for t in titles):
+        return "fr"
+    return asked if asked in KINDS else "impulse"
 
 
 def _peak_x(trace) -> float:
-    """The x of the largest |y| — an impulse's arrival, read the crudest way there is."""
-    best, best_x = -1.0, float(trace.x[0])
-    for x, y in zip(trace.x, trace.y):
-        if abs(y) > best:
-            best, best_x = abs(y), float(x)
-    return best_x
+    """The x of the largest |y| — an impulse's arrival, read the crudest way there is.
+
+    numpy, because a Python loop over 262 144 samples is a visible pause per trace.
+    """
+    y = np.asarray(trace.y, dtype=float)
+    if not y.size:
+        return 0.0
+    return float(np.asarray(trace.x, dtype=float)[int(np.argmax(np.abs(y)))])
 
 
 class _CurveWorker(QThread):
@@ -52,18 +78,28 @@ class _CurveWorker(QThread):
 
     def run(self) -> None:
         traces: list[Trace] = []
-        try:
-            for title in self._titles:
+        problems: list[str] = []
+        for title in self._titles:
+            # Per measurement, not per batch: one curve REW cannot produce must not take the other
+            # one off the screen with it. The window shows what it has and names what it does not.
+            try:
                 mid = self._bridge.find_id(title)
                 if self._kind == "impulse":
                     times, samples = self._bridge.impulse_response(mid)
-                    scale = KINDS["impulse"]["scale_x"]
-                    traces.append(Trace(title, [t * scale for t in times], list(samples)))
+                    # numpy from here down. These are 262 144 points per trace, and a Python list
+                    # comprehension over them was the panel's actual cost, not the HTTP call
+                    # (measured: fetch 0.03 s).
+                    x = np.asarray(times, dtype=float) * KINDS["impulse"]["scale_x"]
+                    traces.append(Trace(title, x, np.asarray(samples, dtype=float)))
                 else:
                     freqs, mag, _phase = self._bridge.frequency_response(mid)
-                    traces.append(Trace(title, list(freqs), list(mag)))
-        except Exception as exc:  # noqa: BLE001 — any REW failure is a message, not a crash
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+                    traces.append(
+                        Trace(title, np.asarray(freqs, dtype=float), np.asarray(mag, dtype=float))
+                    )
+            except Exception as exc:  # noqa: BLE001 — a REW failure is a message, not a crash
+                problems.append(f"{title}: {type(exc).__name__}")
+        if not traces:
+            self.failed.emit("; ".join(problems) or "no curves")
             return
         self.done.emit(traces)
 
@@ -93,7 +129,7 @@ class CurveDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(i18n.t("curveTitle"))
         self.resize(880, 560)
-        self._kind = kind if kind in KINDS else "impulse"
+        self._kind = kind_for(titles, kind)
         self._markers = list(markers)
         self._bridge = bridge or RewBridge()
         self._worker: Optional[_CurveWorker] = None
@@ -124,6 +160,19 @@ class CurveDialog(QDialog):
                 self._pickers.append(combo)
             layout.addLayout(picker_row)
 
+        # The kind is a property of the WINDOW, not of a measurement: two curves in different
+        # units on one pair of axes would be a picture of nothing. Switching it re-fetches.
+        self._kind_combo = QComboBox()
+        self._kind_combo.setProperty("class", "mini-select")
+        for key in KINDS:
+            self._kind_combo.addItem(i18n.t(f"curveKind_{key}"), key)
+        self._kind_combo.setCurrentIndex(max(0, self._kind_combo.findData(self._kind)))
+        self._kind_combo.currentIndexChanged.connect(self._on_kind_changed)
+        if self._pickers:
+            picker_row.addWidget(self._kind_combo)
+        else:
+            layout.addWidget(self._kind_combo)
+
         self._status = QLabel(i18n.t("curveLoading"))
         self._status.setProperty("class", "phead-sub")
         self._status.setWordWrap(True)
@@ -134,7 +183,18 @@ class CurveDialog(QDialog):
         layout.addWidget(self._view, stretch=1)
 
         self._titles = list(titles)
+        self._apply_kind()
         self._reload()
+
+    def _on_kind_changed(self, _index: int) -> None:
+        self._kind = str(self._kind_combo.currentData() or "impulse")
+        self._apply_kind()
+        self._reload()
+
+    def _apply_kind(self) -> None:
+        spec = KINDS[self._kind]
+        self._view.set_unit(str(spec["label_x"]))
+        self._view.set_log_x(bool(spec["log_x"]))
 
     def _chosen(self) -> list[str]:
         if not self._pickers:
@@ -160,7 +220,18 @@ class CurveDialog(QDialog):
     def _on_curves(self, traces: list) -> None:
         self._status.setVisible(False)
         self._view.set_traces(traces)
-        self._view.set_markers(*self._starting_markers(traces))
+        positions, names, tokens = self._starting_markers(traces)
+        self._view.set_markers(positions, names, tokens)
+        self._frame(traces, positions)
+
+    def _frame(self, traces: list, positions: list) -> None:
+        """Open on the part being argued about rather than on everything REW recorded."""
+        if self._kind == "fr":
+            self._view.focus_x(*_FR_BAND_HZ)
+        elif positions:
+            centre = sum(positions) / len(positions)
+            self._view.focus_x(centre - _IMPULSE_WINDOW_MS, centre + _IMPULSE_WINDOW_MS)
+        self._view.autoscale_y()
 
     def _starting_markers(self, traces: list):
         """Where the markers begin, and what to call them.
@@ -179,9 +250,12 @@ class CurveDialog(QDialog):
             names = [i18n.t("curveMarkerModel"), i18n.t("curveMarkerYou")]
             if len(positions) == 1:
                 positions.append(positions[0])
-            return positions[:2], names[:len(positions[:2])]
-        positions = [_peak_x(t) for t in traces[:2] if len(t.x)]
-        return positions, [t.name for t in traces[:2] if len(t.x)]
+            return positions[:2], names[:len(positions[:2])], []
+        usable = [t for t in traces[:2] if len(t.x)]
+        # One marker per curve, each in its curve's own colour: nobody has claimed a reading yet,
+        # so calling the first one "the model's" would be a lie the colour tells.
+        return ([_peak_x(t) for t in usable], [t.name for t in usable],
+                list(_TRACE_TOKENS[:len(usable)]))
 
     def _on_failed(self, message: str) -> None:
         self._status.setVisible(True)
