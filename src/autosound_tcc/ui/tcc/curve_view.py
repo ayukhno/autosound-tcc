@@ -154,6 +154,12 @@ class CurveView(QWidget):
         # downsampled impulse loses the very onset the argument is about.
         self._plot.setDownsampling(auto=True, mode="peak")
         self._plot.setClipToView(True)
+        # pyqtgraph's own right-click menu is off. It offers this app nothing that the A/D/−/+
+        # buttons do not (and several things that mean nothing here — "Link Axis", "Auto Pan
+        # Only"), while being a native QMenu full of unstyled spin boxes that renders as
+        # white-on-white in the dark theme (user, 2026-08-11, with the picture). Removing the
+        # menu removes the whole class of problem rather than restyling somebody else's dialog.
+        self._plot.setMenuEnabled(False)
         for axis in ("bottom", "left"):
             self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
@@ -281,6 +287,30 @@ class CurveView(QWidget):
         self._marker_tokens = list(tokens)
         self._rebuild_h_markers()
         self._render_readout()
+
+    def apply_theme(self) -> None:
+        """Re-read the palette after a theme switch.
+
+        Everything else in the app repaints from the stylesheet; a plot draws with explicit pens
+        and brushes, so it keeps the colours it was built with until somebody says otherwise — a
+        light plot sitting in a dark window (user, 2026-08-11).
+        """
+        theme = current_theme()
+        self._plot.setBackground(theme.panel)
+        for axis_name in ("bottom", "left"):
+            axis = self._plot.getAxis(axis_name)
+            axis.setPen(pg.mkPen(theme.border2))
+            axis.setTextPen(pg.mkPen(theme.muted))
+        if self._legend is not None:
+            self._legend.setLabelTextColor(theme.text)
+        # Traces and markers are rebuilt rather than recoloured in place: both already know how to
+        # draw themselves from the current theme, and two ways of doing it is one too many.
+        traces, positions = list(self._traces), self.positions()
+        names, tokens = list(self._marker_names), list(self._marker_tokens)
+        if traces:
+            self.set_traces(traces)
+        if positions:
+            self.set_markers(positions, names, tokens)
 
     def set_log_x(self, on: bool) -> None:
         """Frequency is read on a log axis; time is not.

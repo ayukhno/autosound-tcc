@@ -345,3 +345,34 @@ def test_the_unit_sits_with_the_numbers_not_under_the_axis():
     assert view._unit_label.text() == "Hz/dB"
     view.set_axes_mode("h")
     assert view._unit_label.text() == "dB"
+
+
+def test_the_plot_repaints_when_the_theme_changes():
+    """Everything else in the app repaints from the stylesheet; a plot draws with explicit pens
+    and keeps the colours it was built with — a light plot sitting in a dark window (user,
+    2026-08-11)."""
+    from autosound_tcc.ui.tcc.theme import apply_theme
+
+    app = _app()
+    apply_theme(app, "light")
+    view = _view()
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    light_bg = view._plot.backgroundBrush().color().name()
+    light_pen = view._markers[0].pen.color().name()
+
+    apply_theme(app, "dark")
+    view.apply_theme()
+
+    assert view._plot.backgroundBrush().color().name() != light_bg
+    assert view._markers[0].pen.color().name() != light_pen
+    # ...and the reading survives the repaint: a theme switch must not move a marker.
+    assert view.positions() == pytest.approx([4.52, 4.78])
+    apply_theme(app, "light")
+
+
+def test_pyqtgraphs_own_context_menu_is_not_offered():
+    """It is a native QMenu of unstyled spin boxes — white-on-white in the dark theme — and it
+    offers nothing the A/D/−/+ buttons do not."""
+    view = _view()
+
+    assert view._plot.getPlotItem().vb.menuEnabled() is False

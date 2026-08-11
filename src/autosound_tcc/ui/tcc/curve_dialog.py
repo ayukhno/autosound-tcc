@@ -271,6 +271,10 @@ class CurveDialog(QDialog):
         return ([_peak_x(t) for t in usable], [t.name for t in usable],
                 list(_TRACE_TOKENS[:len(usable)]))
 
+    def apply_theme(self) -> None:
+        """Passed through from the window: a plot does not repaint from a stylesheet."""
+        self._view.apply_theme()
+
     def _on_failed(self, message: str) -> None:
         self._status.setVisible(True)
         self._status.setText(i18n.t("curveFailed").format(error=message))

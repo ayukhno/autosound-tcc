@@ -1645,6 +1645,14 @@ class MainWindow(QMainWindow):
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
         self._repolish_all()
+        # The curve window is not in this window's widget tree and would not repaint from the
+        # stylesheet even if it were: pyqtgraph draws with explicit pens.
+        curves = getattr(self, "_curve_dialog", None)
+        if curves is not None:
+            try:
+                curves.apply_theme()
+            except RuntimeError:
+                self._curve_dialog = None  # closed and deleted since
 
     def _repolish_all(self) -> None:
         """Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
