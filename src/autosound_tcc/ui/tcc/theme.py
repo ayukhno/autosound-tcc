@@ -312,6 +312,27 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QComboBox[class~="mini-select"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .is-warn — the picker whose current choice is not what it appears to be (substituted, or
+    the reviewer sharing the Generator's vendor). Tinted rather than only marked beside: a warning
+    sign next to a normal-looking field leaves you hunting for what it refers to. */
+    QComboBox[class~="is-warn"] {{
+        background: {t.mix('warn', 14, 'panel3')};
+        border-color: {t.warn};
+    }}
+    /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
+    clickable; hover says what, click says why. */
+    QPushButton[class~="warn-mark"] {{
+        background: {t.mix('warn', 16, 'panel')};
+        color: {t.warn};
+        border: 1px solid {t.warn};
+        border-radius: 9px;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 0;
+    }}
+    QPushButton[class~="warn-mark"]:hover {{
+        background: {t.mix('warn', 30, 'panel')};
+    }}
     QComboBox[class~="mini-select"]::drop-down {{
         border: none;
         width: 18px;

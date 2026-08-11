@@ -133,7 +133,11 @@ class CurveView(QWidget):
                 pen=pg.mkPen(getattr(theme, token), width=1.6,
                              style=Qt.PenStyle.DashLine if index == 0 else Qt.PenStyle.SolidLine),
                 label=self._marker_names[index] if index < len(self._marker_names) else "",
-                labelOpts={"color": getattr(theme, token), "position": 0.92},
+                # Staggered heights: the two markers START on top of each other (that is the
+                # point — the Arbiter drags away from the model's reading), and labels printed at
+                # the same height would overlap into one unreadable word until they separate.
+                labelOpts={"color": getattr(theme, token),
+                           "position": 0.94 - 0.07 * index},
             )
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)

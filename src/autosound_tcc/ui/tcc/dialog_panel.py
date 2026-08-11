@@ -490,6 +490,17 @@ class DialogPanel(QWidget):
         composer_layout.addWidget(self._stop_btn)
         outer.addWidget(composer)
 
+    def put_in_composer(self, text: str) -> None:
+        """Append a line to the composer without sending it. Used by anything that produces a
+        statement the Arbiter should see before it goes out — the curve window's reading, an
+        attached screenshot's path."""
+        text = (text or "").strip()
+        if not text:
+            return
+        existing = self._input.text().rstrip()
+        self._input.setText(f"{existing}\n{text}" if existing else text)
+        self._input.setFocus()
+
     def _on_attach_image(self) -> None:
         """Paste a screenshot; TCC saves it in the project and writes the path into the composer.
 
@@ -503,12 +514,7 @@ class DialogPanel(QWidget):
         dialog = AttachImageDialog(config.project_dir(), parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        line = dialog.line()
-        if not line:
-            return
-        existing = self._input.text().rstrip()
-        self._input.setText(f"{existing}\n{line}" if existing else line)
-        self._input.setFocus()
+        self.put_in_composer(dialog.line())
 
     def retranslate(self) -> None:
         """Re-set the panel's own *chrome* (title, chip, composer) into the new UI language.

@@ -1859,6 +1859,7 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     # `isHidden`, not `isVisible`: the window is never shown in these tests, so every child
     # reports invisible regardless of its own flag.
     assert window._critic_warn.isHidden()  # a different vendor, nothing substituted
+    assert "is-warn" not in str(window._ai_critic_combo.property("class"))
 
     # The machine now sends the chosen reviewer somewhere else — and that somewhere is the
     # Generator's own vendor, so both warnings apply at once.
@@ -1867,11 +1868,15 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     _pick(window._ai_critic_combo, critic.key)
     window._refresh_critic_warning()
 
-    text = window._critic_warn.text()
     assert not window._critic_warn.isHidden()
-    assert i18n.t("criticSubstituted") in text
-    assert i18n.t("criticSameVendor") in text
-    assert generator.key in window._critic_warn_tip._text  # the tooltip names what actually runs
+    # A mark, not a sentence: the row has no width for one, and elided to fit it was unreadable.
+    assert window._critic_warn.text() == "!"
+    assert i18n.t("criticSubstituted") in window._critic_warn_tip._text
+    assert i18n.t("criticSameVendor") in window._critic_warn_tip._text
+    # ...and the click has the room the row does not, including what actually runs.
+    assert generator.key in window._critic_warn_detail
+    # The field itself is tinted, so the thing that is wrong is the thing that looks wrong.
+    assert "is-warn" in str(window._ai_critic_combo.property("class"))
 
 
 def test_two_unknown_models_are_not_reported_as_a_matched_pair(tmp_path, monkeypatch):
@@ -1899,13 +1904,10 @@ def test_the_critic_warning_does_not_widen_the_window_off_the_screen(tmp_path, m
 
     window._critic_warn.setVisible(False)
     quiet = footer.minimumSizeHint().width()
-    window._critic_warn.setText("⚠ substituted · same vendor as the Generator")
     window._critic_warn.setVisible(True)
 
-    # A few pixels for the label's own floor and the layout spacing, not the width of the sentence.
-    assert footer.minimumSizeHint().width() - quiet < 60
-    # ...and nothing is lost: what got cut is on the hover, which is not a Qt tooltip.
-    assert window._critic_warn.toolTip() == "", "two hints on one widget"
+    # A fixed 18px mark plus spacing, whatever the reason turns out to say.
+    assert footer.minimumSizeHint().width() - quiet < 40
 
 
 def test_a_replacement_is_offered_from_the_same_vendor_first(tmp_path, monkeypatch):

@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from autosound_tcc.ui.tcc import attach_image  # noqa: E402
+from autosound_tcc.ui.tcc import attach_image, i18n  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -119,3 +119,53 @@ def test_pasting_then_accepting_writes_the_file_and_returns_its_line(tmp_path):
     assert dialog.saved_path is not None and dialog.saved_path.is_file()
     assert QImage(str(dialog.saved_path)).width() == attach_image.MAX_WIDTH_PX
     assert dialog.line().startswith("імпульсна w-L, перший пік — process/attachments/")
+
+
+def test_pasting_while_the_caption_has_focus_still_reaches_the_preview(tmp_path):
+    """⌘V went to the QLineEdit, which pastes TEXT — and an image clipboard has none, so the
+    keystroke did nothing and the picture only turned up the next time the window was opened
+    (user, 2026-08-11)."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    app = _app()
+    app.clipboard().clear()
+    dialog = attach_image.AttachImageDialog(tmp_path)
+    assert dialog._image is None
+
+    app.clipboard().setImage(_image(800))
+    paste = QKeyEvent(
+        QEvent.Type.KeyPress, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier, "v"
+    )
+    handled = dialog.eventFilter(dialog._caption, paste)
+
+    assert handled is True, "the line edit must not swallow a picture"
+    assert dialog._image is not None
+
+
+def test_a_capture_taken_while_the_window_waits_appears_on_its_own(tmp_path):
+    """The screenshot tool has focus at the moment the clipboard changes, so the window has to
+    look again when it comes back rather than wait for a keystroke."""
+    app = _app()
+    app.clipboard().clear()
+    dialog = attach_image.AttachImageDialog(tmp_path)
+
+    app.clipboard().setImage(_image(700))
+    dialog._on_clipboard_changed()
+
+    assert dialog._image is not None
+    assert dialog._buttons.button(dialog._buttons.StandardButton.Ok).isEnabled()
+
+
+def test_the_hint_names_the_shortcut_this_platform_actually_uses(monkeypatch):
+    """On macOS ⌘⇧4 writes a FILE to the desktop; ⌘⌃⇧4 is the one that copies. Telling somebody
+    the wrong one leaves them pasting nothing and wondering what broke."""
+    _app()
+    monkeypatch.setattr(attach_image.sys, "platform", "darwin")
+    assert "⌘⌃⇧4" in i18n.t(attach_image.capture_hint_key())
+
+    monkeypatch.setattr(attach_image.sys, "platform", "win32")
+    assert "Win+Shift+S" in i18n.t(attach_image.capture_hint_key())
+
+    monkeypatch.setattr(attach_image.sys, "platform", "linux")
+    assert "Ctrl+V" in i18n.t(attach_image.capture_hint_key())

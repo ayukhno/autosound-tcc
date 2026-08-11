@@ -146,3 +146,43 @@ def test_rew_being_unreachable_is_a_message_not_a_crash():
 
     assert "ConnectionRefusedError" in dialog._status.text()
     assert dialog._status.isVisibleTo(dialog)
+
+
+def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
+    """The Arbiter can open this themselves, with nothing to argue against yet. Two markers parked
+    at zero say nothing; markers on the peaks are a crude reading of the arrivals, which makes the
+    delta meaningful before anything is touched — and an obvious guess invites correction."""
+    _app()
+    dialog = CurveDialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    positions = dialog._view.positions()
+    assert abs(positions[0] - 4.52) < 0.05 and abs(positions[1] - 4.78) < 0.05
+    assert dialog._view._marker_names == ["w-L_01 (sw)", "w-R_01 (sw)"]
+
+
+def test_the_pickers_let_the_argument_move_to_another_pair():
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
+    dialog = CurveDialog(every[:2], bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("m-L_01 (sw)"))
+    dialog._worker.wait(4000)
+
+    assert dialog._chosen() == ["w-L_01 (sw)", "m-L_01 (sw)"]
+
+
+def test_one_curve_is_a_legitimate_thing_to_argue_about():
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = CurveDialog(every, bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    dialog._pickers[1].setCurrentIndex(0)  # the "— none —" row
+    dialog._worker.wait(4000)
+
+    assert dialog._chosen() == ["w-L_01 (sw)"]

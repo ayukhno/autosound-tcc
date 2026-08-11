@@ -347,6 +347,17 @@ class MeasurementPanel(QWidget):
         self._assign_names_tip = attach_tip(self._assign_names_btn, i18n.t("assignNames"))
         self._assign_names_btn.clicked.connect(self._on_assign_names_clicked)
         head_row.addWidget(self._assign_names_btn)
+        # Curves, with markers on them: the panel that turns "I read it differently" into a
+        # number (see `curve_view.py`). Beside Read because that is where the measurements are.
+        self._curves_btn = QPushButton()
+        self._curves_btn.setIcon(QIcon(str(_ICONS_DIR / "activity.svg")))
+        self._curves_btn.setIconSize(QSize(16, 16))
+        self._curves_btn.setProperty("class", "meas-icon-btn")
+        self._curves_btn.setFixedSize(28, 28)
+        self._curves_tip = attach_tip(self._curves_btn, i18n.t("curveBtn"))
+        self._curves_btn.clicked.connect(self._on_curves_clicked)
+        head_row.addWidget(self._curves_btn)
+
         self._read_btn = QPushButton()
         self._read_btn.setIcon(QIcon(str(_ICONS_DIR / "download.svg")))
         self._read_btn.setIconSize(QSize(16, 16))
@@ -419,6 +430,7 @@ class MeasurementPanel(QWidget):
             self._session_combo,
             self._version,
             self._assign_names_btn,
+            self._curves_btn,
             self._read_btn,
         ):
             widget.setVisible(False)
@@ -439,6 +451,7 @@ class MeasurementPanel(QWidget):
             self._session_combo,
             self._version,
             self._assign_names_btn,
+            self._curves_btn,
             self._read_btn,
         ):
             widget.setVisible(True)
@@ -556,6 +569,7 @@ class MeasurementPanel(QWidget):
         self._render_status()  # the last Read/Scan result, in the new language too
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
+        self._curves_tip.set_text(i18n.t("curveBtn"))
 
     # ---- capture-order (item 9) ---------------------------------------------
 
@@ -697,6 +711,22 @@ class MeasurementPanel(QWidget):
         for worker in (self._worker, self._scan_worker, self._rename_worker):
             if worker is not None and worker.isRunning():
                 worker.wait(6000)
+
+    curvesRequested = Signal(list)  # REW titles to plot — MainWindow opens the window
+
+    def _on_curves_clicked(self) -> None:
+        """Ask for the curve window over whatever titles are on screen.
+
+        The panel does not own the window: it knows which measurements this task is about, and
+        MainWindow knows about REW and the dialog. Kept apart so the same window can later be
+        opened by the model through MCP without going through a widget.
+        """
+        rows = [with_method(r.item_name, r.method_suffix) for r in self._rows]
+        known = self.known_titles()
+        # Prefer titles REW actually holds; fall back to the expected names so the picker is not
+        # empty on a task where nothing has been read yet.
+        titles = [t for t in rows if t in known] or known or rows
+        self.curvesRequested.emit(titles)
 
     def _on_read_clicked(self) -> None:
         if self._worker is not None and self._worker.isRunning():

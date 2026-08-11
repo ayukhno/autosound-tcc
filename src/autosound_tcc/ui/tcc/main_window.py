@@ -279,6 +279,19 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
+def _cap_combo_width(combo) -> None:
+    """Stop a combo's WIDEST MENU ROW from setting the width of its closed box.
+
+    A model row reads "SDK · Claude Opus 5 · recommended pair · free", and by default a QComboBox
+    sizes itself to fit the longest one of those even while showing a short label. Two of them in
+    the footer is most of a screen spent on text nobody is looking at, and it squeezed the reviewer
+    status down to "gem…". The menu still shows every row in full; only the closed box is capped.
+    """
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(16)
+    combo.setMaximumWidth(260)
+
+
 def _replacements_for(key: str, entries: list) -> list:
     """`entries`, ordered so the sensible stand-ins for `key` come first.
 
@@ -725,6 +738,7 @@ class MainWindow(QMainWindow):
         # user picks a model; which adapter carries it follows from that, explicitly rather than
         # by inference.
         ai_main = _mini_combo()
+        _cap_combo_width(ai_main)
         self._ai_main_combo = ai_main
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
@@ -755,6 +769,7 @@ class MainWindow(QMainWindow):
         # is reachability -- the reviewer script is Gemini-shaped (SCR-033), so anything else
         # lands in clipboard mode and says so here rather than after the wait.
         ai_critic = _mini_combo()
+        _cap_combo_width(ai_critic)
         self._ai_critic_combo = ai_critic
         ai_critic.currentIndexChanged.connect(self._on_critic_model_changed)
         layout.addWidget(ai_critic)
@@ -768,14 +783,18 @@ class MainWindow(QMainWindow):
         # while the footer read "AGY · Gemini 3.1 Pro (High) · recommended pair" (2026-08-11).
         # Empty and hidden when there is nothing to report -- a permanently-visible caveat is a
         # caveat nobody reads.
-        # An `ElidedLabel`, not a QLabel: this text is as long as the reason is, and a footer
-        # label that demands its natural width pushes the window's right edge off the screen --
-        # which is exactly what it did (user, 2026-08-11). The full reason is on the tooltip,
-        # which this label maintains itself whenever it had to cut.
-        self._critic_warn = ElidedLabel("", min_width=18)
-        self._critic_warn.setProperty("class", "kv-warn")
+        # A red "!" and nothing else (user, 2026-08-11). It was a sentence, and a sentence in this
+        # row is a footer that pushes the window off the screen; elided to fit, it was a sentence
+        # nobody could read. A mark is legible at any width, and the reason belongs where there is
+        # room for it — one click away.
+        self._critic_warn = QPushButton("!")
+        self._critic_warn.setProperty("class", "warn-mark")
+        self._critic_warn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._critic_warn.setFixedSize(18, 18)
         self._critic_warn.setVisible(False)
+        self._critic_warn.clicked.connect(self._explain_critic_warning)
         self._critic_warn_tip = attach_tip(self._critic_warn, "")
+        self._critic_warn_detail = ""
         layout.addWidget(self._critic_warn)
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
@@ -783,7 +802,7 @@ class MainWindow(QMainWindow):
         # Elides for the same reason as the warning beside it: a model name plus "4 h ago" is as
         # long as the model's name happens to be, and a footer that asks for its natural width
         # takes the window's right edge off the screen with it.
-        self._critic_status = ElidedLabel(i18n.t("criticNever"), min_width=40)
+        self._critic_status = ElidedLabel(i18n.t("criticNever"), min_width=130)
         self._critic_status.setProperty("class", "kv-val")
         layout.addWidget(self._critic_status)
 
@@ -1125,6 +1144,26 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(
                 i18n.t("diagStripIssues").format(n=len(report.issues())), level="warn"
             )
+
+    def _open_curves(self, titles: list, markers: Optional[list] = None) -> None:
+        """Open the curve window over `titles`, with the model's reading marked if there is one.
+
+        Signature is the one an MCP tool will call: titles the model names, and where it read the
+        answer. Reached from the measurement panel's own button for now.
+        """
+        from autosound_tcc.ui.tcc.curve_dialog import CurveDialog
+
+        titles = [str(t) for t in titles if str(t).strip()]
+        if not titles:
+            self._status_strip.notify(i18n.t("curveNothing"), level="warn")
+            return
+        dialog = CurveDialog(
+            titles[:2], markers=markers or [], available=titles, parent=self
+        )
+        # The reading lands in the composer rather than being sent: it is the Arbiter's statement,
+        # and they get to see and edit it before it goes out. Nothing is recorded behind them.
+        dialog.readingSent.connect(self._dialog.put_in_composer)
+        dialog.exec()
 
     def _open_diagnostics(self) -> None:
         if self._diag_dialog is None:
@@ -1563,6 +1602,7 @@ class MainWindow(QMainWindow):
         # A step's measurement icon opens that capture series in the panel below (user request
         # 2026-07-28).
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
+        self._meas_panel.curvesRequested.connect(self._open_curves)
 
         return container
 
@@ -2086,12 +2126,26 @@ class MainWindow(QMainWindow):
             if vendor and vendor == model_choices.vendor_of(generator):
                 notes.append(i18n.t("criticSameVendor"))
                 tips.append(i18n.t("criticSameVendorTip").format(vendor=vendor))
-        headline = f'⚠ {" · ".join(notes)}' if notes else ""
-        warn.setText(headline)
+        headline = " · ".join(notes)
         warn.setVisible(bool(notes))
-        # The headline leads the tip as well: the label elides, so the hover has to be able to
-        # show what was cut as well as why it matters.
-        self._critic_warn_tip.set_text("<br>".join(([headline] if headline else []) + tips))
+        # Hover says WHAT, the click says why — the same split the diagnostics button uses, and the
+        # reason a mark can stand in for a sentence at all.
+        self._critic_warn_tip.set_text(headline)
+        self._critic_warn_detail = "\n\n".join([headline] + tips) if headline else ""
+        # The picker itself is tinted, so the thing that is wrong is the thing that looks wrong —
+        # a mark beside a normal-looking field still leaves you hunting for what it refers to.
+        self._ai_critic_combo.setProperty("class", "mini-select" + (" is-warn" if notes else ""))
+        self._ai_critic_combo.style().unpolish(self._ai_critic_combo)
+        self._ai_critic_combo.style().polish(self._ai_critic_combo)
+
+    def _explain_critic_warning(self) -> None:
+        if not self._critic_warn_detail:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(i18n.t("criticWarnTitle"))
+        box.setText(self._critic_warn_detail)
+        box.exec()
 
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
@@ -2099,12 +2153,10 @@ class MainWindow(QMainWindow):
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
             return
-        self._critic_status.setText(
-            i18n.t("criticStatus").format(
-                model=entry.get("model") or entry.get("mode", "?"),
-                ago=_ago(entry.get("at", "")),
-            )
-        )
+        # Short (user, 2026-08-11): the model name alone, and how long ago. The word "Critic" is
+        # already three widgets to the left, and the vendor prefix is in the picker beside it.
+        model = str(entry.get("model") or entry.get("mode", "?"))
+        self._critic_status.setText(f"{model.split('/')[-1]} · {_ago(entry.get('at', ''))}")
 
     def _on_dialog_start_requested(self, text: str) -> None:
         """The Arbiter typed the first message instead of clicking start — same intent."""

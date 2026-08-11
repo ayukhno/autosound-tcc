@@ -18,12 +18,13 @@ still readable to the pixel that matters — the cursor, the grid, the trace.
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QGuiApplication, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
@@ -91,6 +92,20 @@ def message_line(path: Path, caption: str, project_dir: Path) -> str:
     return f"{caption} — {shown}" if caption else str(shown)
 
 
+def capture_hint_key() -> str:
+    """The i18n key for "how do I get a screenshot onto the clipboard", per platform.
+
+    It matters that this is right and not approximately right: on macOS ⌘⇧4 writes a FILE to the
+    desktop and ⌘⌃⇧4 copies to the clipboard, and a dialog that tells you the wrong one leaves you
+    pasting nothing and wondering what broke (user, 2026-08-11). Windows does not use either.
+    """
+    if sys.platform == "darwin":
+        return "attachEmptyMac"
+    if sys.platform.startswith("win"):
+        return "attachEmptyWin"
+    return "attachEmptyOther"
+
+
 def clipboard_image() -> Optional[QImage]:
     """Whatever picture the clipboard is holding, or None. Never raises: an empty clipboard is the
     normal state, not an error."""
@@ -104,8 +119,9 @@ def clipboard_image() -> Optional[QImage]:
 class AttachImageDialog(QDialog):
     """Paste a screenshot, name it, and get back a line to send.
 
-    Reads the clipboard on open (the usual flow: ⌘⇧4, then this button) and takes ⌘V as well, so a
-    capture made after the window opened does not require closing it.
+    Reads the clipboard on open, on ⌘V, on the clipboard changing, and on the window becoming
+    active again — because the capture is as often made after this window is open as before it,
+    and every one of those routes was needed to make the picture actually appear.
     """
 
     def __init__(self, project_dir: Path, parent=None) -> None:
@@ -119,7 +135,7 @@ class AttachImageDialog(QDialog):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(10)
 
-        self._preview = QLabel(i18n.t("attachEmpty"))
+        self._preview = QLabel(i18n.t(capture_hint_key()))
         self._preview.setProperty("class", "phead-sub")
         self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview.setMinimumSize(420, 240)
@@ -128,6 +144,11 @@ class AttachImageDialog(QDialog):
 
         self._caption = QLineEdit()
         self._caption.setPlaceholderText(i18n.t("attachCaption"))
+        # ⌘V with the caption focused went to the LINE EDIT, which pastes text — and an image
+        # clipboard has no text, so the keystroke did nothing and the preview never appeared
+        # (user, 2026-08-11: "видно тільки при наступному відкриванні"). The filter takes the
+        # paste before the field does whenever the clipboard is holding a picture.
+        self._caption.installEventFilter(self)
         layout.addWidget(self._caption)
 
         self._buttons = QDialogButtonBox(
@@ -138,7 +159,38 @@ class AttachImageDialog(QDialog):
         layout.addWidget(self._buttons)
 
         QShortcut(QKeySequence.StandardKey.Paste, self, self.take_from_clipboard)
+        # The other half of the same complaint: the capture is often made AFTER this window is
+        # open, so coming back to it must pick the clipboard up rather than wait for a keystroke.
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.dataChanged.connect(self._on_clipboard_changed)
         self.take_from_clipboard()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        if (
+            watched is self._caption
+            and event.type() == QEvent.Type.KeyPress
+            and event.matches(QKeySequence.StandardKey.Paste)
+            and clipboard_image() is not None
+        ):
+            self.take_from_clipboard()
+            return True  # swallowed: pasting an image into a one-line text field means nothing
+        return super().eventFilter(watched, event)
+
+    def _on_clipboard_changed(self) -> None:
+        """A capture taken while this window is open shows up without a keystroke."""
+        if clipboard_image() is not None:
+            self.take_from_clipboard()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """...and so does one taken while the window was in the background, on the way back.
+
+        `dataChanged` is not delivered on macOS while the application is inactive, which is
+        exactly the case here: the screenshot tool has focus at the moment the clipboard changes.
+        """
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._on_clipboard_changed()
+        super().changeEvent(event)
 
     def take_from_clipboard(self) -> bool:
         image = clipboard_image()
@@ -148,6 +200,7 @@ class AttachImageDialog(QDialog):
         self._image = image
         preview = QPixmap.fromImage(scaled(image, 520))
         self._preview.setPixmap(preview)
+        self._preview.repaint()  # the paste is a keystroke, not a resize: ask for the redraw
         self._set_ok_enabled(True)
         return True
 
