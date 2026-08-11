@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043 and SCR-044 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1218,3 +1218,51 @@ Found on the way: **`process.py` was the only one of the seven modules with no s
 module holding the most gates (evidence must exist and resolve — SCR-035; a round's captures must
 be usable — SCR-040; the target curve — SCR-036) had none of them exercised since they were
 written. It has one now.
+
+## SCR-045 — an open question that is never asked again was never open
+
+**Status**: done (skill `a71cf5a`, 2026-08-11 — `missing_facts()` in `dsp_profile.py`, and
+`enter-phase` refuses a phase whose facts are not on record)
+**Target**: `rew_tool/dsp_profile.py`, `rew_tool/state/process.py`,
+`references/phases/phase_1_foundation.md`, `references/phases/phase_2_eq.md`
+**TCC dependency**: none new — but the Diagnostics dialog's "Open questions (intake unfinished)"
+list gets truthful the moment the pin is bumped, because `contract.py` renders whatever
+`open_questions()` returns.
+
+**Detail**: the second half of the decision in `ARCHITECTURE-NOTES.md` §4 — *learning instead of
+softer gates*. That decision rested on a measurement: `open_questions` is deliberately not part of
+`contract.py`'s `ok`, so the phase −1 gate has always wanted a **valid** profile rather than a
+**complete** one, and a DSP nobody knows everything about can already start. The missing piece was
+that an unanswered question never came back.
+
+Checking that on the live project turned up something worse first. `testTCC-5`'s Helix profile:
+
+```json
+{"dsp_profile": {"name": "Helix DSP Ultra S", "vendor": "Audiotec-Fischer",
+                 "groups": [...], "_open_questions": []}}
+```
+
+No `sample_rate_hz`. No `max_count`. No `parametric_eq`, no `crossover_filters`, no per-group `eq`.
+And `open-questions` returned **`[]`** — because `open_questions()` walks *nulls*, and every one of
+those keys was **absent**. "Unconfirmed facts are `null`, not omitted" was an invariant in the
+module docstring that nothing enforced, so a question the interview never reached left nothing
+behind to find. Third instance of the same class after SCR-042 and SCR-043.
+
+`missing_facts()` fixes it without a new list to keep in sync: **what a profile must describe is
+derived from what it declares.** A group's `fields` says which capabilities the DSP has, and each
+capability has a block explaining how it behaves — `ta_ms` → `delay`, `phase_deg` →
+`phase_control`, `eq` → `parametric_eq`, `hp`/`lp` → that group's `crossover_filters`. Plus two
+unconditional ones: `sample_rate_hz`, and `max_count` per group (SCR-042). A tier that declares no
+crossover legs is not missing a crossover description. This only works because `FIELD_VOCABULARY`
+is now enforced (SCR-043) — deriving from a field list nobody checks would inherit its typos.
+
+Then the return: `enter-phase` refuses a phase whose arithmetic needs a fact nobody recorded —
+phase 1 (`sample_rate_hz`, `delay`, `crossover_filters`), phase 2 (`parametric_eq`, `eq`).
+**Phase-scoped, not step-scoped**, for the same reason `_CAPTURE_PLAN` is: a phase's needs belong
+to the method and are identical on every car, while a step's name is written per project. Same
+rules as the other two gates in `enter_phase` — forward moves only, re-entry and going back free,
+an unreadable profile is `contract.py`'s complaint.
+
+The one that actually hurts is `sample_rate_hz`: phase 1 converts every delay to samples, so a
+rate nobody wrote down is a rate the next session assumes. On this project the real answer is
+96 kHz; at an assumed 48 kHz every sample count would have been half of what the DSP needed.
