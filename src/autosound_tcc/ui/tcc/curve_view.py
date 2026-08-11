@@ -47,6 +47,12 @@ _TRACE_TOKENS = ("accent", "info")
 # whole point of the panel is showing that these two are different numbers.
 _MODEL_TOKEN = "muted"
 _ARBITER_TOKEN = "ok"
+#: The marker modes, and what their buttons say. `vx`/`hx` are the CROSS modes: one line, read
+#: where it crosses each curve — "at this frequency, how far apart are the two channels" and "at
+#: this level, where does each one reach it". Both are questions about a PAIR, which the
+#: one-marker-per-curve modes cannot ask, because there the two markers are at different places.
+_MODE_LABELS = {"v": "V", "h": "H", "vh": "VH", "vhs": "VHs", "vx": "Vx", "hx": "Hx"}
+_CROSS_MODES = ("vx", "hx")
 
 
 class LogHzAxis(pg.AxisItem):
@@ -168,6 +174,13 @@ class CurveView(QWidget):
         # white-on-white in the dark theme (user, 2026-08-11, with the picture). Removing the
         # menu removes the whole class of problem rather than restyling somebody else's dialog.
         self._plot.setMenuEnabled(False)
+        # pyqtgraph parks its own auto-range "A" in the bottom-left corner whenever the view is
+        # not auto-ranged. We already have an A button that says what it does, and two of them --
+        # one of which is an unlabelled square sitting on top of the data -- is one too many.
+        self._plot.getPlotItem().hideButtons()
+        # `hx` picks the crossing nearest the middle of what is on screen, so panning or zooming
+        # changes the answer and the dots have to follow.
+        self._plot.getViewBox().sigRangeChanged.connect(self._on_view_changed)
         for axis in ("bottom", "left"):
             self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
@@ -199,8 +212,8 @@ class CurveView(QWidget):
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
-        for mode in ("v", "h", "vh", "vhs"):
-            button = QPushButton("VHs" if mode == "vhs" else mode.upper())
+        for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
+            button = QPushButton(_MODE_LABELS[mode])
             button.setProperty("class", "zoom-btn")
             button.setCheckable(True)
             button.setChecked(mode == self._axes_mode)
@@ -236,6 +249,7 @@ class CurveView(QWidget):
         self._markers: list[pg.InfiniteLine] = []
         self._h_markers: list[pg.InfiniteLine] = []
         self._marker_tokens: list[str] = []
+        self._crossing_dots = None
         self._syncing = False
         self._marker_names: list[str] = []
         self._render_readout()
@@ -260,6 +274,7 @@ class CurveView(QWidget):
             )
         for line in self._markers:
             self._plot.addItem(line)
+        self._render_crossings()
         self._render_readout()
 
     def set_markers(
@@ -327,6 +342,7 @@ class CurveView(QWidget):
         names, tokens = list(self._marker_names), list(self._marker_tokens)
         if traces:
             self.set_traces(traces)
+        self._render_crossings()
         if positions:
             self.set_markers(positions, names, tokens)
 
@@ -401,12 +417,19 @@ class CurveView(QWidget):
         The same markers either way — a horizontal line is added beside each vertical one rather
         than replacing it, so switching to VH does not lose a position already placed.
         """
-        self._axes_mode = mode if mode in ("v", "h", "vh", "vhs") else "v"
+        self._axes_mode = mode if mode in _MODE_LABELS else "v"
         for button, value in self._axes_buttons:
             button.setChecked(value == self._axes_mode)
         self._rebuild_h_markers()
-        for line in self._markers:
-            line.setVisible("v" in self._axes_mode)
+        for index, line in enumerate(self._markers):
+            # A cross mode has exactly ONE line: the whole question is what a single position says
+            # about both curves at once, and a second line would be a second question.
+            line.setVisible(
+                index == 0 if self._axes_mode == "vx"
+                else False if self._axes_mode == "hx"
+                else "v" in self._axes_mode
+            )
+        self._render_crossings()
         self._render_readout()
 
     def _rebuild_h_markers(self) -> None:
@@ -419,6 +442,19 @@ class CurveView(QWidget):
         for line in self._h_markers:
             self._plot.removeItem(line)
         self._h_markers = []
+        if self._axes_mode == "hx":
+            # One horizontal line, placed at whatever the first curve is doing where the vertical
+            # marker last stood -- a level somewhere on the data rather than at zero.
+            theme = current_theme()
+            level = self._y_at(0, self.positions()[0]) if self.positions() else 0.0
+            line = pg.InfiniteLine(
+                pos=level, angle=0, movable=True,
+                pen=pg.mkPen(theme.accent, width=1.4, style=Qt.PenStyle.DashLine),
+            )
+            line.sigPositionChanged.connect(self._on_marker_moved)
+            self._plot.addItem(line)
+            self._h_markers = [line]
+            return
         if "h" not in self._axes_mode:
             return
         theme = current_theme()
@@ -437,6 +473,72 @@ class CurveView(QWidget):
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._h_markers.append(line)
+
+    def _render_crossings(self) -> None:
+        """Dots where the single line meets each curve. Nothing to draw outside the cross modes."""
+        if self._crossing_dots is not None:
+            self._plot.removeItem(self._crossing_dots)
+            self._crossing_dots = None
+        if self._axes_mode not in _CROSS_MODES or not self._traces:
+            return
+        theme = current_theme()
+        spots = []
+        for index, (x, y) in enumerate(self.crossings()):
+            token = self._marker_tokens[index] if index < len(self._marker_tokens) else "accent"
+            spots.append({
+                "pos": (self._to_view(x), y), "size": 9,
+                "brush": pg.mkBrush(getattr(theme, token)),
+                "pen": pg.mkPen(theme.panel, width=1.5),
+            })
+        if spots:
+            self._crossing_dots = pg.ScatterPlotItem(spots)
+            self._plot.addItem(self._crossing_dots)
+
+    def crossings(self) -> list[tuple[float, float]]:
+        """Where the single line meets each curve, as (x, y) in the axes' own units.
+
+        `vx` is exact: a vertical line has one y per curve. `hx` is a choice — a level line can
+        cross a response many times — and the choice is the crossing nearest the middle of what is
+        currently on screen, because that is the one being pointed at. Zooming to the region of
+        interest is therefore part of asking the question, which is honest about the ambiguity
+        rather than hiding it behind a rule nobody can see.
+        """
+        if self._axes_mode == "vx":
+            if not self._markers:
+                return []
+            x = self.positions()[0]
+            return [(x, self._y_at(i, x)) for i in range(len(self._traces))]
+        if self._axes_mode == "hx":
+            if not self._h_markers:
+                return []
+            level = float(self._h_markers[0].value())
+            (low, high), _ = self._plot.getViewBox().viewRange()
+            centre = self._from_view((low + high) / 2.0)
+            out = []
+            for index in range(len(self._traces)):
+                x = self._crossing_near(index, level, centre)
+                if x is not None:
+                    out.append((x, level))
+            return out
+        return []
+
+    def _crossing_near(self, index: int, level: float, centre: float) -> Optional[float]:
+        """The x where trace `index` crosses `level`, closest to `centre`. None if it never does."""
+        trace = self._traces[index]
+        xs = np.asarray(trace.x, dtype=float)
+        ys = np.asarray(trace.y, dtype=float) - level
+        if xs.size < 2:
+            return None
+        sign_change = np.nonzero(np.diff(np.signbit(ys)))[0]
+        if not sign_change.size:
+            return None
+        # Linear interpolation across the sample pair that straddles the level -- at 262 144
+        # points the difference is invisible, but at 957 (a frequency response) it is not.
+        x0, x1 = xs[sign_change], xs[sign_change + 1]
+        y0, y1 = ys[sign_change], ys[sign_change + 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            crossings = np.where(y1 != y0, x0 - y0 * (x1 - x0) / (y1 - y0), x0)
+        return float(crossings[int(np.abs(crossings - centre).argmin())])
 
     def _y_at(self, index: int, x: float) -> float:
         """The value of trace `index` at `x`, or 0 when there is no such trace."""
@@ -468,6 +570,8 @@ class CurveView(QWidget):
             return ""
         names = [t.name for t in self._traces] or [""]
         digits = 3 if self._unit == "ms" else 1
+        if self._axes_mode in _CROSS_MODES:
+            return self._cross_reading(digits)
         lines = []
         if "v" in self._axes_mode:
             lines.append(self._axis_reading(self.positions(), self._unit, digits))
@@ -476,11 +580,45 @@ class CurveView(QWidget):
         parts = [part for part in lines if part]
         if not parts:
             return ""
-        # One line per axis when both are live: "at 96.6 Hz" and "at 75.0 dB" are two readings,
-        # and running them together is how the row got too long to read in the first place.
-        # A NEWLINE, not `<br>`: this string is what gets sent to the model, and markup in a
-        # message is markup the model has to see through. The label does its own conversion.
-        return f"{' / '.join(names)} — " + "\n".join(parts)
+        # One line. It has a full-width row of its own now, which is room enough — the wrapping is
+        # there for a narrow window, not as the normal shape (user, 2026-08-11).
+        body = "; ".join(parts)
+        # ...and the header is dropped when the markers are already named after their curves,
+        # which is the ordinary case: "tw-L / tw-R — tw-L: …, tw-R: …" says each name twice for
+        # no reader's benefit.
+        if list(names) == list(self._marker_names):
+            return body
+        return f"{' / '.join(names)} — {body}"
+
+    def _cross_reading(self, digits: int) -> str:
+        """One line, both curves. "At 2.5 kHz the channels are 6 dB apart" is a single fact about
+        a pair, and it is the reason these modes exist — the per-curve markers cannot state it,
+        because there the two markers are in different places."""
+        crossings = self.crossings()
+        if not crossings:
+            return ""
+        names = [t.name for t in self._traces]
+        if self._axes_mode == "vx":
+            at = f"{crossings[0][0]:.{digits}f} {self._unit}".strip()
+            unit = f" {self._y_unit}" if self._y_unit else ""
+            values = [y for _x, y in crossings]
+            body = ", ".join(
+                f"{names[i] if i < len(names) else i}: {y:.1f}{unit}"
+                for i, y in enumerate(values)
+            )
+            if len(values) >= 2:
+                body += f" (Δ {abs(values[1] - values[0]):.1f}{unit})"
+        else:
+            level_unit = f" {self._y_unit}" if self._y_unit else ""
+            at = f"{crossings[0][1]:.1f}{level_unit}".strip()
+            values = [x for x, _y in crossings]
+            body = ", ".join(
+                f"{names[i] if i < len(names) else i}: {x:.{digits}f} {self._unit}"
+                for i, x in enumerate(values)
+            )
+            if len(values) >= 2:
+                body += f" (Δ {abs(values[1] - values[0]):.{digits}f} {self._unit})"
+        return f"{i18n.t('curveAt')} {at} — {body}"
 
     def _axis_reading(self, values: list[float], unit: str, digits: int) -> str:
         if not values:
@@ -503,8 +641,17 @@ class CurveView(QWidget):
 
     def _on_marker_moved(self) -> None:
         self._sync_levels()
+        self._on_any_move()
         self._render_readout()
         self.markersChanged.emit()
+
+    def _on_any_move(self) -> None:
+        self._render_crossings()
+
+    def _on_view_changed(self, *_args) -> None:
+        if self._axes_mode == "hx":
+            self._render_crossings()
+            self._render_readout()
 
     def _sync_levels(self) -> None:
         """In `vhs`, follow the curve: one point, both coordinates.

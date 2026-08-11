@@ -389,5 +389,60 @@ def test_the_reading_that_is_sent_carries_no_markup():
     sent = view.reading()
 
     assert "<br>" not in sent and "<" not in sent
-    assert sent.count("\n") == 1, "one line per axis, and the newline is a real one"
-    assert "<br>" in view._readout.text(), "...while the label wraps it for display"
+    assert "\n" not in sent, "one line: the row is full width now, and there is room"
+
+
+def test_pyqtgraphs_own_auto_range_button_is_not_offered_either():
+    """It parks an unlabelled "A" square on top of the data whenever the view is not auto-ranged,
+    beside our own A button that says what it does."""
+    view = _view()
+
+    assert view._plot.getPlotItem().autoBtn.isVisible() is False
+
+
+# ---- one line, both curves (user, 2026-08-12) -------------------------------------------------
+
+
+def test_vx_reads_both_curves_at_one_x_and_the_gap_between_them():
+    """"At 2.5 kHz the channels are 6 dB apart" is a single fact about a PAIR, and the per-curve
+    markers cannot state it — there the two markers are in different places."""
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_axes_mode("vx")
+
+    crossings = view.crossings()
+    assert [x for x, _y in crossings] == [4.52, 4.52], "one x, read on both curves"
+    assert crossings[0][1] == pytest.approx(view._y_at(0, 4.52))
+    assert crossings[1][1] == pytest.approx(view._y_at(1, 4.52))
+    assert "Δ" in view.reading() and "dB" in view.reading()
+    # One vertical line, not two: a second would be a second question.
+    assert [line.isVisible() for line in view._markers] == [True, False]
+
+
+def test_hx_reads_where_each_curve_reaches_one_level():
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_axes_mode("hx")
+    view._h_markers[0].setValue(0.0)
+
+    crossings = view.crossings()
+    assert len(crossings) == 2
+    assert all(abs(y) < 1e-9 for _x, y in crossings), "both readings are AT the level"
+    assert crossings[0][0] != crossings[1][0], "each curve reaches it somewhere else"
+    assert view.reading().startswith(i18n.t("curveAt"))
+    assert not any(line.isVisible() for line in view._markers), "no vertical line in Hx"
+
+
+def test_a_level_no_curve_ever_reaches_reads_as_nothing_rather_than_a_wrong_number():
+    view = _view()
+    view.set_markers([4.52], tokens=["accent"])
+    view.set_axes_mode("hx")
+
+    view._h_markers[0].setValue(50.0)  # far above any sample
+
+    assert view.crossings() == []
+    assert view.reading() == ""
