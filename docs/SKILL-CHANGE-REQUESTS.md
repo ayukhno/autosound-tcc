@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07, SCR-043 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043 and SCR-044 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1180,3 +1180,41 @@ arriving one level deeper.
 Nothing on disk changed meaning: the bundled Helix profile, the live project's profile and both TCC
 fixtures already used `ta_ms`. The only `delay_ms` declarations anywhere were three fixtures inside
 the module's own selftest, which is how it had gone unnoticed for so long.
+
+## SCR-044 — the flaw map is a phase-0 deliverable, so leaving phase 0 should ask for it
+
+**Status**: done (skill `39fbd19`, 2026-08-11 — `enter-phase` refuses to leave phase 0 while
+`acoustics.flaws[]` is empty; `process.py` gained the selftest it never had)
+**Target**: `skills/autosound-tuning/rew_tool/state/process.py`,
+`references/phases/phase_0_baseline.md`
+**TCC dependency**: none new. `state/acoustics_view.py` + the "Car audio analysis" section have
+rendered this since SCR-015 and were correct to show nothing — there was nothing.
+
+**Detail**: found on the live `testTCC-5` run, 2026-08-11. The step *"Acoustic flaw map:
+distortion floor + raw pair coherence"* was closed `done`; `project.json` had no `acoustics` key at
+all; and the actual findings were in the journal as a `user_decision`:
+
+> «Are the w-L 160 Hz and w-R 250-315 Hz anomalies mechanical faults or acoustic nulls? — Both are
+> acoustic nulls, settled by absolute harmonic SPL, not the THD ratio…»
+
+So the work was done and the knowledge stayed prose. SCR-015 had built both ends — the writer with
+its closed `action` list and the panel — and left the middle to good intentions. Phase 2 equalises
+against this map: which features may be cut, which must be left, which are not EQ problems at all.
+
+The lever is the one that keeps working (SCR-042, SCR-043): refuse, and name the command. The gate
+sits beside the target-curve one in `enter_phase` and follows the same rules — forward moves only,
+re-entry and going back always allowed, and an unreadable `project.json` is `contract.py`'s
+complaint rather than this gate's, so a half-built project is not blocked by it.
+
+Two judgement calls worth keeping:
+
+1. **Non-empty, not merely present.** `project.py`'s own template seeds `"acoustics": {"flaws": []}`,
+   so requiring the key would have passed trivially on every new project.
+2. **The escape is itself a record.** A car with nothing to correct still has features; the answer
+   is an entry with `action=leave`, which is exactly why that value is in the closed list. "Nothing
+   to record" and "nobody recorded anything" must not look the same.
+
+Found on the way: **`process.py` was the only one of the seven modules with no selftest**, so the
+module holding the most gates (evidence must exist and resolve — SCR-035; a round's captures must
+be usable — SCR-040; the target curve — SCR-036) had none of them exercised since they were
+written. It has one now.
