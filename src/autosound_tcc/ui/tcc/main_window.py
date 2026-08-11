@@ -98,7 +98,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
     clear_layout,
 )
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
-from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
+from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
@@ -742,6 +742,17 @@ class MainWindow(QMainWindow):
         # Both combos exist now, so one pass fills them from the one registry.
         self._reload_model_choices()
         self._running_model: Optional[str] = None
+
+        # What the picker's own label cannot say: this machine sends that key somewhere else, or
+        # the reviewer ended up on the Generator's vendor. Both were happening on a live tune
+        # while the footer read "AGY · Gemini 3.1 Pro (High) · recommended pair" (2026-08-11).
+        # Empty and hidden when there is nothing to report -- a permanently-visible caveat is a
+        # caveat nobody reads.
+        self._critic_warn = QLabel("")
+        self._critic_warn.setProperty("class", "kv-val")
+        self._critic_warn.setVisible(False)
+        self._critic_warn_tip = attach_tip(self._critic_warn, "")
+        layout.addWidget(self._critic_warn)
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
         # panel's "engaged? which AI+model? last called when").
@@ -2010,13 +2021,53 @@ class MainWindow(QMainWindow):
 
     def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
+        self._refresh_critic_warning()
         choice = self._critic_choice()
         if choice is None:
             return
         project_settings.set_value(config.tcc_dir(), _CRITIC_KEY, choice.key)
         self._bridge.set_snapshot(critic_model=choice.model)
 
+    def _refresh_critic_warning(self) -> None:
+        """Say when the reviewer is not what the picker appears to promise.
+
+        Two ways it stops being an independent review, both of them silent until now:
+
+        * **Substituted** — the stored key is aliased on this machine, so the model that answers is
+          not the one named. `resolve()` has always known (it is in `get_tcc_state` as
+          `substituted`, which is how the model found out); the footer did not say it.
+        * **Same vendor as the Generator** — the skill's fallback rung when the chosen reviewer is
+          unreachable. It still reviews, but cross-vendor anti-anchoring is the whole reason the
+          reviewer is a different vendor, and losing it quietly is exactly SCR-041's failure: a
+          downgrade that agrees with you instead of erroring.
+        """
+        warn = getattr(self, "_critic_warn", None)
+        if warn is None:
+            return
+        key = str(self._ai_critic_combo.currentData() or "")
+        resolved = model_choices.resolve(self._critic_choices, key)
+        notes, tips = [], []
+        if resolved.note:
+            notes.append(i18n.t("criticSubstituted"))
+            tips.append(resolved.note)
+        generator = self._generator_choice()
+        chosen = resolved.choice
+        if chosen is not None and generator is not None:
+            # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
+            # does not recognise, which would make any two unknown models look like a matched pair.
+            vendor = model_choices.vendor_of(chosen)
+            if vendor and vendor == model_choices.vendor_of(generator):
+                notes.append(i18n.t("criticSameVendor"))
+                tips.append(i18n.t("criticSameVendorTip").format(vendor=vendor))
+        theme = current_theme()
+        warn.setText(
+            f'<span style="color:{theme.warn}">⚠ {" · ".join(notes)}</span>' if notes else ""
+        )
+        warn.setVisible(bool(notes))
+        self._critic_warn_tip.set_text("<br>".join(tips))
+
     def _refresh_critic_status(self) -> None:
+        self._refresh_critic_warning()
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
@@ -2255,6 +2306,7 @@ class MainWindow(QMainWindow):
         for key, entries in ((generator, self._model_choices), (critic, self._critic_choices)):
             if key and not model_choices.resolve(entries, str(key)).ok:
                 self._offer_replacement(str(key), entries)
+        self._refresh_critic_warning()
 
     def _offer_replacement(self, key: str, entries: list) -> None:
         """A model this project uses is gone. Say so, and let the Arbiter map it to another.
@@ -2333,6 +2385,9 @@ class MainWindow(QMainWindow):
         return model_choices.resolve(self._model_choices, str(key)).choice
 
     def _on_generator_model_changed(self, _index: int) -> None:
+        # Changing the Generator can create (or clear) the same-vendor warning on the reviewer:
+        # it is a property of the PAIR, not of either picker alone.
+        self._refresh_critic_warning()
         choice = self._generator_choice()
         if choice is None:
             self._update_session_button()
@@ -2694,6 +2749,7 @@ class MainWindow(QMainWindow):
         self._diag_tip.set_text(i18n.t("diagBtnTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
+        self._refresh_critic_warning()
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
         self._coffee_btn.setText(i18n.t("coffeeBtn"))
         for i in range(self._preset_combo.count()):

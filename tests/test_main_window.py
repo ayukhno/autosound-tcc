@@ -1825,3 +1825,61 @@ def test_rew_dot_is_shown_in_both_places_and_they_never_disagree():
     finally:
         i18n.set_language(before)
         window._retranslate()
+
+
+def _pick(combo, key: str) -> None:
+    index = combo.findData(key)
+    assert index >= 0, f"{key} is not in the picker"
+    combo.setCurrentIndex(index)
+
+
+def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path, monkeypatch):
+    """Live tune, 2026-08-11: the footer read "AGY · Gemini 3.1 Pro (High) · recommended pair"
+    while the channel had degraded to the Generator's own model. TCC knew — `resolve()` carries the
+    substitution and `get_tcc_state` reports it, which is how the model found out — and the one
+    surface a human looks at said nothing. Silent degradation of the review channel is SCR-041's
+    failure mode exactly: it agrees with you instead of erroring."""
+    from autosound_tcc.core import config, model_choices as mc, model_overrides
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    _app()
+    window = MainWindow()
+
+    # Whichever two vendors this machine can actually offer -- the point is that they differ.
+    generator = next(c for c in window._model_choices if mc.vendor_of(c) == "anthropic")
+    critic = next(
+        c for c in window._critic_choices if mc.vendor_of(c) not in ("", "anthropic")
+    )
+    _pick(window._ai_main_combo, generator.key)
+    _pick(window._ai_critic_combo, critic.key)
+    window._refresh_critic_warning()
+    # `isHidden`, not `isVisible`: the window is never shown in these tests, so every child
+    # reports invisible regardless of its own flag.
+    assert window._critic_warn.isHidden()  # a different vendor, nothing substituted
+
+    # The machine now sends the chosen reviewer somewhere else — and that somewhere is the
+    # Generator's own vendor, so both warnings apply at once.
+    model_overrides.set_alias(critic.key, generator.key, "no longer available on this machine")
+    window._reload_model_choices()
+    _pick(window._ai_critic_combo, critic.key)
+    window._refresh_critic_warning()
+
+    text = window._critic_warn.text()
+    assert not window._critic_warn.isHidden()
+    assert i18n.t("criticSubstituted") in text
+    assert i18n.t("criticSameVendor") in text
+    assert generator.key in window._critic_warn_tip._text  # the tooltip names what actually runs
+
+
+def test_two_unknown_models_are_not_reported_as_a_matched_pair(tmp_path, monkeypatch):
+    """`critic_vendor` falls back to google for a name it does not recognise, which is right for
+    picking a transport and wrong for "are these the same vendor" — it would warn about a pair it
+    knows nothing about."""
+    from autosound_tcc.core import model_choices as mc
+
+    unknown = mc.Choice(harness="omp", model="mistral-large", label="Mistral", provider="mistral")
+    assert mc.vendor_of(unknown) == ""
+    assert mc.critic_vendor(unknown) == "google"

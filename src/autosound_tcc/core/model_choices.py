@@ -465,17 +465,25 @@ _CRITIC_VENDOR_MARKERS = (
 )
 
 
+def vendor_of(choice: Choice) -> str:
+    """The vendor a model name actually names, or "" when no marker matches.
+
+    Split out from `critic_vendor` because the two questions differ where it matters. "Which
+    transport do we call?" needs an answer for every model, so it falls back. "Are these two models
+    the same vendor?" must NOT: with a fallback, two unrecognised names look like a matched pair
+    and the caller warns about something it does not know.
+    """
+    haystack = f"{choice.provider} {choice.model}".lower()
+    return next((vendor for marker, vendor in _CRITIC_VENDOR_MARKERS if marker in haystack), "")
+
+
 def critic_vendor(choice: Choice) -> str:
     """Which vendor's transport the reviewer script would use for this model.
 
     Same resolution the script does, by the same markers — an unrecognised name falls to google,
     which is what every setup predating the parameter already meant.
     """
-    haystack = f"{choice.provider} {choice.model}".lower()
-    for marker, vendor in _CRITIC_VENDOR_MARKERS:
-        if marker in haystack:
-            return vendor
-    return "google"
+    return vendor_of(choice) or "google"
 
 
 def critic_reaches(choice: Choice) -> bool:
