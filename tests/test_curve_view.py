@@ -376,3 +376,18 @@ def test_pyqtgraphs_own_context_menu_is_not_offered():
     view = _view()
 
     assert view._plot.getPlotItem().vb.menuEnabled() is False
+
+
+def test_the_reading_that_is_sent_carries_no_markup():
+    """It goes into a chat message. `<br>` in one is markup the model has to see through — the
+    label does its own conversion."""
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode("vh")
+
+    sent = view.reading()
+
+    assert "<br>" not in sent and "<" not in sent
+    assert sent.count("\n") == 1, "one line per axis, and the newline is a real one"
+    assert "<br>" in view._readout.text(), "...while the label wraps it for display"

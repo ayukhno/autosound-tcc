@@ -18,6 +18,7 @@ driver against its joint partner). Markers are draggable and their delta is the 
 
 from __future__ import annotations
 
+import html
 import math
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
@@ -25,7 +26,14 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -166,18 +174,28 @@ class CurveView(QWidget):
         self._legend = self._plot.addLegend(offset=(-8, 8), labelTextColor=theme.text)
         layout.addWidget(self._plot, stretch=1)
 
+        # Its own row, above the buttons (user, 2026-08-11). Sharing a line with eight controls
+        # left the reading fighting them for width — it stretched the window when it could and was
+        # cut when it could not, and the numbers ARE the output of this panel.
         self._readout = QLabel("")
         self._readout.setProperty("class", "kv-val")
         self._readout.setTextFormat(Qt.TextFormat.RichText)
+        self._readout.setWordWrap(True)
+        # A wrapping label still reports its unwrapped width as what it "wants"; without this the
+        # window would keep growing to fit the reading on one line anyway.
+        self._readout.setMinimumWidth(80)
+        self._readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._readout)
 
         row = QHBoxLayout()
         row.setContentsMargins(2, 0, 2, 0)
         row.setSpacing(6)
-        row.addWidget(self._readout, stretch=1)
-        # The axis's own unit, at the right end of the numbers it applies to.
+        # The axis's own unit, at the left of the controls that read in it.
         self._unit_label = QLabel("")
         self._unit_label.setProperty("class", "phead-sub")
         row.addWidget(self._unit_label)
+        row.addStretch(1)
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
@@ -455,8 +473,14 @@ class CurveView(QWidget):
             lines.append(self._axis_reading(self.positions(), self._unit, digits))
         if "h" in self._axes_mode:
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
-        body = "; ".join(part for part in lines if part)
-        return f"{' / '.join(names)} — {body}" if body else ""
+        parts = [part for part in lines if part]
+        if not parts:
+            return ""
+        # One line per axis when both are live: "at 96.6 Hz" and "at 75.0 dB" are two readings,
+        # and running them together is how the row got too long to read in the first place.
+        # A NEWLINE, not `<br>`: this string is what gets sent to the model, and markup in a
+        # message is markup the model has to see through. The label does its own conversion.
+        return f"{' / '.join(names)} — " + "\n".join(parts)
 
     def _axis_reading(self, values: list[float], unit: str, digits: int) -> str:
         if not values:
@@ -507,7 +531,9 @@ class CurveView(QWidget):
             )
             unit.setText(axes)
         text = self.reading()
-        self._readout.setText(text or i18n.t("curveNoMarkers"))
+        self._readout.setText(
+            html.escape(text).replace("\n", "<br>") if text else i18n.t("curveNoMarkers")
+        )
         self._send_btn.setEnabled(bool(text))
 
     def retranslate(self) -> None:
