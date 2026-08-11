@@ -787,6 +787,21 @@ class MainWindow(QMainWindow):
             return "wait"  # not checked yet -- same neutral dot the measurement legend uses
         return "done" if self._rew_online else "bad"
 
+    def _rew_dots(self):
+        """Every widget showing REW reachability: the System-params row and the measurement card's
+        header. Both are optional here because this is called during construction, before the one
+        that is built later exists, and on a language switch, which destroys and rebuilds the first
+        of them."""
+        for attr in ("_rew_dot", "_meas_rew_dot"):
+            dot = getattr(self, attr, None)
+            if dot is not None:
+                yield dot
+
+    def _retip_rew_dots(self) -> None:
+        tip = i18n.t("rewOnlineTip") if self._rew_online else i18n.t("rewOfflineTip")
+        for dot in self._rew_dots():
+            dot.setToolTip(tip)
+
     def _rebuild_system_params(self) -> None:
         """System params: REW's default local port (always shown) plus whatever equipment facts
         `project.json` has (DSP/amps/mic/source -- SCR-015 point 1, `project_view.load_system_params`).
@@ -796,9 +811,7 @@ class MainWindow(QMainWindow):
         which is what survives across rebuilds."""
         clear_layout(self._system_section.body_layout())
         self._rew_dot = TrafficLight(self._rew_status_class())
-        self._rew_dot.setToolTip(
-            i18n.t("rewOnlineTip") if self._rew_online else i18n.t("rewOfflineTip")
-        )
+        self._retip_rew_dots()  # the new instance, and the header's, in the current language
         self._system_section.body_layout().addWidget(
             _kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT, trailing=self._rew_dot)
         )
@@ -988,10 +1001,9 @@ class MainWindow(QMainWindow):
 
     def _set_rew_online(self, online: bool) -> None:
         self._rew_online = online
-        self._rew_dot.set_status(self._rew_status_class())
-        self._rew_dot.setToolTip(
-            i18n.t("rewOnlineTip") if online else i18n.t("rewOfflineTip")
-        )
+        for dot in self._rew_dots():
+            dot.set_status(self._rew_status_class())
+        self._retip_rew_dots()
 
     # ---- diagnostics (TCC-TZ.md §8) -----------------------------------------
 
@@ -1480,6 +1492,18 @@ class MainWindow(QMainWindow):
         meas_layout = QVBoxLayout(meas_panel)
         meas_layout.setContentsMargins(0, 0, 0, 0)
         meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
+        # The REW-online dot, a second time, at the right end of this header (user request
+        # 2026-08-11). It already exists in System params, but that is in the left sidebar and
+        # this is the card whose Read button fails when REW is closed -- the answer to "why did
+        # nothing turn green" should be visible without looking away from the question. Same
+        # `_rew_online` state and same `TrafficLight` widget, so there is one status shown twice,
+        # not two statuses that can disagree.
+        self._meas_rew_lbl = QLabel("REW")
+        self._meas_rew_lbl.setProperty("class", "phead-sub")
+        self._meas_rew_dot = TrafficLight(self._rew_status_class())
+        meas_head.layout().addWidget(self._meas_rew_lbl)
+        meas_head.layout().addWidget(self._meas_rew_dot)
+        self._retip_rew_dots()
         meas_layout.addWidget(meas_head)
         self._meas_panel = MeasurementPanel(
             preset_provider=lambda: self._view.preset if self._view else "",

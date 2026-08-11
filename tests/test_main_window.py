@@ -1795,3 +1795,33 @@ def test_closing_with_a_live_session_asks_instead_of_dropping_the_turn(monkeypat
     event = QCloseEvent()
     window.closeEvent(event)
     assert handed == ["quit"] and not event.isAccepted()
+
+
+def test_rew_dot_is_shown_in_both_places_and_they_never_disagree():
+    """User request 2026-08-11: the REW indicator also sits at the right end of the measurement
+    card's header. It is the SAME status in two places, so the test that matters is that they move
+    together -- a second dot that could lag behind the first would be worse than no second dot."""
+    _app()
+    window = MainWindow()
+    dots = list(window._rew_dots())
+    assert len(dots) == 2  # System params, and the "IN FOCUS NOW" header
+
+    assert {d.property("class") for d in dots} == {"tl tl-wait"}  # not probed yet
+    window._set_rew_online(True)
+    assert {d.property("class") for d in dots} == {"tl tl-done"}
+    window._set_rew_online(False)
+    assert {d.property("class") for d in dots} == {"tl tl-bad"}
+    assert all(d.toolTip() == i18n.t("rewOfflineTip") for d in dots)
+
+    # A language switch rebuilds System params from scratch (a new dot object) -- the header's is
+    # not rebuilt, and both must still say the same thing afterwards.
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en" if before == "uk" else "uk")
+        window._retranslate()
+        rebuilt = list(window._rew_dots())
+        assert {d.property("class") for d in rebuilt} == {"tl tl-bad"}
+        assert all(d.toolTip() == i18n.t("rewOfflineTip") for d in rebuilt)
+    finally:
+        i18n.set_language(before)
+        window._retranslate()
