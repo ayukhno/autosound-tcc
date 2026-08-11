@@ -7,7 +7,7 @@ The goal is to lower the barrier to entry for people who are not tuning
 experts — show the current state of a system clearly, and guide the manual
 steps — rather than to automate the DSP.
 
-> **Status: early scaffold.** Nothing is implemented yet.
+> **Status: early scaffold.** Under development.
 
 ## Scope of the first version
 
