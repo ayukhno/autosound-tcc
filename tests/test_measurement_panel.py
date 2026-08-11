@@ -56,14 +56,18 @@ class _FakeBridge:
         self.renamed.append((mid, title))
 
 
-def test_worker_picks_highest_ordinal_id_and_emits_done():
+def test_worker_emits_every_title_in_ordinal_order():
+    """Not just the newest one (user, 2026-08-11): a Read after a capture round used to turn a
+    single row green because the worker took the highest ordinal only."""
     _app()
-    bridge = _FakeBridge({"1": {"title": "old"}, "15": {"title": "sub_10 (sw)"}})
+    bridge = _FakeBridge(
+        {"1": {"title": "m-L_10 (sw)"}, "15": {"title": "sub_10 (sw)"}, "7": {"title": ""}}
+    )
     worker = _RewReadWorker(bridge)
     results = []
     worker.done.connect(lambda r: results.append(r))
     worker.run()  # call synchronously -- no real thread, no race
-    assert results == [{"id": "15", "title": "sub_10 (sw)", "n_points": 3}]
+    assert results == [{"titles": ["m-L_10 (sw)", "sub_10 (sw)"]}]
 
 
 def test_worker_emits_failed_on_empty_measurements():
@@ -92,10 +96,47 @@ def test_read_done_marks_matching_row():
     # so the transition this test checks is actually exercised.
     row = next(r for r in panel._rows if r.item_name == "m-L_10")
     assert row._dot.property("class") == "tl tl-wait"
-    panel._on_read_done({"title": "m-L_10 (sw)", "n_points": 512})
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
     assert row._dot.property("class") == "tl tl-done"
     assert row._name_label.property("class") == "mn mn-done"
     assert panel._read_btn.isEnabled()
+
+
+def test_read_done_marks_every_matching_row_not_just_one():
+    """The whole point of the 2026-08-11 fix: one Read, every row REW can account for."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    waiting = [r for r in panel._rows if r.status == "wait" and r.method_suffix == "sw"][:3]
+    assert len(waiting) == 3  # otherwise the mock changed and this test proves nothing
+    panel._on_read_done({"titles": [with_method(r.item_name, "sw") for r in waiting]})
+    assert [r.status for r in waiting] == ["done", "done", "done"]
+
+
+def test_read_done_leaves_unusable_and_skipped_rows_alone():
+    """A failed check (SCR-040) and a recorded decision (SCR-034) outrank "REW holds that title" --
+    a re-read must not quietly turn either of them green."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    bad, skipped = [r for r in panel._rows if r.method_suffix == "sw"][:2]
+    for row, status in ((bad, "bad"), (skipped, "skip")):
+        row._status = status
+        row._dot.set_status(status)
+    panel._on_read_done(
+        {"titles": [with_method(bad.item_name, "sw"), with_method(skipped.item_name, "sw")]}
+    )
+    assert (bad.status, skipped.status) == ("bad", "skip")
+
+
+def test_second_read_does_not_duplicate_additional_rows():
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    before = len(panel._rows)
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
+    assert len(panel._rows) == before + 1
 
 
 def test_read_failed_shows_error_and_reenables_button():
@@ -127,7 +168,7 @@ def test_read_done_with_modifier_colors_only_the_extra_text():
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     row = next(r for r in panel._rows if r.item_name == "m-L_10" and r.method_suffix == "sw")
-    panel._on_read_done({"title": "m-L_10 (sw) redo", "n_points": 512})
+    panel._on_read_done({"titles": ["m-L_10 (sw) redo"]})
     html = row._name_label.text()
     assert "m-L_10 (sw)" in html
     assert "redo" in html
@@ -141,7 +182,7 @@ def test_read_done_with_unmatched_title_adds_additional_row():
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     before = len(panel._rows)
-    panel._on_read_done({"title": "extra-mic_10 (sw)", "n_points": 256})
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
     assert len(panel._rows) == before + 1
     new_row = panel._rows[-1]
     assert new_row.item_name == "extra-mic_10"

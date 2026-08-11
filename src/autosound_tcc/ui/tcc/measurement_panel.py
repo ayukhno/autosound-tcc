@@ -79,11 +79,22 @@ _LEGEND = (
 
 
 class _RewReadWorker(QThread):
-    """Pulls the latest measurement's metadata + frequency response off a background thread --
-    `rew_api`'s HTTP calls are synchronous (plain `urllib`), so calling them from the GUI thread
-    would freeze the window for the duration of the request. Mirrors the QThread+signals shape
-    already used for `profile_interview_dialog.py`'s `_AgentWorker` (that one also runs asyncio,
-    which this doesn't need since REW's client isn't async)."""
+    """Pulls EVERY measurement REW currently holds, off a background thread -- `rew_api`'s HTTP
+    calls are synchronous (plain `urllib`), so calling them from the GUI thread would freeze the
+    window for the duration of the request. Mirrors the QThread+signals shape already used for
+    `profile_interview_dialog.py`'s `_AgentWorker` (that one also runs asyncio, which this doesn't
+    need since REW's client isn't async).
+
+    It used to read the highest-ordinal measurement only, on a "that's the most recent one"
+    heuristic -- so a Read after a whole capture round turned exactly one row green and left the
+    rest looking uncaptured (user, 2026-08-11). REW has no "currently selected measurement" concept
+    to ask about (rew-api-quirks.md), which is what made the heuristic tempting; but the panel's
+    question is "which of these rows does REW already hold", and that is answered by all of them.
+
+    One HTTP call, not one per measurement: the frequency response is no longer fetched. It was
+    only ever used to print a point count in the status line, and paying N round-trips for a
+    cosmetic number is not a trade worth making now that N is the whole list.
+    """
 
     done = Signal(dict)
     failed = Signal(str)
@@ -98,15 +109,14 @@ class _RewReadWorker(QThread):
             if not measurements:
                 self.failed.emit(i18n.t("measReadNoMeas"))
                 return
-            # REW's measurement ids are ordinals, not stable identity (rew-api-quirks.md) -- there
-            # is no "currently selected measurement" concept in the API at all. Highest ordinal is
-            # used as a "most recent" heuristic, same caveat rew_api.py itself documents for id
-            # reuse; if this proves unreliable in practice, replace with an explicit picker rather
-            # than trusting the heuristic further.
-            mid = max(measurements, key=lambda k: int(k) if str(k).isdigit() else -1)
-            title = (measurements[mid] or {}).get("title", "")
-            freqs, mag, _phase = self._bridge.frequency_response(mid)
-            self.done.emit({"id": mid, "title": title, "n_points": len(freqs)})
+            # Ascending ordinal = REW's own list order, which is capture order in practice -- it
+            # decides nothing here, it just keeps the status line and any newly added "additional"
+            # rows in a predictable sequence rather than dict order.
+            titles = [
+                str((measurements[mid] or {}).get("title", ""))
+                for mid in sorted(measurements, key=lambda k: int(k) if str(k).isdigit() else -1)
+            ]
+            self.done.emit({"titles": [t for t in titles if t.strip()]})
         except Exception as exc:  # noqa: BLE001 — surface any REW/network failure, don't crash
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -212,6 +222,11 @@ class _MeasRow(QWidget):
         self._name_label.style().unpolish(self._name_label)
         self._name_label.style().polish(self._name_label)
 
+    @property
+    def status(self) -> str:
+        """What this row currently shows -- one of the `_LEGEND` keys."""
+        return self._status
+
     def mark_done(self, extra: Optional[str] = None) -> None:
         self._status = "done"
         if extra:
@@ -255,6 +270,10 @@ class MeasurementPanel(QWidget):
         self._known_titles: set[str] = set()
         self._rename_worker: "_RewRenameWorker | None" = None
         self._rows: list[_MeasRow] = []
+        # REW titles this grid has already grown an "additional" row for. A Read now folds in the
+        # whole list, so without this the second press would add every unexpected graph a second
+        # time. Cleared whenever the grid is rebuilt -- the rows go, so the memory of them must.
+        self._additional_titles: set[str] = set()
         # The project's naming glossary, read once and kept: `_classify_title` asks it per title,
         # and it is what tells `L w+m` (a joint) from `L` plus a stray modifier.
         self._glossary = None
@@ -375,6 +394,7 @@ class MeasurementPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._rows = []
+        self._additional_titles = set()
         self._no_project_label.setText(message)
         self._no_project_label.setVisible(True)
 
@@ -447,6 +467,7 @@ class MeasurementPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._rows = []
+        self._additional_titles = set()
         self._col_next_row = []
         for c, group in enumerate(session.groups):
             header = QLabel(group.type)
@@ -630,23 +651,44 @@ class MeasurementPanel(QWidget):
         self._worker.start()
 
     def _on_read_done(self, result: dict) -> None:
+        """Fold everything REW holds into the grid: every title, not just the newest one.
+
+        Order matters here. `_remember_titles` can emit `titlesChanged`, which the window answers
+        by rebuilding this very grid from the derived checklist -- so the titles go in FIRST and
+        the rows are looked up afterwards, against whatever `self._rows` holds by then. Marking
+        first would decorate widgets that are already on their way to `deleteLater()`.
+        """
         self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
-        title = result.get("title", "")
-        self._remember_titles([title])
+        titles = [str(t) for t in (result.get("titles") or []) if str(t).strip()]
+        self._remember_titles(titles)
+
+        matched = 0
+        added = 0
+        for title in titles:
+            row, extra = self._classify_title(title)
+            if row is not None:
+                matched += 1
+                # "Taken but unusable" and "skipped" are verdicts and decisions (SCR-034/SCR-040),
+                # and both outrank the bare fact that REW holds a title of that name -- the same
+                # precedence `measurement_view.status_for` applies. Turning them green here would
+                # have a re-read quietly erase a failed check.
+                if row.status == "wait":
+                    row.mark_done(extra)
+                continue
+            # No expected channel matched at all -- not an error, an "additional" graph (user
+            # request 2026-07-28: names with modifiers or wholly extra graphs are OK, just flag
+            # them rather than silently drop them). Base name = title minus any trailing "(method)".
+            if title in self._additional_titles:
+                continue  # a second Read must not stack a duplicate row for the same graph
+            base = title.split(" (")[0].strip()
+            col = self._guess_column_for_new_title(title)
+            self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
+            self._additional_titles.add(title)
+            added += 1
         self._status_label.setText(
-            i18n.t("measReadOk").format(title=title, n=result.get("n_points", 0))
+            i18n.t("measReadOk").format(n=len(titles), matched=matched, extra=added)
         )
-        row, extra = self._classify_title(title)
-        if row is not None:
-            row.mark_done(extra)
-            return
-        # No expected channel matched at all -- not an error, an "additional" graph (user request
-        # 2026-07-28: names with modifiers or wholly extra graphs are OK, just flag them rather
-        # than silently drop them). Base name = the title with any trailing "(method)" stripped.
-        base = title.split(" (")[0].strip()
-        col = self._guess_column_for_new_title(title)
-        self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
 
     def _title_key(self, title: str):
         """A title's identity in the naming grammar, or None if it is not one of ours.
