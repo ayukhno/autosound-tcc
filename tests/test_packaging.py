@@ -84,6 +84,10 @@ def test_asking_for_the_window_without_it_prints_what_to_type():
     assert proc.returncode == 2, "a refusal, not a crash and not a success"
     assert "uv tool install" in proc.stderr and "[gui]" in proc.stderr
     assert "Traceback" not in proc.stderr
+    # A command that fails with "no such package" sends its reader hunting for a typo of their
+    # own. `autosound-tcc` is not on PyPI, so the line printed here has to carry the git URL —
+    # caught by actually running it (2026-08-12).
+    assert "git+https://" in proc.stderr, "the printed command must be one that works"
 
 
 def test_the_two_sizes_are_declared_the_way_the_split_assumes():

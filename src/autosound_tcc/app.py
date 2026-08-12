@@ -20,10 +20,15 @@ from autosound_tcc.core import app_log, config
 #: the window needs PySide6 + pyqtgraph, which is hundreds of megabytes. A person who installed
 #: the light one and then typed the GUI command must get a sentence they can act on, not a
 #: traceback about a module they have never heard of.
+#: The git URL, not a bare package name. `autosound-tcc` is not on PyPI, so the obvious
+#: `uv tool install 'autosound-tcc[gui]'` fails with "no such package" — a message that sends its
+#: reader looking for a typo in their own command (caught by running it, 2026-08-12). Whatever is
+#: printed here has to be a line somebody can paste.
 _NO_GUI = """\
 autosound-tcc: the graphical window is not installed.
 
-    uv tool install --upgrade 'autosound-tcc[gui]'
+    uv tool install --upgrade \
+      'autosound-tcc[gui] @ git+https://github.com/ayukhno/autosound-tcc'
 
 (The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)
 Missing: {error}"""
