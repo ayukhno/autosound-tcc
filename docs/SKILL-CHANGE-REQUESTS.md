@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1266,3 +1266,38 @@ an unreadable profile is `contract.py`'s complaint.
 The one that actually hurts is `sample_rate_hz`: phase 1 converts every delay to samples, so a
 rate nobody wrote down is a rate the next session assumes. On this project the real answer is
 96 kHz; at an assumed 48 kHz every sample count would have been half of what the DSP needed.
+
+## SCR-046 — an unreadable `project.json` is not an empty one
+
+**Status**: done (skill `94eaa62`, 2026-08-12 — `Project.load()` refuses a file it cannot read;
+`contract.py` reports it as a row instead of crashing)
+**Target**: `skills/autosound-tuning/rew_tool/project.py`, `rew_tool/contract.py`
+**TCC dependency**: none — TCC reads `project.json` with plain `json.loads` in
+`state/project_view.py`, so it never went through this path.
+
+**Detail**: found by the 2026-08-12 audit and reproduced before fixing. `load()` answered the same
+thing for two different questions:
+
+```python
+except (OSError, ValueError):
+    return _empty_project()
+```
+
+"This project has no facts yet" and "this file exists and will not parse" are not the same state,
+and every mutator in the module is load-modify-save. So one `set_channel` against a half-written
+or badly merged file wrote the skeleton over it: the whole project replaced, `project_rev` back to
+1, no error anywhere. Verified — the reproduction is now a selftest case.
+
+**What did not help, and is worth being precise about: the atomic write.** temp-then-rename
+guarantees nobody ever reads a half-written file, and it delivered exactly that here — the
+replacement was atomic and complete. Atomicity protects the SHAPE of a write. It has nothing to
+say about its meaning.
+
+Two judgement calls:
+
+1. **A missing file still reads as a skeleton**, because that is true, and a brand-new folder must
+   not be an error. The distinction is `os.path.isfile`, checked before the parse rather than
+   inferred from the exception — `FileNotFoundError` is not the only way to fail to read a file.
+2. **`contract.py` catches and reports** rather than propagating. Diagnostics exists to say what is
+   wrong with a project; a checker that dies on the worst case is a checker that is absent exactly
+   when it is needed.
