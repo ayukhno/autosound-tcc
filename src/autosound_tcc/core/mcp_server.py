@@ -18,6 +18,31 @@ to be spawned by the client, which would give a second, headless TCC with no win
 **No mock data is exposed.** The measurement panel still renders `ui/tcc/mock_data`, and a tool
 serving that to a model would invite EQ proposals computed from fabricated sweeps. Measurements
 land here only once the skill emits them for real (SCR-004/SCR-008).
+
+## D-6 audit of this surface (2026-07-31)
+
+The rule: TCC never writes DATA — not state, not project, not profile. A tool either reads, or
+carries an INTENT, or is a SIGNAL. Every tool below was checked against "does this write?":
+
+| Tool | Writes | Verdict |
+|---|---|---|
+| `get_tcc_state`, `get_ledger`, `get_capability_checklist` | — | read |
+| `get_pending_signals`, `wait_for_signal` | `.tcc/` bus | TCC's own namespace; the payload is user intent |
+| `propose_change` | — | intent, put on screen for the Arbiter |
+| `copy_helix_eq` | clipboard | hand-off to a human, gated |
+| `write_rew_filters` | REW's model | an instrument, not project data; gated |
+| `call_critic` | `.tcc/` call log | TCC's own namespace |
+| `report_phase` | — | **converted** — read-back + refresh signal |
+| the four onboarding tools | — | **converted** — intent handed to the skill's writer |
+
+The onboarding tools were the last thing here that authored project data, and only because the
+skill had no writer to route an interview through (`dsp_profile.py` could `validate`, `diff` and
+`find-bundled`, nothing else). SCR-025 added one; they now pass each confirmed value to it via
+`core/profile_writer.py`. The draft, the validation and the refusals all live on the skill's side
+— including `finalize` declining an incomplete profile, which this server reports verbatim rather
+than deciding for itself.
+
+Nothing on this surface writes project data any more.
 """
 
 from __future__ import annotations
@@ -34,7 +59,16 @@ from typing import Any, Optional, Protocol
 
 from mcp.server.fastmcp import FastMCP
 
-from autosound_tcc.core import agent_session, config, critic, vendor_loader
+from autosound_tcc.core import (
+    agent_session,
+    config,
+    critic,
+    model_choices,
+    process_writer,
+    profile_writer,
+    project_settings,
+    vendor_loader,
+)
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
 
@@ -45,6 +79,84 @@ _TOKEN_HEADER = "x-tcc-token"
 # user can walk to the car and back, short enough that a forgotten dialog doesn't pin an MCP call
 # open forever.
 CONFIRM_TIMEOUT_S = 600.0
+
+
+def _vendor_of(model: Optional[str]) -> str:
+    """The vendor a model name implies, for the journal's `reviewer` field.
+
+    A guess by design, and a cheap one: the reviewer script reports the model it used and nothing
+    about who makes it. Wrong is better than absent here -- the field exists so a reader can see
+    that the Critic was a DIFFERENT vendor from the Generator, which is the whole anti-anchoring
+    argument, and "?" answers that question for nobody.
+    """
+    name = (model or "").lower()
+    for needle, vendor in (
+        ("gemini", "google"), ("gpt", "openai"), ("o1", "openai"), ("claude", "anthropic"),
+        ("grok", "xai"), ("llama", "meta"), ("mistral", "mistral"), ("deepseek", "deepseek"),
+    ):
+        if needle in name:
+            return vendor
+    return "unknown"
+
+
+def _reviewer_state(project_dir: Path) -> dict[str, Any]:
+    """What TCC already knows about the reviewer channel, so intake stops asking about it.
+
+    The Arbiter picks a Critic in the footer and it is stored per project. The skill, having no
+    way to see that, opens every intake with "how would you like to set up the Reviewer
+    (Critic-Advisor) channel?" -- about a channel that is configured and one `call_critic` away.
+    A GUI that knows something and asks anyway is just a chat window with more buttons.
+
+    `reachable` is the honest half, and since SCR-033 it is a real question rather than a vendor
+    check: the reviewer script speaks three transports, so this asks whether THIS machine has the
+    chosen vendor's key or CLI. False means clipboard-only — a designed fallback, not a failure.
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    if not key:
+        return {
+            "configured": False,
+            "how": "ask the Arbiter to pick one in TCC's footer",
+        }
+    known = model_choices.choices([]) + model_choices.critic_choices([])
+    harness, _, model = key.partition(":")
+    # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
+    # choice is often not in it. Judge the key itself rather than reporting "unreachable" for a
+    # reviewer that works.
+    resolved = model_choices.resolve(known, key)
+    choice = resolved.choice or model_choices.Choice(
+        harness=harness or "omp", model=model or key, label=key, provider=""
+    )
+    return {
+        "configured": True,
+        "model": choice.model,
+        # What the Arbiter picked, versus what this machine will actually run. Empty unless the
+        # install has an alias — and when it does, the model must not be able to report the
+        # project's stored name as if it were the one that answered.
+        "substituted": resolved.note,
+        "label": choice.label,
+        "reachable": model_choices.critic_reaches(choice),
+        "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
+               else "call `call_critic`; it will hand you a clipboard package for this model",
+        # Reported once and asked back: the model read this, then put "confirm that this is your
+        # independent reviewer?" to the Arbiter. Naming a field `configured` says what the value
+        # is; it does not say who decided it. This does.
+        "decided_by": "the Arbiter, in TCC's own UI — settled, not a suggestion to confirm",
+    }
+
+
+def configured_critic_model(project_dir: Path) -> str:
+    """The reviewer this project's footer is set to, in the CLI's own vocabulary — or "".
+
+    Through `model_choices.resolve`, so a machine-level alias is honoured here exactly as it is in
+    the picker; two answers to "which model" is how they came to disagree in the first place.
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    if not key:
+        return ""
+    resolved = model_choices.resolve(model_choices.critic_choices([]), key)
+    if resolved.choice is not None:
+        return resolved.choice.model
+    return resolved.key.partition(":")[2] or resolved.key
 
 
 @dataclass(frozen=True)
@@ -76,10 +188,25 @@ class UiBridge(Protocol):
 
     def show_critique(self, critique: dict[str, Any]) -> None: ...
 
+    def show_curves(self, request: dict[str, Any]) -> None:
+        """Open the curve panel over named REW measurements, with the model's own reading marked.
+
+        The one channel that carries a disagreement about a NUMBER in both directions, without an
+        image anywhere in it: the model says where it read the answer, the Arbiter drags a marker
+        to where they read it, and what comes back is a value rather than a picture of one.
+        """
+
     def notify_profile_ready(self) -> None:
         """A DSP profile was just written (onboarding via terminal, `finalize_profile` below) --
         the GUI should reload it. Fires only from the terminal path; the in-app onboarding chat
         already restarts into a fresh window off its own `profile_saved` signal."""
+
+    def refresh_from_disk(self) -> None:
+        """The skill changed something on disk — re-read the project (D-6's signal direction).
+
+        Not the same as `notify_profile_ready`, which is about one file appearing for the first
+        time: this is the ordinary "the tune moved" refresh, and it is a MESSAGE, not data.
+        """
 
 
 class HeadlessBridge:
@@ -109,20 +236,14 @@ class HeadlessBridge:
     def notify_profile_ready(self) -> None:
         pass
 
+    def refresh_from_disk(self) -> None:
+        pass
+
     def show_critique(self, critique: dict[str, Any]) -> None:
         pass
 
-
-def _strip_stray_dsp_profile_prefix(path: str) -> str:
-    """Defensive: `save_profile_field`/`reset_profile_field`'s `path` is relative to
-    `project_profile` (already the unwrapped profile), but an agent that also saw a bundled
-    profile's on-disk shape (`{"dsp_profile": {...}}`) can still guess a `dsp_profile.` prefix --
-    observed live (2026-07-29 dogfood: "Wrong nesting — path made dsp_profile.dsp_profile").
-    Correcting it here is more robust than hoping the tool description alone prevents every case.
-    """
-    if path.startswith("dsp_profile."):
-        return path[len("dsp_profile."):]
-    return path
+    def show_curves(self, request: dict[str, Any]) -> None:
+        pass
 
 
 def build_server(
@@ -146,6 +267,19 @@ def build_server(
         ),
     )
 
+    def _load_process_state() -> tuple[Optional[dict[str, Any]], Optional[str]]:
+        """The skill's process state, read through the skill's own module (`state/process.py`).
+
+        The one authority on where the tune stands (D-6): TCC reads this, never writes it. Returns
+        `(state, None)` or `(None, reason)` — a project with no process yet reads as an empty
+        state, which is not an error.
+        """
+        try:
+            process = vendor_loader.load_process()
+        except vendor_loader.VendorNotInitializedError as exc:
+            return None, str(exc)
+        return process.Process(str(project_dir / "process")).load(), None
+
     async def _confirm(request: ConfirmRequest) -> bool:
         try:
             return await asyncio.wait_for(
@@ -164,13 +298,41 @@ def build_server(
         Call this before proposing anything, so a proposal refers to what they are actually
         looking at rather than to state you inferred earlier in the conversation.
         """
-        data = registry.load()
+        process_state, error = _load_process_state()
+        ui = bridge.snapshot()
         state = {
             "project_dir": str(project_dir),
-            "ui": bridge.snapshot(),
-            "current_phase": data.get("current_phase"),
-            "phases": data.get("phases", {}),
+            "ui": ui,
+            # Top-level, not left inside `ui`, because it is not a screen detail: it is the answer
+            # to the intake's first question. The Arbiter picked it in the app before the session
+            # started, and every project file the skill writes follows it.
+            "language": ui.get("ui_language"),
+            # The phase comes from the skill's own file, not from this server's bookkeeping: two
+            # places answering "which phase" is how they drift apart (#10, D-6).
+            "current_phase": (process_state or {}).get("active_phase"),
+            "process_state_error": error,
+            "sessions": registry.load().get("phases", {}),
             "pending_signals": bus.pending_count,
+            # How hard this session was asked to think, so a record can say it. A journal entry
+            # that names the model but not its effort does not describe what ran -- the same model
+            # at `high` and at `max` is two different reviewers of its own work. Fixed for the
+            # session: both adapters take it when the session is built, so it cannot have changed
+            # since this session started, whatever the picker shows now.
+            "effort": model_choices.resolve_effort(
+                project_settings.get(config.tcc_dir(project_dir), "effort", "")
+            ),
+            # The Arbiter already chose a reviewer in the footer, and without this the skill
+            # cannot see it: intake asks "how would you like to set up the Reviewer channel?"
+            # about a channel that is configured and one tool call away. Anything TCC already
+            # knows must not be asked again -- that is the difference between a GUI and a chat.
+            "reviewer": _reviewer_state(project_dir),
+            # Said in the payload rather than in a system prompt, because it has to reach both
+            # front-ends and only one of them has a system prompt TCC controls.
+            "_this_is_settled": (
+                "Everything above is TCC's own state: what the Arbiter configured in the UI and "
+                "what is on their screen right now. Act on it. Do not ask them to confirm a value "
+                "they set themselves — ask only about what is missing or contradicts the disk."
+            ),
         }
         return json.dumps(state, ensure_ascii=False, indent=2)
 
@@ -182,6 +344,13 @@ def build_server(
         param-edit mode, flagging that something you claimed to have changed is not visible, or
         moving attention to another channel. Check this at the start of a turn and before any
         proposal; a `not_visible` signal means re-verify against disk, not restate your claim.
+
+        A `channel_toggle` signal (`{group, channel, on}`) is the Arbiter asking for a channel to
+        be switched on or off in the tree. TCC does not write the ledger, so nothing has changed
+        yet: record it the way any other agreed change is recorded (`apply.propose`), and say so.
+        Turning one **on** usually means more than a flag -- a physical output needs its virtual
+        counterpart and its place in the glossary -- so treat it as a request to make that channel
+        real, not as a single field edit.
         """
         signals = [s.as_dict() for s in bus.drain()]
         return json.dumps({"signals": signals, "count": len(signals)}, ensure_ascii=False, indent=2)
@@ -232,7 +401,8 @@ def build_server(
             vstate = vendor_loader.load_dsp_state()
         except vendor_loader.VendorNotInitializedError as exc:
             return json.dumps({"error": str(exc)})
-        history = vstate.PresetHistory(str(config.state_root()), preset)
+        history = vstate.PresetHistory(str(config.state_root()), preset,
+                                       project_dir=str(project_dir))
         raw = history.load(version or None)
         return json.dumps(raw, ensure_ascii=False, indent=2)
 
@@ -245,115 +415,220 @@ def build_server(
     # by construction, see terminal_launcher.py) can run the identical interview against a brand
     # new project: there's no system_prompt= channel for an arbitrary external agent, so these tool
     # DESCRIPTIONS are the only instructions it gets -- keep them in sync with
-    # agent_session.SYSTEM_PROMPT if that ever changes. Never touches DSP/REW (just one JSON file),
-    # so unlike the writes below, none of this needs the Arbiter gate.
-    onboarding_draft: dict[str, Any] = {"vendor": None, "model": None, "data": None}
-
+    # agent_session's own prompt if that ever changes.
+    #
+    # Neither path writes the file itself any more (D-6): both hand the confirmed value to the
+    # skill's `dsp_profile.py`, which owns the draft, the validation and the schema stamp. No
+    # Arbiter gate here -- these touch neither the DSP nor REW, and the gate that matters is the
+    # skill's own refusal to finalize an incomplete profile.
     @mcp.tool()
     async def get_capability_checklist() -> str:
         """The fixed DSP capability-checklist questions to ask the human about (project-intake.md
         §4). Ask closed questions with concrete options where you can, 2-3 per turn -- never dump
         the whole remaining list into one message, even when several are still open."""
-        return json.dumps(agent_session.CAPABILITY_CHECKLIST, ensure_ascii=False)
+        return json.dumps(profile_writer.capability_checklist(), ensure_ascii=False)
 
     @mcp.tool()
     async def check_existing_profile(vendor: str, model: str) -> str:
-        """Call this FIRST, before asking the human anything. Checks this project's own
-        in-progress draft and the bundled reference library for an EXACT vendor+model match --
+        """Call this FIRST, before asking the human anything. Starts (or resumes) this project's
+        interview draft and checks the bundled reference library for an EXACT vendor+model match --
         never treat a different model's profile (even a platform sibling's) as fact for this one.
-        If it returns a project profile or an exact bundled match, don't re-ask about anything it
+        If it returns a draft with answers or an exact bundled match, don't re-ask about anything
         already confirmed -- call get_capability_checklist and ask only about what's still open,
         2-3 questions per turn (see get_capability_checklist's own note).
 
-        `project_profile` and `bundled_exact_match` are both returned UNWRAPPED (no top-level
-        `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s `path`
-        resolves against. A path like `groups.0.fields` reaches `project_profile.groups[0].fields`
-        directly; never prefix a path with `dsp_profile.`, that key does not exist at this level.
+        Resuming is real: the draft lives on disk, so an interview interrupted days ago comes back
+        with its answers. `project_profile` and `bundled_exact_match` are both UNWRAPPED (no
+        top-level `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s
+        `path` resolves against, so never prefix a path with `dsp_profile.`.
         """
         try:
-            dsp_profile = vendor_loader.load_dsp_profile()
-        except vendor_loader.VendorNotInitializedError as exc:
+            current = profile_writer.start(project_dir, vendor, model)
+            bundled = profile_writer.find_bundled(
+                vendor, model, config.bundled_profiles_dir()
+            )
+        except profile_writer.ProfileWriterError as exc:
             return json.dumps({"error": str(exc)})
-        if onboarding_draft["data"] is None:
-            onboarding_draft["vendor"] = vendor
-            onboarding_draft["model"] = model
-            profile_path = config.dsp_profile_path(project_dir)
-            if profile_path.is_file():
-                onboarding_draft["data"] = dsp_profile.load_profile(str(profile_path))
-            else:
-                onboarding_draft["data"] = agent_session.empty_profile_draft(vendor, model)
-        bundled = dsp_profile.find_bundled(vendor, model, str(config.bundled_profiles_dir()))
-        out = {
-            "project_profile": onboarding_draft["data"].get("dsp_profile", onboarding_draft["data"]),
-            "open_questions": dsp_profile.open_questions(onboarding_draft["data"]),
-            "bundled_exact_match": bundled.get("dsp_profile", bundled) if bundled else None,
-        }
-        return json.dumps(out, ensure_ascii=False)
+        return json.dumps({
+            "project_profile": current.get("draft", {}),
+            "open_questions": current.get("open_questions", []),
+            "bundled_exact_match": bundled,
+        }, ensure_ascii=False)
 
     @mcp.tool()
     async def save_profile_field(path: str, value: Any) -> str:
         f"""Save one confirmed field into the in-progress profile draft (call
         check_existing_profile first). One field per call, as soon as it's confirmed -- don't
-        batch everything to the end.
+        batch everything to the end. Each call lands on disk, so an interrupted interview keeps
+        everything answered so far.
 
         `path` is a dotted path relative to `project_profile` as returned by
-        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields' reach
-        `project_profile.sample_rate_hz` / `project_profile.groups[0].fields` directly. NEVER
-        prefix a path with 'dsp_profile.' -- `project_profile` already IS that object, prefixing
-        it creates a wrong nested dsp_profile.dsp_profile. `groups` is a flat array, each EXACTLY
-        {{"id": "<snake_case_id>", "label": "<Human Label>", "fields": [<tokens>]}} -- `fields`
-        must be a flat array of STRING TOKENS drawn ONLY from this vocabulary, nothing else:
-        {json.dumps(agent_session.FIELD_VOCABULARY)}
+        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields'. `groups` is a flat
+        array, each entry EXACTLY {{"id": "<snake_case_id>", "label": "<Human Label>",
+        "fields": [<tokens>]}} -- `fields` must be a flat array of STRING TOKENS drawn ONLY from
+        this vocabulary, nothing else:
+        {json.dumps(profile_writer.field_vocabulary())}
         A capability that doesn't fit this vocabulary belongs in `_open_questions`, not a made-up
         field name.
         """
-        if onboarding_draft["data"] is None:
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
-        path = _strip_stray_dsp_profile_prefix(path)
-        value = agent_session.maybe_decode_json(value)
-        agent_session.set_dotted_field(
-            onboarding_draft["data"].setdefault("dsp_profile", {}), path, value
-        )
-        return json.dumps({"saved": path, "value": value}, ensure_ascii=False)
+        try:
+            return json.dumps(profile_writer.set_field(project_dir, path, value),
+                               ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"saved": False, "error": str(exc)})
 
     @mcp.tool()
     async def reset_profile_field(path: str) -> str:
         """Delete a field from the draft (by dotted path) so it can be re-saved from scratch --
         recovery if a previous save_profile_field produced the wrong shape (e.g. a list written as
         a string), not part of the normal interview flow."""
-        if onboarding_draft["data"] is None:
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
-        path = _strip_stray_dsp_profile_prefix(path)
-        parts = path.split(".")
-        node = onboarding_draft["data"].get("dsp_profile", {})
-        for part in parts[:-1]:
-            key: Any = int(part) if part.isdigit() else part
-            if isinstance(node, (dict, list)) and key in (node if isinstance(node, dict) else range(len(node))):
-                node = node[key]
-            else:
-                return json.dumps({"reset": False, "reason": f"{path} not found"})
-        last: Any = int(parts[-1]) if parts[-1].isdigit() else parts[-1]
-        if isinstance(node, dict) and last in node:
-            del node[last]
-        elif isinstance(node, list) and isinstance(last, int) and 0 <= last < len(node):
-            node[last] = None
-        return json.dumps({"reset": path}, ensure_ascii=False)
+        try:
+            return json.dumps(profile_writer.reset_field(project_dir, path), ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"reset": False, "error": str(exc)})
 
     @mcp.tool()
     async def finalize_profile() -> str:
-        """Validate and write the profile to disk. Call this when the interview is done or the
-        human says they're done -- do not just say so in text, call the tool."""
-        if onboarding_draft["data"] is None:
+        """Validate the draft and write `dsp_profile.json`. Call this when the interview is done or
+        the human says they're done -- do not just say so in text, call the tool.
+
+        The skill's own writer decides: if it refuses, the reason comes back here and the draft is
+        untouched, so fix that one field and call again rather than starting over.
+        """
+        if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
         try:
-            dsp_profile = vendor_loader.load_dsp_profile()
-        except vendor_loader.VendorNotInitializedError as exc:
-            return json.dumps({"error": str(exc)})
-        profile_path = config.dsp_profile_path(project_dir)
-        dsp_profile.validate_profile(onboarding_draft["data"])
-        dsp_profile.save_profile(str(profile_path), onboarding_draft["data"])
-        bridge.notify_profile_ready()
-        return json.dumps({"saved_to": str(profile_path)}, ensure_ascii=False)
+            return json.dumps({"saved_to": str(profile_writer.finalize(project_dir))},
+                               ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({"saved": False, "error": str(exc)})
+
+    # ---- process record (the skill's writer; not gated -- recording is not a change) ----
+    #
+    # These exist because `report_phase` records nothing and never did: an agent that wanted to
+    # write the move had to find `state/process.py` on disk and shell out to it, and whether it
+    # managed to was a property of the model, not of the method. The gates stay where the schema
+    # is owned -- `finish_step` without evidence is refused by the skill and the refusal is
+    # returned verbatim.
+
+    def _record(call, *args, **kwargs) -> str:
+        try:
+            line = call(project_dir, *args, **kwargs)
+        except process_writer.ProcessWriterError as exc:
+            return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
+        bridge.refresh_from_disk()
+        state, _ = _load_process_state()
+        return json.dumps({"recorded": True, "said": line,
+                           "active_phase": (state or {}).get("active_phase")},
+                          ensure_ascii=False)
+
+    @mcp.tool()
+    async def enter_phase(phase: str) -> str:
+        """Make a phase current (−1…5) and record it. Phases are the skill's fixed skeleton --
+        entering one instantiates its template steps; you do not invent phases."""
+        return await asyncio.to_thread(_record, process_writer.enter_phase, phase)
+
+    @mcp.tool()
+    async def add_step(step_id: str, name: str, situational: bool = False) -> str:
+        """Add a plan step. `situational=True` records it as this car's own insert rather than one
+        instantiated from the phase template -- the distinction is what makes a plan readable
+        later."""
+        return await asyncio.to_thread(_record, process_writer.add_step, step_id, name, situational)
+
+    @mcp.tool()
+    async def start_step(step_id: str) -> str:
+        """Begin, or re-begin, a step. Re-beginning is attempt N+1 -- a redo is recorded next to the
+        first try, never on top of it."""
+        return await asyncio.to_thread(_record, process_writer.start_step, step_id)
+
+    @mcp.tool()
+    async def finish_step(step_id: str, evidence: list[str]) -> str:
+        """Close a step. `evidence` is REQUIRED, and at least one item must RESOLVE rather than
+        describe: a REW capture name in the grammar (`tw-L_1 (rta)` -- the method suffix is what
+        makes it a capture), a ledger version that exists on disk (`v_003`), or a project file that
+        exists (`autosound_context.md`). Prose may ride along with one of those; prose alone is
+        refused. The skill checks this, not TCC, and a refusal comes back in the skill's own
+        wording -- write the artefact, then close the step against it, rather than retrying the
+        same call."""
+        return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
+
+    @mcp.tool()
+    async def skip_step(step_id: str, superseded_by: str = "") -> str:
+        """Supersede a step. It stays visible in the plan -- steps are never deleted, and what
+        replaced this one is worth naming."""
+        return await asyncio.to_thread(_record, process_writer.skip_step, step_id, superseded_by)
+
+    @mcp.tool()
+    async def block_step(step_id: str, reason: str) -> str:
+        """Mark a step blocked and say what blocks it -- a gate waiting on the human, a measurement
+        that cannot be taken yet."""
+        return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
+
+    @mcp.tool()
+    async def record_decision(
+        question: str, answer: str, step: str = "", invalidates: str = ""
+    ) -> str:
+        """Record what the Arbiter ruled — the question as put, the answer as given (SCR-030).
+
+        Their half of the conversation is in no machine file otherwise, so a constraint they set is
+        invisible to the next session unless somebody re-reads it out of the transcript. Call this
+        BEFORE acting on a ruling that constrains a later phase. `invalidates` names what the
+        ruling supersedes (channels, captures) when it supersedes anything."""
+        return await asyncio.to_thread(
+            _record, process_writer.record_decision, question, answer, step, invalidates
+        )
+
+    @mcp.tool()
+    async def check_captures(titles: list[str] = []) -> str:
+        """Check the open round's captures against REW and record the verdict (SCR-040).
+
+        Arithmetic, not judgement: does REW hold each measurement, is it in the band asked for, is
+        the level a signal rather than silence or a loopback. Do NOT read frequency-response arrays
+        to answer this yourself — this computes it, records it against REW's own `uuid`, and the
+        step's gate reads what it recorded.
+
+        A step that asked for captures will not close until they pass. `titles` defaults to
+        everything the round expects."""
+        return await asyncio.to_thread(_record, process_writer.check_captures, titles or None)
+
+    @mcp.tool()
+    async def start_capture(version: str, expected: list[str], step: str = "") -> str:
+        """Open a capture round before measuring: the ledger version being captured at, and the
+        titles the phase asks for (SCR-034).
+
+        A round, not a version. The version names the config the measurements were taken under and
+        cannot tell two passes at the same config apart -- and the round is what makes a finished
+        pass survive REW being closed, since otherwise its status lives only in REW's own list of
+        open measurements.
+
+        `step` binds the round to the plan step it satisfies, which is what lets that step's gate
+        refuse to close while a capture it asked for is unusable (SCR-040)."""
+        return await asyncio.to_thread(
+            _record, process_writer.start_capture, version, expected, step
+        )
+
+    @mcp.tool()
+    async def record_capture(title: str) -> str:
+        """A measurement came back, by its REW title. One that was not on the round's list is
+        recorded as unplanned rather than refused -- the derivation can only say what SHOULD have
+        been taken, so "this came back and nobody asked for it" has nowhere else to live."""
+        return await asyncio.to_thread(_record, process_writer.record_capture, title)
+
+    @mcp.tool()
+    async def skip_capture(title: str, reason: str) -> str:
+        """A capture deliberately NOT taken, and why. The reason is required: skipped and
+        not-yet-taken render identically without it, and the next session proposes it again."""
+        return await asyncio.to_thread(_record, process_writer.skip_capture, title, reason)
+
+    @mcp.tool()
+    async def close_capture(reason: str = "") -> str:
+        """Close the open capture round. Whatever is neither taken nor skipped is recorded as
+        outstanding rather than quietly dropped."""
+        return await asyncio.to_thread(_record, process_writer.close_capture, reason)
 
     # ---- writes (every one gated on the Arbiter) ---------------------------
 
@@ -431,6 +706,43 @@ def build_server(
         return json.dumps({"copied": True, "chars": len(text)})
 
     @mcp.tool()
+    async def show_curves(
+        titles: list[str], markers: list[float] | None = None,
+        kind: str = "impulse", note: str = "",
+    ) -> str:
+        """Put a measurement on screen with YOUR reading marked, and ask the Arbiter for theirs.
+
+        Use this the moment a number is in dispute — an IR onset, where a joint sums, which peak is
+        the arrival. Do not ask for a screenshot: a picture is an image of an opinion, it cannot be
+        computed on, and pushing one back through this transport has ended a session before.
+
+        `titles` are REW measurement names (`w-L_01 (sw)`), one or two — a disagreement is nearly
+        always about a pair. `markers` is where YOU read the answer, in the plot's own units
+        (milliseconds for `impulse`, Hz for `fr`); the Arbiter's marker starts on yours, so any
+        distance between them afterwards is deliberate. `note` says what you are asking them to
+        look at.
+
+        Returns as soon as the panel is open. The Arbiter's reading arrives as an ordinary message
+        from them — they see it and can edit it first, which is the same rule every other statement
+        of theirs follows. Do not wait for it in a loop; finish your turn.
+        """
+        request = {
+            "titles": [str(t) for t in (titles or []) if str(t).strip()],
+            "markers": [float(m) for m in (markers or [])],
+            "kind": kind if kind in ("impulse", "fr") else "impulse",
+            "note": note,
+        }
+        if not request["titles"]:
+            return json.dumps({"shown": False, "reason": "no measurement titles given"})
+        bridge.show_curves(request)
+        return json.dumps({
+            "shown": True,
+            "titles": request["titles"],
+            "markers": request["markers"],
+            "next": "the Arbiter's reading will arrive as a message; end your turn and wait for it",
+        })
+
+    @mcp.tool()
     async def call_critic(package: str, trace_path: str = "", model: str = "") -> str:
         """Send a proposal package to the Critic (a different vendor's model) and return its reply.
 
@@ -446,14 +758,33 @@ def build_server(
         for them to paste into any web chat and bring the reply back by hand; `error` explains why
         nothing ran. Never present `clipboard` as a critique — there isn't one yet.
         """
+        # The Arbiter's pick is the default. Without this the call went out with NO model, the
+        # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
+        # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"
+        # while the UI showed `gemini-3.1-pro-high` (2026-08-12). The substitution happened BEFORE
+        # any fallback; there was nothing to fall back from.
         result = await asyncio.to_thread(
             critic.run,
             package,
             project_dir=project_dir,
             trace_path=trace_path or None,
-            model=model or None,
+            model=model or configured_critic_model(project_dir) or None,
         )
         critic.log_call(result, None, project_dir)
+        # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
+        # local log answers the footer's "last called"; the journal is what a resume and any other
+        # front-end read, and until now it recorded that a review happened and lost what it argued.
+        if result.mode in (critic.MODE_API_OR_CLI, critic.MODE_CLIPBOARD):
+            try:
+                process_writer.record_reviewer(
+                    project_dir,
+                    vendor=_vendor_of(result.model),
+                    model=result.model or "?",
+                    review=result.review or "",
+                    mode="clipboard" if result.mode == critic.MODE_CLIPBOARD else "api",
+                )
+            except process_writer.ProcessWriterError:
+                pass  # a critique that ran must not fail over its own bookkeeping
         bridge.show_critique(
             {
                 "mode": result.mode,
@@ -461,6 +792,8 @@ def build_server(
                 "model": result.model,
                 "role": result.role,
                 "detail": result.detail,
+                # The bubble links the text rather than being the only copy of it.
+                "review": result.review,
             }
         )
         return json.dumps(
@@ -475,22 +808,42 @@ def build_server(
         )
 
     @mcp.tool()
-    async def report_phase(
-        phase: str, step: str = "", status: str = "", evidence: Optional[list[str]] = None
-    ) -> str:
-        """Tell TCC which phase/step you are on, with evidence links for a finished step.
+    async def report_phase(phase: str = "") -> str:
+        """Re-read the process from disk and tell you what it actually says. Not a recorder --
+        record with `enter_phase` / `add_step` / `start_step` / `finish_step` on this same surface,
+        which drive the skill's own writer.
 
-        TCC uses this to decide whether a later launch resumes your session or starts a fresh one
-        (one phase ≈ one session), and to show the Arbiter where the process stands. Report a
-        phase change as soon as you make it, not at the end of the turn.
+        This records nothing. It re-reads `process/process-state.json` and refreshes what the
+        Arbiter is looking at, then hands you back what that file actually says — so if your call
+        and the file disagree, you find out here rather than proposing against a phase that only
+        exists in this conversation. `phase` is optional and used only for that comparison.
+
+        Evidence, step status and the plan all belong in that file, written by the skill: there is
+        no argument here for them because TCC does not keep a second copy.
         """
-        entry = registry.record_phase(
-            phase=phase,
-            step=step or None,
-            status=status or None,
-            evidence=evidence or None,
-        )
-        return json.dumps({"recorded": True, "phase": phase, "entry": entry}, ensure_ascii=False)
+        state, error = _load_process_state()
+        if error:
+            return json.dumps({"refreshed": False, "error": error}, ensure_ascii=False)
+        active = (state or {}).get("active_phase")
+        bridge.refresh_from_disk()
+        if not active:
+            return json.dumps(
+                {
+                    "refreshed": True,
+                    "skill_phase": None,
+                    "warning": "process-state.json has no active_phase -- "
+                               "call enter_phase before reporting one",
+                },
+                ensure_ascii=False,
+            )
+        entry = registry.sync_phase(active)
+        out = {"refreshed": True, "skill_phase": active, "session": entry}
+        if phase and str(phase) != str(active):
+            out["mismatch"] = (
+                f"you reported phase {phase!r}, but process-state.json says {active!r} -- "
+                "the file wins; write the move before reporting it"
+            )
+        return json.dumps(out, ensure_ascii=False)
 
     return mcp
 

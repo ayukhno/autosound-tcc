@@ -13,6 +13,8 @@ import pytest
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import process_view
 
+from tests import _intake
+
 pytestmark = pytest.mark.skipif(
     not vendor_loader.is_available(), reason="rew_tool submodule not checked out"
 )
@@ -26,9 +28,25 @@ def project(tmp_path, monkeypatch):
 
 @pytest.fixture
 def process(project):
-    """A real `Process` writing into the project, so the test exercises the actual file format."""
+    """A real `Process` writing into the project, so the test exercises the actual file format.
+
+    The target is recorded up front because the skill now refuses a forward move out of phase 0
+    without one (SCR-036) — these tests jump straight to a mid-tune phase, which a real session
+    only reaches through phase 0.
+
+    The ledger snapshot exists for the same class of reason (SCR-035): a step cannot be closed
+    against `v_003` unless `v_003` is on disk. Writing the file is what these tests were always
+    claiming had happened.
+    """
+    snapshot = project / "state" / "FULL" / "v_003.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text("{}", encoding="utf-8")
     module = vendor_loader.load_process()
-    return module.Process(str(process_view.process_dir(project)))
+    _intake.seed(project)  # the phase -1 gate is real: a fixture passes it like anyone else
+    process = module.Process(str(process_view.process_dir(project)))
+    _intake.open_phases(process)
+    process.set_target("FULL", "EPY")
+    return process
 
 
 def test_no_process_state_reads_as_none_so_the_mock_stays(project):
@@ -55,6 +73,22 @@ def test_phase_titles_come_from_the_skill(process, project):
 
     assert "EQ & acoustic alignment" in current.name["en"]
     assert current.name["uk"].startswith("Фаза 2")
+    # The skeleton is the method's, the same in every project, so its titles are translated here
+    # rather than written translated into the file -- where the intake's language would stick.
+    assert "EQ та акустичне узгодження" in current.name["uk"]
+
+
+def test_a_phase_title_someone_wrote_themselves_is_left_alone(process, project):
+    """Only the skill's own skeleton has a translation. A title this version has not seen is
+    somebody's decision, and inventing a translation for it would be inventing content."""
+    process.enter_phase("2")
+    state = process.load()
+    state["phases"]["2"]["title"] = "EQ, but only above 300 Hz (see the notes)"
+    process._write(state)
+
+    current = next(p for p in process_view.load_plan(project) if p.current)
+
+    assert current.name["uk"] == "Фаза 2 · EQ, but only above 300 Hz (see the notes)"
 
 
 def test_steps_land_under_their_phase(process, project):
@@ -86,7 +120,7 @@ def test_a_redone_step_reports_its_attempt(process, project):
     process.enter_phase("2")
     process.add_step("2.3", "target-match")
     process.start_attempt("2.3")
-    process.finish_step("2.3", ["m-L_10"])
+    process.finish_step("2.3", ["m-L_10 (rta)"])  # the method suffix is what makes it a capture
     process.start_attempt("2.3")  # redo
 
     step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "2.3")
@@ -149,3 +183,152 @@ def test_evidence_rule_is_the_skills_not_reimplemented_here(process):
 
     with pytest.raises(module.ProcessError, match="evidence"):
         process.finish_step("2.1", [])
+
+
+# ---- SCR-014: what a config change invalidated ------------------------------
+
+
+def _record_change(project, process, impact, what="driver swapped", why=None):
+    """Log a `config_change` the way the skill does — through `project.py`, not by hand."""
+    proj_module = vendor_loader.load_project()
+    proj = proj_module.Project(str(project))
+    proj.save(proj.load())  # the file has to exist for a change to be recorded against it
+    return proj.record_change(process, "project.json", what, why=why, impact=impact)
+
+
+def test_a_remeasure_change_flags_exactly_its_channels(project, process):
+    """The SCR's whole promise: name the affected captures, never flag everything and never stay
+    silent."""
+    process.enter_phase("2")
+    _record_change(project, process, "remeasure: [w-L, w-R]", why="blown voice coil")
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-L", "w-R"}
+    assert stale["w-L"]["why"] == "blown voice coil"
+
+
+def test_a_capture_recorded_after_the_change_clears_it(project, process):
+    """"Stale" means the skill has recorded no capture since the change — so a later `step_done`
+    whose evidence names the channel clears it, and one naming a different channel does not."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _record_change(project, process, "remeasure: [w-L, w-R]")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-R"}
+
+
+def _rename(project, was, now):
+    """Rename a channel the way the skill does — `project.py`, not a hand-edited file."""
+    proj_module = vendor_loader.load_project()
+    proj = proj_module.Project(str(project))
+    proj.set_channel(was, slot="C")
+    proj.rename_channel(was, now)
+
+
+def test_a_capture_under_the_old_name_clears_a_change_that_named_the_new_one(project, process):
+    """SCR-039. The change says `wf-L` (what the session calls it) and the capture that answers it
+    says `w-L` (what it was called when the title was typed). Matching those literally would leave
+    a channel stale forever — no capture could ever clear it, because the title is not editable."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _rename(project, "w-L", "wf-L")
+    _record_change(project, process, "remeasure: [wf-L]")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    assert process_view.stale_channels(project) == {}
+
+
+def test_a_done_step_evidenced_under_the_old_name_is_still_re_chipped(project, process):
+    """The same two names meeting in the plan panel instead of the checklist: a step closed with a
+    capture taken before the rename must still go "recheck" when that channel is invalidated."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    _rename(project, "w-L", "wf-L")
+    _record_change(project, process, "remeasure: [wf-L]")
+
+    stale = process_view.stale_channels(project)
+    plan = process_view.to_plan(process_view.load_state(project), stale)
+    step = next(s for phase in plan for s in phase.steps if s.id == "2.1")
+
+    assert set(stale) == {"wf-L"}
+    assert step.tag["en"] == "recheck", step
+
+
+def test_a_capture_from_before_the_change_does_not_clear_it(project, process):
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    _record_change(project, process, "remeasure: [w-L]")
+
+    assert set(process_view.stale_channels(project)) == {"w-L"}
+
+
+def test_full_rebaseline_flags_every_active_channel(project, process):
+    """"Everything" is the glossary's active channels — the same list the capture checklist is
+    built from, not a guess."""
+    import json
+
+    (project / "glossary.json").write_text(json.dumps({
+        "channels": [{"code": "w-L", "active": True}, {"code": "w-R", "active": True},
+                     {"code": "c", "active": False}],
+    }), encoding="utf-8")
+    process.enter_phase("2")
+    _record_change(project, process, "full_rebaseline", what="mic recalibrated")
+
+    stale = process_view.stale_channels(project)
+
+    assert set(stale) == {"w-L", "w-R"}  # the inactive centre is not a capture anyone owes
+
+
+def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):
+    """`voicing` (written by the skill's own set_target) and free prose are real impacts a human
+    should read — but guessing which channels a sentence meant is how a checklist starts lying."""
+    process.enter_phase("2")
+    before = len(process_view.config_changes(project))
+    _record_change(project, process, "voicing")
+    _record_change(project, process, "check the sub once the amp is back")
+
+    assert process_view.stale_channels(project) == {}
+    # Counted as a delta: recording the target is itself a `voicing` change, so the fixture starts
+    # with one. Both of these are still visible as events, which is the point.
+    assert len(process_view.config_changes(project)) == before + 2
+
+
+def test_no_journal_reads_as_nothing_stale(project):
+    assert process_view.config_changes(project) == ()
+    assert process_view.stale_channels(project) == {}
+
+
+def test_a_done_step_whose_evidence_went_stale_is_re_chipped(project, process):
+    """The step stays done in the file — the skill owns that — but the panel must not keep showing
+    a green "ok" for work whose result no longer describes the car."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)", "w-R_10 (sw)"])
+    process.add_step("2.2", "set delays")
+    process.finish_step("2.2", ["v_003"])
+    _record_change(project, process, "remeasure: [w-L]")
+
+    stale = process_view.stale_channels(project)
+    plan = process_view.to_plan(process.load(), stale)
+    steps = {s.id: s for phase in plan for s in phase.steps}
+
+    assert steps["2.1"].tag_class == "wait" and steps["2.1"].tag["en"] == "recheck"
+    assert steps["2.2"].tag["en"] == "ok"  # evidence is a ledger version, no channel involved
+
+
+def test_without_the_stale_map_the_plan_is_unchanged(project, process):
+    """`to_plan(state)` alone still works — the mock, the tests and any caller that doesn't care
+    about staleness keep the old behaviour."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+
+    steps = {s.id: s for phase in process_view.to_plan(process.load()) for s in phase.steps}
+
+    assert steps["2.1"].tag["en"] == "ok"

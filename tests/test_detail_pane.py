@@ -76,3 +76,34 @@ def test_band_flow_marks_only_bands_at_mismatched_frequencies():
     widget = _band_flow(bands, match_map={8800.0: "#5aa9e6", 4050.0: "#4bbf87"}, gain_mismatch_freqs={8800.0})
     cards = widget.findChildren(EqBandCard)
     assert len(cards) == 2
+
+
+def test_the_pane_speaks_the_window_s_language():
+    """"Table", "close ✕", "Channel" and "shared frequencies:" were English literals while both
+    translations sat unused in the table — the pane had simply never registered for the language
+    switch (found 2026-08-12)."""
+    from PySide6.QtWidgets import QPushButton
+
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    group = ProfileGroup(
+        id="virtual_channels", label="Virtual channels", fields=("gain_db",),
+        rows=(GroupRow(id="v1", name="FrontL", raw={"gain_db": -1.0}, slot="A"),),
+    )
+    pane.open_table(group)
+    try:
+        i18n.set_language("uk")
+
+        assert pane._tab_table.text() == i18n.t("tabTable")
+        close = next(b for b in pane.findChildren(QPushButton)
+                     if b.property("class") == "d-close")
+        assert close.text() == i18n.t("close")
+        table = pane._scroll.widget()
+        assert table.horizontalHeaderItem(1).text() == i18n.t("colChan")
+    finally:
+        i18n.set_language("en")
+    assert pane._tab_table.text() == "Table", "and back again"

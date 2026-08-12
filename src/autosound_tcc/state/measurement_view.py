@@ -19,10 +19,18 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
 
 STATUS_DONE = "done"
 STATUS_WAIT = "wait"
+# The panel's own legend already calls this one "taken, unusable" -- exactly what a capture becomes
+# when the hardware under it changed (SCR-014).
+STATUS_STALE = "bad"
+# Decided against, with a reason, and recorded as such by the skill (SCR-034). Distinct from
+# waiting: before the round was recorded these were the same colour, so a capture the tuner had
+# ruled out came back on the checklist every session.
+STATUS_SKIPPED = "skip"
 
 
 def glossary_path(project_dir: Optional[Path] = None) -> Path:
@@ -40,6 +48,34 @@ def has_glossary(project_dir: Optional[Path] = None) -> bool:
         return bool(json.loads((project / "project.json").read_text(encoding="utf-8")).get("glossary"))
     except (OSError, ValueError):
         return False
+
+
+# REW title -> capture method, by the suffix the grammar writes (`naming-and-structure.md`).
+_METHOD_BY_SUFFIX = (("(sw)", "sw"), ("(rta)", "rta"))
+_METHOD_LABELS = {"sw": "sweep (sw)", "rta": "MMM RTA (rta)"}
+
+
+def groups_from_titles(titles) -> list[dict]:
+    """A flat list of REW titles, split into the column groups the panel renders.
+
+    Used where there is no `expected_groups` to ask: a round the session opened itself, and every
+    past round read back from the journal. Grouped by capture method and nothing else — the scopes
+    the derived path knows about (pairs, sides, joints) are a property of the phase plan, and a
+    round that exists outside one has no such structure to recover.
+    """
+    by_method: dict[str, list[str]] = {}
+    for title in titles:
+        text = str(title).strip()
+        if not text:
+            continue
+        method = next(
+            (m for suffix, m in _METHOD_BY_SUFFIX if text.rstrip().endswith(suffix)), "sw"
+        )
+        by_method.setdefault(method, []).append(text)
+    return [
+        {"label": _METHOD_LABELS.get(method, method), "method": method, "names": names}
+        for method, names in sorted(by_method.items(), key=lambda kv: kv[0] != "sw")
+    ]
 
 
 def build_session(
@@ -64,14 +100,22 @@ def build_session(
 
     glossary = naming.Glossary.for_project(str(project))
     groups_spec = naming.expected_groups(phase, glossary, version)
+    live_round = process_view.capture_round(project) or {}
     if not groups_spec:
-        # A phase that captures nothing (phase 1 analyses `_1`) is a real answer, and an empty
-        # task is the honest way to show it.
-        return MeasSession(
-            id=f"v{version}",
-            version={"en": f"Phase {phase} · no capture", "uk": f"Фаза {phase} · без замірів"},
-            groups=(),
-        )
+        # A phase whose plan captures nothing (the skill's `_CAPTURE_PLAN["1"]` is literally `[]`
+        # — phase 1 computes from what phase 0 took) still gets a task if the session OPENED one.
+        # This used to return before it ever looked, so an ad-hoc round in such a phase rendered
+        # as "no captures here": the panel showed the derivation and ignored the record, which is
+        # the wrong way round — a round is a fact, a phase plan is a prediction about it.
+        outstanding = [] if live_round.get("closed") else list(live_round.get("expected") or [])
+        if not outstanding:
+            return MeasSession(
+                id=f"v{version}",
+                version={"en": f"Phase {phase} · no capture",
+                         "uk": f"Фаза {phase} · без замірів"},
+                groups=(),
+            )
+        groups_spec = groups_from_titles(outstanding)
 
     # Keyed by parsed identity, not by raw title, so `c_01 (rta)` counts as `c_1 (rta)` -- REW
     # titles are hand-typed and zero-padding is common.
@@ -81,18 +125,55 @@ def build_session(
         if entry:
             parsed[naming.name_key(entry)] = entry
 
+    # SCR-014: a capture whose channel was invalidated by a `config_change` is not "done" -- the
+    # graph exists and is unusable, which is a different thing from missing, and the panel has a
+    # colour for exactly that. Flagging it here rather than in the panel keeps the panel a renderer.
+    stale = process_view.stale_channels(project)
+
+    # The round the skill recorded, if there is one (SCR-034). REW's open-measurement list is what
+    # this panel used to be built on entirely, which meant closing REW turned a finished round back
+    # into an empty checklist. What was recorded is a fact; what REW happens to have open is a
+    # snapshot of another application's session.
+    round_ = live_round
+    recorded_taken = {str(t) for t in (round_.get("taken") or {})}
+    recorded_skipped = {str(t) for t in (round_.get("skipped") or {})}
+    # What the arithmetic said about each curve (SCR-040). A verdict outranks "a title exists":
+    # a sweep that never finished and a muted channel both leave a title behind, and every later
+    # phase used to compute on them.
+    verdicts = {
+        str(title): (entry or {}).get("verified") or {}
+        for title, entry in (round_.get("taken") or {}).items()
+    }
+
+    def status_for(name: str) -> str:
+        entry = naming.parse_name(name, glossary)
+        if name in recorded_skipped:
+            return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
+        verdict = verdicts.get(name)
+        if verdict and not verdict.get("ok"):
+            # The panel's own legend already calls this "taken, unusable" -- which is exactly what
+            # a capture that came back and failed the check is.
+            return STATUS_STALE
+        if naming.name_key(entry) not in parsed and name not in recorded_taken:
+            return STATUS_WAIT
+        # Both names a renamed channel answers to (SCR-039): a `config_change` names whichever the
+        # session was using, and the capture's title carries whichever it was typed under. Either
+        # side alone would leave a real invalidation looking like a clean capture.
+        codes = {(entry or {}).get("code"), (entry or {}).get("code_current")} - {None}
+        return STATUS_STALE if codes & set(stale) else STATUS_DONE
+
+    def issues_for(name: str) -> Optional[str]:
+        """Why a capture is unusable, in the checker's own words — the panel shows it on hover."""
+        issues = (verdicts.get(name) or {}).get("issues") or []
+        return "; ".join(str(i) for i in issues) or None
+
     groups = []
     for spec in groups_spec:
         items = tuple(
-            MeasItem(
-                name=name,
-                status=STATUS_DONE
-                if naming.name_key(naming.parse_name(name, glossary)) in parsed
-                else STATUS_WAIT,
-            )
+            MeasItem(name=name, status=status_for(name), extra=issues_for(name))
             for name in spec["names"]
         )
-        groups.append(MeasGroup(type=spec["label"], items=items))
+        groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version)
     if extras:
@@ -100,13 +181,105 @@ def build_session(
         # phase doesn't ask for. Shown, flagged blue, never silently dropped.
         groups.append(MeasGroup(type="additional", items=extras))
 
+    # The round's own id when there is one: the ledger version names the config the measurements
+    # were taken under and cannot tell two passes at the same config apart, which is exactly what
+    # "this session's task" means (SCR-034).
+    round_id = str(round_.get("id") or "") if not round_.get("closed") else ""
     return MeasSession(
-        id=f"v{version}",
+        id=round_id or f"v{version}",
         version={
-            "en": f"Capture series v{version} · phase {phase}",
-            "uk": f"Серія v{version} · фаза {phase}",
+            "en": f"Capture series v{version} · phase {phase}"
+            + (f" · {round_id}" if round_id else ""),
+            "uk": f"Серія v{version} · фаза {phase}" + (f" · {round_id}" if round_id else ""),
         },
         groups=tuple(groups),
+    )
+
+
+def build_sessions(
+    phase: str,
+    version,
+    titles: list[str],
+    project_dir: Optional[Path] = None,
+) -> Optional[tuple[MeasSession, ...]]:
+    """The live capture task, followed by every past round, newest first.
+
+    The panel has had a session picker, a read-only history view and a plan-step link since it was
+    built against the mock — and no supplier for any of it: the window only ever handed it one
+    session (user, 2026-08-11: "shows v4, no history of v1"). The rounds were on disk the whole
+    time, in the journal.
+    """
+    project = Path(project_dir or config.project_dir())
+    live = build_session(phase, version, titles, project)
+    if live is None:
+        return None
+    state = process_view.load_state(project)
+    past = [
+        session
+        for round_ in process_view.capture_rounds(project)
+        if str(round_.get("id") or "") != live.id
+        for session in (_session_for_round(round_, state),)
+        if session is not None
+    ]
+    return (live, *past)
+
+
+def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSession]:
+    """One past round as a read-only session: what it asked for, and what became of each item.
+
+    Statuses come from the round's own record and nothing else — REW is not consulted. A series
+    captured three weeks ago is history whether or not that project is still open in REW, which is
+    the whole reason SCR-034 wrote the round down in the first place.
+    """
+    expected = [str(t) for t in (round_.get("expected") or [])]
+    taken = {str(k): (v or {}) for k, v in (round_.get("taken") or {}).items()}
+    skipped = {str(k) for k in (round_.get("skipped") or {})}
+    if not expected and not taken:
+        return None
+    for title in taken:
+        if title not in expected:
+            expected.append(title)  # captured though nobody asked: still part of what happened
+
+    def status_for(name: str) -> str:
+        if name in skipped:
+            return STATUS_SKIPPED
+        entry = taken.get(name)
+        if entry is None:
+            return STATUS_WAIT  # asked for, never taken, and the round closed anyway
+        verdict = entry.get("verified") or {}
+        return STATUS_DONE if verdict.get("ok", True) else STATUS_STALE
+
+    def issues_for(name: str) -> Optional[str]:
+        # The skip reason comes first, and the order is the point: a skipped capture is ALSO
+        # reported by the checker as "no measurement titled ...", which is true and useless. Why a
+        # human decided not to take it outranks the arithmetic noticing it is not there.
+        if name in skipped:
+            return (round_.get("skipped") or {}).get(name, {}).get("reason")
+        issues = ((taken.get(name) or {}).get("verified") or {}).get("issues") or []
+        return "; ".join(str(i) for i in issues) or None
+
+    groups = tuple(
+        MeasGroup(
+            type=spec["label"],
+            method=spec.get("method"),
+            items=tuple(
+                MeasItem(name=name, status=status_for(name), extra=issues_for(name))
+                for name in spec["names"]
+            ),
+        )
+        for spec in groups_from_titles(expected)
+    )
+    rid = str(round_.get("id") or "")
+    ver = str(round_.get("version") or "").lstrip("v_").lstrip("0") or "?"
+    phase = round_.get("phase")
+    return MeasSession(
+        id=rid or f"round·{ver}",
+        version={
+            "en": f"Capture series v{ver} · phase {phase} · {rid}",
+            "uk": f"Серія v{ver} · фаза {phase} · {rid}",
+        },
+        groups=groups,
+        used_in_steps=process_view.steps_using(state, expected),
     )
 
 

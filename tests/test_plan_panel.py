@@ -6,10 +6,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel  # noqa: E402
-from autosound_tcc.ui.tcc.mock_data import MEAS, PLAN, PlanStep, sessions_for_step  # noqa: E402
+from autosound_tcc.ui.tcc.mock_data import MEAS, MEAS_SESSIONS, PLAN, PlanStep, sessions_for_step  # noqa: E402
 from autosound_tcc.ui.tcc.plan_panel import (  # noqa: E402
     _PhaseRow,
     _PhaseStepRow,
@@ -36,8 +37,35 @@ def test_only_the_current_phase_starts_expanded():
 def test_plan_panel_builds_one_row_per_phase():
     _app()
     panel = PlanPanel()
+    panel.set_plan(PLAN)
     rows = panel.widget().findChildren(_PhaseRow)
     assert len(rows) == len(PLAN)
+
+
+def test_a_project_with_no_process_state_shows_no_plan_at_all():
+    """It used to fall back to the mock, so a real project that had not started tuning showed
+    seven invented phases with invented progress -- the same mistake the dialog panel already
+    refuses to make with demo bubbles."""
+    _app()
+    panel = PlanPanel()
+
+    panel.set_plan(None)
+
+    assert panel.widget().findChildren(_PhaseRow) == []
+    assert any(
+        i18n.t("planEmpty") in label.text() for label in panel.widget().findChildren(QLabel)
+    )
+
+
+def test_no_project_and_no_plan_say_different_things():
+    _app()
+    panel = PlanPanel()
+
+    panel.set_plan(())
+
+    assert any(
+        i18n.t("planNoProject") in label.text() for label in panel.widget().findChildren(QLabel)
+    )
 
 
 def test_retranslate_does_not_leave_stale_rows_behind():
@@ -46,6 +74,7 @@ def test_retranslate_does_not_leave_stale_rows_behind():
     next spins, which a synchronous retranslate() call never triggers on its own."""
     _app()
     panel = PlanPanel()
+    panel.set_plan(PLAN)
     panel.retranslate()
     assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN)
     panel.retranslate()
@@ -72,6 +101,64 @@ def test_attempt_gt_one_renders_attempt_chip():
     assert "2" in labels[0].text()
 
 
+def test_a_long_step_name_wraps_instead_of_widening_the_column():
+    """One step -- "Bonus baseline solo: c_1 (sw) + c_1 (rta) (captured early, normally Phase 5)"
+    -- decided the panel's width, so the whole plan column scrolled sideways and every other row
+    lost its right-hand end. Wrapping is what keeps it in the column."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    long_name = "Bonus baseline solo: c_1 (sw) + c_1 (rta) (captured early, normally Phase 5)"
+    step = PlanStep(
+        id="x.4", name={"en": long_name, "uk": long_name}, tag="no evidence", tag_class="warn"
+    )
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+    row.resize(190, 80)
+    row.show()
+    row.layout().activate()  # geometry is nothing until the layout has run
+
+    name = row.findChildren(QLabel)[0]
+    assert name.wordWrap()
+    assert row.minimumSizeHint().width() < 200  # a plan column is about 190 px wide
+
+
+def test_the_status_chip_sits_on_the_steps_own_line():
+    """The chips had a line of their own, which kept the name column wide and left the status
+    floating under the step it belonged to, reading as a separate entry (user, 2026-08-07)."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    step = PlanStep(id="x.5", name={"en": "Sweep the fronts", "uk": "Заміряти фронт"},
+                    tag={"en": "unproven", "uk": "без доказу"}, tag_class="bad")
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+    row.resize(190, 60)
+    row.show()
+    row.layout().activate()
+
+    name = row.findChildren(QLabel)[0]
+    chip = next(w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or ""))
+    assert chip.y() == name.y()          # same line
+    assert chip.x() > name.x()           # and to its right
+
+
+def test_a_status_chip_explains_itself_and_how_it_differs_from_no_tick():
+    """"What is 'unproven', and how is it different from an unticked box?" (user, 2026-08-07) —
+    the tick says the skill closed the step, the chip says whether anything on disk backs it."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    step = PlanStep(id="x.6", name={"en": "Sweep", "uk": "Заміри"},
+                    tag={"en": "unproven", "uk": "без доказу"}, tag_class="bad")
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    chip = next(w for w in row.findChildren(QLabel) if "stag" in (w.property("class") or ""))
+
+    assert chip.hover_tip.text() == i18n.t("stepTagUnprovenTip")
+    assert "unticked" in i18n.T["en"]["stepTagUnprovenTip"]  # it names the distinction asked about
+
+
 def test_project_source_step_gets_blue_class():
     _app()
     progress = _PlanProgress()
@@ -83,26 +170,35 @@ def test_project_source_step_gets_blue_class():
     assert name_label.property("class") == "substep-name-project"
 
 
-def test_done_checkbox_persists_via_progress_overlay(tmp_path, monkeypatch):
+def test_the_checkbox_shows_what_the_skill_wrote(tmp_path):
+    """It used to read a local QSettings overlay left over from the mock, so a finished phase
+    showed unticked steps."""
     _app()
-    progress = _PlanProgress()
-    assert not progress.is_done("0.1")
-    seen = {}
-
-    def _on_toggle(sid, checked):
-        seen[sid] = checked
-        progress.set_done(sid, checked)
-
-    row = _PhaseStepRow(PLAN[0].steps[0], progress, _on_toggle, lambda _sid: None)
     from PySide6.QtWidgets import QCheckBox
 
+    done = PlanStep(id="x.1", name={"en": "done one", "uk": "зроблено"}, tag_class="ok")
+    todo = PlanStep(id="x.2", name={"en": "todo one", "uk": "треба"})
+
+    assert _PhaseStepRow(done, _PlanProgress(), lambda *_: None, lambda _s: None
+                         ).findChild(QCheckBox).isChecked()
+    assert not _PhaseStepRow(todo, _PlanProgress(), lambda *_: None, lambda _s: None
+                             ).findChild(QCheckBox).isChecked()
+
+
+def test_the_checkbox_cannot_be_clicked(tmp_path):
+    """SCR-004: v1's only writer is the skill. Ticking one here recorded nothing, contradicted the
+    file, and invited a decision against a plan that existed only in this window."""
+    _app()
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QCheckBox
+
+    row = _PhaseStepRow(
+        PlanStep(id="x.1", name={"en": "one", "uk": "один"}), _PlanProgress(),
+        lambda *_: None, lambda _s: None,
+    )
     checkbox = row.findChild(QCheckBox)
-    checkbox.setChecked(True)
-    assert seen == {"0.1": True}
-    assert progress.is_done("0.1")
-    # New _PlanProgress instance reads the same QSettings store -- persisted across "sessions".
-    reloaded = _PlanProgress()
-    assert reloaded.is_done("0.1")
+
+    assert checkbox.testAttribute(_Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
 
 def test_inserted_step_appears_in_phase_and_persists():
@@ -127,6 +223,7 @@ def i18n_tx(name_dict):
 def test_measurement_panel_builds_three_columns():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     assert len(MEAS.groups) == 3
     # one _MeasRow per item across all groups
     from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
@@ -178,3 +275,48 @@ def test_plan_panel_session_requested_reaches_measurement_panel():
     assert meas._viewing_id == "v10"
     plan.sessionRequested.emit("v9")
     assert meas._viewing_id == "v9"
+
+
+def test_a_run_of_baseline_steps_collapses_to_one_row():
+    """A phase-0 baseline is one step per driver — nine rows of "Baseline solo: …" bury the phase's
+    shape in the one panel whose job is to show it. The per-channel detail is in the capture task."""
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    steps = tuple(
+        PlanStep(id=f"m0-{ch}", name={"en": f"Baseline solo: {ch}_1 (sw) + {ch}_1 (rta)"},
+                 tag_class="ok" if i < 2 else "")
+        for i, ch in enumerate(("tw-L", "tw-R", "m-L"))
+    )
+
+    rows = _collapse_runs(steps)
+
+    assert len(rows) == 1
+    assert "2/3" in rows[0].name["en"]
+    assert rows[0].name["en"].startswith("Baseline solo")
+
+
+def test_a_lone_step_is_left_exactly_as_it_was():
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    step = PlanStep(id="lang", name={"en": "Language & reviewer channel confirmed"})
+
+    assert _collapse_runs((step,)) == [step]
+
+
+def test_different_prefixes_do_not_merge():
+    from autosound_tcc.ui.tcc.mock_data import PlanStep
+    from autosound_tcc.ui.tcc.plan_panel import _collapse_runs
+
+    steps = (
+        PlanStep(id="a", name={"en": "Baseline solo: tw-L_1 (sw)"}),
+        PlanStep(id="b", name={"en": "Baseline solo: tw-R_1 (sw)"}),
+        PlanStep(id="c", name={"en": "Crossover set: tw-L"}),
+    )
+
+    rows = _collapse_runs(steps)
+
+    assert len(rows) == 2
+    assert "0/2" in rows[0].name["en"]  # neither is done; the count is honest either way
+    assert rows[1].name["en"] == "Crossover set: tw-L"

@@ -26,3 +26,6 @@ dist/
 .DS_Store
 Thumbs.db
 .gstack/
+
+# spike renders of real project data — public repo keeps fixtures only
+spike/out-real-*.html

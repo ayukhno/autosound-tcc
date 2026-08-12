@@ -111,3 +111,61 @@ def test_resolved_signal_reports_the_verdict():
     bar._deny.click()
 
     assert seen == [("write_rew_filters", False)]
+
+
+def test_ticking_always_names_the_tool_it_covers(tmp_path):
+    """Claude Code's own prompt works this way, and the reason is the one measured here all day: a
+    gate that fires constantly gets clicked through, so the way to keep it meaningful is to let it
+    be narrowed deliberately — one tick, one kind."""
+    from concurrent.futures import Future
+
+    from autosound_tcc.core.mcp_server import ConfirmRequest
+    from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
+
+    bar = ConfirmBar()
+    seen: list[str] = []
+    bar.alwaysAllowed.connect(seen.append)
+    bar.enqueue(ConfirmRequest(tool="Bash", title="t", detail="d"), Future())
+
+    bar._always.setChecked(True)
+    bar._answer(True)
+
+    assert seen == ["Bash"]
+
+
+def test_the_tick_does_not_carry_over_to_the_next_request(tmp_path):
+    from concurrent.futures import Future
+
+    from autosound_tcc.core.mcp_server import ConfirmRequest
+    from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
+
+    bar = ConfirmBar()
+    seen: list[str] = []
+    bar.alwaysAllowed.connect(seen.append)
+    bar.enqueue(ConfirmRequest(tool="Bash", title="t", detail="d"), Future())
+    bar._always.setChecked(True)
+    bar._answer(True)
+    bar.enqueue(ConfirmRequest(tool="Read", title="t", detail="d"), Future())
+
+    bar._answer(True)
+
+    assert seen == ["Bash"]
+
+
+def test_denying_never_remembers(tmp_path):
+    """A refusal is not a rule; ticking the box and then refusing must not silently allow it next
+    time."""
+    from concurrent.futures import Future
+
+    from autosound_tcc.core.mcp_server import ConfirmRequest
+    from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
+
+    bar = ConfirmBar()
+    seen: list[str] = []
+    bar.alwaysAllowed.connect(seen.append)
+    bar.enqueue(ConfirmRequest(tool="Bash", title="t", detail="d"), Future())
+
+    bar._always.setChecked(True)
+    bar._answer(False)
+
+    assert seen == []

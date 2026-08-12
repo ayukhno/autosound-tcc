@@ -24,16 +24,20 @@ import shlex
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    PermissionResultAllow,
-    PermissionResultDeny,
-    ResultMessage,
-)
+from autosound_tcc.core import claude_sdk, config, model_choices, vendor_loader
 
-from autosound_tcc.core import config
+#: See `core/claude_sdk.py`. Bound in `TuningSession.__init__`, not imported here: `main_window`
+#: imports this module on its first line, so an import at the top made the Claude SDK a
+#: requirement for opening the window at all — including for someone driving TCC with Gemini.
+SDK_NAMES = (
+    "ClaudeAgentOptions",
+    "ClaudeSDKClient",
+    "PermissionResultAllow",
+    "PermissionResultDeny",
+    "ResultMessage",
+    "UserMessage",
+)
+from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
 
@@ -52,15 +56,30 @@ SKILL_NAME = "autosound-tuning"
 # `can_use_tool`, which is where the real decision is made.
 ALLOWED_TOOLS = ["mcp__tcc", "TodoWrite"]
 
-# Hard-blocked: never offered, never promptable. TCC's sanctioned writes all go through its own
-# gated MCP tools, where the Arbiter sees exactly what changes; a general-purpose file writer
-# would be a second, unaudited path to the same place.
-DISALLOWED_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
+# Hard-blocked: never offered, never promptable. Reaching outside the machine for content, or
+# editing in ways nobody can read back, has no place in a tuning session.
+#
+# `Write` and `Edit` used to be here, on the theory that TCC's own gated MCP tools were the only
+# sanctioned path to disk. In practice the skill writes project files it owns -- the context file,
+# the changelog, the audit trail -- and the block did not stop it: the model announced "Write is
+# disabled in this session, I will create the files through Bash" and did exactly that, with a
+# `python3 - <<EOF` heredoc. So the policy bought nothing and cost the one thing that mattered:
+# `Write path=... content=...` is a card the Arbiter can read, and a heredoc three screens long is
+# not. They are gated now, like Bash, rather than blocked.
+DISALLOWED_TOOLS = ["MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
+
+# Harness plumbing, not work. Claude Code defers large tool catalogues, so the model has to look
+# TCC's own tools up by name before it can call them -- three times in a seven-minute session.
+# That is the harness finding its own hands; a process chip for it says nothing about the tune.
+_PLUMBING_TOOLS = frozenset({"ToolSearch"})
 
 # Read-only commands the skill runs constantly. Anything outside this set still works -- it just
 # has to be confirmed by the Arbiter first, rather than being refused outright.
 _SAFE_COMMANDS = frozenset(
-    {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "file", "stat", "pwd", "echo", "which"}
+    {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "file", "stat", "pwd", "echo", "which",
+     # Path questions the skill asks constantly, because its install is a symlink and every
+     # "where am I really" answer costs a permission dialog otherwise.
+     "readlink", "realpath", "basename", "dirname", "sort", "uniq", "cut", "column", "jq"}
 )
 _SAFE_GIT_SUBCOMMANDS = frozenset({"status", "log", "diff", "show", "branch", "remote"})
 # `rew_tool` scripts that only read REW and compute. `apply.py` is pointedly not here: it writes
@@ -85,9 +104,21 @@ _SAFE_REW_SCRIPTS = frozenset(
         "atf_eq.py",
     }
 )
-# Shell syntax that lets one approved-looking command carry another. Presence of any of these
-# means the allowlist can no longer reason about what will run, so the Arbiter decides.
-_SHELL_CHAINING = re.compile(r"[;&|><`]|\$\(")
+# Substitution hides a whole second command inside an approved-looking one, and there is no
+# reading of `$(...)` or backticks that keeps the allowlist meaningful. Always ask.
+_SUBSTITUTION = re.compile(r"`|\$\(")
+
+# Redirects that write a file. `2>&1`, `2>/dev/null` and `>/dev/null` are not among them -- they
+# move or discard a stream, which is why the model appends one to almost every command it runs.
+# Treating those as writes is what put a permission dialog in front of `ls -la … 2>&1`, and a gate
+# that fires on `ls` is a gate the Arbiter learns to click through.
+_DISCARD_REDIRECT = re.compile(r"(?:\d?>&\d|\d?>\s*/dev/null|\d?>&-)")
+_FILE_REDIRECT = re.compile(r"[<>]")
+
+# What separates one command from the next. Each part is judged on its own: a chain of read-only
+# commands is read-only, and refusing the whole chain because it *is* a chain is what made the
+# skill's own "where does this symlink point" one-liner need approval.
+_SEPARATORS = re.compile(r"\|\||&&|[;|]")
 
 SYSTEM_PROMPT_APPEND = """
 You are running inside the Tuning Command Center (TCC), the GUI the Arbiter is looking at.
@@ -134,13 +165,27 @@ def _read_roots_for(project_dir: Path) -> tuple[Path, ...]:
 def bash_is_read_only(command: str) -> bool:
     """Whether `command` is one of the read-only invocations the skill makes all day.
 
-    Conservative by construction: unparseable or chained commands are not read-only, so the
-    answer degrades to "ask the Arbiter" rather than to "allow".
+    Conservative by construction: anything unparseable, substituted or redirected into a file is
+    not read-only, so the answer degrades to "ask the Arbiter" rather than to "allow".
+
+    A chain is judged part by part rather than refused for being a chain. Refusing it outright was
+    the wrong kind of caution: `ls -la … 2>&1; echo ---; readlink -f …` is three reads and a
+    stream redirect, and putting that in front of the Arbiter teaches them to approve without
+    looking — which is worse protection than not asking. Every part must pass on its own, so the
+    chain can only be as permissive as its least permissive command.
     """
-    if _SHELL_CHAINING.search(command):
-        return False
+    if not command.strip() or _SUBSTITUTION.search(command):
+        return False  # nothing to judge is not the same as nothing to worry about
+    parts = [part for part in _SEPARATORS.split(command) if part.strip()]
+    return bool(parts) and all(_single_command_is_read_only(part) for part in parts)
+
+
+def _single_command_is_read_only(command: str) -> bool:
+    without_discards = _DISCARD_REDIRECT.sub(" ", command)
+    if _FILE_REDIRECT.search(without_discards):
+        return False  # a redirect that writes somewhere real
     try:
-        parts = shlex.split(command)
+        parts = shlex.split(without_discards)
     except ValueError:
         return False
     if not parts:
@@ -152,6 +197,10 @@ def bash_is_read_only(command: str) -> bool:
     if name == "git":
         return bool(rest) and rest[0] in _SAFE_GIT_SUBCOMMANDS
     if name.startswith("python"):
+        # `-c` is arbitrary code with a shell's reach, so it is never on this list however
+        # harmless the snippet looks; a named script from the skill's read-only set is.
+        if "-c" in rest:
+            return False
         script = next((arg for arg in rest if arg.endswith(".py")), None)
         return script is not None and Path(script).name in _SAFE_REW_SCRIPTS
     return False
@@ -167,11 +216,23 @@ class TuningSession:
         mcp_token: Optional[str] = None,
         bridge: Optional[UiBridge] = None,
         model: str = DEFAULT_MODEL,
+        gate: str = "writes",
+        always_allowed: Optional[frozenset[str]] = None,
+        effort: Optional[str] = None,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
+        # Stated, never inherited (`model_choices.EFFORT_LEVELS`). Whatever the harness's own
+        # default happens to be, a record that says which model answered but not how hard it was
+        # asked to think is the same half-truth as one that names a model that did not run.
+        self.effort = model_choices.resolve_effort(effort)
+        # Same two dials as the omp adapter, so "stop asking" means one thing whichever harness is
+        # driving. `auto` turns off the harness's own permission traffic; TCC's `mcp__tcc__*` tools
+        # keep their own confirmations, which is where a change to the car is actually attested.
+        self.gate = gate
+        self.always_allowed = always_allowed or frozenset()
         self.session_id: Optional[str] = None
         self._read_roots = _read_roots_for(self.project_dir)
         self.resumed_from: Optional[str] = self.registry.resumable_session()
@@ -185,6 +246,8 @@ class TuningSession:
             }
         self._client: Optional[ClaudeSDKClient] = None
         self._started = False
+        # Whether the current bubble already got its text from the stream -- see `_translate`.
+        self._streamed_this_turn = False
 
     # ---- permission gate ---------------------------------------------------
 
@@ -195,7 +258,13 @@ class TuningSession:
         `write_rew_filters` and `copy_helix_eq` raise their own confirmation, and double-prompting
         the same action trains the Arbiter to click through both.
         """
+        # Reachable without going through `start()` — the suite asks this method for a decision
+        # directly, and so would anything else testing one. See `_options` for why not `__init__`.
+        claude_sdk.bind(SDK_NAMES, globals())
         if tool_name.startswith("mcp__tcc"):
+            return PermissionResultAllow()
+
+        if self.gate == "auto" or tool_name in self.always_allowed:
             return PermissionResultAllow()
 
         if tool_name in ("Read", "Grep", "Glob"):
@@ -233,10 +302,21 @@ class TuningSession:
 
     # ---- lifecycle ---------------------------------------------------------
 
-    def _options(self) -> ClaudeAgentOptions:
+    def _options(self) -> "ClaudeAgentOptions":
+        # NOT in `__init__`. `main_window._launch_session` constructs a TuningSession
+        # unconditionally as a cheap probe — "only reads the registry" — before it knows whether
+        # the session will be Claude or omp, so binding in the constructor would have made the
+        # Claude SDK a requirement for starting a GEMINI session. Bound where it is used instead,
+        # which is here and in `start()` (caught by reading the caller, 2026-08-12).
+        claude_sdk.bind(SDK_NAMES, globals())
         return ClaudeAgentOptions(
             cwd=str(self.project_dir),
             model=self.model,
+            # Set here and only here: the SDK takes effort at client construction, so this is the
+            # session's level for its whole life. Raising it mid-tune would mean reconnecting, and
+            # the session is the thing being preserved -- which is why `max` is offered where the
+            # model is picked rather than as a control the Arbiter can reach for mid-conversation.
+            effort=self.effort,
             system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_PROMPT_APPEND},
             # Project scope only: the skill must come from this project's own
             # `.claude/skills/autosound-tuning` symlink (the TCC worktree branch), not from
@@ -248,11 +328,25 @@ class TuningSession:
             mcp_servers=self._mcp_servers,
             can_use_tool=self._can_use_tool,
             include_partial_messages=True,
+            # The SDK reads the CLI's stdout as one JSON object per line and refuses a line over
+            # `_DEFAULT_MAX_BUFFER_SIZE` = 1 MiB, which kills the session outright: "Failed to
+            # decode JSON: JSON message exceeded maximum buffer size of 1048576 bytes". A tool
+            # result carrying an image is base64, so a ~1 MB screenshot arrives as ~1.4 MB on one
+            # line — the Arbiter handed over a REW screenshot, the model read it, and the tune
+            # ended mid-turn (2026-08-11). Nothing about that is exceptional: a long file read or
+            # a large measurement export gets there the same way.
+            max_buffer_size=32 * 1024 * 1024,
             resume=self.resumed_from,
         )
 
-    async def start(self, prompt: Optional[str] = None) -> AsyncIterator[Any]:
-        """Open (or resume) the session and yield raw SDK messages for the caller to render."""
+    async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
+        """Open (or resume) the session and yield `agent_events` for the caller to render."""
+        # `setting_sources=["project"]` means the project's own `.claude/skills` is the *only*
+        # place the skill can come from, and nothing used to put it there -- so a project without
+        # the link ran with no method at all. TCC installs the version it ships; an existing link
+        # is left alone.
+        vendor_loader.link_skill_into(self.project_dir)
+        claude_sdk.bind(SDK_NAMES, globals())  # everything downstream of the client is bound now
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
         self._started = True
@@ -267,25 +361,86 @@ class TuningSession:
         async for message in self._drain():
             yield message
 
-    async def send(self, text: str) -> AsyncIterator[Any]:
+    async def send(self, text: str) -> AsyncIterator[AgentEvent]:
         if not self._started or self._client is None:
             raise RuntimeError("call start() before send()")
         await self._client.query(text)
         async for message in self._drain():
             yield message
 
+    async def answer(self, question_id: str, value: str) -> None:
+        """No-op: the Agent SDK has no question channel, so this session never raises one."""
+
+    async def cancel_question(self, question_id: str) -> None:
+        """No-op, for the same reason as `answer`."""
+
     async def interrupt(self) -> None:
         if self._client is not None:
             await self._client.interrupt()
 
-    async def _drain(self) -> AsyncIterator[Any]:
+    async def _drain(self) -> AsyncIterator[AgentEvent]:
         assert self._client is not None
         async for message in self._client.receive_response():
             if isinstance(message, ResultMessage):
                 self._remember_session(message)
-                yield message
+                yield TurnEnd(session_id=message.session_id)
                 return
-            yield message
+            for event in self._translate(message):
+                yield event
+
+    def _translate(self, message: Any) -> list[AgentEvent]:
+        """One SDK message -> zero or more events. The only place SDK shapes are read.
+
+        Two shapes carry what the panel renders, and the streaming one wins when both arrive for
+        the same turn: partial messages stream the text as it is generated, and the complete
+        `AssistantMessage` repeats it at the end. Emitting both would double every bubble, so the
+        final text is only used when nothing streamed -- a turn must never render as silence.
+        """
+        claude_sdk.bind(SDK_NAMES, globals())
+        event = getattr(message, "event", None)
+        if isinstance(event, dict):  # StreamEvent -- the raw Anthropic stream event
+            if event.get("type") == "content_block_delta":
+                delta = event.get("delta") or {}
+                if delta.get("type") == "text_delta" and delta.get("text"):
+                    self._streamed_this_turn = True
+                    return [TextDelta(delta["text"])]
+            return []
+
+        content = getattr(message, "content", None)
+        if not isinstance(content, list):
+            return []
+        if isinstance(message, UserMessage):
+            # Nothing on the user side of the wire is the Generator talking, and rendering it as
+            # such is how **the whole of SKILL.md** ended up in the transcript as a bubble under
+            # the model's byline: the `Skill` tool delivers the method as a user-role message, and
+            # a text block with no `.name` fell through to "this must be prose". Tool results and
+            # system reminders arrive the same way. The Arbiter's own messages are drawn by the
+            # panel when they are typed, so the only thing worth reading here is that a tool
+            # returned.
+            return [ToolEnd() for block in content
+                    if getattr(block, "tool_use_id", None) is not None]
+        out: list[AgentEvent] = []
+        for block in content:
+            if getattr(block, "tool_use_id", None) is not None:
+                # A tool result, which is what stops the activity line moving. Without it the last
+                # tool of a turn appears to be running for as long as the window is open, so a
+                # stalled turn looks exactly like a busy one -- reported that way on the omp side
+                # before `ToolEnd` existed, and true here for the same reason.
+                out.append(ToolEnd())
+                continue
+            name = getattr(block, "name", None)
+            if name in _PLUMBING_TOOLS:
+                continue
+            if name:
+                out.append(ToolCall(name=name, arguments=dict(getattr(block, "input", {}) or {})))
+                # Text after a tool call belongs to a new bubble, and whether anything streamed is
+                # judged per bubble, not per turn.
+                self._streamed_this_turn = False
+            elif not self._streamed_this_turn:
+                text = getattr(block, "text", "")
+                if text:
+                    out.append(TextDelta(text))
+        return out
 
     def _remember_session(self, result: ResultMessage) -> None:
         """Bind the SDK's session id to the current phase so a later launch can resume it."""
@@ -300,10 +455,3 @@ class TuningSession:
         if self._started and self._client is not None:
             await self._client.disconnect()
         self._started = False
-
-    @staticmethod
-    def text_of(message: Any) -> str:
-        """Concatenated text of an AssistantMessage, for callers that only want the prose."""
-        if not isinstance(message, AssistantMessage):
-            return ""
-        return "".join(getattr(block, "text", "") for block in message.content)

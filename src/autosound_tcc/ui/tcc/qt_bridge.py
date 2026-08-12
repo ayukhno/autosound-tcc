@@ -33,7 +33,9 @@ class QtUiBridge(QObject):
     clipboardRequested = Signal(str)
     proposalReceived = Signal(dict)
     critiqueReceived = Signal(dict)
+    curvesReceived = Signal(dict)
     profileReady = Signal()
+    refreshRequested = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -71,5 +73,11 @@ class QtUiBridge(QObject):
     def show_critique(self, critique: dict[str, Any]) -> None:
         self.critiqueReceived.emit(critique)
 
+    def show_curves(self, request: dict[str, Any]) -> None:
+        self.curvesReceived.emit(request)
+
     def notify_profile_ready(self) -> None:
         self.profileReady.emit()
+
+    def refresh_from_disk(self) -> None:
+        self.refreshRequested.emit()

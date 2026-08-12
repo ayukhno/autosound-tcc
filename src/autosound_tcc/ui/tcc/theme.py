@@ -250,6 +250,24 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('info', 20)};
     }}
 
+    /* .icon-btn — a single-glyph header button that stands ON ITS OWN. `.zoomgroup-btn` is
+    deliberately transparent and borderless because it sits INSIDE the zoom group's frame, which
+    supplies the border; the header's refresh and diagnostics buttons had borrowed that class and
+    so rendered as bare glyphs next to buttons that all have a body (user, 2026-08-07). Same shell
+    as `.theme-btn`, squared up for one character. */
+    QPushButton[class~="icon-btn"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        color: {t.muted};
+        border-radius: 5px;
+        padding: 4px 9px;
+        font-size: 13px;
+    }}
+    QPushButton[class~="icon-btn"]:hover {{
+        color: {t.text};
+        border-color: {t.accent};
+    }}
+
     /* .zoomgroup — A-/percent/A+ as one bordered block with divider lines, ported from the
     prototype's disconnected three-pill look at the user's request (2026-07-26 feedback). */
     QFrame[class~="zoomgroup"] {{
@@ -293,6 +311,48 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QComboBox[class~="mini-select"]:hover {{
         border-color: {t.accent_dim};
+    }}
+    /* .is-warn — the picker whose current choice is not what it appears to be (substituted, or
+    the reviewer sharing the Generator's vendor). Tinted rather than only marked beside: a warning
+    sign next to a normal-looking field leaves you hunting for what it refers to. */
+    QComboBox[class~="is-warn"] {{
+        background: {t.mix('warn', 14, 'panel3')};
+        border-color: {t.warn};
+    }}
+    /* .zoom-btn — the curve panel's A / D / − / + . Narrow enough that four of them fit beside
+    the readout, and padded so the glyph is not clipped by the ordinary button padding. */
+    QPushButton[class~="zoom-btn"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 2px 0;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QPushButton[class~="zoom-btn"]:hover {{
+        border-color: {t.accent_dim};
+    }}
+    /* .is-missing — the picker's current choice is not on offer on this machine. Red text, not a
+    red background: the model is still SELECTED and still what the project asks for, which is a
+    different statement from "this setting is wrong". */
+    QComboBox[class~="is-missing"] {{
+        color: {t.warn};
+        border-color: {t.warn};
+    }}
+    /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
+    clickable; hover says what, click says why. */
+    QPushButton[class~="warn-mark"] {{
+        background: {t.mix('warn', 16, 'panel')};
+        color: {t.warn};
+        border: 1px solid {t.warn};
+        border-radius: 9px;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 0;
+    }}
+    QPushButton[class~="warn-mark"]:hover {{
+        background: {t.mix('warn', 30, 'panel')};
     }}
     QComboBox[class~="mini-select"]::drop-down {{
         border: none;
@@ -344,6 +404,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QLabel[class~="kv-val"] {{
         color: {t.text};
+        font-weight: 600;
+    }}
+    /* .kv-warn — a footer value that is a warning rather than a fact (the reviewer being
+    substituted or sharing the Generator's vendor). Its own class rather than inline HTML,
+    because the label has to be an `ElidedLabel` and that one measures plain text. */
+    QLabel[class~="kv-warn"] {{
+        color: {t.warn};
         font-weight: 600;
     }}
     /* .kv-val-link — the header's "Target curve" value, clickable through to the skill's online
@@ -700,6 +767,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
     QLabel[class~="tl-done"] {{ background: {t.ok}; }}
     QLabel[class~="tl-bad"] {{ background: {t.warn}; }}
+    /* A capture somebody decided against (SCR-034). Grey, not yellow: waiting is work outstanding,
+       this is work that will not happen -- and until the skill recorded the decision the two were
+       the same colour, so the next session proposed it again. */
+    QLabel[class~="tl-skip"] {{ background: {t.off}; }}
+    /* The flaw map's verdicts (SCR-015). Two answers matter more than six colours: `done` = this
+       one you may correct, `bad` = the boost this map exists to forbid, `off` = a fact of the car,
+       `info` = the fix exists but is not EQ. */
+    QLabel[class~="tl-off"] {{ background: {t.off}; }}
+    QLabel[class~="tl-info"] {{ background: {t.info}; }}
     QLabel[class~="mcol-h"] {{
         font-size: 9.5px;
         letter-spacing: 1px;
@@ -769,12 +845,63 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 700;
         min-height: 32px;
     }}
+    /* .action-2nd — the same shape as `.composer-send`, without the claim to being THE action.
+    Two solid blue buttons side by side is two primaries, which is none: the curve window's "this
+    is my reading" is the act, and "analyse the set" is a second thing you may also do. */
+    QPushButton[class~="action-2nd"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 6px;
+        padding: 0 14px;
+        font-weight: 600;
+        min-height: 32px;
+    }}
+    QPushButton[class~="action-2nd"]:hover {{
+        border-color: {t.accent_dim};
+        color: {t.accent};
+    }}
+    QPushButton[class~="action-2nd"]:disabled {{
+        color: {t.faint};
+        border-color: {t.border};
+    }}
+    /* .clear-btn — the same family, low. These undo; they are not offers, and at full button
+    height they carried the weight of the two actions above them (user, 2026-08-12). */
+    QPushButton[class~="clear-btn"] {{
+        background: {t.panel3};
+        color: {t.muted};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 600;
+        min-height: 20px;
+        max-height: 20px;
+    }}
+    QPushButton[class~="clear-btn"]:hover {{
+        border-color: {t.accent_dim};
+        color: {t.accent};
+    }}
+    QPushButton[class~="clear-btn"]:disabled {{
+        color: {t.faint};
+        border-color: {t.border};
+    }}
 
+    /* The "still working" line under the transcript -- system-grey, so it reads as chrome
+       rather than as something the model said. */
+    QLabel[class~="activity"] {{
+        color: {t.muted};
+        font-size: 11px;
+        padding: 2px 12px 0 12px;
+    }}
     QPushButton[class~="edit-chip"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
         color: {t.muted};
-        border-radius: 12px;
+        /* Under half the rendered height (22px): Qt treats a larger radius as invalid and draws
+           a square corner instead -- measured, which is why these chips looked sharp while every
+           other rounded thing in the app looked right. */
+        border-radius: 10px;
         padding: 4px 11px;
         font-size: 11px;
     }}
@@ -789,13 +916,79 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.panel2};
         border-bottom: 1px solid {t.border};
     }}
+    /* The confirmation is the one thing in this window that is waiting on a person, and it used
+       to look like every other panel: same background, same border, a hairline apart from the
+       transcript. Reported as easy to miss. It gets the accent, a real border and its own tint. */
+    QWidget[class~="confirm-bar"] {{
+        background: {t.mix("accent", 0.10, "panel")};
+        border: 2px solid {t.accent};
+        border-radius: 10px;
+    }}
+    QWidget[class~="confirm-bar"] QLabel[class~="phead-title"] {{
+        color: {t.accent};
+    }}
     QPushButton[class~="reason-btn"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
         color: {t.text};
-        border-radius: 12px;
+        /* Same rule as `edit-chip`: stay under half the rendered height (22px), or Qt treats the
+           radius as invalid and draws a square corner. */
+        border-radius: 10px;
         padding: 4px 12px;
         font-size: 11.5px;
+    }}
+    /* .project-btn — the header's project picker. It is a **QToolButton** with an instant popup,
+    which is the whole reason the first attempt at this did nothing: the rules said QPushButton and
+    matched no widget, so macOS kept drawing its native pale pill with pale text on a dark header,
+    unreadable. Both types are named now, every state is covered, theme tokens only. */
+    QToolButton[class~="project-btn"], QPushButton[class~="project-btn"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        border-radius: 8px;
+        color: {t.text};
+        padding: 4px 12px;
+        font-size: 11.5px;
+        text-align: left;
+    }}
+    QToolButton[class~="project-btn"]:hover, QPushButton[class~="project-btn"]:hover {{
+        border-color: {t.accent};
+        color: {t.accent};
+    }}
+    QToolButton[class~="project-btn"]:pressed, QToolButton[class~="project-btn"]:checked,
+    QPushButton[class~="project-btn"]:pressed, QPushButton[class~="project-btn"]:checked {{
+        background: {t.mix("accent", 0.14, "panel")};
+        border-color: {t.accent};
+        color: {t.text};
+    }}
+    QToolButton[class~="project-btn"]::menu-indicator,
+    QPushButton[class~="project-btn"]::menu-indicator {{
+        subcontrol-origin: padding;
+        subcontrol-position: right center;
+        width: 10px;
+    }}
+    /* .chan-toggle — the per-channel switch. It reads as the ACTION it performs, so the colour
+    previews the result rather than reporting the present state: `-on` (accented) is offered on a
+    channel that is currently off, `-off` (quiet) on one that is live. The state itself is the
+    row's own name, dimmed when the channel is not in play. */
+    QPushButton[class~="chan-toggle"] {{
+        border: 1px solid {t.border2};
+        border-radius: 4px;
+        padding: 0px 6px;
+        font-size: 9.5px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="chan-toggle-on"] {{
+        background: {t.mix("ok", 0.16, "panel")};
+        border-color: {t.ok};
+        color: {t.ok};
+    }}
+    QPushButton[class~="chan-toggle-off"] {{
+        background: transparent;
+        color: {t.faint};
+    }}
+    QPushButton[class~="chan-toggle"]:hover {{
+        border-color: {t.accent};
+        color: {t.accent};
     }}
     QPushButton[class~="reason-btn"]:hover {{
         border-color: {t.info};
@@ -926,6 +1119,10 @@ def current_theme() -> "Theme":
     return _CURRENT if _CURRENT is not None else get_theme("dark")
 
 
+#: The (mode, scale, qss) last handed to `setStyleSheet`, so an identical one is not re-applied.
+_APPLIED: "tuple[str, float, str] | None" = None
+
+
 def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     """Swap the whole application's stylesheet — the Qt equivalent of the prototype's
     `document.documentElement.dataset.theme = mode`. `scale` reapplies the current zoom level
@@ -950,5 +1147,12 @@ def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     pal.setColor(QPalette.ColorRole.Base, base)
     pal.setColor(QPalette.ColorRole.PlaceholderText, QColor(theme.faint))
     app.setPalette(pal)
-    app.setStyleSheet(build_qss(theme, scale=scale))
+    # Skip the re-style when nothing about it changed. `setStyleSheet` on the QApplication makes Qt
+    # re-polish every widget in the process — 0.19 s with one window, more with each one after —
+    # and building a second window re-applied an identical sheet for no reason at all.
+    global _APPLIED
+    qss = build_qss(theme, scale=scale)
+    if _APPLIED != (mode, scale, qss):
+        app.setStyleSheet(qss)
+        _APPLIED = (mode, scale, qss)
     return theme

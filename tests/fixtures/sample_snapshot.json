@@ -11,7 +11,7 @@
       "gain_db": -2.5,
       "ta_ms": 3.10,
       "polarity": "NORM",
-      "eq": ["PK 1000 -3.0 Q2.0"]
+      "eq": [{"type": "PK", "f": 1000, "gain_db": -3.0, "q": 2.0}]
     },
     "SUB": {
       "hp": "OFF",

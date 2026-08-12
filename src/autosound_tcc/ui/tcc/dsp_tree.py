@@ -17,18 +17,22 @@ without them still renders.
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
-from autosound_tcc.ui.tcc import i18n, rounded_tooltip
+from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -42,9 +46,25 @@ _GROUP_LABEL_KEY = {
 }
 
 
-def _group_label(group: ProfileGroup) -> str:
+_LABEL_PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def group_label(group: ProfileGroup) -> str:
+    """A tier's name for a section header — its own name, and nothing else.
+
+    A profile is free to describe its tier in full (`Virtual channels (Front L/R, Center, Rear,
+    Sub, Link L+R)`), and that reads fine in the file it was written in. In a header, next to a
+    count, it is a paragraph where a title should be — and the list it spells out is exactly the
+    rows underneath (user, 2026-08-07). The known tiers use TCC's own translated names; anything
+    else keeps the profile's wording with the trailing aside dropped.
+    """
     key = _GROUP_LABEL_KEY.get(group.id)
-    return i18n.t(key) if key else group.label
+    if key:
+        return i18n.t(key)
+    return _LABEL_PARENTHETICAL.sub("", str(group.label or "")).strip() or str(group.label or "")
+
+
+_group_label = group_label  # the name this module's own call sites already use
 
 
 def _collapsed_key(group_id: str) -> str:
@@ -89,6 +109,8 @@ class ChannelRow(QWidget):
 
     clicked = Signal()
     eqRequested = Signal()
+    # (channel name, wanted state). A request, not a change: the ledger is the skill's to write.
+    toggleRequested = Signal(str, bool)
 
     def __init__(self, group: ProfileGroup, row: GroupRow) -> None:
         super().__init__()
@@ -172,7 +194,17 @@ class ChannelRow(QWidget):
 
         # rounded_tooltip.attach(), not setToolTip() -- native QToolTip's window frame stays
         # square on macOS regardless of its own QSS border-radius (user request 2026-07-28).
-        rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
+        # Kept rather than discarded: these are not Qt tooltips, so `toolTip()` is empty here and
+        # "copy hint" has to read the tip itself. The hint is where the driver and Fs live -- the
+        # facts the row has no room to show.
+        self._tip = rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
+        summary = " · ".join(row.params(group.fields))
+        copy_menu.enable_copy(
+            self,
+            value=row.name,
+            row=lambda: f"{row.name}: {summary}" if summary else row.name,
+            hint=lambda: copy_menu.plain(self._tip.text()),
+        )
 
     @staticmethod
     def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:
@@ -188,14 +220,17 @@ class ChannelRow(QWidget):
         html = [f"<b>{head}</b>"]
 
         if is_output:
+            # Driver / role / Fs are channel IDENTITY and reach this row from `project.json` by way
+            # of the SCR-001 join (`GroupRow.driver`/`role`/`fs_hz`), not from the ledger row: the
+            # skill never wrote `driver`/`fs` keys there, so reading `raw` left this block
+            # permanently empty and raised nothing.
             meta = []
-            if raw.get("driver"):  # speaker make/model (e.g. "Hertz MP70") -- shown when captured
-                meta.append(f"<b>{raw['driver']}</b>")
-            if raw.get("role"):
-                meta.append(raw["role"])
-            fs = raw.get("fs")
-            if isinstance(fs, (int, float)):
-                meta.append(f"Fs&nbsp;{fs:g}&nbsp;Hz")
+            if row.driver:  # speaker make/model, e.g. "Audiofrog GB25" -- shown when captured
+                meta.append(f"<b>{row.driver}</b>")
+            if row.role:
+                meta.append(str(row.role))
+            if row.fs_hz is not None:
+                meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz")
             if meta:
                 html.append(c(" · ".join(meta), t.muted))
             hp = CrossoverLeg.from_raw(raw.get("hp")).label
@@ -227,7 +262,10 @@ class ChannelRow(QWidget):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().mousePressEvent(event)
-        self.clicked.emit()
+        # Left button only. It used to fire on any press, which was invisible until the row gained
+        # a right-click copy menu: one right-click then opened the detail pane AND the menu.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 
 class _ParamsOpenRow(QWidget):
@@ -245,9 +283,11 @@ class _ParamsOpenRow(QWidget):
         icon = QLabel("⊞")
         icon.setProperty("class", "prow-params-ic")
         layout.addWidget(icon)
-        label = QLabel(i18n.t("paramsRow"))
-        layout.addWidget(label)
-        layout.addStretch(1)
+        # Elided: "params · усі параметри таблицею" is wider than the tree's own viewport in UK,
+        # and a row that insists on its width makes the whole tree scroll sideways -- taking every
+        # channel's crossover line with it.
+        label = ElidedLabel(i18n.t("paramsRow"), min_width=60)
+        layout.addWidget(label, 1)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         event.accept()
@@ -270,6 +310,11 @@ class _ParamRow(QWidget):
         v = QLabel(value)
         v.setProperty("class", "pv")
         layout.addWidget(v)
+        copy_menu.enable_copy(
+            self,
+            value=lambda: copy_menu.full_text(v),
+            row=lambda: f"{copy_menu.full_text(k)}: {copy_menu.full_text(v)}",
+        )
 
 
 class ParamsSection(QWidget):
@@ -336,6 +381,7 @@ class TreeGroupSection(QWidget):
     channelClicked = Signal(str, str)  # group_id, row_id
     eqRequested = Signal(str, str)
     tableRequested = Signal(str)
+    toggleRequested = Signal(str, str, bool)  # group_id, channel name, wanted state
 
     def __init__(self, group: ProfileGroup, settings: QSettings) -> None:
         super().__init__()
@@ -361,9 +407,10 @@ class TreeGroupSection(QWidget):
         title = QLabel(_group_label(group).upper())
         apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
-        # Hidden rows (unused virtual-channel slots the skill flagged at intake, see GroupRow.hidden
-        # / docs/SKILL-CHANGE-REQUESTS.md SCR-003) are excluded from both the row count and the
-        # rendered list below.
+        # The working tree shows what is being worked on: unused slots stay out of it (user,
+        # 2026-08-06 -- "in the main place, only what we work with"). Every channel, in use or not,
+        # with its ON/OFF, lives in System params instead, where looking at the whole rig is the
+        # point rather than a distraction.
         visible_rows = [row for row in group.rows_ordered() if not row.hidden]
         count_text = (
             f"{len(visible_rows)}/{group.max_count}" if group.max_count else f"{len(visible_rows)}"
@@ -388,6 +435,9 @@ class TreeGroupSection(QWidget):
             chan = ChannelRow(group, row)
             chan.clicked.connect(lambda r=row: self.channelClicked.emit(group.id, r.id))
             chan.eqRequested.connect(lambda r=row: self.eqRequested.emit(group.id, r.id))
+            chan.toggleRequested.connect(
+                lambda name, on, gid=group.id: self.toggleRequested.emit(gid, name, on)
+            )
             children_layout.addWidget(chan)
 
         outer.addWidget(self._children)
@@ -409,6 +459,7 @@ class DspTreeWidget(QScrollArea):
     channelClicked = Signal(str, str)
     eqRequested = Signal(str, str)
     tableRequested = Signal(str)
+    toggleRequested = Signal(str, str, bool)  # (group id, channel name, wanted state)
 
     def __init__(self) -> None:
         super().__init__()
@@ -444,4 +495,5 @@ class DspTreeWidget(QScrollArea):
             section.channelClicked.connect(self.channelClicked.emit)
             section.eqRequested.connect(self.eqRequested.emit)
             section.tableRequested.connect(self.tableRequested.emit)
+            section.toggleRequested.connect(self.toggleRequested.emit)
             self._layout.insertWidget(self._layout.count() - 1, section)

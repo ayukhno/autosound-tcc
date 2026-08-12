@@ -181,6 +181,12 @@ class MeasItem:
 class MeasGroup:
     type: str  # column header — a literal label, not translated in the prototype either
     items: tuple[MeasItem, ...]
+    # Which capture method this column holds ("sw" / "rta"), when the builder knows. The panel
+    # used to infer it from the column INDEX against a three-entry table, which is fine for the
+    # mock's fixed three columns and wrong for anything else: phase 2's derived task has five
+    # groups, and the fourth would have raised IndexError while rendering. None keeps the old
+    # index convention, so the mock and its tests are unaffected.
+    method: "str | None" = None
 
 
 @dataclass(frozen=True)

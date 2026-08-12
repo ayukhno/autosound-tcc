@@ -5,15 +5,20 @@ real QThread."""
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog  # noqa: E402
+from autosound_tcc.ui.tcc.mock_data import MEAS_SESSIONS  # noqa: E402
+from autosound_tcc.state import measurement_view  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import (  # noqa: E402
     MeasurementPanel,
+    with_method,
     _RewReadWorker,
     _RewRenameWorker,
     _RewScanWorker,
@@ -52,14 +57,18 @@ class _FakeBridge:
         self.renamed.append((mid, title))
 
 
-def test_worker_picks_highest_ordinal_id_and_emits_done():
+def test_worker_emits_every_title_in_ordinal_order():
+    """Not just the newest one (user, 2026-08-11): a Read after a capture round used to turn a
+    single row green because the worker took the highest ordinal only."""
     _app()
-    bridge = _FakeBridge({"1": {"title": "old"}, "15": {"title": "sub_10 (sw)"}})
+    bridge = _FakeBridge(
+        {"1": {"title": "m-L_10 (sw)"}, "15": {"title": "sub_10 (sw)"}, "7": {"title": ""}}
+    )
     worker = _RewReadWorker(bridge)
     results = []
     worker.done.connect(lambda r: results.append(r))
     worker.run()  # call synchronously -- no real thread, no race
-    assert results == [{"id": "15", "title": "sub_10 (sw)", "n_points": 3}]
+    assert results == [{"titles": ["m-L_10 (sw)", "sub_10 (sw)"]}]
 
 
 def test_worker_emits_failed_on_empty_measurements():
@@ -83,19 +92,58 @@ def test_worker_emits_failed_on_exception():
 def test_read_done_marks_matching_row():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     # "sw_10" is already "done" in the mock grid's first (sw) group -- pick a "wait" row instead
     # so the transition this test checks is actually exercised.
     row = next(r for r in panel._rows if r.item_name == "m-L_10")
     assert row._dot.property("class") == "tl tl-wait"
-    panel._on_read_done({"title": "m-L_10 (sw)", "n_points": 512})
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
     assert row._dot.property("class") == "tl tl-done"
     assert row._name_label.property("class") == "mn mn-done"
     assert panel._read_btn.isEnabled()
 
 
+def test_read_done_marks_every_matching_row_not_just_one():
+    """The whole point of the 2026-08-11 fix: one Read, every row REW can account for."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    waiting = [r for r in panel._rows if r.status == "wait" and r.method_suffix == "sw"][:3]
+    assert len(waiting) == 3  # otherwise the mock changed and this test proves nothing
+    panel._on_read_done({"titles": [with_method(r.item_name, "sw") for r in waiting]})
+    assert [r.status for r in waiting] == ["done", "done", "done"]
+
+
+def test_read_done_leaves_unusable_and_skipped_rows_alone():
+    """A failed check (SCR-040) and a recorded decision (SCR-034) outrank "REW holds that title" --
+    a re-read must not quietly turn either of them green."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    bad, skipped = [r for r in panel._rows if r.method_suffix == "sw"][:2]
+    for row, status in ((bad, "bad"), (skipped, "skip")):
+        row._status = status
+        row._dot.set_status(status)
+    panel._on_read_done(
+        {"titles": [with_method(bad.item_name, "sw"), with_method(skipped.item_name, "sw")]}
+    )
+    assert (bad.status, skipped.status) == ("bad", "skip")
+
+
+def test_second_read_does_not_duplicate_additional_rows():
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    before = len(panel._rows)
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
+    assert len(panel._rows) == before + 1
+
+
 def test_read_failed_shows_error_and_reenables_button():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._read_btn.setEnabled(False)
     panel._on_read_failed("boom")
     assert panel._read_btn.isEnabled()
@@ -107,6 +155,7 @@ def test_row_shows_full_name_with_method_suffix():
     "<id> (<method>)" -- not just the bare channel id."""
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     row = next(r for r in panel._rows if r.item_name == "sw_10" and r.method_suffix == "sw")
     assert row._name_label.text() == "sw_10 (sw) · 2"  # the mock's own capture count, unrelated
     group_row = next(r for r in panel._rows if r.item_name == "SW+Ws_10")
@@ -118,8 +167,9 @@ def test_read_done_with_modifier_colors_only_the_extra_text():
     matches, and the extra text renders blue (user request 2026-07-28)."""
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     row = next(r for r in panel._rows if r.item_name == "m-L_10" and r.method_suffix == "sw")
-    panel._on_read_done({"title": "m-L_10 (sw) redo", "n_points": 512})
+    panel._on_read_done({"titles": ["m-L_10 (sw) redo"]})
     html = row._name_label.text()
     assert "m-L_10 (sw)" in html
     assert "redo" in html
@@ -131,8 +181,9 @@ def test_read_done_with_unmatched_title_adds_additional_row():
     flagged blue end-to-end, rather than silently dropped (user request 2026-07-28)."""
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     before = len(panel._rows)
-    panel._on_read_done({"title": "extra-mic_10 (sw)", "n_points": 256})
+    panel._on_read_done({"titles": ["extra-mic_10 (sw)"]})
     assert len(panel._rows) == before + 1
     new_row = panel._rows[-1]
     assert new_row.item_name == "extra-mic_10"
@@ -203,6 +254,7 @@ def test_scan_worker_emits_failed_on_exception():
 def test_scan_match_reports_mismatch_when_short():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._pending_order = ["A", "B", "C", "D", "E"]
     panel._on_scan_done({"1": {}, "2": {}})
     text = panel._status_label.text()
@@ -212,6 +264,7 @@ def test_scan_match_reports_mismatch_when_short():
 def test_scan_match_starts_rename_when_counts_line_up():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._bridge = _FakeBridge({})  # not used by _on_scan_done itself, just needs .rename_measurement
     panel._pending_order = ["w_L", "w_R"]
     panel._on_scan_done({"5": {}, "6": {}})
@@ -250,6 +303,7 @@ def test_rename_worker_stops_at_first_failure_and_reports_progress():
 def test_rename_done_and_failed_update_status_label():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._on_rename_done([("5", "w_L"), ("6", "w_R")])
     assert "2" in panel._status_label.text()
 
@@ -261,6 +315,7 @@ def test_rename_done_and_failed_update_status_label():
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     pairs = panel._method_channel_pairs()
     assert set(pairs) == {"sw", "rta", "rta_group"}
     # MEAS.groups[0]'s own item order, untouched -- label is the full REW name (id + method
@@ -285,6 +340,7 @@ def test_shutdown_waits_for_running_worker_before_returning():
     must not return while a worker is still alive."""
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._bridge = _FakeBridge({"1": {"title": "m-L_10 (sw)"}})
     panel._worker = _RewReadWorker(panel._bridge)
     panel._worker.start()
@@ -295,6 +351,7 @@ def test_shutdown_waits_for_running_worker_before_returning():
 def test_shutdown_is_a_noop_with_no_workers():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel.shutdown()  # must not raise with every worker still None
 
 
@@ -309,6 +366,7 @@ def test_capture_order_key_is_per_preset_and_method():
 def test_session_dropdown_lists_all_sessions_live_one_marked():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     items = [panel._session_combo.itemText(i) for i in range(panel._session_combo.count())]
     assert items == ["v10 ●", "v9", "v8"]
 
@@ -319,6 +377,7 @@ def test_picking_a_past_session_shows_its_step_and_disables_live_actions():
     (Read/assign-names) disable since they always target the live session, not what's shown."""
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     assert panel._version.text() == "Capture series v10"
     assert panel._read_btn.isEnabled()
 
@@ -336,6 +395,215 @@ def test_picking_a_past_session_shows_its_step_and_disables_live_actions():
 def test_picking_session_via_combo_switches_the_grid():
     _app()
     panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     panel._session_combo.setCurrentIndex(panel._session_combo.findData("v8"))
     assert panel._viewing_id == "v8"
     assert panel._rows[0].item_name == "sw_8"
+
+
+def test_the_panel_remembers_what_rew_holds():
+    """`known_titles()` was called by the checklist and by the supervisor's audit, and the panel
+    never defined it — so both silently ran on "REW holds nothing": a checklist that could not
+    mark anything captured from REW, and an audit that could not back a step with a measurement."""
+    _app()
+    panel = MeasurementPanel()
+    seen: list = []
+    panel.titlesChanged.connect(lambda: seen.append(1))
+
+    panel._remember_titles(["sw_1 (sw)", "tw-L_1 (rta)", ""])
+
+    assert panel.known_titles() == ["sw_1 (sw)", "tw-L_1 (rta)"]  # blanks are not titles
+    assert seen  # and the window is told, so the checklist can be rebuilt
+
+    seen.clear()
+    panel._remember_titles(["sw_1 (sw)"])
+    assert not seen  # nothing new: no signal, and no needless capture check
+
+
+def test_replacing_a_running_worker_does_not_abort_the_process():
+    """Assigning over an attribute that holds a RUNNING QThread destroys it on the spot, and Qt
+    answers that with `qFatal` — the whole process aborts, mid-session (real crash report,
+    2026-08-07: `QThread::~QThread()` reached through `Sbk_QWidget_setattro`)."""
+    from PySide6.QtCore import QThread
+
+    class _Slow(QThread):
+        def run(self) -> None:
+            self.msleep(120)
+
+    _app()
+    panel = MeasurementPanel()
+    first = _Slow()
+    panel._replace_worker("_worker", first)
+    first.start()
+
+    second = _Slow()
+    panel._replace_worker("_worker", second)  # must not raise, and must not abort
+
+    assert not first.isRunning()  # waited out before being dropped
+    assert panel._worker is second
+    second.wait(2000)
+
+
+# ---- title identity and the method suffix (user, 2026-08-07) -----------------
+
+
+def test_a_zero_padded_rew_title_matches_the_row_that_expects_it(tmp_path, monkeypatch):
+    """REW held `c_01 (sw)` while the expected row said `c_1 (sw)`, so matching on the characters
+    found nothing and the read added an "additional" graph — beside the very same capture, which
+    the derived checklist had already marked done off that title. One capture, two rows."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "glossary.json").write_text(
+        json.dumps({"schema_version": 1,
+                    "channels": [{"code": "c", "active": True}, {"code": "sw", "active": True}]}),
+        encoding="utf-8",
+    )
+    _app()
+    panel = MeasurementPanel()
+    session = measurement_view.build_session("0", 1, [], tmp_path)
+    assert session is not None
+    panel.set_sessions((session,))
+
+    row, extra = panel._classify_title("c_01 (sw)")
+
+    assert row is not None and row.item_name == "c_1 (sw)"
+    assert extra is None  # padding is not a qualifier, it is the same measurement
+
+
+def test_the_method_is_not_appended_to_a_name_that_already_carries_it():
+    """`c_1 (sw) (sw)` — the row rendering learned this once, then the capture-order dialog was
+    built from the same names and printed it all over again."""
+    assert with_method("tw-L_1 (sw)", "sw") == "tw-L_1 (sw)"
+    assert with_method("tw-L_1", "sw") == "tw-L_1 (sw)"
+    assert with_method("  tw-L_1  ", "rta") == "tw-L_1 (rta)"
+
+
+def test_language_switch_keeps_a_real_capture_task_on_screen():
+    """The 2026-08-11 bug: sixteen captures read from REW, switch to English, empty card.
+
+    `retranslate()` ended with an unconditional `set_no_project()` -- written when the mock was the
+    only thing the panel could hold, and never revisited when `set_sessions()` gave it a real task.
+    """
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
+    rows_before = len(panel._rows)
+    assert rows_before
+
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en" if before == "uk" else "uk")
+        panel.retranslate()
+        assert len(panel._rows) == rows_before
+        assert not panel._no_project_label.isVisible()
+        # ...and the status line speaks the new language rather than staying frozen mid-sentence.
+        assert panel._status_label.text() == i18n.t("measReadOk").format(n=1, matched=1, extra=0)
+    finally:
+        i18n.set_language(before)
+
+
+def test_language_switch_keeps_the_no_project_message_when_there_is_no_task():
+    """The other half: without a derived task the card must stay empty, not fall back to the mock
+    grid -- a project has never taken "capture series v10" over invented channel names."""
+    _app()
+    panel = MeasurementPanel()  # constructor ends in set_no_project()
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en" if before == "uk" else "uk")
+        panel.retranslate()
+        assert panel._rows == []
+        assert panel._no_project_label.text() == i18n.t("measNoTask")
+    finally:
+        i18n.set_language(before)
+
+
+def _no_capture_session():
+    from autosound_tcc.ui.tcc.mock_data import MeasSession
+
+    return [MeasSession(id="v3", version={"en": "Phase 1 · no capture",
+                                          "uk": "Фаза 1 · без замірів"}, groups=())]
+
+
+def test_a_phase_that_captures_nothing_says_so_instead_of_showing_an_empty_grid():
+    """User, 2026-08-11: phase 1 rendered as a live legend over no rows, which reads as a mock left
+    on screen. `measurement_view.build_session` returns that session deliberately — it is an answer,
+    so it has to look like one."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session())
+    assert panel._rows == []
+    assert panel._no_project_label.text() == i18n.t("measPhaseNoCapture")
+    assert not panel._legend.isVisibleTo(panel)  # no rows, so no colours to explain
+
+
+def test_read_on_a_phase_with_no_columns_does_not_blow_up():
+    """`_col_next_row` is empty there, and indexing it inside a signal handler is a printed
+    traceback plus a half-updated panel."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session())
+    panel._on_read_done({"titles": ["sub_3 (sw)", "m-L_3 (sw)"]})
+    assert panel._rows == []
+    assert panel._status_label.text() == i18n.t("measReadOk").format(n=2, matched=0, extra=0)
+
+
+def test_switching_session_drops_a_status_line_about_the_previous_grid():
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._on_read_done({"titles": ["m-L_10 (sw)"]})
+    assert panel._status_label.text()
+    panel.set_sessions(_no_capture_session())
+    assert panel._status_label.text() == ""
+
+
+def test_the_session_picker_shows_a_whole_round_id():
+    """`cap_001 ●` was eliding to "cap_00…" — a picker whose entries cannot be told apart from one
+    another (user, 2026-08-11)."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(_no_capture_session()[:1] + [
+        __import__("autosound_tcc.ui.tcc.mock_data", fromlist=["MeasSession"]).MeasSession(
+            id="cap_001", version={"en": "past", "uk": "минула"}, groups=()
+        )
+    ])
+
+    combo = panel._session_combo
+    hint = combo.sizeHint().width()
+    metrics = combo.fontMetrics().horizontalAdvance("cap_001 ●")
+
+    assert hint >= metrics, f"picker asks for {hint}px, the id needs {metrics}px"
+
+
+def test_the_legend_speaks_the_window_s_language():
+    """Four hard-coded English words above a Ukrainian panel, with three of the four translations
+    already in the table and unused (found 2026-08-12). `legSkip` was the one genuinely missing."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc.measurement_panel import _LEGEND
+
+    _app()
+    panel = MeasurementPanel()
+    labels = [w for w in panel._legend.findChildren(QLabel)
+              if w.property("class") == "meas-legend-label"]
+    assert len(labels) == len(_LEGEND)
+
+    try:
+        i18n.set_language("uk")
+        panel.retranslate()  # MainWindow's own language switch calls exactly this
+
+        assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+        assert labels[0].text() != "waiting", "the legend actually changed"
+    finally:
+        i18n.set_language("en")
+    panel.retranslate()
+    assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+
+
+def test_every_string_the_app_asks_for_exists_in_both_languages():
+    """A key present in one table and not the other renders as the key itself. `legSkip` had no
+    Ukrainian at all, and nothing said so until someone switched the language and looked."""
+    en, uk = set(i18n.T["en"]), set(i18n.T["uk"])
+
+    assert not en - uk, f"no Ukrainian for: {sorted(en - uk)}"
+    assert not uk - en, f"Ukrainian-only keys: {sorted(uk - en)}"

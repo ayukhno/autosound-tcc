@@ -55,15 +55,63 @@ _METHOD_KEYS = ("sw", "rta", "rta_group")
 # (user request 2026-07-28: "SW+Ws_10 (rta)", not "SW+Ws_10 (rta_group)").
 _METHOD_SUFFIX = {"sw": "sw", "rta": "rta", "rta_group": "rta"}
 
-_LEGEND = (("wait", "waiting"), ("done", "done"), ("bad", "taken, unusable"))
+
+def _method_suffix_for(group, column: int) -> str:
+    """The `(method)` suffix a column's rows are named with.
+
+    A group that states its own method is believed. The index fallback is the mock's convention,
+    and it is only safe for the mock: a derived phase-2 task has five groups, and `_METHOD_KEYS[3]`
+    is an IndexError raised while drawing the panel.
+    """
+    method = getattr(group, "method", None)
+    if method:
+        return _METHOD_SUFFIX.get(method, method)
+    if column < len(_METHOD_KEYS):
+        return _METHOD_SUFFIX[_METHOD_KEYS[column]]
+    return "rta"
+
+
+def with_method(name: str, suffix: str) -> str:
+    """`"c_1"` or `"c_1 (sw)"` in, `"c_1 (sw)"` out.
+
+    The skill's expected names already carry the method, so appending it unconditionally prints
+    `c_1 (sw) (sw)`. The row rendering learned that once; the capture-order dialog was built from
+    the same names later and had to learn it again (user, 2026-08-07) — so the rule lives here now
+    rather than at each call site that formats one.
+    """
+    name = (name or "").strip()
+    tail = f"({suffix})"
+    return name if name.endswith(tail) else f"{name} {tail}"
+
+#: (traffic-light status, i18n key). Keys, not words: three of the four had a Ukrainian
+#: translation sitting unused in the table while the legend showed English (2026-08-12).
+_LEGEND = (
+    ("wait", "legWait"),
+    ("done", "legDone"),
+    ("bad", "legBad"),
+    # Recorded as decided against, with a reason (SCR-034) -- not the same as outstanding, which is
+    # what it looked like before the skill kept a record of the round.
+    ("skip", "legSkip"),
+)
 
 
 class _RewReadWorker(QThread):
-    """Pulls the latest measurement's metadata + frequency response off a background thread --
-    `rew_api`'s HTTP calls are synchronous (plain `urllib`), so calling them from the GUI thread
-    would freeze the window for the duration of the request. Mirrors the QThread+signals shape
-    already used for `profile_interview_dialog.py`'s `_AgentWorker` (that one also runs asyncio,
-    which this doesn't need since REW's client isn't async)."""
+    """Pulls EVERY measurement REW currently holds, off a background thread -- `rew_api`'s HTTP
+    calls are synchronous (plain `urllib`), so calling them from the GUI thread would freeze the
+    window for the duration of the request. Mirrors the QThread+signals shape already used for
+    `profile_interview_dialog.py`'s `_AgentWorker` (that one also runs asyncio, which this doesn't
+    need since REW's client isn't async).
+
+    It used to read the highest-ordinal measurement only, on a "that's the most recent one"
+    heuristic -- so a Read after a whole capture round turned exactly one row green and left the
+    rest looking uncaptured (user, 2026-08-11). REW has no "currently selected measurement" concept
+    to ask about (rew-api-quirks.md), which is what made the heuristic tempting; but the panel's
+    question is "which of these rows does REW already hold", and that is answered by all of them.
+
+    One HTTP call, not one per measurement: the frequency response is no longer fetched. It was
+    only ever used to print a point count in the status line, and paying N round-trips for a
+    cosmetic number is not a trade worth making now that N is the whole list.
+    """
 
     done = Signal(dict)
     failed = Signal(str)
@@ -78,15 +126,14 @@ class _RewReadWorker(QThread):
             if not measurements:
                 self.failed.emit(i18n.t("measReadNoMeas"))
                 return
-            # REW's measurement ids are ordinals, not stable identity (rew-api-quirks.md) -- there
-            # is no "currently selected measurement" concept in the API at all. Highest ordinal is
-            # used as a "most recent" heuristic, same caveat rew_api.py itself documents for id
-            # reuse; if this proves unreliable in practice, replace with an explicit picker rather
-            # than trusting the heuristic further.
-            mid = max(measurements, key=lambda k: int(k) if str(k).isdigit() else -1)
-            title = (measurements[mid] or {}).get("title", "")
-            freqs, mag, _phase = self._bridge.frequency_response(mid)
-            self.done.emit({"id": mid, "title": title, "n_points": len(freqs)})
+            # Ascending ordinal = REW's own list order, which is capture order in practice -- it
+            # decides nothing here, it just keeps the status line and any newly added "additional"
+            # rows in a predictable sequence rather than dict order.
+            titles = [
+                str((measurements[mid] or {}).get("title", ""))
+                for mid in sorted(measurements, key=lambda k: int(k) if str(k).isdigit() else -1)
+            ]
+            self.done.emit({"titles": [t for t in titles if t.strip()]})
         except Exception as exc:  # noqa: BLE001 — surface any REW/network failure, don't crash
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -178,7 +225,7 @@ class _MeasRow(QWidget):
 
     def _render(self) -> None:
         t = current_theme()
-        base = f"{self.item_name} ({self.method_suffix})"
+        base = with_method(self.item_name, self.method_suffix)
         if self._count:
             base += f" · {self._count}"
         if self._additional:
@@ -191,6 +238,11 @@ class _MeasRow(QWidget):
         self._name_label.setProperty("class", f"mn mn-{self._status}")
         self._name_label.style().unpolish(self._name_label)
         self._name_label.style().polish(self._name_label)
+
+    @property
+    def status(self) -> str:
+        """What this row currently shows -- one of the `_LEGEND` keys."""
+        return self._status
 
     def mark_done(self, extra: Optional[str] = None) -> None:
         self._status = "done"
@@ -216,6 +268,13 @@ class MeasurementPanel(QWidget):
     # A real Read/Scan call is the freshest possible signal of whether REW is actually reachable --
     # main_window.py's REW-online dot listens to this rather than polling on its own.
     rewStatusChanged = Signal(bool)
+    # REW's own list of titles changed (a scan, or a read that named one). The window rebuilds the
+    # checklist off this and runs the capture check; the panel itself decides nothing about them.
+    titlesChanged = Signal()
+    #: The grid switched to another capture series. The curve window listens: its delay bank is
+    #: scoped by series, and a window left open while the panel moves would keep showing the
+    #: corrections of a series nobody is looking at any more (user, 2026-08-12).
+    sessionChanged = Signal(str)
 
     def __init__(self, preset_provider: Optional[Callable[[], str]] = None) -> None:
         """`preset_provider` returns the current preset name, so each capture method's saved order
@@ -224,8 +283,21 @@ class MeasurementPanel(QWidget):
         self._bridge = RewBridge()
         self._worker: "_RewReadWorker | None" = None
         self._scan_worker: "_RewScanWorker | None" = None
+        # Every title this panel has seen REW hold, this session. There was no such collection at
+        # all: `known_titles()` was called by the checklist and by the supervisor's own audit, and
+        # the panel never defined it, so both silently ran on "REW holds nothing" -- a checklist
+        # that could never mark anything captured from REW, and an audit that could never back a
+        # step with a measurement.
+        self._known_titles: set[str] = set()
         self._rename_worker: "_RewRenameWorker | None" = None
         self._rows: list[_MeasRow] = []
+        # REW titles this grid has already grown an "additional" row for. A Read now folds in the
+        # whole list, so without this the second press would add every unexpected graph a second
+        # time. Cleared whenever the grid is rebuilt -- the rows go, so the memory of them must.
+        self._additional_titles: set[str] = set()
+        # The project's naming glossary, read once and kept: `_classify_title` asks it per title,
+        # and it is what tells `L w+m` (a joint) from `L` plus a stray modifier.
+        self._glossary = None
         self._preset_provider = preset_provider
         self._settings = get_settings()
         self._pending_order: list[str] = []
@@ -234,6 +306,18 @@ class MeasurementPanel(QWidget):
         # names always act on the live session regardless (see `_on_read_clicked` etc.'s guard).
         self._sessions = MEAS_SESSIONS
         self._viewing_id = self._sessions[0].id
+        # Whether `_sessions` is a REAL derived capture task or still the mock fixture. The
+        # difference only ever mattered on a language switch, which is exactly where it was
+        # missing -- see `retranslate`.
+        self._has_real_sessions = False
+        # Which session the grid was last actually BUILT for. Distinct from `_viewing_id`, which
+        # `set_sessions` assigns before it renders anything -- comparing against that one would
+        # answer "unchanged" for every switch that arrives with new data.
+        self._shown_id: Optional[str] = None
+        # The last status line as (i18n key, format args) rather than as finished text, so a
+        # language switch re-renders it instead of leaving a Ukrainian sentence under an English
+        # window. None = nothing to say yet, which is not the same as an empty string.
+        self._status: Optional[tuple[str, dict]] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -253,11 +337,18 @@ class MeasurementPanel(QWidget):
         self._session_combo.currentIndexChanged.connect(
             lambda _idx: self.show_session(self._session_combo.currentData())
         )
-        head_row.addWidget(self._session_combo, 1)
+        # A round id is `cap_001` plus the live-marker dot, and at stretch 1 against the banner's
+        # 4 it was eliding to "cap_00…" — a picker whose entries cannot be told apart (user,
+        # 2026-08-11). Sized to its own contents instead of to a share of the row.
+        self._session_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._session_combo.setMinimumContentsLength(11)
+        head_row.addWidget(self._session_combo)
         self._version = QLabel("")
         self._version.setProperty("class", "meas-head")
         self._version_tip = attach_tip(self._version)
-        head_row.addWidget(self._version, 4)
+        head_row.addWidget(self._version, 1)
         # Icon-only, not full-text buttons -- the text labels ate too much of this header row next
         # to the version banner (user request 2026-07-27). Full label moved to the tooltip. Real
         # SVG icons (Lucide, ISC-licensed -- NOTICE.md), not unicode glyphs, for a sharper look.
@@ -269,6 +360,17 @@ class MeasurementPanel(QWidget):
         self._assign_names_tip = attach_tip(self._assign_names_btn, i18n.t("assignNames"))
         self._assign_names_btn.clicked.connect(self._on_assign_names_clicked)
         head_row.addWidget(self._assign_names_btn)
+        # Curves, with markers on them: the panel that turns "I read it differently" into a
+        # number (see `curve_view.py`). Beside Read because that is where the measurements are.
+        self._curves_btn = QPushButton()
+        self._curves_btn.setIcon(QIcon(str(_ICONS_DIR / "activity.svg")))
+        self._curves_btn.setIconSize(QSize(16, 16))
+        self._curves_btn.setProperty("class", "meas-icon-btn")
+        self._curves_btn.setFixedSize(28, 28)
+        self._curves_tip = attach_tip(self._curves_btn, i18n.t("curveBtn"))
+        self._curves_btn.clicked.connect(self._on_curves_clicked)
+        head_row.addWidget(self._curves_btn)
+
         self._read_btn = QPushButton()
         self._read_btn.setIcon(QIcon(str(_ICONS_DIR / "download.svg")))
         self._read_btn.setIconSize(QSize(16, 16))
@@ -290,12 +392,14 @@ class MeasurementPanel(QWidget):
         legend_layout = QHBoxLayout(legend)
         legend_layout.setContentsMargins(0, 0, 0, 0)
         legend_layout.setSpacing(10)
-        for status, label in _LEGEND:
+        self._legend_labels: list[QLabel] = []
+        for status, key in _LEGEND:
             dot = TrafficLight(status)
-            text = QLabel(label)
+            text = QLabel(i18n.t(key))
             text.setProperty("class", "meas-legend-label")
             legend_layout.addWidget(dot)
             legend_layout.addWidget(text)
+            self._legend_labels.append(text)
         legend_layout.addStretch(1)
         layout.addWidget(legend)
 
@@ -313,20 +417,35 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setWordWrap(True)
         self._no_project_label.setVisible(False)
         layout.addWidget(self._no_project_label)
-        self._no_project_active = False
 
         self.show_session(self._viewing_id)
+        # ...and then hide it. `MEAS_SESSIONS` still builds the grid so the widget has its real
+        # shape (and the unit tests keep it as a fixture), but a project is never shown a capture
+        # series it did not take: opening one and being met with "capture series v10" over
+        # invented channel names is the plan panel's retired demo plan in a second place.
+        self.set_no_project(i18n.t("measNoTask"))
+
+    def _set_status(self, key: str, **kwargs) -> None:
+        """Show a status line, remembering WHICH line it is so `retranslate` can redraw it."""
+        self._status = (key, kwargs)
+        self._render_status()
+
+    def _render_status(self) -> None:
+        if self._status is None:
+            return
+        key, kwargs = self._status
+        self._status_label.setText(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
         when there's no real project on disk at all. `set_sessions()` reverses this the moment a
-        real capture task arrives. `_no_project_active` is what stops `retranslate()` from
-        rebuilding the mock grid back in via `show_session()` on a language switch."""
-        self._no_project_active = True
+        real capture task arrives."""
+        self._has_real_sessions = False  # whatever was derived is gone; do not redraw it later
         for widget in (
             self._session_combo,
             self._version,
             self._assign_names_btn,
+            self._curves_btn,
             self._read_btn,
         ):
             widget.setVisible(False)
@@ -338,15 +457,16 @@ class MeasurementPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._rows = []
+        self._additional_titles = set()
         self._no_project_label.setText(message)
         self._no_project_label.setVisible(True)
 
     def _show_content(self) -> None:
-        self._no_project_active = False
         for widget in (
             self._session_combo,
             self._version,
             self._assign_names_btn,
+            self._curves_btn,
             self._read_btn,
         ):
             widget.setVisible(True)
@@ -359,12 +479,15 @@ class MeasurementPanel(QWidget):
     def set_sessions(self, sessions) -> None:
         """Replace the mock series with one derived from the glossary + REW (SCR-008).
 
-        Passing None or an empty tuple keeps the mock: a project with no glossary has no derivable
-        capture task, and an empty grid reads as "everything captured" rather than "nothing known".
+        Passing None or an empty tuple says so in words. An empty grid would read as "everything
+        captured" rather than "nothing known", and the mock it used to fall back to read as a
+        series someone had already taken.
         """
         if not sessions:
+            self.set_no_project(i18n.t("measNoTask"))
             return
         self._show_content()  # reverses a prior set_no_project(), a no-op otherwise
+        self._has_real_sessions = True
         self._sessions = tuple(sessions)
         self._viewing_id = self._sessions[0].id
         self._session_combo.blockSignals(True)
@@ -375,6 +498,12 @@ class MeasurementPanel(QWidget):
         self._session_combo.blockSignals(False)
         self.show_session(self._viewing_id)
 
+    def viewing_session_id(self) -> str:
+        """Which capture series the grid is showing. The curve window scopes its delay bank by
+        this: switching back to an earlier series must bring that series' own corrections, not the
+        current one's (user, 2026-08-12)."""
+        return self._viewing_id
+
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
         (Read/Scan/assign-names enabled) and the title banner shows what to capture; any other is
@@ -384,11 +513,20 @@ class MeasurementPanel(QWidget):
         request 2026-07-28). Called by picking this panel's own session dropdown and, from the
         other direction, `ui/tcc/plan_panel.py`'s per-step measurement icon."""
         session = self._session(session_id)
-        self._viewing_id = session_id
+        if session_id != self._shown_id:
+            # A count of what matched belongs to the grid it was counted against. Carrying "16
+            # matched" over to a phase showing different rows -- or none -- states something false
+            # about what is on screen (user, 2026-08-11).
+            self._status = None
+            self._status_label.setText("")
+        self._viewing_id = self._shown_id = session_id
+        self.sessionChanged.emit(session_id)
         is_live = session_id == self._sessions[0].id
         if is_live:
             self._version.setText(i18n.tx(session.version))
-            self._version_tip.set_text("")
+            # The banner elides ("Phase 1 · no capt…") long before this text runs out, and the
+            # part it drops is the part that says what is going on.
+            self._version_tip.set_text(i18n.tx(session.version))
         else:
             steps = ", ".join(session.used_in_steps) or "—"
             self._version.setText(i18n.t("measUsedInStep").format(steps=steps))
@@ -408,12 +546,25 @@ class MeasurementPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._rows = []
+        self._additional_titles = set()
         self._col_next_row = []
+        self._col_methods: list[str] = []
+        # A phase that captures nothing (phase 1 analyses the series phase 0 took) is a real
+        # answer, and `measurement_view` already returns it as a session with no groups. It was
+        # rendered as an empty grid under a live legend, which reads as a mock left on screen
+        # rather than as an answer (user, 2026-08-11) — and the legend explains colours that no
+        # row has. Say it in words instead, and keep the header: the series is still selectable.
+        empty_phase = not session.groups
+        self._legend.setVisible(not empty_phase)
+        self._no_project_label.setVisible(empty_phase)
+        if empty_phase:
+            self._no_project_label.setText(i18n.t("measPhaseNoCapture"))
         for c, group in enumerate(session.groups):
             header = QLabel(group.type)
             header.setProperty("class", "mcol-h")
             self._cols_layout.addWidget(header, 0, c)
-            method_suffix = _METHOD_SUFFIX[_METHOD_KEYS[c]]
+            method_suffix = _method_suffix_for(group, c)
+            self._col_methods.append(method_suffix)
             for r, item in enumerate(group.items, start=1):
                 row = _MeasRow(item, method_suffix)
                 self._rows.append(row)
@@ -421,13 +572,28 @@ class MeasurementPanel(QWidget):
             self._col_next_row.append(len(group.items) + 1)
 
     def retranslate(self) -> None:
-        # show_session() rebuilds _cols_layout from the (mock) session data -- skip it while
-        # set_no_project() is active, or a language switch would silently bring the mock grid
-        # back over a real "no project" state.
-        if not self._no_project_active:
-            self.show_session(self._viewing_id)  # re-renders the banner text in the new language
+        """Re-render whatever this panel is currently showing, in the new language.
+
+        It used to end with an unconditional `set_no_project()`. That was written when the mock was
+        the only thing the panel could hold, and the line's own job was to hide it -- but `set_
+        sessions()` (SCR-008) later gave the panel a REAL capture task to hold, and the language
+        switch went on wiping it. Sixteen captures read from REW, switch to English, empty card
+        (user, 2026-08-11). What a panel shows must not depend on which language it shows it in.
+        """
+        if self._has_real_sessions:
+            self.show_session(self._viewing_id)
+        else:
+            # No real task derived yet. `MEAS_SESSIONS` is still the widget's shape fixture, but a
+            # project is never SHOWN a capture series it did not take: being met with "capture
+            # series v10" over invented channel names is the plan panel's retired demo plan in a
+            # second place.
+            self.set_no_project(i18n.t("measNoTask"))
+        self._render_status()  # the last Read/Scan result, in the new language too
+        for label, (_status, key) in zip(self._legend_labels, _LEGEND):
+            label.setText(i18n.t(key))
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
+        self._curves_tip.set_text(i18n.t("curveBtn"))
 
     # ---- capture-order (item 9) ---------------------------------------------
 
@@ -456,7 +622,7 @@ class MeasurementPanel(QWidget):
             # -- not just the bare channel id (user request 2026-07-28); the id itself (first tuple
             # element) stays bare so previously-saved orders keyed by it are unaffected.
             suffix = _METHOD_SUFFIX[key]
-            meas_pairs = [(item.name, f"{item.name} ({suffix})") for item in group.items]
+            meas_pairs = [(item.name, with_method(item.name, suffix)) for item in group.items]
             if not meas_pairs:
                 continue
             saved = self._saved_order(key)
@@ -492,22 +658,33 @@ class MeasurementPanel(QWidget):
         if self._scan_worker is not None and self._scan_worker.isRunning():
             return
         self._status_label.setHidden(False)
-        self._status_label.setText(i18n.t("measReading"))
+        self._set_status("measReading")
         self._pending_order = order
-        self._scan_worker = _RewScanWorker(self._bridge)
+        self._replace_worker("_scan_worker", _RewScanWorker(self._bridge))
         self._scan_worker.done.connect(self._on_scan_done)
         self._scan_worker.failed.connect(self._on_read_failed)
         self._scan_worker.start()
 
+    def known_titles(self) -> list[str]:
+        """What REW held, last time this panel looked. Sorted, so callers are order-stable."""
+        return sorted(self._known_titles)
+
+    def _remember_titles(self, titles) -> None:
+        before = len(self._known_titles)
+        self._known_titles.update(t for t in titles if str(t).strip())
+        if len(self._known_titles) != before:
+            self.titlesChanged.emit()
+
     def _on_scan_done(self, measurements: dict) -> None:
         self.rewStatusChanged.emit(True)
+        self._remember_titles(
+            (m or {}).get("title", "") for m in (measurements or {}).values()
+        )
         order = self._pending_order
         expected = len(order)
         found_count = len(measurements)
         if found_count < expected:
-            self._status_label.setText(
-                i18n.t("captureScanMismatch").format(found=found_count, expected=expected)
-            )
+            self._set_status("captureScanMismatch", found=found_count, expected=expected)
             return
         # The `expected` highest-ordinal ids are treated as "the newest batch" -- same "highest
         # ordinal = most recent" heuristic as _RewReadWorker (rew-api-quirks.md: REW's own ordinal
@@ -521,19 +698,32 @@ class MeasurementPanel(QWidget):
         # button yet (see naming-and-structure.md §3 for the fuller `<channel>_<version> (method)`
         # convention). Extend here once a "current capture version/method" concept exists.
         pairs = list(zip(newest_ids, order))
-        self._status_label.setText(i18n.t("captureRenaming").format(n=len(pairs)))
-        self._rename_worker = _RewRenameWorker(self._bridge, pairs)
+        self._set_status("captureRenaming", n=len(pairs))
+        self._replace_worker("_rename_worker", _RewRenameWorker(self._bridge, pairs))
         self._rename_worker.done.connect(self._on_rename_done)
         self._rename_worker.failed.connect(self._on_rename_failed)
         self._rename_worker.start()
 
     def _on_rename_done(self, renamed: list) -> None:
-        self._status_label.setText(i18n.t("captureRenameOk").format(n=len(renamed)))
+        self._set_status("captureRenameOk", n=len(renamed))
 
     def _on_rename_failed(self, message: str, renamed: list) -> None:
-        self._status_label.setText(
-            i18n.t("captureRenameFail").format(error=message, n=len(renamed))
-        )
+        self._set_status("captureRenameFail", error=message, n=len(renamed))
+
+    def _replace_worker(self, attr: str, worker: QThread) -> QThread:
+        """Put `worker` in `self.<attr>`, waiting out whatever was there.
+
+        Assigning over an attribute that still holds a RUNNING QThread destroys it on the spot,
+        and Qt answers that with `qFatal` -- the process aborts, mid-session, with a crash report
+        (seen: `QThread::~QThread()` reached through `Sbk_QWidget_setattro`). The read button
+        guards itself; scan and rename did not, so a second scan while the first was in flight, or
+        a rename started from a scan that was still running, could take the window out.
+        """
+        previous = getattr(self, attr, None)
+        if previous is not None and previous.isRunning():
+            previous.wait(6000)
+        setattr(self, attr, worker)
+        return worker
 
     def shutdown(self) -> None:
         """Block briefly for any in-flight REW worker before the window closes -- Qt aborts the
@@ -546,41 +736,110 @@ class MeasurementPanel(QWidget):
             if worker is not None and worker.isRunning():
                 worker.wait(6000)
 
+    curvesRequested = Signal(list)  # REW titles to plot — MainWindow opens the window
+
+    def _on_curves_clicked(self) -> None:
+        """Ask for the curve window over whatever titles are on screen.
+
+        The panel does not own the window: it knows which measurements this task is about, and
+        MainWindow knows about REW and the dialog. Kept apart so the same window can later be
+        opened by the model through MCP without going through a widget.
+        """
+        rows = [with_method(r.item_name, r.method_suffix) for r in self._rows]
+        known = self.known_titles()
+        # Prefer titles REW actually holds; fall back to the expected names so the picker is not
+        # empty on a task where nothing has been read yet.
+        titles = [t for t in rows if t in known] or known or rows
+        self.curvesRequested.emit(titles)
+
     def _on_read_clicked(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
         self._read_btn.setEnabled(False)
         self._status_label.setHidden(False)
-        self._status_label.setText(i18n.t("measReading"))
-        self._worker = _RewReadWorker(self._bridge)
+        self._set_status("measReading")
+        self._replace_worker("_worker", _RewReadWorker(self._bridge))
         self._worker.done.connect(self._on_read_done)
         self._worker.failed.connect(self._on_read_failed)
         self._worker.start()
 
     def _on_read_done(self, result: dict) -> None:
+        """Fold everything REW holds into the grid: every title, not just the newest one.
+
+        Order matters here. `_remember_titles` can emit `titlesChanged`, which the window answers
+        by rebuilding this very grid from the derived checklist -- so the titles go in FIRST and
+        the rows are looked up afterwards, against whatever `self._rows` holds by then. Marking
+        first would decorate widgets that are already on their way to `deleteLater()`.
+        """
         self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
-        title = result.get("title", "")
-        self._status_label.setText(
-            i18n.t("measReadOk").format(title=title, n=result.get("n_points", 0))
-        )
-        row, extra = self._classify_title(title)
-        if row is not None:
-            row.mark_done(extra)
-            return
-        # No expected channel matched at all -- not an error, an "additional" graph (user request
-        # 2026-07-28: names with modifiers or wholly extra graphs are OK, just flag them rather
-        # than silently drop them). Base name = the title with any trailing "(method)" stripped.
-        base = title.split(" (")[0].strip()
-        col = self._guess_column_for_new_title(title)
-        self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True))
+        titles = [str(t) for t in (result.get("titles") or []) if str(t).strip()]
+        self._remember_titles(titles)
+
+        matched = 0
+        added = 0
+        for title in titles:
+            row, extra = self._classify_title(title)
+            if row is not None:
+                matched += 1
+                # "Taken but unusable" and "skipped" are verdicts and decisions (SCR-034/SCR-040),
+                # and both outrank the bare fact that REW holds a title of that name -- the same
+                # precedence `measurement_view.status_for` applies. Turning them green here would
+                # have a re-read quietly erase a failed check.
+                if row.status == "wait":
+                    row.mark_done(extra)
+                continue
+            # No expected channel matched at all -- not an error, an "additional" graph (user
+            # request 2026-07-28: names with modifiers or wholly extra graphs are OK, just flag
+            # them rather than silently drop them). Base name = title minus any trailing "(method)".
+            if title in self._additional_titles:
+                continue  # a second Read must not stack a duplicate row for the same graph
+            base = title.split(" (")[0].strip()
+            col = self._guess_column_for_new_title(title)
+            if not self._add_dynamic_row(col, MeasItem(name=base, status="done", additional=True)):
+                continue  # nowhere to put it (a phase with no capture columns); do not claim one
+            self._additional_titles.add(title)
+            added += 1
+        self._set_status("measReadOk", n=len(titles), matched=matched, extra=added)
+
+    def _title_key(self, title: str):
+        """A title's identity in the naming grammar, or None if it is not one of ours.
+
+        The grammar's own answer to "are these the same measurement", which is not the same as "are
+        these the same characters": `_01` and `_1` are one DSP config version, because REW titles
+        are typed by hand and zero-padding is a habit, not a distinction.
+        """
+        try:
+            from autosound_tcc.core import vendor_loader
+
+            naming = vendor_loader.load_naming()
+        except Exception:  # noqa: BLE001 - no submodule: fall back to matching characters
+            return None
+        if self._glossary is None:
+            from autosound_tcc.core import config
+
+            self._glossary = naming.Glossary.for_project(str(config.project_dir()))
+        parsed = naming.parse_name(title, self._glossary)
+        return naming.name_key(parsed) if parsed else None
 
     def _classify_title(self, title: str) -> tuple[Optional["_MeasRow"], Optional[str]]:
         """Match a REW measurement title against the known rows. Returns `(row, extra)`: `extra`
         is any qualifier text trailing the row's own expected `"<name> (<method>)"` pattern (a
         capture-mode modifier REW or the user added, e.g. a re-take note) -- None if it matches
         exactly. `(None, None)` means the title doesn't correspond to any expected channel at all
-        (see `_on_read_done` for what happens then)."""
+        (see `_on_read_done` for what happens then).
+
+        Identity comes from the grammar first and from the characters only as a fallback. Matching
+        on the characters alone is what put one capture in two places at once (user, 2026-08-07):
+        REW held `c_01 (sw)`, the expected row said `c_1 (sw)`, so this returned no match and the
+        read added an "additional" graph — while the derived checklist, which does parse, marked
+        the expected row done off the very same title.
+        """
+        key = self._title_key(title)
+        if key is not None:
+            for row in self._rows:
+                if self._title_key(row.item_name) == key:
+                    return row, None
         for row in self._rows:
             if not title.startswith(row.item_name):
                 continue
@@ -598,26 +857,41 @@ class MeasurementPanel(QWidget):
 
     def _guess_column_for_new_title(self, title: str) -> int:
         """Which column an "additional" graph (unmatched by `_classify_title`) should land in.
-        Heuristic, not authoritative -- `(sw)` is unambiguous, but `(rta)` covers both the plain
-        RTA column and RTA-GROUP (same suffix, see `_METHOD_SUFFIX`), so group-shaped names
-        (combined-driver tokens, matching the mock RTA-GROUP column's own Ws/Ms/TWs/SW+Ws/L/R/ALL
-        convention) route there; anything else defaults to the plain RTA column. A wrong guess
-        just means a two-second manual re-check, not lost data."""
-        if title.rstrip().endswith("(sw)"):
-            return 0
-        base = title.split(" (")[0].strip()
-        if "+" in base or base in {"L", "R", "ALL"} or base.startswith(("Ws", "Ms", "TWs")):
-            return 2
-        return 1
 
-    def _add_dynamic_row(self, col: int, item: MeasItem) -> None:
-        method_suffix = _METHOD_SUFFIX[_METHOD_KEYS[col]]
+        Matched against the columns this session actually has, not against a fixed three: a
+        derived task has as many columns as the phase has scopes, and a round read back from the
+        journal has one per method. `(sw)` is unambiguous; `(rta)` can be the plain RTA column or
+        a group one (same suffix), so a group-shaped name -- a combined-driver token, the
+        Ws/Ms/TWs/SW+Ws/L/R/ALL convention -- takes the LAST rta column, which is where the group
+        scopes sit in both the derived order and the mock. A wrong guess costs a two-second manual
+        re-check, not data; -1 (no column of that method at all) drops the row, which
+        `_add_dynamic_row` reports rather than crashing on.
+        """
+        wanted = "sw" if title.rstrip().endswith("(sw)") else "rta"
+        columns = [c for c, method in enumerate(self._col_methods) if method == wanted]
+        if not columns:
+            return -1
+        base = title.split(" (")[0].strip()
+        grouped = "+" in base or base in {"L", "R", "ALL"} or base.startswith(("Ws", "Ms", "TWs"))
+        return columns[-1] if (grouped and wanted == "rta") else columns[0]
+
+    def _add_dynamic_row(self, col: int, item: MeasItem) -> bool:
+        """Place an "additional" row, or answer False if this session has no column to place it in.
+
+        A phase that captures nothing has no columns at all, and `self._col_next_row[col]` on an
+        empty list is an IndexError raised inside a signal handler -- which Qt turns into a printed
+        traceback and a half-updated panel, from pressing Read on phase 1.
+        """
+        if not 0 <= col < len(self._col_next_row):
+            return False
+        method_suffix = self._col_methods[col]
         row = _MeasRow(item, method_suffix)
         self._rows.append(row)
         r = self._col_next_row[col]
         self._col_next_row[col] = r + 1
         self._cols_layout.addWidget(row, r, col)
+        return True
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)
-        self._status_label.setText(i18n.t("measReadFail").format(error=message))
+        self._set_status("measReadFail", error=message)

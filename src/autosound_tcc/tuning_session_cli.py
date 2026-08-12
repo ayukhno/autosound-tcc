@@ -22,24 +22,23 @@ import asyncio
 import sys
 from pathlib import Path
 
-from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
-
 from autosound_tcc.core import config
+from autosound_tcc.core.agent_events import AgentEvent, Question, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
 
 
-def _render(message) -> None:
-    """Print a message the way the dialog panel will show it: prose, and tool calls as events."""
-    if isinstance(message, AssistantMessage):
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                print(block.text, end="", flush=True)
-            elif isinstance(block, ToolUseBlock):
-                print(f"\n  · {block.name}", flush=True)
-    elif isinstance(message, ResultMessage):
-        cost = f" · ${message.total_cost_usd:.4f}" if message.total_cost_usd else ""
-        print(f"\n[turn done · {message.num_turns} turns{cost}]\n", flush=True)
+def _render(event: AgentEvent) -> None:
+    """Print an event the way the dialog panel shows it: prose, and tool calls as events."""
+    if isinstance(event, TextDelta):
+        print(event.text, end="", flush=True)
+    elif isinstance(event, ToolCall):
+        print(f"\n  · {event.name}", flush=True)
+    elif isinstance(event, Question):
+        options = " / ".join(o.label for o in event.options)
+        print(f"\n  ? {event.question}{f' [{options}]' if options else ''}", flush=True)
+    elif isinstance(event, TurnEnd):
+        print("\n[turn done]\n", flush=True)
 
 
 async def _run(project_dir: Path, prompt: str | None, once: bool) -> None:

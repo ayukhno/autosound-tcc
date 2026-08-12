@@ -34,6 +34,11 @@ PARAM_EDIT_MODE = "param_edit_mode"  # the ✎ chip: user is correcting ledger v
 NOT_VISIBLE = "not_visible"  # "I don't see this in the UI" -- re-check, something didn't land
 SELECTION = "selection"  # user moved attention: channel / preset / measurement session
 NOTE = "note"  # free-text aside typed into the panel
+# The Arbiter flipped a channel on or off in the tree. An INTENT, not a write: enabling a channel
+# changes the ledger, and the ledger is the skill's to write (D-6). TCC says what was asked for and
+# the model records it, the same way the ✎ chip works -- which is why every channel is now shown,
+# including the ones nobody is using. You cannot switch on what the panel refuses to draw.
+CHANNEL_TOGGLE = "channel_toggle"
 
 
 @dataclass(frozen=True)

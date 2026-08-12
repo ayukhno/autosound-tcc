@@ -30,6 +30,13 @@ def test_load_dsp_state():
     assert callable(vstate.samples_for)
 
 
+def test_load_project():
+    proj = vendor_loader.load_project()
+    assert hasattr(proj, "Project")
+    assert callable(proj.fact) and callable(proj.open_questions)
+    assert proj.__name__ == "autosound_tcc._vendor.project"
+
+
 def test_get_post_put_pass_a_timeout():
     """A real, live-triggered incident (2026-07-27): `urlopen()` with no timeout let a REW-
     unreachable call hang a QThread forever, which crashed the whole app on shutdown ("QThread:
@@ -59,3 +66,45 @@ def test_bridge_wraps_loaded_api():
     for forbidden in ("set_filters", "set_equaliser", "measurement_command"):
         assert not hasattr(bridge, forbidden)
     assert hasattr(bridge, "rename_measurement")
+
+
+# ---- installing the skill into a project ------------------------------------
+
+
+def test_a_project_gets_the_skill_tcc_ships(tmp_path):
+    """Both adapters assume `<project>/.claude/skills/autosound-tuning` and nothing created it, so
+    a project without it ran with whatever was in `~/.claude/skills` — in a real session, an old
+    checkout whose references resolve nowhere."""
+    from autosound_tcc.core import vendor_loader
+
+    link = vendor_loader.link_skill_into(tmp_path)
+
+    assert link == tmp_path / ".claude" / "skills" / "autosound-tuning"
+    assert link.is_symlink()
+    assert (link / "SKILL.md").is_file()
+    assert link.resolve() == vendor_loader.SKILL_DIR.resolve()
+
+
+def test_an_existing_link_is_left_alone(tmp_path):
+    """The user may have wired a working tree there on purpose; replacing it under them would be
+    worse than the problem this solves."""
+    from autosound_tcc.core import vendor_loader
+
+    theirs = tmp_path / "their-checkout"
+    theirs.mkdir()
+    link = tmp_path / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(theirs, target_is_directory=True)
+
+    vendor_loader.link_skill_into(tmp_path)
+
+    assert link.resolve() == theirs.resolve()
+
+
+def test_linking_reports_rather_than_raises_when_it_cannot(tmp_path, monkeypatch):
+    """A session with a warning beats no session."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "is_available", lambda: False)
+
+    assert vendor_loader.link_skill_into(tmp_path) is None

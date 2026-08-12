@@ -13,7 +13,7 @@ tooltip in the app should look the same).
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QCursor, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath
 from PySide6.QtWidgets import QLabel, QWidget
 
 from autosound_tcc.ui.tcc.theme import current_theme
@@ -47,9 +47,31 @@ class RoundedTooltip(QLabel):
         self.adjustSize()
         # Offset so the cursor doesn't sit on top of (and immediately re-trigger leave/enter on)
         # the popup itself -- same rough offset the native tooltip uses.
-        self.move(global_pos + QPoint(14, 18))
+        self.move(self._fit_on_screen(global_pos + QPoint(14, 18)))
         self.show()
         self.raise_()
+
+    def _fit_on_screen(self, top_left: QPoint) -> QPoint:
+        """Keep the whole tip on the screen the cursor is on.
+
+        Placed blind, a hint near the right edge is simply cut off -- and the hints in this app are
+        where the reasoning lives, so half of one is worse than none (user, 2026-08-07). It flips
+        to the other side of the cursor when there is no room, and only slides as a last resort:
+        sliding alone would park the tip under the pointer and re-trigger the hover it came from.
+        """
+        screen = QGuiApplication.screenAt(top_left) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return top_left
+        area = screen.availableGeometry()
+        size = self.size()
+        x, y = top_left.x(), top_left.y()
+        if x + size.width() > area.right():
+            flipped = x - 28 - size.width()  # back across the cursor, same 14px gap on that side
+            x = flipped if flipped >= area.left() else area.right() - size.width()
+        if y + size.height() > area.bottom():
+            flipped = y - 32 - size.height()
+            y = flipped if flipped >= area.top() else area.bottom() - size.height()
+        return QPoint(max(x, area.left()), max(y, area.top()))
 
     def hide_tip(self) -> None:
         self.hide()
@@ -100,8 +122,20 @@ class HoverTip:
     def set_text(self, text: str) -> None:
         self._text = text
 
+    def text(self) -> str:
+        """The hint as it stands. These tips are not Qt tooltips — `widget.toolTip()` is empty on
+        anything using this — so a reader that wants the hint (copy_menu) has to ask the tip."""
+        return self._text
+
 
 def attach(widget: QWidget, text: str = "") -> HoverTip:
     """Shorthand for `HoverTip(widget, text)` -- reads better at call sites replacing a
-    `widget.setToolTip(text)` line one-for-one."""
-    return HoverTip(widget, text)
+    `widget.setToolTip(text)` line one-for-one.
+
+    The tip is also left on the widget as `hover_tip`. These are not Qt tooltips, so `toolTip()`
+    is empty on anything using them, and a reader that wants the hint -- "copy hint", a test
+    asking whether a chip explains itself -- would otherwise have no way to find it.
+    """
+    tip = HoverTip(widget, text)
+    widget.hover_tip = tip  # type: ignore[attr-defined]
+    return tip

@@ -14,6 +14,8 @@ completion UI is dogfoodable now even though the base structure itself is still 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import replace
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.mock_data import PLAN, PlanPhase, PlanStep, sessions_for_step
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
@@ -49,7 +52,7 @@ class _PlanProgress:
         except (TypeError, ValueError):
             data = {}
         self.done: dict[str, bool] = dict(data.get("done", {}))
-        # phase index (str) -> list of inserted-step dicts (id/name/tag/tag_class)
+        # phase index (str) -> list of inserted-step dicts (id/name/tag/tag_class)  # noqa: E501
         self.inserted: dict[str, list[dict]] = dict(data.get("inserted", {}))
 
     def _save(self) -> None:
@@ -87,22 +90,104 @@ class _StatusDot(QLabel):
         self.setFixedSize(15, 15)
 
 
+# A phase-0 baseline is one step per driver -- "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)" nine
+# times over. Each is a real step in the skill's plan and each is checked off separately, but as
+# nine rows they bury the phase's shape in the one panel whose job is to show it. The detail is
+# already in the capture task, channel by channel, which is where it belongs.
+#: What each status chip means, keyed by its class. The tick and the chip answer two different
+#: questions and were being read as one: the tick is whether the SKILL closed the step, the chip is
+#: whether anything on disk stands behind it. A step can be closed and unproven at the same time,
+#: which is the whole reason the panel is called plan-versus-fact.
+_TAG_HINTS = {
+    "ok": "stepTagOkTip",
+    "bad": "stepTagUnprovenTip",
+    "wait": "stepTagWaitTip",
+}
+
+_RUN_PREFIX = re.compile(r"^([^:]{4,}?):\s")
+
+
+def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
+    """Fold consecutive steps sharing a "Prefix: " into one row that counts them.
+
+    Only consecutive ones, and only on the prefix the skill itself wrote, so nothing is grouped
+    that the plan did not already write as a series. A run of one is left exactly as it was.
+    """
+    out: list[PlanStep] = []
+    run: list[PlanStep] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        if len(run) == 1:
+            out.append(run[0])
+        else:
+            done = sum(1 for s in run if s.tag_class == "ok")
+            prefix = _RUN_PREFIX.match(i18n.tx(run[0].name)).group(1)
+            out.append(replace(
+                run[0],
+                id=f"{run[0].id}+{len(run)}",
+                name={"en": f"{prefix} · {done}/{len(run)}", "uk": f"{prefix} · {done}/{len(run)}"},
+                tag_class="ok" if done == len(run) else run[0].tag_class,
+                skip=all(s.skip for s in run),
+            ))
+        run.clear()
+
+    for step in steps:
+        found = _RUN_PREFIX.match(i18n.tx(step.name))
+        if run and found and _RUN_PREFIX.match(i18n.tx(run[0].name)).group(1) == found.group(1):
+            run.append(step)
+            continue
+        flush()
+        run.append(step) if found else out.append(step)
+    flush()
+    return out
+
+
 class _PhaseStepRow(QWidget):
-    def __init__(self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click) -> None:
+    def __init__(
+        self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click,
+        sessions_for=sessions_for_step,
+    ) -> None:
         super().__init__()
-        done = progress.is_done(step.id)
+        # Done is what the skill wrote, never what was clicked here. The checkbox used to read a
+        # local QSettings overlay left over from the mock, so a finished phase showed unticked
+        # steps *and* the Arbiter could tick one -- recording nothing, contradicting the file, and
+        # inviting a decision to be made against a plan that only existed in this window.
+        done = step.tag_class == "ok"
         if step.skip:
             self.setProperty("class", "step-skip")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 3, 6, 3)
+        # One line, with the chips right-aligned on it (user, 2026-08-07). They used to sit on a
+        # second line of their own -- which kept the name column wide, at the cost of a status that
+        # floated under the step it belonged to and read as a separate entry. The name still wraps,
+        # so what the chips take is width from a sentence that has somewhere to go, not a truncated
+        # one; and a step's status belongs beside the step.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 3, 6, 3)
+        outer.setSpacing(2)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        outer.addLayout(layout)
+        chips = QHBoxLayout()
+        chips.setContentsMargins(0, 0, 0, 0)
+        chips.setSpacing(6)
 
         check = QCheckBox()
         check.setChecked(done)
-        check.toggled.connect(lambda checked, sid=step.id: on_toggle(sid, checked))
+        # Read-only on purpose (SCR-004): v1's only writer is the skill, and the Arbiter changes
+        # the plan by saying so in the dialog -- which lands as a journal event -- not by clicking
+        # a box that writes nowhere.
+        check.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(check)
 
         name = QLabel(i18n.tx(step.name))
+        # Wrapped, not elided: a step name is a sentence the skill wrote ("Bonus baseline solo:
+        # c_1 (sw) + c_1 (rta) (captured early, out of order)") and the panel has vertical room
+        # but only about 190 px of width. Unwrapped, the longest step decided the panel's width,
+        # so the whole column scrolled sideways and every other row lost its right-hand end.
+        name.setWordWrap(True)
         if done:
             name.setProperty("class", "substep-name-done")
             font = QFont(name.font())
@@ -112,25 +197,35 @@ class _PhaseStepRow(QWidget):
             name.setProperty("class", "substep-name-project")
         else:
             name.setProperty("class", "substep-name")
-        layout.addWidget(name)
-        layout.addStretch(1)
+        layout.addWidget(name, 1)
 
+        has_chip = False
         if step.attempt > 1:
             attempt = QLabel(f"{i18n.t('attempt')} {step.attempt}")
             attempt.setProperty("class", "stag stag-attempt")
-            layout.addWidget(attempt)
+            chips.addWidget(attempt)
+            has_chip = True
 
         tag_text = i18n.tx(step.tag) if step.tag else ""
         if tag_text:
             tag = QLabel(tag_text)
             tag.setProperty("class", f"stag stag-{step.tag_class}" if step.tag_class else "stag")
-            layout.addWidget(tag)
+            # What the chip means, and — for the two that are easy to read as "not done" — how it
+            # differs from an unticked box (user, 2026-08-07: "what is 'unproven', and how is it
+            # different from no tick?"). The tick says the skill closed the step; the chip says
+            # whether anything on disk stands behind it.
+            hint = _TAG_HINTS.get(str(step.tag_class or ""))
+            if hint:
+                attach_tip(tag, i18n.t(hint))
+            chips.addWidget(tag)
+            has_chip = True
 
         # Measurement icon (user request 2026-07-28): shown when this step has capture series
-        # linked to it (`mock_data.sessions_for_step`); hover lists them all, click opens the
-        # newest in the measurement panel below (PlanPanel.sessionRequested -> main_window.py ->
-        # MeasurementPanel.show_session).
-        sessions = sessions_for_step(step.id)
+        # linked to it; hover lists them all, click opens the newest in the measurement panel
+        # below (PlanPanel.sessionRequested -> main_window.py -> MeasurementPanel.show_session).
+        # `sessions_for` used to be `mock_data.sessions_for_step` directly, so the icon could only
+        # ever appear on mock step ids — invisible on every real project (user, 2026-08-11).
+        sessions = sessions_for(step.id)
         if sessions:
             meas_icon = QLabel("▤")
             meas_icon.setProperty("class", "step-meas-icon")
@@ -139,13 +234,17 @@ class _PhaseStepRow(QWidget):
             meas_icon.mousePressEvent = (  # type: ignore[assignment]
                 lambda _e, sid=sessions[0].id: on_session_click(sid)
             )
-            layout.addWidget(meas_icon)
+            chips.addWidget(meas_icon)
+            has_chip = True
+
+        if has_chip:
+            layout.addLayout(chips)
 
 
 class _PhaseRow(QWidget):
     def __init__(
         self, phase: PlanPhase, phase_index: int, progress: _PlanProgress, on_changed,
-        on_session_click,
+        on_session_click, sessions_for=sessions_for_step,
     ) -> None:
         super().__init__()
         steps = phase.steps + progress.inserted_steps(phase_index)
@@ -171,10 +270,11 @@ class _PhaseRow(QWidget):
         self._caret.setFixedWidth(12)
         head_layout.addWidget(self._caret)
         head_layout.addWidget(_StatusDot(phase.status))
-        name = QLabel(i18n.tx(phase.name))
+        # Elided, unlike the steps below it: a phase header is one line with a count chip at its
+        # right, and wrapping it would push that chip around. The full title is in the tooltip.
+        name = ElidedLabel(i18n.tx(phase.name), min_width=60)
         name.setProperty("class", "pname-current" if phase.current else "pname")
-        head_layout.addWidget(name)
-        head_layout.addStretch(1)
+        head_layout.addWidget(name, 1)
         if has_steps:
             count = QLabel(str(len(steps)))
             count.setProperty("class", "pcnt")
@@ -189,14 +289,15 @@ class _PhaseRow(QWidget):
         def _on_toggle(step_id: str, checked: bool) -> None:
             progress.set_done(step_id, checked)
 
-        for step in steps:
-            steps_layout.addWidget(_PhaseStepRow(step, progress, _on_toggle, on_session_click))
+        for step in _collapse_runs(steps):
+            steps_layout.addWidget(
+                _PhaseStepRow(step, progress, _on_toggle, on_session_click, sessions_for)
+            )
 
-        add_btn = QPushButton(i18n.t("addStep"))
-        add_btn.setProperty("class", "add-step-btn")
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(lambda: self._add_step(phase_index, progress, on_changed))
-        steps_layout.addWidget(add_btn)
+        # "+ add step" wrote into the same local overlay the checkbox did, so a step added here
+        # existed in this window and nowhere else -- not in the plan the model reads, not in the
+        # journal. Adding a step is `add_step` on the MCP surface; the Arbiter asks for it in the
+        # dialog. Gone rather than disabled: a control that cannot work is not a hint.
 
         self._steps_container.setHidden(collapsed)
         outer.addWidget(self._steps_container)
@@ -224,9 +325,11 @@ class PlanPanel(QScrollArea):
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._progress = _PlanProgress()
-        # Real plan from the skill's process-state when the project has one; the mock `PLAN`
-        # otherwise. Kept as an override rather than a hard switch so the design surface (and the
-        # tests built on it) keep working on a project that has never run.
+        self._sessions: tuple = ()
+        # The real plan from the skill's process-state, or None for "there isn't one yet".
+        # None used to fall back to the mock `PLAN`, which meant a real project that had not
+        # started tuning showed seven invented phases with invented progress -- the same mistake
+        # the dialog panel already refuses to make with demo bubbles. An empty plan says so.
         self._plan: tuple[PlanPhase, ...] | None = None
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
@@ -236,13 +339,27 @@ class PlanPanel(QScrollArea):
         self.retranslate()
 
     def set_plan(self, phases: "tuple[PlanPhase, ...] | None") -> None:
-        """Swap in the real plan (or None to fall back to the mock) and rebuild."""
+        """Swap in the real plan, or None when the project has no process state yet."""
         self._plan = phases
         self.retranslate()
 
+    def set_sessions(self, sessions) -> None:
+        """The project's real capture series, live first (see `measurement_view.build_sessions`).
+
+        Until they arrive the per-step measurement icon falls back to the mock's own linkage, which
+        is what the design fixture needs and what a real project never matches.
+        """
+        self._sessions = tuple(sessions or ())
+        self.retranslate()
+
+    def _sessions_for_step(self, step_id: str):
+        if not self._sessions:
+            return sessions_for_step(step_id)
+        return tuple(s for s in self._sessions if step_id in s.used_in_steps)
+
     @property
     def plan(self) -> "tuple[PlanPhase, ...]":
-        return self._plan if self._plan is not None else PLAN
+        return self._plan if self._plan is not None else ()
 
     def retranslate(self) -> None:
         """Rebuild every phase/step row from the active plan + the progress overlay in the current
@@ -258,8 +375,19 @@ class PlanPanel(QScrollArea):
                 # event-loop pass.
                 widget.setParent(None)
                 widget.deleteLater()
-        for i, phase in enumerate(self.plan):
+        plan = self.plan
+        if not plan:
+            # Which of the two empty states this is matters: a project with no plan is waiting for
+            # a session, a window with no project is waiting for a folder.
+            empty = QLabel(i18n.t("planEmpty" if self._plan is None else "planNoProject"))
+            empty.setWordWrap(True)
+            empty.setProperty("class", "muted")
+            self._layout.addWidget(empty)
+            self._layout.addStretch(1)
+            return
+        for i, phase in enumerate(plan):
             self._layout.addWidget(
-                _PhaseRow(phase, i, self._progress, self.retranslate, self.sessionRequested.emit)
+                _PhaseRow(phase, i, self._progress, self.retranslate,
+                          self.sessionRequested.emit, self._sessions_for_step)
             )
         self._layout.addStretch(1)

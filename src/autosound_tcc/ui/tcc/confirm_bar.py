@@ -18,22 +18,35 @@ from concurrent.futures import Future
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from autosound_tcc.core.mcp_server import ConfirmRequest
+from autosound_tcc.ui.tcc import i18n
 
 
 class ConfirmBar(QWidget):
     """Shows pending confirmations one at a time and resolves each request's future."""
 
     resolved = Signal(str, bool)  # (tool, allowed) — for the transcript
+    # The Arbiter said "and stop asking about this one". Carries the tool the decision covers, so
+    # the caller can remember it per project. Claude Code's own prompt works this way, and the
+    # reason is the one measured here all day: a gate that fires constantly is a gate that gets
+    # clicked through, so the way to keep it meaningful is to let it be narrowed deliberately.
+    alwaysAllowed = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._queue: list[tuple[ConfirmRequest, "Future[bool]"]] = []
         self._current: Optional[tuple[ConfirmRequest, "Future[bool]"]] = None
 
-        self.setProperty("class", "edit-reasons")
+        self.setProperty("class", "edit-reasons confirm-bar")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
         outer.setSpacing(4)
@@ -48,6 +61,10 @@ class ConfirmBar(QWidget):
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         outer.addWidget(self._detail)
+
+        self._always = QCheckBox(i18n.t("confirmAlways"))
+        self._always.setCursor(Qt.CursorShape.PointingHandCursor)
+        outer.addWidget(self._always)
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -102,6 +119,9 @@ class ConfirmBar(QWidget):
         if self._current is None:
             return
         request, future = self._current
+        if allowed and self._always.isChecked():
+            self.alwaysAllowed.emit(request.tool)
+        self._always.setChecked(False)  # a decision covers one kind, not the next one by accident
         self._current = None
         if not future.done():
             future.set_result(allowed)

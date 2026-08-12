@@ -115,6 +115,31 @@ class AgentWorker(QThread):
         except RuntimeError:
             pass  # loop already closing: the turn is ending anyway
 
+    def answer(self, question_id: str, value: str) -> None:
+        """Deliver the Arbiter's answer to a parked question. Thread-safe.
+
+        Not `send()`: a question blocks the turn inside the harness, so the answer has to go back
+        through the same channel it came from rather than arriving as the next user message. Same
+        scheduling as `interrupt()` -- the session's coroutine belongs to this worker's loop.
+        """
+        session, loop = self._session, self._loop
+        if session is None or loop is None or not hasattr(session, "answer"):
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(session.answer(question_id, value), loop)
+        except RuntimeError:
+            pass  # loop already closing: the turn is ending anyway
+
+    def cancel_question(self, question_id: str) -> None:
+        """Withdraw a question the Arbiter will not answer. Thread-safe, same route as `answer`."""
+        session, loop = self._session, self._loop
+        if session is None or loop is None or not hasattr(session, "cancel_question"):
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(session.cancel_question(question_id), loop)
+        except RuntimeError:
+            pass
+
     def run(self) -> None:  # noqa: D102 - QThread override
         try:
             asyncio.run(self._main())
