@@ -656,3 +656,131 @@ def test_a_delay_set_in_code_shows_in_the_control():
     # ...and setting it again from the control must not recurse through the same setter.
     view._shift_box.setValue(0.25)
     assert view._shift_ms == pytest.approx(0.25)
+
+
+# ---- the delay bank (user, 2026-08-12) --------------------------------------------------------
+
+
+def test_a_delay_is_kept_against_the_measurement_it_was_read_on():
+    """Aligning a car is six pairs, not one, and this window used to drop each reading as the next
+    pair loaded — "було б здорово мати збереження затримки по кожному каналу"."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    dialog._view.set_delay(0.26)
+
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.26}, "banked against the trace being held back"
+
+
+def test_coming_back_to_a_pair_brings_its_answer_with_it():
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-R_01 (sw)", 0.4)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    assert dialog._view.delay_target() == 1, "the one with a banked answer, not the default"
+    assert dialog._view.delay_ms() == pytest.approx(0.4)
+
+
+def test_the_pickers_show_what_each_measurement_already_carries():
+    """Where the Arbiter chooses the next pair is where they need to see that this channel has
+    already been read once."""
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-R_01 (sw)", 0.4)
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
+    dialog = _dialog(every[:2], bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+    dialog._render_bank()
+
+    combo = dialog._pickers[0]
+    at = combo.findData("w-R_01 (sw)")
+    assert "+0.400 ms" in combo.itemText(at)
+    assert combo.itemText(combo.findData("m-L_01 (sw)")) == "m-L_01 (sw)", "untouched stays plain"
+
+
+def test_zero_forgets_the_entry_rather_than_banking_a_zero():
+    """"needs no delay" and "not looked at yet" are different claims, and only the second is
+    honest about a curve nobody opened."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay(0.26)
+
+    dialog._view.set_delay(0.0)
+
+    assert delay_bank.load() == {}
+
+
+def test_the_whole_set_goes_out_for_analysis_and_says_it_is_not_a_change():
+    """User, 2026-08-12: "відправити на аналіз ШІ (не для запису)". Two more gates stand between
+    a reading and any hardware, and this is not one of them."""
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    delay_bank.put("m-L_01 (sw)", 1.25)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._view.set_resolution(0.01, 96000)
+    dialog._render_bank()
+    sent: list[str] = []
+    dialog.readingSent.connect(sent.append)
+
+    dialog._bank_ask_btn.click()
+
+    assert len(sent) == 1
+    assert "w-L_01 (sw): +0.198 ms (19 smp)" in sent[0]
+    assert "m-L_01 (sw): +1.250 ms (120 smp)" in sent[0]
+    assert i18n.t("curveBankNotForWriting") in sent[0], "it says it is not to be written"
+
+
+def test_with_nothing_banked_there_is_nothing_to_analyse():
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._render_bank()
+
+    assert not dialog._bank_ask_btn.isEnabled()
+    assert i18n.t("curveBankEmpty") in dialog._bank_label.text()
+
+
+def test_moving_the_radio_moves_the_reading_instead_of_copying_it():
+    """One pair has one answer, and it sits on one side."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay(0.26)
+
+    dialog._view.set_delay_target(1)
+
+    assert delay_bank.load() == {"w-R_01 (sw)": 0.26}
+
+
+def test_a_delay_banked_on_another_pair_is_left_alone():
+    """Two alignments are two independent facts. w-L waiting 0.198 for the midbass and w-R waiting
+    0.26 for w-L can both be true, and the window must not tidy one of them away."""
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("m-L_01 (sw)", 1.1)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    dialog._view.set_delay(0.26)
+    dialog._view.set_delay_target(1)
+
+    assert delay_bank.load() == {"m-L_01 (sw)": 1.1, "w-R_01 (sw)": 0.26}

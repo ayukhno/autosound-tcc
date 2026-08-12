@@ -16,9 +16,16 @@ from typing import Optional, Sequence
 import numpy as np
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
-from autosound_tcc.core import config
+from autosound_tcc.core import config, delay_bank
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
@@ -144,6 +151,10 @@ class CurveDialog(QDialog):
         self._markers = list(markers)
         self._bridge = bridge or RewBridge()
         self._worker: Optional[_CurveWorker] = None
+        #: Which measurement the delay currently on screen is banked against, so that moving the
+        #: radio moves the entry instead of leaving one behind on the other curve.
+        self._banked_title = ""
+        self._restoring = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -191,12 +202,107 @@ class CurveDialog(QDialog):
 
         self._view = CurveView(x_label=str(KINDS[self._kind]["label_x"]))
         self._view.on_send(self._on_send)
+        self._view.delayChanged.connect(self._bank_current_delay)
         layout.addWidget(self._view, stretch=1)
+
+        # Everything read so far, and one button that hands the whole set to the model. A delay is
+        # only ever relative to the rest of the car, so one pair's number decides nothing — and
+        # this window used to drop each one as soon as the next pair loaded (user, 2026-08-12).
+        bank_row = QHBoxLayout()
+        bank_row.setContentsMargins(0, 0, 0, 0)
+        bank_row.setSpacing(8)
+        self._bank_label = QLabel("")
+        self._bank_label.setProperty("class", "phead-sub")
+        self._bank_label.setWordWrap(True)
+        bank_row.addWidget(self._bank_label, stretch=1)
+        self._bank_ask_btn = QPushButton(i18n.t("curveBankAskBtn"))
+        self._bank_ask_btn.setProperty("class", "zoom-btn")
+        self._bank_ask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bank_ask_btn.clicked.connect(self._on_ask_about_bank)
+        bank_row.addWidget(self._bank_ask_btn)
+        self._bank_clear_btn = QPushButton(i18n.t("curveBankClear"))
+        self._bank_clear_btn.setProperty("class", "zoom-btn")
+        self._bank_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bank_clear_btn.clicked.connect(self._on_clear_bank)
+        bank_row.addWidget(self._bank_clear_btn)
+        layout.addLayout(bank_row)
 
         self._titles = list(titles)
         self._apply_delay_resolution()
+        self._render_bank()
         self._apply_kind()
         self._reload()
+
+    # ---- the delay bank -----------------------------------------------------
+
+    def _bank_current_delay(self) -> None:
+        """Remember what the Arbiter just read, against the measurement they read it on.
+
+        Written on every change rather than on close: this window is left open across a whole
+        alignment pass, and a crash or a forgotten close would take the afternoon's readings with
+        it. Zero removes the entry — "needs no delay" and "not looked at yet" are different claims
+        and only the second is honest about a curve nobody opened.
+
+        Moving the radio MOVES the reading rather than copying it. One pair has one answer and it
+        sits on one side; both sides banked at 0.198 ms would be the window claiming the Arbiter
+        read the same gap twice. What it must not do is touch a delay banked on the OTHER curve
+        from an earlier pair — those are two independent facts about two alignments, and they
+        coexist happily.
+        """
+        if self._restoring:
+            return
+        name = self._view.delay_target_name()
+        if not name:
+            return
+        ms = self._view.delay_ms()
+        if self._banked_title and self._banked_title != name:
+            delay_bank.put(self._banked_title, 0.0)
+        self._banked_title = name if ms > 0 else ""
+        delay_bank.put(name, ms)
+        self._render_bank()
+
+    def _render_bank(self) -> None:
+        """The banked set under the plot, and the same numbers beside the titles in the pickers.
+
+        In the pickers because that is where the Arbiter is choosing the next pair: seeing that
+        w-L already carries +0.198 ms is what stops the same channel being read twice against two
+        different partners and banked twice with different answers.
+        """
+        bank = delay_bank.load()
+        if bank:
+            shown = ", ".join(f"{title} +{ms:.3f}" for title, ms in sorted(bank.items()))
+            self._bank_label.setText(f"{i18n.t('curveBankLabel')} {shown}")
+        else:
+            self._bank_label.setText(i18n.t("curveBankEmpty"))
+        self._bank_ask_btn.setEnabled(bool(bank))
+        self._bank_clear_btn.setEnabled(bool(bank))
+        for combo in self._pickers:
+            for row in range(combo.count()):
+                title = str(combo.itemData(row) or "")
+                if not title:
+                    continue
+                ms = bank.get(title)
+                combo.setItemText(row, f"{title}  ·  +{ms:.3f} ms" if ms else title)
+
+    def _on_ask_about_bank(self) -> None:
+        """The whole set, to be LOOKED AT — never written.
+
+        It goes into the composer like every other statement of the Arbiter's, so they read it
+        before it is sent. Nothing about this touches a DSP: the model is being asked whether the
+        picture holds together, not to apply it (user, 2026-08-12: "відправити на аналіз ШІ (не
+        для запису)").
+        """
+        text = delay_bank.as_sentence(delay_bank.load(), self._sample_rate_hz(), i18n.t)
+        if text:
+            self.readingSent.emit(text)
+
+    def _on_clear_bank(self) -> None:
+        delay_bank.clear()
+        self._view.set_delay(0.0)
+        self._render_bank()
+
+    def _sample_rate_hz(self):
+        return getattr(self._view, "_sample_rate_hz", None)
 
     def _apply_delay_resolution(self) -> None:
         """Step the delay control by what THIS processor accepts, from its own profile.
@@ -264,9 +370,27 @@ class CurveDialog(QDialog):
     def _on_curves(self, traces: list) -> None:
         self._status.setVisible(False)
         self._view.set_traces(traces)
+        # A pair already argued about comes back with its answer on it. `set_traces` clears the
+        # delay by design (a new pair is a new question); the bank is what makes coming BACK to a
+        # pair different from meeting it for the first time.
+        bank = delay_bank.load()
+        self._banked_title = ""
+        for index, trace in enumerate(traces[:2]):
+            if trace.name in bank:
+                # Restoring, not reading: `_bank_current_delay` must not see these two calls, or
+                # the zero the first one passes through would erase what it is restoring.
+                self._restoring = True
+                try:
+                    self._view.set_delay_target(index)
+                    self._view.set_delay(bank[trace.name])
+                finally:
+                    self._restoring = False
+                self._banked_title = trace.name
+                break
         positions, names, tokens = self._starting_markers(traces)
         self._view.set_markers(positions, names, tokens)
         self._frame(traces, positions)
+        self._render_bank()
 
     def _frame(self, traces: list, positions: list) -> None:
         """Open on the part being argued about rather than on everything REW recorded."""
@@ -329,8 +453,10 @@ class CurveDialog(QDialog):
         blocked = self._kind_combo.blockSignals(True)
         self._kind_combo.setCurrentIndex(max(0, at))
         self._kind_combo.blockSignals(blocked)
-        # Re-read: the window outlives the project, and switching projects switches processors.
+        # Re-read: the window outlives the project, and switching projects switches processors —
+        # and switching projects switches the bank with it.
         self._apply_delay_resolution()
+        self._render_bank()
         self._apply_kind()
         self._reload()
 

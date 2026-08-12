@@ -359,6 +359,15 @@ T: dict[Lang, dict[str, str]] = {
         "curveShift": "delay",
         "curveShiftTip": "Hold the chosen driver back. A DSP has no negative delay, so the one that arrives FIRST is the one you can move — the radio picks it. Steps by what this DSP lets you type. Nothing is applied: the reading goes out as a proposal.",
         "curveShiftReading": "delay {name} by {ms} to align (proposed, not applied)",
+        "curveBankLabel": "delays read:",
+        "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
+        "curveBankAskBtn": "analyse the set",
+        "curveBankClear": "clear",
+        "curveBankAsk": "Delays I have read off the curves, for ANALYSIS ONLY — do not write \
+these anywhere and do not treat them as a change:",
+        "curveBankNotForWriting": "Tell me whether this set is coherent: which arrivals it \
+implies, whether any of it looks like a measurement error rather than a tuning, and what you \
+would check next. Nothing here is applied.",
         "curveNoMarkers": "Drag a marker onto the point you mean.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
@@ -749,6 +758,15 @@ T: dict[Lang, dict[str, str]] = {
         "curveShift": "затримка",
         "curveShiftTip": "Притримати обраний драйвер. У ДСП немає відʼємної затримки, тож рухати можна той, що приходить ПЕРШИМ — його й обирає радіокнопка. Крок — той, який дає ввести цей ДСП. Нічого не застосовується: прочитання йде як пропозиція.",
         "curveShiftReading": "затримати {name} на {ms} для вирівнювання (пропозиція, не застосовано)",
+        "curveBankLabel": "зчитані затримки:",
+        "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
+        "curveBankAskBtn": "на аналіз",
+        "curveBankClear": "очистити",
+        "curveBankAsk": "Затримки, які я зчитав(ла) з кривих, ЛИШЕ НА АНАЛІЗ — нікуди їх не \
+записуй і не вважай змінами:",
+        "curveBankNotForWriting": "Скажи, чи ця картина узгоджена: які приходи вона означає, чи \
+не схоже щось із цього радше на помилку заміру, ніж на налаштування, і що б ти перевірив(ла) \
+далі. Нічого з цього не застосовано.",
         "curveNoMarkers": "Перетягни маркер на точку, яку маєш на увазі.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",

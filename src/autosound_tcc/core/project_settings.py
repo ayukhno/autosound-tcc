@@ -48,8 +48,13 @@ def get(tcc_dir: Path, key: str, default: Optional[str] = None) -> Optional[str]
     return str(value) if isinstance(value, (str, int, float)) else default
 
 
-def set_value(tcc_dir: Path, key: str, value: Optional[str]) -> None:
+def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
     """Write one field, keeping the rest. Atomic, same shape as `core/session_registry.py`.
+
+    `value` is usually a string (a model key, a language). It may be any JSON-serialisable thing —
+    `core/delay_bank.py` keeps a `{title: ms}` mapping here — but the reader is the caller's
+    problem then: `get()` deliberately returns only scalars, so a structured value needs its own
+    accessor rather than a cast at every call site. `None` removes the field.
 
     Write-then-rename rather than write-in-place: this is touched on model changes, which can
     happen while a session is mid-turn, and a half-written settings file would read as "no

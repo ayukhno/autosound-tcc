@@ -143,6 +143,10 @@ class CurveView(QWidget):
     """
 
     markersChanged = Signal()
+    #: The delay, or which trace it applies to, changed. The window banks it per measurement; the
+    #: view keeps nothing across a pair — a delay read here is worth as much as the six read
+    #: before it, and holding only the current one is what left the rest in the Arbiter's head.
+    delayChanged = Signal()
 
     def __init__(self, x_label: str = "ms", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -359,6 +363,16 @@ class CurveView(QWidget):
         if self._traces:
             self.set_traces(self._traces)
         self._render_readout()
+        self.delayChanged.emit()
+
+    def delay_ms(self) -> float:
+        return self._shift_ms
+
+    def delay_target_name(self) -> str:
+        """The name of the trace being held back, or "" when there is no such trace."""
+        if self._shift_target < len(self._traces):
+            return self._traces[self._shift_target].name
+        return ""
 
     def set_resolution(self, step_ms, sample_rate_hz) -> None:
         """Step the delay by what the DSP offers, and count samples with its rate.
@@ -396,6 +410,7 @@ class CurveView(QWidget):
         if self._traces:
             self.set_traces(self._traces)
         self._render_readout()
+        self.delayChanged.emit()
 
     def delay_target(self) -> int:
         return self._shift_target
