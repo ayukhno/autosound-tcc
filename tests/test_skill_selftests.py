@@ -24,7 +24,7 @@ from autosound_tcc.core import vendor_loader
 
 #: (module path relative to `rew_tool/`, extra argv before `selftest`).
 #: `naming.py` takes a project directory first; the rest take none.
-#: TEN, not the eight anybody could name. `curve_view.py` and `state/migrate.py` were found by
+#: ELEVEN, not the eight anybody could name. `curve_view.py` and `state/migrate.py` were found by
 #: the completeness test below on its first run — both have a working `selftest` and neither was
 #: on the list a person keeps in their head, which is the whole argument for having the list
 #: checked by a test instead of by memory (2026-08-12).
@@ -39,6 +39,10 @@ SELFTESTS = (
     ("rew_tool.py", ()),
     ("curve_view.py", ()),
     ("state/migrate.py", ()),
+    # ELEVEN. `verify.py` grew one when the post-sweep quality gate landed (issue #9), and this
+    # file failed on the same commit — which is the second time the completeness check has caught
+    # a module before a person did (2026-08-12).
+    ("verify.py", ()),
 )
 
 pytestmark = pytest.mark.skipif(
