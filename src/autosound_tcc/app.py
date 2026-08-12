@@ -13,11 +13,20 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
-
 from autosound_tcc.core import app_log, config
-from autosound_tcc.ui.tcc.main_window import MainWindow
-from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
+
+#: What to say when the window is asked for and the toolkit that draws it is not installed.
+#: `autosound-tcc` ships in two sizes — the CLI half needs `claude-agent-sdk` and nothing else,
+#: the window needs PySide6 + pyqtgraph, which is hundreds of megabytes. A person who installed
+#: the light one and then typed the GUI command must get a sentence they can act on, not a
+#: traceback about a module they have never heard of.
+_NO_GUI = """\
+autosound-tcc: the graphical window is not installed.
+
+    uv tool install --upgrade 'autosound-tcc[gui]'
+
+(The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)
+Missing: {error}"""
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -44,6 +53,16 @@ def main() -> int:
     # in the terminal TCC was launched from. On macOS a line arriving there while the window is a
     # full-screen space switches the user out of the app mid-tune (see core/app_log.py).
     app_log.setup()
+    # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
+    # cannot even be imported gives its user a traceback where a sentence belongs.
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        from autosound_tcc.ui.tcc.main_window import MainWindow
+        from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
+    except ImportError as exc:
+        print(_NO_GUI.format(error=exc), file=sys.stderr)
+        return 2
     args = _parse(sys.argv)
     if args.project_dir is not None:
         # Into the environment rather than a private variable: `AUTOSOUND_PROJECT_DIR` is the

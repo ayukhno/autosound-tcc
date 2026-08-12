@@ -10,11 +10,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "ayukhno" }]
+# The BASE install is the CLI half, and it is deliberately small: `tuning-session`,
+# `dsp-profile-interview` and the MCP server import no Qt at all (asserted by
+# `tests/test_packaging.py`, because that is an easy thing to break by adding one import). The
+# window is an extra because PySide6 + pyqtgraph is hundreds of megabytes, and making the light
+# path carry them defeats the point of having one (decision 2026-08-12, ARCHITECTURE-NOTES §3).
 dependencies = [
-    "PySide6>=6.6",
-    # Curve plotting: `ui/tcc/curve_view.py`, the panel a disagreement about a number gets
-    # pointed at. Pulls numpy transitively.
-    "pyqtgraph>=0.13",
     # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to the
     # locally-authenticated `claude` CLI session — no separate API key needed
     # in dev.
@@ -22,7 +23,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+gui = [
+    "PySide6>=6.6",
+    # Curve plotting: `ui/tcc/curve_view.py`, the panel a disagreement about a number gets
+    # pointed at. Pulls numpy transitively.
+    "pyqtgraph>=0.13",
+]
+# `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen.
+dev = ["pytest>=7", "autosound-tcc[gui]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"

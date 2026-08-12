@@ -186,7 +186,8 @@ class CurveView(QWidget):
         # downsampled impulse loses the very onset the argument is about.
         self._plot.setDownsampling(auto=True, mode="peak")
         self._plot.setClipToView(True)
-        self._plot.setMenuEnabled(False)  # belt and braces; the menu was never built
+        self._plot.setMenuEnabled(False)  # belt and braces
+        self._adopt_orphan_menus()
         # pyqtgraph parks its own auto-range "A" in the bottom-left corner whenever the view is
         # not auto-ranged. We already have an A button that says what it does, and two of them --
         # one of which is an unlabelled square sitting on top of the data -- is one too many.
@@ -329,6 +330,30 @@ class CurveView(QWidget):
         self._syncing = False
         self._marker_names: list[str] = []
         self._render_readout()
+
+    def _adopt_orphan_menus(self) -> None:
+        """Give pyqtgraph's parentless menus an owner, so they die with this widget.
+
+        `PlotItem.__init__` builds `QMenu("Plot Options")` with **no parent**, unconditionally —
+        `enableMenu=False` is checked for the ViewBox's menu, not this one (pyqtgraph 0.13,
+        `PlotItem.py:237`). A top-level QMenu with four submenus and four `QWidgetAction`s is
+        left behind by every plot ever constructed, and once enough of them accumulate the
+        process dies *inside a later* `PlotItem.__init__` — a real SIGSEGV, about one suite run
+        in six, and the reason the app already reuses a single curve window (2026-08-12).
+
+        Reparenting is the fix rather than another workaround: an owned menu is destroyed with
+        its widget, in order, by Qt itself. Written defensively because it reaches into
+        pyqtgraph's internals — a version that stops building the menu, or names it something
+        else, must leave this a no-op rather than a crash on startup.
+        """
+        item = self._plot.getPlotItem()
+        for name in ("ctrlMenu", "stateGroup"):
+            menu = getattr(item, name, None)
+            if menu is not None and hasattr(menu, "setParent"):
+                try:
+                    menu.setParent(self)
+                except (RuntimeError, TypeError):  # noqa: PERF203 — one-time, at construction
+                    pass
 
     def add_delay_action(self, button: QWidget) -> None:
         """Put the delay group's own action immediately after the delay controls.

@@ -41,7 +41,15 @@ def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
     for thread in threads:
         thread.join()
 
-    assert errors == []
+    # What the lock guarantees is that no write lands on top of another. It does NOT decide the
+    # order, and it must not: an `add_step` that wins the race against `enter_phase` has no phase
+    # to name, and since the phase validation landed the skill REFUSES it (2026-08-12). That
+    # refusal is the writer working, so it is allowed here — a traceback or a mangled file is not.
+    # Asserting `errors == []` made this test fail about one run in twelve on ordering alone.
+    for error in errors:
+        assert "names phase None" in error, f"a refusal is fine; this is not: {error}"
     state = json.loads((tmp_path / "process" / "process-state.json").read_text())
     assert state["active_phase"] == "-1"
-    assert {step["id"] for step in state["plan"]} >= {"a", "b"}
+    landed = {step["id"] for step in state["plan"]}
+    assert landed <= {"a", "b"} and len(landed) == 2 - len(errors)
+    assert all(step.get("phase") == "-1" for step in state["plan"]), "no phaseless step written"

@@ -137,12 +137,18 @@ def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
 
     from autosound_tcc import app
     from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
 
     remembered: list = []
     monkeypatch.setattr(config, "set_project_dir", remembered.append)
-    monkeypatch.setattr(app, "config", config)
     monkeypatch.setattr(sys, "argv", ["autosound-tcc", "--project-dir", str(tmp_path)])
-    monkeypatch.setattr(app, "ensure_project_chosen", lambda **_: False)  # stop before the window
+    # Patched where it is DEFINED, not on `app`: the window layer is imported inside `main()` now,
+    # so a light install can run the CLI half without PySide6 (packaging split, 2026-08-12) — and
+    # a copy of the name on `app` no longer exists to patch. Patching the definition is what a
+    # deferred import needs, and it would have kept working either way.
+    monkeypatch.setattr(
+        project_gate_dialog, "ensure_project_chosen", lambda **_: False  # stop before the window
+    )
 
     app.main()
 

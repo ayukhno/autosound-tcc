@@ -2875,6 +2875,15 @@ class MainWindow(QMainWindow):
         catalogue = getattr(self, "_cli_catalogue", None)
         if catalogue is not None and catalogue.isRunning():
             catalogue.wait(5000)
+        # The MCP server is a background thread this window owns, and it used to be stopped ONLY
+        # in `closeEvent` — so a quit that does not close a window (Cmd-Q, a signal) left a daemon
+        # thread running uvicorn's asyncio loop into interpreter shutdown, and the process died
+        # there. Seen as a macOS crash report with `mcp_server._serve` on the stack, and
+        # reproducible in the suite about one run in five (2026-08-12). Idempotent, like every
+        # other branch here.
+        server = getattr(self, "_mcp_server", None)
+        if server is not None:
+            server.stop()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # A live session holds things only the model can write down. Quitting used to shut it down
@@ -2906,9 +2915,7 @@ class MainWindow(QMainWindow):
             # Interrupt-then-wait, not just stop-then-wait: a worker mid-turn never reads the
             # stop sentinel, and Qt destroying a still-running QThread is undefined behaviour.
             worker.shutdown()
-        if getattr(self, "_mcp_server", None) is not None:
-            self._mcp_server.stop()
-        super().closeEvent(event)
+        super().closeEvent(event)  # the MCP server went down with `stop_workers()` above
 
     def _ask_save_before_quit(self):
         """Save, discard, or stay. Discard is not the default — losing a turn's worth of tuning is

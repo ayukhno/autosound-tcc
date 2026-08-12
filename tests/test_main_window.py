@@ -26,6 +26,14 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
+#: Windows that have built a CurveDialog, kept alive for the whole run. pyqtgraph's `PlotItem`
+#: constructs parentless QMenus and QWidgetActions on every instance, and letting enough of them
+#: be collected segfaults the process from inside a LATER `PlotItem.__init__` — the same hazard
+#: `tests/test_curve_view.py::_KEEP` exists for, and the reason the app reuses one curve window.
+#: Reproduced here the moment these tests were added (one run in four, 2026-08-12).
+_KEEP_WINDOWS: list = []
+
+
 def _control_only_widgets(window: MainWindow) -> list:
     return [
         window._session_btn,
@@ -1267,9 +1275,16 @@ def test_closing_the_window_stops_the_contract_worker(tmp_path, monkeypatch):
     assert window._contract_worker is not None and window._contract_worker.isRunning()
 
     worker = window._contract_worker
+    mcp = window._mcp_server
     window.stop_workers()
 
     assert not worker.isRunning()  # cancelled, not waited out for 30 s
+    # ...and so does the MCP server. It used to come down only in `closeEvent`, so quitting
+    # without closing a window (Cmd-Q, a signal) left a daemon thread running uvicorn's asyncio
+    # loop into interpreter shutdown — where the process died. A macOS crash report with
+    # `mcp_server._serve` on the stack, and one suite run in five (2026-08-12).
+    if mcp is not None:
+        assert mcp._thread is None, "a daemon asyncio thread outliving the window is the crash"
 
 
 def test_a_new_ledger_snapshot_does_not_need_the_reload_button(tmp_path, monkeypatch):
@@ -1385,6 +1400,10 @@ def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypat
 
     class Server:
         bus = Bus()
+
+        def stop(self, timeout: float = 5.0) -> None:
+            """A stand-in for the real server has to answer what the real one is asked. Since
+            2026-08-12 that includes `stop()`, called from `stop_workers()` on the way out."""
 
     window._mcp_server = Server()
 
@@ -2056,6 +2075,7 @@ def test_opening_the_curve_window_wires_it_to_the_ledger_and_the_series():
 
     _app()
     window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
 
     window._open_curves(["w-L_01 (sw)", "w-R_01 (sw)"])
 
@@ -2071,7 +2091,7 @@ def test_opening_the_curve_window_wires_it_to_the_ledger_and_the_series():
     # ...and switching series in the panel reaches the open window rather than raising.
     window._meas_panel.sessionChanged.emit("cap_001")
 
-    dialog.close()
+    dialog.close()  # closed, not dropped — the window holding it stays in `_KEEP_WINDOWS`
 
 
 def test_the_curve_window_is_reused_not_rebuilt():
@@ -2079,6 +2099,7 @@ def test_the_curve_window_is_reused_not_rebuilt():
     segfault the process from inside its own `__init__`."""
     _app()
     window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
 
     window._open_curves(["w-L_01 (sw)"])
     first = window._curve_dialog
