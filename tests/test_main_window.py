@@ -2045,3 +2045,44 @@ def test_no_row_repeats_what_the_row_already_says():
                   provider="google", free=True),
     ], "", critic=True)
     assert i18n.t("modelFree") in free.itemText(0)
+
+
+def test_opening_the_curve_window_wires_it_to_the_ledger_and_the_series():
+    """`_open_curves` had no test at all, and it is where the curve window is handed the two facts
+    it cannot get for itself: what each channel is set to now, and which capture series the panel
+    is showing. A typo in either would only have surfaced on the first click during a real tune
+    (found before packaging, 2026-08-12)."""
+    from autosound_tcc.core import delay_bank
+
+    _app()
+    window = MainWindow()
+
+    window._open_curves(["w-L_01 (sw)", "w-R_01 (sw)"])
+
+    dialog = window._curve_dialog
+    assert dialog is not None
+    assert dialog._delays_provider is not None and dialog._session_provider is not None
+    # Both are callable right now, on a window with no project loaded — the degraded path is the
+    # one a first launch takes.
+    assert dialog._delays_provider() == {}, "no project loaded is an empty ledger, not a crash"
+    assert dialog._session() == (window._meas_panel.viewing_session_id() or None)
+    assert delay_bank.load(session=dialog._session()) == {}
+
+    # ...and switching series in the panel reaches the open window rather than raising.
+    window._meas_panel.sessionChanged.emit("cap_001")
+
+    dialog.close()
+
+
+def test_the_curve_window_is_reused_not_rebuilt():
+    """pyqtgraph builds parentless QMenus on every PlotItem; enough construct/destroy cycles
+    segfault the process from inside its own `__init__`."""
+    _app()
+    window = MainWindow()
+
+    window._open_curves(["w-L_01 (sw)"])
+    first = window._curve_dialog
+    window._open_curves(["m-L_01 (sw)", "m-R_01 (sw)"])
+
+    assert window._curve_dialog is first
+    first.close()
