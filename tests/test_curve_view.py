@@ -446,3 +446,37 @@ def test_a_level_no_curve_ever_reaches_reads_as_nothing_rather_than_a_wrong_numb
 
     assert view.crossings() == []
     assert view.reading() == ""
+
+
+def test_double_click_fetches_strayed_markers_back_into_view():
+    """After a zoom the markers are usually off-screen, and hunting for them costs more than the
+    zoom was worth (user, 2026-08-12)."""
+    view = _view()
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.focus_x(20.0, 30.0)  # zoomed somewhere else entirely
+
+    view.bring_markers_into_view()
+
+    low, high = view._plot.viewRange()[0]
+    assert all(low <= p <= high for p in view.positions()), view.positions()
+    assert view.positions()[0] != view.positions()[1], "two strays must not land on each other"
+
+
+def test_a_marker_already_in_view_is_not_moved():
+    """Moving a reading nobody asked to move would destroy the answer being read."""
+    view = _view()
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.focus_x(4.0, 5.0)
+
+    view.bring_markers_into_view()
+
+    assert view.positions() == pytest.approx([4.52, 4.78])
+
+
+def test_the_guides_are_drawn_heavier_than_the_traces():
+    """At trace weight a guide vanishes into a dense impulse — 262 144 points is a solid block of
+    pixels, and a 1 px line over it is not a line."""
+    view = _view()
+    view.set_markers([4.52], tokens=["accent"])
+
+    assert view._markers[0].pen.widthF() > 1.4

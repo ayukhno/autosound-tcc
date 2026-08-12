@@ -53,6 +53,9 @@ _ARBITER_TOKEN = "ok"
 #: one-marker-per-curve modes cannot ask, because there the two markers are at different places.
 _MODE_LABELS = {"v": "V", "h": "H", "vh": "VH", "vhs": "VHs", "vx": "Vx", "hx": "Hx"}
 _CROSS_MODES = ("vx", "hx")
+#: Guides are drawn heavier than the traces they cross. At trace weight they vanish into a dense
+#: impulse — 262 144 points is a solid block of pixels, and a 1 px line over it is not a line.
+_GUIDE_WIDTH = 2.4
 
 
 class LogHzAxis(pg.AxisItem):
@@ -181,6 +184,9 @@ class CurveView(QWidget):
         # `hx` picks the crossing nearest the middle of what is on screen, so panning or zooming
         # changes the answer and the dots have to follow.
         self._plot.getViewBox().sigRangeChanged.connect(self._on_view_changed)
+        # Double-click anywhere on the plot fetches the markers back. `mouseDoubleClickEvent` on
+        # the scene rather than the widget: the ViewBox owns the mouse inside the plot area.
+        self._plot.getPlotItem().scene().sigMouseClicked.connect(self._on_scene_click)
         for axis in ("bottom", "left"):
             self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
@@ -254,6 +260,34 @@ class CurveView(QWidget):
         self._marker_names: list[str] = []
         self._render_readout()
 
+    def bring_markers_into_view(self) -> None:
+        """Put every marker back inside the visible span, keeping their order and spacing where it
+        fits.
+
+        After a zoom the markers are usually somewhere off-screen, and hunting for them is worse
+        than the zoom was worth (user, 2026-08-12). Markers already visible are left exactly where
+        they are — moving a reading nobody asked to move would destroy the answer being read.
+        """
+        (low, high), _ = self._plot.getViewBox().viewRange()
+        if high <= low:
+            return
+        span = high - low
+        for index, line in enumerate(self._markers):
+            if low <= line.value() <= high:
+                continue
+            # Spread the strays across the middle third, in their own order, so two of them do not
+            # land on top of each other.
+            share = (index + 1) / (len(self._markers) + 1)
+            line.setValue(low + span * (0.34 + 0.32 * share))
+        for line in self._h_markers:
+            (_x, (y_low, y_high)) = (None, self._plot.getViewBox().viewRange()[1])
+            if not y_low <= line.value() <= y_high:
+                line.setValue((y_low + y_high) / 2.0)
+        self._sync_levels()
+        self._render_crossings()
+        self._render_readout()
+        self.markersChanged.emit()
+
     # ---- content ---------------------------------------------------------
 
     def set_traces(self, traces: Sequence[Trace]) -> None:
@@ -303,7 +337,11 @@ class CurveView(QWidget):
                 token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
             line = pg.InfiniteLine(
                 pos=self._to_view(float(position)), angle=90, movable=True,
-                pen=pg.mkPen(getattr(theme, token), width=1.6,
+                # Thicker than the traces, deliberately. A guide the same weight as a dense
+                # impulse disappears into it — on the frequency response, where the trace is
+                # sparser, the same line read clearly, which is what made the difference visible
+                # (user, 2026-08-12). It is furniture over the data, not another curve.
+                pen=pg.mkPen(getattr(theme, token), width=_GUIDE_WIDTH,
                              style=Qt.PenStyle.DashLine if index == 0 and not tokens
                              else Qt.PenStyle.SolidLine),
                 label=self._marker_names[index] if index < len(self._marker_names) else "",
@@ -468,7 +506,8 @@ class CurveView(QWidget):
                 # where the vertical marker stands. Making it draggable there would let the two
                 # halves of one reading disagree.
                 movable=self._axes_mode != "vhs",
-                pen=pg.mkPen(getattr(theme, token), width=1.2, style=Qt.PenStyle.DotLine),
+                pen=pg.mkPen(getattr(theme, token), width=_GUIDE_WIDTH,
+                             style=Qt.PenStyle.DotLine),
             )
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
@@ -647,6 +686,10 @@ class CurveView(QWidget):
 
     def _on_any_move(self) -> None:
         self._render_crossings()
+
+    def _on_scene_click(self, event) -> None:
+        if getattr(event, "double", lambda: False)():
+            self.bring_markers_into_view()
 
     def _on_view_changed(self, *_args) -> None:
         if self._axes_mode == "hx":
