@@ -501,8 +501,9 @@ def test_the_guides_are_drawn_heavier_than_the_traces():
 # ---- delaying one trace to meet the other (user, 2026-08-12) ----------------------------------
 
 
-def test_the_delay_lands_on_the_chosen_trace_and_leaves_the_other_alone():
-    """Which one waits is the whole question, so it is a choice and not a convention."""
+def test_every_driver_carries_its_own_delay():
+    """The pair is not the unit of alignment; the car is. Each driver is placed against the same
+    origin (x = 0), and only then do the numbers agree with each other (user, 2026-08-12)."""
     view = _view()
     view.set_unit("ms")
     view.set_delay_target(1)
@@ -515,21 +516,76 @@ def test_the_delay_lands_on_the_chosen_trace_and_leaves_the_other_alone():
     assert x1[0] == pytest.approx(view._traces[1].x[0] + 0.198)
 
     view.set_delay_target(0)
+    view.set_delay(0.5)
+
     x0, _ = view._shifted(0, view._traces[0])
     x1, _ = view._shifted(1, view._traces[1])
-    assert x0[0] == pytest.approx(view._traces[0].x[0] + 0.198), "the same amount, other end"
-    assert x1[0] == pytest.approx(view._traces[1].x[0])
+    assert x0[0] == pytest.approx(view._traces[0].x[0] + 0.5)
+    assert x1[0] == pytest.approx(view._traces[1].x[0] + 0.198), "and keeps its own"
+    assert view.delays() == pytest.approx([0.5, 0.198])
 
 
-def test_a_negative_delay_cannot_be_expressed():
-    """User, 2026-08-12: "затримки не можна зменшувати якщо там нуль". A channel sitting at 0 ms
-    has nothing to give back, so the panel must not let anyone propose that it does."""
+def test_switching_driver_moves_nothing_and_shows_that_driver_s_number():
+    """The bug in the picture: 1.200 ms on tw-L, click the radio, and the two curves were suddenly
+    2.4 ms apart — the amount had been carried across instead of each driver keeping its own."""
     view = _view()
+    view.set_unit("ms")
+    view.set_delay_target(1)
+    view.set_delay(1.2)
+    before = view._shifted(1, view._traces[1])[0][0]
 
-    view.set_delay(-1.0)
+    view.set_delay_target(0)
 
-    assert view._shift_ms == 0.0
-    assert view._shift_box.minimum() == 0.0
+    assert view._shift_box.value() == pytest.approx(0.0), "driver 0 has no delay of its own"
+    assert view._shifted(1, view._traces[1])[0][0] == pytest.approx(before), "nothing moved"
+    assert view._shifted(0, view._traces[0])[0][0] == pytest.approx(view._traces[0].x[0])
+
+
+def test_a_negative_delay_is_a_correction_not_an_error():
+    """User, 2026-08-12: "давай відʼємні залишимо — буває дуже корисно, коли підправляєш на
+    наступних кроках". On a later pass the channel already carries a delay; taking time back off
+    it is an ordinary move. The limit is on the SUM, not on this number."""
+    view = _view()
+    view.set_unit("ms")
+
+    view.set_delay(-0.15)
+
+    assert view._shift_ms == pytest.approx(-0.15)
+    assert view._shift_box.minimum() < 0
+    x0, _ = view._shifted(0, view._traces[0])
+    assert x0[0] == pytest.approx(view._traces[0].x[0] - 0.15), "and it moves the curve earlier"
+
+
+def test_the_total_is_checked_against_what_the_channel_already_has():
+    """"головне щоб загалом не йшло менш нуля" — and only the caller knows what is in there."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_markers([4.52], tokens=["accent"])
+    view.set_channel_delay(1.2)
+
+    view.set_delay(-0.15)
+
+    assert view.total_delay_ms() == pytest.approx(1.05)
+    assert "1.050" in view.reading()
+    assert i18n.t("curveDelayBelowZero") not in view.reading()
+
+    view.set_delay(-2.0)
+
+    assert i18n.t("curveDelayBelowZero") in view.reading(), "stated, not silently prevented"
+
+
+def test_an_unknown_current_delay_is_not_reported_as_zero():
+    """"this channel sits at 0.0" and "nobody told me" lead to opposite conclusions about a
+    −0.15 ms proposal, so the panel states a total only when it has one."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_markers([4.52], tokens=["accent"])
+
+    view.set_delay(-0.15)
+
+    assert view.total_delay_ms() is None
+    assert i18n.t("curveDelayBelowZero") not in view.reading()
+    assert "ms" in view.reading(), "the reading itself is still there"
 
 
 def test_the_delay_starts_on_whichever_trace_arrives_first():
@@ -676,7 +732,9 @@ def test_a_delay_is_kept_against_the_measurement_it_was_read_on():
     assert delay_bank.load() == {"w-L_01 (sw)": 0.26}, "banked against the trace being held back"
 
 
-def test_coming_back_to_a_pair_brings_its_answer_with_it():
+def test_a_driver_brings_its_delay_with_it_wherever_it_is_plotted():
+    """The bank is per driver, so a channel already placed keeps its position when it turns up
+    against a different partner — which is what makes the whole set consistent."""
     from autosound_tcc.core import delay_bank
 
     delay_bank.put("w-R_01 (sw)", 0.4)
@@ -686,8 +744,10 @@ def test_coming_back_to_a_pair_brings_its_answer_with_it():
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
                        Trace("w-R_01 (sw)", *_impulse(4.78))])
 
-    assert dialog._view.delay_target() == 1, "the one with a banked answer, not the default"
-    assert dialog._view.delay_ms() == pytest.approx(0.4)
+    assert dialog._view.delays() == pytest.approx([0.0, 0.4])
+    x1, _ = dialog._view._shifted(1, dialog._view._traces[1])
+    assert x1[0] == pytest.approx(dialog._view._traces[1].x[0] + 0.4), "drawn where it belongs"
+    assert delay_bank.load() == {"w-R_01 (sw)": 0.4}, "and restoring banked nothing new"
 
 
 def test_the_pickers_show_what_each_measurement_already_carries():
@@ -740,8 +800,8 @@ def test_the_whole_set_goes_out_for_analysis_and_says_it_is_not_a_change():
     dialog._bank_ask_btn.click()
 
     assert len(sent) == 1
-    assert "w-L_01 (sw): +0.198 ms (19 smp)" in sent[0]
-    assert "m-L_01 (sw): +1.250 ms (120 smp)" in sent[0]
+    assert "w-L_01 (sw): +0.198 ms (+19 smp)" in sent[0]
+    assert "m-L_01 (sw): +1.250 ms (+120 smp)" in sent[0]
     assert i18n.t("curveBankNotForWriting") in sent[0], "it says it is not to be written"
 
 
@@ -754,19 +814,19 @@ def test_with_nothing_banked_there_is_nothing_to_analyse():
     assert i18n.t("curveBankEmpty") in dialog._bank_label.text()
 
 
-def test_moving_the_radio_moves_the_reading_instead_of_copying_it():
-    """One pair has one answer, and it sits on one side."""
+def test_both_drivers_on_screen_are_banked_each_with_its_own():
     from autosound_tcc.core import delay_bank
 
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
                        Trace("w-R_01 (sw)", *_impulse(4.78))])
+
     dialog._view.set_delay(0.26)
-
     dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.1)
 
-    assert delay_bank.load() == {"w-R_01 (sw)": 0.26}
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.26, "w-R_01 (sw)": 0.1}
 
 
 def test_a_delay_banked_on_another_pair_is_left_alone():
@@ -783,4 +843,134 @@ def test_a_delay_banked_on_another_pair_is_left_alone():
     dialog._view.set_delay(0.26)
     dialog._view.set_delay_target(1)
 
-    assert delay_bank.load() == {"m-L_01 (sw)": 1.1, "w-R_01 (sw)": 0.26}
+    assert delay_bank.load() == {"m-L_01 (sw)": 1.1, "w-L_01 (sw)": 0.26}
+
+
+def test_the_ledger_join_is_a_split_not_a_guess():
+    """`w-L_02 (sw)` → `w-L`, which is the key a real snapshot uses for its channels."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+
+    assert delay_bank.code_of("w-L_02 (sw)") == "w-L"
+    assert delay_bank.code_of("tw-R_01") == "tw-R"
+
+    class _View:
+        groups = (
+            ProfileGroup(id="physical_outputs", label="Outputs", fields=("ta_ms",), rows=(
+                GroupRow(id="m-L", name="m-L", raw={"ta_ms": 1.266}, slot="E"),
+                GroupRow(id="w-L", name="w-L", raw={"ta_ms": 0.0}, slot="C"),
+                GroupRow(id="c", name="c", raw={}, slot="A"),
+            )),
+        )
+
+    delays = delay_bank.current_delays(_View())
+    assert delays == {"m-L": 1.266, "w-L": 0.0}
+    assert "c" not in delays, "no delay field is 'unknown', not zero"
+
+
+def test_a_set_that_cannot_be_applied_says_so_before_the_model_has_to_notice():
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence(
+        {"w-L_01 (sw)": -0.5, "m-L_01 (sw)": 0.25},
+        sample_rate_hz=96000,
+        lang_t=i18n.t,
+        current=lambda title: {"w-L_01 (sw)": 0.1, "m-L_01 (sw)": 1.0}.get(title),
+    )
+
+    assert "w-L_01 (sw): -0.500 ms (-48 smp) | channel 0.100 → -0.400 ms" in text
+    assert i18n.t("curveDelayBelowZero") in text
+    assert i18n.t("curveBankImpossible") in text
+    assert "m-L_01 (sw): +0.250 ms (+24 smp) | channel 1.000 → 1.250 ms" in text
+
+
+def test_with_no_ledger_the_lines_are_readings_alone():
+    """Honest about what TCC knows: no invented totals for a project whose ledger is not loaded."""
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence({"w-L_01 (sw)": -0.5}, lang_t=i18n.t)
+
+    assert "w-L_01 (sw): -0.500 ms" in text
+    assert "→" not in text
+    assert i18n.t("curveBankImpossible") not in text
+
+
+def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
+    """The window is open across a whole pass; a snapshot taken when it opened would be checking
+    tonight's proposal against an hour-old ledger."""
+    from autosound_tcc.core import delay_bank
+
+    ledger = {"w-L": 1.0}
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_delays_provider(lambda: dict(ledger))
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    dialog._view.set_delay(-0.2)
+    assert dialog._view.total_delay_ms() == pytest.approx(0.8)
+
+    ledger["w-L"] = 0.1
+    dialog._sync_channel_delay()
+
+    assert dialog._view.total_delay_ms() == pytest.approx(-0.1)
+    assert i18n.t("curveDelayBelowZero") in dialog._view.reading()
+
+
+def test_an_impossible_total_is_coloured_not_just_worded():
+    """A warning inside a sentence made of numbers is read last."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_markers([4.52], tokens=["accent"])
+    view.set_channel_delay(0.1)
+
+    view.set_delay(-0.5)
+
+    assert "color:" in view._readout.text()
+
+    view.set_delay(0.5)
+
+    assert "color:" not in view._readout.text()
+
+
+def test_the_set_states_what_the_numbers_are_measured_from():
+    """User, 2026-08-12: "привʼязка повинна бути до 0 осі Х, а затримка відносно позиції як було
+    знято при змірі". A set of deltas with no origin cannot be checked, and being checkable is the
+    only reason it is sent."""
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence(
+        {"tw-L_01 (sw)": 1.2, "m-R_01 (sw)": 1.18},
+        sample_rate_hz=96000,
+        lang_t=i18n.t,
+        at={"tw-L_01 (sw)": 2.95, "m-R_01 (sw)": 4.12},
+    )
+
+    assert i18n.t("curveBankConvention") in text
+    assert "arrival 2.950 → 4.150 ms" in text
+    assert "arrival 4.120 → 5.300 ms" in text
+    assert "1.150 ms" in text, "and how far from aligned that leaves them"
+
+
+def test_the_arrival_is_banked_with_the_delay_and_survives_a_reload():
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    dialog._view.set_delay(0.26)
+
+    assert delay_bank.arrivals()["w-L_01 (sw)"] == pytest.approx(4.52, abs=0.05)
+
+
+def test_an_older_bank_of_bare_numbers_still_reads():
+    """The first version wrote `{"w-L_01 (sw)": 0.198}`. A schema change that silently emptied a
+    tuner's afternoon would be worse than the feature is worth."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    project_settings.set_value(config.tcc_dir(), delay_bank.KEY, {"w-L_01 (sw)": 0.198})
+
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.198}
+    assert delay_bank.arrivals() == {}

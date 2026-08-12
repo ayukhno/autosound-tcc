@@ -1209,6 +1209,7 @@ class MainWindow(QMainWindow):
         Signature is the one an MCP tool will call: titles the model names, and where it read the
         answer. Reached from the measurement panel's own button for now.
         """
+        from autosound_tcc.core import delay_bank
         from autosound_tcc.ui.tcc.curve_dialog import CurveDialog
 
         titles = [str(t) for t in titles if str(t).strip()]
@@ -1228,6 +1229,13 @@ class MainWindow(QMainWindow):
             # Not modal, and above the window (user, 2026-08-11): the point is reading a curve
             # WHILE talking about it, and a modal window makes you close the evidence to answer.
             dialog.setWindowFlag(Qt.WindowType.Tool, True)
+            # What each channel is set to NOW, read fresh on every use rather than captured: this
+            # window stays open across a whole alignment pass, and a snapshot taken when it opened
+            # would be checking a proposal against an hour-old ledger. It is the only thing that
+            # lets the panel say a −0.15 ms correction takes a channel below zero.
+            dialog.set_delays_provider(
+                lambda: delay_bank.current_delays(self._view) if self._view is not None else {}
+            )
             self._curve_dialog = dialog
         else:
             # ONE window, re-pointed. Building a second is not merely wasteful: pyqtgraph's

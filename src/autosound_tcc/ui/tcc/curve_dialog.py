@@ -153,8 +153,12 @@ class CurveDialog(QDialog):
         self._worker: Optional[_CurveWorker] = None
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
-        self._banked_title = ""
         self._restoring = False
+        #: `() -> {channel code: ms}` — what the DSP is set to now, supplied by the window because
+        #: this dialog has no business loading a ledger. Without it the panel simply does not
+        #: state a total, which is honest; with it, it can say when a correction would take a
+        #: channel below zero (user, 2026-08-12).
+        self._delays_provider = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -235,6 +239,24 @@ class CurveDialog(QDialog):
 
     # ---- the delay bank -----------------------------------------------------
 
+    def set_delays_provider(self, provider) -> None:
+        self._delays_provider = provider
+        self._sync_channel_delay()
+
+    def _current_delay_of(self, title: str):
+        if not self._delays_provider or not title:
+            return None
+        try:
+            return (self._delays_provider() or {}).get(delay_bank.code_of(title))
+        except Exception:  # noqa: BLE001 — a curve window must not die on a ledger read
+            return None
+
+    def _sync_channel_delay(self) -> None:
+        """What each of the two channels is set to now — both, because both may carry a proposal
+        and the reading states a total for each."""
+        for index, trace in enumerate(self._view._traces[:2]):
+            self._view.set_channel_delay(self._current_delay_of(trace.name), index)
+
     def _bank_current_delay(self) -> None:
         """Remember what the Arbiter just read, against the measurement they read it on.
 
@@ -251,14 +273,16 @@ class CurveDialog(QDialog):
         """
         if self._restoring:
             return
-        name = self._view.delay_target_name()
-        if not name:
-            return
-        ms = self._view.delay_ms()
-        if self._banked_title and self._banked_title != name:
-            delay_bank.put(self._banked_title, 0.0)
-        self._banked_title = name if ms > 0 else ""
-        delay_bank.put(name, ms)
+        for index, trace in enumerate(self._view._traces[:2]):
+            # Both, every time. Each driver carries its own delay now, so there is nothing to move
+            # from one entry to another — the radio only chooses which one you are typing into.
+            # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
+            # checking the set is the only reason it is ever sent anywhere.
+            delay_bank.put(
+                trace.name, self._view.delay_ms(index),
+                arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
+            )
+        self._sync_channel_delay()
         self._render_bank()
 
     def _render_bank(self) -> None:
@@ -270,7 +294,7 @@ class CurveDialog(QDialog):
         """
         bank = delay_bank.load()
         if bank:
-            shown = ", ".join(f"{title} +{ms:.3f}" for title, ms in sorted(bank.items()))
+            shown = ", ".join(f"{title} {ms:+.3f}" for title, ms in sorted(bank.items()))
             self._bank_label.setText(f"{i18n.t('curveBankLabel')} {shown}")
         else:
             self._bank_label.setText(i18n.t("curveBankEmpty"))
@@ -282,7 +306,7 @@ class CurveDialog(QDialog):
                 if not title:
                     continue
                 ms = bank.get(title)
-                combo.setItemText(row, f"{title}  ·  +{ms:.3f} ms" if ms else title)
+                combo.setItemText(row, f"{title}  ·  {ms:+.3f} ms" if ms else title)
 
     def _on_ask_about_bank(self) -> None:
         """The whole set, to be LOOKED AT — never written.
@@ -292,7 +316,10 @@ class CurveDialog(QDialog):
         picture holds together, not to apply it (user, 2026-08-12: "відправити на аналіз ШІ (не
         для запису)").
         """
-        text = delay_bank.as_sentence(delay_bank.load(), self._sample_rate_hz(), i18n.t)
+        text = delay_bank.as_sentence(
+            delay_bank.load(), self._sample_rate_hz(), i18n.t, self._current_delay_of,
+            at=delay_bank.arrivals(),
+        )
         if text:
             self.readingSent.emit(text)
 
@@ -374,22 +401,22 @@ class CurveDialog(QDialog):
         # delay by design (a new pair is a new question); the bank is what makes coming BACK to a
         # pair different from meeting it for the first time.
         bank = delay_bank.load()
-        self._banked_title = ""
-        for index, trace in enumerate(traces[:2]):
-            if trace.name in bank:
-                # Restoring, not reading: `_bank_current_delay` must not see these two calls, or
-                # the zero the first one passes through would erase what it is restoring.
-                self._restoring = True
-                try:
+        # Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros
+        # they pass through on the way would erase what they are restoring.
+        self._restoring = True
+        try:
+            target = self._view.delay_target()
+            for index, trace in enumerate(traces[:2]):
+                if trace.name in bank:
                     self._view.set_delay_target(index)
                     self._view.set_delay(bank[trace.name])
-                finally:
-                    self._restoring = False
-                self._banked_title = trace.name
-                break
+            self._view.set_delay_target(target)
+        finally:
+            self._restoring = False
         positions, names, tokens = self._starting_markers(traces)
         self._view.set_markers(positions, names, tokens)
         self._frame(traces, positions)
+        self._sync_channel_delay()
         self._render_bank()
 
     def _frame(self, traces: list, positions: list) -> None:

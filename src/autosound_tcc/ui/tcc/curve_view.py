@@ -249,8 +249,12 @@ class CurveView(QWidget):
         self._shift_box.setProperty("class", "mini-select")
         self._shift_box.setDecimals(3)
         self._shift_box.setSingleStep(_DEFAULT_STEP_MS)
-        # No negative side at all: the control must not express what the hardware cannot do.
-        self._shift_box.setRange(0.0, 50.0)
+        # Negative is allowed again (user, 2026-08-12): on a later pass you correct a channel that
+        # is already delayed, and taking time BACK off it is an ordinary move. What must not go
+        # below zero is the channel's TOTAL — which this widget cannot know on its own, so the
+        # caller supplies it via `set_channel_delay()` and the readout says when the sum is
+        # impossible instead of the box refusing to express it.
+        self._shift_box.setRange(-50.0, 50.0)
         self._shift_box.setSuffix(" ms")
         self._shift_box.setFixedWidth(96)
         # C locale: everything else in this window prints a dot, and a box that reads "0,198" next
@@ -297,7 +301,17 @@ class CurveView(QWidget):
         self._markers: list[pg.InfiniteLine] = []
         self._h_markers: list[pg.InfiniteLine] = []
         self._marker_tokens: list[str] = []
-        self._shift_ms = 0.0
+        #: One delay per TRACE, not one per pair. A pair is not the unit of alignment — the car
+        #: is: every driver is delayed against a single origin (x = 0 here), and only then are the
+        #: numbers mutually consistent. The earlier one-delay-per-pair model produced two curves
+        #: 2.4 ms apart from a 1.2 ms reading the moment the radio moved (user, with the picture,
+        #: 2026-08-12), because it moved the amount to the other curve instead of leaving each
+        #: driver its own. The radio now chooses WHICH DRIVER YOU ARE EDITING; both keep theirs.
+        self._delays = [0.0, 0.0]
+        #: What each channel is ALREADY set to on the DSP, when the caller knows. `None` means
+        #: unknown, and unknown must never be rendered as zero: "this channel sits at 0.0" and
+        #: "nobody told me" lead to opposite conclusions about a −0.15 ms proposal.
+        self._channel_delays = [None, None]
         #: Which trace is held back. Defaults to the one that ARRIVES FIRST once traces are set —
         #: the only one a DSP can actually delay.
         self._shift_target = 0
@@ -339,20 +353,23 @@ class CurveView(QWidget):
     # ---- content ---------------------------------------------------------
 
     def set_delay(self, ms: float) -> None:
-        """Delay the CHOSEN trace by `ms` (never negative), and redraw.
+        """Delay the CHOSEN trace by `ms`, and redraw.
 
-        A delay, not a shift. On a DSP you can only ever ADD time to a channel — there is no
-        negative delay, and a channel already at zero cannot be reduced (user, 2026-08-12). So the
-        control asks which driver to hold back, and the answer is always the one that arrives
-        FIRST. Choosing the other curve is the same alignment with the sign the other way round,
-        which is why picking one is a radio button rather than a minus key.
+        A delay, not a shift: this is time added to a channel, which is why the radio asks WHICH
+        driver waits and why the default is the one that arrives first. Negative is allowed — on
+        a later pass you are correcting a channel that already carries a delay, and taking time
+        back off it is an ordinary move (user, 2026-08-12).
+
+        The limit is on the SUM, not on this number: a channel cannot end up below zero. That is
+        a fact about the ledger, not about this widget, so `set_channel_delay()` feeds it in and
+        the readout reports an impossible total rather than the box quietly refusing to type it.
 
         On an impulse this slides the curve later in time. On a phase plot it is the same fact
         seen differently: a pure delay is `φ = −360·f·Δt`, exactly, so it becomes a ramp. That
         direction is arithmetic; reading a delay OFF a wrapped phase curve is the hard one, and
         this deliberately does not attempt it.
         """
-        self._shift_ms = max(0.0, float(ms))
+        self._delays[self._shift_target] = float(ms)
         box = getattr(self, "_shift_box", None)
         if box is not None and abs(box.value() - self._shift_ms) > 1e-9:
             # Set programmatically — by the model opening the window with a proposal of its own,
@@ -365,8 +382,37 @@ class CurveView(QWidget):
         self._render_readout()
         self.delayChanged.emit()
 
-    def delay_ms(self) -> float:
-        return self._shift_ms
+    @property
+    def _shift_ms(self) -> float:
+        """The selected driver's delay — what the box shows and what typing in it changes."""
+        return self._delays[self._shift_target] if self._shift_target < len(self._delays) else 0.0
+
+    def set_channel_delay(self, ms, index: Optional[int] = None) -> None:
+        """What a channel is already set to, from the ledger. `None` when not known.
+
+        Defaults to the selected driver; `index` addresses the other one, because the reading
+        states a total for every driver that carries a proposal, not only the one being edited.
+        """
+        at = self._shift_target if index is None else index
+        if 0 <= at < len(self._channel_delays):
+            self._channel_delays[at] = None if ms is None else float(ms)
+        self._render_readout()
+
+    def total_delay_ms(self, index: Optional[int] = None):
+        """A channel's delay if its proposal were applied, or None when the current one is not
+        known. The one number that has to stay non-negative."""
+        at = self._shift_target if index is None else index
+        if not (0 <= at < len(self._channel_delays)) or self._channel_delays[at] is None:
+            return None
+        return self._channel_delays[at] + self._delays[at]
+
+    def delay_ms(self, index: Optional[int] = None) -> float:
+        at = self._shift_target if index is None else index
+        return self._delays[at] if 0 <= at < len(self._delays) else 0.0
+
+    def delays(self) -> list[float]:
+        """Every driver's delay, in trace order."""
+        return list(self._delays)
 
     def delay_target_name(self) -> str:
         """The name of the trace being held back, or "" when there is no such trace."""
@@ -403,12 +449,23 @@ class CurveView(QWidget):
         return int(round(ms * self._sample_rate_hz / 1000.0))
 
     def set_delay_target(self, index: int) -> None:
-        """Which trace the delay is applied to. Both directions of one alignment."""
+        """Choose WHICH DRIVER you are editing. It does not move anything by itself.
+
+        Each driver keeps its own delay, so switching shows that driver's number in the box and
+        leaves the other curve exactly where it was. The previous behaviour carried the amount
+        across, which turned one 1.2 ms reading into two curves 2.4 ms apart the moment the radio
+        moved (user, with the picture, 2026-08-12).
+        """
         self._shift_target = 0 if index == 0 else 1
         for i, button in enumerate(self._target_buttons):
+            blocked = button.blockSignals(True)
             button.setChecked(i == self._shift_target)
-        if self._traces:
-            self.set_traces(self._traces)
+            button.blockSignals(blocked)
+        box = getattr(self, "_shift_box", None)
+        if box is not None:
+            blocked = box.blockSignals(True)
+            box.setValue(self._shift_ms)
+            box.blockSignals(blocked)
         self._render_readout()
         self.delayChanged.emit()
 
@@ -419,14 +476,15 @@ class CurveView(QWidget):
         """`(x, y)` for trace `index` with the current delay applied, in the plot's own units."""
         x = np.asarray(trace.x, dtype=float)
         y = np.asarray(trace.y, dtype=float)
-        if index != self._shift_target or not self._shift_ms:
+        delay = self._delays[index] if index < len(self._delays) else 0.0
+        if not delay:
             return x, y
         if self._unit == "ms":
-            return x + self._shift_ms, y
+            return x + delay, y
         if self._y_unit == "°":
             # Degrees per hertz for this delay, then wrapped back into ±180 so the curve stays on
             # the axis it is drawn on rather than walking off it.
-            shifted = y - 360.0 * x * (self._shift_ms / 1000.0)
+            shifted = y - 360.0 * x * (delay / 1000.0)
             return x, (shifted + 180.0) % 360.0 - 180.0
         return x, y  # a magnitude response does not move when you delay it
 
@@ -455,7 +513,7 @@ class CurveView(QWidget):
         if first_time:
             # A new pair is a new question: the delay goes back to zero and points at whichever of
             # these two arrives first.
-            self._shift_ms = 0.0
+            self._delays = [0.0, 0.0]
             self._shift_target = self._default_delay_target(self._traces)
             box = getattr(self, "_shift_box", None)
             if box is not None:
@@ -482,8 +540,9 @@ class CurveView(QWidget):
             # comprehension over 262 144 floats had already been paid for upstream.
             x, y = self._shifted(index, trace)
             label = trace.name
-            if index == self._shift_target and self._shift_ms:
-                label = f"{trace.name}  +{self._shift_ms:.3f} ms"
+            delay = self._delays[index] if index < len(self._delays) else 0.0
+            if delay:
+                label = f"{trace.name}  {delay:+.3f} ms"
             self._plot.plot(x, y, pen=pg.mkPen(getattr(theme, token), width=1.0), name=label)
         for line in self._markers:
             self._plot.addItem(line)
@@ -784,7 +843,7 @@ class CurveView(QWidget):
         A sentence rather than a dict because this goes into the dialog, where the Arbiter can see
         and edit it before it is sent. Nothing is recorded behind their back.
         """
-        if not self._markers and not self._shift_ms:
+        if not self._markers and not any(self._delays):
             return ""
         names = [t.name for t in self._traces] or [""]
         digits = 3 if self._unit == "ms" else 1
@@ -796,16 +855,32 @@ class CurveView(QWidget):
         if self._markers and "h" in self._axes_mode:
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
         parts = [part for part in lines if part]
-        if self._shift_ms and len(self._traces) > self._shift_target:
+        for index, trace in enumerate(self._traces):
+            # EVERY driver that carries a proposal, not only the selected one. Alignment is what
+            # the whole set says together, and a sentence naming one of two delayed curves would
+            # describe a picture nobody is looking at.
+            delay = self._delays[index] if index < len(self._delays) else 0.0
+            if not delay:
+                continue
             # Named as a PROPOSAL. The panel changes nothing: this sentence goes to the composer,
             # the Arbiter sends it, and the delta is banked 🟡 like every other proposed change.
-            # In ms AND samples, because that is the skill's own rule for every delay it states.
-            samples = self.samples(self._shift_ms)
-            amount = f"{self._shift_ms:.3f} ms"
+            # In ms AND samples, because that is the skill's own rule for every delay it states,
+            # and signed, because an unsigned "0.150 ms" beside a channel already at 1.2 ms is two
+            # different instructions depending on a sign the reader cannot see.
+            samples = self.samples(delay)
+            amount = f"{delay:+.3f} ms"
             if samples is not None:
-                amount += f" ({samples} smp)"
-            parts.append(i18n.t("curveShiftReading").format(
-                name=self._traces[self._shift_target].name, ms=amount))
+                amount += f" ({samples:+d} smp)"
+            line = i18n.t("curveShiftReading").format(name=trace.name, ms=amount)
+            total = self.total_delay_ms(index)
+            if total is not None:
+                line += " " + i18n.t("curveDelayTotal").format(total=f"{total:.3f}")
+                if total < 0:
+                    # Stated, not prevented. The Arbiter decides; the panel's job is to make sure
+                    # the impossible one is never proposed by accident (user, 2026-08-12: "головне
+                    # щоб загалом не йшло менш нуля").
+                    line += " " + i18n.t("curveDelayBelowZero")
+            parts.append(line)
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is
@@ -910,9 +985,13 @@ class CurveView(QWidget):
             )
             unit.setText(axes)
         text = self.reading()
-        self._readout.setText(
-            html.escape(text).replace("\n", "<br>") if text else i18n.t("curveNoMarkers")
-        )
+        body = html.escape(text).replace("\n", "<br>") if text else i18n.t("curveNoMarkers")
+        totals = [self.total_delay_ms(i) for i in range(len(self._traces) or 1)]
+        if any(total is not None and total < 0 for total in totals):
+            # The one reading in this panel that is not merely a number but a claim the hardware
+            # will reject. Coloured, because a warning inside a sentence of numbers is read last.
+            body = f'<span style="color: {current_theme().warn}">{body}</span>'
+        self._readout.setText(body)
         self._send_btn.setEnabled(bool(text))
 
     def retranslate(self) -> None:
