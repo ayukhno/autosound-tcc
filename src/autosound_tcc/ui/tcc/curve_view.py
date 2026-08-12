@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -57,6 +58,9 @@ _CROSS_MODES = ("vx", "hx")
 #: Guides are drawn heavier than the traces they cross. At trace weight they vanish into a dense
 #: impulse — 262 144 points is a solid block of pixels, and a 1 px line over it is not a line.
 _GUIDE_WIDTH = 2.4
+#: Fallback delay step, in ms, when no profile has been read. What DSPs seen so far let you TYPE;
+#: the hardware resolves in whole samples, which is a different number — see `set_resolution`.
+_DEFAULT_STEP_MS = 0.01
 
 
 class LogHzAxis(pg.AxisItem):
@@ -220,22 +224,35 @@ class CurveView(QWidget):
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
-        # Shift the second trace in time. A spin box rather than buttons: 0.198 ms is typed as
-        # often as it is nudged, and the step matches the finest a DSP usually offers.
+        # WHICH trace is held back, then by how much. Two radio buttons rather than a signed
+        # number: a DSP has no negative delay, so the question is which driver waits, and the two
+        # answers are the same alignment read from either end.
+        self._target_buttons: list[QRadioButton] = []
+        for index in (0, 1):
+            button = QRadioButton(str(index + 1))
+            button.setProperty("class", "phead-sub")
+            button.setChecked(index == 0)
+            button.toggled.connect(
+                lambda checked, i=index: self.set_delay_target(i) if checked else None
+            )
+            row.addWidget(button)
+            self._target_buttons.append(button)
+
         self._shift_label = QLabel(i18n.t("curveShift"))
         self._shift_label.setProperty("class", "phead-sub")
         row.addWidget(self._shift_label)
         self._shift_box = QDoubleSpinBox()
         self._shift_box.setProperty("class", "mini-select")
         self._shift_box.setDecimals(3)
-        self._shift_box.setSingleStep(0.01)
-        self._shift_box.setRange(-50.0, 50.0)
+        self._shift_box.setSingleStep(_DEFAULT_STEP_MS)
+        # No negative side at all: the control must not express what the hardware cannot do.
+        self._shift_box.setRange(0.0, 50.0)
         self._shift_box.setSuffix(" ms")
         self._shift_box.setFixedWidth(96)
         # C locale: everything else in this window prints a dot, and a box that reads "0,198" next
         # to a readout saying "0.198" makes the reader check whether they are the same number.
         self._shift_box.setLocale(QLocale(QLocale.Language.C))
-        self._shift_box.valueChanged.connect(self.set_shift)
+        self._shift_box.valueChanged.connect(self.set_delay)
         attach_tip(self._shift_box, i18n.t("curveShiftTip"))
         row.addWidget(self._shift_box)
 
@@ -277,6 +294,11 @@ class CurveView(QWidget):
         self._h_markers: list[pg.InfiniteLine] = []
         self._marker_tokens: list[str] = []
         self._shift_ms = 0.0
+        #: Which trace is held back. Defaults to the one that ARRIVES FIRST once traces are set —
+        #: the only one a DSP can actually delay.
+        self._shift_target = 0
+        self._sample_rate_hz = None
+        self._step_ms = _DEFAULT_STEP_MS
         self._crossing_dots = None
         self._syncing = False
         self._marker_names: list[str] = []
@@ -312,19 +334,21 @@ class CurveView(QWidget):
 
     # ---- content ---------------------------------------------------------
 
-    def set_shift(self, ms: float) -> None:
-        """Offset the SECOND trace by `ms`, and redraw.
+    def set_delay(self, ms: float) -> None:
+        """Delay the CHOSEN trace by `ms` (never negative), and redraw.
 
-        One trace, not both, because alignment is always relative — and the second, because the
-        first is the reference the Arbiter is aligning to. Their own working order is pairwise:
-        w-L against w-R, then each against the sub, then the mid.
+        A delay, not a shift. On a DSP you can only ever ADD time to a channel — there is no
+        negative delay, and a channel already at zero cannot be reduced (user, 2026-08-12). So the
+        control asks which driver to hold back, and the answer is always the one that arrives
+        FIRST. Choosing the other curve is the same alignment with the sign the other way round,
+        which is why picking one is a radio button rather than a minus key.
 
-        On an impulse this slides the curve along time. On a phase plot it is the same fact seen
-        differently: a pure delay is `φ = −360·f·Δt`, exactly, so the shift becomes a ramp. That
+        On an impulse this slides the curve later in time. On a phase plot it is the same fact
+        seen differently: a pure delay is `φ = −360·f·Δt`, exactly, so it becomes a ramp. That
         direction is arithmetic; reading a delay OFF a wrapped phase curve is the hard one, and
         this deliberately does not attempt it.
         """
-        self._shift_ms = float(ms)
+        self._shift_ms = max(0.0, float(ms))
         box = getattr(self, "_shift_box", None)
         if box is not None and abs(box.value() - self._shift_ms) > 1e-9:
             # Set programmatically — by the model opening the window with a proposal of its own,
@@ -336,11 +360,51 @@ class CurveView(QWidget):
             self.set_traces(self._traces)
         self._render_readout()
 
+    def set_resolution(self, step_ms, sample_rate_hz) -> None:
+        """Step the delay by what the DSP offers, and count samples with its rate.
+
+        Two different numbers, and the profile carries both: `delay.step_ms` is what the vendor's
+        software lets you TYPE (0.01 ms on this Helix), one sample at `sample_rate_hz` is what the
+        hardware RESOLVES (0.010417 ms at 96 kHz). The control steps by the first, because that is
+        the box the Arbiter types into; the reading gives both, because the skill's own rule is
+        that a delay is always stated in milliseconds AND samples.
+
+        The two do not divide evenly, and that is not a rounding detail: 0.01 ms is 0.96 samples
+        at 96 kHz, so roughly every twenty-fifth typed step moves the driver by nothing at all.
+        The user has been watching PC-Tool swallow a step with no explanation for it
+        (2026-08-12); printing both numbers is the explanation.
+        """
+        self._sample_rate_hz = float(sample_rate_hz) if sample_rate_hz else None
+        step = float(step_ms) if step_ms else (
+            1000.0 / self._sample_rate_hz if self._sample_rate_hz else _DEFAULT_STEP_MS
+        )
+        self._step_ms = step
+        self._shift_box.setSingleStep(step)
+        self._shift_box.setDecimals(4 if step < 0.01 else 3)
+
+    def samples(self, ms: float):
+        """`ms` in whole samples at the DSP's rate, or None when the rate is not on record."""
+        if not self._sample_rate_hz:
+            return None
+        return int(round(ms * self._sample_rate_hz / 1000.0))
+
+    def set_delay_target(self, index: int) -> None:
+        """Which trace the delay is applied to. Both directions of one alignment."""
+        self._shift_target = 0 if index == 0 else 1
+        for i, button in enumerate(self._target_buttons):
+            button.setChecked(i == self._shift_target)
+        if self._traces:
+            self.set_traces(self._traces)
+        self._render_readout()
+
+    def delay_target(self) -> int:
+        return self._shift_target
+
     def _shifted(self, index: int, trace: "Trace"):
-        """`(x, y)` for trace `index` with the current shift applied, in the plot's own units."""
+        """`(x, y)` for trace `index` with the current delay applied, in the plot's own units."""
         x = np.asarray(trace.x, dtype=float)
         y = np.asarray(trace.y, dtype=float)
-        if index != 1 or not self._shift_ms:
+        if index != self._shift_target or not self._shift_ms:
             return x, y
         if self._unit == "ms":
             return x + self._shift_ms, y
@@ -351,6 +415,19 @@ class CurveView(QWidget):
             return x, (shifted + 180.0) % 360.0 - 180.0
         return x, y  # a magnitude response does not move when you delay it
 
+    def _default_delay_target(self, traces) -> int:
+        """The trace that ARRIVES FIRST. It is the only one a DSP can hold back — the other is
+        already at whatever delay it has, and there is no negative to give it."""
+        if len(traces) < 2 or self._unit != "ms":
+            return 0
+        peaks = []
+        for trace in traces[:2]:
+            y = np.asarray(trace.y, dtype=float)
+            if not y.size:
+                return 0
+            peaks.append(float(np.asarray(trace.x, dtype=float)[int(np.abs(y).argmax())]))
+        return 0 if peaks[0] <= peaks[1] else 1
+
     def set_traces(self, traces: Sequence[Trace]) -> None:
         theme = current_theme()
         self._plot.clear()
@@ -358,15 +435,40 @@ class CurveView(QWidget):
         # names stack up one pass at a time.
         if self._legend is not None:
             self._legend.clear()
+        first_time = [t.name for t in self._traces] != [t.name for t in traces]
         self._traces = list(traces)
+        if first_time:
+            # A new pair is a new question: the delay goes back to zero and points at whichever of
+            # these two arrives first.
+            self._shift_ms = 0.0
+            self._shift_target = self._default_delay_target(self._traces)
+            box = getattr(self, "_shift_box", None)
+            if box is not None:
+                blocked = box.blockSignals(True)
+                box.setValue(0.0)
+                box.blockSignals(blocked)
+            for i, button in enumerate(getattr(self, "_target_buttons", [])):
+                blocked = button.blockSignals(True)
+                button.setChecked(i == self._shift_target)
+                button.blockSignals(blocked)
+        for index, button in enumerate(getattr(self, "_target_buttons", [])):
+            # The radios are named after the curves they hold back, and coloured like them.
+            if index < len(self._traces):
+                button.setText(self._traces[index].name.split(" ")[0])
+                button.setVisible(True)
+                button.setStyleSheet(
+                    f"color: {getattr(theme, _TRACE_TOKENS[index % len(_TRACE_TOKENS)])}"
+                )
+            else:
+                button.setVisible(False)
         for index, trace in enumerate(self._traces):
             token = _TRACE_TOKENS[index % len(_TRACE_TOKENS)]
             # Arrays, not Python lists: pyqtgraph converts a list element by element, and a list
             # comprehension over 262 144 floats had already been paid for upstream.
             x, y = self._shifted(index, trace)
             label = trace.name
-            if index == 1 and self._shift_ms:
-                label = f"{trace.name}  {self._shift_ms:+.3f} ms"
+            if index == self._shift_target and self._shift_ms:
+                label = f"{trace.name}  +{self._shift_ms:.3f} ms"
             self._plot.plot(x, y, pen=pg.mkPen(getattr(theme, token), width=1.0), name=label)
         for line in self._markers:
             self._plot.addItem(line)
@@ -667,23 +769,28 @@ class CurveView(QWidget):
         A sentence rather than a dict because this goes into the dialog, where the Arbiter can see
         and edit it before it is sent. Nothing is recorded behind their back.
         """
-        if not self._markers:
+        if not self._markers and not self._shift_ms:
             return ""
         names = [t.name for t in self._traces] or [""]
         digits = 3 if self._unit == "ms" else 1
-        if self._axes_mode in _CROSS_MODES:
+        if self._markers and self._axes_mode in _CROSS_MODES:
             return self._cross_reading(digits)
         lines = []
-        if "v" in self._axes_mode:
+        if self._markers and "v" in self._axes_mode:
             lines.append(self._axis_reading(self.positions(), self._unit, digits))
-        if "h" in self._axes_mode:
+        if self._markers and "h" in self._axes_mode:
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
         parts = [part for part in lines if part]
-        if self._shift_ms and len(self._traces) > 1:
+        if self._shift_ms and len(self._traces) > self._shift_target:
             # Named as a PROPOSAL. The panel changes nothing: this sentence goes to the composer,
             # the Arbiter sends it, and the delta is banked 🟡 like every other proposed change.
+            # In ms AND samples, because that is the skill's own rule for every delay it states.
+            samples = self.samples(self._shift_ms)
+            amount = f"{self._shift_ms:.3f} ms"
+            if samples is not None:
+                amount += f" ({samples} smp)"
             parts.append(i18n.t("curveShiftReading").format(
-                name=self._traces[1].name, ms=f"{self._shift_ms:+.3f}"))
+                name=self._traces[self._shift_target].name, ms=amount))
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is
@@ -692,7 +799,7 @@ class CurveView(QWidget):
         # ...and the header is dropped when the markers are already named after their curves,
         # which is the ordinary case: "tw-L / tw-R — tw-L: …, tw-R: …" says each name twice for
         # no reader's benefit.
-        if list(names) == list(self._marker_names):
+        if not self._markers or list(names) == list(self._marker_names):
             return body
         return f"{' / '.join(names)} — {body}"
 

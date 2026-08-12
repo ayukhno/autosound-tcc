@@ -83,13 +83,15 @@ def with_method(name: str, suffix: str) -> str:
     tail = f"({suffix})"
     return name if name.endswith(tail) else f"{name} {tail}"
 
+#: (traffic-light status, i18n key). Keys, not words: three of the four had a Ukrainian
+#: translation sitting unused in the table while the legend showed English (2026-08-12).
 _LEGEND = (
-    ("wait", "waiting"),
-    ("done", "done"),
-    ("bad", "taken, unusable"),
+    ("wait", "legWait"),
+    ("done", "legDone"),
+    ("bad", "legBad"),
     # Recorded as decided against, with a reason (SCR-034) -- not the same as outstanding, which is
     # what it looked like before the skill kept a record of the round.
-    ("skip", "skipped"),
+    ("skip", "legSkip"),
 )
 
 
@@ -386,12 +388,14 @@ class MeasurementPanel(QWidget):
         legend_layout = QHBoxLayout(legend)
         legend_layout.setContentsMargins(0, 0, 0, 0)
         legend_layout.setSpacing(10)
-        for status, label in _LEGEND:
+        self._legend_labels: list[QLabel] = []
+        for status, key in _LEGEND:
             dot = TrafficLight(status)
-            text = QLabel(label)
+            text = QLabel(i18n.t(key))
             text.setProperty("class", "meas-legend-label")
             legend_layout.addWidget(dot)
             legend_layout.addWidget(text)
+            self._legend_labels.append(text)
         legend_layout.addStretch(1)
         layout.addWidget(legend)
 
@@ -574,6 +578,8 @@ class MeasurementPanel(QWidget):
             # second place.
             self.set_no_project(i18n.t("measNoTask"))
         self._render_status()  # the last Read/Scan result, in the new language too
+        for label, (_status, key) in zip(self._legend_labels, _LEGEND):
+            label.setText(i18n.t(key))
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
         self._curves_tip.set_text(i18n.t("curveBtn"))

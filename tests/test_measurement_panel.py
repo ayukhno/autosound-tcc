@@ -573,3 +573,37 @@ def test_the_session_picker_shows_a_whole_round_id():
     metrics = combo.fontMetrics().horizontalAdvance("cap_001 ●")
 
     assert hint >= metrics, f"picker asks for {hint}px, the id needs {metrics}px"
+
+
+def test_the_legend_speaks_the_window_s_language():
+    """Four hard-coded English words above a Ukrainian panel, with three of the four translations
+    already in the table and unused (found 2026-08-12). `legSkip` was the one genuinely missing."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc.measurement_panel import _LEGEND
+
+    _app()
+    panel = MeasurementPanel()
+    labels = [w for w in panel._legend.findChildren(QLabel)
+              if w.property("class") == "meas-legend-label"]
+    assert len(labels) == len(_LEGEND)
+
+    try:
+        i18n.set_language("uk")
+        panel.retranslate()  # MainWindow's own language switch calls exactly this
+
+        assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+        assert labels[0].text() != "waiting", "the legend actually changed"
+    finally:
+        i18n.set_language("en")
+    panel.retranslate()
+    assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+
+
+def test_every_string_the_app_asks_for_exists_in_both_languages():
+    """A key present in one table and not the other renders as the key itself. `legSkip` had no
+    Ukrainian at all, and nothing said so until someone switched the language and looked."""
+    en, uk = set(i18n.T["en"]), set(i18n.T["uk"])
+
+    assert not en - uk, f"no Ukrainian for: {sorted(en - uk)}"
+    assert not uk - en, f"Ukrainian-only keys: {sorted(uk - en)}"

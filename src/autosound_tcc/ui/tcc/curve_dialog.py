@@ -18,6 +18,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
+from autosound_tcc.core import config
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
@@ -193,8 +194,37 @@ class CurveDialog(QDialog):
         layout.addWidget(self._view, stretch=1)
 
         self._titles = list(titles)
+        self._apply_delay_resolution()
         self._apply_kind()
         self._reload()
+
+    def _apply_delay_resolution(self) -> None:
+        """Step the delay control by what THIS processor accepts, from its own profile.
+
+        Two different numbers, and the panel needs both. Helix takes 0.01 ms in its box while the
+        hardware resolves samples (1/96 kHz = 0.010417 ms), which is why typing successive steps
+        sometimes moves nothing and sometimes moves two — the user has watched it happen and had
+        no way to explain it. MUSWAY shows thousandths on a step nobody here has confirmed. So the
+        control steps by `delay.step_ms` where the profile states one, and the reading carries the
+        sample count only when a sample rate is on record. Guessing either would put a number in
+        front of the Arbiter that the DSP never agreed to.
+        """
+        step, rate = None, None
+        try:
+            import json
+
+            raw = json.loads(config.dsp_profile_path().read_text(encoding="utf-8"))
+            profile = raw.get("dsp_profile") if isinstance(raw.get("dsp_profile"), dict) else raw
+            delay = profile.get("delay")
+            if isinstance(delay, dict):
+                step = delay.get("step_ms")
+            rate = profile.get("sample_rate_hz")
+        except Exception:  # noqa: BLE001 — no profile yet is the ordinary case, not a failure
+            pass
+        self._view.set_resolution(
+            float(step) if isinstance(step, (int, float)) else None,
+            float(rate) if isinstance(rate, (int, float)) else None,
+        )
 
     def _on_kind_changed(self, _index: int) -> None:
         self._kind = str(self._kind_combo.currentData() or "impulse")
@@ -299,6 +329,8 @@ class CurveDialog(QDialog):
         blocked = self._kind_combo.blockSignals(True)
         self._kind_combo.setCurrentIndex(max(0, at))
         self._kind_combo.blockSignals(blocked)
+        # Re-read: the window outlives the project, and switching projects switches processors.
+        self._apply_delay_resolution()
         self._apply_kind()
         self._reload()
 

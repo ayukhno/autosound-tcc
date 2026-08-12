@@ -498,23 +498,70 @@ def test_the_guides_are_drawn_heavier_than_the_traces():
     assert view._markers[0].pen.widthF() > 1.4
 
 
-# ---- shifting one trace in time (user, 2026-08-12) --------------------------------------------
+# ---- delaying one trace to meet the other (user, 2026-08-12) ----------------------------------
 
 
-def test_shifting_the_second_trace_moves_it_in_time_and_leaves_the_first_alone():
-    """Alignment is relative, and the first trace is the reference being aligned to."""
+def test_the_delay_lands_on_the_chosen_trace_and_leaves_the_other_alone():
+    """Which one waits is the whole question, so it is a choice and not a convention."""
     view = _view()
     view.set_unit("ms")
+    view.set_delay_target(1)
 
-    view.set_shift(0.198)
+    view.set_delay(0.198)
 
     x0, _ = view._shifted(0, view._traces[0])
     x1, _ = view._shifted(1, view._traces[1])
-    assert x0[0] == pytest.approx(view._traces[0].x[0]), "the reference does not move"
+    assert x0[0] == pytest.approx(view._traces[0].x[0]), "the other curve does not move"
     assert x1[0] == pytest.approx(view._traces[1].x[0] + 0.198)
 
+    view.set_delay_target(0)
+    x0, _ = view._shifted(0, view._traces[0])
+    x1, _ = view._shifted(1, view._traces[1])
+    assert x0[0] == pytest.approx(view._traces[0].x[0] + 0.198), "the same amount, other end"
+    assert x1[0] == pytest.approx(view._traces[1].x[0])
 
-def test_on_a_phase_plot_the_same_shift_is_a_ramp():
+
+def test_a_negative_delay_cannot_be_expressed():
+    """User, 2026-08-12: "затримки не можна зменшувати якщо там нуль". A channel sitting at 0 ms
+    has nothing to give back, so the panel must not let anyone propose that it does."""
+    view = _view()
+
+    view.set_delay(-1.0)
+
+    assert view._shift_ms == 0.0
+    assert view._shift_box.minimum() == 0.0
+
+
+def test_the_delay_starts_on_whichever_trace_arrives_first():
+    """The only one a DSP can actually hold back."""
+    view = _view()
+    view.set_unit("ms")
+
+    assert view.delay_target() == 0, "w-L peaks at 4.52 ms, w-R at 4.78"
+
+    xl, yl = _impulse(5.9)
+    xr, yr = _impulse(4.3)
+    view.set_traces([Trace("late", xl, yl), Trace("early", xr, yr)])
+
+    assert view.delay_target() == 1
+
+
+def test_a_new_pair_starts_the_argument_over():
+    """Carrying 0.198 ms onto two curves it was never measured from would be the panel inventing a
+    proposal nobody made."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_delay(0.198)
+
+    xl, yl = _impulse(2.0)
+    xr, yr = _impulse(3.0)
+    view.set_traces([Trace("m-L_02", xl, yl), Trace("m-R_02", xr, yr)])
+
+    assert view._shift_ms == 0.0
+    assert view._shift_box.value() == pytest.approx(0.0)
+
+
+def test_on_a_phase_plot_the_same_delay_is_a_ramp():
     """A pure delay is φ = −360·f·Δt, exactly. That direction is arithmetic; reading a delay off a
     wrapped phase curve is the hard one, and this does not attempt it."""
     view = _view()
@@ -522,8 +569,9 @@ def test_on_a_phase_plot_the_same_shift_is_a_ramp():
     view.set_y_unit("°")
     view.set_traces([Trace("a", [100.0, 1000.0], [0.0, 0.0]),
                      Trace("b", [100.0, 1000.0], [0.0, 0.0])])
+    view.set_delay_target(1)
 
-    view.set_shift(1.0)  # 1 ms
+    view.set_delay(1.0)  # 1 ms
 
     _x, y = view._shifted(1, view._traces[1])
     # −360 × 100 Hz × 0.001 s = −36°, and −360° at 1 kHz wraps to 0°.
@@ -535,44 +583,76 @@ def test_a_magnitude_response_does_not_move_when_you_delay_it():
     view = _view()
     view.set_unit("Hz")
     view.set_y_unit("dB")
+    view.set_delay_target(1)
     before = list(view._traces[1].y)
 
-    view.set_shift(2.0)
+    view.set_delay(2.0)
 
     _x, y = view._shifted(1, view._traces[1])
     assert list(y) == pytest.approx(before)
 
 
-def test_the_shift_is_sent_as_a_proposal_not_as_a_change():
+def test_the_delay_is_read_in_milliseconds_and_in_samples():
+    """Helix takes 0.01 ms in its box but resolves samples, so consecutive typed steps sometimes
+    land on the same sample and sometimes skip one (user, 2026-08-12). Stating both is what makes
+    that visible instead of mysterious."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_resolution(0.01, 96000)
+    view.set_delay_target(1)
+
+    view.set_delay(0.198)
+    reading = view.reading()
+
+    assert "w-R_01 (sw)" in reading and "0.198" in reading
+    assert "19 smp" in reading
+    assert view._shift_box.singleStep() == pytest.approx(0.01)
+
+
+def test_without_a_sample_rate_the_reading_is_milliseconds_alone():
+    """MUSWAY's own box goes to thousandths on a step nobody here has confirmed. A samples figure
+    invented from a guessed rate would be a number the Arbiter could act on and shouldn't."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_resolution(0.001, None)
+    view.set_delay_target(1)
+
+    view.set_delay(0.198)
+
+    assert view.samples(0.198) is None
+    assert "smp" not in view.reading()
+
+
+def test_the_delay_is_sent_as_a_proposal_not_as_a_change():
     """The panel changes nothing. The sentence goes to the composer, the Arbiter sends it, and the
     delta is banked 🟡 like every other proposed change."""
     view = _view()
     view.set_unit("ms")
     view.set_markers([4.52, 4.78], tokens=["accent", "info"])
 
-    view.set_shift(-0.198)
+    view.set_delay(0.198)
     reading = view.reading()
 
-    assert "w-R_01 (sw)" in reading and "-0.198" in reading
+    assert "w-L_01 (sw)" in reading, "the earlier arrival is the one being held back"
     assert "proposed" in reading or "пропозиц" in reading
 
 
-def test_no_shift_says_nothing_about_shifting():
+def test_no_delay_says_nothing_about_delaying():
     view = _view()
     view.set_markers([4.52], tokens=["accent"])
 
-    assert "shift" not in view.reading().lower()
+    assert "delay" not in view.reading().lower()
 
 
-def test_a_shift_set_in_code_shows_in_the_control():
+def test_a_delay_set_in_code_shows_in_the_control():
     """The model can open this window with a proposal of its own. A box reading 0.000 beside a
     curve that has visibly moved is the panel disagreeing with itself."""
     view = _view()
     view.set_unit("ms")
 
-    view.set_shift(-0.198)
+    view.set_delay(0.198)
 
-    assert view._shift_box.value() == pytest.approx(-0.198)
+    assert view._shift_box.value() == pytest.approx(0.198)
     # ...and setting it again from the control must not recurse through the same setter.
     view._shift_box.setValue(0.25)
     assert view._shift_ms == pytest.approx(0.25)

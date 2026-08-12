@@ -182,7 +182,7 @@ class DetailPane(QFrame):
         head_layout.setContentsMargins(12, 6, 12, 6)
         head_layout.setSpacing(6)
 
-        self._tab_table = _DTab("Table")
+        self._tab_table = _DTab(i18n.t("tabTable"))
         self._tab_table.clicked.connect(self._on_tab_table)
         head_layout.addWidget(self._tab_table)
         self._tab_eq = _DTab("EQ")
@@ -203,10 +203,10 @@ class DetailPane(QFrame):
         head_layout.addWidget(self._title)
         head_layout.addStretch(1)
 
-        close_btn = QPushButton("close ✕")
-        close_btn.setProperty("class", "d-close")
-        close_btn.clicked.connect(self.close_pane)
-        head_layout.addWidget(close_btn)
+        self._close_btn = QPushButton(i18n.t("close"))
+        self._close_btn.setProperty("class", "d-close")
+        self._close_btn.clicked.connect(self.close_pane)
+        head_layout.addWidget(self._close_btn)
         outer.addWidget(head)
 
         self._scroll = QScrollArea()
@@ -215,6 +215,21 @@ class DetailPane(QFrame):
         outer.addWidget(self._scroll, stretch=1)
         # Sized by the parent QSplitter now (main_window._build_center), which gives the user a
         # drag handle between this pane and the AI dialog below it -- no fixed cap here anymore.
+
+        i18n.on_language_changed(self.retranslate)
+
+    def retranslate(self) -> None:
+        """The head is set once at construction; the body is rebuilt from the open group.
+
+        Its four labels were English literals while both translations already sat in the table
+        (found 2026-08-12) — the pane simply never registered, so switching to Ukrainian left
+        "Table", "close ✕", "Channel" and "shared frequencies:" behind in an otherwise translated
+        window.
+        """
+        self._tab_table.setText(i18n.t("tabTable"))
+        self._close_btn.setText(i18n.t("close"))
+        if self._group is not None:
+            self.refresh_with(self._group)
 
     # ---- public API ----------------------------------------------------
 
@@ -304,7 +319,7 @@ class DetailPane(QFrame):
 
     def _build_table(self, group: ProfileGroup) -> QTableWidget:
         columns = [f for f in group.fields if f in _FIELD_COLUMNS]
-        headers = ["ID", "Channel"] + [_FIELD_COLUMNS[f] for f in columns]
+        headers = ["ID", i18n.t("colChan")] + [_FIELD_COLUMNS[f] for f in columns]
         table = QTableWidget(len(group.rows), len(headers))
         table.setProperty("class", "ptable")
         table.setHorizontalHeaderLabels(headers)
@@ -424,7 +439,7 @@ class DetailPane(QFrame):
                 legend = QWidget()
                 legend_layout = QHBoxLayout(legend)
                 legend_layout.setContentsMargins(0, 0, 0, 0)
-                legend_layout.addWidget(QLabel("shared frequencies:"))
+                legend_layout.addWidget(QLabel(i18n.t("shared")))
                 for f in shared:
                     chip = QLabel(f"⬤ {f:g} Hz")
                     chip.setStyleSheet(f"color: {match_map[f]};")
