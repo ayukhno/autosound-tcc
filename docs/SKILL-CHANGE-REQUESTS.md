@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046 and SCR-047 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1301,3 +1301,37 @@ Two judgement calls:
 2. **`contract.py` catches and reports** rather than propagating. Diagnostics exists to say what is
    wrong with a project; a checker that dies on the worst case is a checker that is absent exactly
    when it is needed.
+
+## SCR-047 — three gates that did not hold what they claimed
+
+**Status**: done (skill `bb20bfc`, 2026-08-12)
+**Target**: `rew_tool/dsp_profile.py`, `rew_tool/state/process.py`, `rew_tool/contract.py`,
+`references/phases/phase_-1_intake.md`
+**TCC dependency**: none. TCC reads `contract.py check`'s JSON and now gets two extra keys
+(`complete`, `missing`) it may render later; nothing it already reads changed shape.
+
+**Detail**: all three came out of the 2026-08-12 audit, and all three were in gates written or
+leaned on within the previous 48 hours. Worth recording together for that reason — the pattern is
+not "old code rots", it is "a gate is easy to build one assertion short".
+
+1. **`sample_rate_hz` was checked for presence, not for being a rate.** SCR-045 refuses phase 1
+   without it, because every delay in samples comes from it. `"96 kHz-ish"` satisfied that gate on
+   the night it shipped. Now: a number, in hertz, drawn from a list of rates DSPs actually run at.
+   `96` is refused as loudly as a sentence — kHz-for-Hz is the same defect in another costume — and
+   an unlisted rate must be added in the same commit as the profile that needs it, so it gets a
+   second reader instead of a silent pass.
+
+2. **The phase-0 refusal named `set-target`; the CLI has `target`.** A refusal that instructs an
+   invalid command costs more than the one gate: it teaches the reader that refusals are noise.
+
+3. **`contract.py check` called an EMPTY project OK, and phase −1 named it as its verifier.** The
+   verdict was right and the usage was wrong — two questions sharing one word:
+
+   * `ok` — is anything here WRONG. A fresh folder passes, and should: intake has not run.
+   * `complete` — does everything the method needs EXIST. That is the gate's question, and it is
+     new.
+
+   `--gate` exits on `complete`, the report lists what is owed, and the phase −1 doc names the flag
+   and says why plain `check` is not it. The missing ledger needed separate detection:
+   `check_ledgers` emits one row per preset directory, so a project with no `state/` emits none —
+   absence of the row IS the missing ledger, which no name-based check can see.
