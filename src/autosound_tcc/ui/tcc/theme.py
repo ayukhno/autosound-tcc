@@ -865,6 +865,27 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.faint};
         border-color: {t.border};
     }}
+    /* .clear-btn — the same family, low. These undo; they are not offers, and at full button
+    height they carried the weight of the two actions above them (user, 2026-08-12). */
+    QPushButton[class~="clear-btn"] {{
+        background: {t.panel3};
+        color: {t.muted};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 600;
+        min-height: 20px;
+        max-height: 20px;
+    }}
+    QPushButton[class~="clear-btn"]:hover {{
+        border-color: {t.accent_dim};
+        color: {t.accent};
+    }}
+    QPushButton[class~="clear-btn"]:disabled {{
+        color: {t.faint};
+        border-color: {t.border};
+    }}
 
     /* The "still working" line under the transcript -- system-grey, so it reads as chrome
        rather than as something the model said. */
