@@ -26,9 +26,12 @@ steps — rather than to automate the DSP.
 
 There are two pieces and they are separate on purpose:
 
-- **the skill** (`autosound-tuning`) — the tuning method itself. Plain Python,
-  standard library only, no dependencies. It works on its own, in a terminal,
-  with no TCC at all.
+- **the skill** (`autosound-tuning`) — the tuning method itself. Plain Python.
+  It works on its own, in a terminal, with no TCC at all. It needs `numpy`
+  (imported at module scope by five of its tools, which do not load without
+  it); `scipy` and `matplotlib` are feature dependencies, imported at the point
+  of use, and their absence costs one feature rather than a session. Its
+  `requirements.txt` lists all three.
 - **TCC** — this app. It never works without the skill: the skill writes the
   project's files, TCC reads them.
 
@@ -52,6 +55,16 @@ export AUTOSOUND_SKILL_DIR=/path/to/autosound-tuning-skill/skills/autosound-tuni
 ln -s /path/to/autosound-tuning-skill/skills/autosound-tuning \
       ~/.claude/skills/autosound-tuning
 ```
+
+Then install what its tools need:
+
+```sh
+python3 -m pip install -r /path/to/autosound-tuning-skill/skills/autosound-tuning/requirements.txt
+```
+
+Skipping this leaves the method usable but takes crossover selection, the EQ
+gate, the DSP maths and plot rendering with it — those five modules import
+`numpy` at module scope and do not load without it.
 
 TCC looks in this order, first hit wins: `$AUTOSOUND_SKILL_DIR`, the
 `vendor/` submodule of a checkout, `~/.claude/skills/autosound-tuning`, then
