@@ -1044,3 +1044,104 @@ def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
 
     assert "cap_001" in dialog._bank_label.text() and "+0.260" in dialog._bank_label.text()
     assert [t.name for t in dialog._view._traces] == plotted
+
+
+def test_a_driver_with_no_reading_is_named_not_assumed_to_be_at_zero():
+    """The user's first real set left w-R, both rears, the centre and the sub off it entirely,
+    with nothing saying so — a fragment that reads as a plan (2026-08-12)."""
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence(
+        {"m-L_01 (sw)": 1.93}, lang_t=i18n.t, unplaced=["w-R_01 (sw)", "sw_01 (sw)"]
+    )
+
+    assert "w-R_01 (sw)" in text and "sw_01 (sw)" in text
+    assert i18n.t("curveBankUnplaced").partition("{")[0].strip() in text
+
+
+def test_the_set_is_listed_by_where_each_driver_lands():
+    """Sorted by delay, the outlier sat in the middle of the list. It is the whole point."""
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence(
+        {"m-L": 1.93, "w-L": 1.09, "m-R": 0.71},
+        lang_t=i18n.t,
+        at={"m-L": 2.907, "w-L": 4.781, "m-R": 4.124},
+    )
+
+    order = [line.split(":")[0].strip() for line in text.splitlines() if line.startswith("  ")]
+    assert order == ["m-R", "m-L", "w-L"], "4.834, 4.837, 5.871"
+
+
+def test_only_the_family_under_discussion_counts_as_unplaced():
+    """The pickers hold the sweep and the RTA of every channel; an RTA capture has no arrival at
+    all, so listing one as an unplaced driver would be noise."""
+    dialog = _dialog(
+        ["w-L_01 (sw)"], bridge=_FakeBridge(),
+        available=["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)", "sw_01 (sw)"],
+    )
+    dialog._worker.wait(4000)
+
+    unplaced = dialog._unplaced({"w-L_01 (sw)": 1.0})
+
+    assert unplaced == ["w-R_01 (sw)", "sw_01 (sw)"]
+    assert "w-R_01 (rta)" not in unplaced
+
+
+def test_clearing_leaves_nothing_behind_not_even_the_curve_on_screen():
+    """The bug in the picture: Clear, and one value survived — the OTHER curve in the pair, put
+    straight back by the handler that banks both whenever a delay changes (user, 2026-08-12)."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["tw-L_01 (sw)", "tw-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("tw-L_01 (sw)", *_impulse(2.98)),
+                       Trace("tw-R_01 (sw)", *_impulse(4.17))])
+    dialog._view.set_delay(1.89)
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.69)
+    delay_bank.put("m-L_01 (sw)", 1.93, session=dialog._session())
+    assert len(delay_bank.load()) == 3
+
+    dialog._bank_clear_btn.click()
+
+    assert delay_bank.load() == {}
+    assert dialog._view.delays() == pytest.approx([0.0, 0.0]), "and the curves went back too"
+    assert dialog._view.delay_target() == 1, "without moving which driver you were editing"
+
+
+def test_clearing_the_markers_puts_them_back_on_the_peaks():
+    """"Clear" for a marker is undoing the dragging. Removing them would leave the panel with no
+    reading and no way to get one back short of reloading the pair."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_markers([1.0, 7.0], tokens=["accent", "info"])
+
+    view.reset_markers()
+
+    assert view.positions() == pytest.approx([4.52, 4.78], abs=0.05)
+
+
+def test_a_driver_left_at_zero_is_the_reference_not_an_omission():
+    """User, 2026-08-12: "w-R немає, бо він був нулем. як би додавав сабвуфер — то саб був би
+    нулем". The zero is the choice everything else is measured from."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge(),
+                     available=["w-L_01 (sw)", "w-R_01 (sw)", "sw_01 (sw)"])
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.78)),
+                       Trace("w-R_01 (sw)", *_impulse(4.98))])
+
+    dialog._view.set_delay(1.09)
+
+    assert delay_bank.load() == {"w-L_01 (sw)": 1.09}, "only the moved one is a delay"
+    assert delay_bank.references() == ["w-R_01 (sw)"], "and the other is the reference"
+    assert dialog._unplaced(delay_bank.seen()) == ["sw_01 (sw)"], "never opened, so unplaced"
+
+    sent = []
+    dialog.readingSent.connect(sent.append)
+    dialog._bank_ask_btn.click()
+
+    assert "w-R_01 (sw)" in sent[0] and i18n.t("curveBankReference").partition("{")[0][:20] in sent[0]
+    assert "sw_01 (sw)" in sent[0]

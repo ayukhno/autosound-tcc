@@ -223,17 +223,29 @@ class CurveDialog(QDialog):
         self._bank_label.setProperty("class", "phead-sub")
         self._bank_label.setWordWrap(True)
         bank_row.addWidget(self._bank_label, stretch=1)
-        self._bank_ask_btn = QPushButton(i18n.t("curveBankAskBtn"))
-        self._bank_ask_btn.setProperty("class", "zoom-btn")
-        self._bank_ask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._bank_ask_btn.clicked.connect(self._on_ask_about_bank)
-        bank_row.addWidget(self._bank_ask_btn)
-        self._bank_clear_btn = QPushButton(i18n.t("curveBankClear"))
+        # "Clear" is two different things and one button cannot be both: the delays are a set
+        # being built up over an afternoon, the markers are one reading being dragged (user,
+        # 2026-08-12). They sit down here together; the ACTIONS go up with the controls.
+        clear_label = QLabel(i18n.t("curveClearLabel"))
+        clear_label.setProperty("class", "phead-sub")
+        bank_row.addWidget(clear_label)
+        self._bank_clear_btn = QPushButton(i18n.t("curveClearDelay"))
         self._bank_clear_btn.setProperty("class", "zoom-btn")
         self._bank_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._bank_clear_btn.clicked.connect(self._on_clear_bank)
         bank_row.addWidget(self._bank_clear_btn)
+        self._markers_clear_btn = QPushButton(i18n.t("curveClearMarkers"))
+        self._markers_clear_btn.setProperty("class", "zoom-btn")
+        self._markers_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._markers_clear_btn.clicked.connect(self._view.reset_markers)
+        bank_row.addWidget(self._markers_clear_btn)
         layout.addLayout(bank_row)
+
+        self._bank_ask_btn = QPushButton(i18n.t("curveBankAskBtn"))
+        self._bank_ask_btn.setProperty("class", "composer-send")
+        self._bank_ask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bank_ask_btn.clicked.connect(self._on_ask_about_bank)
+        self._view.add_action(self._bank_ask_btn)
 
         self._titles = list(titles)
         self._apply_delay_resolution()
@@ -348,16 +360,55 @@ class CurveDialog(QDialog):
         picture holds together, not to apply it (user, 2026-08-12: "відправити на аналіз ШІ (не
         для запису)").
         """
+        series = self._session()
+        bank = delay_bank.load(session=series)
         text = delay_bank.as_sentence(
-            delay_bank.load(session=self._session()), self._sample_rate_hz(), i18n.t, self._current_delay_of,
-            at=delay_bank.arrivals(session=self._session()),
+            bank, self._sample_rate_hz(), i18n.t, self._current_delay_of,
+            at=delay_bank.arrivals(session=series),
+            unplaced=self._unplaced(delay_bank.seen(session=series)),
+            reference=delay_bank.references(session=series),
         )
         if text:
             self.readingSent.emit(text)
 
+    def _unplaced(self, seen) -> list:
+        """Measurements of the same kind as the ones already looked at, never opened in here.
+
+        Same KIND, by the capture-method suffix the titles carry: the pickers hold both the sweep
+        and the RTA of every channel, and listing an RTA capture as an unplaced driver would be
+        noise about a measurement that has no arrival at all. Whatever suffix the seen ones share
+        is the family under discussion.
+
+        A driver left at zero is NOT here — it is the reference, and it has an entry.
+        """
+        if not seen:
+            return []
+        suffixes = {t.partition(" ")[2] for t in seen}
+        options = [str(c.itemData(row) or "") for c in self._pickers[:1]
+                   for row in range(c.count())]
+        return [
+            title for title in options
+            if title and title not in seen and title.partition(" ")[2] in suffixes
+        ]
+
     def _on_clear_bank(self) -> None:
+        """Forget this series' readings, and put the curves on screen back where they were drawn.
+
+        Guarded and in this order for a reason. Clearing the store first and zeroing the plot
+        afterwards wrote the pair straight back in: zeroing emits `delayChanged`, the handler
+        banks BOTH curves on screen, and the one that was not selected still held its delay. The
+        user pressed Clear and watched a single value survive — the other curve's (2026-08-12).
+        """
+        self._restoring = True
+        try:
+            target = self._view.delay_target()
+            for index in range(len(self._view._traces[:2])):
+                self._view.set_delay_target(index)
+                self._view.set_delay(0.0)
+            self._view.set_delay_target(target)
+        finally:
+            self._restoring = False
         delay_bank.clear(session=self._session())
-        self._view.set_delay(0.0)
         self._render_bank()
 
     def _sample_rate_hz(self):

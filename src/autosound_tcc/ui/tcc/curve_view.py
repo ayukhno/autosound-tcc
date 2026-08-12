@@ -294,6 +294,10 @@ class CurveView(QWidget):
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(self._send_btn)
+        #: The control row ends with the ACTIONS, after every group of settings — the window's
+        #: owner adds its own here rather than parking them on a second row away from the one
+        #: they belong beside (user, 2026-08-12).
+        self._action_row = row
         layout.addLayout(row)
 
         self._detail_range: Optional[tuple[float, float]] = None
@@ -321,6 +325,28 @@ class CurveView(QWidget):
         self._syncing = False
         self._marker_names: list[str] = []
         self._render_readout()
+
+    def add_action(self, button: QWidget) -> None:
+        """Put another action at the end of the control row, beside "this is my reading"."""
+        self._action_row.addWidget(button)
+
+    def reset_markers(self) -> None:
+        """Put every marker back where it opens: each trace's own largest peak.
+
+        "Clear" for a marker means undoing the dragging, not removing the marker — a panel with no
+        markers has no reading and no way to get one back without reloading the pair.
+        """
+        usable = [(i, t) for i, t in enumerate(self._traces[:2]) if len(t.x)]
+        if not usable:
+            return
+        peaks = [self._arrival_of(i) for i, _t in usable]
+        if any(peak is None for peak in peaks):
+            # Not a time axis: the peak is not a meaningful place to park a marker, so spread them
+            # across the visible span instead of inventing an arrival.
+            (low, high), _ = self._plot.getViewBox().viewRange()
+            peaks = [low + (high - low) * (n + 1) / (len(usable) + 1) for n in range(len(usable))]
+        self.set_markers(peaks, [t.name for _i, t in usable],
+                         list(_TRACE_TOKENS[:len(usable)]))
 
     def bring_markers_into_view(self) -> None:
         """Put every marker back inside the visible span, keeping their order and spacing where it
@@ -487,6 +513,17 @@ class CurveView(QWidget):
             shifted = y - 360.0 * x * (delay / 1000.0)
             return x, (shifted + 180.0) % 360.0 - 180.0
         return x, y  # a magnitude response does not move when you delay it
+
+    def _arrival_of(self, index: int):
+        """Where trace `index` arrives as CAPTURED, by its largest peak. Only meaningful on an
+        impulse; on an FR or a phase plot the x axis is not time and there is no arrival."""
+        if self._unit != "ms" or index >= len(self._traces):
+            return None
+        trace = self._traces[index]
+        y = np.asarray(trace.y, dtype=float)
+        if not y.size:
+            return None
+        return float(np.asarray(trace.x, dtype=float)[int(np.abs(y).argmax())])
 
     def _default_delay_target(self, traces) -> int:
         """The trace that ARRIVES FIRST. It is the only one a DSP can hold back — the other is
@@ -855,6 +892,7 @@ class CurveView(QWidget):
         if self._markers and "h" in self._axes_mode:
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
         parts = [part for part in lines if part]
+        proposals = []
         for index, trace in enumerate(self._traces):
             # EVERY driver that carries a proposal, not only the selected one. Alignment is what
             # the whole set says together, and a sentence naming one of two delayed curves would
@@ -862,25 +900,36 @@ class CurveView(QWidget):
             delay = self._delays[index] if index < len(self._delays) else 0.0
             if not delay:
                 continue
-            # Named as a PROPOSAL. The panel changes nothing: this sentence goes to the composer,
-            # the Arbiter sends it, and the delta is banked 🟡 like every other proposed change.
             # In ms AND samples, because that is the skill's own rule for every delay it states,
             # and signed, because an unsigned "0.150 ms" beside a channel already at 1.2 ms is two
             # different instructions depending on a sign the reader cannot see.
             samples = self.samples(delay)
-            amount = f"{delay:+.3f} ms"
+            clause = f"{trace.name} {delay:+.3f} {i18n.t('unitMs')}"
             if samples is not None:
-                amount += f" ({samples:+d} smp)"
-            line = i18n.t("curveShiftReading").format(name=trace.name, ms=amount)
+                clause += f" ({samples:+d} {i18n.t('unitSmp')})"
+            arrival = self._arrival_of(index)
+            if arrival is not None:
+                # Where it LANDS, not only how far it moves. Without this the sentence reads as a
+                # contradiction whenever the pair on screen is not what the driver is being
+                # aligned to: markers 1.191 ms apart, proposal +1.890 ms, and nothing saying that
+                # the reference is a third curve (user, with the message, 2026-08-12).
+                clause += ", " + i18n.t("curveDelayLands").format(
+                    was=f"{arrival:.3f}", now=f"{arrival + delay:.3f}")
             total = self.total_delay_ms(index)
             if total is not None:
-                line += " " + i18n.t("curveDelayTotal").format(total=f"{total:.3f}")
+                clause += ", " + i18n.t("curveDelayTotal").format(total=f"{total:.3f}")
                 if total < 0:
                     # Stated, not prevented. The Arbiter decides; the panel's job is to make sure
                     # the impossible one is never proposed by accident (user, 2026-08-12: "головне
                     # щоб загалом не йшло менш нуля").
-                    line += " " + i18n.t("curveDelayBelowZero")
-            parts.append(line)
+                    clause += " " + i18n.t("curveDelayBelowZero")
+            proposals.append(clause)
+        if proposals:
+            # The caveat once, at the head, not once per driver. It is a property of the whole
+            # statement — the panel changes nothing; this goes to the composer, the Arbiter sends
+            # it, and the delta is banked 🟡 like every other proposed change. Repeating it on
+            # each driver was most of the sentence by the second one (user's screenshot).
+            parts.append(i18n.t("curveDelayHead") + " " + "; ".join(proposals))
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is

@@ -24,6 +24,13 @@ that series' own curves; it has to bring that series' own corrections with them 
 An entry written before the scope existed carries no series and is shown under every one, rather
 than disappearing from all of them. It picks up a series the first time it is touched.
 
+**Zero is a reading too.** A driver plotted in the window and left at zero is the REFERENCE — the
+one everything else is measured against, and it is chosen, not skipped ("w-R немає, бо він був
+нулем. як би додавав сабвуфер — то саб був би нулем", user, 2026-08-12). So a zero entry is kept
+and marked as seen, and only a driver that has never been on screen counts as unplaced. The
+difference is the whole shape of the set: with it a model can see four drivers converging on a
+reference, and without it the reference looks like an omission.
+
 Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 """
 
@@ -59,8 +66,6 @@ def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> d
             ms = float(ms)
         except (TypeError, ValueError):
             continue
-        if not ms:
-            continue
         try:
             at = float(at) if at is not None else None
         except (TypeError, ValueError):
@@ -70,9 +75,27 @@ def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> d
 
 
 def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, float]:
-    """`{measurement title: ms}` for one capture series, worst case empty. Never raises: a
-    hand-edited file is "nothing banked yet", not a dead curve window."""
-    return {title: entry["ms"] for title, entry in _entries(tcc_dir, session).items()}
+    """`{measurement title: ms}` for the drivers actually MOVED, worst case empty.
+
+    Zeros are excluded here because this feeds the pickers and the label, where "+0.000 ms" beside
+    a title says nothing — `references()` is where a deliberate zero surfaces. Never raises: a
+    hand-edited file is "nothing banked yet", not a dead curve window.
+    """
+    return {
+        title: entry["ms"] for title, entry in _entries(tcc_dir, session).items() if entry["ms"]
+    }
+
+
+def references(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> list[str]:
+    """Drivers that have been on screen and were left at zero — the set's own reference points."""
+    return sorted(
+        title for title, entry in _entries(tcc_dir, session).items() if not entry["ms"]
+    )
+
+
+def seen(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> set:
+    """Every driver this series has an opinion about, at zero or otherwise."""
+    return set(_entries(tcc_dir, session))
 
 
 def arrivals(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, float]:
@@ -90,32 +113,31 @@ def put(
     arrival_ms: Optional[float] = None,
     session: Optional[str] = None,
 ) -> dict[str, float]:
-    """Bank one reading, or forget it when it goes back to zero.
+    """Bank one reading, zero included.
 
     Negative is a real reading, not an error: on a later pass the channel already carries a delay
     and the correction takes time back off it (user, 2026-08-12). What may not go below zero is
     the channel's TOTAL, which is a fact about the ledger and is checked where the ledger is
     known — see `CurveView.total_delay_ms`.
 
-    Zero is stored as absence rather than as `0.0`: "this channel needs no delay" and "I have not
-    looked at this channel" are different statements, and only the second is honest about a curve
-    nobody has opened.
+    Zero is kept, not dropped. It was dropped at first on the reasoning that "needs no delay" and
+    "not looked at" should not be confused — right distinction, wrong resolution: a driver on
+    screen and left at zero is the REFERENCE the rest are aligned to, and dropping it made the
+    reference indistinguishable from a channel nobody opened. What separates the two now is
+    whether there is an entry at all.
     """
     tcc_dir = tcc_dir or config.tcc_dir()
     entries = _entries(tcc_dir)
     title = str(title)
-    if round(float(ms), 4):
-        was = entries.get(title) or {}
-        at = arrival_ms if arrival_ms is not None else was.get("at")
-        entries[title] = {
-            "ms": round(float(ms), 4),
-            "at": None if at is None else round(float(at), 4),
-            "set": session if session is not None else was.get("set"),
-        }
-    else:
-        entries.pop(title, None)
+    was = entries.get(title) or {}
+    at = arrival_ms if arrival_ms is not None else was.get("at")
+    entries[title] = {
+        "ms": round(float(ms), 4),
+        "at": None if at is None else round(float(at), 4),
+        "set": session if session is not None else was.get("set"),
+    }
     project_settings.set_value(tcc_dir, KEY, entries or None)
-    return {name: entry["ms"] for name, entry in entries.items()}
+    return {name: entry["ms"] for name, entry in entries.items() if entry["ms"]}
 
 
 def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None:
@@ -141,6 +163,8 @@ def as_sentence(
     lang_t=None,
     current=None,
     at: Optional[dict] = None,
+    unplaced: Optional[list] = None,
+    reference: Optional[list] = None,
 ) -> str:
     """The whole set as something a model can read, and a person can check before it is sent.
 
@@ -153,34 +177,52 @@ def as_sentence(
     left for the model to notice — a set that cannot be applied should not need a reader to spot
     it. Without it the lines are readings alone, which is honest about what TCC knows.
     """
-    if not bank:
+    if not bank and not reference:
         return ""
     t = lang_t or (lambda key: key)
     at = at or {}
     lines, impossible, landings = [], False, []
-    for title, ms in sorted(bank.items(), key=lambda kv: (-kv[1], kv[0])):
-        line = f"  {title}: {ms:+.3f} ms"
+    # By where each driver ENDS UP, not by how far it moves. The outlier is the whole point of
+    # sending this, and sorted by delay it sat in the middle of the list (user's own set,
+    # 2026-08-12: four drivers inside 37 µs and one a millisecond out).
+    order = sorted(bank.items(), key=lambda kv: (at.get(kv[0], 0.0) + kv[1], kv[0]))
+    for title, ms in order:
+        unit = t("unitMs")
+        line = f"  {title}: {ms:+.3f} {unit}"
         if sample_rate_hz:
-            line += f" ({int(round(ms * sample_rate_hz / 1000.0)):+d} smp)"
+            line += f" ({int(round(ms * sample_rate_hz / 1000.0)):+d} {t('unitSmp')})"
         measured = at.get(title)
         if measured is not None:
             # The arrival as CAPTURED, and where this delay puts it. Without the origin a set of
             # deltas cannot be checked for coherence, which is the only reason it is being sent.
             landings.append(measured + ms)
-            line += f" | {t('curveBankArrival')} {measured:.3f} → {measured + ms:.3f} ms"
+            line += f" | {t('curveBankArrival')} {measured:.3f} → {measured + ms:.3f} {unit}"
         now = current(title) if current else None
         if now is not None:
             total = now + ms
-            line += f" | {t('curveBankChannel')} {now:.3f} → {total:.3f} ms"
+            line += f" | {t('curveBankChannel')} {now:.3f} → {total:.3f} {unit}"
             if total < 0:
                 line += "  << " + t("curveDelayBelowZero")
                 impossible = True
         lines.append(line)
     head = [t("curveBankAsk"), t("curveBankConvention")]
     tail = [t("curveBankNotForWriting")]
+    if reference:
+        # NOT an omission. The zero is the choice — everything else in the set is measured from
+        # it, and a model told only about the moved drivers would ask why the reference is missing
+        # (user, 2026-08-12).
+        lines.append("")
+        lines.append(t("curveBankReference").format(names=", ".join(sorted(reference))))
+    if unplaced:
+        # A driver with NO reading is not a driver at zero. It is one nobody has placed yet, and
+        # the difference decides whether the set above is a plan or a fragment — the user's own
+        # first set left w-R, both rears, the centre and the sub off it entirely, with nothing
+        # saying so (2026-08-12). Named, because "5 more" does not tell the model which.
+        lines.append("")
+        lines.append(t("curveBankUnplaced").format(names=", ".join(sorted(unplaced))))
     if len(landings) > 1:
         spread = max(landings) - min(landings)
-        tail.insert(0, t("curveBankSpread").format(spread=f"{spread:.3f}"))
+        tail.insert(0, t("curveBankSpread").format(spread=f"{spread:.3f}", n=len(landings)))
     if impossible:
         tail.insert(0, t("curveBankImpossible"))
     return "\n".join([*head, *lines, *tail])

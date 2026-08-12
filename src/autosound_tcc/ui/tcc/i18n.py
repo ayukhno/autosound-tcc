@@ -358,8 +358,11 @@ T: dict[Lang, dict[str, str]] = {
         "curveSend": "This is my reading",
         "curveShift": "delay",
         "curveShiftTip": "Hold the chosen driver back — the radio picks which one. It starts on whichever arrives FIRST, the natural choice on a first pass; negative is allowed, because on a later pass you are correcting a channel that already carries a delay. What cannot go below zero is the channel's TOTAL, and the reading says so when the ledger is known. Steps by what this DSP lets you type. Nothing is applied: the reading goes out as a proposal.",
-        "curveShiftReading": "delay {name} by {ms} to align (proposed, not applied)",
-        "curveDelayTotal": "→ {total} ms on the channel",
+        "curveDelayHead": "delay, to align (proposed, not applied):",
+        "unitMs": "ms",
+        "unitSmp": "smp",
+        "curveDelayLands": "arrival {was} → {now} ms",
+        "curveDelayTotal": "channel → {total} ms",
         "curveDelayBelowZero": "⚠ below zero — the channel cannot go there",
         "curveBankImpossible": "One or more of these takes a channel below zero, so the set as it \
 stands cannot be applied — say which reference to move instead.",
@@ -367,7 +370,9 @@ stands cannot be applied — say which reference to move instead.",
         "curveBankLabelIn": "delays read in {set}:",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveBankAskBtn": "analyse the set",
-        "curveBankClear": "clear",
+        "curveClearLabel": "clear:",
+        "curveClearDelay": "delays",
+        "curveClearMarkers": "markers",
         "curveBankAsk": "Delays I have read off the curves, for ANALYSIS ONLY — do not write \
 these anywhere and do not treat them as a change:",
         "curveBankConvention": "Convention: every measurement shares one time origin (0 ms on \
@@ -375,8 +380,12 @@ the impulse axis). Each number below is added to that measurement's arrival AS C
 is for every driver to land on the same arrival.",
         "curveBankArrival": "arrival",
         "curveBankChannel": "channel",
-        "curveBankSpread": "Spread of the resulting arrivals: {spread} ms — that is how far from \
-aligned this set leaves them.",
+        "curveBankSpread": "Spread of the resulting arrivals across the {n} drivers placed: \
+{spread} ms.",
+        "curveBankReference": "REFERENCE — on screen and deliberately left at zero; everything \
+above is measured from these: {names}",
+        "curveBankUnplaced": "NOT placed — no reading taken on these yet, so they are absent \
+from the picture above and are NOT to be assumed at zero: {names}",
         "curveBankNotForWriting": "Tell me whether this set is coherent: which arrivals it \
 implies, whether any of it looks like a measurement error rather than a tuning, and what you \
 would check next. Nothing here is applied.",
@@ -769,8 +778,11 @@ would check next. Nothing here is applied.",
         "curveSend": "Ось моє прочитання",
         "curveShift": "затримка",
         "curveShiftTip": "Притримати обраний драйвер — радіокнопка обирає, який саме. Починає з того, що приходить ПЕРШИМ (природний вибір на першому проході); відʼємне дозволено, бо на наступних проходах ви правите канал, у якому затримка вже є. Нижче нуля не може йти СУМА на каналі — і прочитання це скаже, коли реєстр відомий. Крок — той, який дає ввести цей ДСП. Нічого не застосовується: прочитання йде як пропозиція.",
-        "curveShiftReading": "затримати {name} на {ms} для вирівнювання (пропозиція, не застосовано)",
-        "curveDelayTotal": "→ {total} мс на каналі",
+        "curveDelayHead": "затримки для вирівнювання (пропозиція, не застосовано):",
+        "unitMs": "мс",
+        "unitSmp": "вибірок",
+        "curveDelayLands": "прихід {was} → {now} мс",
+        "curveDelayTotal": "на каналі → {total} мс",
         "curveDelayBelowZero": "⚠ нижче нуля — канал так не може",
         "curveBankImpossible": "Щось із цього виводить канал нижче нуля, тож набір у такому \
 вигляді не застосувати — скажи, яку опорну точку рухати натомість.",
@@ -778,7 +790,9 @@ would check next. Nothing here is applied.",
         "curveBankLabelIn": "зчитані затримки в {set}:",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveBankAskBtn": "на аналіз",
-        "curveBankClear": "очистити",
+        "curveClearLabel": "очистити:",
+        "curveClearDelay": "Затримку",
+        "curveClearMarkers": "Маркери",
         "curveBankAsk": "Затримки, які я зчитав(ла) з кривих, ЛИШЕ НА АНАЛІЗ — нікуди їх не \
 записуй і не вважай змінами:",
         "curveBankConvention": "Домовленість: усі заміри мають спільний нуль часу (0 мс на осі \
@@ -786,8 +800,11 @@ would check next. Nothing here is applied.",
 усі драйвери зійшлися на одному приході.",
         "curveBankArrival": "прихід",
         "curveBankChannel": "канал",
-        "curveBankSpread": "Розкид приходів після цього: {spread} мс — настільки набір лишає їх \
-невирівняними.",
+        "curveBankSpread": "Розкид приходів по {n} розміщених драйверах: {spread} мс.",
+        "curveBankReference": "ОПОРА — були на екрані й свідомо лишені на нулі; усе вище \
+відраховано від них: {names}",
+        "curveBankUnplaced": "НЕ розміщені — по цих прочитання ще не робилось, тож у картині \
+вище їх нема і НЕ можна вважати, що вони на нулі: {names}",
         "curveBankNotForWriting": "Скажи, чи ця картина узгоджена: які приходи вона означає, чи \
 не схоже щось із цього радше на помилку заміру, ніж на налаштування, і що б ти перевірив(ла) \
 далі. Нічого з цього не застосовано.",
