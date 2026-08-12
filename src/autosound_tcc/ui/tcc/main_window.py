@@ -409,6 +409,18 @@ class _ContractWorker(QThread):
 _live_windows: "weakref.WeakSet[MainWindow]" = weakref.WeakSet()
 
 
+_quit_hook_connected = False
+
+
+def _connect_quit_hook(app) -> None:
+    """Connect `_stop_all_workers` to `aboutToQuit` exactly once per process."""
+    global _quit_hook_connected
+    if _quit_hook_connected:
+        return
+    app.aboutToQuit.connect(_stop_all_workers)
+    _quit_hook_connected = True
+
+
 def _stop_all_workers() -> None:
     """Stop every live window's background threads at interpreter exit.
 
@@ -570,7 +582,15 @@ class MainWindow(QMainWindow):
         # destroyed under Qt -- which aborts. Both routes lead to the same cleanup.
         app = QApplication.instance()
         if app is not None:
-            app.aboutToQuit.connect(self.stop_workers)
+            # The MODULE function, not `self.stop_workers`. A bound method handed to a Qt signal
+            # is a strong reference held by the QApplication for the life of the process, so every
+            # window ever built stayed alive — `_live_windows` is a WeakSet precisely so that does
+            # not happen, and this one line defeated it. In the app that is one leaked window per
+            # project switch; in the test suite it is quadratic, because `setStyleSheet` re-polishes
+            # every widget in the process and there were ninety windows' worth by the end
+            # (measured 2026-08-12: window #1 0.26 s, #25 1.81 s). `_stop_all_workers` walks the
+            # WeakSet, so it does the same job holding nothing.
+            _connect_quit_hook(app)
 
     # ---- header / footer -------------------------------------------------
 

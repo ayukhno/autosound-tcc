@@ -9,6 +9,7 @@ displays translated text registers a retranslate callback via `on_language_chang
 
 from __future__ import annotations
 
+import weakref
 from typing import Callable
 
 Lang = str  # "en" | "uk"
@@ -824,8 +825,18 @@ def tx(obj) -> str:
 
 def on_language_changed(callback: Callable[[], None]) -> None:
     """Register a no-arg callback to run every time the language changes (a widget's own
-    "retranslate myself" method). Mirrors the prototype re-rendering `[data-i]` elements."""
-    _listeners.append(callback)
+    "retranslate myself" method). Mirrors the prototype re-rendering `[data-i]` elements.
+
+    Held WEAKLY when the callback is a bound method, which is what every caller passes. A plain
+    list of bound methods is a list of the widgets they belong to, and this list never shrank: it
+    kept every window and every dialog ever built alive for the life of the process (found while
+    hunting a quadratic test suite, 2026-08-12). A dead widget's callback is dropped on the next
+    language switch rather than called on a destroyed object.
+    """
+    try:
+        _listeners.append(weakref.WeakMethod(callback))
+    except TypeError:
+        _listeners.append(callback)  # a plain function or a lambda: nothing to hold weakly
 
 
 def set_language(lang: Lang) -> None:
@@ -833,5 +844,11 @@ def set_language(lang: Lang) -> None:
     if lang not in T:
         raise ValueError(f"unknown language {lang!r}, known: {sorted(T)}")
     _lang = lang
-    for callback in list(_listeners):
+    alive = []
+    for entry in list(_listeners):
+        callback = entry() if isinstance(entry, weakref.WeakMethod) else entry
+        if callback is None:
+            continue  # its widget is gone; so is its registration
+        alive.append(entry)
         callback()
+    _listeners[:] = alive
