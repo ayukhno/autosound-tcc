@@ -1154,3 +1154,34 @@ def test_a_driver_left_at_zero_is_stated_never_interpreted():
     assert "sw_01 (sw)" in sent[0], "and the one never opened is named separately"
     for claim in ("REFERENCE", "ОПОРА", "deliberately", "свідомо"):
         assert claim not in sent[0], "the panel reports; the model concludes"
+
+
+def test_the_window_has_two_verbs_and_each_appears_twice():
+    """User, 2026-08-12: "кнопки називаються однаково і ті що відправляють і ті що в секції
+    очистки". Each group of controls ends with the action it produces, named after the group, and
+    the Clear section below repeats the same two names. Nothing is called "this is my reading"."""
+    from PySide6.QtWidgets import QPushButton
+
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    labels = [b.text() for b in dialog.findChildren(QPushButton)]
+    assert labels.count(i18n.t("curveSendDelays")) == 2, "send delays, clear delays"
+    assert labels.count(i18n.t("curveSendMarkers")) == 2, "send markers, clear markers"
+    assert "This is my reading" not in labels and "Ось моє прочитання" not in labels
+
+
+def test_each_action_sits_beside_the_controls_that_produce_it():
+    """Parked at the far end of the row, the delay action reads as a second opinion about the
+    markers."""
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    row = dialog._view._action_row
+
+    order = [row.itemAt(i).widget() for i in range(row.count())]
+    delays_at = order.index(dialog._bank_ask_btn)
+    box_at = order.index(dialog._view._shift_box)
+    markers_at = order.index(dialog._view._send_btn)
+
+    assert box_at < delays_at < markers_at
+    assert markers_at == len(order) - 1, "the markers group ends the row"

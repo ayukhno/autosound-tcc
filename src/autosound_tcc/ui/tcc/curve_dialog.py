@@ -243,11 +243,14 @@ class CurveDialog(QDialog):
         bank_row.addWidget(self._markers_clear_btn)
         layout.addLayout(bank_row)
 
-        self._bank_ask_btn = QPushButton(i18n.t("curveBankAskBtn"))
-        self._bank_ask_btn.setProperty("class", "action-2nd")
+        # The delay group's own action, beside the delay controls, named after the group — the
+        # markers group has its own at the end of the row, and the Clear section below repeats
+        # both names. Two verbs, four buttons, no button called "this is my reading".
+        self._bank_ask_btn = QPushButton(i18n.t("curveSendDelays"))
+        self._bank_ask_btn.setProperty("class", "composer-send")
         self._bank_ask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._bank_ask_btn.clicked.connect(self._on_ask_about_bank)
-        self._view.add_action(self._bank_ask_btn)
+        self._view.add_delay_action(self._bank_ask_btn)
 
         self._titles = list(titles)
         self._apply_delay_resolution()

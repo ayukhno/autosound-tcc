@@ -263,6 +263,8 @@ class CurveView(QWidget):
         self._shift_box.valueChanged.connect(self.set_delay)
         attach_tip(self._shift_box, i18n.t("curveShiftTip"))
         row.addWidget(self._shift_box)
+        #: Where the delay group's action goes — see `add_delay_action`.
+        self._delay_slot = row.count()
 
         for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
             button = QPushButton(_MODE_LABELS[mode])
@@ -290,13 +292,15 @@ class CurveView(QWidget):
             button.clicked.connect(handler)
             row.addWidget(button)
             self._zoom_buttons.append((button, key))
-        self._send_btn = QPushButton(i18n.t("curveSend"))
+        # Each group of controls ends with the action that group produces, and both are named
+        # after their group — the same two names the Clear section uses (user, 2026-08-12:
+        # "кнопки називаються однаково і ті що відправляють і ті що в секції очистки"). So the
+        # window has two verbs, "Затримки" and "Маркери", and each appears twice: once to send,
+        # once to clear. Nothing is called "this is my reading" any more.
+        self._send_btn = QPushButton(i18n.t("curveSendMarkers"))
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         row.addWidget(self._send_btn)
-        #: The control row ends with the ACTIONS, after every group of settings — the window's
-        #: owner adds its own here rather than parking them on a second row away from the one
-        #: they belong beside (user, 2026-08-12).
         self._action_row = row
         layout.addLayout(row)
 
@@ -326,9 +330,16 @@ class CurveView(QWidget):
         self._marker_names: list[str] = []
         self._render_readout()
 
-    def add_action(self, button: QWidget) -> None:
-        """Put another action at the end of the control row, beside "this is my reading"."""
-        self._action_row.addWidget(button)
+    def add_delay_action(self, button: QWidget) -> None:
+        """Put the delay group's own action immediately after the delay controls.
+
+        Not at the end of the row: an action belongs beside the controls that produce it, and
+        parked at the far end it reads as a second opinion about the markers.
+        """
+        self._action_row.insertWidget(self._delay_slot, button)
+
+    def on_send(self, handler: Callable[[str], None]) -> None:
+        self._send_btn.clicked.connect(lambda: handler(self.reading()))
 
     def bring_markers_into_view(self, force: bool = False) -> None:
         """Put the markers back inside the visible span, keeping their order and spacing.
@@ -970,8 +981,6 @@ class CurveView(QWidget):
             out += f" (Δ {abs(values[1] - values[0]):.{digits}f}{suffix})"
         return out
 
-    def on_send(self, handler: Callable[[str], None]) -> None:
-        self._send_btn.clicked.connect(lambda: handler(self.reading()))
 
     # ---- internals -------------------------------------------------------
 
@@ -1028,11 +1037,11 @@ class CurveView(QWidget):
         self._send_btn.setEnabled(bool(text))
 
     def retranslate(self) -> None:
-        self._send_btn.setText(i18n.t("curveSend"))
         self._shift_label.setText(i18n.t("curveShift"))
         for button, mode in self._axes_buttons:
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))
+        self._send_btn.setText(i18n.t("curveSendMarkers"))
         for button, key in self._zoom_buttons:
             button.setText(i18n.t(key + "Short"))
             if getattr(button, "hover_tip", None) is not None:
