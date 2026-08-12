@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import (
     app_log,
     config,
+    self_check,
     contract_check,
     critic,
     model_choices,
@@ -2157,6 +2158,14 @@ class MainWindow(QMainWindow):
         if resolved.note:
             notes.append(i18n.t("criticSubstituted"))
             tips.append(resolved.note)
+        # Third condition, and the only one backed by evidence rather than configuration: who
+        # actually answered last. A live session proved the other two can both look clean while a
+        # different model does the reviewing — the script falls back from the API to a local CLI
+        # and that CLI runs whatever it is set to (2026-08-12).
+        actual = self_check.reviewer_mismatch()
+        if actual:
+            notes.append(i18n.t("criticAnswered").format(model=actual[1]))
+            tips.append(i18n.t("selfReviewerDiffDetail").format(wanted=actual[0], answered=actual[1]))
         generator = self._generator_choice()
         chosen = resolved.choice
         if chosen is not None and generator is not None:

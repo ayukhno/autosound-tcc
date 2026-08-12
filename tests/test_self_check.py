@@ -82,7 +82,7 @@ def test_a_probe_that_raises_becomes_a_row_not_a_dead_dialog(monkeypatch):
     checks = self_check.run()
 
     assert any("boom" in (c.detail or "") for c in checks)
-    assert len(checks) == 2, "the other probe still ran"
+    assert len(checks) == 3, "the other probes still ran"
 
 
 def test_an_installed_cli_that_answered_nothing_gets_a_row_and_a_retry(monkeypatch):
@@ -103,3 +103,56 @@ def test_worst_first():
     statuses = [c.status for c in self_check.run()]
 
     assert statuses == sorted(statuses, key=lambda s: {"bad": 0, "wait": 1, "done": 2}[s])
+
+
+# ---- who actually answered (live session, 2026-08-12) -----------------------------------------
+
+
+def _last_call(tmp_path, monkeypatch, model, mode="answered"):
+    import json
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+    path = critic.log_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": "2026-08-12T06:24:58+00:00", "role": "critic",
+                                "mode": mode, "model": model}) + "\n", encoding="utf-8")
+
+
+def test_a_different_model_answering_is_caught_even_with_no_alias(tmp_path, monkeypatch):
+    """`substituted` was empty and the picker said Pro while Flash did the reviewing — the swap
+    happened inside the reviewer script's API→CLI fallback, which no flag in TCC records. Both
+    halves were already on disk; nothing compared them."""
+    _last_call(tmp_path, monkeypatch, "gemini-3.6-flash-high")
+
+    check = _find(self_check.run(), "reviewer_actual")
+
+    assert check.status == self_check.BAD
+    assert "gemini-3.1-pro-high" in check.detail and "gemini-3.6-flash-high" in check.detail
+    assert not check.fixable, "TCC cannot fix what another program's fallback chose"
+    assert self_check.reviewer_mismatch() == ("gemini-3.1-pro-high", "gemini-3.6-flash-high")
+
+
+def test_two_spellings_of_the_same_model_are_not_a_mismatch(tmp_path, monkeypatch):
+    """The picker's key and the script's recorded name differ in punctuation, not in model."""
+    _last_call(tmp_path, monkeypatch, "Gemini 3.1 Pro (High)")
+
+    assert _find(self_check.run(), "reviewer_actual").status == self_check.OK
+    assert self_check.reviewer_mismatch() is None
+
+
+def test_a_clipboard_round_is_not_evidence_of_anything(tmp_path, monkeypatch):
+    """Clipboard mode means nobody was called; comparing against it would invent a mismatch."""
+    _last_call(tmp_path, monkeypatch, "", mode="clipboard")
+
+    assert _find(self_check.run(), "reviewer_actual").status == self_check.OK
+
+
+def test_the_no_alias_row_no_longer_claims_more_than_it_knows():
+    """It said "every picker runs what it says", which the same night's session disproved. An
+    assurance that reaches past its evidence is the one a reader stops checking."""
+    from autosound_tcc.ui.tcc import i18n
+
+    assert "runs what it says" not in i18n.t("selfAliasNoneTitle")
+    assert "reviewer script" in i18n.t("selfAliasNoneDetail")

@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from autosound_tcc.core import model_choices, model_overrides
+from autosound_tcc.core import config, critic, model_choices, model_overrides, project_settings
 
 #: Severity, in the same vocabulary the traffic lights already use.
 BAD = "bad"
@@ -63,6 +63,12 @@ def _alias_check() -> Check:
     """
     aliases = model_overrides.load().get("aliases") or {}
     if not aliases:
+        # Says only what it knows. It used to say "every picker runs what it says", which a live
+        # session disproved the same night (2026-08-12): the reviewer script ALSO substitutes, one
+        # layer below TCC — Gemini API answered 404 and it fell back to the local `agy` CLI, which
+        # runs whatever model `agy` is currently set to. No alias was involved, and nothing in
+        # TCC's config could have shown it. An assurance that reaches further than the evidence is
+        # worse than no assurance: it is the one a reader stops checking.
         return Check("aliases", OK, _t("selfAliasNoneTitle"), _t("selfAliasNoneDetail"))
 
     known = model_choices.choices([]) + model_choices.critic_choices([])
@@ -126,11 +132,58 @@ def _refresh_catalogue() -> str:
     return _t("selfCatalogueFixed").format(n=total)
 
 
+def _reviewer_actual_check() -> Check:
+    """Who answered last, against who was asked for.
+
+    The one comparison that survives the layer below. `reviewer.substituted` was empty and
+    `reviewer.model` said `gemini-3.1-pro-high` while `gemini-3.6-flash-high` was doing the
+    reviewing — because the substitution happened inside the reviewer script's own API→CLI
+    fallback, which no flag in TCC records. Both halves of this comparison are already on disk;
+    nothing compared them (live session, 2026-08-12: "the only reliable check is to make a call").
+    """
+    entry = critic.last_call() or {}
+    answered = str(entry.get("model") or "").strip()
+    if not answered or entry.get("mode") != "answered":
+        return Check("reviewer_actual", OK, _t("selfReviewerNeverTitle"), _t("selfReviewerNeverDetail"))
+    wanted_key = project_settings.get(config.tcc_dir(), "critic", "") or ""
+    wanted = wanted_key.partition(":")[2] or wanted_key
+    if not wanted or _same_model(wanted, answered):
+        return Check("reviewer_actual", OK, _t("selfReviewerOkTitle").format(model=answered))
+    return Check(
+        "reviewer_actual",
+        BAD,
+        _t("selfReviewerDiffTitle"),
+        _t("selfReviewerDiffDetail").format(wanted=wanted or "?", answered=answered),
+    )
+
+
+def reviewer_mismatch() -> Optional[tuple[str, str]]:
+    """`(asked_for, answered)` when the last review came back from another model, else None.
+
+    Exposed on its own because the footer needs the same fact the diagnostics row states, and two
+    implementations of "did the reviewer change" would eventually disagree about it.
+    """
+    check = _reviewer_actual_check()
+    if check.status == OK:
+        return None
+    entry = critic.last_call() or {}
+    wanted_key = project_settings.get(config.tcc_dir(), "critic", "") or ""
+    return (wanted_key.partition(":")[2] or wanted_key, str(entry.get("model") or "?"))
+
+
+def _same_model(wanted: str, answered: str) -> bool:
+    """Loose on purpose: the picker's key and the script's recorded name are two spellings of one
+    model (`gemini-3.1-pro-high` vs `Gemini 3.1 Pro (High)`). Compare on the letters and digits."""
+    strip = lambda text: "".join(ch for ch in text.lower() if ch.isalnum())  # noqa: E731
+    a, b = strip(wanted), strip(answered)
+    return a in b or b in a
+
+
 def run() -> list[Check]:
     """Every self-check, worst first. Never raises: a diagnostics panel that crashes is worse than
     one that is missing a row."""
     checks = []
-    for probe in (_alias_check, _catalogue_check):
+    for probe in (_alias_check, _catalogue_check, _reviewer_actual_check):
         try:
             checks.append(probe())
         except Exception as exc:  # noqa: BLE001 — a broken probe is a row, not a dead dialog
