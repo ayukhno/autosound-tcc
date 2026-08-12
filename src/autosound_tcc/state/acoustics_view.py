@@ -47,9 +47,21 @@ class Flaw:
     bw_oct: Optional[float] = None
     why: str = ""
     evidence: tuple[str, ...] = ()
+    #: `hypothesis` or `confirmed`. Absent in the file means confirmed: every map written before
+    #: the field existed was written as fact, and re-labelling history would be its own lie.
+    status: str = "confirmed"
+
+    @property
+    def is_hypothesis(self) -> bool:
+        return self.status == "hypothesis"
 
     @property
     def tone(self) -> str:
+        # A hypothesis is not a verdict, so it does not get a verdict's colour. Showing "never
+        # boost" in red for something nobody has settled is the map claiming more than it knows —
+        # which is the failure the status field was added to prevent.
+        if self.is_hypothesis:
+            return "wait"
         return _ACTION_TONE.get(self.action, "info")
 
     @property
@@ -94,6 +106,7 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
                     level_db=float(row["level_db"]),
                     kind=str(row.get("kind", "")),
                     action=str(row.get("action", "")),
+                    status=str(row.get("status") or "confirmed"),
                     channels=tuple(str(c) for c in row.get("channels") or ()),
                     q=float(row["q"]) if row.get("q") else None,
                     bw_oct=float(row["bw_oct"]) if row.get("bw_oct") else None,

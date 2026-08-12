@@ -966,6 +966,12 @@ class MainWindow(QMainWindow):
         action = QLabel(i18n.t(f"flawAction_{flaw.action}"))
         action.setProperty("class", "stag")
         top.addWidget(action)
+        if flaw.is_hypothesis:
+            # Said in words, not only in the dot's colour: "not settled yet" is the kind of thing
+            # a reader has to be able to see without knowing the palette.
+            unsure = QLabel(i18n.t("flawHypothesis"))
+            unsure.setProperty("class", "stag stag-attempt")
+            top.addWidget(unsure)
         outer.addLayout(top)
 
         detail = ", ".join(flaw.channels) if flaw.channels else i18n.t("flawAllChannels")

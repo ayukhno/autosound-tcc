@@ -80,3 +80,36 @@ def test_a_row_tcc_cannot_read_does_not_take_the_map_down(project):
     ])
 
     assert [f.f_hz for f in acoustics_view.load_flaws(project)] == [73]
+
+
+def test_a_hypothesis_is_not_shown_as_a_verdict(tmp_path):
+    """A tune generates suspicions constantly and they had nowhere to go: the pair-coherence
+    findings sat in prose for a week, explicitly marked "measured before TA, re-check after",
+    because recording them as fact would have been a lie and there was no third option
+    (user, 2026-08-12)."""
+    _write(tmp_path, [
+        {"f_hz": 175, "level_db": -31.7, "kind": "pair_suckout", "action": "leave",
+         "status": "hypothesis", "channels": ["w-L", "w-R"], "why": "raw _01, before any TA",
+         "evidence": ["Ws pair coherence"]},
+    ])
+
+    flaw = acoustics_view.load_flaws(tmp_path)[0]
+
+    assert flaw.is_hypothesis
+    # Not the action's colour: showing "leave it alone" as settled is the map claiming more than
+    # it knows, which is exactly what the field exists to stop.
+    assert flaw.tone == "wait"
+
+
+def test_a_map_written_before_the_field_existed_still_reads_as_fact(tmp_path):
+    """Every entry written before `status` was written as a verdict. Re-labelling history would be
+    its own lie."""
+    _write(tmp_path, [
+        {"f_hz": 152, "level_db": -12, "kind": "cabin_null", "action": "no_boost",
+         "why": "settled", "evidence": ["w-L_01 (sw)"]},
+    ])
+
+    flaw = acoustics_view.load_flaws(tmp_path)[0]
+
+    assert flaw.status == "confirmed" and not flaw.is_hypothesis
+    assert flaw.tone == "bad", "a confirmed no_boost keeps the verdict colour"

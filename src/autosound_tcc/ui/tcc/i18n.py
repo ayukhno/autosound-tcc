@@ -94,6 +94,7 @@ T: dict[Lang, dict[str, str]] = {
         # The flaw map (SCR-015). `action` is the load-bearing half — what may and may not be done
         # about a feature — so each value gets a short label a reader can scan, not a raw key.
         "acousticsNone": "No flaw map yet. Phase 0 measures what this cabin does to the sound, and the rows land here — each with what may and may not be done about it.",
+        "flawHypothesis": "not settled",
         "flawAllChannels": "all channels",
         "flawAction_notch": "cut",
         "flawAction_leave": "leave",
@@ -491,6 +492,7 @@ T: dict[Lang, dict[str, str]] = {
         "missingRecord": "Не записано: {what} — {why}.",
         "criticSaved": "Текст збережено у {path}",
         "acousticsNone": "Карти дефектів ще немає. Фаза 0 міряє, що ця машина робить зі звуком, і рядки з'являться тут — кожен із тим, що з ним можна й чого не можна.",
+        "flawHypothesis": "не підтверджено",
         "flawAllChannels": "усі канали",
         "flawAction_notch": "різати",
         "flawAction_leave": "лишити",
