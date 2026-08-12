@@ -54,8 +54,31 @@ def _candidates():
         yield from sorted(plugins.glob(f"*/*/skills/{SKILL_NAME}"))
 
 
+#: What makes a skill THIS TCC's skill. `rew_api.py` alone is any version back to v2.1; these two
+#: arrived with the 3.0 format and are what TCC actually reads through — `project.py` for the
+#: project's facts, `contract.py` for the diagnostics panel. A 2.x skill passed the old check and
+#: then failed one call at a time: `load_project()` raised FileNotFoundError, diagnostics reported
+#: itself unavailable, and the process writer cheerfully offered to write schema-v1 files into a
+#: 3.0 project (found 2026-08-12, by pointing TCC at a v2.8.1 checkout).
+_REQUIRED_FILES = ("rew_api.py", "project.py", "contract.py")
+
+
 def _looks_like_the_skill(path: Path) -> bool:
-    return (path / "rew_tool" / "rew_api.py").is_file()
+    return all((path / "rew_tool" / name).is_file() for name in _REQUIRED_FILES)
+
+
+def _looks_like_an_older_skill(path: Path) -> bool:
+    """A real skill, of a line TCC cannot drive. Worth telling apart from "nothing here": the
+    remedy is different and so is the surprise."""
+    return (path / "rew_tool" / "rew_api.py").is_file() and not _looks_like_the_skill(path)
+
+
+def older_skill_found() -> Optional[Path]:
+    """Where a 2.x skill is sitting, when that is why nothing usable was found."""
+    for candidate in _candidates():
+        if _looks_like_an_older_skill(candidate):
+            return candidate
+    return None
 
 
 def skill_dir() -> Path:
@@ -188,6 +211,16 @@ def load(vendored_rel: str) -> ModuleType:
     if not is_available():
         # The message has to fit BOTH readers: a developer with a checkout who forgot the
         # submodule, and someone who installed TCC and has no repository to run git in.
+        older = older_skill_found()
+        if older is not None:
+            raise VendorNotInitializedError(
+                f"found a 2.x {SKILL_NAME} skill at {older}, and TCC needs the 3.x line — it "
+                f"reads project.json and the contract checker, neither of which exists there.\n"
+                f"Install the 3.0 skill (`/plugin install autosound-tuning-next`) or point "
+                f"{SKILL_DIR_ENV} at a 3.x checkout.\n"
+                f"Your 2.x projects are unaffected: they stay on 2.x, and the way across is "
+                f"`rew_tool/state/migrate.py <old> --into <new>`."
+            )
         looked = "\n  ".join(str(path) for path in _candidates())
         raise VendorNotInitializedError(
             f"the {SKILL_NAME} skill was not found. Looked in:\n  {looked}\n"

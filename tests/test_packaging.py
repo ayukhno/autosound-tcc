@@ -163,10 +163,15 @@ def test_every_console_script_points_at_something_that_exists():
 # ---- what an INSTALLED copy can find (found by installing it, 2026-08-12) ----------------------
 
 
-def _fake_skill(root: Path) -> Path:
+def _fake_skill(root: Path, line: str = "3.x") -> Path:
+    """A skill on disk. `line="2.x"` builds one with only the files the older line had."""
+    from autosound_tcc.core import vendor_loader
+
     skill = root / "skills" / "autosound-tuning"
     (skill / "rew_tool").mkdir(parents=True)
-    (skill / "rew_tool" / "rew_api.py").write_text("# enough to be recognised\n")
+    names = ("rew_api.py",) if line == "2.x" else vendor_loader._REQUIRED_FILES
+    for name in names:
+        (skill / "rew_tool" / name).write_text("# enough to be recognised\n")
     return skill
 
 
@@ -349,3 +354,47 @@ def test_the_declared_sdk_names_match_the_ones_the_code_uses(module):
         f"{sorted(referenced - set(loaded.SDK_NAMES))}"
     )
     assert set(loaded.SDK_NAMES) <= exported, "declared but not an SDK export"
+
+
+def test_a_2x_skill_is_told_apart_from_no_skill_at_all(tmp_path, monkeypatch):
+    """TCC needs the 3.x line: it reads `project.json` and shells out to the contract checker,
+    neither of which exists in 2.x. The old check was "is `rew_api.py` there", which every version
+    back to v2.1 satisfies — so a 2.8.1 skill reported itself available and then failed one call
+    at a time: `load_project()` raised FileNotFoundError, diagnostics reported itself unavailable,
+    and the process writer offered to write schema-v1 files into a 3.0 project (2026-08-12).
+
+    This is reachable, not theoretical: the marketplace's default entry delivers 2.8.1, and TCC
+    installs separately.
+    """
+    from autosound_tcc.core import vendor_loader
+
+    old = _fake_skill(tmp_path / "home" / ".claude", line="2.x")
+    monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+
+    assert not vendor_loader.is_available(), "a 2.x skill is not a skill TCC can drive"
+    assert vendor_loader.older_skill_found() == old
+
+    with pytest.raises(vendor_loader.VendorNotInitializedError) as caught:
+        vendor_loader.load_project()
+
+    message = str(caught.value)
+    assert "2.x" in message and str(old) in message, message
+    assert "autosound-tuning-next" in message, "it names the install that fixes this"
+    assert "--into" in message, "and says 2.x projects are not stranded"
+
+
+def test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it(tmp_path, monkeypatch):
+    """Finding an old skill first must not stop the search — someone can easily have both."""
+    from autosound_tcc.core import vendor_loader
+
+    _fake_skill(tmp_path / "old", line="2.x")
+    good = _fake_skill(tmp_path / "home" / ".claude", line="3.x")
+    monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV,
+                       str(tmp_path / "old" / "skills" / "autosound-tuning"))
+
+    assert vendor_loader.is_available()
+    assert vendor_loader.skill_dir() == good
