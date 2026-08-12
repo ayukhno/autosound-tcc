@@ -448,3 +448,33 @@ def test_a_channel_that_does_not_name_its_tier_is_left_out_rather_than_guessed_i
     rows = ProjectView.from_dict(ledger, profile, channels=channels).groups[0].rows_ordered()
 
     assert [r.name for r in rows] == ["sw"]
+
+
+def test_slots_order_the_same_whether_the_processor_labels_them_letters_or_numbers():
+    """Helix labels its outputs A…L; other processors number them, and the counts run 12, 14, 16,
+    20 and up (user, 2026-08-12). Compared as text, `10` sorts before `2`, so a numbered rig would
+    read 1, 10, 11, 2 — the settings sheet out of order is the Arbiter typing into the wrong
+    output."""
+    from autosound_tcc.state.dsp_state import slot_key
+
+    assert sorted(["L", "A", "K", "B"], key=slot_key) == ["A", "B", "K", "L"]
+    assert sorted(["10", "2", "1", "20", "16"], key=slot_key) == ["1", "2", "10", "16", "20"]
+    # mixed labels, and a processor that combines them
+    assert sorted(["A2", "A10", "A1"], key=slot_key) == ["A1", "A2", "A10"]
+    # a channel with no slot goes last: the exceptions must not push the rig down the page
+    assert sorted(["B", None, "A"], key=slot_key) == ["A", "B", None]
+
+
+def test_a_twenty_output_rig_orders_in_slot_order():
+    """Nothing caps the channel count — `max_count` is a fact from the profile, not a limit in the
+    code. Helix alone runs 12, 14, 16 and 20; other processors go further."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+
+    rows = tuple(
+        GroupRow(id=f"ch{n}", name=f"ch{n}", raw={"gain_db": -1.0 * n}, slot=str(n))
+        for n in range(1, 21)
+    )
+    group = ProfileGroup(id="physical_outputs", label="Outputs", fields=("gain_db",),
+                         rows=rows, max_count=20)
+
+    assert [r.slot for r in group.rows_ordered()] == [str(n) for n in range(1, 21)]
