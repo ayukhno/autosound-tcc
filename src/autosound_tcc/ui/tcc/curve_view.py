@@ -160,7 +160,13 @@ class CurveView(QWidget):
         layout.setSpacing(6)
 
         self._hz_axis = LogHzAxis(orientation="bottom")
-        self._plot = pg.PlotWidget(background=theme.panel)
+        # `enableMenu=False` at CONSTRUCTION, not `setMenuEnabled(False)` afterwards. pyqtgraph
+        # builds the whole ViewBox menu eagerly — several QMenus, a QWidgetAction and a generated
+        # UI form each — and disabling it later leaves all of that built. Constructing and
+        # dropping enough of them segfaults the process inside `ViewBoxMenu.__init__`
+        # (reproduced in the suite, 2026-08-12). We do not use the menu at all: everything it
+        # offers is on the A/D/−/+ buttons, and in the dark theme it renders white-on-white.
+        self._plot = pg.PlotWidget(background=theme.panel, enableMenu=False)
         self._plot.showGrid(x=True, y=True, alpha=0.18)
         # No axis label under the ticks: it is a whole row of window spent centring one word, and
         # the readout wants that row (user, 2026-08-11). The unit moves to the right end of the
@@ -171,12 +177,7 @@ class CurveView(QWidget):
         # downsampled impulse loses the very onset the argument is about.
         self._plot.setDownsampling(auto=True, mode="peak")
         self._plot.setClipToView(True)
-        # pyqtgraph's own right-click menu is off. It offers this app nothing that the A/D/−/+
-        # buttons do not (and several things that mean nothing here — "Link Axis", "Auto Pan
-        # Only"), while being a native QMenu full of unstyled spin boxes that renders as
-        # white-on-white in the dark theme (user, 2026-08-11, with the picture). Removing the
-        # menu removes the whole class of problem rather than restyling somebody else's dialog.
-        self._plot.setMenuEnabled(False)
+        self._plot.setMenuEnabled(False)  # belt and braces; the menu was never built
         # pyqtgraph parks its own auto-range "A" in the bottom-left corner whenever the view is
         # not auto-ranged. We already have an A button that says what it does, and two of them --
         # one of which is an unlabelled square sitting on top of the data -- is one too many.

@@ -271,6 +271,37 @@ class CurveDialog(QDialog):
         return ([_peak_x(t) for t in usable], [t.name for t in usable],
                 list(_TRACE_TOKENS[:len(usable)]))
 
+    def reset(self, titles, markers=(), kind="impulse", available=()) -> None:
+        """Re-point an existing window at a new question, instead of building another one.
+
+        pyqtgraph's `PlotItem` builds several parentless QMenus and `QWidgetAction`s on every
+        construction, whatever `enableMenu` says, and constructing/destroying enough of them
+        segfaults the process from inside its own `__init__` — reproduced in the suite, and
+        reachable in the app by opening this window twenty times during a tune (2026-08-12).
+        One window, re-pointed, avoids the whole class rather than betting on the collector.
+        """
+        self._kind = kind_for(titles, kind)
+        self._markers = [float(m) for m in (markers or [])]
+        self._titles = list(titles)
+        options = list(available) or list(titles)
+        for index, combo in enumerate(self._pickers):
+            blocked = combo.blockSignals(True)
+            combo.clear()
+            if index:
+                combo.addItem(i18n.t("curveNoSecond"), "")
+            for title in options:
+                combo.addItem(title, title)
+            wanted = titles[index] if index < len(titles) else ""
+            at = combo.findData(wanted)
+            combo.setCurrentIndex(at if at >= 0 else 0)
+            combo.blockSignals(blocked)
+        at = self._kind_combo.findData(self._kind)
+        blocked = self._kind_combo.blockSignals(True)
+        self._kind_combo.setCurrentIndex(max(0, at))
+        self._kind_combo.blockSignals(blocked)
+        self._apply_kind()
+        self._reload()
+
     def apply_theme(self) -> None:
         """Passed through from the window: a plot does not repaint from a stylesheet."""
         self._view.apply_theme()

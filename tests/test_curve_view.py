@@ -29,9 +29,25 @@ def _impulse(peak_ms: float, n: int = 200, span: float = 8.0):
     return xs, ys
 
 
+#: Every view this module builds, kept alive for the run. pyqtgraph's `PlotItem` constructs
+#: parentless QMenus and QWidgetActions on every instance, and letting enough of them be collected
+#: segfaults the process from inside a LATER `PlotItem.__init__` — reproduced here, and the reason
+#: the app now reuses one curve window instead of building a second. Holding them is not tidiness;
+#: it is the only thing that makes this file's ~20 widgets safe to create.
+_KEEP: list = []
+
+
+def _dialog(*args, **kwargs) -> CurveDialog:
+    """Build a dialog and keep it alive for the run — see `_KEEP`."""
+    made = CurveDialog(*args, **kwargs)
+    _KEEP.append(made)
+    return made
+
+
 def _view() -> CurveView:
     _app()
     view = CurveView()
+    _KEEP.append(view)
     xl, yl = _impulse(4.52)
     xr, yr = _impulse(4.78)
     view.set_traces([Trace("w-L_01 (sw)", xl, yl), Trace("w-R_01 (sw)", xr, yr)])
@@ -120,7 +136,7 @@ class _FakeBridge:
 def test_the_dialog_plots_what_rew_holds_in_milliseconds():
     _app()
     bridge = _FakeBridge()
-    dialog = CurveDialog(["w-L_01 (sw)", "w-R_01 (sw)"], markers=[4.6], bridge=bridge)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], markers=[4.6], bridge=bridge)
     dialog._worker.wait(4000)
     dialog._worker.run()  # synchronously, so the result is in hand rather than raced
 
@@ -131,7 +147,7 @@ def test_a_single_model_marker_gets_a_second_one_to_drag():
     """The Arbiter's marker starts ON the model's: dragging away from it IS the disagreement, so
     every millimetre of movement is deliberate."""
     _app()
-    dialog = CurveDialog(["w-L_01 (sw)"], markers=[4.52], bridge=_FakeBridge())
+    dialog = _dialog(["w-L_01 (sw)"], markers=[4.52], bridge=_FakeBridge())
     dialog._worker.wait(4000)
 
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52))])
@@ -141,7 +157,7 @@ def test_a_single_model_marker_gets_a_second_one_to_drag():
 
 def test_rew_being_unreachable_is_a_message_not_a_crash():
     _app()
-    dialog = CurveDialog(["w-L_01 (sw)"], bridge=_FakeBridge(ConnectionRefusedError("no REW")))
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge(ConnectionRefusedError("no REW")))
     dialog._worker.wait(4000)
     dialog._worker.run()
 
@@ -154,7 +170,7 @@ def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
     at zero say nothing; markers on the peaks are a crude reading of the arrivals, which makes the
     delta meaningful before anything is touched — and an obvious guess invites correction."""
     _app()
-    dialog = CurveDialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
 
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
@@ -168,7 +184,7 @@ def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
 def test_the_pickers_let_the_argument_move_to_another_pair():
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
-    dialog = CurveDialog(every[:2], bridge=_FakeBridge(), available=every)
+    dialog = _dialog(every[:2], bridge=_FakeBridge(), available=every)
     dialog._worker.wait(4000)
 
     dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("m-L_01 (sw)"))
@@ -180,7 +196,7 @@ def test_the_pickers_let_the_argument_move_to_another_pair():
 def test_one_curve_is_a_legitimate_thing_to_argue_about():
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)"]
-    dialog = CurveDialog(every, bridge=_FakeBridge(), available=every)
+    dialog = _dialog(every, bridge=_FakeBridge(), available=every)
     dialog._worker.wait(4000)
 
     dialog._pickers[1].setCurrentIndex(0)  # the "— none —" row
@@ -227,7 +243,7 @@ def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
                 raise RuntimeError("HTTP Error 400: Bad Request")
             return super().impulse_response(mid)
 
-    dialog = CurveDialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_HalfBroken(), kind="impulse")
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_HalfBroken(), kind="impulse")
     dialog._worker.wait(4000)
     got = []
     dialog._worker.done.connect(got.append)
@@ -240,7 +256,7 @@ def test_the_impulse_opens_on_the_arrival_not_on_three_seconds_of_room():
     """A REW impulse spans −995 ms to +1735 ms. Auto-ranged, the two millimetres the argument is
     about are a vertical line."""
     _app()
-    dialog = CurveDialog(["w-L_01 (sw)"], bridge=_FakeBridge())
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
 
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52, n=4000, span=200.0))])

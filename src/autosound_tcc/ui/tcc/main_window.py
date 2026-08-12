@@ -1216,24 +1216,24 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(i18n.t("curveNothing"), level="warn")
             return
         available = sorted(set(titles) | set(self._meas_panel.known_titles()))
-        dialog = CurveDialog(
-            titles[:2], markers=markers or [], kind=kind, available=available, parent=self
-        )
-        # The reading lands in the composer rather than being sent: it is the Arbiter's statement,
-        # and they get to see and edit it before it goes out. Nothing is recorded behind them.
-        dialog.readingSent.connect(self._dialog.put_in_composer)
-        # Not modal, and above the window (user, 2026-08-11): the whole point is reading a curve
-        # WHILE talking about it, and a modal window makes you close the evidence to answer. Kept
-        # on `self` so Python does not collect it the moment this method returns.
-        dialog.setWindowFlag(Qt.WindowType.Tool, True)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        previous = getattr(self, "_curve_dialog", None)
-        if previous is not None:
-            try:
-                previous.close()
-            except RuntimeError:
-                pass  # already destroyed by WA_DeleteOnClose
-        self._curve_dialog = dialog
+        dialog = getattr(self, "_curve_dialog", None)
+        if dialog is None:
+            dialog = CurveDialog(
+                titles[:2], markers=markers or [], kind=kind, available=available, parent=self
+            )
+            # The reading lands in the composer rather than being sent: it is the Arbiter's
+            # statement, and they see and edit it before it goes out. Nothing is recorded behind
+            # them.
+            dialog.readingSent.connect(self._dialog.put_in_composer)
+            # Not modal, and above the window (user, 2026-08-11): the point is reading a curve
+            # WHILE talking about it, and a modal window makes you close the evidence to answer.
+            dialog.setWindowFlag(Qt.WindowType.Tool, True)
+            self._curve_dialog = dialog
+        else:
+            # ONE window, re-pointed. Building a second is not merely wasteful: pyqtgraph's
+            # PlotItem constructs parentless QMenus every time, and enough construct/destroy
+            # cycles segfault the process from inside its own `__init__` (2026-08-12).
+            dialog.reset(titles[:2], markers=markers or [], kind=kind, available=available)
         dialog.show()
         dialog.raise_()
 
