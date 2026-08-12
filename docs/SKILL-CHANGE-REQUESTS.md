@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046 and SCR-047 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1335,3 +1335,34 @@ not "old code rots", it is "a gate is easy to build one assertion short".
    and says why plain `check` is not it. The missing ledger needed separate detection:
    `check_ledgers` emits one row per preset directory, so a project with no `state/` emits none —
    absence of the row IS the missing ledger, which no name-based check can see.
+
+## SCR-048 — the last five from the audit
+
+**Status**: done (skill `1101c71`, 2026-08-12 — each pinned by a selftest case that reproduces it)
+**Target**: `rew_tool/state/state.py`, `rew_tool/project.py`, `rew_tool/state/process.py`,
+`scripts/.critic-env.example`, `SKILL.md`
+**TCC dependency**: none new. TCC benefits from all five as a reader; nothing it calls changed
+shape.
+
+**Detail**: the remainder of the 2026-08-12 audit, closed together.
+
+1. **One stray value hid a whole tier.** `tier_names` required a dict OF DICTS, so a single
+   `"comment": "temp note"` sitting beside the rows demoted `virtual_channels` to unknown
+   metadata — and `validate` never looks at unknown top-level keys. The snapshot validated, banked,
+   and then disappeared from `validate`, `diff_states` and `render` simultaneously: the
+   split-artifact failure `state/schema.md` names as the reason its invariants exist. A dict at top
+   level IS a tier now, and a bad row is `validate`'s problem.
+2. **`acoustics.flaws[]` was validated only by `add_flaw`.** Any other route to disk banked
+   anything. `validate` runs the same checker, so the rule belongs to the file rather than to one
+   function.
+3. **A plan step could name a phase outside the skeleton.** Written, counted by nothing, displayed
+   nowhere.
+4. **`scripts/.critic-env.example` had Critic and Advisor swapped.** Copying the skill's own
+   template configured the rubber-stamp Flash reviewer that `setup-critic-channel.md` warns about
+   two lines below its own table. Latent — it had not fired on the live project, which has no
+   `.critic-env` — but loaded.
+5. **SKILL.md contradicted itself on where the active phase lives**, twenty-three lines apart.
+
+The pattern across SCR-043…048 is worth keeping in one sentence: **every one of them was a rule
+that existed and was not checked.** Not missing rules — unenforced ones. That is the class an audit
+finds cheaply and a reader never does, because the rule reads as true.
