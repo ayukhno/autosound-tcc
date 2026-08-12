@@ -200,6 +200,21 @@ def test_an_installed_tcc_finds_the_skill_where_claude_code_put_it(tmp_path, mon
     assert vendor_loader.REW_TOOL_DIR == installed / "rew_tool", "the live attribute follows"
 
 
+def test_a_plugin_installed_skill_is_found(tmp_path, monkeypatch):
+    """Option A's front door: `/plugin install autosound-tuning` unpacks the skill under
+    `~/.claude/plugins/marketplaces/<marketplace>/skills/autosound-tuning`. If TCC cannot see it
+    there, the recommended install route produces a TCC that says the skill is missing."""
+    from autosound_tcc.core import vendor_loader
+
+    home = tmp_path / "home"
+    installed = _fake_skill(home / ".claude" / "plugins" / "marketplaces" / "autosound-tuning-skill")
+    monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout-here")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+
+    assert vendor_loader.skill_dir() == installed
+
+
 def test_the_env_override_outranks_everything(monkeypatch):
     """How a developer points TCC at a working tree of the skill, and how a packaged install can
     be told where the skill went instead of being made to guess."""
