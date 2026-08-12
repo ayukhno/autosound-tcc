@@ -1236,6 +1236,10 @@ class MainWindow(QMainWindow):
             dialog.set_delays_provider(
                 lambda: delay_bank.current_delays(self._view) if self._view is not None else {}
             )
+            # Which capture series the measurement panel is showing. Read fresh, like the ledger
+            # above: the Arbiter switches series in the panel while this window stays open.
+            dialog.set_session_provider(self._meas_panel.viewing_session_id)
+            self._meas_panel.sessionChanged.connect(lambda _id: dialog.session_switched())
             self._curve_dialog = dialog
         else:
             # ONE window, re-pointed. Building a second is not merely wasteful: pyqtgraph's

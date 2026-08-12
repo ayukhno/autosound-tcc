@@ -364,6 +364,7 @@ T: dict[Lang, dict[str, str]] = {
         "curveBankImpossible": "One or more of these takes a channel below zero, so the set as it \
 stands cannot be applied — say which reference to move instead.",
         "curveBankLabel": "delays read:",
+        "curveBankLabelIn": "delays read in {set}:",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveBankAskBtn": "analyse the set",
         "curveBankClear": "clear",
@@ -774,6 +775,7 @@ would check next. Nothing here is applied.",
         "curveBankImpossible": "Щось із цього виводить канал нижче нуля, тож набір у такому \
 вигляді не застосувати — скажи, яку опорну точку рухати натомість.",
         "curveBankLabel": "зчитані затримки:",
+        "curveBankLabelIn": "зчитані затримки в {set}:",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveBankAskBtn": "на аналіз",
         "curveBankClear": "очистити",

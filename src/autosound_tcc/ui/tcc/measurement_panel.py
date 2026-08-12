@@ -271,6 +271,10 @@ class MeasurementPanel(QWidget):
     # REW's own list of titles changed (a scan, or a read that named one). The window rebuilds the
     # checklist off this and runs the capture check; the panel itself decides nothing about them.
     titlesChanged = Signal()
+    #: The grid switched to another capture series. The curve window listens: its delay bank is
+    #: scoped by series, and a window left open while the panel moves would keep showing the
+    #: corrections of a series nobody is looking at any more (user, 2026-08-12).
+    sessionChanged = Signal(str)
 
     def __init__(self, preset_provider: Optional[Callable[[], str]] = None) -> None:
         """`preset_provider` returns the current preset name, so each capture method's saved order
@@ -494,6 +498,12 @@ class MeasurementPanel(QWidget):
         self._session_combo.blockSignals(False)
         self.show_session(self._viewing_id)
 
+    def viewing_session_id(self) -> str:
+        """Which capture series the grid is showing. The curve window scopes its delay bank by
+        this: switching back to an earlier series must bring that series' own corrections, not the
+        current one's (user, 2026-08-12)."""
+        return self._viewing_id
+
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
         (Read/Scan/assign-names enabled) and the title banner shows what to capture; any other is
@@ -510,6 +520,7 @@ class MeasurementPanel(QWidget):
             self._status = None
             self._status_label.setText("")
         self._viewing_id = self._shown_id = session_id
+        self.sessionChanged.emit(session_id)
         is_live = session_id == self._sessions[0].id
         if is_live:
             self._version.setText(i18n.tx(session.version))

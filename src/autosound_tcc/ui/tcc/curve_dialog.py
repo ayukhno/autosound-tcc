@@ -159,6 +159,10 @@ class CurveDialog(QDialog):
         #: state a total, which is honest; with it, it can say when a correction would take a
         #: channel below zero (user, 2026-08-12).
         self._delays_provider = None
+        #: `() -> capture-series id`. The bank is scoped by it: switching the measurement panel
+        #: back to an earlier series brings that series' own curves, so it must bring that series'
+        #: own corrections too (user, 2026-08-12).
+        self._session_provider = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -243,6 +247,27 @@ class CurveDialog(QDialog):
         self._delays_provider = provider
         self._sync_channel_delay()
 
+    def set_session_provider(self, provider) -> None:
+        self._session_provider = provider
+        self._render_bank()
+
+    def session_switched(self) -> None:
+        """The measurement panel moved to another capture series while this window was open.
+
+        Only the bank is re-read. The curves stay: the Arbiter may well be switching series in
+        order to compare, and yanking the plot out from under them would be the window deciding
+        what they are doing.
+        """
+        self._render_bank()
+
+    def _session(self) -> Optional[str]:
+        if not self._session_provider:
+            return None
+        try:
+            return self._session_provider() or None
+        except Exception:  # noqa: BLE001 — a curve window must not die on a panel read
+            return None
+
     def _current_delay_of(self, title: str):
         if not self._delays_provider or not title:
             return None
@@ -281,6 +306,7 @@ class CurveDialog(QDialog):
             delay_bank.put(
                 trace.name, self._view.delay_ms(index),
                 arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
+                session=self._session(),
             )
         self._sync_channel_delay()
         self._render_bank()
@@ -292,10 +318,16 @@ class CurveDialog(QDialog):
         w-L already carries +0.198 ms is what stops the same channel being read twice against two
         different partners and banked twice with different answers.
         """
-        bank = delay_bank.load()
+        bank = delay_bank.load(session=self._session())
         if bank:
             shown = ", ".join(f"{title} {ms:+.3f}" for title, ms in sorted(bank.items()))
-            self._bank_label.setText(f"{i18n.t('curveBankLabel')} {shown}")
+            series = self._session()
+            head = i18n.t("curveBankLabel")
+            if series:
+                # Named, because the same channel can carry a different correction in another
+                # series and a list with no series on it says which one is being looked at.
+                head = i18n.t("curveBankLabelIn").format(set=series)
+            self._bank_label.setText(f"{head} {shown}")
         else:
             self._bank_label.setText(i18n.t("curveBankEmpty"))
         self._bank_ask_btn.setEnabled(bool(bank))
@@ -317,14 +349,14 @@ class CurveDialog(QDialog):
         для запису)").
         """
         text = delay_bank.as_sentence(
-            delay_bank.load(), self._sample_rate_hz(), i18n.t, self._current_delay_of,
-            at=delay_bank.arrivals(),
+            delay_bank.load(session=self._session()), self._sample_rate_hz(), i18n.t, self._current_delay_of,
+            at=delay_bank.arrivals(session=self._session()),
         )
         if text:
             self.readingSent.emit(text)
 
     def _on_clear_bank(self) -> None:
-        delay_bank.clear()
+        delay_bank.clear(session=self._session())
         self._view.set_delay(0.0)
         self._render_bank()
 
@@ -400,7 +432,7 @@ class CurveDialog(QDialog):
         # A pair already argued about comes back with its answer on it. `set_traces` clears the
         # delay by design (a new pair is a new question); the bank is what makes coming BACK to a
         # pair different from meeting it for the first time.
-        bank = delay_bank.load()
+        bank = delay_bank.load(session=self._session())
         # Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros
         # they pass through on the way would erase what they are restoring.
         self._restoring = True

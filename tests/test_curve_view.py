@@ -974,3 +974,73 @@ def test_an_older_bank_of_bare_numbers_still_reads():
 
     assert delay_bank.load() == {"w-L_01 (sw)": 0.198}
     assert delay_bank.arrivals() == {}
+
+
+def test_each_capture_series_keeps_its_own_corrections():
+    """User, 2026-08-12: switching back to an earlier series shows its own curves, so it has to
+    show its own corrections — "там все своє і криві і корекції"."""
+    from autosound_tcc.core import delay_bank
+
+    series = ["cap_002"]
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay(0.26)
+
+    series[0] = "cap_001"
+
+    assert delay_bank.load(session="cap_001") == {}, "another series, another answer"
+    assert delay_bank.load(session="cap_002") == {"w-L_01 (sw)": 0.26}
+    dialog._render_bank()
+    assert "cap_001" in dialog._bank_label.text() or i18n.t("curveBankEmpty") in \
+        dialog._bank_label.text()
+
+
+def test_clearing_one_series_leaves_the_others_alone():
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.26, session="cap_001")
+    delay_bank.put("w-L_02 (sw)", 0.31, session="cap_002")
+
+    delay_bank.clear(session="cap_002")
+
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.26}
+
+
+def test_a_reading_banked_before_series_scoping_shows_under_every_series():
+    """It was somebody's afternoon. Hiding it from all of them would be worse than showing it in
+    one too many."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    project_settings.set_value(config.tcc_dir(), delay_bank.KEY, {"w-L_01 (sw)": 0.198})
+
+    assert delay_bank.load(session="cap_001") == {"w-L_01 (sw)": 0.198}
+    assert delay_bank.load(session="cap_009") == {"w-L_01 (sw)": 0.198}
+
+    delay_bank.put("w-L_01 (sw)", 0.2, session="cap_001")
+
+    assert delay_bank.load(session="cap_009") == {}, "touching it settles which series it is in"
+
+
+def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
+    """The Arbiter may be switching in order to compare; yanking the curves away would be the
+    window deciding what they are doing."""
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.26, session="cap_001")
+    series = ["cap_002"]
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    plotted = [t.name for t in dialog._view._traces]
+    assert i18n.t("curveBankEmpty") in dialog._bank_label.text()
+
+    series[0] = "cap_001"
+    dialog.session_switched()
+
+    assert "cap_001" in dialog._bank_label.text() and "+0.260" in dialog._bank_label.text()
+    assert [t.name for t in dialog._view._traces] == plotted

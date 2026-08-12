@@ -14,9 +14,15 @@ whether the picture is coherent (a sub 20 ms behind everything else is a measure
 tuning), and the Arbiter's job is to decide what to do about it. Two more gates stand between this
 and any hardware, and both of them are somebody else's (see `project_tcc_safety_gates`).
 
-Keyed by MEASUREMENT TITLE, not by channel. Those are nearly the same thing and the difference
-matters: a delay read off `w-L_02` was read off that capture, at that crossover, with that gain.
-Folding it onto "w-L" would silently carry a number from round 2 into round 5.
+Keyed by MEASUREMENT TITLE **within a capture series**. Two scopes because neither alone is
+enough: a delay read off `w-L_02` was read off that capture, at that crossover, with that gain, so
+folding it onto "w-L" would carry a number from round 2 into round 5 — and a series is exactly
+what the ledger version cannot tell apart from another pass at the same config (SCR-034), so two
+passes can hold the same titles. Switching the measurement panel back to an earlier series brings
+that series' own curves; it has to bring that series' own corrections with them (user, 2026-08-12).
+
+An entry written before the scope existed carries no series and is shown under every one, rather
+than disappearing from all of them. It picks up a series the first time it is touched.
 
 Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 """
@@ -31,7 +37,7 @@ from autosound_tcc.core import config, project_settings
 KEY = "curve_delays"
 
 
-def _entries(tcc_dir: Optional[Path] = None) -> dict[str, dict]:
+def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, dict]:
     """`{title: {"ms": delay, "at": measured arrival or None}}`.
 
     Two shapes are read: a bare number (what the first version wrote) and the object. The arrival
@@ -44,9 +50,11 @@ def _entries(tcc_dir: Optional[Path] = None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for title, value in raw.items():
         if isinstance(value, dict):
-            ms, at = value.get("ms"), value.get("at")
+            ms, at, series = value.get("ms"), value.get("at"), value.get("set")
         else:
-            ms, at = value, None
+            ms, at, series = value, None, None
+        if session is not None and series is not None and str(series) != session:
+            continue
         try:
             ms = float(ms)
         except (TypeError, ValueError):
@@ -57,26 +65,30 @@ def _entries(tcc_dir: Optional[Path] = None) -> dict[str, dict]:
             at = float(at) if at is not None else None
         except (TypeError, ValueError):
             at = None
-        out[str(title)] = {"ms": ms, "at": at}
+        out[str(title)] = {"ms": ms, "at": at, "set": None if series is None else str(series)}
     return out
 
 
-def load(tcc_dir: Optional[Path] = None) -> dict[str, float]:
-    """`{measurement title: ms}`, worst case empty. Never raises: a hand-edited file is "nothing
-    banked yet", not a dead curve window."""
-    return {title: entry["ms"] for title, entry in _entries(tcc_dir).items()}
+def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, float]:
+    """`{measurement title: ms}` for one capture series, worst case empty. Never raises: a
+    hand-edited file is "nothing banked yet", not a dead curve window."""
+    return {title: entry["ms"] for title, entry in _entries(tcc_dir, session).items()}
 
 
-def arrivals(tcc_dir: Optional[Path] = None) -> dict[str, float]:
+def arrivals(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, float]:
     """`{title: measured arrival in ms}` for the entries that have one."""
     return {
-        title: entry["at"] for title, entry in _entries(tcc_dir).items()
+        title: entry["at"] for title, entry in _entries(tcc_dir, session).items()
         if entry["at"] is not None
     }
 
 
 def put(
-    title: str, ms: float, tcc_dir: Optional[Path] = None, arrival_ms: Optional[float] = None
+    title: str,
+    ms: float,
+    tcc_dir: Optional[Path] = None,
+    arrival_ms: Optional[float] = None,
+    session: Optional[str] = None,
 ) -> dict[str, float]:
     """Bank one reading, or forget it when it goes back to zero.
 
@@ -95,16 +107,32 @@ def put(
     if round(float(ms), 4):
         was = entries.get(title) or {}
         at = arrival_ms if arrival_ms is not None else was.get("at")
-        entries[title] = {"ms": round(float(ms), 4),
-                          "at": None if at is None else round(float(at), 4)}
+        entries[title] = {
+            "ms": round(float(ms), 4),
+            "at": None if at is None else round(float(at), 4),
+            "set": session if session is not None else was.get("set"),
+        }
     else:
         entries.pop(title, None)
     project_settings.set_value(tcc_dir, KEY, entries or None)
     return {name: entry["ms"] for name, entry in entries.items()}
 
 
-def clear(tcc_dir: Optional[Path] = None) -> None:
-    project_settings.set_value(tcc_dir or config.tcc_dir(), KEY, None)
+def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None:
+    """Forget one capture series' readings, or all of them when no series is named.
+
+    Scoped, because the button sits under a window showing one series and a button that also wiped
+    last week's would be doing something nobody asked for.
+    """
+    tcc_dir = tcc_dir or config.tcc_dir()
+    if session is None:
+        project_settings.set_value(tcc_dir, KEY, None)
+        return
+    keep = {
+        title: entry for title, entry in _entries(tcc_dir).items()
+        if entry["set"] is not None and entry["set"] != session
+    }
+    project_settings.set_value(tcc_dir, KEY, keep or None)
 
 
 def as_sentence(
