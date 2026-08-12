@@ -13,6 +13,8 @@ import pytest
 
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import measurement_view, process_view
+
+from tests import _intake
 from autosound_tcc.state import measurement_view as mv
 
 pytestmark = pytest.mark.skipif(
@@ -182,6 +184,7 @@ def test_off_convention_is_empty_without_a_glossary(tmp_path, monkeypatch):
 def _record_change(project, impact, what="driver swapped"):
     """A `config_change` written the way the skill writes it, through its own modules."""
     process_module = vendor_loader.load_process()
+    _intake.seed(project)
     proc = process_module.Process(str(project / "process"))
     proc.enter_phase("0")
     proj_module = vendor_loader.load_project()
@@ -222,6 +225,7 @@ def _round(project, **fields):
     from autosound_tcc.state import process_view
 
     module = vendor_loader.load_process()
+    _intake.seed(project)
     process = module.Process(str(process_view.process_dir(project)))
     process.enter_phase("0")
     process.start_capture(fields.pop("version", 1), expected=fields.pop("expected", ()))
@@ -283,6 +287,7 @@ def test_a_capture_that_failed_the_check_is_not_done(project):
     from autosound_tcc.state import process_view
 
     module = vendor_loader.load_process()
+    _intake.seed(project)
     process = module.Process(str(process_view.process_dir(project)))
     process.enter_phase("0")
     process.start_capture(1, expected=["sw_1 (sw)"], step="0.1")
@@ -305,6 +310,7 @@ def test_a_capture_that_passed_reads_as_done(project):
     from autosound_tcc.state import process_view
 
     module = vendor_loader.load_process()
+    _intake.seed(project)
     process = module.Process(str(process_view.process_dir(project)))
     process.enter_phase("0")
     process.start_capture(1, expected=["sw_1 (sw)"], step="0.1")

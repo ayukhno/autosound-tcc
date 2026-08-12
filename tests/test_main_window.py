@@ -16,6 +16,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
+
+from tests import _intake  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, main_window  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
@@ -448,10 +450,12 @@ def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     from autosound_tcc.core import vendor_loader
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    # A real session reaches phase 2 through intake and phase 0, and both now hold: the machine
+    # files have to exist (2026-08-12) and a target has to be recorded (SCR-036). This test starts
+    # mid-tune, so it seeds what a real one would have produced by then.
+    _intake.seed(tmp_path)
     process = vendor_loader.load_process().Process(str(tmp_path / "process"))
-    # A real session only reaches phase 2 through phase 0, which now refuses to be left without a
-    # recorded target (SCR-036). This test starts mid-tune, so it records one first.
-    process.set_target("FULL", "EPY")
+    _intake.open_phases(process)
     process.enter_phase("2")
     proj = vendor_loader.load_project().Project(str(tmp_path))
     proj.save(proj.load())

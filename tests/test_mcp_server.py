@@ -21,6 +21,8 @@ from autosound_tcc.core.mcp_server import (
     write_mcp_config,
 )
 from autosound_tcc.core.session_registry import SessionRegistry
+
+from tests import _intake
 from autosound_tcc.core.signal_bus import NOT_VISIBLE, PARAM_EDIT_MODE, SignalBus
 
 
@@ -607,6 +609,7 @@ def test_the_reviewer_says_who_decided_it(tmp_path):
 def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
     """SCR-034 through the surface the model actually has: without these it would have to shell out
     to `process.py` for the one kind of process write that has no tool."""
+    _intake.seed(tmp_path)  # phase 0 does not start on a folder intake never touched
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
 
@@ -651,6 +654,7 @@ def test_skipping_a_capture_without_a_reason_is_refused(tmp_path):
 def test_an_arbiters_ruling_is_recorded_as_the_answer_not_as_prose(tmp_path):
     """Their half of the conversation was in no machine file: the only trace of an answer was a
     hand-typed evidence string, so a constraint they set was invisible to the next session."""
+    _intake.seed(tmp_path)
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
 

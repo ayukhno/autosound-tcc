@@ -13,6 +13,8 @@ import pytest
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import process_view
 
+from tests import _intake
+
 pytestmark = pytest.mark.skipif(
     not vendor_loader.is_available(), reason="rew_tool submodule not checked out"
 )
@@ -40,7 +42,9 @@ def process(project):
     snapshot.parent.mkdir(parents=True, exist_ok=True)
     snapshot.write_text("{}", encoding="utf-8")
     module = vendor_loader.load_process()
+    _intake.seed(project)  # the phase -1 gate is real: a fixture passes it like anyone else
     process = module.Process(str(process_view.process_dir(project)))
+    _intake.open_phases(process)
     process.set_target("FULL", "EPY")
     return process
 
