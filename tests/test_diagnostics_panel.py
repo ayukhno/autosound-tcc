@@ -203,3 +203,45 @@ def test_the_headline_counts_tccs_own_problems_too(tmp_path, monkeypatch):
 
     assert dialog._verdict.text() != i18n.t("diagOk"), "a red row of its own making counts"
     assert "1" in dialog._verdict.text()
+
+
+def test_a_problem_in_the_skills_files_can_be_forwarded_but_never_fixed_here(monkeypatch):
+    """D-6: those files have an owner and it is not TCC. What TCC can do is carry the checker's
+    own words to the thing that may write — and then re-check (user, 2026-08-12)."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    sent: list[str] = []
+    dialog.askRequested.connect(sent.append)
+
+    dialog.set_report(_report())
+    rows = dialog.findChildren(_AskRow)
+    assert rows, "every issue the checker names is forwardable"
+
+    next(r for r in rows).findChild(QPushButton).click()
+
+    assert len(sent) == 1
+    # The checker's own words go with it, and so does the file it is about.
+    assert "unknown EQ type 'XX'" in sent[0] or "missing -- run intake/onboarding" in sent[0]
+    assert "contract.py check" in sent[0], "it says how the claim will be checked"
+
+
+def test_asking_records_the_time_and_never_claims_success(monkeypatch):
+    """The button reports that it asked. The next check reports the truth — a button that painted
+    the row green would be reporting on somebody else's work."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog.set_report(_report())
+
+    first = dialog.findChildren(_AskRow)[0]
+    first.findChild(QPushButton).click()
+
+    # Still reported by the checker, so the row is still there — now saying it was asked about.
+    text = _texts(dialog)
+    assert i18n.t("diagAgoNow") in text
+    assert i18n.t("diagOk") not in text

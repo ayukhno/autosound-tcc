@@ -1201,6 +1201,10 @@ class MainWindow(QMainWindow):
         if self._diag_dialog is None:
             self._diag_dialog = DiagnosticsDialog(self)
             self._diag_dialog.refreshRequested.connect(self._start_contract_check)
+            # The other half of D-6: TCC cannot write the skill's files, so it carries the
+            # checker's finding to the thing that can. Into the composer, not out — the Arbiter
+            # reads it before it is sent, like every other statement of theirs.
+            self._diag_dialog.askRequested.connect(self._dialog.put_in_composer)
             self._diag_dialog.set_report(self._contract_report)
         elif self._contract_report is not None:
             self._diag_dialog.set_report(self._contract_report)

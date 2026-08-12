@@ -14,6 +14,7 @@ and `set_report()` brings the answer back.
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -48,6 +49,52 @@ def _dot_status(entry: dict) -> str:
     return "done"
 
 
+def request_text(subject: str, issue: str) -> str:
+    """The message that goes to the session about a problem TCC may not touch.
+
+    Exact on purpose. "Please fix the flaw map" is a sentence a model answers with a sentence; the
+    file, the checker's own words, and what "fixed" means are what let it answer with a write. And
+    it goes into the COMPOSER, not out — the Arbiter reads it, edits it if it is wrong, and sends
+    it. Nothing here asks a model to change a project behind them.
+    """
+    return i18n.t("diagAskText").format(subject=subject, issue=issue)
+
+
+class _AskRow(QWidget):
+    """One problem in the skill's own files, with an offer to forward it to the session.
+
+    No Fix button: these files have an owner and it is not TCC (D-6). What TCC can do is carry the
+    checker's finding to the thing that may write, and then — the half that matters — re-check and
+    say whether it actually went away. The button never claims success; it records that it asked.
+    """
+
+    ask = Signal(str)
+
+    def __init__(self, subject: str, issue: str, asked_at: Optional[float]) -> None:
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 1, 12, 1)
+        layout.setSpacing(8)
+        text = _note(str(issue))
+        layout.addWidget(text, stretch=1)
+        if asked_at is not None:
+            # Still here, and we already asked. Saying WHEN is the whole verification: a button
+            # that reported success would be reporting on somebody else's work.
+            stale = _note(i18n.t("diagAskedAgo").format(ago=_ago_minutes(asked_at)))
+            stale.setProperty("class", "kv-warn")
+            layout.addWidget(stale)
+        button = QPushButton(i18n.t("diagAsk"))
+        button.setProperty("class", "reason-btn")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(lambda: self.ask.emit(request_text(subject, issue)))
+        layout.addWidget(button)
+
+
+def _ago_minutes(when: float) -> str:
+    minutes = max(0, int((time.time() - when) // 60))
+    return i18n.t("diagAgoNow") if minutes < 1 else i18n.t("diagAgoMin").format(n=minutes)
+
+
 class _FileRow(QWidget):
     """One machine file: status dot, path, schema version, and its issues underneath."""
 
@@ -71,9 +118,9 @@ class _FileRow(QWidget):
         head.addWidget(version)
         outer.addLayout(head)
 
-        for issue in entry.get("issues") or []:
-            outer.addWidget(_note(str(issue)))
-        if not entry.get("exists") and not (entry.get("issues") or []):
+        self.issues = list(entry.get("issues") or [])
+        self.subject = str(entry.get("file", "?"))
+        if not entry.get("exists") and not self.issues:
             outer.addWidget(_note(i18n.t("diagMissing")))
 
 
@@ -138,11 +185,17 @@ class DiagnosticsDialog(QDialog):
     """Non-modal so it can stay open beside the tune it describes."""
 
     refreshRequested = Signal()
+    #: Text for the dialog composer — a problem in the skill's files, forwarded to the session.
+    askRequested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._report: Optional[ContractReport] = None
         self._checks: list = []
+        #: `subject::issue` -> when it was last forwarded. In memory on purpose: the durable
+        #: record of the ask is the message in the transcript, and this only decides whether the
+        #: row says "still here, asked N minutes ago".
+        self._asked: dict[str, float] = {}
         self.setModal(False)
         self.setMinimumSize(560, 420)
         self.setProperty("class", "fb-card")
@@ -205,6 +258,18 @@ class DiagnosticsDialog(QDialog):
         self._refresh_btn.setEnabled(report is not None)
         self._render()
 
+    def _ask_row(self, subject: str, issue: str) -> QWidget:
+        row = _AskRow(subject, issue, self._asked.get(f"{subject}::{issue}"))
+        row.ask.connect(lambda text, key=f"{subject}::{issue}": self._on_ask(key, text))
+        return row
+
+    def _on_ask(self, key: str, text: str) -> None:
+        """Remember WHEN, then hand the text to the composer. The next re-check is what says
+        whether it worked; this only ever claims to have asked."""
+        self._asked[key] = time.time()
+        self.askRequested.emit(text)
+        self._render()
+
     def _on_fixed(self, message: str) -> None:
         """Re-render so the row that was fixed says so itself, rather than only a banner claiming
         it. A panel whose contents disagree with its own message is a panel nobody believes."""
@@ -259,15 +324,20 @@ class DiagnosticsDialog(QDialog):
 
         self._body_layout.addWidget(_section_title(i18n.t("diagFiles")))
         for entry in report.files:
-            self._body_layout.addWidget(_FileRow(entry))
+            row = _FileRow(entry)
+            self._body_layout.addWidget(row)
+            for issue in row.issues:
+                self._body_layout.addWidget(self._ask_row(row.subject, issue))
 
         cross = report.cross_checks or {}
         cross_notes = list(cross.get("glossary_vs_ledgers") or []) + list(
             cross.get("tiers_vs_profile") or []
         )
         self._body_layout.addWidget(_section_title(i18n.t("diagCross")))
-        for note in cross_notes or [i18n.t("diagNoIssues")]:
-            self._body_layout.addWidget(_note(f"⚠ {note}" if cross_notes else note))
+        for note in cross_notes:
+            self._body_layout.addWidget(self._ask_row(i18n.t("diagCross"), note))
+        if not cross_notes:
+            self._body_layout.addWidget(_note(i18n.t("diagNoIssues")))
         self._body_layout.addWidget(_note(_rew_line(report)))
 
         # TCC's own setup, after the project's. Separate section because it is a different
