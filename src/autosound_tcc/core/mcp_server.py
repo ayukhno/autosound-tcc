@@ -144,6 +144,21 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def configured_critic_model(project_dir: Path) -> str:
+    """The reviewer this project's footer is set to, in the CLI's own vocabulary — or "".
+
+    Through `model_choices.resolve`, so a machine-level alias is honoured here exactly as it is in
+    the picker; two answers to "which model" is how they came to disagree in the first place.
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    if not key:
+        return ""
+    resolved = model_choices.resolve(model_choices.critic_choices([]), key)
+    if resolved.choice is not None:
+        return resolved.choice.model
+    return resolved.key.partition(":")[2] or resolved.key
+
+
 @dataclass(frozen=True)
 class ConfirmRequest:
     """A mutation waiting on the Arbiter's button. This *is* the 🟡→🟢 attest step."""
@@ -743,12 +758,17 @@ def build_server(
         for them to paste into any web chat and bring the reply back by hand; `error` explains why
         nothing ran. Never present `clipboard` as a critique — there isn't one yet.
         """
+        # The Arbiter's pick is the default. Without this the call went out with NO model, the
+        # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
+        # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"
+        # while the UI showed `gemini-3.1-pro-high` (2026-08-12). The substitution happened BEFORE
+        # any fallback; there was nothing to fall back from.
         result = await asyncio.to_thread(
             critic.run,
             package,
             project_dir=project_dir,
             trace_path=trace_path or None,
-            model=model or None,
+            model=model or configured_critic_model(project_dir) or None,
         )
         critic.log_call(result, None, project_dir)
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The

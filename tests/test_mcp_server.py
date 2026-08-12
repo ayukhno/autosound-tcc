@@ -774,3 +774,66 @@ def test_an_unknown_curve_kind_falls_back_to_the_impulse_rather_than_failing(tmp
     asyncio.run(mcp.call_tool("show_curves", {"titles": ["sub_01 (sw)"], "kind": "waterfall"}))
 
     assert bridge.shown[-1]["kind"] == "impulse"
+
+
+def test_call_critic_defaults_to_the_model_the_footer_is_set_to(tmp_path, monkeypatch):
+    """TCC's picker steered nothing: with no explicit model the call went out with none, the
+    reviewer script used its own built-in, and the session's routing test caught the UI showing
+    `gemini-3.1-pro-high` while the API was called with `gemini-3.6-flash-high` (2026-08-12). The
+    substitution happened BEFORE any fallback — there was nothing to fall back from."""
+    from autosound_tcc.core import config, critic, mcp_server, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "_CLI_CACHE",
+                        {"agy": [model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
+                                                      label="Gemini 3.1 Pro (High)",
+                                                      provider="google")]})
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    assert mcp_server.configured_critic_model(tmp_path) == "gemini-3.1-pro-high"
+
+    seen = {}
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, **kw):
+        seen["model"] = model
+        return critic.CriticResult(critic.MODE_ERROR, "", None, "critic", "stub", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
+
+    assert seen["model"] == "gemini-3.1-pro-high", "the Arbiter's pick must reach the call"
+
+
+def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
+    from autosound_tcc.core import config, critic, mcp_server, project_settings
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+    seen = {}
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, **kw):
+        seen["model"] = model
+        return critic.CriticResult(critic.MODE_ERROR, "", None, "critic", "stub", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x", "model": "gemini-9-pro-high"}))
+
+    assert seen["model"] == "gemini-9-pro-high"
+
+
+def test_no_configured_critic_leaves_the_scripts_own_default_alone(tmp_path, monkeypatch):
+    """Empty means "nothing chosen", not "choose for them"."""
+    from autosound_tcc.core import critic, mcp_server
+
+    seen = {}
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, **kw):
+        seen["model"] = model
+        return critic.CriticResult(critic.MODE_ERROR, "", None, "critic", "stub", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))
+
+    assert seen["model"] is None

@@ -645,6 +645,23 @@ def recommended(choice: Choice, critic: bool = False) -> bool:
     return True
 
 
+def reduced_effort(choice: Choice, critic: bool = False) -> bool:
+    """Right vendor, right tier, wrong effort — a Pro that is only Pro on the box.
+
+    Its own question because the absence of a bold row is not an explanation. `agy` publishes Pro
+    at several efforts, and "Pro (Low)" sitting unbolded next to "Pro (High)" reads as a bug
+    (user, 2026-08-12). It is not: a low-effort reviewer agrees with you, which is the one thing a
+    reviewer must not do — but the list has to SAY that rather than imply it by weight.
+    """
+    if not critic:
+        return False
+    vendor, tier = RECOMMENDED["critic"]
+    if vendor_of(choice) != vendor or tier_of(choice) != tier:
+        return False
+    name = f"{choice.model} {choice.label}".lower()
+    return any(marker in name for marker in RECOMMENDED_CRITIC_EXCLUDES)
+
+
 def recommendation_available(entries: list[Choice], critic: bool = False) -> bool:
     """Does the recommended CLASS match anything this machine can actually offer.
 

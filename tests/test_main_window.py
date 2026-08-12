@@ -636,7 +636,13 @@ def test_every_entry_says_which_route_it_takes(monkeypatch):
     assert labels, "the picker should have entries to label"
     assert all(label.split(" · ")[0] in ("SDK", "OMP", "AGY", "CODEX") for label in labels), labels
     assert any(label.startswith("OMP · ") for label in labels)
-    assert any(i18n.t("modelRecommended") in label for label in labels)
+    # The recommendation is WEIGHT now, not words: the badge repeated what the bold already said
+    # (user, 2026-08-12), so the assertion moved to the font role.
+    from PySide6.QtCore import Qt as _Qt
+
+    fonts = [window._ai_main_combo.itemData(i, _Qt.ItemDataRole.FontRole)
+             for i in range(window._ai_main_combo.count())]
+    assert any(font is not None and font.bold() for font in fonts)
 
 
 def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch):
@@ -1983,3 +1989,45 @@ def test_the_recommended_class_is_bold_and_a_new_version_of_it_too(tmp_path):
     bold = [combo.itemData(i, Qt.ItemDataRole.FontRole) for i in range(combo.count())]
     assert bold[0] is None, "Flash is not the recommended class"
     assert bold[1] is not None and bold[1].bold()
+
+
+def test_the_red_field_clears_when_a_real_model_is_picked(tmp_path):
+    """It was set once at fill time, so a combo that had ever been red STAYED red through every
+    later pick — the Arbiter chose a model that exists and the field went on saying it did not
+    (user, 2026-08-12)."""
+    from PySide6.QtWidgets import QComboBox
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc.main_window import _mark_missing
+
+    _app()
+    combo = QComboBox()
+    entries = [mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5",
+                         provider="anthropic")]
+    MainWindow._fill_combo(combo, entries, "agy:gemini-3.1-pro-high", critic=True)
+    assert "is-missing" in str(combo.property("class"))
+
+    combo.setCurrentIndex(combo.findData("sdk:claude-opus-5"))
+    _mark_missing(combo, entries)
+
+    assert "is-missing" not in str(combo.property("class"))
+
+
+def test_a_reduced_effort_pro_says_why_it_is_not_bold(tmp_path):
+    """"Pro (Low)" unbolded beside "Pro (High)" reads as a bug. It is not — but an absence
+    explains nothing, so the row says it."""
+    from PySide6.QtWidgets import QComboBox
+    from autosound_tcc.core import model_choices as mc
+
+    _app()
+    combo = QComboBox()
+    entries = [
+        mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
+                  provider="google"),
+        mc.Choice(harness="agy", model="gemini-3.1-pro-low", label="Gemini 3.1 Pro (Low)",
+                  provider="google"),
+    ]
+
+    MainWindow._fill_combo(combo, entries, "", critic=True)
+
+    assert i18n.t("modelRecommended") not in combo.itemText(0), "bold says it; words repeat it"
+    assert i18n.t("modelLowEffort") in combo.itemText(1)

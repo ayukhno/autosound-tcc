@@ -280,6 +280,20 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
+def _mark_missing(combo, entries) -> None:
+    """Red when the current choice is not among `entries`, plain when it is.
+
+    Recomputed on every selection change, not only when the list is rebuilt. It was set once at
+    fill time, so a combo that had ever been red STAYED red through every later pick — the Arbiter
+    chose a model that exists and the field went on claiming it did not (user, 2026-08-12).
+    """
+    current = str(combo.currentData() or "")
+    missing = bool(current) and not any(choice.key == current for choice in entries)
+    combo.setProperty("class", "mini-select" + (" is-missing" if missing else ""))
+    combo.style().unpolish(combo)
+    combo.style().polish(combo)
+
+
 def _cap_combo_width(combo) -> None:
     """Stop a combo's WIDEST MENU ROW from setting the width of its closed box.
 
@@ -2133,6 +2147,7 @@ class MainWindow(QMainWindow):
 
     def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
+        _mark_missing(self._ai_critic_combo, self._critic_choices)
         self._refresh_critic_warning()
         choice = self._critic_choice()
         if choice is None:
@@ -2484,10 +2499,12 @@ class MainWindow(QMainWindow):
         combo.clear()
         for choice in entries:
             notes = []
-            if model_choices.recommended(choice, critic=critic):
-                # First note, because it is the one a first-time Arbiter needs: two hundred rows
-                # and one combination the method has actually been driven with end to end.
-                notes.append(i18n.t("modelRecommended"))
+            # No "recommended pair" words any more: the row is BOLD, and a badge that repeats
+            # what the weight already says is width spent twice (user, 2026-08-12). The reduced-
+            # effort sibling is the exception — there the absence of bold is the whole message, and
+            # an absence explains nothing.
+            if model_choices.reduced_effort(choice, critic=critic):
+                notes.append(i18n.t("modelLowEffort"))
             if choice.free:
                 notes.append(i18n.t("modelFree"))
             if critic and not model_choices.critic_reaches(choice):
@@ -2519,7 +2536,7 @@ class MainWindow(QMainWindow):
 
         index = combo.findData(wanted) if wanted else -1
         missing = bool(wanted) and index < 0
-        if missing:
+        if missing:  # noqa: SIM102 - the branches below are three different states, not one
             # The chosen model is not on offer here. Shown in red and still selected, rather than
             # dropped: a picker that silently moves to another row is how a project came to be
             # reviewed by a model nobody chose, and how three permanent aliases got written
@@ -2534,16 +2551,15 @@ class MainWindow(QMainWindow):
             combo.insertItem(0, i18n.t("modelUnchosen"), "")
             index = 0
         combo.setCurrentIndex(index if index >= 0 else 0)
-        combo.setProperty("class", "mini-select" + (" is-missing" if missing else ""))
-        combo.style().unpolish(combo)
-        combo.style().polish(combo)
         combo.blockSignals(blocked)
+        _mark_missing(combo, entries)
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:
         key = self._ai_main_combo.currentData()
         return model_choices.resolve(self._model_choices, str(key)).choice
 
     def _on_generator_model_changed(self, _index: int) -> None:
+        _mark_missing(self._ai_main_combo, self._model_choices)
         # Changing the Generator can create (or clear) the same-vendor warning on the reviewer:
         # it is a property of the PAIR, not of either picker alone.
         self._refresh_critic_warning()
