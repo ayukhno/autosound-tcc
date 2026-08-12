@@ -25,8 +25,9 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QLocale, Qt, Signal
 from PySide6.QtWidgets import (
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -219,6 +220,25 @@ class CurveView(QWidget):
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
+        # Shift the second trace in time. A spin box rather than buttons: 0.198 ms is typed as
+        # often as it is nudged, and the step matches the finest a DSP usually offers.
+        self._shift_label = QLabel(i18n.t("curveShift"))
+        self._shift_label.setProperty("class", "phead-sub")
+        row.addWidget(self._shift_label)
+        self._shift_box = QDoubleSpinBox()
+        self._shift_box.setProperty("class", "mini-select")
+        self._shift_box.setDecimals(3)
+        self._shift_box.setSingleStep(0.01)
+        self._shift_box.setRange(-50.0, 50.0)
+        self._shift_box.setSuffix(" ms")
+        self._shift_box.setFixedWidth(96)
+        # C locale: everything else in this window prints a dot, and a box that reads "0,198" next
+        # to a readout saying "0.198" makes the reader check whether they are the same number.
+        self._shift_box.setLocale(QLocale(QLocale.Language.C))
+        self._shift_box.valueChanged.connect(self.set_shift)
+        attach_tip(self._shift_box, i18n.t("curveShiftTip"))
+        row.addWidget(self._shift_box)
+
         for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
             button = QPushButton(_MODE_LABELS[mode])
             button.setProperty("class", "zoom-btn")
@@ -256,6 +276,7 @@ class CurveView(QWidget):
         self._markers: list[pg.InfiniteLine] = []
         self._h_markers: list[pg.InfiniteLine] = []
         self._marker_tokens: list[str] = []
+        self._shift_ms = 0.0
         self._crossing_dots = None
         self._syncing = False
         self._marker_names: list[str] = []
@@ -291,6 +312,45 @@ class CurveView(QWidget):
 
     # ---- content ---------------------------------------------------------
 
+    def set_shift(self, ms: float) -> None:
+        """Offset the SECOND trace by `ms`, and redraw.
+
+        One trace, not both, because alignment is always relative — and the second, because the
+        first is the reference the Arbiter is aligning to. Their own working order is pairwise:
+        w-L against w-R, then each against the sub, then the mid.
+
+        On an impulse this slides the curve along time. On a phase plot it is the same fact seen
+        differently: a pure delay is `φ = −360·f·Δt`, exactly, so the shift becomes a ramp. That
+        direction is arithmetic; reading a delay OFF a wrapped phase curve is the hard one, and
+        this deliberately does not attempt it.
+        """
+        self._shift_ms = float(ms)
+        box = getattr(self, "_shift_box", None)
+        if box is not None and abs(box.value() - self._shift_ms) > 1e-9:
+            # Set programmatically — by the model opening the window with a proposal of its own,
+            # or by a reset. The control must show what is drawn.
+            blocked = box.blockSignals(True)
+            box.setValue(self._shift_ms)
+            box.blockSignals(blocked)
+        if self._traces:
+            self.set_traces(self._traces)
+        self._render_readout()
+
+    def _shifted(self, index: int, trace: "Trace"):
+        """`(x, y)` for trace `index` with the current shift applied, in the plot's own units."""
+        x = np.asarray(trace.x, dtype=float)
+        y = np.asarray(trace.y, dtype=float)
+        if index != 1 or not self._shift_ms:
+            return x, y
+        if self._unit == "ms":
+            return x + self._shift_ms, y
+        if self._y_unit == "°":
+            # Degrees per hertz for this delay, then wrapped back into ±180 so the curve stays on
+            # the axis it is drawn on rather than walking off it.
+            shifted = y - 360.0 * x * (self._shift_ms / 1000.0)
+            return x, (shifted + 180.0) % 360.0 - 180.0
+        return x, y  # a magnitude response does not move when you delay it
+
     def set_traces(self, traces: Sequence[Trace]) -> None:
         theme = current_theme()
         self._plot.clear()
@@ -301,12 +361,13 @@ class CurveView(QWidget):
         self._traces = list(traces)
         for index, trace in enumerate(self._traces):
             token = _TRACE_TOKENS[index % len(_TRACE_TOKENS)]
-            self._plot.plot(
-                # Arrays, not Python lists: pyqtgraph converts a list element by element, and a
-                # list comprehension over 262 144 floats had already been paid for upstream.
-                np.asarray(trace.x, dtype=float), np.asarray(trace.y, dtype=float),
-                pen=pg.mkPen(getattr(theme, token), width=1.0), name=trace.name,
-            )
+            # Arrays, not Python lists: pyqtgraph converts a list element by element, and a list
+            # comprehension over 262 144 floats had already been paid for upstream.
+            x, y = self._shifted(index, trace)
+            label = trace.name
+            if index == 1 and self._shift_ms:
+                label = f"{trace.name}  {self._shift_ms:+.3f} ms"
+            self._plot.plot(x, y, pen=pg.mkPen(getattr(theme, token), width=1.0), name=label)
         for line in self._markers:
             self._plot.addItem(line)
         self._render_crossings()
@@ -618,6 +679,11 @@ class CurveView(QWidget):
         if "h" in self._axes_mode:
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
         parts = [part for part in lines if part]
+        if self._shift_ms and len(self._traces) > 1:
+            # Named as a PROPOSAL. The panel changes nothing: this sentence goes to the composer,
+            # the Arbiter sends it, and the delta is banked 🟡 like every other proposed change.
+            parts.append(i18n.t("curveShiftReading").format(
+                name=self._traces[1].name, ms=f"{self._shift_ms:+.3f}"))
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is
@@ -729,6 +795,7 @@ class CurveView(QWidget):
 
     def retranslate(self) -> None:
         self._send_btn.setText(i18n.t("curveSend"))
+        self._shift_label.setText(i18n.t("curveShift"))
         for button, mode in self._axes_buttons:
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))

@@ -496,3 +496,83 @@ def test_the_guides_are_drawn_heavier_than_the_traces():
     view.set_markers([4.52], tokens=["accent"])
 
     assert view._markers[0].pen.widthF() > 1.4
+
+
+# ---- shifting one trace in time (user, 2026-08-12) --------------------------------------------
+
+
+def test_shifting_the_second_trace_moves_it_in_time_and_leaves_the_first_alone():
+    """Alignment is relative, and the first trace is the reference being aligned to."""
+    view = _view()
+    view.set_unit("ms")
+
+    view.set_shift(0.198)
+
+    x0, _ = view._shifted(0, view._traces[0])
+    x1, _ = view._shifted(1, view._traces[1])
+    assert x0[0] == pytest.approx(view._traces[0].x[0]), "the reference does not move"
+    assert x1[0] == pytest.approx(view._traces[1].x[0] + 0.198)
+
+
+def test_on_a_phase_plot_the_same_shift_is_a_ramp():
+    """A pure delay is φ = −360·f·Δt, exactly. That direction is arithmetic; reading a delay off a
+    wrapped phase curve is the hard one, and this does not attempt it."""
+    view = _view()
+    view.set_unit("Hz")
+    view.set_y_unit("°")
+    view.set_traces([Trace("a", [100.0, 1000.0], [0.0, 0.0]),
+                     Trace("b", [100.0, 1000.0], [0.0, 0.0])])
+
+    view.set_shift(1.0)  # 1 ms
+
+    _x, y = view._shifted(1, view._traces[1])
+    # −360 × 100 Hz × 0.001 s = −36°, and −360° at 1 kHz wraps to 0°.
+    assert y[0] == pytest.approx(-36.0, abs=1e-6)
+    assert y[1] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_magnitude_response_does_not_move_when_you_delay_it():
+    view = _view()
+    view.set_unit("Hz")
+    view.set_y_unit("dB")
+    before = list(view._traces[1].y)
+
+    view.set_shift(2.0)
+
+    _x, y = view._shifted(1, view._traces[1])
+    assert list(y) == pytest.approx(before)
+
+
+def test_the_shift_is_sent_as_a_proposal_not_as_a_change():
+    """The panel changes nothing. The sentence goes to the composer, the Arbiter sends it, and the
+    delta is banked 🟡 like every other proposed change."""
+    view = _view()
+    view.set_unit("ms")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+
+    view.set_shift(-0.198)
+    reading = view.reading()
+
+    assert "w-R_01 (sw)" in reading and "-0.198" in reading
+    assert "proposed" in reading or "пропозиц" in reading
+
+
+def test_no_shift_says_nothing_about_shifting():
+    view = _view()
+    view.set_markers([4.52], tokens=["accent"])
+
+    assert "shift" not in view.reading().lower()
+
+
+def test_a_shift_set_in_code_shows_in_the_control():
+    """The model can open this window with a proposal of its own. A box reading 0.000 beside a
+    curve that has visibly moved is the panel disagreeing with itself."""
+    view = _view()
+    view.set_unit("ms")
+
+    view.set_shift(-0.198)
+
+    assert view._shift_box.value() == pytest.approx(-0.198)
+    # ...and setting it again from the control must not recurse through the same setter.
+    view._shift_box.setValue(0.25)
+    assert view._shift_ms == pytest.approx(0.25)
