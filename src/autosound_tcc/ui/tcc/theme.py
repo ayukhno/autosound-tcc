@@ -845,6 +845,26 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 700;
         min-height: 32px;
     }}
+    /* .action-2nd — the same shape as `.composer-send`, without the claim to being THE action.
+    Two solid blue buttons side by side is two primaries, which is none: the curve window's "this
+    is my reading" is the act, and "analyse the set" is a second thing you may also do. */
+    QPushButton[class~="action-2nd"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 6px;
+        padding: 0 14px;
+        font-weight: 600;
+        min-height: 32px;
+    }}
+    QPushButton[class~="action-2nd"]:hover {{
+        border-color: {t.accent_dim};
+        color: {t.accent};
+    }}
+    QPushButton[class~="action-2nd"]:disabled {{
+        color: {t.faint};
+        border-color: {t.border};
+    }}
 
     /* The "still working" line under the transcript -- system-grey, so it reads as chrome
        rather than as something the model said. */

@@ -794,7 +794,7 @@ would change and why. Nothing here is applied.",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveBankAskBtn": "на аналіз",
         "curveClearLabel": "очистити:",
-        "curveClearDelay": "Затримку",
+        "curveClearDelay": "Затримки",
         "curveClearMarkers": "Маркери",
         "curveBankAsk": "Затримки, які я зчитав(ла) з кривих, ЛИШЕ НА АНАЛІЗ — нікуди їх не \
 записуй і не вважай змінами:",
