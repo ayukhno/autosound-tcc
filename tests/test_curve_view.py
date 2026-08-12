@@ -1122,9 +1122,10 @@ def test_clearing_the_markers_puts_them_back_on_the_peaks():
     assert view.positions() == pytest.approx([4.52, 4.78], abs=0.05)
 
 
-def test_a_driver_left_at_zero_is_the_reference_not_an_omission():
-    """User, 2026-08-12: "w-R немає, бо він був нулем. як би додавав сабвуфер — то саб був би
-    нулем". The zero is the choice everything else is measured from."""
+def test_a_driver_left_at_zero_is_stated_never_interpreted():
+    """Two users' facts, one message: "w-R немає, бо він був нулем" AND "нуль може бути ще те, до
+    чого руки не дійшли" (2026-08-12). Nothing here separates the reference from the driver
+    nobody has reached, so the sentence says what is true and stops."""
     from autosound_tcc.core import delay_bank
 
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge(),
@@ -1143,5 +1144,7 @@ def test_a_driver_left_at_zero_is_the_reference_not_an_omission():
     dialog.readingSent.connect(sent.append)
     dialog._bank_ask_btn.click()
 
-    assert "w-R_01 (sw)" in sent[0] and i18n.t("curveBankReference").partition("{")[0][:20] in sent[0]
-    assert "sw_01 (sw)" in sent[0]
+    assert "w-R_01 (sw)" in sent[0] and i18n.t("curveBankAtZero").partition("{")[0][:20] in sent[0]
+    assert "sw_01 (sw)" in sent[0], "and the one never opened is named separately"
+    for claim in ("REFERENCE", "ОПОРА", "deliberately", "свідомо"):
+        assert claim not in sent[0], "the panel reports; the model concludes"

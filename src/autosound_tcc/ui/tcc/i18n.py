@@ -382,13 +382,16 @@ is for every driver to land on the same arrival.",
         "curveBankChannel": "channel",
         "curveBankSpread": "Spread of the resulting arrivals across the {n} drivers placed: \
 {spread} ms.",
-        "curveBankReference": "REFERENCE — on screen and deliberately left at zero; everything \
-above is measured from these: {names}",
+        "curveBankAtZero": "On screen, no shift entered (0). That may be the reference the rest \
+was measured from, or simply a driver not got to yet — the data here cannot tell those apart: \
+{names}",
         "curveBankUnplaced": "NOT placed — no reading taken on these yet, so they are absent \
 from the picture above and are NOT to be assumed at zero: {names}",
         "curveBankNotForWriting": "Tell me whether this set is coherent: which arrivals it \
 implies, whether any of it looks like a measurement error rather than a tuning, and what you \
-would check next. Nothing here is applied.",
+would check next. These are readings off the curves, not a target — aligning arrivals exactly \
+has not by itself fixed stage accuracy in this car, so treat them as evidence and say what you \
+would change and why. Nothing here is applied.",
         "curveNoMarkers": "Drag a marker onto the point you mean.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
@@ -801,13 +804,16 @@ would check next. Nothing here is applied.",
         "curveBankArrival": "прихід",
         "curveBankChannel": "канал",
         "curveBankSpread": "Розкид приходів по {n} розміщених драйверах: {spread} мс.",
-        "curveBankReference": "ОПОРА — були на екрані й свідомо лишені на нулі; усе вище \
-відраховано від них: {names}",
+        "curveBankAtZero": "На екрані, зсув не задано (0). Це може бути опора, від якої \
+рахувалась решта, а може бути просто те, до чого ще не дійшли руки — з цих даних не розрізнити: \
+{names}",
         "curveBankUnplaced": "НЕ розміщені — по цих прочитання ще не робилось, тож у картині \
 вище їх нема і НЕ можна вважати, що вони на нулі: {names}",
         "curveBankNotForWriting": "Скажи, чи ця картина узгоджена: які приходи вона означає, чи \
 не схоже щось із цього радше на помилку заміру, ніж на налаштування, і що б ти перевірив(ла) \
-далі. Нічого з цього не застосовано.",
+далі. Це прочитання з кривих, а не ціль: точне збігання приходів саме по собі сцену в цій машині \
+не виправляло — тож сприймай їх як свідчення і скажи, що б ти змінив(ла) і чому. Нічого з цього \
+не застосовано.",
         "curveNoMarkers": "Перетягни маркер на точку, яку маєш на увазі.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",

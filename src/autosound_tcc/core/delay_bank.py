@@ -24,12 +24,12 @@ that series' own curves; it has to bring that series' own corrections with them 
 An entry written before the scope existed carries no series and is shown under every one, rather
 than disappearing from all of them. It picks up a series the first time it is touched.
 
-**Zero is a reading too.** A driver plotted in the window and left at zero is the REFERENCE — the
-one everything else is measured against, and it is chosen, not skipped ("w-R немає, бо він був
-нулем. як би додавав сабвуфер — то саб був би нулем", user, 2026-08-12). So a zero entry is kept
-and marked as seen, and only a driver that has never been on screen counts as unplaced. The
-difference is the whole shape of the set: with it a model can see four drivers converging on a
-reference, and without it the reference looks like an omission.
+**Zero is a reading too, and it is ambiguous.** A driver plotted here and left at zero may be the
+reference everything else was measured from — or a driver nobody has got to yet, since the sub,
+the centre and the rears are done last ("w-R немає, бо він був нулем"; "нуль може бути ще те, до
+чого руки не дійшли", user, 2026-08-12). Nothing in this data separates the two, so the entry is
+kept and the sentence says exactly that and no more. What TCC can state honestly is: this was on
+screen and carries no shift; this has never been opened. The inference is the model's.
 
 Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 """
@@ -87,7 +87,11 @@ def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[
 
 
 def references(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> list[str]:
-    """Drivers that have been on screen and were left at zero — the set's own reference points."""
+    """Drivers that have been on screen and carry no shift.
+
+    Named for what it is, not for what it might mean: this is the reference on some passes and an
+    untouched driver on others, and only the person tuning knows which.
+    """
     return sorted(
         title for title, entry in _entries(tcc_dir, session).items() if not entry["ms"]
     )
@@ -208,11 +212,12 @@ def as_sentence(
     head = [t("curveBankAsk"), t("curveBankConvention")]
     tail = [t("curveBankNotForWriting")]
     if reference:
-        # NOT an omission. The zero is the choice — everything else in the set is measured from
-        # it, and a model told only about the moved drivers would ask why the reference is missing
-        # (user, 2026-08-12).
+        # Stated, not interpreted. A zero here may be the reference the set was built on or a
+        # driver not reached yet, and the panel cannot tell — claiming "reference" would put a
+        # conclusion of TCC's into a message that is supposed to carry evidence (user, 2026-08-12:
+        # "не знаю як це відрізнити... а він вже сам зробить висновки").
         lines.append("")
-        lines.append(t("curveBankReference").format(names=", ".join(sorted(reference))))
+        lines.append(t("curveBankAtZero").format(names=", ".join(sorted(reference))))
     if unplaced:
         # A driver with NO reading is not a driver at zero. It is one nobody has placed yet, and
         # the difference decides whether the set above is a plan or a fragment — the user's own
