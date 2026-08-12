@@ -10,6 +10,7 @@ Decision and reasoning: `docs/ARCHITECTURE-NOTES.md` §3 (2026-08-12).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tomllib
@@ -229,3 +230,107 @@ def test_the_missing_skill_message_fits_both_readers(tmp_path, monkeypatch):
     assert "git submodule update" in message
     assert vendor_loader.SKILL_DIR_ENV in message
     assert "Looked in:" in message, "it names the places, so the reader can check one"
+
+
+# ---- the model backends are extras too (user asked, 2026-08-12) -------------------------------
+
+
+_NO_CLAUDE = """
+import sys
+
+
+class _Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] == "claude_agent_sdk":
+            raise ImportError("the Claude extra is not installed")
+        return None
+
+
+sys.meta_path.insert(0, _Block())
+"""
+
+
+def _run_without_claude(body: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-c", _NO_CLAUDE + body],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=180,
+        env={**os.environ, "QT_QPA_PLATFORM": "offscreen", "AUTOSOUND_TCC_MCP": "0"},
+    )
+
+
+def test_the_window_opens_for_someone_who_only_uses_gemini():
+    """`main_window` imports `TuningSession` on its first line, and that imported the Claude SDK —
+    so the window would not START without a package that a Gemini user has no use for, after
+    downloading 277 MB of Claude Code bundled inside it."""
+    proc = _run_without_claude(
+        "from autosound_tcc.ui.tcc.main_window import MainWindow\n"
+        "from autosound_tcc.core.tuning_session import TuningSession\n"
+        "TuningSession(project_dir='/tmp')  # the probe main_window makes for EVERY session\n"
+        "print('ok')"
+    )
+
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "ok" in proc.stdout
+
+
+def test_claude_models_are_not_offered_when_the_route_cannot_run():
+    """A picker that lists a route it cannot reach is the same defect as the model aliases were."""
+    proc = _run_without_claude(
+        "from autosound_tcc.core import model_choices\n"
+        "print('choices:', len(model_choices.sdk_choices()))"
+    )
+
+    assert "choices: 0" in proc.stdout, proc.stderr[-2000:]
+
+
+def test_asking_for_claude_without_the_extra_names_the_command():
+    proc = _run_without_claude(
+        "from autosound_tcc.core import claude_sdk\n"
+        "from autosound_tcc.core.tuning_session import TuningSession\n"
+        "try:\n"
+        "    TuningSession(project_dir='/tmp')._options()\n"
+        "except claude_sdk.ClaudeSdkMissing as exc:\n"
+        "    print(exc)"
+    )
+
+    assert "[claude]" in proc.stdout and "git+https://" in proc.stdout, proc.stderr[-2000:]
+    assert "omp" in proc.stdout, "and it says the other models need nothing installed"
+
+
+@pytest.mark.parametrize("module", ["tuning_session", "agent_session"])
+def test_the_declared_sdk_names_match_the_ones_the_code_uses(module):
+    """`SDK_NAMES` is hand-written, and a name used in the code but missing from it is a
+    `NameError` that only the person mid-session would find. Checked against the SDK's own export
+    list rather than a guess."""
+    import ast
+    import importlib
+
+    import claude_agent_sdk
+
+    loaded = importlib.import_module(f"autosound_tcc.core.{module}")
+    exported = set(getattr(claude_agent_sdk, "__all__", ())) or {
+        n for n in dir(claude_agent_sdk) if n[:1].isupper()
+    }
+    source = (ROOT / "src" / "autosound_tcc" / "core" / f"{module}.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    # Names the module binds itself. Without this the scan flags `tool` in `_ask(self, tool: str,
+    # ...)` — a parameter that happens to share a name with an SDK export, which is not a use of
+    # the SDK at all.
+    local = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    local |= {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    }
+    referenced = {
+        node.id for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in exported
+        and node.id not in local
+    }
+
+    assert referenced <= set(loaded.SDK_NAMES), (
+        f"used but not declared, so it will NameError at runtime: "
+        f"{sorted(referenced - set(loaded.SDK_NAMES))}"
+    )
+    assert set(loaded.SDK_NAMES) <= exported, "declared but not an SDK export"

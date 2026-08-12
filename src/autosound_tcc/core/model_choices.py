@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from autosound_tcc.core import model_overrides
+from autosound_tcc.core import claude_sdk, model_overrides
 
 # How a model is reached — and, more to the point, WHOSE BILL it lands on. This is the axis the
 # picker was missing: "Gemini 3.1 Pro" through a desktop subscription and the same model through
@@ -170,11 +170,18 @@ class OmpCatalogueError(RuntimeError):
 def sdk_choices() -> list[Choice]:
     """Claude models: what the Models API reported if it could be asked, then the shipped list.
 
+    Empty when `claude-agent-sdk` is not installed — the route genuinely does not exist then.
+
     The shipped list is a floor, not the answer. It is dated (`SDK_MODELS_VERIFIED`) and it will
     go stale — every name in it retires eventually. Three things keep an install working past that
     without anybody shipping an update: the API refresh below when this machine has a key, the
     local overrides file, and the replacement offered when a stored choice stops resolving.
     """
+    if not claude_sdk.available():
+        # The SDK is an extra. Offering Claude models on an install that cannot reach them is the
+        # same failure as the aliases were: a picker that says a route exists when it does not
+        # (2026-08-12). Nothing here is hidden from a Claude user — for them it is installed.
+        return []
     fetched = list(_CLI_CACHE.get("sdk", []))
     known = {choice.model for choice in fetched}
     for label, model in SDK_MODELS:

@@ -24,14 +24,31 @@ authors = [{ name = "ayukhno" }]
 # "the next major/minor that may break us", and moving one is a deliberate act with a test run
 # behind it, not something a resolver decides at 2 a.m. in a car park (user asked, 2026-08-12:
 # "як наш пакет буде себе вести з часом з оновленнями версій?").
+# Base = what TCC needs whatever model drives it. Every model BACKEND is an extra, because which
+# one you use is a choice:
+# Claude goes through the Agent SDK (a Python package), everything else — Gemini, Codex — goes
+# through the `omp` CLI and needs no Python dependency at all. Carrying the Claude SDK
+# unconditionally made a Gemini user download 277 MB of Claude Code they would never run, and
+# made the window refuse to open without it (user asked, 2026-08-12: "а якщо хтось буде ставити
+# не Клаудом, а Джеміні чи Кодексом?").
 dependencies = [
-    # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to a Claude Code CLI —
-    # see the note below about WHICH one. Pre-1.0, so the whole 0.x line is the risk surface;
-    # bounded at 1.0 because that is where the vendor's own compatibility promise starts.
-    "claude-agent-sdk>=0.2,<1",
+    # The MCP server is the substrate BOTH front-ends talk through — the Claude session and the
+    # omp one — so it belongs in the base, not behind any model's extra. Declared here because we
+    # `import mcp` and `import uvicorn` directly: both used to arrive transitively through
+    # `claude-agent-sdk`, which meant a dependency we call into by name was not written down
+    # anywhere and vanished the moment the SDK became optional (2026-08-12).
+    "mcp>=1.2,<2",
+    "uvicorn>=0.27,<1",
 ]
 
 [project.optional-dependencies]
+claude = [
+    # DSP-profile onboarding and the tuning session, when the model is Claude (docs/TCC-TZ.md
+    # §4a, option B). Runs the user's own `claude` login rather than an API key. Pre-1.0, so the
+    # whole 0.x line is the risk surface; bounded at 1.0, where the vendor's own compatibility
+    # promise starts.
+    "claude-agent-sdk>=0.2,<1",
+]
 gui = [
     # -Essentials, not the full PySide6. TCC imports QtCore, QtGui and QtWidgets and nothing else
     # (`tests/test_packaging.py` checks that too); the Addons half is Qt3D, Charts, WebEngine,
@@ -48,7 +65,7 @@ gui = [
 ]
 # `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen. Bounded like the rest —
 # the test that enforces that caught this line first, which is the argument for having it.
-dev = ["pytest>=7,<9", "autosound-tcc[gui]"]
+dev = ["pytest>=7,<9", "autosound-tcc[gui,claude]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"

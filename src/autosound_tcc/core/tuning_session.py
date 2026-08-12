@@ -24,16 +24,19 @@ import shlex
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    PermissionResultAllow,
-    PermissionResultDeny,
-    ResultMessage,
-    UserMessage,
-)
+from autosound_tcc.core import claude_sdk, config, model_choices, vendor_loader
 
-from autosound_tcc.core import config, model_choices, vendor_loader
+#: See `core/claude_sdk.py`. Bound in `TuningSession.__init__`, not imported here: `main_window`
+#: imports this module on its first line, so an import at the top made the Claude SDK a
+#: requirement for opening the window at all — including for someone driving TCC with Gemini.
+SDK_NAMES = (
+    "ClaudeAgentOptions",
+    "ClaudeSDKClient",
+    "PermissionResultAllow",
+    "PermissionResultDeny",
+    "ResultMessage",
+    "UserMessage",
+)
 from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -255,6 +258,9 @@ class TuningSession:
         `write_rew_filters` and `copy_helix_eq` raise their own confirmation, and double-prompting
         the same action trains the Arbiter to click through both.
         """
+        # Reachable without going through `start()` — the suite asks this method for a decision
+        # directly, and so would anything else testing one. See `_options` for why not `__init__`.
+        claude_sdk.bind(SDK_NAMES, globals())
         if tool_name.startswith("mcp__tcc"):
             return PermissionResultAllow()
 
@@ -296,7 +302,13 @@ class TuningSession:
 
     # ---- lifecycle ---------------------------------------------------------
 
-    def _options(self) -> ClaudeAgentOptions:
+    def _options(self) -> "ClaudeAgentOptions":
+        # NOT in `__init__`. `main_window._launch_session` constructs a TuningSession
+        # unconditionally as a cheap probe — "only reads the registry" — before it knows whether
+        # the session will be Claude or omp, so binding in the constructor would have made the
+        # Claude SDK a requirement for starting a GEMINI session. Bound where it is used instead,
+        # which is here and in `start()` (caught by reading the caller, 2026-08-12).
+        claude_sdk.bind(SDK_NAMES, globals())
         return ClaudeAgentOptions(
             cwd=str(self.project_dir),
             model=self.model,
@@ -334,6 +346,7 @@ class TuningSession:
         # the link ran with no method at all. TCC installs the version it ships; an existing link
         # is left alone.
         vendor_loader.link_skill_into(self.project_dir)
+        claude_sdk.bind(SDK_NAMES, globals())  # everything downstream of the client is bound now
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
         self._started = True
@@ -383,6 +396,7 @@ class TuningSession:
         `AssistantMessage` repeats it at the end. Emitting both would double every bubble, so the
         final text is only used when nothing streamed -- a turn must never render as silence.
         """
+        claude_sdk.bind(SDK_NAMES, globals())
         event = getattr(message, "event", None)
         if isinstance(event, dict):  # StreamEvent -- the raw Anthropic stream event
             if event.get("type") == "content_block_delta":

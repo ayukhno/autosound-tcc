@@ -17,17 +17,22 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    TextBlock,
-    create_sdk_mcp_server,
-    tool,
-)
+from autosound_tcc.core import claude_sdk, config, profile_writer
 
-from autosound_tcc.core import config, profile_writer
+#: Bound into this module's globals by `claude_sdk.bind()` at the point the SDK is first needed —
+#: the SDK is an extra, and importing it here would stop the window opening on an install that
+#: only ever talks to Gemini (see `core/claude_sdk.py`). Declared as a list so a test can check it
+#: still matches what this file actually references: a name added to the code and not to this
+#: tuple is a `NameError` that only the person running an onboarding interview would find.
+SDK_NAMES = (
+    "AssistantMessage",
+    "ClaudeAgentOptions",
+    "ClaudeSDKClient",
+    "ResultMessage",
+    "TextBlock",
+    "create_sdk_mcp_server",
+    "tool",
+)
 
 _SYSTEM_PROMPT = """You are the DSP-profile onboarding interviewer for the Tuning Command Center \
 (TCC), a car-audio DSP tuning tool.
@@ -101,6 +106,7 @@ def language_name(code: str) -> str:
 
 
 def build_tools(project_dir: Path, vendor: str, model: str):
+    claude_sdk.bind(SDK_NAMES, globals())  # `@tool` below is one of them
     """One closure set per interview session — this is what keeps the agent's filesystem reach to
     exactly this project's profile file, nothing else (no path is ever taken from the model).
 

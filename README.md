@@ -61,19 +61,30 @@ skill folders under `~/.claude/plugins/`.
 
 [`uv`](https://docs.astral.sh/uv/) is the recommended route because it installs
 a suitable Python itself, which removes the most common failure on Windows.
-TCC comes in two sizes:
+
+Two things are extras, and both for the same reason — they are choices, and
+each one is hundreds of megabytes:
+
+- `gui` — the window. Qt is most of the download.
+- `claude` — the Claude Agent SDK, needed only if a **Claude** model drives the
+  session. Every other model (Gemini, Codex, …) goes through the `omp` CLI and
+  needs no Python package at all.
 
 ```sh
-# the CLI half — `tuning-session`, `dsp-profile-interview`, the MCP server
+# CLI only, driven by Gemini/Codex through omp
 uv tool install 'autosound-tcc @ git+https://github.com/ayukhno/autosound-tcc'
 
-# ...plus the graphical window
+# the window, driven by Gemini/Codex
 uv tool install 'autosound-tcc[gui] @ git+https://github.com/ayukhno/autosound-tcc'
+
+# the usual one: the window, with Claude available too
+uv tool install 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
 ```
 
-The window is an extra because Qt is most of the download: roughly 300 MB
-without it against 680 MB with (measured on macOS/arm64). Asking for the window
-on a CLI-only install prints the command to add it rather than a traceback.
+Measured on macOS/arm64: 29 MB for the base, 394 MB with the window, 678 MB
+with the window and Claude. Asking for something that is not installed prints
+the command that adds it — the window and the Claude route both do — rather
+than a traceback about a module you have never heard of.
 
 `pip install` works the same way if you would rather not use `uv`. So does
 running from a checkout:
@@ -89,11 +100,12 @@ uv venv && uv pip install -e '.[dev]'
 
 - **Python 3.11+** — or nothing, if you use `uv`, which brings its own.
 - **REW** with its API enabled, for anything involving measurements.
-- **A working `claude` CLI.** Today this is required even if you intend to
-  drive TCC with another model, because the Claude Agent SDK is an
-  unconditional dependency. That is a packaging defect, not a design choice,
-  and it is being fixed — non-Claude routes (Gemini, Codex and others via
-  `omp`) shell out to a CLI and need no Python dependency of their own.
+- **A model, and a way to reach it.** For Claude: the `claude` CLI, logged in,
+  plus the `claude` extra above — TCC authenticates to nothing itself, it uses
+  your own login. For anything else: `omp` on your PATH and
+  whichever vendor CLI it drives.
+- Nothing here removes the Claude Code step for the Claude route. TCC talks to
+  a locally-authenticated session; it cannot offer you a login of its own.
 
 ## Stack
 
