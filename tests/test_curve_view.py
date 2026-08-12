@@ -1110,16 +1110,22 @@ def test_clearing_leaves_nothing_behind_not_even_the_curve_on_screen():
     assert dialog._view.delay_target() == 1, "without moving which driver you were editing"
 
 
-def test_clearing_the_markers_puts_them_back_on_the_peaks():
-    """"Clear" for a marker is undoing the dragging. Removing them would leave the panel with no
-    reading and no way to get one back short of reloading the pair."""
+def test_clearing_the_markers_recentres_them_even_when_they_are_in_view():
+    """"очистка Маркери це повинно бути як дабл-клік — поставити по центру з зміщенням" (user,
+    2026-08-12). The double-click leaves visible markers alone on purpose; the button must not,
+    or pressing it on a screen where both are visible would do nothing at all."""
     view = _view()
     view.set_unit("ms")
-    view.set_markers([1.0, 7.0], tokens=["accent", "info"])
+    view.focus_x(0.0, 10.0)
+    view.set_markers([4.0, 4.1], tokens=["accent", "info"])
 
-    view.reset_markers()
+    view.bring_markers_into_view(force=True)
 
-    assert view.positions() == pytest.approx([4.52, 4.78], abs=0.05)
+    placed = view.positions()
+    assert placed != pytest.approx([4.0, 4.1]), "both were in view and both moved"
+    assert placed[0] < placed[1], "in their own order, spread apart"
+    (low, high), _ = view._plot.getViewBox().viewRange()
+    assert all(low < value < high for value in placed)
 
 
 def test_a_driver_left_at_zero_is_stated_never_interpreted():

@@ -237,7 +237,9 @@ class CurveDialog(QDialog):
         self._markers_clear_btn = QPushButton(i18n.t("curveClearMarkers"))
         self._markers_clear_btn.setProperty("class", "zoom-btn")
         self._markers_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._markers_clear_btn.clicked.connect(self._view.reset_markers)
+        self._markers_clear_btn.clicked.connect(
+            lambda: self._view.bring_markers_into_view(force=True)
+        )
         bank_row.addWidget(self._markers_clear_btn)
         layout.addLayout(bank_row)
 

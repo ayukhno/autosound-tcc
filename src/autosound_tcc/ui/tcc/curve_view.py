@@ -330,38 +330,22 @@ class CurveView(QWidget):
         """Put another action at the end of the control row, beside "this is my reading"."""
         self._action_row.addWidget(button)
 
-    def reset_markers(self) -> None:
-        """Put every marker back where it opens: each trace's own largest peak.
-
-        "Clear" for a marker means undoing the dragging, not removing the marker — a panel with no
-        markers has no reading and no way to get one back without reloading the pair.
-        """
-        usable = [(i, t) for i, t in enumerate(self._traces[:2]) if len(t.x)]
-        if not usable:
-            return
-        peaks = [self._arrival_of(i) for i, _t in usable]
-        if any(peak is None for peak in peaks):
-            # Not a time axis: the peak is not a meaningful place to park a marker, so spread them
-            # across the visible span instead of inventing an arrival.
-            (low, high), _ = self._plot.getViewBox().viewRange()
-            peaks = [low + (high - low) * (n + 1) / (len(usable) + 1) for n in range(len(usable))]
-        self.set_markers(peaks, [t.name for _i, t in usable],
-                         list(_TRACE_TOKENS[:len(usable)]))
-
-    def bring_markers_into_view(self) -> None:
-        """Put every marker back inside the visible span, keeping their order and spacing where it
-        fits.
+    def bring_markers_into_view(self, force: bool = False) -> None:
+        """Put the markers back inside the visible span, keeping their order and spacing.
 
         After a zoom the markers are usually somewhere off-screen, and hunting for them is worse
-        than the zoom was worth (user, 2026-08-12). Markers already visible are left exactly where
-        they are — moving a reading nobody asked to move would destroy the answer being read.
+        than the zoom was worth (user, 2026-08-12). On a double-click, markers already visible are
+        left exactly where they are — moving a reading nobody asked to move would destroy the
+        answer being read. `force` is the Clear button: there the whole point is to put them back
+        in the middle of the screen, spread apart, and start the reading over ("очистка Маркери це
+        повинно бути як дабл-клік — поставити по центру з зміщенням").
         """
         (low, high), _ = self._plot.getViewBox().viewRange()
         if high <= low:
             return
         span = high - low
         for index, line in enumerate(self._markers):
-            if low <= line.value() <= high:
+            if not force and low <= line.value() <= high:
                 continue
             # Spread the strays across the middle third, in their own order, so two of them do not
             # land on top of each other.
@@ -369,7 +353,7 @@ class CurveView(QWidget):
             line.setValue(low + span * (0.34 + 0.32 * share))
         for line in self._h_markers:
             (_x, (y_low, y_high)) = (None, self._plot.getViewBox().viewRange()[1])
-            if not y_low <= line.value() <= y_high:
+            if force or not y_low <= line.value() <= y_high:
                 line.setValue((y_low + y_high) / 2.0)
         self._sync_levels()
         self._render_crossings()
