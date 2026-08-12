@@ -1845,10 +1845,13 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    # This test needs a SECOND vendor to exist, so it says so rather than depending on what the
+    # developer happens to have installed (conftest forces the probe off for exactly that reason).
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
     _app()
     window = MainWindow()
 
-    # Whichever two vendors this machine can actually offer -- the point is that they differ.
+    # Whichever two vendors are on offer -- the point is only that they differ.
     generator = next(c for c in window._model_choices if mc.vendor_of(c) == "anthropic")
     critic = next(
         c for c in window._critic_choices if mc.vendor_of(c) not in ("", "anthropic")

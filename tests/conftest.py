@@ -45,3 +45,25 @@ def _isolated_project_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(project))
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "0")
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_machine_config(tmp_path, monkeypatch):
+    """Third layer, same lesson: keep tests out of `~/.config/autosound-tcc`.
+
+    `model_overrides` lives there, and once diagnostics started reporting on it (2026-08-12) two
+    existing tests began failing on this machine and nowhere else — they were reading the
+    developer's own model aliases. A test that passes or fails depending on whose laptop it runs on
+    is not a test, and one that could WRITE there would edit a real configuration.
+    """
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "machine-config"))
+    # ...and out of the answer to "which agent CLIs does this developer have installed". That is a
+    # probe of the machine, so a suite that reads it passes here and fails on the next laptop —
+    # `test_ok_report_says_so` started failing the moment diagnostics learned to report an
+    # installed-but-silent CLI, on a machine that happens to have `agy`. Tests that care about a
+    # CLI being present monkeypatch this themselves; their patch runs later and wins.
+    from autosound_tcc.core import model_choices
+
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {}, raising=False)
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False, raising=False)
+    yield

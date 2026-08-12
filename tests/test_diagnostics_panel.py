@@ -10,7 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from autosound_tcc.core.contract_check import ContractReport  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -142,3 +142,51 @@ def test_language_switch_retranslates_an_open_dialog():
         assert "unknown EQ type 'XX'" in text  # the skill's own words stay as they are
     finally:
         i18n.set_language("en")
+
+
+def test_tcc_s_own_setup_gets_a_section_with_a_working_fix(tmp_path, monkeypatch):
+    """User, 2026-08-12: "why isn't that in the diagnostics window — it belongs there, with a Fix
+    button". The remedy for three redirected reviewers was editing a JSON file nobody opens."""
+    from autosound_tcc.core import model_choices, model_overrides, self_check
+    from autosound_tcc.ui.tcc.diagnostics_panel import _CheckRow
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+    model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
+    _app()
+
+    dialog = DiagnosticsDialog()
+    dialog.set_report(_report())
+    rows = dialog.findChildren(_CheckRow)
+
+    assert rows, "the section renders even when the project's own files are clean"
+    alias_row = next(r for r in rows if r.findChild(QPushButton) is not None)
+    alias_row.findChild(QPushButton).click()
+
+    assert model_overrides.load()["aliases"] == {}
+    # ...and the panel now agrees with itself: the row is gone, not just a banner claiming it.
+    assert not any(r.findChild(QPushButton) for r in dialog.findChildren(_CheckRow))
+    assert self_check.run()[0].status == self_check.OK
+
+
+def test_the_headline_counts_tccs_own_problems_too(tmp_path, monkeypatch):
+    """It read the project's verdict alone, so the panel could say "OK — nothing to fix" directly
+    above a red row of its own making."""
+    from autosound_tcc.core import model_choices, model_overrides
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_report(ok=True, files=(), cross_checks={
+        "glossary_vs_ledgers": [], "tiers_vs_profile": [], "rew": {"reachable": True}}))
+    assert dialog._verdict.text() == i18n.t("diagOk")
+
+    model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
+    dialog._render()
+
+    assert dialog._verdict.text() != i18n.t("diagOk")
+    assert "1" in dialog._verdict.text()

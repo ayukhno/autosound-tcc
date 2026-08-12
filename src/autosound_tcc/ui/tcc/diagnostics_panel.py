@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import self_check
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -90,6 +91,49 @@ def _section_title(text: str) -> QLabel:
     return label
 
 
+class _CheckRow(QWidget):
+    """One of TCC's own checks, with its Fix button when the repair is TCC's to make.
+
+    The button is the whole point of the section. A diagnostic that describes a problem and leaves
+    the remedy in a file the Arbiter has no reason to open is a diagnostic that gets read once —
+    which is how three model aliases sat redirecting every reviewer call for five days.
+    """
+
+    fixed = Signal(str)
+
+    def __init__(self, check: self_check.Check) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 3, 0, 3)
+        layout.setSpacing(2)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(TrafficLight(check.status))
+        title = QLabel(check.title)
+        title.setWordWrap(True)
+        head.addWidget(title, stretch=1)
+        if check.fixable:
+            self._btn = QPushButton(check.fix_label)
+            self._btn.setProperty("class", "reason-btn")
+            self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._btn.clicked.connect(lambda: self._run(check))
+            head.addWidget(self._btn)
+        layout.addLayout(head)
+
+        for line in (check.detail or "").splitlines():
+            if line.strip():
+                layout.addWidget(_note(line))
+
+    def _run(self, check: self_check.Check) -> None:
+        self._btn.setEnabled(False)
+        try:
+            message = check.fix() or ""
+        except Exception as exc:  # noqa: BLE001 — a failed repair is a sentence, not a crash
+            message = f"{type(exc).__name__}: {exc}"
+        self.fixed.emit(message)
+
+
 class DiagnosticsDialog(QDialog):
     """Non-modal so it can stay open beside the tune it describes."""
 
@@ -98,6 +142,7 @@ class DiagnosticsDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._report: Optional[ContractReport] = None
+        self._checks: list = []
         self.setModal(False)
         self.setMinimumSize(560, 420)
         self.setProperty("class", "fb-card")
@@ -160,6 +205,13 @@ class DiagnosticsDialog(QDialog):
         self._refresh_btn.setEnabled(report is not None)
         self._render()
 
+    def _on_fixed(self, message: str) -> None:
+        """Re-render so the row that was fixed says so itself, rather than only a banner claiming
+        it. A panel whose contents disagree with its own message is a panel nobody believes."""
+        self._verdict.setText(i18n.t("diagFixDone").format(what=message))
+        self._render()
+        self._verdict.setText(i18n.t("diagFixDone").format(what=message))
+
     def _on_refresh(self) -> None:
         self.set_report(None)
         self.refreshRequested.emit()
@@ -193,9 +245,16 @@ class DiagnosticsDialog(QDialog):
             self._verdict.setText(f"{i18n.t('diagUnavailable')} — {report.error}")
             return
 
+        # The headline counts BOTH halves. It read `report.ok` alone, so the panel could say
+        # "OK — nothing to fix" directly above a red row of its own making, which is the exact
+        # shape of thing this section was added to stop.
+        checks = self_check.run()
+        self._checks = checks
+        own = [c for c in checks if c.status != self_check.OK]
         issues = report.issues()
+        total = len(issues) + len(own)
         self._verdict.setText(
-            i18n.t("diagOk") if report.ok else i18n.t("diagIssues").format(n=len(issues))
+            i18n.t("diagOk") if report.ok and not own else i18n.t("diagIssues").format(n=total)
         )
 
         self._body_layout.addWidget(_section_title(i18n.t("diagFiles")))
@@ -210,6 +269,15 @@ class DiagnosticsDialog(QDialog):
         for note in cross_notes or [i18n.t("diagNoIssues")]:
             self._body_layout.addWidget(_note(f"⚠ {note}" if cross_notes else note))
         self._body_layout.addWidget(_note(_rew_line(report)))
+
+        # TCC's own setup, after the project's. Separate section because it is a different
+        # question with a different owner: these are things TCC did to itself, and the ones it may
+        # undo carry a button (see `core/self_check.py` for where that line is drawn).
+        self._body_layout.addWidget(_section_title(i18n.t("selfSection")))
+        for check in checks:
+            row = _CheckRow(check)
+            row.fixed.connect(self._on_fixed)
+            self._body_layout.addWidget(row)
 
         open_questions = report.open_questions()
         if open_questions:
