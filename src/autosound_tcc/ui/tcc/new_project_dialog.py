@@ -34,7 +34,7 @@ def _field_label(text: str) -> QLabel:
 
 
 def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
-    """(vendor, name) pairs from `data/dsp_profiles/*.json` -- read directly rather than through
+    """(vendor, name) pairs from the packaged `dsp_profiles/*.json` -- read directly rather than through
     the vendored `rew_tool` so this dialog still works if that submodule isn't checked out.
 
     Picking one of these guarantees an EXACT match against `dsp_profile.find_bundled()`'s
@@ -179,7 +179,7 @@ class NewProjectDialog(QDialog):
     def _on_profile_selected(self, _index: int) -> None:
         """A bundled pick fills vendor/model with the EXACT strings `find_bundled()` checks
         against and hides the free-text fields (nothing to type); "Add new" clears and reveals
-        them for a DSP that isn't in `data/dsp_profiles/` yet."""
+        them for a DSP that isn't in the packaged `dsp_profiles/` yet."""
         pair = self._profile_combo.currentData()
         is_new = pair is None
         if not is_new:

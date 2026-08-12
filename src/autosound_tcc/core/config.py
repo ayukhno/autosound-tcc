@@ -32,7 +32,12 @@ from typing import Optional
 # config.py -> core -> autosound_tcc -> src -> <repo root>
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATE_ROOT = _REPO_ROOT / "data" / "private" / "state"
-DEFAULT_BUNDLED_PROFILES_DIR = _REPO_ROOT / "data" / "dsp_profiles"
+# INSIDE the package, not beside it. It used to be `<repo>/data/dsp_profiles`, which exists in a
+# checkout and nowhere else: a `uv tool install` produced a New Project dialog with no bundled
+# profiles at all, silently, because a wheel contains only what is under `src/autosound_tcc`
+# (found by installing it, 2026-08-12). One location that works in both layouts beats a build
+# rule that copies it into a second one.
+DEFAULT_BUNDLED_PROFILES_DIR = Path(__file__).resolve().parent.parent / "dsp_profiles"
 
 
 def state_root() -> Path:

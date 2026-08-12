@@ -99,6 +99,51 @@ def test_the_two_sizes_are_declared_the_way_the_split_assumes():
     assert any("gui" in d for d in extras["dev"])
 
 
+def test_every_dependency_has_an_upper_bound():
+    """An open `>=` is not a version policy. It says "whatever exists on the day this is
+    installed", which for a tool taken to a competition means a resolver picks the Qt major in a
+    car park. Bounds are cheap to raise deliberately and expensive to discover the absence of
+    (user, 2026-08-12: "як наш пакет буде себе вести з часом з оновленнями версій?")."""
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = list(data["project"]["dependencies"])
+    for name, group in data["project"]["optional-dependencies"].items():
+        # `dev` pulls this package's own extra (`autosound-tcc[gui]`) — a self-reference has no
+        # version of its own to bound.
+        declared += [d for d in group if not d.startswith("autosound-tcc")]
+
+    unbounded = [d for d in declared if "<" not in d and "==" not in d and "~=" not in d]
+    assert not unbounded, f"no upper bound, so a breaking major installs itself: {unbounded}"
+
+
+def test_the_python_floor_is_one_that_has_actually_been_run():
+    """`>=3.10` was declared and never exercised — no CI, and every run on this project has been
+    3.12 or newer. A floor nobody tests is a claim, not support."""
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    floor = data["project"]["requires-python"]
+
+    assert floor == ">=3.11", floor
+    assert sys.version_info >= (3, 11), "and the interpreter running the suite must satisfy it"
+
+
+def test_the_window_uses_only_what_the_essentials_wheel_ships():
+    """The `gui` extra asks for PySide6-Essentials, which is 800 MB smaller and does NOT contain
+    Qt3D, Charts, WebEngine or Multimedia. One import of any of those turns a working install
+    into an ImportError for everyone who took the recommended path."""
+    addons_only = {
+        "Qt3DCore", "Qt3DRender", "QtCharts", "QtDataVisualization", "QtWebEngineCore",
+        "QtWebEngineWidgets", "QtMultimedia", "QtMultimediaWidgets", "QtBluetooth", "QtNfc",
+        "QtRemoteObjects", "QtScxml", "QtSensors", "QtSerialPort", "QtWebSockets", "QtCharts",
+    }
+    used = set()
+    for path in (ROOT / "src").rglob("*.py"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(("from PySide6.", "import PySide6.")):
+                used.add(line.split("PySide6.", 1)[1].split()[0].split(".")[0])
+
+    assert used, "the scan found no Qt imports at all, which means it is not scanning"
+    assert not (used & addons_only), f"needs the Addons wheel: {sorted(used & addons_only)}"
+
+
 def test_every_console_script_points_at_something_that_exists():
     """A dangling entry point is only discovered by the person who typed the command."""
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -108,3 +153,75 @@ def test_every_console_script_points_at_something_that_exists():
         path = ROOT / "src" / Path(module.replace(".", "/") + ".py")
         assert path.exists(), f"{name} -> {module} has no module"
         assert f"def {func}(" in path.read_text(encoding="utf-8"), f"{name} -> {target} missing"
+
+
+# ---- what an INSTALLED copy can find (found by installing it, 2026-08-12) ----------------------
+
+
+def _fake_skill(root: Path) -> Path:
+    skill = root / "skills" / "autosound-tuning"
+    (skill / "rew_tool").mkdir(parents=True)
+    (skill / "rew_tool" / "rew_api.py").write_text("# enough to be recognised\n")
+    return skill
+
+
+def test_the_bundled_profiles_ship_inside_the_package():
+    """They lived in `<repo>/data/dsp_profiles`, which exists in a checkout and nowhere else — so
+    an installed TCC opened New Project with no bundled profile in the list, silently. A wheel
+    contains what is under `src/autosound_tcc` and nothing more."""
+    from autosound_tcc.core import config
+
+    directory = config.bundled_profiles_dir()
+
+    assert directory.is_dir() and list(directory.glob("*.json")), directory
+    assert (ROOT / "src" / "autosound_tcc") in directory.parents, (
+        "outside the package directory it will not be in the wheel"
+    )
+
+
+def test_an_installed_tcc_finds_the_skill_where_claude_code_put_it(tmp_path, monkeypatch):
+    """`vendor/` is a submodule of the CHECKOUT. From a wheel that path resolves to
+    `.../lib/python3.x/vendor/...`, so the install came out with no skill and told the user to run
+    `git submodule update` in a repository they do not have."""
+    from autosound_tcc.core import vendor_loader
+
+    installed = _fake_skill(tmp_path / "home" / ".claude")
+    monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout-here")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+
+    assert vendor_loader.is_available()
+    assert vendor_loader.skill_dir() == installed
+    assert vendor_loader.REW_TOOL_DIR == installed / "rew_tool", "the live attribute follows"
+
+
+def test_the_env_override_outranks_everything(monkeypatch):
+    """How a developer points TCC at a working tree of the skill, and how a packaged install can
+    be told where the skill went instead of being made to guess."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+    assert list(vendor_loader._candidates())[0] == vendor_loader._SUBMODULE_DIR, (
+        "with no override, a checkout comes before any installed copy"
+    )
+
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, "/somewhere/else")
+
+    assert list(vendor_loader._candidates())[0] == Path("/somewhere/else")
+
+
+def test_the_missing_skill_message_fits_both_readers(tmp_path, monkeypatch):
+    """A developer who forgot the submodule, and someone who installed TCC and has no repo."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "nope")
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+
+    with pytest.raises(vendor_loader.VendorNotInitializedError) as caught:
+        vendor_loader.load("rew_api.py")
+
+    message = str(caught.value)
+    assert "git submodule update" in message
+    assert vendor_loader.SKILL_DIR_ENV in message
+    assert "Looked in:" in message, "it names the places, so the reader can check one"

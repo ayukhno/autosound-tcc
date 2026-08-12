@@ -21,16 +21,71 @@ from typing import Optional
 # Duplicated from `tuning_session` on purpose: this module is imported by it, not the other way.
 SKILL_NAME = "autosound-tuning"
 
-# vendor_loader.py -> core -> autosound_tcc -> src -> <repo root>
+# vendor_loader.py -> core -> autosound_tcc -> src -> <repo root>. Only meaningful in a checkout:
+# from an installed wheel this points at `.../lib/python3.x`, which is how a `uv tool install`
+# came out with no skill at all and said "run git submodule update" to somebody who has no repo
+# (found by installing it, 2026-08-12).
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-SKILL_DIR = (
-    _REPO_ROOT
-    / "vendor"
-    / "autosound-tuning-skill"
-    / "skills"
-    / "autosound-tuning"
-)
-REW_TOOL_DIR = SKILL_DIR / "rew_tool"
+_SUBMODULE_DIR = _REPO_ROOT / "vendor" / "autosound-tuning-skill" / "skills" / SKILL_NAME
+
+#: Env override, first in line. It is how a developer points TCC at a working tree of the skill,
+#: and how a packaged install can be told where the skill went without guessing.
+SKILL_DIR_ENV = "AUTOSOUND_SKILL_DIR"
+
+
+def _candidates():
+    """Where the skill may be, most specific first.
+
+    Deliberately NOT "inside the wheel". The skill is its own repository and its own product —
+    it works without TCC, TCC never works without it — and a copy shipped inside TCC would be a
+    second source of truth that drifts from the one the user's Claude Code session actually runs.
+    So TCC LOOKS for the installed skill instead of carrying one.
+    """
+    env = os.environ.get(SKILL_DIR_ENV)
+    if env:
+        yield Path(env).expanduser()
+    yield _SUBMODULE_DIR  # a checkout: the submodule is the source of truth
+    home = Path.home()
+    yield home / ".claude" / "skills" / SKILL_NAME  # installed for Claude Code
+    plugins = home / ".claude" / "plugins"
+    if plugins.is_dir():
+        # Installed as a Claude Code plugin — the front door option A recommends.
+        yield from sorted(plugins.glob(f"*/skills/{SKILL_NAME}"))
+        yield from sorted(plugins.glob(f"*/*/skills/{SKILL_NAME}"))
+
+
+def _looks_like_the_skill(path: Path) -> bool:
+    return (path / "rew_tool" / "rew_api.py").is_file()
+
+
+def skill_dir() -> Path:
+    """The skill this TCC will use. Resolved on every call, not once at import: the env override
+    is the documented way to repoint it, and a value frozen at import would ignore it."""
+    for candidate in _candidates():
+        if _looks_like_the_skill(candidate):
+            return candidate
+    # Nothing found. Return the checkout path anyway so the error message names the place a
+    # developer expects — the packaged case is covered by the message in `load()`.
+    return _SUBMODULE_DIR
+
+
+def rew_tool_dir() -> Path:
+    return skill_dir() / "rew_tool"
+
+
+def __getattr__(name: str):
+    """`SKILL_DIR` / `REW_TOOL_DIR` as live module attributes.
+
+    They were plain constants and are read as such all over TCC (`contract_check.script_path()`,
+    `process_writer`, `critic`, the tests). Keeping the names but resolving them on access means
+    the search order applies everywhere without touching each call site — and, unlike a constant,
+    a skill installed after TCC started is found.
+    """
+    if name == "SKILL_DIR":
+        return skill_dir()
+    if name == "REW_TOOL_DIR":
+        return rew_tool_dir()
+    raise AttributeError(name)
 
 # Vendored file (relative to REW_TOOL_DIR) -> synthetic module name we import it as.
 _VENDORED = {
@@ -55,8 +110,8 @@ class VendorNotInitializedError(RuntimeError):
 
 
 def is_available() -> bool:
-    """True if the vendored `rew_tool` submodule is present on disk."""
-    return (REW_TOOL_DIR / "rew_api.py").is_file()
+    """True if a skill was found in any of the places `_candidates()` looks."""
+    return _looks_like_the_skill(skill_dir())
 
 
 def link_skill_into(project_dir: Path) -> Optional[Path]:
@@ -85,7 +140,7 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
         if not is_available():
             return None
         link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(SKILL_DIR.resolve(), target_is_directory=True)
+        link.symlink_to(skill_dir().resolve(), target_is_directory=True)
         return link
     except OSError:
         return None
@@ -131,11 +186,15 @@ def load(vendored_rel: str) -> ModuleType:
     if vendored_rel not in _VENDORED:
         raise KeyError(f"unknown vendored module {vendored_rel!r}; known: {sorted(_VENDORED)}")
     if not is_available():
+        # The message has to fit BOTH readers: a developer with a checkout who forgot the
+        # submodule, and someone who installed TCC and has no repository to run git in.
+        looked = "\n  ".join(str(path) for path in _candidates())
         raise VendorNotInitializedError(
-            "rew_tool submodule not found at "
-            f"{REW_TOOL_DIR}. Run: git submodule update --init --recursive"
+            f"the {SKILL_NAME} skill was not found. Looked in:\n  {looked}\n"
+            f"In a checkout: git submodule update --init --recursive\n"
+            f"Installed: install the skill for Claude Code, or set {SKILL_DIR_ENV}."
         )
-    return _load_file(REW_TOOL_DIR / vendored_rel, _VENDORED[vendored_rel])
+    return _load_file(rew_tool_dir() / vendored_rel, _VENDORED[vendored_rel])
 
 
 def load_rew_api() -> ModuleType:

@@ -7,7 +7,10 @@ name = "autosound-tcc"
 version = "0.0.2"
 description = "Read-only Tuning Command Center for car-audio DSP tuning (macOS + Windows)."
 readme = "README.md"
-requires-python = ">=3.10"
+# 3.11, not 3.10. The old floor was a promise nobody kept: there is no CI, nothing has ever run
+# on 3.10, and `uv` installs the interpreter itself — so the floor costs a user nothing and an
+# untested claim costs them an evening. Raised deliberately (2026-08-12).
+requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "ayukhno" }]
 # The BASE install is the CLI half, and it is deliberately small: `tuning-session`,
@@ -15,22 +18,37 @@ authors = [{ name = "ayukhno" }]
 # `tests/test_packaging.py`, because that is an easy thing to break by adding one import). The
 # window is an extra because PySide6 + pyqtgraph is hundreds of megabytes, and making the light
 # path carry them defeats the point of having one (decision 2026-08-12, ARCHITECTURE-NOTES §3).
+# EVERY dependency carries an upper bound, and `tests/test_packaging.py` fails if one does not.
+# Open-ended `>=` means "whatever exists on the day someone installs this" — which for a tool used
+# in a car at a competition is not a version policy, it is a wish. The bounds below are all
+# "the next major/minor that may break us", and moving one is a deliberate act with a test run
+# behind it, not something a resolver decides at 2 a.m. in a car park (user asked, 2026-08-12:
+# "як наш пакет буде себе вести з часом з оновленнями версій?").
 dependencies = [
-    # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to the
-    # locally-authenticated `claude` CLI session — no separate API key needed
-    # in dev.
-    "claude-agent-sdk>=0.2",
+    # DSP-profile onboarding agent (docs/TCC-TZ.md §4a, option B). Talks to a Claude Code CLI —
+    # see the note below about WHICH one. Pre-1.0, so the whole 0.x line is the risk surface;
+    # bounded at 1.0 because that is where the vendor's own compatibility promise starts.
+    "claude-agent-sdk>=0.2,<1",
 ]
 
 [project.optional-dependencies]
 gui = [
-    "PySide6>=6.6",
+    # -Essentials, not the full PySide6. TCC imports QtCore, QtGui and QtWidgets and nothing else
+    # (`tests/test_packaging.py` checks that too); the Addons half is Qt3D, Charts, WebEngine,
+    # Multimedia — 800 MB this app never touches. Strictly more permissive than requiring
+    # `PySide6`, because the full package *depends on* this one: anybody who already has PySide6
+    # installed already satisfies it. Measured 2026-08-12: 691 MB vs 1517 MB.
+    "PySide6-Essentials>=6.6,<7",
     # Curve plotting: `ui/tcc/curve_view.py`, the panel a disagreement about a number gets
-    # pointed at. Pulls numpy transitively.
-    "pyqtgraph>=0.13",
+    # pointed at. Pulls numpy transitively. The tightest bound here on purpose — this is the one
+    # dependency whose INTERNALS we touch: `LogHzAxis` subclasses `pg.AxisItem`, and
+    # `_adopt_orphan_menus` reaches for `PlotItem.ctrlMenu`. Both are guarded, neither is public
+    # API, and a minor bump deserves a look rather than a silent resolve.
+    "pyqtgraph>=0.13,<0.14",
 ]
-# `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen.
-dev = ["pytest>=7", "autosound-tcc[gui]"]
+# `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen. Bounded like the rest —
+# the test that enforces that caught this line first, which is the argument for having it.
+dev = ["pytest>=7,<9", "autosound-tcc[gui]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"
