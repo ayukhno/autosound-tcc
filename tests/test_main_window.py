@@ -1941,3 +1941,45 @@ def test_an_unrecognised_key_leaves_the_replacement_list_as_it_was(tmp_path):
     entries = [mc.Choice(harness="omp", model="mistral-large", label="M", provider="mistral")]
 
     assert _replacements_for("omp:something-unknown", entries) == entries
+
+
+def test_a_model_this_machine_lacks_stays_selected_and_turns_red(tmp_path, monkeypatch):
+    """A picker that silently moves to another row is how a project came to be reviewed by a model
+    nobody chose, and how three permanent aliases got written (user, 2026-08-12)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QComboBox
+    from autosound_tcc.core import model_choices as mc
+
+    _app()
+    combo = QComboBox()
+    entries = [mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5",
+                         provider="anthropic")]
+
+    MainWindow._fill_combo(combo, entries, "agy:gemini-3.1-pro-high", critic=True)
+
+    assert combo.currentData() == "agy:gemini-3.1-pro-high", "the choice is not moved"
+    assert "agy:gemini-3.1-pro-high" in combo.currentText()
+    assert isinstance(combo.itemData(0, Qt.ItemDataRole.ForegroundRole), QColor)
+    assert "is-missing" in str(combo.property("class"))
+
+
+def test_the_recommended_class_is_bold_and_a_new_version_of_it_too(tmp_path):
+    """Bold by class, so an Opus 6 or a Pro 3.5 is marked the day it appears with no release."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+    from autosound_tcc.core import model_choices as mc
+
+    _app()
+    combo = QComboBox()
+    entries = [
+        mc.Choice(harness="agy", model="gemini-3.6-flash-high", label="Flash", provider="google"),
+        mc.Choice(harness="agy", model="gemini-9-pro-high", label="Gemini 9 Pro (High)",
+                  provider="google"),
+    ]
+
+    MainWindow._fill_combo(combo, entries, "", critic=True)
+
+    bold = [combo.itemData(i, Qt.ItemDataRole.FontRole) for i in range(combo.count())]
+    assert bold[0] is None, "Flash is not the recommended class"
+    assert bold[1] is not None and bold[1].bold()

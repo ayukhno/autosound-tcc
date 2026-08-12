@@ -179,11 +179,38 @@ def _same_model(wanted: str, answered: str) -> bool:
     return a in b or b in a
 
 
+def _recommendation_check() -> Check:
+    """Does the recommended pair still name anything this machine can run.
+
+    The recommendation is a CLASS now — Opus-class generator, Pro-class reviewer — so it survives
+    a version bump on its own. It will not survive the classes themselves retiring, and that day
+    has to be loud: a recommendation matching nothing looks exactly like no recommendation, which
+    is the failure the class scheme was adopted to prevent rather than to postpone.
+    """
+    entries = model_choices.choices([]) + model_choices.critic_choices([])
+    missing = [
+        role for role, critic in (("generator", False), ("critic", True))
+        if not model_choices.recommendation_available(entries, critic=critic)
+    ]
+    if not missing:
+        return Check("recommendation", OK, _t("selfRecommendOkTitle"))
+    pairs = ", ".join(
+        f"{vendor} {tier}" for role, (vendor, tier) in model_choices.RECOMMENDED.items()
+        if role in missing
+    )
+    return Check(
+        "recommendation",
+        WARN,
+        _t("selfRecommendTitle").format(roles=", ".join(missing)),
+        _t("selfRecommendDetail").format(pairs=pairs, since=model_choices.RECOMMENDED_SINCE),
+    )
+
+
 def run() -> list[Check]:
     """Every self-check, worst first. Never raises: a diagnostics panel that crashes is worse than
     one that is missing a row."""
     checks = []
-    for probe in (_alias_check, _catalogue_check, _reviewer_actual_check):
+    for probe in (_alias_check, _catalogue_check, _reviewer_actual_check, _recommendation_check):
         try:
             checks.append(probe())
         except Exception as exc:  # noqa: BLE001 — a broken probe is a row, not a dead dialog

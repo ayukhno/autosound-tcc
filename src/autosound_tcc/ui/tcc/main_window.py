@@ -27,7 +27,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QCursor, QDesktopServices, QFont, QGuiApplication
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -99,7 +99,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
     clear_layout,
 )
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
-from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme
+from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
@@ -2501,18 +2501,38 @@ class MainWindow(QMainWindow):
             # entry reads as "the normal one", which is the assumption that quietly spends money
             # (reported 2026-08-07: an API balance gone negative next to an unused subscription).
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
+            row = combo.count() - 1
             combo.setItemData(
-                combo.count() - 1,
-                f"{choice.route_note}\n{choice.model}",
-                Qt.ItemDataRole.ToolTipRole,
+                row, f"{choice.route_note}\n{choice.model}", Qt.ItemDataRole.ToolTipRole
             )
+            if model_choices.recommended(choice, critic=critic):
+                # Bold, and by CLASS — so a new Opus or a new Pro is marked the day it appears,
+                # with no release for it. The old literal match would simply have stopped bolding
+                # anything, silently (2026-08-12).
+                font = combo.font()
+                font.setBold(True)
+                combo.setItemData(row, font, Qt.ItemDataRole.FontRole)
+
         index = combo.findData(wanted) if wanted else -1
-        if index < 0 and not critic:
+        missing = bool(wanted) and index < 0
+        if missing:
+            # The chosen model is not on offer here. Shown in red and still selected, rather than
+            # dropped: a picker that silently moves to another row is how a project came to be
+            # reviewed by a model nobody chose, and how three permanent aliases got written
+            # (2026-08-12). What is wrong stays visible and stays selected until a human moves it.
+            combo.insertItem(0, i18n.t("modelMissingRow").format(key=wanted), wanted)
+            combo.setItemData(0, QColor(current_theme().warn), Qt.ItemDataRole.ForegroundRole)
+            combo.setItemData(0, i18n.t("modelMissingTip"), Qt.ItemDataRole.ToolTipRole)
+            index = 0
+        elif index < 0 and not critic:
             # Nothing chosen yet: say so rather than pre-selecting the first entry. A model that
             # was never picked must not be startable by someone who did not notice a default.
             combo.insertItem(0, i18n.t("modelUnchosen"), "")
             index = 0
         combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.setProperty("class", "mini-select" + (" is-missing" if missing else ""))
+        combo.style().unpolish(combo)
+        combo.style().polish(combo)
         combo.blockSignals(blocked)
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:

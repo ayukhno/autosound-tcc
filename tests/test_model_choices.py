@@ -452,3 +452,50 @@ def test_a_malformed_cache_reads_as_no_memory(tmp_path, monkeypatch):
     mc.catalogue_cache_path().write_text("{not json", encoding="utf-8")
 
     assert mc.agy_choices() == []
+
+
+# ---- the recommendation is a class, not a name (user, 2026-08-12) -----------------------------
+
+
+def _c(harness, model, label, provider):
+    return Choice(harness=harness, model=model, label=label, provider=provider)
+
+
+def test_a_new_version_of_the_recommended_class_is_recommended_with_no_release():
+    """It matched `sdk:claude-opus-5` literally, so the day Opus 6 shipped the badge would have
+    stopped appearing — silently, in the one place meant to help a first-time Arbiter."""
+    assert mc.recommended(_c("sdk", "claude-opus-6", "Claude Opus 6", "anthropic"))
+    assert mc.recommended(_c("agy", "gemini-3.5-pro-high", "Gemini 3.5 Pro (High)", "google"),
+                          critic=True)
+
+
+def test_the_class_is_vendor_and_tier_together():
+    """Cross-vendor is half the point of the pair, so an Opus-class reviewer is not the reviewer."""
+    opus = _c("sdk", "claude-opus-5", "Claude Opus 5", "anthropic")
+
+    assert mc.recommended(opus) and not mc.recommended(opus, critic=True)
+    assert not mc.recommended(_c("sdk", "claude-sonnet-5", "Sonnet 5", "anthropic"))
+
+
+def test_a_reduced_effort_tier_of_the_right_class_is_still_not_it():
+    assert not mc.recommended(
+        _c("agy", "gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)", "google"), critic=True
+    )
+
+
+def test_an_unrecognised_name_gets_no_badge_rather_than_a_guess():
+    unknown = _c("omp", "mistral-large", "Mistral Large", "mistral")
+
+    assert mc.tier_of(unknown) == ""
+    assert not mc.recommended(unknown) and not mc.recommended(unknown, critic=True)
+
+
+def test_a_recommendation_that_matches_nothing_can_be_asked_about():
+    """It will outlive Opus and Pro too. Going stale is not the failure; going stale quietly is."""
+    only_unknown = [_c("omp", "mistral-large", "Mistral", "mistral")]
+
+    assert not mc.recommendation_available(only_unknown)
+    assert not mc.recommendation_available(only_unknown, critic=True)
+    assert mc.recommendation_available(
+        [_c("sdk", "claude-opus-9", "Opus 9", "anthropic")], critic=False
+    )

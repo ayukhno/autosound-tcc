@@ -82,7 +82,9 @@ def test_a_probe_that_raises_becomes_a_row_not_a_dead_dialog(monkeypatch):
     checks = self_check.run()
 
     assert any("boom" in (c.detail or "") for c in checks)
-    assert len(checks) == 3, "the other probes still ran"
+    # By id, not by count: a test that has to be edited every time a probe is added is a test that
+    # eventually gets edited without being read.
+    assert {"catalogue", "reviewer_actual", "recommendation"} <= {c.id for c in checks}
 
 
 def test_an_installed_cli_that_answered_nothing_gets_a_row_and_a_retry(monkeypatch):

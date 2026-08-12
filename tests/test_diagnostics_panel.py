@@ -65,10 +65,20 @@ def test_renders_every_file_row_and_the_cross_check_finding():
     assert "/tmp/proj" in text
 
 
-def test_verdict_counts_defects_only():
+def _stub_self_checks(monkeypatch):
+    """The dialog's job is to render and COUNT whatever `self_check.run()` returns; which checks
+    exist is `test_self_check.py`'s business. Letting the real list in made these tests depend on
+    which agent CLIs the developer has installed."""
+    from autosound_tcc.core import self_check
+
+    monkeypatch.setattr(self_check, "run", list)
+
+
+def test_verdict_counts_defects_only(monkeypatch):
     """Two: the invalid ledger and the cross-file mismatch. A file that is merely MISSING and an
     open question on project.json are both intake that hasn't happened, not defects — the checker's
     own `ok` treats them that way, and a verdict that disagreed with it would be the panel's."""
+    _stub_self_checks(monkeypatch)
     _app()
     dialog = DiagnosticsDialog()
 
@@ -80,7 +90,8 @@ def test_verdict_counts_defects_only():
     assert "missing -- run intake/onboarding" in text  # still SHOWN, just not counted
 
 
-def test_ok_report_says_so():
+def test_ok_report_says_so(monkeypatch):
+    _stub_self_checks(monkeypatch)
     _app()
     dialog = DiagnosticsDialog()
 
@@ -167,26 +178,28 @@ def test_tcc_s_own_setup_gets_a_section_with_a_working_fix(tmp_path, monkeypatch
     assert model_overrides.load()["aliases"] == {}
     # ...and the panel now agrees with itself: the row is gone, not just a banner claiming it.
     assert not any(r.findChild(QPushButton) for r in dialog.findChildren(_CheckRow))
-    assert self_check.run()[0].status == self_check.OK
+    alias_check = next(c for c in self_check.run() if c.id == "aliases")
+    assert alias_check.status == self_check.OK
 
 
 def test_the_headline_counts_tccs_own_problems_too(tmp_path, monkeypatch):
     """It read the project's verdict alone, so the panel could say "OK — nothing to fix" directly
     above a red row of its own making."""
-    from autosound_tcc.core import model_choices, model_overrides
+    from autosound_tcc.core import self_check
 
-    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
-    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog.set_report(_report(ok=True, files=(), cross_checks={
-        "glossary_vs_ledgers": [], "tiers_vs_profile": [], "rew": {"reachable": True}}))
+    clean = _report(ok=True, files=(), cross_checks={
+        "glossary_vs_ledgers": [], "tiers_vs_profile": [], "rew": {"reachable": True}})
+    _stub_self_checks(monkeypatch)
+    dialog.set_report(clean)
     assert dialog._verdict.text() == i18n.t("diagOk")
 
-    model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
+    monkeypatch.setattr(self_check, "run", lambda: [
+        self_check.Check("stub", self_check.BAD, "something of TCC's own is wrong")
+    ])
     dialog._render()
 
-    assert dialog._verdict.text() != i18n.t("diagOk")
+    assert dialog._verdict.text() != i18n.t("diagOk"), "a red row of its own making counts"
     assert "1" in dialog._verdict.text()

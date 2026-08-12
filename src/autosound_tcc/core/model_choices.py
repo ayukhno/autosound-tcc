@@ -58,14 +58,43 @@ SDK_MODELS: tuple[tuple[str, str], ...] = (
     ("Claude Fable 5", "claude-fable-5"),
 )
 
-# The pair that is worth running today. Everything else in the picker is a real option and an
-# experiment; this is the one combination the method has been driven with end to end, and it is
-# marked so a first-time Arbiter does not have to infer it from a list of two hundred models.
-RECOMMENDED_GENERATOR = "sdk:claude-opus-5"
-RECOMMENDED_CRITIC_MARKERS = ("gemini", "pro")
+# The pair that is worth running today — named as a CLASS, not as two model names.
+#
+# It was `sdk:claude-opus-5` and a literal search for "gemini"+"pro", and that has a short shelf
+# life: the day Gemini 3.7 ships, the recommendation stops matching anything and does so SILENTLY
+# — no error, no warning, just nothing bold in a list of two hundred rows. Same failure class as
+# every "declared and not enforced" rule found this week, in the one place meant to help a
+# first-time Arbiter.
+#
+# A vendor and a tier survive a version bump, because that is what the experience is actually
+# about: Opus-class generator, Pro-class reviewer, cross-vendor. Nobody ever concluded "3.1
+# specifically". And when Opus and Pro themselves are gone — they will be — the recommendation
+# matches nothing, `recommendation_available()` says so out loud, and the date below says how old
+# the claim is. Going stale is not the failure; going stale quietly is.
+RECOMMENDED_SINCE = "2026-08"
+RECOMMENDED = {
+    "generator": ("anthropic", "opus"),
+    "critic": ("google", "pro"),
+}
 #: …but not a reduced-effort tier of it. `agy` publishes Pro at several efforts, and "Pro (Low)"
 #: is not the reviewer the pair was judged on.
 RECOMMENDED_CRITIC_EXCLUDES = ("low", "flash", "lite")
+
+#: Model TIERS, by the marker that names them. Ordered: the first match wins, so a longer or more
+#: specific token comes before one that could also appear inside it. `""` for anything
+#: unrecognised — the same rule as `vendor_of`, and for the same reason: a guess here would put a
+#: recommendation badge on a model nobody has judged.
+_TIER_MARKERS = (
+    ("opus", "opus"), ("sonnet", "sonnet"), ("haiku", "haiku"), ("fable", "fable"),
+    ("pro", "pro"), ("flash", "flash"), ("lite", "lite"),
+    ("codex", "codex"), ("gpt-oss", "oss"),
+)
+
+
+def tier_of(choice: "Choice") -> str:
+    """Which class of model this is (`opus`, `pro`, `flash`…), or "" when the name does not say."""
+    haystack = f"{choice.model} {choice.label}".lower()
+    return next((tier for marker, tier in _TIER_MARKERS if marker in haystack), "")
 
 # How hard the Generator is asked to think. Three levels, not the full ladder the CLIs expose:
 # **below `high` is not a tuning setting** (user, 2026-08-07). A cheap pass reads as competence —
@@ -599,17 +628,28 @@ def critic_choices(active_omp: list[str]) -> list[Choice]:
 
 
 def recommended(choice: Choice, critic: bool = False) -> bool:
-    """Is this the combination the method has actually been driven with end to end.
+    """Is this model of the class the method has actually been driven with end to end.
 
-    Claude Opus through the user's own login as Generator, a Gemini Pro through a subscription CLI
-    as Critic. Everything else in the picker is a real option and an experiment — worth offering,
-    not worth a first-time Arbiter having to infer the answer from two hundred rows.
+    An Opus-class generator on the user's own login, a Pro-class reviewer from another vendor.
+    Matched by vendor and tier rather than by name, so a new version of either is recommended the
+    day it appears and nobody has to ship a release for it. Everything else in the picker is a
+    real option and an experiment.
     """
-    if not critic:
-        return choice.key == RECOMMENDED_GENERATOR
-    if choice.harness not in ("agy", "omp"):
+    vendor, tier = RECOMMENDED["critic" if critic else "generator"]
+    if vendor_of(choice) != vendor or tier_of(choice) != tier:
         return False
-    name = f"{choice.model} {choice.label}".lower()
-    if any(marker in name for marker in RECOMMENDED_CRITIC_EXCLUDES):
-        return False
-    return all(marker in name for marker in RECOMMENDED_CRITIC_MARKERS)
+    if critic:
+        name = f"{choice.model} {choice.label}".lower()
+        if any(marker in name for marker in RECOMMENDED_CRITIC_EXCLUDES):
+            return False
+    return True
+
+
+def recommendation_available(entries: list[Choice], critic: bool = False) -> bool:
+    """Does the recommended CLASS match anything this machine can actually offer.
+
+    Asked separately because the answer "no" has to be visible. A recommendation that quietly
+    matches nothing is indistinguishable from having no recommendation at all — and that is the
+    state this whole scheme exists to make loud, since the classes it names will retire too.
+    """
+    return any(recommended(choice, critic=critic) for choice in entries)

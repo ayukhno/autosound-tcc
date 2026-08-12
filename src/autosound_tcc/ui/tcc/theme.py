@@ -333,6 +333,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="zoom-btn"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .is-missing — the picker's current choice is not on offer on this machine. Red text, not a
+    red background: the model is still SELECTED and still what the project asks for, which is a
+    different statement from "this setting is wrong". */
+    QComboBox[class~="is-missing"] {{
+        color: {t.warn};
+        border-color: {t.warn};
+    }}
     /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
     clickable; hover says what, click says why. */
     QPushButton[class~="warn-mark"] {{
