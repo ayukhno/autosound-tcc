@@ -147,6 +147,15 @@ Bash дочитує файл на льоту — видалення посере
 
 ## 3. Установка скіла
 
+> **Застаріло разом із формою поставки TCC (2026-08-13).** Тут припускалося, що TCC живе як
+> git-чекаут, у якому є submodule. TCC ставиться колесом (`uv tool install`), а submodule лежить
+> поза `src/autosound_tcc`, тож у встановленому пакеті його немає — вказувати симлінк нема на що.
+> Тому скіл ставиться **окремо**, а TCC його **шукає**: `AUTOSOUND_SKILL_DIR` → submodule чекауту
+> → `~/.claude/skills/autosound-tuning` → теки плагінів (`core/vendor_loader.py`). Матриця версій,
+> якої боявся цей розділ, закрита інакше: TCC перевіряє, що знайдений скіл — 3.x, і називає його
+> лінію, якщо ні. Решта розділу (чому саме `~/.claude/skills`, чому не проєктні симлінки, junction
+> на Windows) чинна.
+
 **Глобально:** `~/.claude/skills/autosound-tuning` → симлінк на submodule
 `…/autosound-tcc/vendor/autosound-tuning-skill/skills/autosound-tuning`.
 
