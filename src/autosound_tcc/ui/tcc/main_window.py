@@ -2529,7 +2529,11 @@ class MainWindow(QMainWindow):
             # what the weight already says is width spent twice (user, 2026-08-12). The reduced-
             # effort sibling is the exception — there the absence of bold is the whole message, and
             # an absence explains nothing.
-            if model_choices.reduced_effort(choice, critic=critic):
+            reduced = model_choices.reduced_effort(choice, critic=critic)
+            if reduced:
+                # Two words in the row, the argument on hover. The row's job is to say why this
+                # one is not bold beside its bolded sibling; the reason does not fit on a line and
+                # does not belong on one (user, 2026-08-12 — the same note twice now).
                 notes.append(i18n.t("modelLowEffort"))
             if choice.free:
                 notes.append(i18n.t("modelFree"))
@@ -2549,9 +2553,10 @@ class MainWindow(QMainWindow):
             # (reported 2026-08-07: an API balance gone negative next to an unused subscription).
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
             row = combo.count() - 1
-            combo.setItemData(
-                row, f"{choice.route_note}\n{choice.model}", Qt.ItemDataRole.ToolTipRole
-            )
+            tip = f"{choice.route_note}\n{choice.model}"
+            if reduced:
+                tip += "\n\n" + i18n.t("modelLowEffortTip")
+            combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
             if model_choices.recommended(choice, critic=critic):
                 # Bold, and by CLASS — so a new Opus or a new Pro is marked the day it appears,
                 # with no release for it. The old literal match would simply have stopped bolding

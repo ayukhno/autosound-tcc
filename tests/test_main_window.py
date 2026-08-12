@@ -2035,3 +2035,23 @@ def test_a_reduced_effort_pro_says_why_it_is_not_bold(tmp_path):
 
     assert i18n.t("modelRecommended") not in combo.itemText(0), "bold says it; words repeat it"
     assert i18n.t("modelLowEffort") in combo.itemText(1)
+
+
+def test_the_low_effort_reason_moved_to_the_hover():
+    """"reduced effort — a reviewer that agrees" was a sentence in a picker row. Two words in the
+    row, the argument on hover (user, 2026-08-12)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+    from autosound_tcc.core import model_choices as mc
+
+    _app()
+    combo = QComboBox()
+    MainWindow._fill_combo(combo, [
+        mc.Choice(harness="agy", model="gemini-3.1-pro-low", label="Gemini 3.1 Pro (Low)",
+                  provider="google"),
+    ], "", critic=True)
+
+    assert combo.itemText(0).endswith(i18n.t("modelLowEffort"))
+    assert len(i18n.t("modelLowEffort")) < 24, "a row label, not an argument"
+    assert "agree" in combo.itemData(0, Qt.ItemDataRole.ToolTipRole).lower() or \
+           "погоджу" in combo.itemData(0, Qt.ItemDataRole.ToolTipRole).lower()
