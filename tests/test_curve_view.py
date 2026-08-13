@@ -425,6 +425,28 @@ def test_the_reading_that_is_sent_carries_no_markup():
     assert "\n" not in sent, "one line: the row is full width now, and there is room"
 
 
+def test_pyqtgraphs_plot_options_menu_is_never_filled_in():
+    """The segfault, in test form.
+
+    Every `PlotItem` used to add six `QWidgetAction`s to six submenus, and adding a
+    Python-created action to a QMenu is where the process died — 5 crashes in 40 runs of the
+    plot-heavy files, 0 in 40 once the submenus stopped being built (measured 2026-08-13, see
+    `_do_not_build_the_plot_options_menu`). The menu is disabled twice over and never shown, so
+    an empty one costs nothing; what must keep working is `ctrl`, which the plot itself reads.
+    """
+    view = _view()
+    item = view._plot.getPlotItem()
+
+    assert item.ctrlMenu.actions() == [], "a filled menu means the patch stopped applying"
+    # ...and the control form the plot actually uses is untouched: these four calls read it.
+    view._plot.showGrid(x=True, y=True, alpha=0.18)
+    view._plot.setDownsampling(auto=True, mode="peak")
+    view._plot.setClipToView(True)
+    view.set_log_x(True)
+    assert item.ctrl.gridAlphaSlider is not None
+    assert view._plot.getPlotItem().vb.menuEnabled() is False
+
+
 def test_pyqtgraphs_own_auto_range_button_is_not_offered_either():
     """It parks an unlabelled "A" square on top of the data whenever the view is not auto-ranged,
     beside our own A button that says what it does."""

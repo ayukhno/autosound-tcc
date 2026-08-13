@@ -19,6 +19,7 @@ driver against its joint partner). Markers are draggable and their delta is the 
 from __future__ import annotations
 
 import html
+import importlib
 import math
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QRadioButton,
     QSizePolicy,
@@ -61,6 +63,81 @@ _GUIDE_WIDTH = 2.4
 #: Fallback delay step, in ms, when no profile has been read. What DSPs seen so far let you TYPE;
 #: the hardware resolves in whole samples, which is a different number — see `set_resolution`.
 _DEFAULT_STEP_MS = 0.01
+
+
+class _UnbuiltSubmenu:
+    """Stands in for a submenu that is never created, and swallows whatever is done to it.
+
+    Permissive on purpose: a later pyqtgraph that calls something else on the object `addMenu`
+    returned must get a no-op, not an `AttributeError` at plot construction.
+    """
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        return lambda *args, **kwargs: None
+
+
+class _PlotOptionsMenu(QMenu):
+    """pyqtgraph's `ctrlMenu`, real but left empty — see `_do_not_build_the_plot_options_menu`."""
+
+    def addMenu(self, *args, **kwargs) -> _UnbuiltSubmenu:  # noqa: N802 (Qt naming)
+        return _UnbuiltSubmenu()
+
+
+class _QtWidgetsWithoutSubmenus:
+    """`PlotItem.py`'s view of `QtWidgets`, with only `QMenu` swapped."""
+
+    QMenu = _PlotOptionsMenu
+
+    def __init__(self, real) -> None:
+        self._real = real
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
+
+
+def _do_not_build_the_plot_options_menu() -> None:
+    """Stop pyqtgraph filling a menu we never show — the line the process dies on.
+
+    `PlotItem.__init__` builds six submenus and six `QWidgetAction`s unconditionally
+    (0.14.0 `PlotItem.py:231-237`; byte-identical on upstream master, and `enableMenu=False`
+    governs the ViewBox's menu, not this one). Adding a Python-created `QWidgetAction` to a QMenu
+    makes Qt connect to it BY SIGNAL NAME, which asks PySide for the action's metaobject:
+
+        Sbk_QMenuFunc_addAction → QWidget::insertAction → QMenu::actionEvent
+          → QObject::connect → PySide::SignalManager::retrieveMetaObject → SIGSEGV
+
+    The crash report has `x0 = 0` at that last frame: a C++ object asked for a metaobject it has
+    no Python half left to answer with. Two sessions read this as a leak or a GC accident and both
+    were wrong — the count of live QMenus settles at zero, and neither `gc.disable()` nor
+    per-test teardown moved the rate.
+
+    Measured 2026-08-13, 40 runs each of the two plot-heavy test files (44 plots per run):
+    5/40 crashes as shipped, **0/40 with this patch**. Three other candidates, same protocol,
+    did not fix it: keeping pyqtgraph's ctrl form widget alive 1/40, dropping
+    `_adopt_orphan_menus` 3/40, keeping the `QWidgetAction` wrappers alive 3/40. The rate over
+    all baseline runs is 12/81, so 0/40 is worth 0.15%, not luck.
+
+    Nothing is lost: the menu is disabled twice over (`enableMenu=False` at construction and
+    `setMenuEnabled(False)` after), it renders white-on-white in the dark theme, and everything
+    it offers is on the A/D/−/+ buttons. `self.ctrl` — which `showGrid`, `setDownsampling`,
+    `setClipToView` and `setLogMode` all read — is untouched, and so is the `ctrlMenu` object
+    itself, which `PlotItem.close()` expects to find.
+
+    Written defensively for the same reason `_adopt_orphan_menus` is: a pyqtgraph that stops
+    building the menu, or restructures it, must leave this a no-op rather than an import-time
+    crash.
+    """
+    try:
+        module = importlib.import_module("pyqtgraph.graphicsItems.PlotItem.PlotItem")
+    except ImportError:  # pragma: no cover — pyqtgraph is a hard dependency of this module
+        return
+    real = getattr(module, "QtWidgets", None)
+    if real is None or not hasattr(real, "QMenu") or isinstance(real, _QtWidgetsWithoutSubmenus):
+        return
+    module.QtWidgets = _QtWidgetsWithoutSubmenus(real)
+
+
+_do_not_build_the_plot_options_menu()
 
 
 class LogHzAxis(pg.AxisItem):
@@ -335,11 +412,10 @@ class CurveView(QWidget):
         """Give pyqtgraph's parentless menus an owner, so they die with this widget.
 
         `PlotItem.__init__` builds `QMenu("Plot Options")` with **no parent**, unconditionally —
-        `enableMenu=False` is checked for the ViewBox's menu, not this one (pyqtgraph 0.13,
-        `PlotItem.py:237`). A top-level QMenu with four submenus and four `QWidgetAction`s is
-        left behind by every plot ever constructed, and once enough of them accumulate the
-        process dies *inside a later* `PlotItem.__init__` — a real SIGSEGV, about one suite run
-        in six, and the reason the app already reuses a single curve window (2026-08-12).
+        `enableMenu=False` is checked for the ViewBox's menu, not this one (pyqtgraph 0.14,
+        `PlotItem.py:231`). A top-level QMenu is left behind by every plot ever constructed.
+        `_do_not_build_the_plot_options_menu` above keeps that menu EMPTY, which is what stops
+        the segfault; this keeps the empty menu from outliving the widget that caused it.
 
         Reparenting is the fix rather than another workaround: an owned menu is destroyed with
         its widget, in order, by Qt itself. Written defensively because it reaches into
