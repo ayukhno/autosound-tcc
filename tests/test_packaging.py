@@ -209,6 +209,21 @@ def _fake_skill(root: Path, line: str = "3.x") -> Path:
     return skill
 
 
+def test_the_app_icon_ships_inside_the_package():
+    """Same trap as the profiles, and the same fix. The `.icns` is read by the installer's app
+    builder, which lives in the OTHER repository — it locates it through the installed package
+    rather than keeping a second copy, so this file being in the wheel is what makes the bundle
+    get an icon at all. The `.png` is what the running app hands to `setWindowIcon`, which is the
+    only icon a terminal-launched TCC has."""
+    from autosound_tcc import app
+
+    for path in (app.APP_ICON, app.APP_ICNS):
+        assert path.is_file(), path
+        assert (ROOT / "src" / "autosound_tcc") in path.parents, (
+            "outside the package directory it will not be in the wheel"
+        )
+
+
 def test_the_bundled_profiles_ship_inside_the_package():
     """They lived in `<repo>/data/dsp_profiles`, which exists in a checkout and nowhere else — so
     an installed TCC opened New Project with no bundled profile in the list, silently. A wheel

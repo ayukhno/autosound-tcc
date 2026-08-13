@@ -18,6 +18,11 @@ from autosound_tcc.core import app_log, config, macos_identity
 #: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
 #: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
 APP_DISPLAY_NAME = "Autosound TCC"
+#: Shipped inside the package so every install has it, however it was installed. The `.icns`
+#: beside it is the same artwork for the macOS bundle, and the installer's app builder reads it
+#: from here rather than keeping a second copy in the other repository.
+APP_ICON = Path(__file__).resolve().parent / "assets" / "app-icon.png"
+APP_ICNS = APP_ICON.with_suffix(".icns")
 
 #: What to say when the window is asked for and the toolkit that draws it is not installed.
 #: `autosound-tcc` ships in two sizes — the CLI half needs `claude-agent-sdk` and nothing else,
@@ -65,6 +70,7 @@ def main() -> int:
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
     try:
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
 
         from autosound_tcc.ui.tcc.main_window import MainWindow
@@ -98,6 +104,12 @@ def main() -> int:
     # uses for QSettings and friends, and is deliberately the package name; this is the one a
     # person reads.
     app.setApplicationDisplayName(APP_DISPLAY_NAME)
+    # The Dock tile of the RUNNING app. The bundle's own `.icns` is what Finder and Spotlight
+    # show, and it only exists for people who installed through the installer — a `uv tool
+    # install` and `autosound-tcc` from a terminal has no bundle at all, and used to run under
+    # the generic Python rocket. Same artwork either way, from inside the package.
+    if APP_ICON.is_file():
+        app.setWindowIcon(QIcon(str(APP_ICON)))
     app_log.install_qt_handler()  # Qt's own warnings, into the same file
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build
