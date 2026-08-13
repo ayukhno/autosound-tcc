@@ -91,12 +91,11 @@ for the method and `~/.local/bin/` for the app.
 Nothing to download. Open Terminal (⌘-Space, type "terminal", press Enter) and paste this line:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash
 ```
 
-It tells you what it is about to do and asks before it downloads anything.
-
-For the method on its own, without the window, use `--terminal` instead of `--tcc`.
+It asks which of the two sizes you want — for this app, answer **2**. Then it lists everything it
+is about to download, and where each piece comes from, and asks once before any of it happens.
 
 On a Mac that has never been used for programming, the script stops and asks you to run
 `xcode-select --install` first. macOS installs git through a dialog box, and a script cannot click
