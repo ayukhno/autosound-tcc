@@ -164,5 +164,36 @@ def setup(*, to_stderr: Optional[bool] = None) -> Optional[Path]:
         stream.setFormatter(formatter)
         log.addHandler(stream)
 
+    _capture_python_warnings(log.handlers)
     _install_excepthooks()
     return _log_path
+
+
+def _capture_python_warnings(handlers: list) -> None:
+    """Python's own warnings into the same file, for the same reason Qt's go there.
+
+    The first line a person saw when launching TCC from a terminal was three lines of somebody
+    else's jargon — `pydantic_settings` complaining, through `mcp`, that a field named `lifespan`
+    has an unresolved forward reference and someone should call `model_rebuild()`. Nothing of ours
+    is involved and nothing breaks, but on a first launch it reads as "this is broken" (user, on a
+    fresh install 2026-08-13).
+
+    Captured rather than FILTERED. A `filterwarnings("ignore", …)` narrow enough to hit only that
+    one would still be a rule that silently swallows the next real warning from the same category,
+    and a rule nobody would think to check. Here nothing is lost: it is in `tcc.log` with
+    everything else, and the terminal is clean.
+    """
+    # Off, then on. `captureWarnings(True)` only installs its hook `if _warnings_showwarning is
+    # None` — so a SECOND call is a silent no-op, and if anything replaced `warnings.showwarning`
+    # in between (pytest does, around every test) the capture is quietly dead and the warnings go
+    # back to the terminal. Turning it off first clears that flag, so this is idempotent in the
+    # way it appears to be. Found by the test below failing only when it was not run alone.
+    logging.captureWarnings(False)
+    logging.captureWarnings(True)
+    captured = logging.getLogger("py.warnings")
+    captured.setLevel(logging.WARNING)
+    captured.propagate = False  # `logger()` does not propagate either; this is the same argument
+    for handler in list(captured.handlers):
+        captured.removeHandler(handler)
+    for handler in handlers:
+        captured.addHandler(handler)

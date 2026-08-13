@@ -40,6 +40,19 @@ def test_an_unhandled_exception_goes_to_the_file_and_not_to_stderr(installed, ca
     assert capsys.readouterr().err == ""
 
 
+def test_a_library_warning_lands_in_the_file_instead_of_the_first_screen(installed, capsys):
+    """The first line of a fresh install used to be `pydantic_settings` complaining, through
+    `mcp`, about a field named `lifespan` — three lines of somebody else's jargon, nothing of ours
+    involved, and it reads as "this is broken". Captured, not filtered: an ignore rule would
+    swallow the next real warning from the same category and nobody would think to check."""
+    import warnings
+
+    warnings.warn("a forward reference nobody here can fix", UserWarning)
+
+    assert "a forward reference nobody here can fix" in installed.read_text(encoding="utf-8")
+    assert capsys.readouterr().err == "", "the terminal is the one place it must not appear"
+
+
 def test_the_window_is_told_so_a_failure_is_not_silent(installed):
     seen = []
     app_log.set_ui_sink(lambda message, path: seen.append((message, path)))
