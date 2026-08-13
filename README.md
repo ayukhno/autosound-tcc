@@ -8,7 +8,10 @@ without working in a terminal.
 - **Reads REW live**: measurements come over its API, and you can drag delay markers on the curves
 - **Keeps the plan in view**: the phase you are on, what is done, what is still waiting
 - **Puts the AI in a panel**, instead of a terminal full of scrolling text
-- **Never writes to your processor**: you still type every number into the DSP yourself
+- **Never writes to your processor**: nothing reaches the DSP unless you put it there. EQ does
+  not have to be retyped, though. REW exports a file the Helix PC-Tool imports in one go, and a
+  [copy-paste helper](https://github.com/IvanBakhmutov/REW-EQ-CopyPaste-Assistant) covers
+  processors without file import
 
 > [!CAUTION]
 > AI gets numbers wrong. Check crossover frequencies, slopes and EQ values in your DSP before you
