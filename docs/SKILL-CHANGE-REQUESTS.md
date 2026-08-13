@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-11: nothing.** SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12 — everything in this file is done, superseded or rejected. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-13: SCR-049** (the project backup nobody wrote down). SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1366,3 +1366,37 @@ shape.
 The pattern across SCR-043…048 is worth keeping in one sentence: **every one of them was a rule
 that existed and was not checked.** Not missing rules — unenforced ones. That is the class an audit
 finds cheaply and a reader never does, because the rule reads as true.
+
+## SCR-049 — the project backup is a promise nobody wrote down
+
+**Status**: proposed (2026-08-13 — user chose to build it rather than soften the claim)
+**Target**: skill — a documented backup step (where it belongs in the phase order is part of the
+ask); `install.sh` in the skill repo, for the question and the CLI it needs
+**TCC dependency**: none required. TCC already reads git state for the project panel
+(`state/project_view.py:259`) and would show the result for free.
+
+**Detail**: the installer's closing advice says "the skill offers to keep it in a private
+repository when you start one". Grepped both repositories on 2026-08-13: there is no `git init`,
+no `git remote`, no `gh repo create` anywhere in the skill or in TCC. TCC only READS git state to
+display a branch and a dirty count.
+
+The claim is not false, and that is the part worth being precise about: **the skill can do it
+today because the AI can run the commands.** What does not exist is anything written down — no
+step, no phase, no script, no check. So it happens when the model thinks of it and not otherwise,
+which for the artefact the whole method produces (the ledger, the journal, the config backups,
+weeks of decisions) is the wrong reliability.
+
+What the ask covers:
+
+1. **A written backup step in the skill** — when it is offered, what goes in, what stays out. The
+   sweeps stay on disk; the record is what is worth keeping. Private by default, and never
+   automatic: pushing somebody's car, DSP and measurements to a cloud is an outward-facing action
+   and needs their word, once, explicitly.
+2. **The installer asks up front** rather than advising at the end: "keep the project's record in
+   a free private GitHub repository?" — and if yes, `brew install gh`, which turns account
+   creation, login and repo creation into `gh auth login` + one command. Asking early matters
+   because the answer decides whether anything is installed at all.
+3. **The closing advice becomes a how-to** with the actual commands, for the person who said no
+   at install time and changed their mind — or who wants to do it by hand.
+
+Until this lands, the installer's line should not claim the skill "offers" anything.
