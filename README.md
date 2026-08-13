@@ -60,11 +60,14 @@ Three things it cannot get for you, because they are yours:
   [the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
 
 **A GitHub account is worth having, and it is not needed to install.** Installing asks you to log
-in nowhere, and both repositories are public. The reason to have one is your own project: it is
-months of work, and it holds measurements that cannot be taken again once the car has been apart.
-So when you start a new project the method sets up a git backup for it and keeps feeding it, and
-pointing that at a **private** repository on GitHub is the cheapest insurance there is against a
-dead disk or a stolen laptop. A free account covers it.
+in nowhere, and both repositories are public. The reason to have one is your own project, and it
+is not the raw sweeps: those run 16 to 112 MB apiece, they stay on your disk, and if you ever
+needed them again you would re-measure. What the method commits is everything you *concluded* —
+the ledger of every crossover, delay, gain and filter, the journal of how you got there, the DSP
+config backups that restore the tune, the target curves and the analysis notes. Small files, and
+no amount of re-measuring brings them back. So it sets up a git backup when you start a project
+and keeps feeding it; pointing that at a **private** repository is the cheapest insurance there is
+against a dead disk. A free account covers it.
 
 A second AI as reviewer is optional, but it is where most of the value comes from: the method works
 by having one model propose a change and a model from a different vendor argue with it. The
@@ -264,9 +267,10 @@ Or this to remove:
 ```
 
 > [!IMPORTANT]
-> **Removing never deletes a project folder.** Your measurements took hours in a car and cannot be
-> reproduced, so nothing in this installer will touch them. It also leaves Claude Code and the
-> Python packages alone, because other things on your machine use them.
+> **Removing never deletes a project folder.** That folder is the tune itself: the ledger, the
+> process journal, the DSP config backups and the sweeps. Nothing in this installer will touch it.
+> It also leaves Claude Code and the Python packages alone, because other things on your machine
+> use them.
 
 ## What's in here
 
