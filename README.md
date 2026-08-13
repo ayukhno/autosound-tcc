@@ -24,101 +24,137 @@ steps — rather than to automate the DSP.
 
 ## Install
 
-There are two pieces and they are separate on purpose:
+One script installs everything, on both platforms, in one of two sizes. It is the same script for
+a first install, an update and a removal.
 
-- **the skill** (`autosound-tuning`) — the tuning method itself. Plain Python.
-  It works on its own, in a terminal, with no TCC at all. It needs `numpy`
-  (imported at module scope by five of its tools, which do not load without
-  it); `scipy` and `matplotlib` are feature dependencies, imported at the point
-  of use, and their absence costs one feature rather than a session. Its
-  `requirements.txt` lists all three.
-- **TCC** — this app. It never works without the skill: the skill writes the
-  project's files, TCC reads them.
+| | what you get | roughly |
+| :-- | :-- | --: |
+| **Terminal** | the tuning method and the Python packages its tools need. Works on its own, in a terminal. | 30 MB |
+| **Terminal + TCC** | plus this desktop app: the DSP tree, the plan, the measurement panel and the curve window | 680 MB |
 
-Install the skill first.
+TCC never works without the skill — the skill writes the project's files, TCC reads them — so
+every route below installs the skill, and TCC only if you ask for it.
 
-### 1. The skill
+### macOS
 
-Clone it anywhere:
+Open Terminal and paste one of these:
 
 ```sh
-git clone https://github.com/ayukhno/autosound-tuning-skill.git
+# the method only
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
+
+# the method and the desktop app
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
 ```
 
-Then tell TCC where it is, by either of these:
+Without a flag it asks which. It asks before anything is fetched from the network, and it says
+what it is about to run.
+
+**On a machine that has never built anything**, the first run stops and asks you to run
+`xcode-select --install` — macOS puts git behind a dialog that a script cannot click. Click
+Install, wait, and run the line again.
+
+Downloading the script and double-clicking it is deliberately *not* the route: macOS quarantines
+anything a browser saved and Gatekeeper blocks it, so the one-liner is the smoother path, not the
+rougher one.
+
+### Windows
+
+Open PowerShell and paste one of these:
+
+```powershell
+# the method only
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Terminal
+
+# the method and the desktop app
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
+```
+
+The `scriptblock` wrapper is what lets a downloaded script take a flag; without a flag,
+`irm … | iex` works and asks which.
+
+It installs git and Python with `winget` if they are missing, and links the skill with a
+**junction** rather than a symlink — junctions need neither Developer Mode nor an administrator
+prompt.
+
+> **The Windows script has not been run yet.** It mirrors the macOS one line for line and the
+> macOS one is tested, but no part of it has executed on Windows. Run it with `-DryRun` first: it
+> changes nothing and prints every step, so a first attempt shows exactly where it stops. Reports
+> of where it stops are the most useful thing you can send.
+
+### What you still have to do yourself
+
+**Sign in to Claude.** `claude auth login`, once. Neither the skill nor TCC can do it for you:
+they drive *your* authenticated session, and a product may not offer a Claude login of its own.
+The installer checks and tells you if it is missing.
+
+Nothing else needs an account. Both repositories are public, nothing is pushed anywhere, and no
+GitHub login is involved at any point.
+
+A second model as reviewer is optional but is most of the value — the method is built on one
+model proposing and a different vendor's disagreeing. The installer reports whether it found
+`agy`, `omp` or `gemini`; without one, reviews fall back to the clipboard, which works.
+
+### Updating, and removing
 
 ```sh
-# a) point at the clone
-export AUTOSOUND_SKILL_DIR=/path/to/autosound-tuning-skill/skills/autosound-tuning
+# macOS — the same line again; a second run updates
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
 
-# b) or put it where Claude Code keeps skills, and TCC finds it with no variable
-ln -s /path/to/autosound-tuning-skill/skills/autosound-tuning \
-      ~/.claude/skills/autosound-tuning
+# and to remove it
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --uninstall
 ```
 
-Then install what its tools need:
+On Windows, `-Tcc` again to update and `-Uninstall` to remove.
+
+**Uninstall never touches a project folder** — not with `--yes`, not ever. Those hold measurements
+that took hours in a car and cannot be reproduced. It also leaves the Python packages (shared with
+everything else using that interpreter), Claude Code, and `~/.claude`.
+
+### If you would rather do it by hand
+
+The script does five things; each is one command.
 
 ```sh
-python3 -m pip install -r /path/to/autosound-tuning-skill/skills/autosound-tuning/requirements.txt
+# 1. the skill, at its newest 3.x release
+git clone -b v3.0.1 https://github.com/ayukhno/autosound-tuning-skill.git ~/autosound-src
+ln -s ~/autosound-src/skills/autosound-tuning ~/.claude/skills/autosound-tuning
+
+# 2. what its tools import (numpy is not optional — five modules do not load without it)
+python3 -m pip install --user -r ~/autosound-src/skills/autosound-tuning/requirements.txt
+
+# 3. TCC, if you want the window. `--python` matters: without it uv may pick an interpreter
+#    older than TCC needs, and the error reads like a broken package.
+uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
+
+# 4. Claude Code, if it is not already there
+curl -fsSL https://claude.ai/install.sh | sh
+
+# 5. sign in
+claude auth login
 ```
 
-Skipping this leaves the method usable but takes crossover selection, the EQ
-gate, the DSP maths and plot rendering with it — those five modules import
-`numpy` at module scope and do not load without it.
-
-TCC looks in this order, first hit wins: `$AUTOSOUND_SKILL_DIR`, the
-`vendor/` submodule of a checkout, `~/.claude/skills/autosound-tuning`, then
-skill folders under `~/.claude/plugins/`.
-
-### 2. TCC
-
-[`uv`](https://docs.astral.sh/uv/) is the recommended route because it installs
-a suitable Python itself, which removes the most common failure on Windows.
-
-Two things are extras, and both for the same reason — they are choices, and
-each one is hundreds of megabytes:
-
-- `gui` — the window. Qt is most of the download.
-- `claude` — the Claude Agent SDK, needed only if a **Claude** model drives the
-  session. Every other model (Gemini, Codex, …) goes through the `omp` CLI and
-  needs no Python package at all.
-
-```sh
-# CLI only, driven by Gemini/Codex through omp
-uv tool install 'autosound-tcc @ git+https://github.com/ayukhno/autosound-tcc'
-
-# the window, driven by Gemini/Codex
-uv tool install 'autosound-tcc[gui] @ git+https://github.com/ayukhno/autosound-tcc'
-
-# the usual one: the window, with Claude available too
-uv tool install 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
-```
-
-Measured on macOS/arm64: 29 MB for the base, 394 MB with the window, 678 MB
-with the window and Claude. Asking for something that is not installed prints
-the command that adds it — the window and the Claude route both do — rather
-than a traceback about a module you have never heard of.
-
-`pip install` works the same way if you would rather not use `uv`. So does
-running from a checkout:
+Running TCC from a checkout works too, and is what you want if you intend to change it:
 
 ```sh
 git clone --recurse-submodules https://github.com/ayukhno/autosound-tcc.git
-cd autosound-tcc
-uv venv && uv pip install -e '.[dev]'
+cd autosound-tcc && uv venv && uv pip install -e '.[dev]'
 .venv/bin/autosound-tcc
 ```
 
-### What else you need
+### Where TCC looks for the skill
 
-- **Python 3.11+** — or nothing, if you use `uv`, which brings its own.
-- **REW** with its API enabled, for anything involving measurements.
-- **A model, and a way to reach it.** For Claude: the `claude` CLI, logged in,
-  plus the `claude` extra above — TCC authenticates to nothing itself, it uses
-  your own login. For anything else: `omp` on your PATH and
-  whichever vendor CLI it drives.
-- Nothing here removes the Claude Code step for the Claude route. TCC talks to
-  a locally-authenticated session; it cannot offer you a login of its own.
+In this order, first hit wins: `$AUTOSOUND_SKILL_DIR`, the `vendor/` submodule of a checkout,
+`~/.claude/skills/autosound-tuning`, then skill folders under `~/.claude/plugins/`. It checks that
+what it finds is the 3.x line and says so plainly if it is not — a 2.x skill has neither
+`project.json` nor the contract checker, and TCC reads through both.
+
+### Starting
+
+```sh
+autosound-tcc --project-dir .     # the window, on a project folder
+claude                            # then ask it to tune your car
+```
 
 ## Stack
 
