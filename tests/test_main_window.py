@@ -1924,6 +1924,42 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     assert "is-warn" in str(window._ai_critic_combo.property("class"))
 
 
+def test_a_claude_route_with_no_claude_login_says_so_on_the_generator(tmp_path, monkeypatch):
+    """`available()` asks whether the SDK package is installed and stays true forever; only the
+    login says whether it can answer. A fresh Mac offered three Claude models with nobody signed
+    in, and nothing on screen said a word about it (2026-08-13)."""
+    from autosound_tcc.core import claude_sdk, config, model_choices as mc
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    _app()
+    window = MainWindow()
+    generator = next(c for c in window._model_choices if c.harness == "sdk")
+    _pick(window._ai_main_combo, generator.key)
+
+    # "Could not tell" is not an accusation: no CLI to ask, a timeout, an output shape we do not
+    # know — all of them must leave the picker alone rather than send someone to redo a good login.
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", None)
+    window._refresh_main_warning()
+    assert window._main_warn.isHidden()
+    assert "is-warn" not in str(window._ai_main_combo.property("class"))
+
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", False)
+    window._refresh_main_warning()
+
+    assert not window._main_warn.isHidden()
+    assert i18n.t("sdkNoLogin") in window._main_warn_tip._text
+    assert claude_sdk.LOGIN_HINT in window._main_warn_detail
+    assert "is-warn" in str(window._ai_main_combo.property("class"))
+
+    # And it goes quiet the moment there is a login, without rebuilding anything.
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", True)
+    window._refresh_main_warning()
+    assert window._main_warn.isHidden()
+
+
 def test_two_unknown_models_are_not_reported_as_a_matched_pair(tmp_path, monkeypatch):
     """`critic_vendor` falls back to google for a name it does not recognise, which is right for
     picking a transport and wrong for "are these the same vendor" — it would warn about a pair it

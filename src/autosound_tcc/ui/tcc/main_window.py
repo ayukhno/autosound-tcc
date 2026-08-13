@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (
     app_log,
+    claude_sdk,
     config,
     self_check,
     contract_check,
@@ -280,18 +281,37 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
-def _mark_missing(combo, entries) -> None:
+def _mark_missing(combo, entries, warn: bool = False) -> None:
     """Red when the current choice is not among `entries`, plain when it is.
 
     Recomputed on every selection change, not only when the list is rebuilt. It was set once at
     fill time, so a combo that had ever been red STAYED red through every later pick — the Arbiter
     chose a model that exists and the field went on claiming it did not (user, 2026-08-12).
+
+    `warn` is the other tint — the choice exists but is not what it appears to be — and it is
+    passed in rather than applied by the caller afterwards because both write the same `class`
+    property: whoever wrote second used to erase the other's answer.
     """
     current = str(combo.currentData() or "")
     missing = bool(current) and not any(choice.key == current for choice in entries)
-    combo.setProperty("class", "mini-select" + (" is-missing" if missing else ""))
+    classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
+    combo.setProperty("class", classes)
     combo.style().unpolish(combo)
     combo.style().polish(combo)
+
+
+def _sdk_login_note(choice) -> tuple[str, str]:
+    """"You picked Claude and this machine has no Claude login" — headline and detail, or both empty.
+
+    Only for a `False` from `signed_in()`. `None` means the probe could not tell (no CLI to ask, a
+    timeout, output we do not recognise) and must stay silent: sending somebody to redo a login
+    that was fine is a worse error than saying nothing.
+    """
+    if choice is None or getattr(choice, "harness", "") != "sdk":
+        return "", ""
+    if claude_sdk.signed_in() is not False:
+        return "", ""
+    return i18n.t("sdkNoLogin"), i18n.t("sdkNoLoginTip").format(cmd=claude_sdk.LOGIN_HINT)
 
 
 def _cap_combo_width(combo) -> None:
@@ -451,6 +471,10 @@ class _CliCatalogueWorker(QThread):
 
     def run(self) -> None:
         model_choices.refresh_cli_catalogue()
+        # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
+        # built during construction. Asking there would put a process launch in front of the
+        # first paint on every startup.
+        claude_sdk.probe_signed_in()
         self.done.emit()
 
     quiet = Signal(list)  # routes that are installed and answered with nothing
@@ -777,6 +801,20 @@ class MainWindow(QMainWindow):
         self._ai_main_combo = ai_main
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
+        # The Generator has no same-vendor question — picking Claude to argue with Claude is only
+        # wrong for the REVIEWER — but it has the one the Critic also has: a Claude route on a
+        # machine nobody has logged in on. `available()` says the SDK is installed and stays true
+        # forever; only `signed_in()` knows whether it can answer. A fresh Mac offered three
+        # Claude models and could not have run any of them (2026-08-13).
+        self._main_warn = QPushButton("!")
+        self._main_warn.setProperty("class", "warn-mark")
+        self._main_warn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._main_warn.setFixedSize(18, 18)
+        self._main_warn.setVisible(False)
+        self._main_warn.clicked.connect(self._explain_main_warning)
+        self._main_warn_tip = attach_tip(self._main_warn, "")
+        self._main_warn_detail = ""
+        layout.addWidget(self._main_warn)
 
         # Beside the model, because it is fixed for the session exactly like the model is: the
         # Agent SDK takes effort at client construction, so this is a choice made when a session
@@ -2232,6 +2270,11 @@ class MainWindow(QMainWindow):
             if vendor and vendor == model_choices.vendor_of(generator):
                 notes.append(i18n.t("criticSameVendor"))
                 tips.append(i18n.t("criticSameVendorTip").format(vendor=vendor))
+        # ...and the one the Generator has too: the Claude route with nothing to authenticate with.
+        login_note, login_tip = _sdk_login_note(chosen)
+        if login_note:
+            notes.append(login_note)
+            tips.append(login_tip)
         headline = " · ".join(notes)
         warn.setVisible(bool(notes))
         # Hover says WHAT, the click says why — the same split the diagnostics button uses, and the
@@ -2240,9 +2283,32 @@ class MainWindow(QMainWindow):
         self._critic_warn_detail = "\n\n".join([headline] + tips) if headline else ""
         # The picker itself is tinted, so the thing that is wrong is the thing that looks wrong —
         # a mark beside a normal-looking field still leaves you hunting for what it refers to.
-        self._ai_critic_combo.setProperty("class", "mini-select" + (" is-warn" if notes else ""))
-        self._ai_critic_combo.style().unpolish(self._ai_critic_combo)
-        self._ai_critic_combo.style().polish(self._ai_critic_combo)
+        _mark_missing(self._ai_critic_combo, self._critic_choices, warn=bool(notes))
+
+    def _refresh_main_warning(self) -> None:
+        """The Generator's own caveat, and it is only ever one.
+
+        No same-vendor question here — a Claude reviewed by a Claude is the failure, a Claude
+        GENERATING is just a choice — so this says the single thing that can be wrong about the
+        route itself: it is Claude's, and this machine has no login for it.
+        """
+        warn = getattr(self, "_main_warn", None)
+        if warn is None:
+            return
+        note, tip = _sdk_login_note(self._generator_choice())
+        warn.setVisible(bool(note))
+        self._main_warn_tip.set_text(note)
+        self._main_warn_detail = f"{note}\n\n{tip}" if note else ""
+        _mark_missing(self._ai_main_combo, self._model_choices, warn=bool(note))
+
+    def _explain_main_warning(self) -> None:
+        if not self._main_warn_detail:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(i18n.t("aiMain"))
+        box.setText(self._main_warn_detail)
+        box.exec()
 
     def _explain_critic_warning(self) -> None:
         if not self._critic_warn_detail:
@@ -2491,6 +2557,7 @@ class MainWindow(QMainWindow):
         for key, entries in ((generator, self._model_choices), (critic, self._critic_choices)):
             if key and not model_choices.resolve(entries, str(key)).ok:
                 self._offer_replacement(str(key), entries)
+        self._refresh_main_warning()
         self._refresh_critic_warning()
 
     def _offer_replacement(self, key: str, entries: list) -> None:  # noqa: D401
@@ -2594,7 +2661,9 @@ class MainWindow(QMainWindow):
         return model_choices.resolve(self._model_choices, str(key)).choice
 
     def _on_generator_model_changed(self, _index: int) -> None:
-        _mark_missing(self._ai_main_combo, self._model_choices)
+        # `_refresh_main_warning` marks the combo itself, so no separate `_mark_missing` here —
+        # two writers of the same `class` property is how one of the two tints kept vanishing.
+        self._refresh_main_warning()
         # Changing the Generator can create (or clear) the same-vendor warning on the reviewer:
         # it is a property of the PAIR, not of either picker alone.
         self._refresh_critic_warning()
