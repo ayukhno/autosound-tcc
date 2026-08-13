@@ -151,6 +151,14 @@ def ensure_project_chosen(parent=None, force: bool = False) -> bool:
     """
     remembered = config.chosen_project_dir()
     here = _launched_from()
+    # Standing inside a real project and typing `autosound-tcc` is already a choice, and a clearer
+    # one than anything remembered from last week. The gate exists to stop the window opening on a
+    # folder nobody picked; a folder the person is standing in, which already holds a project, is
+    # not that folder. Asking there cost an Enter to confirm what they had just said by being
+    # there (user, 2026-08-13). An empty or unrelated folder still asks.
+    if not force and here is not None and here != remembered and config.looks_like_project(here):
+        config.set_project_dir(here)
+        return True
     if not force and remembered is not None and here is not None and here != remembered:
         # Started from a shell, standing in a folder that is not the remembered project. The
         # remembered one used to win silently, which is right for a double-clicked bundle and

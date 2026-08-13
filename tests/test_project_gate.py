@@ -141,3 +141,55 @@ class _Refused:
         from PySide6.QtWidgets import QDialog
 
         return QDialog.DialogCode.Rejected
+
+
+def test_standing_in_a_project_opens_it_without_asking(tmp_path, monkeypatch):
+    """`cd my-car && autosound-tcc` is a choice, and a fresher one than last week's.
+
+    It used to hit the "you are somewhere else" branch and cost an Enter to confirm the folder the
+    person was already standing in (user, 2026-08-13). The gate is there to stop the window opening
+    on a folder nobody picked, which this is not.
+    """
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
+
+    elsewhere = tmp_path / "other-car"
+    elsewhere.mkdir()
+    here = tmp_path / "this-car"
+    (here / ".tcc").mkdir(parents=True)  # what `looks_like_project` recognises
+
+    saved: list = []
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: elsewhere)
+    monkeypatch.setattr(config, "set_project_dir", lambda p: saved.append(p))
+    monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: here)
+
+    def _must_not_open(*args, **kwargs):
+        raise AssertionError("the gate asked about the folder the user was standing in")
+
+    monkeypatch.setattr(project_gate_dialog, "ProjectGateDialog", _must_not_open)
+
+    assert project_gate_dialog.ensure_project_chosen() is True
+    assert saved == [here], "the folder you opened is the one it should remember next time"
+
+
+def test_standing_in_an_empty_folder_still_asks(tmp_path, monkeypatch):
+    """The shortcut only fires on a folder that already holds a project. An empty one is exactly
+    the case the gate exists for: nothing says the person meant to start a car here."""
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import project_gate_dialog
+
+    remembered = tmp_path / "remembered"
+    remembered.mkdir()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: remembered)
+    monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: empty)
+
+    class _RefusedDialog(_Refused):
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(project_gate_dialog, "ProjectGateDialog", _RefusedDialog)
+
+    assert project_gate_dialog.ensure_project_chosen() is False, "should have asked, and been refused"
