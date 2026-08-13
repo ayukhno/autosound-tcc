@@ -51,9 +51,10 @@ tuning method, the app itself. One command, and none of it has to be there befor
 
 Three things it cannot get for you, because they are yours:
 
-- **[REW](https://www.roomeqwizard.com/)**, with its API switched on. Install it, then open
-  *Preferences → API* and check that `localhost:4735` answers. This is where measurements come
-  from.
+- **[REW](https://www.roomeqwizard.com/)**, with its API switched on. Install it, open
+  *Preferences → API*, and tick **Start the API when REW starts**. That is the whole setup, and it
+  means the API is up every time instead of you pressing *Start server* each session. TCC's own REW
+  indicator tells you whether it is reachable. This is where measurements come from.
 - **A calibrated measurement microphone, and a DSP.** The hardware half of the job.
 - **A paid Claude subscription.** The skill's FAQ explains
   [the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
