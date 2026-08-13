@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import model_choices
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.copy_menu import enable_copy
 
 
 class ModelConfigDialog(QDialog):
@@ -61,6 +62,13 @@ class ModelConfigDialog(QDialog):
 
         self._status = QLabel("")
         self._status.setWordWrap(True)
+        # This line is where the install command lands when omp is missing, and a command you
+        # cannot copy is a command you have to retype from a screenshot (user, on a fresh Mac
+        # 2026-08-13). Selectable AND right-click-copyable, because a one-line label gives no
+        # affordance for either on its own.
+        self._status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._status.setCursor(Qt.CursorShape.IBeamCursor)
+        enable_copy(self._status, value=self._status.text)
         layout.addWidget(self._status)
 
         buttons = QDialogButtonBox(
