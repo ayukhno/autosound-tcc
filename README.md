@@ -29,7 +29,7 @@ The method itself is documented in several languages:
 ## Table of contents
 
 - [Who it is for](#who-it-is-for)
-- [What you need first](#what-you-need-first)
+- [What you need](#what-you-need)
 - [Install](#install)
 - [Your first project](#your-first-project)
 - [Updating and removing](#updating-and-removing)
@@ -44,24 +44,26 @@ The method itself is documented in several languages:
   in a terminal. Most people who tune cars have never worked that way. TCC does not make the
   tuning decisions easier. It replaces the terminal with a window.
 
-## What you need first
+## What you need
 
-| | why | if it is missing |
-| :-- | :-- | :-- |
-| **Claude Code**, signed in | the method runs as a Claude skill | the installer installs it; you sign in yourself with `claude auth login` |
-| **the autosound-tuning skill, 3.x** | it writes everything TCC reads | the installer always installs it |
-| **REW**, with its API on | this is where the measurements come from | in REW open *Preferences → API*, then check that `localhost:4735` answers |
-| **Python 3.11 or newer** | both halves are written in Python | the installer installs it if it is missing |
+**A clean machine is the expected case.** The installer brings its own: Claude Code, Python, the
+tuning method, the app itself. One command, and none of it has to be there beforehand.
 
-A paid Claude subscription is required. The skill's FAQ explains
-[the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
+Three things it cannot get for you, because they are yours:
 
-Nothing else needs an account. Both repositories are public and no GitHub login is involved at any
-point.
+- **[REW](https://www.roomeqwizard.com/)**, with its API switched on. Install it, then open
+  *Preferences → API* and check that `localhost:4735` answers. This is where measurements come
+  from.
+- **A calibrated measurement microphone, and a DSP.** The hardware half of the job.
+- **A paid Claude subscription.** The skill's FAQ explains
+  [the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
+
+Nothing needs a GitHub account. Both repositories are public and nothing is pushed anywhere.
 
 A second AI as reviewer is optional, but it is where most of the value comes from: the method works
 by having one model propose a change and a model from a different vendor argue with it. The
-[FAQ](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md) covers how to set one up.
+[FAQ](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md) covers how to add one,
+and it can wait until after your first session.
 
 ## Install
 
