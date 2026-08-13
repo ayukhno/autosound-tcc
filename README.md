@@ -37,7 +37,7 @@ every route below installs the skill, and TCC only if you ask for it.
 
 ### macOS
 
-Open Terminal and paste one of these:
+Nothing to download. Open **Terminal** (⌘-Space, type "terminal", Enter) and paste one of these:
 
 ```sh
 # the method only
@@ -54,54 +54,59 @@ what it is about to run.
 `xcode-select --install` — macOS puts git behind a dialog that a script cannot click. Click
 Install, wait, and run the line again.
 
-Downloading the script and double-clicking it is deliberately *not* the route: macOS quarantines
-anything a browser saved and Gatekeeper blocks it, so the one-liner is the smoother path, not the
-rougher one.
+Downloading the script and double-clicking it is deliberately *not* the route here, and this is
+the opposite of Windows for a reason: macOS quarantines anything a browser saved and Gatekeeper
+blocks it, so on this platform the pasted line is the smoother path. On Windows the download is
+the smoother one, because `cmd` cannot run a PowerShell script at all.
 
 ### Windows
 
-**The simplest route: download and double-click.** From
-[install.cmd](https://github.com/ayukhno/autosound-tuning-skill/blob/main/install.cmd) press the
-download button, then double-click the file. It asks which of the two sizes you want and holds the
-window open at the end so you can read what happened.
+1. **[Download the installer](https://github.com/ayukhno/autosound-tuning-skill/archive/refs/heads/main.zip)** — a ZIP, about 2 MB.
+2. **Right-click it → Extract All.** Extracting matters: run from inside the ZIP viewer and Windows
+   copies the file to a temporary folder where it cannot find its other half.
+3. **Double-click `install.cmd`** in the extracted folder.
 
-That file exists because of two things that stop a Windows user before they start. `cmd` cannot
-run a PowerShell script at all — a double-clicked `.ps1` opens in Notepad — and a double-click
-always opens `cmd`. And PowerShell refuses to run a script a browser downloaded, under the default
-execution policy. The `.cmd` re-launches itself through PowerShell with that policy bypassed **for
-that one invocation**; nothing about your machine's settings changes.
+It asks which of the two sizes you want, and holds the window open at the end so you can read what
+happened. To skip the question, run it from a prompt: `install.cmd -Terminal` or `install.cmd -Tcc`.
 
-So: `cmd` is a perfectly good place to start from. It just cannot be the thing that runs the
-script, and this arranges the handover.
+A ZIP rather than a link straight to the file, because clicking a file on GitHub shows you its
+text — the raw link too. Neither downloads anything. The ZIP is the one link a browser reliably
+saves, and it brings both halves of the installer with it.
 
-**Or from PowerShell**, if you would rather paste a line:
+<details>
+<summary>Why a <code>.cmd</code>, and why not the PowerShell script directly</summary>
+
+Two things stop a Windows user before they start, and this file removes both.
+
+`cmd` cannot run a PowerShell script at all — a double-clicked `.ps1` opens in Notepad — and a
+double-click always opens `cmd`. So `.cmd` is the one thing every Windows user can start, from
+anywhere: Explorer, `cmd`, or PowerShell.
+
+And PowerShell refuses to run a script a browser downloaded, under the default execution policy.
+The `.cmd` re-launches itself through PowerShell with that policy bypassed **for that one
+invocation** — nothing about your machine's settings changes.
+
+All the work is in `install.ps1`, which the `.cmd` finds beside itself or fetches. Two files, one
+of them a door: the alternative is the same logic written twice, in two languages, drifting apart.
+
+If you are already in PowerShell and would rather paste a line:
 
 ```powershell
-# the method only
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Terminal
-
-# the method and the desktop app
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
 ```
 
-The `scriptblock` wrapper is what lets a downloaded script take a flag; without a flag,
-`irm … | iex` works and asks which.
-
-**Or from `cmd`**, with the file downloaded beside you:
-
-```bat
-install.cmd -Terminal
-install.cmd -Tcc
-```
+The `scriptblock` wrapper is what lets a fetched script take a flag; without one, `irm … | iex`
+works and asks which size.
+</details>
 
 It installs git and Python with `winget` if they are missing, and links the skill with a
 **junction** rather than a symlink — junctions need neither Developer Mode nor an administrator
 prompt.
 
-> **The Windows script has not been run yet.** It mirrors the macOS one line for line and the
-> macOS one is tested, but no part of it has executed on Windows. Run it with `-DryRun` first: it
-> changes nothing and prints every step, so a first attempt shows exactly where it stops. Reports
-> of where it stops are the most useful thing you can send.
+> **Nothing on Windows has been run yet.** Both files mirror the macOS installer, which is tested,
+> but no part of either has executed on Windows. Run it once with `-DryRun` first: it changes
+> nothing and prints every step, so a first attempt shows exactly where it stops. Reports of where
+> it stops are the most useful thing you can send.
 
 ### What you still have to do yourself
 
