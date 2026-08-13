@@ -13,7 +13,11 @@ import os
 import sys
 from pathlib import Path
 
-from autosound_tcc.core import app_log, config
+from autosound_tcc.core import app_log, config, macos_identity
+
+#: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
+#: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
+APP_DISPLAY_NAME = "Autosound TCC"
 
 #: What to say when the window is asked for and the toolkit that draws it is not installed.
 #: `autosound-tcc` ships in two sizes — the CLI half needs `claude-agent-sdk` and nothing else,
@@ -81,11 +85,19 @@ def main() -> int:
         # the person who typed the flag believes they are still where they started. Reported as
         # exactly that confusion.
         config.set_project_dir(Path(chosen))
+    # BEFORE the QApplication, because Qt reads the bundle's name while the Cocoa plugin starts.
+    # Without this the Dock tile says "python3.12" and the menu bar says "python" — macOS asks the
+    # bundle that owns the running executable, which is Apple's own Python.app, not ours.
+    macos_identity.rename(APP_DISPLAY_NAME)
     # Reuse whatever QApplication exists rather than constructing a second one: Qt allows exactly
     # one per process and raises otherwise, which is how running the window tests before this
     # module's own turned a green suite red depending on file order alone.
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("autosound-tcc")
+    # What windows and dialogs are titled with. `setApplicationName` above is the identifier Qt
+    # uses for QSettings and friends, and is deliberately the package name; this is the one a
+    # person reads.
+    app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app_log.install_qt_handler()  # Qt's own warnings, into the same file
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build
