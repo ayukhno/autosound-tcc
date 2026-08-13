@@ -65,7 +65,12 @@ gui = [
 ]
 # `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen. Bounded like the rest —
 # the test that enforces that caught this line first, which is the argument for having it.
-dev = ["pytest>=7,<9", "autosound-tcc[gui,claude]"]
+# `<9` was written when 8 was current and was never revisited; the suite has since been run green
+# on 8.4.2 and on 9.1.1, so the bound says what has actually been exercised rather than what was
+# newest once. `packaging` is here because a test calls it BY NAME (the bounds-vs-installed check)
+# — it arrives with pytest anyway, and a dependency we import and do not declare is exactly the
+# hole this file exists to close.
+dev = ["pytest>=7,<10", "packaging>=24,<27", "autosound-tcc[gui,claude]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"

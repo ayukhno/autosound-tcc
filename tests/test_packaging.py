@@ -14,9 +14,11 @@ import os
 import subprocess
 import sys
 import tomllib
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -118,6 +120,38 @@ def test_every_dependency_has_an_upper_bound():
 
     unbounded = [d for d in declared if "<" not in d and "==" not in d and "~=" not in d]
     assert not unbounded, f"no upper bound, so a breaking major installs itself: {unbounded}"
+
+
+def test_the_environment_running_this_suite_is_the_one_an_install_produces():
+    """A bound nobody checks against the machine is a bound that drifts.
+
+    This developer venv carried pyqtgraph 0.14.0 while `pyproject.toml` said `<0.14` — so the
+    PlotItem segfault was hunted, measured and fixed against a version no install has ever
+    produced. A clean-machine log resolved 0.13.7 (2026-08-13), which is when anyone noticed.
+    The fix happened to hold on both, and re-measuring proved it, but that was luck rather than
+    method: every number in that investigation could have been about software nobody runs.
+
+    Only what is actually installed is checked. A light install has no Qt at all, and that is a
+    supported shape, not a failure.
+    """
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = list(data["project"]["dependencies"])
+    for _name, group in data["project"]["optional-dependencies"].items():
+        declared += [d for d in group if not d.startswith("autosound-tcc")]
+
+    wrong = []
+    for spec in declared:
+        req = Requirement(spec)
+        try:
+            installed = version(req.name)
+        except PackageNotFoundError:
+            continue
+        if not req.specifier.contains(installed, prereleases=True):
+            wrong.append(f"{req.name} {installed} is outside the declared {req.specifier}")
+    assert not wrong, (
+        "this environment is not what `uv tool install` would build, so the suite is testing "
+        f"software users do not have: {wrong}"
+    )
 
 
 def test_the_python_floor_is_one_that_has_actually_been_run():
