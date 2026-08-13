@@ -1101,6 +1101,11 @@ class DialogPanel(QWidget):
             self._add_bubble("crit", f"Critic · {model}", _markdown(critique.get("text", "")) + note)
         elif mode == "clipboard":
             self._add_system_message(i18n.t("criticClipboard") + note)
+        elif mode == "not_ready":
+            # Not a failure and it must not read like one. The reviewer is stateless: it re-reads
+            # the project from disk every call, and a folder that has not been through intake has
+            # nothing for it to read. Say that, in the reader's language, with the way out.
+            self._add_system_message(i18n.t("criticNotReady"))
         else:
             self._add_system_message(
                 i18n.t("criticFailed").format(detail=critique.get("detail", "?"))

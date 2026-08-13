@@ -44,13 +44,19 @@ _REVIEW_MARKER = re.compile(r"^>>\s*REVIEW_FILE:\s*(?P<path>.+?)\s*$", re.MULTIL
 MODE_API_OR_CLI = "answered"
 MODE_CLIPBOARD = "clipboard"
 MODE_ERROR = "error"
+#: The reviewer was not called because the PROJECT is not ready — no contract, no context, which
+#: is the ordinary state of a folder that has not been through intake yet. Distinct from
+#: `MODE_ERROR` because it is not a fault and reporting it as one sends somebody debugging a
+#: working channel: on a fresh project the first thing anyone tries is "check the reviewer", and
+#: what came back was two missing filenames in English under a Ukrainian UI (user, 2026-08-13).
+MODE_NOT_READY = "not_ready"
 
 
 @dataclass(frozen=True)
 class CriticResult:
     """What came back from one reviewer call."""
 
-    mode: str  # answered | clipboard | error
+    mode: str  # answered | clipboard | error | not_ready
     text: str  # the critique itself, marker line stripped; "" unless mode == answered
     model: Optional[str]  # as reported by the script, e.g. "Gemini 3.1 Pro (High)"
     role: str
@@ -139,7 +145,10 @@ def run(
 
     problems = preflight(project_dir)
     if problems:
-        return CriticResult(MODE_ERROR, "", None, role, "; ".join(problems), 0.0, called_at)
+        # A missing SCRIPT is a broken install; missing project files are a project that has not
+        # started yet. Same list, two different things to say about it.
+        mode = MODE_ERROR if not is_available() else MODE_NOT_READY
+        return CriticResult(mode, "", None, role, "; ".join(problems), 0.0, called_at)
 
     candidate = Path(package)
     package_path = candidate if candidate.suffix == ".md" and candidate.is_file() else write_package(

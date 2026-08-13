@@ -100,11 +100,26 @@ def test_preflight_blocks_before_spawning_anything(tmp_path):
     assert any("autosound_context.md" in p for p in problems)
 
 
-def test_run_refuses_early_when_preflight_fails(tmp_path):
+def test_a_project_that_has_not_started_is_not_ready_rather_than_broken(tmp_path):
+    """The first thing anyone does on a fresh project is ask TCC to check the reviewer, and the
+    answer was two missing filenames under `Reviewer call failed` — which sends somebody
+    debugging a channel that works (user, on a clean install 2026-08-13). The reviewer is
+    stateless and re-reads the project every call; a folder that has not been through intake has
+    nothing for it to read, and that is a state, not a fault."""
+    result = critic.run("package", project_dir=tmp_path, python_executable=sys.executable)
+
+    assert result.mode == critic.MODE_NOT_READY
+    assert "autosound_context.md" in result.detail  # still says WHICH files, for the log
+
+
+def test_a_missing_reviewer_script_is_still_an_error(tmp_path, monkeypatch):
+    """The other half of the same check: no script is a broken install, and must not be softened
+    into "your project has not started yet"."""
+    monkeypatch.setattr(critic, "is_available", lambda: False)
+
     result = critic.run("package", project_dir=tmp_path, python_executable=sys.executable)
 
     assert result.mode == critic.MODE_ERROR
-    assert "autosound_context.md" in result.detail
 
 
 def test_markdown_is_persisted_so_the_call_is_auditable(stubbed, tmp_path):
