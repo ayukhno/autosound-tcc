@@ -58,7 +58,12 @@ Three things it cannot get for you, because they are yours:
 - **A paid Claude subscription.** The skill's FAQ explains
   [the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
 
-Nothing needs a GitHub account. Both repositories are public and nothing is pushed anywhere.
+**A GitHub account is worth having, and it is not needed to install.** Installing asks you to log
+in nowhere, and both repositories are public. The reason to have one is your own project: it is
+months of work, and it holds measurements that cannot be taken again once the car has been apart.
+So when you start a new project the method sets up a git backup for it and keeps feeding it, and
+pointing that at a **private** repository on GitHub is the cheapest insurance there is against a
+dead disk or a stolen laptop. A free account covers it.
 
 A second AI as reviewer is optional, but it is where most of the value comes from: the method works
 by having one model propose a change and a model from a different vendor argue with it. The
