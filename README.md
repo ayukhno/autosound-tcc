@@ -1,185 +1,136 @@
-# autosound-tcc
+# Autosound TCC
 
-Cross-platform (macOS + Windows) desktop app for car-audio tuning:
-a **Tuning Command Center** and a **Guided Setup Wizard**.
+**In one line:** a desktop app for car-audio tuning. It gives you a window onto the
+[autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method, so you can tune a car
+without working in a terminal.
 
-**The barrier it lowers is the terminal, not the tuning.** The method lives in the
-[`autosound-tuning`](https://github.com/ayukhno/autosound-tuning-skill) skill and it works on its
-own, in a terminal, driven by an AI — which is a fluent way to work and an unfamiliar one for most
-people who tune cars. TCC is the same method with a window on it: the DSP state, the plan, the
-measurements and the curves visible at once, and the conversation in a panel instead of a scroll
-of text. It does not make the tuning decisions easier; it makes the tool ordinary.
+- **Shows the whole rig at once**: the DSP tree, crossovers, delays, gains and per-channel EQ
+- **Reads REW live**: measurements come over its API, and you can drag delay markers on the curves
+- **Keeps the plan in view**: the phase you are on, what is done, what is still waiting
+- **Puts the AI in a panel**, instead of a terminal full of scrolling text
+- **Never writes to your processor**: you still type every number into the DSP yourself
 
-It does not write to the processor. Automated DSP writes stay out of scope until the safety work
-behind them is done.
+> [!CAUTION]
+> AI gets numbers wrong. Check crossover frequencies, slopes and EQ values in your DSP before you
+> unmute, especially on tweeters, and start quiet.
 
-> **Status: working, not released.** The app runs, reads REW, drives a tuning session and carries
-> 864 tests. It is not on PyPI, so every route below installs from source, and the Windows
-> installer has not yet been run on Windows. Everything written here has been executed except
-> where it says otherwise.
+> [!NOTE]
+> **The app works, but it is not released yet.** It runs, reads REW and drives a tuning session.
+> The Windows installer has never been run on Windows.
 
-## Scope of the first version
+The method itself is documented in several languages:
+[Deutsch](https://github.com/ayukhno/autosound-tuning-skill/blob/main/README.de.md) ·
+[Polski](https://github.com/ayukhno/autosound-tuning-skill/blob/main/README.pl.md) ·
+[Українська](https://github.com/ayukhno/autosound-tuning-skill/blob/main/README.uk.md)
 
-- **Read-only against the processor.** TCC connects to
-  [REW](https://www.roomeqwizard.com/) (local API on `localhost:4735`), reads the current
-  measurement and filter state, and shows crossovers, delays, gains, EQ and curves. Changes to the
-  DSP are typed in by a person, as they always were.
-- **The project's files are the skill's.** The skill writes them, TCC reads them. That boundary is
-  what lets the same project be worked on from a terminal one day and the window the next.
+## Table of contents
+
+- [Who it is for](#who-it-is-for)
+- [What you need first](#what-you-need-first)
+- [Install](#install)
+- [Your first project](#your-first-project)
+- [Updating and removing](#updating-and-removing)
+- [What's in here](#whats-in-here)
+- [License](#license)
+
+## Who it is for
+
+- **Who:** anyone building sound in their own car who would rather work in a window than in a
+  terminal. You bring the ears and the hands on the DSP.
+- **Why:** the tuning method already exists and it works, but it runs as a conversation with an AI
+  in a terminal. Most people who tune cars have never worked that way. TCC does not make the
+  tuning decisions easier. It replaces the terminal with a window.
+
+## What you need first
+
+| | why | if it is missing |
+| :-- | :-- | :-- |
+| **Claude Code**, signed in | the method runs as a Claude skill | the installer installs it; you sign in yourself with `claude auth login` |
+| **the autosound-tuning skill, 3.x** | it writes everything TCC reads | the installer always installs it |
+| **REW**, with its API on | this is where the measurements come from | in REW open *Preferences → API*, then check that `localhost:4735` answers |
+| **Python 3.11 or newer** | both halves are written in Python | the installer installs it if it is missing |
+
+A paid Claude subscription is required. The skill's FAQ explains
+[the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).
+
+Nothing else needs an account. Both repositories are public and no GitHub login is involved at any
+point.
+
+A second AI as reviewer is optional, but it is where most of the value comes from: the method works
+by having one model propose a change and a model from a different vendor argue with it. The
+[FAQ](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md) covers how to set one up.
 
 ## Install
 
-One script installs everything, on both platforms, in one of two sizes. It is the same script for
-a first install, an update and a removal.
+One script installs, updates and removes, on both macOS and Windows. It offers two sizes:
 
 | | what you get | roughly |
 | :-- | :-- | --: |
-| **Terminal** | the tuning method and the Python packages its tools need. Works on its own, in a terminal. | 30 MB |
-| **Terminal + TCC** | plus this desktop app: the DSP tree, the plan, the measurement panel and the curve window | 680 MB |
+| **The app** | the desktop window, plus the method it reads | 680 MB |
+| **Method only** | no window; you work in a terminal | 30 MB |
 
-TCC never works without the skill — the skill writes the project's files, TCC reads them — so
-every route below installs the skill, and TCC only if you ask for it.
+It does not matter which folder you run it from. Everything goes to fixed places: `~/.claude/`
+for the method and `~/.local/bin/` for the app.
 
 ### macOS
 
-Nothing to download. Open **Terminal** (⌘-Space, type "terminal", Enter) and paste one of these:
-
-The method only:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
-```
-
-The method and the desktop app:
+Nothing to download. Open Terminal (⌘-Space, type "terminal", press Enter) and paste this line:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
 ```
 
-Without a flag it asks which. It asks before anything is fetched from the network, and it says
-what it is about to run.
+It tells you what it is about to do and asks before it downloads anything.
 
-It does not matter which folder you are standing in: everything goes to fixed places, never into
-the current directory.
+For the method on its own, without the window, use `--terminal` instead of `--tcc`.
 
-**On a machine that has never built anything**, the first run stops and asks you to run
-`xcode-select --install` — macOS puts git behind a dialog that a script cannot click. Click
-Install, wait, and run the line again.
-
-Downloading the script and double-clicking it is deliberately *not* the route here, and this is
-the opposite of Windows for a reason: macOS quarantines anything a browser saved and Gatekeeper
-blocks it, so on this platform the pasted line is the smoother path. On Windows the download is
-the smoother one, because `cmd` cannot run a PowerShell script at all.
+On a Mac that has never been used for programming, the script stops and asks you to run
+`xcode-select --install` first. macOS installs git through a dialog box, and a script cannot click
+that dialog for you. Click Install, wait for it to finish, then paste the line again.
 
 ### Windows
 
-1. **[Download the installer](https://github.com/ayukhno/autosound-tuning-skill/archive/refs/heads/main.zip)** — a ZIP, about 2 MB.
-2. **Right-click it → Extract All.** Extracting matters: run from inside the ZIP viewer and Windows
-   copies the file to a temporary folder where it cannot find its other half.
-3. **Double-click `install.cmd`** in the extracted folder.
+> [!WARNING]
+> **The Windows installer has never been run on Windows.** It mirrors the macOS one, which is
+> tested, but no part of it has executed on Windows yet. Run it once with `-DryRun` first: that
+> changes nothing and prints every step it would take. If it stops somewhere, telling us where is
+> genuinely useful.
 
-It asks which of the two sizes you want, and holds the window open at the end so you can read what
-happened. To skip the question, run it from a prompt: `install.cmd -Terminal` or `install.cmd -Tcc`.
+1. **[Download the installer](https://github.com/ayukhno/autosound-tuning-skill/archive/refs/heads/main.zip)**, a ZIP file of about 2 MB.
+2. **Right-click the ZIP and choose Extract All.** Do not open the ZIP and run the file from
+   inside it. Windows would copy that one file to a temporary folder, away from the other files it
+   needs.
+3. **Double-click `install.cmd`** in the folder you extracted.
 
-A ZIP rather than a link straight to the file, because clicking a file on GitHub shows you its
-text — the raw link too. Neither downloads anything. The ZIP is the one link a browser reliably
-saves, and it brings both halves of the installer with it.
+It asks which of the two sizes you want, and keeps the window open at the end so you can read what
+happened. To skip the question, open a command prompt and run `install.cmd -Tcc` (or
+`install.cmd -Terminal`).
+
+Installing the method itself needs no administrator rights. If git or Python are missing, it
+offers to install them too, and Windows may ask for permission at that point.
 
 <details>
-<summary>Why a <code>.cmd</code>, and why not the PowerShell script directly</summary>
+<summary>Why a ZIP, when GitHub just shows you the file</summary>
 
-Two things stop a Windows user before they start, and this file removes both.
+Clicking a file on GitHub shows you its text, and so does the "raw" link. Neither one downloads
+anything, which is where most people get stuck. A ZIP is the one link a browser reliably saves,
+and it brings the whole installer with it rather than half of it.
 
-`cmd` cannot run a PowerShell script at all — a double-clicked `.ps1` opens in Notepad — and a
-double-click always opens `cmd`. So `.cmd` is the one thing every Windows user can start, from
-anywhere: Explorer, `cmd`, or PowerShell.
+The file you double-click is `install.cmd`, but the real work is in `install.ps1` beside it.
+Windows needs both. A double-click always opens the old `cmd`, which cannot run a PowerShell
+script at all, and PowerShell by default refuses to run any script that came from a browser. The
+`.cmd` is a small door that gets past both, for that one run, without changing any setting on your
+machine.
 
-And PowerShell refuses to run a script a browser downloaded, under the default execution policy.
-The `.cmd` re-launches itself through PowerShell with that policy bypassed **for that one
-invocation** — nothing about your machine's settings changes.
-
-All the work is in `install.ps1`, which the `.cmd` finds beside itself or fetches. Two files, one
-of them a door: the alternative is the same logic written twice, in two languages, drifting apart.
-
-If you are already in PowerShell and would rather paste a line:
+If you already use PowerShell, you can paste this instead:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
 ```
-
-The `scriptblock` wrapper is what lets a fetched script take a flag; without one, `irm … | iex`
-works and asks which size.
 </details>
 
-It installs git and Python with `winget` if they are missing, and links the skill with a
-**junction** rather than a symlink — junctions need neither Developer Mode nor an administrator
-prompt.
-
-> **Nothing on Windows has been run yet.** Both files mirror the macOS installer, which is tested,
-> but no part of either has executed on Windows. Run it once with `-DryRun` first: it changes
-> nothing and prints every step, so a first attempt shows exactly where it stops. Reports of where
-> it stops are the most useful thing you can send.
-
-### What you still have to do yourself
-
-**Sign in to Claude.** `claude auth login`, once. Neither the skill nor TCC can do it for you:
-they drive *your* authenticated session, and a product may not offer a Claude login of its own.
-The installer checks and tells you if it is missing.
-
-Nothing else needs an account. Both repositories are public, nothing is pushed anywhere, and no
-GitHub login is involved at any point.
-
-A second model as reviewer is optional but is most of the value — the method is built on one
-model proposing and a different vendor's disagreeing. The installer reports whether it found
-`agy`, `omp` or `gemini`; without one, reviews fall back to the clipboard, which works.
-
-### Updating, and removing
-
-Updating is the same command as installing — a second run fetches the newest release and leaves
-everything else alone.
-
-macOS, update:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
-```
-
-macOS, remove:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --uninstall
-```
-
-Windows, update and remove, if you still have the extracted folder:
-
-```bat
-install.cmd -Tcc
-```
-
-```bat
-install.cmd -Uninstall
-```
-
-If you deleted it — which is fine, it is scratch — paste this into PowerShell instead. Update:
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
-```
-
-Remove:
-
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Uninstall
-```
-
-**Uninstall never touches a project folder** — not with `--yes`, not ever. Those hold measurements
-that took hours in a car and cannot be reproduced. It also leaves the Python packages (shared with
-everything else using that interpreter), Claude Code, and `~/.claude`.
-
-### If you would rather do it by hand
-
-The script does six things. Each is one command, and none of them depend on the folder you
-run them from.
+<details>
+<summary>Installing by hand, six commands</summary>
 
 Get the method, at its newest 3.x release:
 
@@ -187,27 +138,28 @@ Get the method, at its newest 3.x release:
 git clone -b v3.0.1 https://github.com/ayukhno/autosound-tuning-skill.git ~/autosound-src
 ```
 
-Put it where Claude Code looks. On a machine that has never run Claude Code the `skills` folder
+Put it where Claude Code looks for skills. On a machine that has never run Claude Code that folder
 does not exist yet, hence the `mkdir`:
 
 ```sh
 mkdir -p ~/.claude/skills && ln -s ~/autosound-src/skills/autosound-tuning ~/.claude/skills/autosound-tuning
 ```
 
-Install what its tools import. `numpy` is not optional — five of them do not load without it:
+Install the Python packages its tools import. `numpy` is not optional: five of them will not load
+without it.
 
 ```sh
 python3 -m pip install --user -r ~/autosound-src/skills/autosound-tuning/requirements.txt
 ```
 
-Install the app, if you want the window. The `--python` matters: without it `uv` may pick an
-interpreter older than TCC needs, and the error reads like a broken package:
+Install the app. Name the Python version explicitly: without it, `uv` may pick one older than TCC
+needs, and the error message will look as if the package is broken.
 
 ```sh
 uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
 ```
 
-Install Claude Code, if it is not already there:
+Install Claude Code, if you do not have it:
 
 ```sh
 curl -fsSL https://claude.ai/install.sh | sh
@@ -218,8 +170,103 @@ Sign in:
 ```sh
 claude auth login
 ```
+</details>
 
-Running TCC from a checkout works too, and is what you want if you intend to change it:
+## Your first project
+
+Make one folder per car, anywhere you keep your own files:
+
+```sh
+mkdir -p ~/Autosound/my-car
+```
+
+Keep it away from the folder you installed from, from `~/.claude`, and from any copy of the two
+repositories, because those get replaced when you update. Everything about a car lives in its own
+folder, so copying that folder copies the whole tune. The folder you ran the installer from holds
+nothing and can be deleted.
+
+**Starting the app.** Point it at that folder the first time:
+
+```sh
+autosound-tcc --project-dir ~/Autosound/my-car
+```
+
+On an empty folder it asks a few setup questions: the car's processor, and which AI models to use.
+After that you work in the dialog panel on the right, in any language. Say what you want to do,
+for example *"let's tune this car from scratch"*, and it takes you through the phases.
+
+TCC remembers the folder, so next time `autosound-tcc` on its own reopens the same car, and so
+does double-clicking the app on macOS. To switch cars, run `autosound-tcc --choose-project`.
+
+**Starting in a terminal instead.** The same project also opens without the window:
+
+```sh
+cd ~/Autosound/my-car
+```
+
+```sh
+claude
+```
+
+Then say the same thing you would have said in the panel.
+
+The two are one project, not two. The skill writes the project's files and TCC reads them, so you
+can work in the window one day and the terminal the next and find everything where you left it.
+
+## Updating and removing
+
+To update, run the install command again. It fetches the newest version and leaves everything else
+alone.
+
+On macOS, update:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
+```
+
+On macOS, remove:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --uninstall
+```
+
+On Windows, from the folder you extracted:
+
+```bat
+install.cmd -Tcc
+```
+
+```bat
+install.cmd -Uninstall
+```
+
+If you already deleted that folder, which is fine, open PowerShell and paste this to update:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
+```
+
+Or this to remove:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Uninstall
+```
+
+> [!IMPORTANT]
+> **Removing never deletes a project folder.** Your measurements took hours in a car and cannot be
+> reproduced, so nothing in this installer will touch them. It also leaves Claude Code and the
+> Python packages alone, because other things on your machine use them.
+
+## What's in here
+
+The app is Python and Qt (PySide6), with `pyqtgraph` drawing the curves. The tuning method it
+reads is a separate project:
+[`autosound-tuning-skill`](https://github.com/ayukhno/autosound-tuning-skill).
+
+<details>
+<summary>For developers</summary>
+
+To run TCC from a checkout:
 
 ```sh
 git clone --recurse-submodules https://github.com/ayukhno/autosound-tcc.git
@@ -233,86 +280,17 @@ cd autosound-tcc && uv venv && uv pip install -e '.[dev]'
 .venv/bin/autosound-tcc
 ```
 
-### Where TCC looks for the skill
+There are 864 tests: `.venv/bin/python -m pytest`.
 
-In this order, first hit wins: `$AUTOSOUND_SKILL_DIR`, the `vendor/` submodule of a checkout,
-`~/.claude/skills/autosound-tuning`, then skill folders under `~/.claude/plugins/`. It checks that
-what it finds is the 3.x line and says so plainly if it is not — a 2.x skill has neither
-`project.json` nor the contract checker, and TCC reads through both.
+Every dependency carries an upper version bound, and a test fails if one does not. An open-ended
+requirement means that whoever installs this in six months gets whatever exists on that day.
 
-### Three folders, and which is which
-
-This trips people up, so plainly:
-
-| folder | what it is | keep it? |
-| :-- | :-- | :-- |
-| wherever you ran the installer | nothing lands here | delete it |
-| `~/.claude/skills/`, `~/.local/bin/` | the method and the app | the installer manages these |
-| **your project, one per car** | your measurements and the tune | **this is the one that matters** |
-
-The install folder is scratch. On macOS the one-liner leaves nothing behind at all; on Windows the
-folder you extracted the ZIP into can go in the bin once the installer has finished.
-
-A project is a folder you make, one per car, anywhere you keep your own files:
-
-```sh
-mkdir -p ~/Autosound/my-car
-```
-
-Do not put it inside the installer folder, inside `~/.claude`, or inside a checkout of either
-repository — those get replaced on update. Keep it where your backups already reach. Everything
-about a car lives in its folder, so moving or copying that one folder moves the whole tune.
-
-### Starting, the first time
-
-**In a terminal.** Stand in the project folder and start Claude:
-
-```sh
-cd ~/Autosound/my-car
-```
-
-```sh
-claude
-```
-
-Then tell it what you are doing — "let's tune this car", in any language. On an empty folder it
-runs the intake interview: the car, the processor, the channel map, the microphone. That interview
-is what creates the project, so there is nothing to set up beforehand.
-
-**In the window.** Point TCC at the same folder:
-
-```sh
-autosound-tcc --project-dir ~/Autosound/my-car
-```
-
-It remembers, so afterwards `autosound-tcc` alone reopens that car — and from the macOS app,
-double-clicking does the same. To work on a different car:
-
-```sh
-autosound-tcc --choose-project
-```
-
-The two are the same project. Start in the window, continue in the terminal, come back — the files
-are the shared state, and both read them fresh.
-
-**Before the first measurement**, REW must be running with its API enabled: *Preferences → API*,
-then check that `localhost:4735` answers. TCC carries a REW indicator that goes red when it cannot
-reach it; the terminal route just finds no measurements, which reads like a bug and is not one.
-
-## Stack
-
-Python + PySide6 (Qt), with `pyqtgraph` for curves. The tuning engine is
-Python already, so the app reuses it directly rather than bridging languages.
-
-Every dependency carries an upper version bound, and a test refuses one that
-does not: an open-ended requirement means whoever installs this in six months
-gets whatever exists that day, which is not a version policy.
-
-## Related projects
-
-- [`autosound-tuning-skill`](https://github.com/ayukhno/autosound-tuning-skill)
-  — the tuning knowledge base and tooling this app builds on.
+TCC finds the skill by looking, first hit wins, at `$AUTOSOUND_SKILL_DIR`, the `vendor/` submodule
+of a checkout, `~/.claude/skills/autosound-tuning`, and then skill folders under
+`~/.claude/plugins/`. It needs the 3.x line and says so plainly if what it finds is older: only
+3.x has `project.json` and the contract checker, and TCC reads both.
+</details>
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](LICENSE).
