@@ -60,7 +60,21 @@ rougher one.
 
 ### Windows
 
-Open PowerShell and paste one of these:
+**The simplest route: download and double-click.** From
+[install.cmd](https://github.com/ayukhno/autosound-tuning-skill/blob/main/install.cmd) press the
+download button, then double-click the file. It asks which of the two sizes you want and holds the
+window open at the end so you can read what happened.
+
+That file exists because of two things that stop a Windows user before they start. `cmd` cannot
+run a PowerShell script at all — a double-clicked `.ps1` opens in Notepad — and a double-click
+always opens `cmd`. And PowerShell refuses to run a script a browser downloaded, under the default
+execution policy. The `.cmd` re-launches itself through PowerShell with that policy bypassed **for
+that one invocation**; nothing about your machine's settings changes.
+
+So: `cmd` is a perfectly good place to start from. It just cannot be the thing that runs the
+script, and this arranges the handover.
+
+**Or from PowerShell**, if you would rather paste a line:
 
 ```powershell
 # the method only
@@ -72,6 +86,13 @@ Open PowerShell and paste one of these:
 
 The `scriptblock` wrapper is what lets a downloaded script take a flag; without a flag,
 `irm … | iex` works and asks which.
+
+**Or from `cmd`**, with the file downloaded beside you:
+
+```bat
+install.cmd -Terminal
+install.cmd -Tcc
+```
 
 It installs git and Python with `winget` if they are missing, and links the skill with a
 **junction** rather than a symlink — junctions need neither Developer Mode nor an administrator
