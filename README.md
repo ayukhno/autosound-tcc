@@ -3,24 +3,29 @@
 Cross-platform (macOS + Windows) desktop app for car-audio tuning:
 a **Tuning Command Center** and a **Guided Setup Wizard**.
 
-The goal is to lower the barrier to entry for people who are not tuning
-experts — show the current state of a system clearly, and guide the manual
-steps — rather than to automate the DSP.
+**The barrier it lowers is the terminal, not the tuning.** The method lives in the
+[`autosound-tuning`](https://github.com/ayukhno/autosound-tuning-skill) skill and it works on its
+own, in a terminal, driven by an AI — which is a fluent way to work and an unfamiliar one for most
+people who tune cars. TCC is the same method with a window on it: the DSP state, the plan, the
+measurements and the curves visible at once, and the conversation in a panel instead of a scroll
+of text. It does not make the tuning decisions easier; it makes the tool ordinary.
 
-> **Status: working, not released.** The app runs, reads REW, drives a tuning
-> session and has a test suite. It is not on PyPI and there are no installers
-> yet, so every route below installs from source. Install instructions describe
-> only what has actually been run end to end.
+It does not write to the processor. Automated DSP writes stay out of scope until the safety work
+behind them is done.
+
+> **Status: working, not released.** The app runs, reads REW, drives a tuning session and carries
+> 864 tests. It is not on PyPI, so every route below installs from source, and the Windows
+> installer has not yet been run on Windows. Everything written here has been executed except
+> where it says otherwise.
 
 ## Scope of the first version
 
-- **Read-only.** The app connects to [REW](https://www.roomeqwizard.com/)
-  (local API on `localhost:4735`), reads the current measurement and filter
-  state, and displays crossovers, delays, gains, EQ and frequency-response
-  curves.
-- **No DSP writes.** The app does not change processor settings. Automated
-  writing is deliberately out of scope until the safety work behind it is
-  done.
+- **Read-only against the processor.** TCC connects to
+  [REW](https://www.roomeqwizard.com/) (local API on `localhost:4735`), reads the current
+  measurement and filter state, and shows crossovers, delays, gains, EQ and curves. Changes to the
+  DSP are typed in by a person, as they always were.
+- **The project's files are the skill's.** The skill writes them, TCC reads them. That boundary is
+  what lets the same project be worked on from a terminal one day and the window the next.
 
 ## Install
 
@@ -39,16 +44,23 @@ every route below installs the skill, and TCC only if you ask for it.
 
 Nothing to download. Open **Terminal** (⌘-Space, type "terminal", Enter) and paste one of these:
 
-```sh
-# the method only
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
+The method only:
 
-# the method and the desktop app
+```sh
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
+```
+
+The method and the desktop app:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
 ```
 
 Without a flag it asks which. It asks before anything is fetched from the network, and it says
 what it is about to run.
+
+It does not matter which folder you are standing in: everything goes to fixed places, never into
+the current directory.
 
 **On a machine that has never built anything**, the first run stops and asks you to run
 `xcode-select --install` — macOS puts git behind a dialog that a script cannot click. Click
@@ -123,15 +135,42 @@ model proposing and a different vendor's disagreeing. The installer reports whet
 
 ### Updating, and removing
 
-```sh
-# macOS — the same line again; a second run updates
-curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
+Updating is the same command as installing — a second run fetches the newest release and leaves
+everything else alone.
 
-# and to remove it
+macOS, update:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --tcc
+```
+
+macOS, remove:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --uninstall
 ```
 
-On Windows, `-Tcc` again to update and `-Uninstall` to remove.
+Windows, update and remove, if you still have the extracted folder:
+
+```bat
+install.cmd -Tcc
+```
+
+```bat
+install.cmd -Uninstall
+```
+
+If you deleted it — which is fine, it is scratch — paste this into PowerShell instead. Update:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Tcc
+```
+
+Remove:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Uninstall
+```
 
 **Uninstall never touches a project folder** — not with `--yes`, not ever. Those hold measurements
 that took hours in a car and cannot be reproduced. It also leaves the Python packages (shared with
@@ -139,24 +178,44 @@ everything else using that interpreter), Claude Code, and `~/.claude`.
 
 ### If you would rather do it by hand
 
-The script does five things; each is one command.
+The script does six things. Each is one command, and none of them depend on the folder you
+run them from.
+
+Get the method, at its newest 3.x release:
 
 ```sh
-# 1. the skill, at its newest 3.x release
 git clone -b v3.0.1 https://github.com/ayukhno/autosound-tuning-skill.git ~/autosound-src
-ln -s ~/autosound-src/skills/autosound-tuning ~/.claude/skills/autosound-tuning
+```
 
-# 2. what its tools import (numpy is not optional — five modules do not load without it)
+Put it where Claude Code looks. On a machine that has never run Claude Code the `skills` folder
+does not exist yet, hence the `mkdir`:
+
+```sh
+mkdir -p ~/.claude/skills && ln -s ~/autosound-src/skills/autosound-tuning ~/.claude/skills/autosound-tuning
+```
+
+Install what its tools import. `numpy` is not optional — five of them do not load without it:
+
+```sh
 python3 -m pip install --user -r ~/autosound-src/skills/autosound-tuning/requirements.txt
+```
 
-# 3. TCC, if you want the window. `--python` matters: without it uv may pick an interpreter
-#    older than TCC needs, and the error reads like a broken package.
+Install the app, if you want the window. The `--python` matters: without it `uv` may pick an
+interpreter older than TCC needs, and the error reads like a broken package:
+
+```sh
 uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
+```
 
-# 4. Claude Code, if it is not already there
+Install Claude Code, if it is not already there:
+
+```sh
 curl -fsSL https://claude.ai/install.sh | sh
+```
 
-# 5. sign in
+Sign in:
+
+```sh
 claude auth login
 ```
 
@@ -164,7 +223,13 @@ Running TCC from a checkout works too, and is what you want if you intend to cha
 
 ```sh
 git clone --recurse-submodules https://github.com/ayukhno/autosound-tcc.git
+```
+
+```sh
 cd autosound-tcc && uv venv && uv pip install -e '.[dev]'
+```
+
+```sh
 .venv/bin/autosound-tcc
 ```
 
@@ -175,12 +240,64 @@ In this order, first hit wins: `$AUTOSOUND_SKILL_DIR`, the `vendor/` submodule o
 what it finds is the 3.x line and says so plainly if it is not — a 2.x skill has neither
 `project.json` nor the contract checker, and TCC reads through both.
 
-### Starting
+### Three folders, and which is which
+
+This trips people up, so plainly:
+
+| folder | what it is | keep it? |
+| :-- | :-- | :-- |
+| wherever you ran the installer | nothing lands here | delete it |
+| `~/.claude/skills/`, `~/.local/bin/` | the method and the app | the installer manages these |
+| **your project, one per car** | your measurements and the tune | **this is the one that matters** |
+
+The install folder is scratch. On macOS the one-liner leaves nothing behind at all; on Windows the
+folder you extracted the ZIP into can go in the bin once the installer has finished.
+
+A project is a folder you make, one per car, anywhere you keep your own files:
 
 ```sh
-autosound-tcc --project-dir .     # the window, on a project folder
-claude                            # then ask it to tune your car
+mkdir -p ~/Autosound/my-car
 ```
+
+Do not put it inside the installer folder, inside `~/.claude`, or inside a checkout of either
+repository — those get replaced on update. Keep it where your backups already reach. Everything
+about a car lives in its folder, so moving or copying that one folder moves the whole tune.
+
+### Starting, the first time
+
+**In a terminal.** Stand in the project folder and start Claude:
+
+```sh
+cd ~/Autosound/my-car
+```
+
+```sh
+claude
+```
+
+Then tell it what you are doing — "let's tune this car", in any language. On an empty folder it
+runs the intake interview: the car, the processor, the channel map, the microphone. That interview
+is what creates the project, so there is nothing to set up beforehand.
+
+**In the window.** Point TCC at the same folder:
+
+```sh
+autosound-tcc --project-dir ~/Autosound/my-car
+```
+
+It remembers, so afterwards `autosound-tcc` alone reopens that car — and from the macOS app,
+double-clicking does the same. To work on a different car:
+
+```sh
+autosound-tcc --choose-project
+```
+
+The two are the same project. Start in the window, continue in the terminal, come back — the files
+are the shared state, and both read them fresh.
+
+**Before the first measurement**, REW must be running with its API enabled: *Preferences → API*,
+then check that `localhost:4735` answers. TCC carries a REW indicator that goes red when it cannot
+reach it; the terminal route just finds no measurements, which reads like a bug and is not one.
 
 ## Stack
 
