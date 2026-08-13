@@ -29,12 +29,43 @@ def _impulse(peak_ms: float, n: int = 200, span: float = 8.0):
     return xs, ys
 
 
-#: Every view this module builds, kept alive for the run. pyqtgraph's `PlotItem` constructs
-#: parentless QMenus and QWidgetActions on every instance, and letting enough of them be collected
-#: segfaults the process from inside a LATER `PlotItem.__init__` — reproduced here, and the reason
-#: the app now reuses one curve window instead of building a second. Holding them is not tidiness;
-#: it is the only thing that makes this file's ~20 widgets safe to create.
+#: Widgets built by the current test. pyqtgraph's `PlotItem` constructs parentless QMenus and
+#: QWidgetActions on every instance, and letting Python collect them at a moment of its choosing
+#: segfaults the process — PySide's SignalManager asks a half-freed wrapper for its metaobject
+#: while Qt is still connecting the menu's actions.
+#:
+#: Holding them for the whole run was the first answer and it traded one crash for another: 44
+#: live PlotItems accumulate, and the process then dies inside a LATER `PlotItem.__init__`
+#: instead. Both directions were reproduced; the second at roughly one run in ten, caught by
+#: macOS's own crash reporter on 2026-08-13 with the stack ending in
+#: `QMenu::actionEvent → QObject::connect → SignalManager::retrieveMetaObject`.
+#:
+#: Neither leaking nor collecting is the fix. Deterministic destruction is: `_drain_widgets`
+#: below hands each widget to Qt at the end of the test that made it, in order, while nothing is
+#: mid-construction. No random GC pass, and nothing accumulates.
 _KEEP: list = []
+
+
+@pytest.fixture(autouse=True)
+def _drain_widgets():
+    """Destroy this test's widgets through Qt, before the next test builds more."""
+    yield
+    from PySide6.QtWidgets import QApplication
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    widgets, _KEEP[:] = list(_KEEP), []
+    for w in widgets:
+        w.hide()
+        w.deleteLater()
+    app = QApplication.instance()
+    if app is not None:
+        # `processEvents()` alone does NOT deliver DeferredDelete — that is the whole trick, and
+        # getting it wrong is why the first attempt at this changed nothing. Measured: with the
+        # flush, a loop of build-and-destroy leaves 0 QMenus behind; without it, 7 per view, all
+        # still live C++ objects, because the widget itself was never destroyed.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def _dialog(*args, **kwargs) -> CurveDialog:

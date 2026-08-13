@@ -10,6 +10,8 @@ displays translated text registers a retranslate callback via `on_language_chang
 from __future__ import annotations
 
 import weakref
+
+import shiboken6
 from typing import Callable
 
 Lang = str  # "en" | "uk"
@@ -922,6 +924,16 @@ def set_language(lang: Lang) -> None:
         callback = entry() if isinstance(entry, weakref.WeakMethod) else entry
         if callback is None:
             continue  # its widget is gone; so is its registration
+        # A WeakMethod outliving its widget's C++ half is not hypothetical. PySide keeps the
+        # Python wrapper after Qt has destroyed the object underneath, so the weakref resolves
+        # happily and the call lands on freed memory:
+        #     RuntimeError: libshiboken: Internal C++ object (_DTab) already deleted.
+        # Which is what switching language after closing a window would do (found 2026-08-13,
+        # once the test suite started destroying widgets instead of hoarding them). Ask shiboken,
+        # not the weakref.
+        target = getattr(callback, "__self__", None)
+        if target is not None and not shiboken6.isValid(target):
+            continue
         alive.append(entry)
         callback()
     _listeners[:] = alive

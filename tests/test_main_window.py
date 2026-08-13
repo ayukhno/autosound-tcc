@@ -26,12 +26,34 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-#: Windows that have built a CurveDialog, kept alive for the whole run. pyqtgraph's `PlotItem`
-#: constructs parentless QMenus and QWidgetActions on every instance, and letting enough of them
-#: be collected segfaults the process from inside a LATER `PlotItem.__init__` — the same hazard
-#: `tests/test_curve_view.py::_KEEP` exists for, and the reason the app reuses one curve window.
-#: Reproduced here the moment these tests were added (one run in four, 2026-08-12).
+#: Windows that have built a CurveDialog, held until the end of the test that made them.
+#: pyqtgraph's `PlotItem` builds parentless QMenus and QWidgetActions on every instance, and
+#: letting Python collect them mid-construction segfaults the process from inside a LATER
+#: `PlotItem.__init__` — reproduced here the moment these tests were added (2026-08-12).
+#:
+#: Keeping them for the whole run was the first answer and it swapped one crash for another:
+#: nothing is collected, so nothing crashes that way, but the live PlotItems pile up and the
+#: process dies on a later construction instead. Measured cause, 2026-08-13: a destroyed-looking
+#: window leaves 7 live QMenus behind, because `deleteLater()` needs a DeferredDelete flush that
+#: `processEvents()` does not perform. With the flush below, the count is 0 and nothing piles up.
 _KEEP_WINDOWS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _drain_windows():
+    """Destroy this test's windows through Qt before the next test builds more."""
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    windows, _KEEP_WINDOWS[:] = list(_KEEP_WINDOWS), []
+    for w in windows:
+        w.hide()
+        w.deleteLater()
+    app = QApplication.instance()
+    if app is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def _control_only_widgets(window: MainWindow) -> list:
