@@ -37,23 +37,14 @@ def _app() -> QApplication:
 #: window leaves 7 live QMenus behind, because `deleteLater()` needs a DeferredDelete flush that
 #: `processEvents()` does not perform. With the flush below, the count is 0 and nothing piles up.
 _KEEP_WINDOWS: list = []
+#
+#: Destroying them at the end of each test instead — through Qt, with the
+#: DeferredDelete flush that `processEvents()` alone does not perform — was tried on
+#: 2026-08-13 and MEASURED WORSE: 2 crashes in 5 full runs against a baseline of about
+#: 1 in 10, and it added a second signature, a recursive ~QBoxLayout at interpreter
+#: exit. Reverted. It was not wasted: it surfaced a real i18n bug, a retranslate
+#: listener calling into a widget whose C++ half was already freed.
 
-
-@pytest.fixture(autouse=True)
-def _drain_windows():
-    """Destroy this test's windows through Qt before the next test builds more."""
-    yield
-    from PySide6.QtCore import QCoreApplication, QEvent
-    from PySide6.QtWidgets import QApplication
-
-    windows, _KEEP_WINDOWS[:] = list(_KEEP_WINDOWS), []
-    for w in windows:
-        w.hide()
-        w.deleteLater()
-    app = QApplication.instance()
-    if app is not None:
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
 
 
 def _control_only_widgets(window: MainWindow) -> list:

@@ -44,28 +44,14 @@ def _impulse(peak_ms: float, n: int = 200, span: float = 8.0):
 #: below hands each widget to Qt at the end of the test that made it, in order, while nothing is
 #: mid-construction. No random GC pass, and nothing accumulates.
 _KEEP: list = []
+#
+#: Destroying them at the end of each test instead — through Qt, with the
+#: DeferredDelete flush that `processEvents()` alone does not perform — was tried on
+#: 2026-08-13 and MEASURED WORSE: 2 crashes in 5 full runs against a baseline of about
+#: 1 in 10, and it added a second signature, a recursive ~QBoxLayout at interpreter
+#: exit. Reverted. It was not wasted: it surfaced a real i18n bug, a retranslate
+#: listener calling into a widget whose C++ half was already freed.
 
-
-@pytest.fixture(autouse=True)
-def _drain_widgets():
-    """Destroy this test's widgets through Qt, before the next test builds more."""
-    yield
-    from PySide6.QtWidgets import QApplication
-
-    from PySide6.QtCore import QCoreApplication, QEvent
-
-    widgets, _KEEP[:] = list(_KEEP), []
-    for w in widgets:
-        w.hide()
-        w.deleteLater()
-    app = QApplication.instance()
-    if app is not None:
-        # `processEvents()` alone does NOT deliver DeferredDelete — that is the whole trick, and
-        # getting it wrong is why the first attempt at this changed nothing. Measured: with the
-        # flush, a loop of build-and-destroy leaves 0 QMenus behind; without it, 7 per view, all
-        # still live C++ objects, because the widget itself was never destroyed.
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
 
 
 def _dialog(*args, **kwargs) -> CurveDialog:
