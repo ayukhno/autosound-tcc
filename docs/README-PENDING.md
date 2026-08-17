@@ -14,24 +14,57 @@ Which README each item lands in is marked: **[skill]** = `README.md` + the three
 
 ---
 
-## Things that are now true and are not written down anywhere
+## 2026-08-17 — the installer was rebuilt; the 08-13 items below are superseded where they clash
 
-**[skill] The install stops and asks for your Mac password.** Homebrew — which brings the Gemini
-reviewer and `omp` — needs an administrator password and a RETURN, and it can only ask if a person
-is sitting there. This is new: before 2026-08-13 that step silently failed for everyone using the
-documented one-liner, so nobody ever saw the prompt. A reader who starts the install and walks
-away will come back to a stalled terminal. Say so **before** the command, not after.
+The flow is now **two blocks**, and the README's getting-started should be written as exactly
+that — nothing in between needs the reader:
+
+1. **Paste the one line.** It shows what is already on the Mac, asks one optional question (*back
+   projects up to a private GitHub repository?*), lists everything it will download, and asks
+   *Go ahead?* once. **On a Mac without Apple's Command Line Tools it then asks for the Mac
+   password — once, right there — and that is the only password in the whole install.** Homebrew
+   is gone; nothing else needs an administrator. Then 10–20 minutes with nobody at the keyboard.
+2. **Sign in, at the end, in the browser.** The installer runs `claude auth login` itself (Enter
+   opens the browser; Authorize), then offers the Gemini reviewer's sign-in (`agy` — Google
+   account; on some accounts a Project ID from `aistudio.google.com/app/apikey`) and, if asked
+   for, GitHub's (`gh auth login --web`). Each is Enter = now, s = later. Then: REW → Preferences →
+   API → *Start the API when REW starts*; double-click **Autosound TCC** on the Desktop.
+
+**[skill] "It asks which of two sizes you want" is no longer true.** Everything is the default —
+the method, the app, the reviewer. `--terminal` leaves the app out, `--no-reviewer` the reviewer,
+`--no-github` skips the question; through the one-liner they go after `bash -s --`. The README
+should say the default and name the flags in one sentence, not describe a menu.
+
+**[skill] `omp` is NOT installed by default any more** (`--with-omp`). It is the metered route.
+The 08-13 line "without it that dialog is empty" is still true and is now the intended state for a
+first install: the recommended pair (Claude through the SDK, Gemini through `agy`) does not need
+it.
+
+**[skill] "Open a new terminal" disappears from the app path.** The .app finds its own tools, and
+the installer runs the Claude sign-in with a full path. Only the `--terminal` path says "open a
+NEW Terminal window", and that is the whole PATH story a reader needs.
+
+**[skill] A GitHub question exists now (SCR-049 §2), and the backup itself is still unscripted
+(§1).** The installer installs `gh` and signs it in when asked; the README may say that, and may say
+"ask the AI to back the project up" — it must still not say the method *offers* it on its own.
+
+**[skill] The app's icon needs the next tag.** `make-macos-app.sh` is fixed on `main`, but the
+clone is the tag, so `v3.0.4` (or later) is what makes the icon appear on a fresh install.
+
+## Things that were true on 2026-08-13 and are not written down anywhere
+
+**[skill] ~~The install stops and asks for your Mac password.~~** Superseded above: the password is
+asked once at the start, only when Apple's Command Line Tools are missing, and Homebrew is gone.
 
 **[skill] The reviewer really does get installed now.** The README can stop hedging about setting
-Gemini up by hand: the one-liner installs Antigravity (`agy`) and links it. What still has to be
-done by hand, once, is signing it in with a Project ID from `aistudio.google.com/app/apikey`.
+Gemini up by hand: the one-liner installs Antigravity (`agy`) — now through Google's own installer,
+no Homebrew — and the installer offers the sign-in at the end. What still has to be done by hand,
+once, is that sign-in (Google account; sometimes a Project ID from `aistudio.google.com/app/apikey`).
 
-**[skill] `omp` is installed too.** One line: it is what lets the model picker offer anything that
-is not Claude. Without it that dialog is empty.
+**[skill] ~~`omp` is installed too.~~** Superseded above: `--with-omp` only.
 
-**[skill] The "what to do next" list is now ordered and grouped**, and the README's own
-step-by-step should match it rather than invent its own order: open a new terminal → `claude auth
-login` → switch on REW's API → start. Everything else is "when you have time".
+**[skill] ~~The "what to do next" list is now ordered and grouped~~** — superseded by the two-block
+flow above; there is no list to mirror any more, only "sign in, then start".
 
 **[skill] You need a Claude login and nothing can do it for you.** Already true, already written,
 but it is now also enforced on screen (TCC marks the picker when the Claude route has no login),
