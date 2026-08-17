@@ -77,6 +77,14 @@ autosound-tcc = "autosound_tcc.app:main"
 dsp-profile-interview = "autosound_tcc.dsp_profile_interview:main"
 tuning-session = "autosound_tcc.tuning_session_cli:main"
 
+# The same window, as a WINDOWED launcher. On Windows a console-script .exe opens a black console
+# behind the Qt window and keeps it there for the app's lifetime; a `gui-scripts` entry point is
+# built without a console, and that is what the installer's Desktop / Start Menu shortcuts point
+# at. On macOS and Linux the two are the same thing. The console one stays for the terminal, where
+# `--project-dir .` and the log line at exit are worth having.
+[project.gui-scripts]
+autosound-tcc-gui = "autosound_tcc.app:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/autosound_tcc"]
 

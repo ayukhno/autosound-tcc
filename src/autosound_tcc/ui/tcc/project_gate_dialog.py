@@ -178,8 +178,12 @@ def _launched_from() -> Optional[Path]:
     A bundle opened from the Finder has `cwd` of `/` or the home directory and no terminal, and
     treating that as "the project I meant" would gate every launch on a folder nobody chose. A tty
     is the difference between the two, and it is the only signal that does not guess.
+
+    `sys.stdin` itself can be None: the windowed launcher on Windows (`autosound-tcc-gui`, a
+    `gui_scripts` entry point) starts the process with no console at all, and asking None for
+    `isatty()` was a crash on the first double-click of the shortcut.
     """
-    if not sys.stdin.isatty():
+    if sys.stdin is None or not sys.stdin.isatty():
         return None
     here = Path.cwd()
     if here == Path.home() or here == Path(here.root):

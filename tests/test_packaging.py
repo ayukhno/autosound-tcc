@@ -184,14 +184,31 @@ def test_the_window_uses_only_what_the_essentials_wheel_ships():
 
 
 def test_every_console_script_points_at_something_that_exists():
-    """A dangling entry point is only discovered by the person who typed the command."""
+    """A dangling entry point is only discovered by the person who typed the command — or, for
+    the windowed launcher, by the person who double-clicked the shortcut."""
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    for name, target in data["project"]["scripts"].items():
+    entry_points = dict(data["project"]["scripts"])
+    entry_points.update(data["project"].get("gui-scripts", {}))
+    for name, target in entry_points.items():
         module, _, func = target.partition(":")
         path = ROOT / "src" / Path(module.replace(".", "/") + ".py")
         assert path.exists(), f"{name} -> {module} has no module"
         assert f"def {func}(" in path.read_text(encoding="utf-8"), f"{name} -> {target} missing"
+
+
+def test_the_windowed_launcher_and_the_icons_ship_together():
+    """The Windows shortcut needs both: a launcher without a console, and an .ico to draw it with.
+    The .icns is the same promise to the macOS bundle builder (`make-macos-app.sh`)."""
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["gui-scripts"]["autosound-tcc-gui"] == "autosound_tcc.app:main"
+
+    from autosound_tcc import app
+
+    assert app.APP_ICON.is_file(), "the window icon (PNG) is missing from the package"
+    assert app.APP_ICNS.is_file(), "the macOS bundle icon (.icns) is missing from the package"
+    assert app.APP_ICO.is_file(), "the Windows shortcut icon (.ico) is missing from the package"
+    assert app.APP_ICO.read_bytes()[:4] == b"\x00\x00\x01\x00", "not an ICO file"
 
 
 # ---- what an INSTALLED copy can find (found by installing it, 2026-08-12) ----------------------

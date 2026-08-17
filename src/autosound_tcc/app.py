@@ -23,6 +23,10 @@ APP_DISPLAY_NAME = "Autosound TCC"
 #: from here rather than keeping a second copy in the other repository.
 APP_ICON = Path(__file__).resolve().parent / "assets" / "app-icon.png"
 APP_ICNS = APP_ICON.with_suffix(".icns")
+#: The same artwork for a Windows shortcut (.lnk), which can only take an .ico. The installer's
+#: shortcut builder asks this module for it, the same way the macOS bundle builder asks for the
+#: .icns, so neither installer keeps a copy of the artwork.
+APP_ICO = APP_ICON.with_suffix(".ico")
 
 #: What to say when the window is asked for and the toolkit that draws it is not installed.
 #: `autosound-tcc` ships in two sizes — the CLI half needs `claude-agent-sdk` and nothing else,
