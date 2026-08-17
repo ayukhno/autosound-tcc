@@ -14,6 +14,14 @@ Which README each item lands in is marked: **[skill]** = `README.md` + the three
 
 ---
 
+> **2026-08-17, later:** the text has now been WRITTEN — skill `README.md` + `FAQ.md` on branch
+> `docs/readme-review` (rebased onto main, pushed, commit 793072e) and TCC `README.md` on main
+> (c29c1a1), with the shared paragraphs (REW, GitHub, install, first project) kept identical in
+> substance. The branch is still not merged: that merge is the release act, gated on the
+> MacBookAir run (planned 2026-08-18) — see the gate section at the end. Still to do after the
+> merge: the uk/de/pl translations (line-for-line port of the new English), GitHub Releases for the
+> v3.0.x tags, and TCC's screenshot.
+
 ## 2026-08-17 — the installer was rebuilt; the 08-13 items below are superseded where they clash
 
 The flow is now **two blocks**, and the README's getting-started should be written as exactly
