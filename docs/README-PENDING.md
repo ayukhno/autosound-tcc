@@ -55,9 +55,10 @@ same two blocks as the Mac. What to say that differs from the Mac: the one inter
 Windows permission dialog (UAC) for **Git for Windows**, not a password, and only when Git is
 missing; everything else lands in the user profile; the shortcuts are on the Desktop and in the
 Start Menu; the reviewer's doctor runs in **Git Bash**. Options are `-Terminal`, `-NoReviewer`,
-`-NoGitHub` on the scriptblock form (`& ([scriptblock]::Create((irm …))) -Terminal`). Not yet
-seen on Windows: the interactive sign-in block, and REW detection on a PC that has REW — say
-nothing about either until they are.
+`-NoGitHub` on the scriptblock form (`& ([scriptblock]::Create((irm …))) -Terminal`). The
+interactive sign-in block has run there too (Claude in the browser, agy's TUI, gh's device code —
+gh asks one extra "Authenticate Git with your GitHub credentials?", answer Yes). Not yet seen on
+Windows: REW detection on a PC that has REW — say nothing about it until it is.
 
 **[skill] The app's icon needs the next tag.** `make-macos-app.sh` is fixed on `main`, but the
 clone is the tag, so `v3.0.4` (or later) is what makes the icon appear on a fresh install.
