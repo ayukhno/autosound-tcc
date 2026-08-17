@@ -48,6 +48,17 @@ NEW Terminal window", and that is the whole PATH story a reader needs.
 (§1).** The installer installs `gh` and signs it in when asked; the README may say that, and may say
 "ask the AI to back the project up" — it must still not say the method *offers* it on its own.
 
+**[skill] Windows has an installer that has actually run (2026-08-17, Windows 11 25H2 in a VM).**
+The README's Windows path is one line in PowerShell — `irm https://raw.githubusercontent.com/
+ayukhno/autosound-tuning-skill/main/install.ps1 | iex` — or a double-click on `install.cmd`;
+same two blocks as the Mac. What to say that differs from the Mac: the one interruption is a
+Windows permission dialog (UAC) for **Git for Windows**, not a password, and only when Git is
+missing; everything else lands in the user profile; the shortcuts are on the Desktop and in the
+Start Menu; the reviewer's doctor runs in **Git Bash**. Options are `-Terminal`, `-NoReviewer`,
+`-NoGitHub` on the scriptblock form (`& ([scriptblock]::Create((irm …))) -Terminal`). Not yet
+seen on Windows: the interactive sign-in block, and REW detection on a PC that has REW — say
+nothing about either until they are.
+
 **[skill] The app's icon needs the next tag.** `make-macos-app.sh` is fixed on `main`, but the
 clone is the tag, so `v3.0.4` (or later) is what makes the icon appear on a fresh install.
 
