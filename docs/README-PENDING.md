@@ -57,8 +57,11 @@ missing; everything else lands in the user profile; the shortcuts are on the Des
 Start Menu; the reviewer's doctor runs in **Git Bash**. Options are `-Terminal`, `-NoReviewer`,
 `-NoGitHub` on the scriptblock form (`& ([scriptblock]::Create((irm …))) -Terminal`). The
 interactive sign-in block has run there too (Claude in the browser, agy's TUI, gh's device code —
-gh asks one extra "Authenticate Git with your GitHub credentials?", answer Yes). Not yet seen on
-Windows: REW detection on a PC that has REW — say nothing about it until it is.
+gh asks one extra "Authenticate Git with your GitHub credentials?", answer Yes). REW detection has
+run on a PC with REW too. **Windows REW has no "start the API when REW starts" box** — only a
+Start-server button — so the installer puts a **"REW (API on)"** shortcut on the Desktop
+(`roomeqwizard.exe -api`, REW's own switch) and the Windows getting-started should say "start REW
+from that shortcut"; the macOS text keeps the checkbox.
 
 **[skill] The app's icon needs the next tag.** `make-macos-app.sh` is fixed on `main`, but the
 clone is the tag, so `v3.0.4` (or later) is what makes the icon appear on a fresh install.
