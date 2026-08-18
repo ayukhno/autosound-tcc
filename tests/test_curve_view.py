@@ -11,6 +11,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -145,6 +146,12 @@ class _FakeBridge:
             raise self._raises
         self.asked.append(name)
         return name
+
+    def by_name(self, name, exact: bool = True):
+        """REW's own shape: ONE `GET /measurements` answers both "which id" and "what is on it",
+        which is why the worker resolves this way — the timing reference comes out of the second
+        half for no extra call."""
+        return self.find_id(name, exact=exact), {"timeOfIRStartSeconds": 0.00518}
 
     def impulse_response(self, mid):
         xs, ys = _impulse(4.6)
@@ -1341,3 +1348,295 @@ def test_each_action_sits_beside_the_controls_that_produce_it():
 
     assert box_at < delays_at < markers_at
     assert markers_at == len(order) - 1, "the markers group ends the row"
+
+
+# ---- the predicted sum (CURVE-ANALYSIS-PLAN.md step 2, user 2026-08-18) -----------------------
+
+
+def _fr_trace(name: str, level_db: float = 90.0, version: str = "1", method: str = "sw",
+              phase: bool = True, points: int = 240) -> Trace:
+    """One driver as REW hands it over on the frequency-response endpoint.
+
+    Flat magnitude and flat phase, so every dB the sum shows is interference and nothing else —
+    the same reason `test_curve_sum` builds its inputs this way. `phase=False` is the MMM/RTA
+    shape: a magnitude and a null where the phase would be.
+    """
+    freqs = [20.0 * (2 ** (i / 24.0)) for i in range(points)]
+    magnitude = [level_db] * points
+    return Trace(
+        name, freqs, magnitude,
+        magnitude_db=magnitude,
+        phase_deg=([0.0] * points) if phase else None,
+        config_version=version, method=method, start_time_s=0.00518,
+    )
+
+
+def _fr_view(*traces: Trace) -> CurveView:
+    """A view on the frequency response, which is where a sum can be drawn at all."""
+    _app()
+    view = CurveView(x_label="Hz")
+    _KEEP.append(view)
+    view.set_unit("Hz")
+    view.set_y_unit("dB")
+    view.set_log_x(True)
+    view.set_traces(list(traces))
+    return view
+
+
+def _at(result, hz: float) -> float:
+    """The sum's level at the grid point nearest `hz`."""
+    freqs = np.asarray(result.freqs_hz, dtype=float)
+    return float(np.asarray(result.magnitude_db, dtype=float)[int(np.abs(freqs - hz).argmin())])
+
+
+def test_the_worker_keeps_the_magnitude_and_the_phase_from_the_one_call_that_returns_both():
+    """A curve carried only what it drew, so a sum needed a second round trip to REW to exist at
+    all — and REW returns both halves from `get_fr` anyway."""
+    _app()
+
+    worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "phase")
+    got: list = []
+    worker.done.connect(got.append)
+    worker.run()
+
+    trace = got[-1][0]
+    assert list(trace.y) == [0.0] * 120, "the phase view still draws the phase"
+    assert trace.phase_deg is not None and trace.magnitude_db is not None
+    assert list(trace.magnitude_db)[:1] == [80.0 - 0.001 * 20.0], "and the magnitude came too"
+
+
+def test_a_trace_carries_the_facts_the_summability_rule_is_written_against():
+    """`_N` and the method suffix decide whether these captures are one round of one car, and
+    REW's own `startTime` travels with them so the sum can report it (`curve_sum`)."""
+    _app()
+
+    worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "fr")
+    got: list = []
+    worker.done.connect(got.append)
+    worker.run()
+
+    trace = got[-1][0]
+    assert trace.config_version == "01" and trace.method == "sw", "read with the skill's grammar"
+    assert trace.start_time_s == pytest.approx(0.00518), "out of the measurement, at no extra call"
+
+
+def test_an_impulse_carries_no_magnitude_or_phase_because_it_has_none():
+    _app()
+
+    worker = _CurveWorker(_FakeBridge(), ["w-L_01 (sw)"], "impulse")
+    got: list = []
+    worker.done.connect(got.append)
+    worker.run()
+
+    trace = got[-1][0]
+    assert trace.magnitude_db is None and trace.phase_deg is None
+    assert trace.method == "sw", "the title still says what the capture was"
+
+
+def test_the_sum_is_off_until_it_is_asked_for():
+    """This window is opened to compare two measured curves at least as often as to predict their
+    joint, and a prediction nobody asked for is a claim nobody checked."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    assert view.sum_shown() is False
+    assert view.sum_result() is None and view.sum_text() == ""
+    assert view._plot.getPlotItem().getAxis("right").isVisible() is False
+
+
+def test_the_second_axis_is_not_built_until_a_sum_is_actually_drawn():
+    """Off by default has to mean off. A window that never shows a sum should not be carrying the
+    graphics items for one — this file's crash history is entirely about how many graphics objects
+    get constructed and destroyed (`_do_not_build_the_plot_options_menu`)."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    assert view._sum_vb is None, "nothing extra in the scene until it is asked for"
+
+    view.set_sum_shown(True)
+
+    assert view._sum_vb is not None, "and exactly one, built once"
+    built = view._sum_vb
+    view.set_sum_shown(False)
+    view.set_sum_shown(True)
+    assert view._sum_vb is built, "never rebuilt: construct/destroy cycles are what crash here"
+
+
+def test_two_identical_drivers_sum_six_db_up_on_a_second_axis_in_db():
+    """The one number this whole feature has to get right before any of the rest matters."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    view.set_sum_shown(True)
+
+    result = view.sum_result()
+    assert _at(result, 1000.0) == pytest.approx(90.0 + 20.0 * math.log10(2.0), abs=1e-6)
+    assert view._plot.getPlotItem().getAxis("right").isVisible(), "and it has a scale of its own"
+
+
+def test_the_sum_follows_the_delay_without_going_back_to_rew():
+    """The entire point of drawing it: dragging or typing a delay is a guess, and the joint has to
+    answer while the guess is being made. Two identical drivers 0.5 ms apart cancel at 1 kHz —
+    read off `|2A cos(pi f tau)|`, not off a previous run of this code."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    view.set_sum_shown(True)
+    assert _at(view.sum_result(), 1000.0) == pytest.approx(96.02, abs=0.01)
+
+    view.set_delay_target(1)
+    view.set_delay(0.5)
+
+    assert _at(view.sum_result(), 1000.0) < 70.0, "a half cycle at 1 kHz is a cancellation"
+    assert _at(view.sum_result(), 2000.0) == pytest.approx(96.02, abs=0.01), "a whole cycle adds"
+
+
+def test_the_drawn_sum_is_in_the_plots_own_x_and_secondary_to_the_measurements():
+    """It is a prediction standing among measurements. Dashed, thinner, and neutral rather than a
+    third accent colour — and on a log plot its x has to be log10(Hz) like everything else, since
+    pyqtgraph's log mode only transforms the items the PlotItem itself owns."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    view.set_sum_shown(True)
+
+    xs, _ys = view._sum_curve.getData()
+    assert xs[0] == pytest.approx(math.log10(20.0))
+    pen = view._sum_curve.opts["pen"]
+    assert pen.style() == Qt.PenStyle.DashLine
+    assert pen.color().alpha() < 255, "faded: it is not a measurement"
+
+
+def test_the_sum_never_takes_the_mouse_off_a_marker():
+    """The markers are this panel's whole output. A second ViewBox laid over the plot that
+    swallowed a press would trade the feature for the reason the window exists."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    view.set_markers([100.0, 1000.0], tokens=["accent", "info"])
+    view.set_sum_shown(True)
+
+    view._markers[1].setValue(math.log10(2000.0))
+
+    assert view.positions() == pytest.approx([100.0, 2000.0], rel=1e-6)
+    assert view._sum_vb.acceptedMouseButtons() == Qt.MouseButton.NoButton
+    assert view._sum_curve.acceptedMouseButtons() == Qt.MouseButton.NoButton
+
+
+def test_a_set_that_cannot_be_summed_draws_nothing_and_says_which_one_and_why():
+    """An MMM capture has a magnitude and nothing to interfere with. Refusing quietly would leave
+    the tuner waiting for a curve; refusing in the engine's own words says which measurement."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"),
+                    _fr_trace("w-R_01 (rta)", method="rta", phase=False))
+
+    view.set_sum_shown(True)
+
+    assert view.sum_result() is None and view._sum_curve is None
+    assert view._plot.getPlotItem().getAxis("right").isVisible() is False
+    assert i18n.t("curveSumNone") in view.sum_text()
+    assert "w-R_01 (rta)" in view.sum_text(), "it names the measurement that decided it"
+    assert view._sum_label.isVisibleTo(view)
+    assert "color:" in view._sum_label.text(), "a refusal is not read last"
+
+
+def test_a_mixed_config_version_is_drawn_and_labelled_two_different_cars():
+    """A bumped `_N` means the DSP configuration changed between the captures, so those drivers
+    never played together at any one setting. It is computed anyway — the comparison is worth
+    looking at — and the label says what it is not."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", version="1"),
+                    _fr_trace("w-R_02 (sw)", version="2"))
+
+    view.set_sum_shown(True)
+
+    assert view.sum_result() is not None and view._sum_curve is not None, "drawn"
+    assert view.sum_result().summability.status == "mixed_config"
+    assert "DIFFERENT DSP config versions" in view.sum_text()
+    assert "color:" in view._sum_label.text(), "and it does not look like a believable one"
+
+
+def test_the_timing_assumption_is_printed_with_every_sum_that_is_drawn():
+    """Half the precondition cannot be checked from the numbers at all (`rew-api-quirks.md`), so
+    it is stated instead — wherever the sum is shown, not in a tooltip somebody may not open."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    view.set_sum_shown(True)
+
+    assert "ASSUMED, NOT CHECKED" in view.sum_text()
+    assert "one shared timing reference" in view.sum_text()
+
+
+def test_one_curve_is_not_a_sum_and_says_so():
+    view = _fr_view(_fr_trace("w-L_01 (sw)"))
+
+    view.set_sum_shown(True)
+
+    assert view.sum_result() is None
+    assert i18n.t("curveSumTooFew") in view.sum_text()
+
+
+def test_on_the_impulse_the_sum_is_refused_in_words_rather_than_drawn_on_a_time_axis():
+    """The impulse's x is time and the sum's is frequency; they cannot share one pair of axes. The
+    strip that answers it there is a separate piece of work, and saying so beats a blank button."""
+    view = _view()  # the impulse view: x in ms
+    view.set_sum_shown(True)
+
+    assert view.sum_result() is None
+    assert i18n.t("curveSumOnlyFrequency") in view.sum_text()
+    assert view._sum_btn.isEnabled() is False
+
+
+def test_the_sum_survives_a_new_pair_and_a_reset_of_the_window():
+    """A tuner who has asked to see joints is working through a whole car. Asking again for every
+    pair is how a feature stops being used."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
+    dialog = _dialog(every[:2], bridge=_FrBridge(), kind="fr", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    dialog._view.set_sum_shown(True)
+    assert dialog._view.sum_result() is not None
+
+    dialog.reset(["w-L_01 (sw)", "m-L_01 (sw)"], kind="fr", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    assert dialog._view.sum_shown() is True
+    assert dialog._view.sum_result() is not None, "and it is drawn for the new pair too"
+    assert [c.name for c in dialog._view.sum_result().contributions] == [
+        "w-L_01 (sw)", "m-L_01 (sw)"
+    ]
+
+
+def test_the_sum_goes_to_the_model_with_its_verdict_and_its_assumption_attached():
+    """A drawn sum ends an argument, so the one that reaches the model must carry what it does not
+    show. `SumResult.as_sentence()` puts them there, which is why nothing downstream has to
+    remember to."""
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FrBridge(), kind="fr")
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    dialog._view.set_sum_shown(True)
+    sent: list[str] = []
+    dialog.readingSent.connect(sent.append)
+
+    dialog._view._send_btn.click()
+
+    assert len(sent) == 1
+    assert "Predicted acoustic sum of 2 measurement(s)" in sent[0]
+    assert "ASSUMED, NOT CHECKED" in sent[0], "the precondition travels with it"
+    assert "one capture round" in sent[0], "and so does the verdict"
+    assert "startTime" in sent[0], "with the timing facts it was judged on"
+
+
+def test_with_the_sum_off_nothing_about_it_reaches_the_model():
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FrBridge(), kind="fr")
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    dialog._view.set_markers([100.0, 1000.0], tokens=["accent", "info"])
+
+    assert "ASSUMED" not in dialog._view.statement()
+    assert dialog._view.statement() == dialog._view.reading()
+
+
+def test_a_sum_on_screen_is_worth_sending_with_no_marker_placed():
+    """It is a statement about the pair whether or not anybody has pointed at a frequency yet."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    view.set_sum_shown(True)
+
+    assert view.reading() == "", "no markers, no delay: nothing to read"
+    assert view._send_btn.isEnabled()
+    assert "Predicted acoustic sum" in view.statement()

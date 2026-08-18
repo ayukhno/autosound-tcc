@@ -69,6 +69,52 @@ def _is_rta(title: str) -> bool:
     return _RTA_SUFFIX in str(title).casefold()
 
 
+def _title_facts(title: str) -> tuple[Optional[str], Optional[str]]:
+    """`(DSP config version, capture method)` for a title, read with the SKILL's own grammar.
+
+    The grammar belongs to the skill — `rew_tool/naming.py` owns it, changes it, and is what wrote
+    these titles in the first place — so TCC asks it rather than keeping a regex that drifts. It
+    answers `None` for a title that is not in the grammar at all (a REW list holds imports and
+    room-sim results too), and "unknown" is a verdict `curve_sum` already has words for; it is not
+    an error and must never be treated as one.
+
+    Two fallbacks, both deliberate. Without the skill installed there is no grammar to ask, and the
+    curve window is not the place to discover that — the sum simply comes out labelled unknown.
+    And a title the grammar rejects can still say `(rta)` out loud: `w-L_02 (rta) INV` does not
+    parse (the grammar allows nothing after the method suffix) but it is unmistakably an MMM
+    capture, so `_is_rta` — the one implementation of that question in this window — answers it.
+    """
+    parsed = None
+    try:
+        from autosound_tcc.core import vendor_loader
+
+        parsed = vendor_loader.load_naming().parse_name(title)
+    except Exception:  # noqa: BLE001 — no skill, or a title it will not parse: both are "unknown"
+        parsed = None
+    version = str(parsed.get("version")) if parsed and parsed.get("version") else None
+    method = str(parsed.get("method")) if parsed and parsed.get("method") else None
+    if method is None and _is_rta(title):
+        method = _RTA_SUFFIX.strip("()")
+    return version, method
+
+
+def _start_time_of(measurement) -> Optional[float]:
+    """REW's own timing reference for a capture, in seconds, or None when it does not report one.
+
+    Free of any extra HTTP: resolving a title already costs one `GET /measurements`, and taking
+    the measurement object out of that same answer (`by_name`) costs nothing more than throwing it
+    away did. Carried so the sum can REPORT it — `rew-api-quirks.md` is explicit that a spread of
+    start times cannot be judged from the numbers alone, so nothing here judges it.
+    """
+    if not isinstance(measurement, dict):
+        return None
+    for key in ("timeOfIRStartSeconds", "startTime", "delay"):
+        value = measurement.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
 def kind_for(titles: Sequence[str], asked: str = "") -> str:
     """Which curve ALL of these measurements can actually show.
 
@@ -101,7 +147,7 @@ def _peak_x(trace) -> float:
 
 
 class _CurveWorker(QThread):
-    """Fetch each named measurement's curve. One `find_id` + one curve call per title."""
+    """Fetch each named measurement's curve. One `by_name` + one curve call per title."""
 
     done = Signal(list)  # list[Trace]
     failed = Signal(str)
@@ -119,22 +165,47 @@ class _CurveWorker(QThread):
             # Per measurement, not per batch: one curve REW cannot produce must not take the other
             # one off the screen with it. The window shows what it has and names what it does not.
             try:
-                mid = self._bridge.find_id(title)
+                # `by_name` rather than `find_id`: both cost exactly one `GET /measurements`, and
+                # this one keeps the measurement object out of the answer instead of dropping it.
+                # That object is where REW's timing reference is, and the sum reports it.
+                mid, measurement = self._bridge.by_name(title)
+                # What the title says about the capture, in the skill's own grammar. Read for
+                # every kind, not only where a sum is drawn: they are facts about the measurement,
+                # not about the curve, and the impulse view will want them when its own strip
+                # lands.
+                version, method = _title_facts(title)
+                facts = {
+                    "config_version": version,
+                    "method": method,
+                    "start_time_s": _start_time_of(measurement),
+                }
                 if self._kind == "impulse":
                     times, samples = self._bridge.impulse_response(mid)
                     # numpy from here down. These are 262 144 points per trace, and a Python list
                     # comprehension over them was the panel's actual cost, not the HTTP call
                     # (measured: fetch 0.03 s).
                     x = np.asarray(times, dtype=float) * KINDS["impulse"]["scale_x"]
-                    traces.append(Trace(title, x, np.asarray(samples, dtype=float)))
+                    # No magnitude and no phase on this one: an impulse IS the time domain, and
+                    # there is nothing here to carry into a frequency-domain sum.
+                    traces.append(Trace(title, x, np.asarray(samples, dtype=float), **facts))
                 else:
+                    # Both halves, from the one call that returns both. Keeping only the one being
+                    # drawn is what used to make a sum impossible without a second round trip —
+                    # and a sum needs the magnitude AND the phase of every driver in it.
                     freqs, mag, phase = self._bridge.frequency_response(mid)
                     values = phase if self._kind == "phase" else mag
                     if values is None:
                         raise ValueError("no phase in this measurement")
                     traces.append(
                         Trace(title, np.asarray(freqs, dtype=float),
-                              np.asarray(values, dtype=float))
+                              np.asarray(values, dtype=float),
+                              magnitude_db=(
+                                  None if mag is None else np.asarray(mag, dtype=float)
+                              ),
+                              phase_deg=(
+                                  None if phase is None else np.asarray(phase, dtype=float)
+                              ),
+                              **facts)
                     )
             except Exception as exc:  # noqa: BLE001 — a REW failure is a message, not a crash
                 problems.append(f"{title}: {type(exc).__name__}")

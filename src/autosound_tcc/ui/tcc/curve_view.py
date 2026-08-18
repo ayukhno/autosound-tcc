@@ -27,6 +27,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QLocale, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import curve_sum
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
@@ -60,6 +62,16 @@ _CROSS_MODES = ("vx", "hx")
 #: Guides are drawn heavier than the traces they cross. At trace weight they vanish into a dense
 #: impulse — 262 144 points is a solid block of pixels, and a 1 px line over it is not a line.
 _GUIDE_WIDTH = 2.4
+#: The predicted sum's colour, and how far it is faded. Neutral rather than a third accent, and
+#: dashed: it is a PREDICTION standing among measurements, and a saturated solid line beside the
+#: two trace colours would be read as another driver somebody captured.
+_SUM_TOKEN = "text"
+_SUM_ALPHA = 150
+_SUM_WIDTH = 1.2
+#: How far under its own loudest point the drawn sum is allowed to fall. `curve_sum` returns −inf
+#: at an exact null and says in as many words that the floor is the DRAWING's decision — without
+#: one, a synthetic cancellation takes the whole right-hand axis to −inf and the curve with it.
+_SUM_FLOOR_DB = 60.0
 #: Fallback delay step, in ms, when no profile has been read. What DSPs seen so far let you TYPE;
 #: the hardware resolves in whole samples, which is a different number — see `set_resolution`.
 _DEFAULT_STEP_MS = 0.01
@@ -204,11 +216,31 @@ class LogHzAxis(pg.AxisItem):
 
 @dataclass(frozen=True)
 class Trace:
-    """One curve: a name the skill would recognise, and its samples."""
+    """One curve: a name the skill would recognise, its samples, and what a sum needs of it.
+
+    `x`/`y` are what is DRAWN, in this view's own units — degrees against hertz on the phase plot,
+    dB against hertz on the frequency response, a sample value against milliseconds on an impulse.
+    `magnitude_db` and `phase_deg` are the MEASUREMENT, both halves of it, because a complex sum
+    needs both at once and REW returns them from one call. Either may be `None`: an impulse is
+    time-domain and has neither, and an MMM/RTA capture carries a magnitude and no phase at all.
+
+    `config_version` and `method` are `_N` and the `(sw)`/`(rta)` suffix as the skill's own grammar
+    reads them (`naming-and-structure.md` §3). They are not decoration — they are what decides
+    whether these curves may be added together at all (`core/curve_sum.summability`), and `None`
+    means "this title is not in the grammar", which that module has its own verdict for rather
+    than a crash. `start_time_s` is REW's own timing reference for the capture, carried so it can
+    be REPORTED with the sum; nothing in TCC judges it, and the module docstring of `curve_sum`
+    says why nothing can.
+    """
 
     name: str
     x: Sequence[float]
     y: Sequence[float]
+    magnitude_db: Optional[Sequence[float]] = None
+    phase_deg: Optional[Sequence[float]] = None
+    config_version: Optional[str] = None
+    method: Optional[str] = None
+    start_time_s: Optional[float] = None
 
 
 class CurveView(QWidget):
@@ -281,6 +313,40 @@ class CurveView(QWidget):
         self._legend = self._plot.addLegend(offset=(-8, 8), labelTextColor=theme.text)
         layout.addWidget(self._plot, stretch=1)
 
+        #: Whether the predicted sum is drawn, and everything it produced last time it was.
+        #: OFF by default, deliberately. This window is opened to compare two measured curves as
+        #: often as to predict their joint, and a sum drawn unasked would put a prediction — plus
+        #: its refusal notice, on every mixed sweep/MMM pair — in front of somebody who asked for
+        #: neither. The kind picker has the same manners: it never jumps on its own, it only stops
+        #: refusing. Once switched on it STAYS on, across a new pair and across `reset()`, because
+        #: a tuner working through a car wants it for all of them, not for one.
+        self._sum_on = False
+        #: Built on FIRST USE and never rebuilt — see `_build_sum_axis`. With the sum off, which
+        #: is the default and most of a session, this window holds exactly the graphics items it
+        #: held before this feature existed. In a file whose crash history is entirely about how
+        #: many graphics objects get constructed and destroyed, that is worth a lazy branch.
+        self._sum_vb: Optional[pg.ViewBox] = None
+        self._sum_axis_failed = False
+        self._sum_curve = None
+        self._sum_result: Optional[curve_sum.SumResult] = None
+        self._sum_text = ""
+        self._sum_doubted = False
+
+        # Directly under the plot, not in the readout: the verdict is about the CURVE, and the
+        # readout is about the markers. It carries the summability verdict and the timing
+        # assumption verbatim from `curve_sum` — a drawn sum ends an argument, so a sum that
+        # cannot be believed has to say so where the eye already is (CURVE-ANALYSIS-PLAN.md,
+        # "The precondition"). Hidden entirely while the sum is off, which is why turning it off
+        # leaves this window exactly the shape it was before the feature existed.
+        self._sum_label = QLabel("")
+        self._sum_label.setProperty("class", "phead-sub")
+        self._sum_label.setWordWrap(True)
+        self._sum_label.setMinimumWidth(80)
+        self._sum_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._sum_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._sum_label.setVisible(False)
+        layout.addWidget(self._sum_label)
+
         # Its own row, above the buttons (user, 2026-08-11). Sharing a line with eight controls
         # left the reading fighting them for width — it stretched the window when it could and was
         # cut when it could not, and the numbers ARE the output of this panel.
@@ -344,6 +410,19 @@ class CurveView(QWidget):
         #: Where the delay group's action goes — see `add_delay_action`.
         self._delay_slot = row.count()
 
+        # Between the delay group and the marker modes, because it belongs to both: it is drawn
+        # from the delays and it changes what the plot shows. Same size and class as the mode
+        # buttons, so a checked state already looks checked.
+        self._sum_btn = QPushButton("Σ")
+        self._sum_btn.setProperty("class", "zoom-btn")
+        self._sum_btn.setCheckable(True)
+        self._sum_btn.setChecked(self._sum_on)
+        self._sum_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sum_btn.setFixedSize(30, 24)
+        attach_tip(self._sum_btn, i18n.t("curveSumTip"))
+        self._sum_btn.clicked.connect(self.set_sum_shown)
+        row.addWidget(self._sum_btn)
+
         for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
             button = QPushButton(_MODE_LABELS[mode])
             button.setProperty("class", "zoom-btn")
@@ -406,7 +485,93 @@ class CurveView(QWidget):
         self._crossing_dots = None
         self._syncing = False
         self._marker_names: list[str] = []
+        self._render_sum()
         self._render_readout()
+
+    def _ensure_sum_axis(self) -> bool:
+        """Build the right-hand axis the first time a sum is actually drawn, and only then.
+
+        Not at construction: the sum is off by default, and a window that never shows one should
+        not be carrying the graphics items for it. One attempt, then the answer is remembered
+        either way — retrying a failed build on every redraw would turn a broken pyqtgraph into a
+        stutter instead of a switched-off feature.
+        """
+        if self._sum_vb is None and not self._sum_axis_failed:
+            self._build_sum_axis()
+        return self._sum_vb is not None
+
+    def _build_sum_axis(self) -> None:
+        """A second Y axis on the right, in dB, with its own ViewBox behind the plot's.
+
+        The sum is in dB and the plot it goes over may be in degrees (phase) or in dB at a
+        completely different level (a two-driver sum sits ~6 dB above either driver), so it cannot
+        share the left axis without either flattening itself or moving the measurements. A second
+        ViewBox X-linked to the plot's is pyqtgraph's own answer to that (`MultiplePlotAxes.py`),
+        and the right-hand axis already exists on every `PlotItem` — it is only hidden.
+
+        **Ownership, because this file has been bitten by it.** The ViewBox goes into the plot's
+        SCENE, which belongs to the `PlotWidget`, which is a child of this widget: it is destroyed
+        with the view, in order, by Qt, and nothing is left parked on the `PlotItem` to outlive it
+        (`_do_not_build_the_plot_options_menu` above is what that costs when it goes wrong).
+        `enableMenu=False` for the same reason it is passed at the plot's own construction:
+        `ViewBox.__init__` builds a whole `ViewBoxMenu` otherwise, and constructing and dropping
+        enough of those segfaults the process from inside its own `__init__`.
+
+        Guarded end to end. Reaching into `PlotItem` is reaching into somebody else's internals,
+        and a pyqtgraph that renames or restructures them must leave this feature switched off
+        rather than take the window down with it.
+        """
+        try:
+            item = self._plot.getPlotItem()
+            box = pg.ViewBox(enableMenu=False)
+            item.scene().addItem(box)
+            axis = item.getAxis("right")
+            axis.linkToView(box)
+            box.setXLink(item.vb)
+            # Never in the way of a marker. The second box sits below the plot's own in the
+            # stacking order, so it would not receive a press anyway — but the markers ARE this
+            # panel's output, and "would not" is not a guarantee to rest a feature on.
+            box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            box.setMouseEnabled(x=False, y=False)
+            item.vb.sigResized.connect(self._resize_sum_axis)
+            self._sum_vb = box
+            self._style_sum_axis()
+            self._resize_sum_axis()
+        except Exception:  # noqa: BLE001 — pyqtgraph moved; the feature is off, not the window
+            self._sum_vb = None
+            self._sum_axis_failed = True
+
+    def _resize_sum_axis(self, *_args) -> None:
+        """Keep the sum's ViewBox exactly over the plot's. It has no geometry of its own.
+
+        This is a Qt signal's slot, so it can also arrive while the window is being torn down and
+        the plot's C++ half is already gone — PySide answers that with a `RuntimeError` from a
+        thread nobody is catching on. Swallowed, because there is nothing to resize by then.
+        """
+        if self._sum_vb is None:
+            return
+        try:
+            item = self._plot.getPlotItem()
+            self._sum_vb.setGeometry(item.vb.sceneBoundingRect())
+            # The linked axis was updated while the two had different shapes, so it has to be told
+            # again — pyqtgraph's own example carries the same two lines, and the same comment.
+            self._sum_vb.linkedViewChanged(item.vb, self._sum_vb.XAxis)
+        except RuntimeError:
+            self._sum_vb = None
+
+    def _style_sum_axis(self) -> None:
+        """The right-hand axis wears the sum's own colour, so the eye pairs scale with curve."""
+        if self._sum_vb is None:
+            return
+        theme = current_theme()
+        axis = self._plot.getPlotItem().getAxis("right")
+        axis.setPen(pg.mkPen(theme.border2))
+        axis.setTextPen(pg.mkPen(self._sum_colour()))
+
+    def _sum_colour(self) -> QColor:
+        colour = QColor(getattr(current_theme(), _SUM_TOKEN))
+        colour.setAlpha(_SUM_ALPHA)
+        return colour
 
     def _adopt_orphan_menus(self) -> None:
         """Give pyqtgraph's parentless menus an owner, so they die with this widget.
@@ -440,7 +605,7 @@ class CurveView(QWidget):
         self._action_row.insertWidget(self._delay_slot, button)
 
     def on_send(self, handler: Callable[[str], None]) -> None:
-        self._send_btn.clicked.connect(lambda: handler(self.reading()))
+        self._send_btn.clicked.connect(lambda: handler(self.statement()))
 
     def bring_markers_into_view(self, force: bool = False) -> None:
         """Put the markers back inside the visible span, keeping their order and spacing.
@@ -680,7 +845,200 @@ class CurveView(QWidget):
         for line in self._markers:
             self._plot.addItem(line)
         self._render_crossings()
+        # Every delay change comes back through here (`set_delay` re-sets the same traces), which
+        # is what makes the sum follow the delays without another fetch from REW.
+        self._render_sum()
         self._render_readout()
+
+    # ---- the predicted sum (CURVE-ANALYSIS-PLAN.md, step 2) --------------
+
+    def set_sum_shown(self, on: bool) -> None:
+        """Draw the predicted sum of the curves on screen, or take it off again.
+
+        Kept on the view and never reset by `set_traces` or by the window's `reset()`: a tuner
+        who has asked to see joints is working through a whole car, and having to ask again for
+        each pair is how a feature stops being used.
+        """
+        self._sum_on = bool(on)
+        button = getattr(self, "_sum_btn", None)
+        if button is not None and button.isChecked() != self._sum_on:
+            blocked = button.blockSignals(True)
+            button.setChecked(self._sum_on)
+            button.blockSignals(blocked)
+        self._render_sum()
+        self._render_readout()
+
+    def sum_shown(self) -> bool:
+        return self._sum_on
+
+    def sum_result(self) -> Optional[curve_sum.SumResult]:
+        """What was last computed, or None when nothing could be — the caller can ask why."""
+        return self._sum_result
+
+    def sum_text(self) -> str:
+        """What stands under the plot: what was summed, and what that sum does not show."""
+        return self._sum_text
+
+    def _sum_possible(self) -> bool:
+        """Only where the x axis is frequency.
+
+        An impulse's x is TIME and the sum's is frequency, so the two cannot share one pair of
+        axes; on that view the sum gets its own strip under the plot, which is a separate piece of
+        work (CURVE-ANALYSIS-PLAN.md, decisions of 2026-08-18).
+
+        Deliberately does not BUILD the right-hand axis to find out — this is asked on every
+        redraw and every retranslate, and the answer must not have a side effect.
+        """
+        return not self._sum_axis_failed and self._unit != "ms"
+
+    def _sum_inputs(self) -> list[curve_sum.SumInput]:
+        """Every plotted trace as the engine's own input, at the delay currently on screen.
+
+        The delay comes from `self._delays`, the same list `_shifted` draws with, so the curve and
+        the sum can never disagree about how far a driver has been held back. Gain and polarity are
+        fixed at "as measured": there is no control for either yet, and a silent normalisation
+        would make a sum of drivers at different calibrations look like a sum of one car.
+        """
+        inputs: list[curve_sum.SumInput] = []
+        for index, trace in enumerate(self._traces):
+            if trace.magnitude_db is None:
+                return []
+            inputs.append(
+                curve_sum.SumInput(
+                    name=trace.name,
+                    freqs_hz=np.asarray(trace.x, dtype=float),
+                    magnitude_db=np.asarray(trace.magnitude_db, dtype=float),
+                    phase_deg=(
+                        None if trace.phase_deg is None
+                        else np.asarray(trace.phase_deg, dtype=float)
+                    ),
+                    delay_ms=self._delays[index] if index < len(self._delays) else 0.0,
+                    start_time_s=trace.start_time_s,
+                    config_version=trace.config_version,
+                    method=trace.method,
+                )
+            )
+        return inputs
+
+    def _render_sum(self) -> None:
+        """Recompute the sum, draw it, and say in words what it is and is not.
+
+        The two halves are deliberately not conditional on each other: whenever the sum is on,
+        SOMETHING is said under the plot — the verdict when there is a curve, the reason when
+        there is not. A sum that quietly fails to appear is the one outcome this must not have.
+        """
+        self._sum_result = None
+        self._sum_text = ""
+        self._sum_doubted = False
+        self._clear_sum_curve()
+        self._update_sum_button()
+        if not self._sum_on:
+            self._plot.getPlotItem().hideAxis("right")
+            self._sum_label.setVisible(False)
+            return
+
+        self._sum_text, self._sum_doubted = self._compute_sum()
+        drawn = self._sum_result is not None and self._draw_sum(self._sum_result)
+        if self._sum_result is not None and not drawn:
+            # Computed, and still nothing to put on screen: every point of it is an exact
+            # cancellation, which only ever happens to synthetic data. Better said out loud than
+            # left as a heading over an empty axis.
+            self._sum_text = f"{i18n.t('curveSumNone')} {self._sum_text}"
+            self._sum_doubted = True
+        # The right-hand axis appears with the curve and leaves with it: an axis over an empty
+        # ViewBox is a scale for nothing, printed in the colour of a line that is not there.
+        self._plot.getPlotItem().showAxis("right", bool(drawn))
+        self._render_sum_label()
+
+    def _compute_sum(self) -> tuple[str, bool]:
+        """`(what to print, is it doubtful)`, computing the sum on the way if there is one."""
+        if not self._sum_possible():
+            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumOnlyFrequency')}", True
+        if len(self._traces) < 2:
+            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumTooFew')}", True
+        inputs = self._sum_inputs()
+        if not inputs:
+            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumNoData')}", True
+
+        verdict = curve_sum.summability(inputs)
+        if verdict.refused:
+            # The engine's own sentence, verbatim: it already names the measurement that cannot be
+            # summed and why, and a paraphrase here would be a second, quietly diverging rule.
+            return f"{i18n.t('curveSumNone')} {verdict.text}", True
+        try:
+            result = curve_sum.sum_responses(inputs)
+        except curve_sum.CurveSumError as exc:
+            return f"{i18n.t('curveSumNone')} {exc}", True
+        self._sum_result = result
+        lines = [f"{i18n.t('curveSumHead')} {' + '.join(result.names)}"]
+        where_hz, depth_db = result.deepest_null()
+        if np.isfinite(where_hz) and np.isfinite(depth_db):
+            lines.append(
+                i18n.t("curveSumWorst").format(depth=f"{depth_db:+.1f}", hz=f"{where_hz:.0f}")
+            )
+        # Both of these come out of `curve_sum` in English and stay that way — they go into a
+        # model's prompt at least as often as onto this screen, and which language TCC speaks to a
+        # model in is one open decision, not one to settle here by accident.
+        lines.append(result.summability.text)
+        lines.append(result.assumption)
+        return "\n".join(lines), not result.summability.ok
+
+    def _draw_sum(self, result: curve_sum.SumResult) -> bool:
+        """Put the sum on its own ViewBox, in the plot's x and on the right-hand dB scale."""
+        values = np.asarray(result.magnitude_db, dtype=float)
+        finite = values[np.isfinite(values)]
+        if not finite.size or not self._ensure_sum_axis():
+            return False
+        # An exact null is −inf out of the engine, by design. Floored HERE, where the drawing
+        # happens, and floored relative to the sum's own loudest point so the number under the plot
+        # stays the honest one.
+        values = np.where(np.isneginf(values), float(finite.max()) - _SUM_FLOOR_DB, values)
+        freqs = np.asarray(result.freqs_hz, dtype=float)
+        # log10 by hand: pyqtgraph's log mode transforms the items IT owns, and this curve lives on
+        # a ViewBox of ours. The X ranges are linked, so both must be in the same coordinates.
+        x = np.log10(freqs) if self._log_x else freqs
+        self._sum_curve = pg.PlotCurveItem(
+            x, values,
+            pen=pg.mkPen(self._sum_colour(), width=_SUM_WIDTH, style=Qt.PenStyle.DashLine),
+            # Outside the band every measurement covers, the sum is NaN rather than a guess. Left
+            # as a gap: a line drawn straight across it would be the one part of this curve that
+            # no measurement stands behind.
+            connect="finite",
+        )
+        self._sum_curve.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._sum_vb.addItem(self._sum_curve)
+        low, high = float(np.nanmin(values)), float(np.nanmax(values))
+        pad = max((high - low) * 0.08, 1.0)
+        self._sum_vb.setYRange(low - pad, high + pad, padding=0)
+        self._resize_sum_axis()
+        return True
+
+    def _clear_sum_curve(self) -> None:
+        if self._sum_curve is not None and self._sum_vb is not None:
+            self._sum_vb.removeItem(self._sum_curve)
+        self._sum_curve = None
+
+    def _render_sum_label(self) -> None:
+        body = html.escape(self._sum_text).replace("\n", "<br>")
+        if self._sum_doubted:
+            # A sum nobody may believe has to look different from one they may, or the verdict is
+            # a paragraph of grey text under a confident-looking curve.
+            body = f'<span style="color: {current_theme().warn}">{body}</span>'
+        self._sum_label.setText(body)
+        self._sum_label.setVisible(bool(self._sum_text))
+
+    def _update_sum_button(self) -> None:
+        """Marked and left in place when it does not apply here — this window's habit for a choice
+        that exists elsewhere (`curve_dialog._mark_availability`)."""
+        button = getattr(self, "_sum_btn", None)
+        if button is None:
+            return
+        possible = self._sum_possible()
+        button.setEnabled(possible)
+        if getattr(button, "hover_tip", None) is not None:
+            button.hover_tip.set_text(
+                i18n.t("curveSumTip") if possible else i18n.t("curveSumOnlyFrequency")
+            )
 
     def set_markers(
         self, positions: Sequence[float], names: Sequence[str] = (),
@@ -745,6 +1103,7 @@ class CurveView(QWidget):
             axis.setTextPen(pg.mkPen(theme.muted))
         if self._legend is not None:
             self._legend.setLabelTextColor(theme.text)
+        self._style_sum_axis()
         # Traces and markers are rebuilt rather than recoloured in place: both already know how to
         # draw themselves from the current theme, and two ways of doing it is one too many.
         traces, positions = list(self._traces), self.positions()
@@ -752,6 +1111,7 @@ class CurveView(QWidget):
         if traces:
             self.set_traces(traces)
         self._render_crossings()
+        self._render_sum()
         if positions:
             self.set_markers(positions, names, tokens)
 
@@ -771,6 +1131,9 @@ class CurveView(QWidget):
         axis.setPen(pg.mkPen(theme.border2))
         axis.setTextPen(pg.mkPen(theme.muted))
         self._plot.setAxisItems({"bottom": axis})
+        # The sum lives on a ViewBox pyqtgraph's log mode does not reach, so its x coordinates are
+        # computed against this flag — which has just changed.
+        self._render_sum()
 
     def _to_view(self, x: float) -> float:
         return math.log10(x) if self._log_x and x > 0 else float(x)
@@ -781,6 +1144,9 @@ class CurveView(QWidget):
     def set_unit(self, unit: str) -> None:
         """What the marker positions are IN. Wrong units in a reading are worse than no reading."""
         self._unit = unit
+        # It also decides whether a sum can be drawn here at all: milliseconds means the x axis is
+        # time, and a sum stated against frequency has no place on it.
+        self._render_sum()
         self._render_readout()
 
     def focus_x(self, low: float, high: float) -> None:
@@ -1038,6 +1404,26 @@ class CurveView(QWidget):
             return body
         return f"{' / '.join(names)} — {body}"
 
+    def statement(self) -> str:
+        """Everything this panel is saying — the markers' reading, and the sum when it is shown.
+
+        This, not `reading()`, is what leaves the window. A delay proposal and the joint it
+        predicts are one statement: sending the first without the second would ask the model about
+        an alignment while withholding the picture it was read off. `reading()` stays what it was,
+        because the readout under the plot is about the markers and the sum has its own line.
+
+        The sum arrives with its verdict and its timing assumption attached — `as_sentence()` puts
+        them there — so nothing downstream has to remember to add the caveat, which is exactly the
+        kind of remembering that eventually does not happen.
+        """
+        parts = [self.reading()]
+        if self._sum_on and self._sum_text:
+            parts.append(
+                f"{i18n.t('curveSumHead')}\n{self._sum_result.as_sentence()}"
+                if self._sum_result is not None else self._sum_text
+            )
+        return "\n".join(part for part in parts if part)
+
     def _cross_reading(self, digits: int) -> str:
         """One line, both curves. "At 2.5 kHz the channels are 6 dB apart" is a single fact about
         a pair, and it is the reason these modes exist — the per-curve markers cannot state it,
@@ -1135,7 +1521,9 @@ class CurveView(QWidget):
             # will reject. Coloured, because a warning inside a sentence of numbers is read last.
             body = f'<span style="color: {current_theme().warn}">{body}</span>'
         self._readout.setText(body)
-        self._send_btn.setEnabled(bool(text))
+        # A predicted sum on screen is worth sending on its own — it is a statement about the pair
+        # whether or not a marker has been placed.
+        self._send_btn.setEnabled(bool(self.statement()))
 
     def retranslate(self) -> None:
         self._shift_label.setText(i18n.t("curveShift"))
@@ -1143,6 +1531,9 @@ class CurveView(QWidget):
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))
         self._send_btn.setText(i18n.t("curveSendMarkers"))
+        # The sum's own line is half translated framing and half `curve_sum`'s English, so it is
+        # rebuilt rather than patched — see `_compute_sum`.
+        self._render_sum()
         for button, key in self._zoom_buttons:
             button.setText(i18n.t(key + "Short"))
             if getattr(button, "hover_tip", None) is not None:

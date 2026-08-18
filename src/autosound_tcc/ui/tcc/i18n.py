@@ -406,6 +406,26 @@ would change and why. Nothing here is applied.",
         "curveAxes_vhs": "One point on the curve gives both — the level follows the frequency",
         "curveAxes_vx": "One vertical line: read BOTH curves at that x, and how far apart they are",
         "curveAxes_hx": "One horizontal line: read where EACH curve reaches that level (the crossing nearest the middle of the view)",
+        # The predicted sum. The engine's own sentences (the summability verdict, the timing
+        # assumption) are English by design and are NOT here — these are the labels that frame
+        # them; see `core/curve_sum.TIMING_ASSUMPTION`.
+        "curveSumTip": "Σ — draw what these drivers do TOGETHER: the complex sum of the curves on \
+screen, dashed, on the right-hand dB axis, with each driver's delay already applied. It is \
+arithmetic on measurements you already have, so a guess costs nothing and nothing is written \
+anywhere. It only means something if every measurement was captured against ONE shared timing \
+reference; the line under the plot says what has been checked and what has not.",
+        "curveSumHead": "Predicted sum, dashed, right axis in dB:",
+        # Signed, and worded for both signs on purpose: the same reading is −18 dB at a null and
+        # +6 dB for a pair that adds up everywhere, and "worst cancellation +6 dB" reads as a
+        # contradiction. `curve_sum.deepest_null` explains why +6.02 is the honest answer there.
+        "curveSumWorst": "Deepest point of the sum: {depth} dB against the loudest single driver \
+there, at {hz} Hz.",
+        "curveSumNone": "No sum drawn.",
+        "curveSumOnlyFrequency": "A sum is drawn on the frequency response and on the phase. The \
+impulse's axis is time, so there it needs a strip of its own — not built yet.",
+        "curveSumTooFew": "One curve is not a sum: put a second measurement on screen.",
+        "curveSumNoData": "These curves carry no magnitude and phase to add up — they did not \
+come from a REW sweep.",
         "curveAt": "at",
         "curveZoomAll": "Show everything the capture holds",
         "curveZoomAllShort": "A",
@@ -837,6 +857,20 @@ Choose sweeps (sw) above to read this.",
         "curveAxes_vhs": "Одна точка на кривій дає обидві — рівень іде за частотою",
         "curveAxes_vx": "Одна вертикаль: читає ОБИДВІ криві на цьому x і різницю між ними",
         "curveAxes_hx": "Одна горизонталь: читає, де КОЖНА крива досягає цього рівня (перетин, найближчий до середини видимого)",
+        "curveSumTip": "Σ — показати, що ці драйвери роблять РАЗОМ: комплексна сума кривих на \
+екрані, пунктиром, по правій осі в дБ, із уже застосованими затримками кожного драйвера. Це \
+арифметика над уже знятими замірами, тож припущення нічого не коштує і нікуди нічого не \
+пишеться. Вона щось означає лише тоді, коли всі заміри знято від ОДНОГО спільного часового \
+опору; рядок під графіком каже, що перевірено, а що ні.",
+        "curveSumHead": "Передбачена сума, пунктир, права вісь у дБ:",
+        "curveSumWorst": "Найнижча точка суми: {depth} дБ відносно найгучнішого окремого драйвера \
+там, на {hz} Гц.",
+        "curveSumNone": "Суму не намальовано.",
+        "curveSumOnlyFrequency": "Суму малюємо на АЧХ і на фазі. В імпульсної вісь — час, тож там \
+їй потрібна власна смуга: її ще не зроблено.",
+        "curveSumTooFew": "Одна крива — це не сума: постав на екран другий замір.",
+        "curveSumNoData": "Ці криві не несуть ні АЧХ, ні фази, щоб їх додати — вони не з \
+розгортки REW.",
         "curveAt": "на",
         "curveZoomAll": "Показати все, що є в замірі",
         "curveZoomAllShort": "A",
