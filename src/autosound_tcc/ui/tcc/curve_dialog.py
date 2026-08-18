@@ -16,20 +16,21 @@ from typing import Optional, Sequence
 import numpy as np
 
 from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, delay_bank
+from autosound_tcc.core import config, curve_groups, delay_bank
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
-from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace, tip_html
+from autosound_tcc.ui.tcc.curve_view import CurveView, Trace, tip_html, trace_token
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
@@ -148,7 +149,12 @@ def _peak_x(trace) -> float:
 
 
 class _CurveWorker(QThread):
-    """Fetch each named measurement's curve. One `by_name` + one curve call per title."""
+    """Fetch each named measurement's curve.
+
+    One `by_name` plus one curve call per title — two on the impulse, where the second brings back
+    the frequency domain the sum's strip is drawn from (`_spectrum`). Per measurement rather than
+    per batch, so one curve REW cannot produce does not take the others off the screen with it.
+    """
 
     done = Signal(list)  # list[Trace]
     failed = Signal(str)
@@ -186,9 +192,10 @@ class _CurveWorker(QThread):
                     # comprehension over them was the panel's actual cost, not the HTTP call
                     # (measured: fetch 0.03 s).
                     x = np.asarray(times, dtype=float) * KINDS["impulse"]["scale_x"]
-                    # No magnitude and no phase on this one: an impulse IS the time domain, and
-                    # there is nothing here to carry into a frequency-domain sum.
-                    traces.append(Trace(title, x, np.asarray(samples, dtype=float), **facts))
+                    traces.append(
+                        Trace(title, x, np.asarray(samples, dtype=float),
+                              **self._spectrum(mid), **facts)
+                    )
                 else:
                     # Both halves, from the one call that returns both. Keeping only the one being
                     # drawn is what used to make a sum impossible without a second round trip —
@@ -215,6 +222,31 @@ class _CurveWorker(QThread):
             return
         self.done.emit(traces)
 
+    def _spectrum(self, mid) -> dict:
+        """The frequency-domain half of an impulse capture, for the sum's strip under the plot.
+
+        One extra REW call per measurement, taken every time rather than when Σ happens to be on:
+        the toggle is flipped while the window is open and a strip that needed a re-fetch to appear
+        would answer a second later than the question. It is the same 0.03 s call the frequency
+        views already make, and REW hands back both halves at once.
+
+        Its own `try`, and this is the point of the method: a measurement REW cannot give a
+        response for must still be PLOTTED as an impulse. Losing the sum's inputs costs the strip,
+        which then says it has no data; losing the trace would cost the curve the tuner opened the
+        window for.
+        """
+        try:
+            freqs, mag, phase = self._bridge.frequency_response(mid)
+        except Exception:  # noqa: BLE001 — see docstring; the impulse is the payload here
+            return {}
+        if freqs is None or mag is None:
+            return {}
+        return {
+            "freqs_hz": np.asarray(freqs, dtype=float),
+            "magnitude_db": np.asarray(mag, dtype=float),
+            "phase_deg": None if phase is None else np.asarray(phase, dtype=float),
+        }
+
 
 class CurveDialog(QDialog):
     """`titles` from REW, `markers` where the model says the answer is.
@@ -235,9 +267,10 @@ class CurveDialog(QDialog):
         available: Sequence[str] = (),
         parent=None,
     ) -> None:
-        """`titles` is what to plot. `available` is everything REW holds, for the two pickers —
-        pass it and the Arbiter can change their mind about which pair is being argued about
-        without closing the window and finding a different button."""
+        """`titles` is what to plot. `available` is everything REW holds, for the pickers, the
+        group picker and the checkbox list — pass it and the Arbiter can change their mind about
+        which drivers are being argued about without closing the window and finding a different
+        button."""
         super().__init__(parent)
         self.setWindowTitle(i18n.t("curveTitle"))
         self.resize(880, 560)
@@ -246,8 +279,10 @@ class CurveDialog(QDialog):
         self._bridge = bridge or RewBridge()
         self._worker: Optional[_CurveWorker] = None
         #: Why what is on screen is not what was asked for, in words. Empty when nothing was
-        #: refused — the status line is then free to disappear, as it did before.
+        #: refused — the status line is then free to disappear, as it did before. `_note` is the
+        #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
         self._note = ""
+        self._refused_note = ""
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
         self._restoring = False
@@ -265,12 +300,27 @@ class CurveDialog(QDialog):
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
 
-        # Two pickers, because a disagreement is nearly always about a pair. The second may be
-        # empty: one curve is a legitimate thing to argue about too.
+        # Two pickers, KEPT, because a disagreement is nearly always about a pair and two combos
+        # side by side is the shortest path to one. They are now a fast path into a selection that
+        # can hold any number of measurements rather than the only way to say what is plotted —
+        # see `_chosen`, which is the one place that answers "what is on screen".
         self._pickers: list[QComboBox] = []
         #: Everything REW holds, whatever this kind can draw of it. The pickers show a SUBSET —
         #: see `_fill_pickers` — so the full list has to live somewhere that is not a widget.
         self._options = list(available) or list(titles)
+        #: The chosen measurements, in the order they will be plotted. THE selection: every control
+        #: writes it and nothing else is consulted, because two controls each holding half a
+        #: selection is how a window comes to draw one thing and report another.
+        self._selection: list[str] = [str(t) for t in titles if t]
+        #: The group whose members are on screen, and what it could not find. Kept so changing the
+        #: version re-resolves the same group rather than clearing it.
+        self._group: Optional[curve_groups.Group] = None
+        self._group_note = ""
+        self._groups = curve_groups.GlossaryGroups.load()
+        self._syncing_selection = False
+        #: Whether one of the checkbox menu's own actions is mid-`toggled` — see
+        #: `_fill_choose_menu`, which must not destroy an action that is emitting.
+        self._in_choose_toggle = False
         if self._options:
             picker_row = QHBoxLayout()
             picker_row.setSpacing(8)
@@ -282,6 +332,7 @@ class CurveDialog(QDialog):
                 self._pickers.append(combo)
             self._fill_pickers(titles)
             layout.addLayout(picker_row)
+            layout.addLayout(self._build_group_row())
 
         # The kind is a property of the WINDOW, not of a measurement: two curves in different
         # units on one pair of axes would be a picture of nothing. Switching it re-fetches.
@@ -358,7 +409,261 @@ class CurveDialog(QDialog):
         # Asked again over what the PICKERS ended up on, not over `titles`: a title the caller
         # named but `available` does not hold leaves its picker on some other measurement, and the
         # kind has to answer for what will actually be fetched.
+        self._selection = self._from_pickers() if self._pickers else list(titles)
         self._settle_kind(kind)
+
+    # ---- choosing more than two curves (CURVE-ANALYSIS-PLAN.md, step 3) -----
+
+    def _build_group_row(self) -> QHBoxLayout:
+        """The row that puts a whole group on screen: which group, at which config version.
+
+        Two controls and not one, because they answer different questions and the second is the
+        one that goes wrong quietly: `Ws` says which drivers, `_02` says which round of the car.
+        A group resolved at the wrong version is a set of measurements taken under a DSP
+        configuration nobody is looking at, and `curve_sum` would happily add them up and label it
+        "two different cars" — a label nobody asked for.
+        """
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        label = QLabel(i18n.t("curveGroupLabel"))
+        label.setProperty("class", "phead-sub")
+        row.addWidget(label)
+
+        self._group_combo = QComboBox()
+        self._group_combo.setProperty("class", "mini-select")
+        attach_tip(self._group_combo, tip_html(i18n.t("curveGroupTip")))
+        self._fill_group_combo()
+        self._group_combo.currentIndexChanged.connect(self._on_group_chosen)
+        row.addWidget(self._group_combo, 2)
+
+        self._version_combo = QComboBox()
+        self._version_combo.setProperty("class", "mini-select")
+        self._version_combo.setFixedWidth(96)
+        attach_tip(self._version_combo, tip_html(i18n.t("curveGroupVersionTip")))
+        self._version_combo.currentIndexChanged.connect(self._on_version_chosen)
+        row.addWidget(self._version_combo)
+
+        # A menu of checkable rows rather than a list widget: it costs one row of window whether
+        # the car has six measurements or sixty, and this window is already tall. Plain QActions —
+        # the QWidgetAction that `curve_view` goes to such lengths to avoid is a different animal.
+        self._choose_btn = QPushButton("")
+        # `.zoom-btn` and not `.mini-select`: every `.mini-select` rule is written `QComboBox[...]`
+        # and would not reach a QPushButton at all (the delay spin box learned this the hard way,
+        # 2026-08-18). The two classes share their background, border, radius and font size, so a
+        # button wearing this one sits in a row of combos without looking like a visitor.
+        self._choose_btn.setProperty("class", "zoom-btn")
+        self._choose_btn.setMinimumWidth(132)
+        self._choose_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        attach_tip(self._choose_btn, tip_html(i18n.t("curveChooseTip")))
+        self._choose_menu = QMenu(self)
+        self._choose_actions: dict[str, QAction] = {}
+        self._choose_btn.setMenu(self._choose_menu)
+        row.addWidget(self._choose_btn, 1)
+        self._fill_choose_menu()
+        self._sync_version_combo()
+        return row
+
+    def _fill_group_combo(self) -> None:
+        """Every group this car has, with its TYPE on the row.
+
+        `Ws` is a pair and `L` is a side, and a list of bare names does not say which — so the kind
+        is printed beside each. With no glossary (no 3.x project, or no skill) the combo says so
+        and stays disabled: the checkbox list below is unaffected, which is the point of having
+        both.
+        """
+        combo = self._group_combo
+        blocked = combo.blockSignals(True)
+        combo.clear()
+        groups = self._groups.groups()
+        combo.addItem(i18n.t("curveGroupNone") if groups else i18n.t("curveGroupNoGlossary"), -1)
+        for index, group in enumerate(groups):
+            combo.addItem(
+                f"{group.name} · {i18n.t('curveGroupKind_' + group.kind)}", index
+            )
+        combo.setCurrentIndex(0)
+        combo.setEnabled(bool(groups))
+        combo.blockSignals(blocked)
+
+    def _fill_choose_menu(self) -> None:
+        """One checkable row per measurement this kind can draw, ticked to match the selection.
+
+        Rebuilt from scratch rather than reconciled: the row set changes with the kind (an MMM
+        capture is absent on the impulse and the phase — `_fill_pickers`), and a menu half-rebuilt
+        is a menu that can tick a measurement the window will not fetch.
+
+        Never rebuilt while one of its own actions is emitting `toggled`. `clear()` DESTROYS the
+        actions, and destroying the object a signal is being delivered from is this app's oldest
+        way of ending a process (the same rule as deleting a widget inside its own event handler).
+        Ticking a row cannot change which rows exist anyway — an MMM row is only reachable on the
+        frequency response, which is where a selection with one in it puts the window regardless —
+        so the tick path only has to re-tick, and that is what it does.
+        """
+        if getattr(self, "_choose_menu", None) is None:
+            return
+        if self._in_choose_toggle:
+            self._sync_choose_ticks()
+            return
+        self._choose_menu.clear()
+        self._choose_actions = {}
+        for title in self._selectable():
+            action = self._choose_menu.addAction(title)
+            action.setCheckable(True)
+            action.toggled.connect(lambda on, t=title: self._on_choose_toggled(t, on))
+            self._choose_actions[title] = action
+        self._sync_choose_ticks()
+
+    def _sync_choose_ticks(self) -> None:
+        """Tick the rows the window is plotting, and count them on the button.
+
+        Signals blocked: `setChecked` emits `toggled`, and a tick set BY the selection arriving
+        back at the handler that changes the selection is a loop with no bottom.
+        """
+        chosen = set(self._chosen())
+        for title, action in self._choose_actions.items():
+            blocked = action.blockSignals(True)
+            action.setChecked(title in chosen)
+            action.blockSignals(blocked)
+        self._choose_btn.setText(i18n.t("curveChooseBtn").format(n=len(chosen)))
+
+    def _selectable(self) -> list[str]:
+        """What may be plotted on THIS kind — the same rule the two pickers follow."""
+        return [t for t in self._options if self._kind == "fr" or not _is_rta(t)]
+
+    def _sync_version_combo(self, select: Optional[str] = None) -> None:
+        """Offer the config versions REW holds, standing on the one the question is about.
+
+        The rule, in order: the version the chosen curves are already on when they agree — that is
+        the round the tuner is working in — and otherwise the newest REW has for the group's own
+        members. Not the newest overall: a car whose sub was re-measured at `_04` while the
+        tweeters stopped at `_02` would offer the tweeters a version none of them has.
+
+        `select` overrides both and is how a group resolved at one version keeps it.
+        """
+        combo = getattr(self, "_version_combo", None)
+        if combo is None:
+            return
+        codes = self._group.members if self._group else ()
+        versions = self._groups.versions_in(self._options, codes)
+        wanted = (
+            select
+            or self._groups.version_of(self._chosen())
+            or (versions[-1] if versions else None)
+        )
+        blocked = combo.blockSignals(True)
+        combo.clear()
+        for version in reversed(versions):  # newest first: it is the usual answer
+            combo.addItem(f"_{version}", version)
+        if wanted is not None and combo.findData(wanted) < 0:
+            combo.addItem(f"_{wanted}", wanted)
+        at = combo.findData(wanted) if wanted is not None else -1
+        combo.setCurrentIndex(at if at >= 0 else 0)
+        combo.setEnabled(combo.count() > 0)
+        combo.blockSignals(blocked)
+
+    def _on_group_chosen(self, _index: int) -> None:
+        at = self._group_combo.currentData()
+        groups = self._groups.groups()
+        if not isinstance(at, int) or at < 0 or at >= len(groups):
+            # Back to "no group". What is plotted does not change — the tuner is saying the
+            # selection is theirs now, not the glossary's — but a note about a group nobody has
+            # chosen has to go with it.
+            self._group = None
+            self._group_note = ""
+            self._render_note()
+            return
+        self._group = groups[at]
+        # The version combo follows the group before the group is resolved: a group's own members
+        # decide which versions are on offer at all.
+        self._sync_version_combo(select=str(self._version_combo.currentData() or "") or None)
+        self._apply_group()
+
+    def _on_version_chosen(self, _index: int) -> None:
+        """A version is only a question when a group is chosen; on its own it changes nothing."""
+        if self._group is not None:
+            self._apply_group()
+
+    def _apply_group(self) -> None:
+        """Put the chosen group at the chosen version on screen, and NAME what is not there.
+
+        A member with no `(sw)` capture at this version is not skipped. `curve_sum` sees only what
+        it is handed, so it cannot tell the sum of the woofers from the sum of one woofer — this
+        sentence is the only place in the whole path that can, which is why it is on screen rather
+        than in a log.
+        """
+        version = str(self._version_combo.currentData() or "")
+        if self._group is None or not version:
+            return
+        found = self._groups.resolve(self._group, version, self._options)
+        names = ", ".join(found.missing)
+        if not found.titles:
+            # Nothing to change and nothing to fetch: the curves being looked at stay on screen,
+            # which beats an empty plot, and the line under the pickers says where it looked.
+            self._group_note = i18n.t("curveGroupEmpty").format(
+                group=self._group.name, version=version
+            )
+            self._render_note()
+            return
+        self._group_note = "" if found.complete else i18n.t("curveGroupMissing").format(
+            group=self._group.name, version=version, names=names
+        )
+        self._set_selection(list(found.titles))
+
+    def _on_choose_toggled(self, title: str, on: bool) -> None:
+        """A ticked row adds the measurement; an unticked one drops it. Order follows the list.
+
+        Ticking by hand ends the group's claim on the selection: what is on screen is no longer
+        "the woofers", so a note about a missing woofer would be about a set nobody is looking at.
+        """
+        if self._syncing_selection:
+            return
+        chosen = [
+            row for row in self._selectable()
+            if (row == title and on) or (row != title and row in self._chosen())
+        ]
+        self._in_choose_toggle = True
+        try:
+            self._clear_group()
+            self._set_selection(chosen)
+        finally:
+            self._in_choose_toggle = False
+
+    def _clear_group(self) -> None:
+        """Let go of the group, and say so on the picker that names it."""
+        self._group = None
+        self._group_note = ""
+        combo = getattr(self, "_group_combo", None)
+        if combo is not None and combo.currentIndex() != 0:
+            blocked = combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(blocked)
+
+    def _set_selection(self, titles: Sequence[str]) -> None:
+        """Make `titles` what the window is plotting, and put every control in step with it.
+
+        One selection, several ways to say it: the two pickers show the first two of it (a pair is
+        still the commonest question and they are still the quickest way to ask one), the menu
+        ticks all of it, the version combo follows it. Guarded against re-entry because moving a
+        picker emits the same signal that arrives when the tuner moves one by hand.
+        """
+        self._selection = [str(t) for t in titles if t]
+        if getattr(self, "_version_combo", None) is None:
+            # No pickers means no group row either (both are built only when there is a list of
+            # measurements to offer), and then there is nothing to keep in step.
+            self._settle_kind(self._kind)
+            return
+        self._syncing_selection = True
+        try:
+            for index, combo in enumerate(self._pickers):
+                target = self._selection[index] if index < len(self._selection) else ""
+                at = combo.findData(target)
+                blocked = combo.blockSignals(True)
+                combo.setCurrentIndex(at if at >= 0 else 0)
+                combo.blockSignals(blocked)
+            self._sync_choose_ticks()
+            self._sync_version_combo(select=str(self._version_combo.currentData() or "") or None)
+        finally:
+            self._syncing_selection = False
+        self._settle_kind(self._kind)
 
     # ---- the delay bank -----------------------------------------------------
 
@@ -396,9 +701,9 @@ class CurveDialog(QDialog):
             return None
 
     def _sync_channel_delay(self) -> None:
-        """What each of the two channels is set to now — both, because both may carry a proposal
-        and the reading states a total for each."""
-        for index, trace in enumerate(self._view._traces[:2]):
+        """What each channel on screen is set to now — every one of them, because every one may
+        carry a proposal and the reading states a total for each."""
+        for index, trace in enumerate(self._view._traces):
             self._view.set_channel_delay(self._current_delay_of(trace.name), index)
 
     def _bank_current_delay(self) -> None:
@@ -417,8 +722,9 @@ class CurveDialog(QDialog):
         """
         if self._restoring:
             return
-        for index, trace in enumerate(self._view._traces[:2]):
-            # Both, every time. Each driver carries its own delay now, so there is nothing to move
+        for index, trace in enumerate(self._view._traces):
+            # All of them, every time. Each driver carries its own delay now, so there is
+            # nothing to move
             # from one entry to another — the radio only chooses which one you are typing into.
             # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
             # checking the set is the only reason it is ever sent anywhere.
@@ -508,13 +814,14 @@ class CurveDialog(QDialog):
 
         Guarded and in this order for a reason. Clearing the store first and zeroing the plot
         afterwards wrote the pair straight back in: zeroing emits `delayChanged`, the handler
-        banks BOTH curves on screen, and the one that was not selected still held its delay. The
-        user pressed Clear and watched a single value survive — the other curve's (2026-08-12).
+        banks EVERY curve on screen, and the ones that were not selected still held their delays.
+        The user pressed Clear and watched a single value survive — the other curve's
+        (2026-08-12). With a whole side plotted there would have been three survivors.
         """
         self._restoring = True
         try:
             target = self._view.delay_target()
-            for index in range(len(self._view._traces[:2])):
+            for index in range(len(self._view._traces)):
                 self._view.set_delay_target(index)
                 self._view.set_delay(0.0)
             self._view.set_delay_target(target)
@@ -559,8 +866,17 @@ class CurveDialog(QDialog):
 
     def _on_selection_changed(self, _index: int) -> None:
         """The pair changed, and what it can show may have changed with it — swapping a sweep for
-        an MMM capture takes the impulse and the phase away with it."""
-        self._settle_kind(self._kind)
+        an MMM capture takes the impulse and the phase away with it.
+
+        Touching a picker means "these two": the selection collapses to the pair on screen, however
+        many curves were plotted before. That is what the pickers are FOR, and the alternative —
+        replacing one member of a six-curve set from a control that shows two of them — would let
+        the window plot six curves while two combos describe the whole selection.
+        """
+        if self._syncing_selection:
+            return
+        self._clear_group()
+        self._set_selection(self._from_pickers())
 
     def _settle_kind(self, asked: str) -> None:
         """Put the window on the kind this selection can answer, then fetch.
@@ -576,11 +892,25 @@ class CurveDialog(QDialog):
         # somebody who thinks to hover it, and this one has just refused something that was asked
         # for out loud.
         rta = [t for t in self._chosen() if _is_rta(t)]
-        self._note = (
+        self._refused_note = (
             "" if self._kind == asked else i18n.t("curveRtaOnly").format(titles=", ".join(rta))
         )
+        self._render_note()
         self._apply_kind()
         self._reload()
+
+    def _render_note(self) -> None:
+        """Everything the window has to say about what it is showing, on the one status line.
+
+        Both notes, not one: a group with a member missing and a kind that had to be overruled are
+        two independent facts about the same selection, and whichever is dropped is the one the
+        tuner needed.
+        """
+        self._note = " ".join(
+            part for part in (self._refused_note, self._group_note) if part
+        )
+        self._status.setText(self._note)
+        self._status.setVisible(bool(self._note))
 
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
@@ -631,6 +961,8 @@ class CurveDialog(QDialog):
         # the old ones. Guarded because the pickers are built before the bank's own widgets are.
         if getattr(self, "_bank_btn", None) is not None:
             self._render_bank()
+        # The checkbox list obeys the same kind rule and has to follow the same change.
+        self._fill_choose_menu()
 
     def _mark_availability(self) -> None:
         """Grey out what cannot be shown in the KIND picker, and drop what cannot be drawn from
@@ -676,10 +1008,22 @@ class CurveDialog(QDialog):
         combo.setItemData(row, faint if shut else None, Qt.ItemDataRole.ForegroundRole)
         combo.setItemData(row, tip if shut else None, Qt.ItemDataRole.ToolTipRole)
 
+    def _from_pickers(self) -> list[str]:
+        return [str(c.currentData() or "") for c in self._pickers if c.currentData()]
+
     def _chosen(self) -> list[str]:
+        """What the window is plotting — the ONE answer, whoever set it last.
+
+        The two pickers, the group picker and the checkbox list all write `_selection`, and
+        everything downstream reads this. Three controls each holding part of the truth is how a
+        window comes to draw one set of curves and report another.
+
+        Falls back to the pickers when the selection is empty, so unticking the last row leaves a
+        curve on screen rather than a blank plot and a window with nothing to say.
+        """
         if not self._pickers:
             return list(self._titles)
-        return [str(c.currentData() or "") for c in self._pickers if c.currentData()]
+        return [t for t in self._selection if t] or self._from_pickers()
 
     def _reload(self) -> None:
         """Fetch whatever is selected. Waits out an in-flight worker rather than assigning over
@@ -698,22 +1042,22 @@ class CurveDialog(QDialog):
         self._worker.start()
 
     def _on_curves(self, traces: list) -> None:
-        # The status line ends up carrying the refusal note, if there is one, and disappears when
-        # there is not. It is written HERE rather than where the note is decided because `_reload`
-        # puts "Reading the curves from REW…" over whatever was there.
-        self._status.setText(self._note)
-        self._status.setVisible(bool(self._note))
+        # The status line ends up carrying the notes, if there are any, and disappears when there
+        # are not. It is written HERE as well as where each note is decided, because `_reload` puts
+        # "Reading the curves from REW…" over whatever was there.
+        self._render_note()
         self._view.set_traces(traces)
-        # A pair already argued about comes back with its answer on it. `set_traces` clears the
-        # delay by design (a new pair is a new question); the bank is what makes coming BACK to a
-        # pair different from meeting it for the first time.
+        # A curve already argued about comes back with its answer on it. `set_traces` clears the
+        # delays by design (a new selection is a new question); the bank is what makes coming BACK
+        # to a driver different from meeting it for the first time — and over a whole side that is
+        # most of what is on screen, not one of two curves.
         bank = delay_bank.load(session=self._session())
         # Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros
         # they pass through on the way would erase what they are restoring.
         self._restoring = True
         try:
             target = self._view.delay_target()
-            for index, trace in enumerate(traces[:2]):
+            for index, trace in enumerate(traces):
                 if trace.name in bank:
                     self._view.set_delay_target(index)
                     self._view.set_delay(bank[trace.name])
@@ -742,10 +1086,15 @@ class CurveDialog(QDialog):
         dragging away from where the model read it IS the disagreement, so every millimetre of
         movement is deliberate.
 
-        Without one (the Arbiter opened this themselves), on each trace's own largest peak. For an
-        impulse that is the arrival by the crudest possible reading, which makes the delta
-        meaningful before anything has been touched — and a starting point that is obviously a
-        guess invites correction better than two markers parked at zero.
+        Without one (the Arbiter opened this themselves), on each trace's own largest peak — every
+        trace, however many there are. For an impulse that is the arrival by the crudest possible
+        reading, which makes the delta meaningful before anything has been touched, and over a
+        whole side it is the picture the alignment is argued from: six arrivals, each one placed.
+        A starting point that is obviously a guess invites correction better than markers parked at
+        zero.
+
+        The model's own reading stays a PAIR (model versus you) whatever is plotted: that pair is
+        the disagreement the window exists to settle, and a third marker in it would have no owner.
         """
         if self._markers:
             positions = list(self._markers)
@@ -753,11 +1102,11 @@ class CurveDialog(QDialog):
             if len(positions) == 1:
                 positions.append(positions[0])
             return positions[:2], names[:len(positions[:2])], []
-        usable = [t for t in traces[:2] if len(t.x)]
+        usable = [t for t in traces if len(t.x)]
         # One marker per curve, each in its curve's own colour: nobody has claimed a reading yet,
         # so calling the first one "the model's" would be a lie the colour tells.
         return ([_peak_x(t) for t in usable], [t.name for t in usable],
-                list(_TRACE_TOKENS[:len(usable)]))
+                [trace_token(i) for i in range(len(usable))])
 
     def reset(self, titles, markers=(), kind="impulse", available=()) -> None:
         """Re-point an existing window at a new question, instead of building another one.
@@ -776,9 +1125,16 @@ class CurveDialog(QDialog):
         # again from whatever it ends up on.
         self._kind = kind_for(titles, kind)
         self._fill_pickers(titles)
-        # Re-read: the window outlives the project, and switching projects switches processors —
-        # and switching projects switches the bank with it.
+        self._selection = self._from_pickers() if self._pickers else list(titles)
+        # Re-read, all three: the window outlives the project, and switching projects switches
+        # processors, switches the bank — and switches the car whose glossary names the groups.
         self._apply_delay_resolution()
+        self._groups = curve_groups.GlossaryGroups.load()
+        if getattr(self, "_group_combo", None) is not None:
+            self._clear_group()
+            self._fill_group_combo()
+            self._fill_choose_menu()
+            self._sync_version_combo()
         self._render_bank()
         # The kind combo is not moved here: `_settle_kind` -> `_apply_kind` does it, and a second
         # writer of the same index is exactly how a picker comes to disagree with the `self._kind`

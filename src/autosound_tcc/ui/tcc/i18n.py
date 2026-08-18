@@ -413,30 +413,63 @@ would change and why. Nothing here is applied.",
         "curveAxes_vhs": "One point on the curve gives both — the level follows the frequency",
         "curveAxes_vx": "One vertical line: read BOTH curves at that x, and how far apart they are",
         "curveAxes_hx": "One horizontal line: read where EACH curve reaches that level (the crossing nearest the middle of the view)",
+        # Vx and Hx answer "how far apart are THESE TWO", and that question has no N-curve form —
+        # fifteen pairwise gaps are not a reading. So with more than two curves plotted the tuner
+        # names the two; the per-curve markers keep answering for the rest.
+        "curveCrossPairTip": "Which two curves Vx and Hx compare. They read one gap between one \
+pair, so with more curves on screen you say which pair — the ordinary V/H/VH markers still read \
+every curve, one number each.",
         # The predicted sum. The engine's own sentences (the summability verdict, the timing
         # assumption) are English by design and are NOT here — these are the labels that frame
         # them; see `core/curve_sum.TIMING_ASSUMPTION`.
         "curveSumTip": "Σ — draw what these drivers do TOGETHER: the complex sum of the curves on \
-screen, dashed, on the right-hand dB axis, with each driver's delay already applied. It is \
-arithmetic on measurements you already have, so a guess costs nothing and nothing is written \
-anywhere. It only means something if every measurement was captured against ONE shared timing \
-reference; the Σ button under the plot carries the verdict — what has been checked and what has \
-not.",
-        "curveSumHead": "Predicted sum, dashed, right axis in dB:",
+screen, dashed, in dB, with each driver's delay already applied. On the phase it goes over the \
+plot on the right-hand axis; on the impulse it gets a strip of its own underneath, because there \
+the plot's axis is time and the sum's is frequency. It is arithmetic on measurements you already \
+have, so a guess costs nothing and nothing is written anywhere. It only means something if every \
+measurement was captured against ONE shared timing reference; the Σ button under the plot carries \
+the verdict — what has been checked and what has not.",
+        "curveSumHead": "Predicted sum, dashed, in dB:",
         # Signed, and worded for both signs on purpose: the same reading is −18 dB at a null and
         # +6 dB for a pair that adds up everywhere, and "worst cancellation +6 dB" reads as a
         # contradiction. `curve_sum.deepest_null` explains why +6.02 is the honest answer there.
         "curveSumWorst": "Deepest point of the sum: {depth} dB against the loudest single driver \
 there, at {hz} Hz.",
         "curveSumNone": "No sum drawn.",
-        # Not a failure and worded so it does not read as one (user, 2026-08-18): the strip is the
-        # next piece of work on this window, and the sum is drawn on the other two views today.
-        "curveSumOnlyFrequency": "A sum is drawn on the frequency response and on the phase. The \
-impulse's axis is time, so here the sum gets a strip of its own under the plot — that strip is \
-coming; until it lands, switch to the phase to see the joint.",
+        # Reachable only when pyqtgraph refused to give this view a surface to draw on. Named
+        # rather than left as a dead toggle: the tuner is entitled to know the button is not
+        # broken, the plotting library is.
+        "curveSumNoPlot": "This view could not build the axis the sum is drawn on, so there is \
+nowhere to put it. Everything else in the window is unaffected.",
         "curveSumTooFew": "One curve is not a sum: put a second measurement on screen.",
         "curveSumNoData": "These curves carry no magnitude and phase to add up — they did not \
 come from a REW sweep.",
+        # The glossary's own groups, which are the sets a tune is argued about (user, 2026-08-18:
+        # "Ws, Ms, TWs, SW+Ws, L, R, ALL"). The type is on the row because `L` is a side and `Ws`
+        # is a pair, and a list of bare names does not say which.
+        "curveGroupLabel": "group",
+        "curveGroupNone": "— no group —",
+        "curveGroupKind_pairs": "pair",
+        "curveGroupKind_joints": "joint",
+        "curveGroupKind_sides": "side",
+        "curveGroupKind_combos": "combo",
+        "curveGroupNoGlossary": "— no glossary in this project —",
+        "curveGroupTip": "Put a whole group on screen at once — the woofers, the mids, sub+woofers, \
+one side, everything. The names come from this car's glossary, and the sweeps chosen are the ones \
+at the config version beside it. Nothing is fetched that the group does not name: a member REW \
+has no sweep for is reported, not skipped.",
+        "curveGroupVersionTip": "The DSP config version (_N) the group's sweeps are taken at. It \
+starts on the version the curves already on screen share, or on the newest this car has for those \
+drivers, and you can move it.",
+        # Named, never skipped: `curve_sum` sees only what it was handed, so it cannot tell a sum
+        # of the woofers from a sum of one woofer. This sentence is the only place that can.
+        "curveGroupMissing": "{group} at _{version}: {names} — not in REW. What is drawn is the \
+sum of a different set.",
+        "curveGroupEmpty": "{group} at _{version}: REW holds no sweep of any member, so nothing \
+was changed.",
+        "curveChooseBtn": "Choose… ({n})",
+        "curveChooseTip": "Tick any measurements you like — the sum takes as many as you give it. \
+A group above ticks its own members here, so the two controls always describe one selection.",
         "curveAt": "at",
         "curveZoomAll": "Show everything the capture holds",
         "curveZoomAllShort": "A",
@@ -871,20 +904,45 @@ Choose sweeps (sw) above to read this.",
         "curveAxes_vhs": "Одна точка на кривій дає обидві — рівень іде за частотою",
         "curveAxes_vx": "Одна вертикаль: читає ОБИДВІ криві на цьому x і різницю між ними",
         "curveAxes_hx": "Одна горизонталь: читає, де КОЖНА крива досягає цього рівня (перетин, найближчий до середини видимого)",
+        "curveCrossPairTip": "Які саме дві криві порівнюють Vx і Hx. Вони читають одну різницю \
+між однією парою, тож коли кривих більше — пару називаєш ти; звичайні маркери V/H/VH далі читають \
+кожну криву, по числу на кожну.",
         "curveSumTip": "Σ — показати, що ці драйвери роблять РАЗОМ: комплексна сума кривих на \
-екрані, пунктиром, по правій осі в дБ, із уже застосованими затримками кожного драйвера. Це \
-арифметика над уже знятими замірами, тож припущення нічого не коштує і нікуди нічого не \
-пишеться. Вона щось означає лише тоді, коли всі заміри знято від ОДНОГО спільного часового \
-опору; кнопка Σ під графіком несе висновок — що перевірено, а що ні.",
-        "curveSumHead": "Передбачена сума, пунктир, права вісь у дБ:",
+екрані, пунктиром, у дБ, із уже застосованими затримками кожного драйвера. На фазі вона лягає \
+поверх графіка по правій осі; на імпульсній отримує власну смугу під ним, бо там вісь графіка — \
+час, а суми — частота. Це арифметика над уже знятими замірами, тож припущення нічого не коштує і \
+нікуди нічого не пишеться. Вона щось означає лише тоді, коли всі заміри знято від ОДНОГО \
+спільного часового опору; кнопка Σ під графіком несе висновок — що перевірено, а що ні.",
+        "curveSumHead": "Передбачена сума, пунктир, у дБ:",
         "curveSumWorst": "Найнижча точка суми: {depth} дБ відносно найгучнішого окремого драйвера \
 там, на {hz} Гц.",
         "curveSumNone": "Суму не намальовано.",
-        "curveSumOnlyFrequency": "Суму малюємо на АЧХ і на фазі. В імпульсної вісь — час, тож тут \
-сума отримає власну смугу під графіком — вона в роботі; поки її нема, дивись стик на фазі.",
+        "curveSumNoPlot": "Цьому вигляду не вдалось побудувати вісь, на якій малюється сума, тож \
+її нема куди покласти. На решту вікна це не впливає.",
         "curveSumTooFew": "Одна крива — це не сума: постав на екран другий замір.",
         "curveSumNoData": "Ці криві не несуть ні АЧХ, ні фази, щоб їх додати — вони не з \
 розгортки REW.",
+        "curveGroupLabel": "група",
+        "curveGroupNone": "— без групи —",
+        "curveGroupKind_pairs": "пара",
+        "curveGroupKind_joints": "стик",
+        "curveGroupKind_sides": "сторона",
+        "curveGroupKind_combos": "набір",
+        "curveGroupNoGlossary": "— у цьому проєкті нема глосарію —",
+        "curveGroupTip": "Поставити на екран цілу групу — мідбаси, середні, саб+мідбаси, одну \
+сторону, все. Назви беруться з глосарію цієї машини, а свіпи — ті, що на версії конфігурації \
+поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не \
+мовчки пропускається.",
+        "curveGroupVersionTip": "Версія конфігурації ДСП (_N), на якій беруться свіпи групи. \
+Починає з версії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — \
+і її можна змінити.",
+        "curveGroupMissing": "{group} на _{version}: {names} — цього нема в REW. Намальовано суму \
+іншого набору.",
+        "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \
+не змінено.",
+        "curveChooseBtn": "Обрати… ({n})",
+        "curveChooseTip": "Познач будь-які заміри — сума приймає стільки, скільки даси. Група \
+вище позначає тут своїх учасників, тож обидва контроли завжди описують один вибір.",
         "curveAt": "на",
         "curveZoomAll": "Показати все, що є в замірі",
         "curveZoomAllShort": "A",

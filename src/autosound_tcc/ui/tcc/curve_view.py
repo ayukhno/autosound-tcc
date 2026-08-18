@@ -11,9 +11,14 @@ measurement. That is machine-readable the instant it is placed, which is exactly
 `user_decision` was written to (SCR-030): record the Arbiter's ruling when it becomes a fact, not
 as prose about a fact.
 
-Two traces at a time, because a disagreement is nearly always about a pair (w-L against w-R, a
-driver against its joint partner). Markers are draggable and their delta is the readout, because
-"how far apart are these two arrivals" is the question that keeps being asked.
+Markers are draggable and their delta is the readout, because "how far apart are these two
+arrivals" is the question that keeps being asked.
+
+As many traces as the tuner names. It began as two, because a disagreement is nearly always about
+a pair (w-L against w-R, a driver against its joint partner), and that is still the commonest
+question — but the tune itself is argued about in GROUPS: the woofers, sub+woofers, a whole side,
+everything (user, 2026-08-18). Nothing below is pair-shaped any more except the cross modes, which
+answer a question that has no N-curve form at all — see `cross_pair`.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QLocale, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -49,6 +55,14 @@ from autosound_tcc.ui.tcc.theme import current_theme
 # pyqtgraph's defaults: a plot that does not belong to the window it is in reads as a screenshot
 # of another program, which is the thing this feature exists to stop needing.
 _TRACE_TOKENS = ("accent", "info")
+#: Hues, in degrees, for traces three and up — a whole side is four drivers and ALL+C is seven
+#: (CURVE-ANALYSIS-PLAN.md, step 3), and two colours cycling would paint driver three the same as
+#: driver one. Not new palette tokens: `theme.py` is the whole app's vocabulary and this window is
+#: not the place to grow it for its own plot. They are the accent's own saturation and value at
+#: another hue, so they keep the palette's contrast in both themes, and the hues themselves are
+#: chosen to stand clear of what a colour already MEANS here — `ok` green, `warn` red, `yellow`
+#: for the predicted sum, and the accent/info the first two traces have.
+_TRACE_HUES = (285, 175, 330, 250, 105, 75)
 # Marker colours: the model's reading and the Arbiter's, and they must never be confusable. The
 # whole point of the panel is showing that these two are different numbers.
 _MODEL_TOKEN = "muted"
@@ -93,6 +107,39 @@ _OVERLAY_MARGIN_PX = 6
 #: `rounded_tooltip`, which is shared with every other tip in the app.
 _TIP_WRAP_CHARS = 72
 _TIP_FONT_PX = 15
+#: How tall the sum's own strip stands under an impulse, in pixels. Short on purpose: the plot
+#: above it is what is being worked in — the delay is DRAGGED there — and the strip answers one
+#: question, "is the joint filling in", which a band 6 dB deep is enough to show.
+_STRIP_HEIGHT_PX = 132
+#: The name a trace colour goes by when the palette has no token for it — `trace#N`, resolved
+#: against the CURRENT theme by `colour_of`. A hex string would have done, except that markers
+#: keep their colour name across a theme switch (`apply_theme` re-sets them with the same list),
+#: and a hex captured under the dark palette would come back dark on the light one.
+_DERIVED_PREFIX = "trace#"
+
+
+def trace_token(index: int) -> str:
+    """The colour NAME of trace `index`: a palette token for the first two, a derived one after.
+
+    A name rather than a value, everywhere, because every colour in this widget is re-resolved on
+    a theme switch — the plot draws with explicit pens and does not repaint from a stylesheet.
+    """
+    if index < len(_TRACE_TOKENS):
+        return _TRACE_TOKENS[index]
+    return f"{_DERIVED_PREFIX}{index}"
+
+
+def colour_of(token: str) -> QColor:
+    """A colour by name: a palette token, or one of this window's derived trace hues."""
+    if str(token).startswith(_DERIVED_PREFIX):
+        try:
+            index = int(str(token)[len(_DERIVED_PREFIX):])
+        except ValueError:
+            index = len(_TRACE_TOKENS)
+        base = QColor(getattr(current_theme(), _TRACE_TOKENS[0]))
+        hue = _TRACE_HUES[(index - len(_TRACE_TOKENS)) % len(_TRACE_HUES)]
+        return QColor.fromHsv(hue, base.saturation(), base.value())
+    return QColor(getattr(current_theme(), str(token), None) or str(token))
 
 
 def tip_html(text: str, head: str = "", warn: bool = False) -> str:
@@ -275,8 +322,13 @@ class Trace:
     `x`/`y` are what is DRAWN, in this view's own units — degrees against hertz on the phase plot,
     dB against hertz on the frequency response, a sample value against milliseconds on an impulse.
     `magnitude_db` and `phase_deg` are the MEASUREMENT, both halves of it, because a complex sum
-    needs both at once and REW returns them from one call. Either may be `None`: an impulse is
-    time-domain and has neither, and an MMM/RTA capture carries a magnitude and no phase at all.
+    needs both at once and REW returns them from one call. Either may be `None`: an MMM/RTA capture
+    carries a magnitude and no phase at all.
+
+    `freqs_hz` is what those two are stated AGAINST, and it exists for exactly one view: the
+    impulse, where `x` is time and cannot double as the frequency axis the way it does on the other
+    two. `None` means "`x` is already the frequency axis", which is true wherever this window plots
+    against hertz.
 
     `config_version` and `method` are `_N` and the `(sw)`/`(rta)` suffix as the skill's own grammar
     reads them (`naming-and-structure.md` §3). They are not decoration — they are what decides
@@ -295,6 +347,7 @@ class Trace:
     config_version: Optional[str] = None
     method: Optional[str] = None
     start_time_s: Optional[float] = None
+    freqs_hz: Optional[Sequence[float]] = None
 
 
 class CurveView(QWidget):
@@ -385,6 +438,15 @@ class CurveView(QWidget):
         self._sum_result: Optional[curve_sum.SumResult] = None
         self._sum_text = ""
         self._sum_doubted = False
+        #: The sum's own strip under the impulse — the same lazy bargain as the axis above, and for
+        #: a stronger reason: this one is a second `PlotWidget`, so building it at construction
+        #: would double the number of `PlotItem`s every curve window ever makes, in the file whose
+        #: crash history is exactly that (`_do_not_build_the_plot_options_menu`). Kept as a member
+        #: of THIS widget and put in THIS widget's layout, so Qt destroys it with the view.
+        self._strip: Optional[pg.PlotWidget] = None
+        self._strip_failed = False
+        self._strip_curve = None
+        self._layout = layout
 
         # ON the chart, in the plot AREA's top-left corner (user, 2026-08-18, with the
         # screenshot): the toggle belongs to the picture it changes rather than to the row of
@@ -436,6 +498,27 @@ class CurveView(QWidget):
         self._readout_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         attach_tip(self._readout_btn, "")
         notes.addWidget(self._readout_btn)
+        # WHICH two curves the cross modes read. Only on screen when there is a choice to make —
+        # more than two traces and a cross mode selected — and in this row rather than beside the
+        # mode buttons because that row is already full at seven drivers, and because what these
+        # two combos configure is the READING, which is what this row is about.
+        self._cross_label = QLabel("×")
+        self._cross_label.setProperty("class", "phead-sub")
+        self._cross_combos: list[QComboBox] = []
+        for slot in (0, 1):
+            combo = QComboBox()
+            combo.setProperty("class", "mini-select")
+            combo.setFixedWidth(96)
+            combo.currentIndexChanged.connect(
+                lambda _index, at=slot: self._on_cross_combo(at)
+            )
+            attach_tip(combo, i18n.t("curveCrossPairTip"))
+            combo.setVisible(False)
+            if slot:
+                notes.addWidget(self._cross_label)
+            notes.addWidget(combo)
+            self._cross_combos.append(combo)
+        self._cross_label.setVisible(False)
         notes.addStretch(1)
         layout.addLayout(notes)
 
@@ -450,19 +533,17 @@ class CurveView(QWidget):
         # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
         # window is used in a car). "All" is everything the capture holds; "Detail" is the span
         # the window opened on, which is the one worth coming back to after wandering.
-        # WHICH trace is held back, then by how much. Two radio buttons rather than a signed
-        # number: a DSP has no negative delay, so the question is which driver waits, and the two
-        # answers are the same alignment read from either end.
+        # WHICH trace is held back, then by how much. Radio buttons rather than a signed number: a
+        # DSP has no negative delay, so the question is which driver waits, and the two answers are
+        # the same alignment read from either end. One per trace, built as traces arrive — a whole
+        # side is four drivers and ALL is six, and a pair of radios would have made those
+        # unreachable.
         self._target_buttons: list[QRadioButton] = []
-        for index in (0, 1):
-            button = QRadioButton(str(index + 1))
-            button.setProperty("class", "phead-sub")
-            button.setChecked(index == 0)
-            button.toggled.connect(
-                lambda checked, i=index: self.set_delay_target(i) if checked else None
-            )
-            row.addWidget(button)
-            self._target_buttons.append(button)
+        #: Where in this row a new radio goes. Recorded rather than counted later: the delay
+        #: group's own action is inserted into the same row (`add_delay_action`), so the two
+        #: insertion points have to move together as radios appear.
+        self._radio_slot = row.count()
+        self._ensure_target_buttons(2, row)
 
         self._shift_label = QLabel(i18n.t("curveShift"))
         self._shift_label.setProperty("class", "phead-sub")
@@ -550,6 +631,8 @@ class CurveView(QWidget):
         self._crossing_dots = None
         self._syncing = False
         self._marker_names: list[str] = []
+        #: Which two traces the cross modes compare — see `cross_pair` for why it is two.
+        self._cross_indices = (0, 1)
         self._render_sum()
         self._render_readout()
 
@@ -682,7 +765,7 @@ class CurveView(QWidget):
         colour.setAlpha(_SUM_ALPHA)
         return colour
 
-    def _adopt_orphan_menus(self) -> None:
+    def _adopt_orphan_menus(self, plot: Optional[pg.PlotWidget] = None) -> None:
         """Give pyqtgraph's parentless menus an owner, so they die with this widget.
 
         `PlotItem.__init__` builds `QMenu("Plot Options")` with **no parent**, unconditionally —
@@ -695,8 +778,11 @@ class CurveView(QWidget):
         its widget, in order, by Qt itself. Written defensively because it reaches into
         pyqtgraph's internals — a version that stops building the menu, or names it something
         else, must leave this a no-op rather than a crash on startup.
+
+        Takes the plot rather than assuming the main one: the sum's strip is a second `PlotWidget`
+        and leaves a second orphan behind.
         """
-        item = self._plot.getPlotItem()
+        item = (plot or self._plot).getPlotItem()
         for name in ("ctrlMenu", "stateGroup"):
             menu = getattr(item, name, None)
             if menu is not None and hasattr(menu, "setParent"):
@@ -704,6 +790,30 @@ class CurveView(QWidget):
                     menu.setParent(self)
                 except (RuntimeError, TypeError):  # noqa: PERF203 — one-time, at construction
                     pass
+
+    def _ensure_target_buttons(self, count: int, row: Optional[QHBoxLayout] = None) -> None:
+        """Have one delay radio per trace, making the missing ones.
+
+        Grown and never shrunk: the extra radios are hidden by `set_traces` when a smaller
+        selection arrives, and destroying a widget that a `toggled` connection is standing on is
+        how this app has crashed before (a widget deleted from its own event handler is a SIGSEGV).
+        Six spare hidden radios cost nothing; a torn-down one costs the window.
+        """
+        row = row if row is not None else self._action_row
+        while len(self._target_buttons) < count:
+            index = len(self._target_buttons)
+            button = QRadioButton(str(index + 1))
+            button.setProperty("class", "phead-sub")
+            button.setChecked(index == 0)
+            button.toggled.connect(
+                lambda checked, i=index: self.set_delay_target(i) if checked else None
+            )
+            row.insertWidget(self._radio_slot + index, button)
+            self._target_buttons.append(button)
+            # Everything to the right of the radios moved one place along, including the slot the
+            # delay group's action is inserted at.
+            if getattr(self, "_delay_slot", None) is not None:
+                self._delay_slot += 1
 
     def add_delay_action(self, button: QWidget) -> None:
         """Put the delay group's own action immediately after the delay controls.
@@ -852,7 +962,7 @@ class CurveView(QWidget):
         across, which turned one 1.2 ms reading into two curves 2.4 ms apart the moment the radio
         moved (user, with the picture, 2026-08-12).
         """
-        self._shift_target = 0 if index == 0 else 1
+        self._shift_target = min(max(int(index), 0), max(len(self._delays) - 1, 0))
         for i, button in enumerate(self._target_buttons):
             blocked = button.blockSignals(True)
             button.setChecked(i == self._shift_target)
@@ -896,20 +1006,29 @@ class CurveView(QWidget):
         return float(np.asarray(trace.x, dtype=float)[int(np.abs(y).argmax())])
 
     def _default_delay_target(self, traces) -> int:
-        """The trace that ARRIVES FIRST. It is the only one a DSP can hold back — the other is
-        already at whatever delay it has, and there is no negative to give it."""
+        """The trace that ARRIVES FIRST, of however many there are.
+
+        It is the only one a DSP can hold back: every other driver is already at whatever delay it
+        has, and there is no negative to give it. Over a whole side or a whole car that is the same
+        rule as over a pair — the earliest arrival is the one everything else is waiting for.
+        """
         if len(traces) < 2 or self._unit != "ms":
             return 0
         peaks = []
-        for trace in traces[:2]:
+        for trace in traces:
             y = np.asarray(trace.y, dtype=float)
             if not y.size:
                 return 0
             peaks.append(float(np.asarray(trace.x, dtype=float)[int(np.abs(y).argmax())]))
-        return 0 if peaks[0] <= peaks[1] else 1
+        return int(np.argmin(peaks))
 
     def set_traces(self, traces: Sequence[Trace]) -> None:
-        theme = current_theme()
+        """Draw these curves — two of them, or a whole side, or everything the car has.
+
+        The count is not fixed anywhere below this line: one delay per trace, one radio per trace,
+        one colour per trace. The pair was never the unit of alignment (see `_delays`); it was only
+        the unit the window happened to be built for.
+        """
         self._plot.clear()
         # `addLegend` returns the same item across clears, so its rows have to go too or the
         # names stack up one pass at a time.
@@ -917,10 +1036,15 @@ class CurveView(QWidget):
             self._legend.clear()
         first_time = [t.name for t in self._traces] != [t.name for t in traces]
         self._traces = list(traces)
+        self._ensure_target_buttons(len(self._traces))
         if first_time:
-            # A new pair is a new question: the delay goes back to zero and points at whichever of
-            # these two arrives first.
-            self._delays = [0.0, 0.0]
+            # A new selection is a new question: every delay goes back to zero, the radio points at
+            # whichever of these arrives first, and the cross modes go back to comparing the first
+            # two — the pair chosen out of the last selection was about drivers that may not even
+            # be on screen now.
+            self._delays = [0.0] * max(len(self._traces), 2)
+            self._channel_delays = [None] * max(len(self._traces), 2)
+            self._cross_indices = (0, 1)
             self._shift_target = self._default_delay_target(self._traces)
             box = getattr(self, "_shift_box", None)
             if box is not None:
@@ -932,17 +1056,17 @@ class CurveView(QWidget):
                 button.setChecked(i == self._shift_target)
                 button.blockSignals(blocked)
         for index, button in enumerate(getattr(self, "_target_buttons", [])):
-            # The radios are named after the curves they hold back, and coloured like them.
+            # The radios are named after the curves they hold back, and coloured like them. Beyond
+            # a pair the version and method suffix come off the label: seven radios reading
+            # "w-L_02" do not fit the row, and the legend above already prints the whole name.
             if index < len(self._traces):
-                button.setText(self._traces[index].name.split(" ")[0])
+                name = self._traces[index].name.split(" ")[0]
+                button.setText(name.rpartition("_")[0] if len(self._traces) > 2 else name)
                 button.setVisible(True)
-                button.setStyleSheet(
-                    f"color: {getattr(theme, _TRACE_TOKENS[index % len(_TRACE_TOKENS)])}"
-                )
+                button.setStyleSheet(f"color: {colour_of(trace_token(index)).name()}")
             else:
                 button.setVisible(False)
         for index, trace in enumerate(self._traces):
-            token = _TRACE_TOKENS[index % len(_TRACE_TOKENS)]
             # Arrays, not Python lists: pyqtgraph converts a list element by element, and a list
             # comprehension over 262 144 floats had already been paid for upstream.
             x, y = self._shifted(index, trace)
@@ -950,9 +1074,12 @@ class CurveView(QWidget):
             delay = self._delays[index] if index < len(self._delays) else 0.0
             if delay:
                 label = f"{trace.name}  {delay:+.3f} ms"
-            self._plot.plot(x, y, pen=pg.mkPen(getattr(theme, token), width=1.0), name=label)
+            self._plot.plot(
+                x, y, pen=pg.mkPen(colour_of(trace_token(index)), width=1.0), name=label
+            )
         for line in self._markers:
             self._plot.addItem(line)
+        self._sync_cross_combos()
         self._render_crossings()
         # Every delay change comes back through here (`set_delay` re-sets the same traces), which
         # is what makes the sum follow the delays without another fetch from REW.
@@ -988,17 +1115,28 @@ class CurveView(QWidget):
         """What stands under the plot: what was summed, and what that sum does not show."""
         return self._sum_text
 
-    def _sum_possible(self) -> bool:
-        """Only where the x axis is frequency.
+    def _on_strip(self) -> bool:
+        """Whether the sum belongs in its own strip rather than on the right-hand axis.
 
-        An impulse's x is TIME and the sum's is frequency, so the two cannot share one pair of
-        axes; on that view the sum gets its own strip under the plot, which is a separate piece of
-        work (CURVE-ANALYSIS-PLAN.md, decisions of 2026-08-18).
-
-        Deliberately does not BUILD the right-hand axis to find out — this is asked on every
-        redraw and every retranslate, and the answer must not have a side effect.
+        The impulse's x is TIME and the sum's is frequency, so those two cannot share one pair of
+        axes — the strip under the plot is the answer, and it is under the plot rather than on
+        another view because the delay is DRAGGED here: the tuner should watch the joint fill in
+        while dragging (user, 2026-08-18).
         """
-        return not self._sum_axis_failed and self._unit != "ms"
+        return self._unit == "ms"
+
+    def _sum_possible(self) -> bool:
+        """Whether this view has somewhere to draw a sum at all.
+
+        Every view has one now. What can still say no is pyqtgraph: both drawing surfaces are built
+        by reaching into somebody else's internals, and a version that moved them leaves the
+        feature switched off rather than taking the window down (`_build_sum_axis` and
+        `_build_strip` both end in the same `except`).
+
+        Deliberately does not BUILD either surface to find out — this is asked on every redraw and
+        every retranslate, and the answer must not have a side effect.
+        """
+        return not (self._strip_failed if self._on_strip() else self._sum_axis_failed)
 
     def _sum_inputs(self) -> list[curve_sum.SumInput]:
         """Every plotted trace as the engine's own input, at the delay currently on screen.
@@ -1012,10 +1150,14 @@ class CurveView(QWidget):
         for index, trace in enumerate(self._traces):
             if trace.magnitude_db is None:
                 return []
+            # `x` is the frequency axis on the two views that plot against hertz, and TIME on the
+            # impulse — where the strip under the plot needs the frequency axis the capture also
+            # carries. `Trace.freqs_hz` is that axis, and `None` means x already is it.
+            freqs = trace.freqs_hz if trace.freqs_hz is not None else trace.x
             inputs.append(
                 curve_sum.SumInput(
                     name=trace.name,
-                    freqs_hz=np.asarray(trace.x, dtype=float),
+                    freqs_hz=np.asarray(freqs, dtype=float),
                     magnitude_db=np.asarray(trace.magnitude_db, dtype=float),
                     phase_deg=(
                         None if trace.phase_deg is None
@@ -1043,6 +1185,7 @@ class CurveView(QWidget):
         self._update_sum_button()
         if not self._sum_on:
             self._plot.getPlotItem().hideAxis("right")
+            self._show_strip(False)
             self._sum_note_btn.setVisible(False)
             return
 
@@ -1054,19 +1197,20 @@ class CurveView(QWidget):
             # left as a heading over an empty axis.
             self._sum_text = f"{i18n.t('curveSumNone')} {self._sum_text}"
             self._sum_doubted = True
-        # The right-hand axis appears with the curve and leaves with it: an axis over an empty
-        # ViewBox is a scale for nothing, printed in the colour of a line that is not there.
-        self._plot.getPlotItem().showAxis("right", bool(drawn))
+        # Whichever surface this view draws on appears with the curve and leaves with it: an axis
+        # over an empty ViewBox is a scale for nothing, and an empty strip under the impulse is a
+        # band of window spent saying the same.
+        on_strip = self._on_strip()
+        self._plot.getPlotItem().showAxis("right", bool(drawn) and not on_strip)
+        self._show_strip(bool(drawn) and on_strip)
         self._render_sum_note()
 
     def _compute_sum(self) -> tuple[str, bool]:
         """`(what to print, is it doubtful)`, computing the sum on the way if there is one."""
         if not self._sum_possible():
-            # NOT doubtful, which is why this one branch does not raise the flag: nothing here is
-            # wrong with the measurements or with the sum. It is the one view whose strip has not
-            # been built yet, and colouring "coming" as a warning files it under "broken" (user,
-            # 2026-08-18).
-            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumOnlyFrequency')}", False
+            # Only reachable when pyqtgraph refused to give this view a surface to draw on. Not
+            # about the measurements, so it is stated rather than doubted.
+            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumNoPlot')}", False
         if len(self._traces) < 2:
             return f"{i18n.t('curveSumNone')} {i18n.t('curveSumTooFew')}", True
         inputs = self._sum_inputs()
@@ -1097,16 +1241,24 @@ class CurveView(QWidget):
         return "\n".join(lines), not result.summability.ok
 
     def _draw_sum(self, result: curve_sum.SumResult) -> bool:
-        """Put the sum on its own ViewBox, in the plot's x and on the right-hand dB scale."""
+        """Draw the sum where this view keeps it: its own strip, or the right-hand dB axis."""
         values = np.asarray(result.magnitude_db, dtype=float)
         finite = values[np.isfinite(values)]
-        if not finite.size or not self._ensure_sum_axis():
+        if not finite.size:
             return False
         # An exact null is −inf out of the engine, by design. Floored HERE, where the drawing
         # happens, and floored relative to the sum's own loudest point so the number under the plot
         # stays the honest one.
         values = np.where(np.isneginf(values), float(finite.max()) - _SUM_FLOOR_DB, values)
         freqs = np.asarray(result.freqs_hz, dtype=float)
+        if self._on_strip():
+            return self._draw_sum_on_strip(freqs, values)
+        return self._draw_sum_on_axis(freqs, values)
+
+    def _draw_sum_on_axis(self, freqs, values) -> bool:
+        """The frequency views: over the measurements, on the second ViewBox's dB scale."""
+        if not self._ensure_sum_axis():
+            return False
         # log10 by hand: pyqtgraph's log mode transforms the items IT owns, and this curve lives on
         # a ViewBox of ours. The X ranges are linked, so both must be in the same coordinates.
         x = np.log10(freqs) if self._log_x else freqs
@@ -1126,10 +1278,101 @@ class CurveView(QWidget):
         self._resize_sum_axis()
         return True
 
+    def _draw_sum_on_strip(self, freqs, values) -> bool:
+        """The impulse: in the strip below the plot, which has a frequency axis of its own.
+
+        Raw hertz, not log10: this curve is owned by the strip's own `PlotItem`, so pyqtgraph's log
+        mode transforms it — which is the whole reason it is a `PlotDataItem` here and a
+        `PlotCurveItem` on the second ViewBox above, where nothing would.
+        """
+        if not self._ensure_strip():
+            return False
+        self._strip_curve = self._strip.plot(
+            freqs, values,
+            pen=pg.mkPen(self._sum_colour(), width=_SUM_WIDTH, style=Qt.PenStyle.DashLine),
+            connect="finite",
+        )
+        self._strip_curve.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        low, high = float(np.nanmin(values)), float(np.nanmax(values))
+        pad = max((high - low) * 0.08, 1.0)
+        self._strip.setYRange(low - pad, high + pad, padding=0)
+        return True
+
     def _clear_sum_curve(self) -> None:
         if self._sum_curve is not None and self._sum_vb is not None:
             self._sum_vb.removeItem(self._sum_curve)
         self._sum_curve = None
+        if self._strip_curve is not None and self._strip is not None:
+            self._strip.removeItem(self._strip_curve)
+        self._strip_curve = None
+
+    # ---- the sum's own strip, under the impulse (user, 2026-08-18) -------
+
+    def _ensure_strip(self) -> bool:
+        """Build the strip the first time a sum is actually drawn on an impulse, and only then.
+
+        Same bargain as `_ensure_sum_axis`, and a bigger one: this is a whole second `PlotWidget`,
+        and the crash this file documents at length is about how many `PlotItem`s get constructed
+        and destroyed. A window that never puts a sum on an impulse carries exactly the graphics
+        items it carried before this feature existed. One attempt, then the answer is remembered
+        either way.
+        """
+        if self._strip is None and not self._strip_failed:
+            self._build_strip()
+        return self._strip is not None
+
+    def _build_strip(self) -> None:
+        """A short second plot under the impulse: x in hertz, y in dB, the sum and nothing else.
+
+        Not a second Y axis on the impulse (user, 2026-08-18): the impulse's x is TIME and the
+        sum's is FREQUENCY, so there is no pair of axes they can share. It goes under the plot
+        rather than on another view because the delay is dragged HERE, and the point of the whole
+        feature is watching the joint fill in while it is dragged.
+
+        **Ownership, because this file has been bitten by it.** The widget is a child of this one,
+        in this one's layout, destroyed with it by Qt, in order. `enableMenu=False` at construction
+        for the reason spelled out at `self._plot`: `ViewBox.__init__` builds a whole `ViewBoxMenu`
+        otherwise, and constructing and dropping enough of those segfaults the process from inside
+        its own `__init__`. `_adopt_orphan_menus` then takes ownership of the parentless "Plot
+        Options" menu `PlotItem` builds whatever anyone says.
+
+        Guarded end to end: a pyqtgraph that moved these internals leaves the impulse without a
+        strip, not the window without a curve.
+        """
+        try:
+            theme = current_theme()
+            strip = pg.PlotWidget(background=theme.panel, enableMenu=False)
+            strip.setMenuEnabled(False)
+            strip.getPlotItem().hideButtons()
+            strip.setFixedHeight(_STRIP_HEIGHT_PX)
+            strip.setLogMode(x=True, y=False)
+            axis = LogHzAxis(orientation="bottom")
+            axis.setPen(pg.mkPen(theme.border2))
+            axis.setTextPen(pg.mkPen(theme.muted))
+            strip.setAxisItems({"bottom": axis})
+            strip.getAxis("left").setPen(pg.mkPen(theme.border2))
+            # The left axis wears the sum's own colour, the same pairing of scale with curve the
+            # right-hand axis uses on the frequency views.
+            strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
+            strip.showGrid(x=True, y=True, alpha=0.18)
+            self._adopt_orphan_menus(strip)
+            # Directly under the plot and above the two note buttons: the verdict for what is in
+            # the strip should read below it, not above the plot it is not about.
+            self._layout.insertWidget(1, strip)
+            strip.setVisible(False)
+            self._strip = strip
+        except Exception:  # noqa: BLE001 — pyqtgraph moved; the strip is off, not the window
+            self._strip = None
+            self._strip_failed = True
+
+    def _show_strip(self, on: bool) -> None:
+        """Put the strip on screen, or take it off. Never builds one to hide it."""
+        if self._strip is not None:
+            self._strip.setVisible(bool(on))
+
+    def strip_shown(self) -> bool:
+        """Whether the sum's own strip is on screen: the impulse, Σ on, and a sum to draw."""
+        return self._strip is not None and self._strip.isVisibleTo(self)
 
     def _render_sum_note(self) -> None:
         """The sum's verdict as a button that names it, with the whole of it in the tip.
@@ -1154,10 +1397,8 @@ class CurveView(QWidget):
     def _update_sum_button(self) -> None:
         """Show the Σ toggle where it applies, and say ON it whether the sum is on.
 
-        Not on the frequency response at all — see `_sum_offered`. On the impulse it stays, marked
-        unavailable, which is this window's habit for a choice that exists elsewhere
-        (`curve_dialog._mark_availability`): the sum's own strip under a time axis is the next
-        piece of work, and a control that disappears teaches nothing about why.
+        Not on the frequency response at all — see `_sum_offered`. On the impulse it is now a live
+        control rather than a marked-shut one: the strip it used to promise is under the plot.
 
         The checked state is coloured here rather than in the stylesheet, which has no `:checked`
         rule for `.zoom-btn`. A toggle floating over the data whose state cannot be read is worse
@@ -1175,7 +1416,7 @@ class CurveView(QWidget):
         )
         if getattr(button, "hover_tip", None) is not None:
             button.hover_tip.set_text(
-                tip_html(i18n.t("curveSumTip") if possible else i18n.t("curveSumOnlyFrequency"))
+                tip_html(i18n.t("curveSumTip") if possible else i18n.t("curveSumNoPlot"))
             )
 
     def set_markers(
@@ -1196,27 +1437,26 @@ class CurveView(QWidget):
             i18n.t("curveMarkerModel") if i == 0 else i18n.t("curveMarkerYou")
             for i in range(len(positions))
         ]
-        theme = current_theme()
         for index, position in enumerate(positions):
             if index < len(tokens):
                 token = tokens[index]
             else:
                 token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
+            colour = colour_of(token)
             line = pg.InfiniteLine(
                 pos=self._to_view(float(position)), angle=90, movable=True,
                 # Thicker than the traces, deliberately. A guide the same weight as a dense
                 # impulse disappears into it — on the frequency response, where the trace is
                 # sparser, the same line read clearly, which is what made the difference visible
                 # (user, 2026-08-12). It is furniture over the data, not another curve.
-                pen=pg.mkPen(getattr(theme, token), width=_GUIDE_WIDTH,
+                pen=pg.mkPen(colour, width=_GUIDE_WIDTH,
                              style=Qt.PenStyle.DashLine if index == 0 and not tokens
                              else Qt.PenStyle.SolidLine),
                 label=self._marker_names[index] if index < len(self._marker_names) else "",
                 # Staggered heights: the two markers START on top of each other (that is the
                 # point — the Arbiter drags away from the model's reading), and labels printed at
                 # the same height would overlap into one unreadable word until they separate.
-                labelOpts={"color": getattr(theme, token),
-                           "position": 0.94 - 0.07 * index},
+                labelOpts={"color": colour, "position": 0.94 - 0.07 * index},
             )
             line.setVisible("v" in self._axes_mode)
             line.sigPositionChanged.connect(self._on_marker_moved)
@@ -1242,6 +1482,12 @@ class CurveView(QWidget):
         if self._legend is not None:
             self._legend.setLabelTextColor(theme.text)
         self._style_sum_axis()
+        if self._strip is not None:
+            self._strip.setBackground(theme.panel)
+            for axis_name in ("bottom", "left"):
+                self._strip.getAxis(axis_name).setPen(pg.mkPen(theme.border2))
+            self._strip.getAxis("bottom").setTextPen(pg.mkPen(theme.muted))
+            self._strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
         # Traces and markers are rebuilt rather than recoloured in place: both already know how to
         # draw themselves from the current theme, and two ways of doing it is one too many.
         traces, positions = list(self._traces), self.positions()
@@ -1340,6 +1586,8 @@ class CurveView(QWidget):
         self._axes_mode = mode if mode in _MODE_LABELS else "v"
         for button, value in self._axes_buttons:
             button.setChecked(value == self._axes_mode)
+        # The pair pickers belong to the cross modes and appear with them.
+        self._sync_cross_combos()
         self._rebuild_h_markers()
         for index, line in enumerate(self._markers):
             # A cross mode has exactly ONE line: the whole question is what a single position says
@@ -1363,10 +1611,12 @@ class CurveView(QWidget):
             self._plot.removeItem(line)
         self._h_markers = []
         if self._axes_mode == "hx":
-            # One horizontal line, placed at whatever the first curve is doing where the vertical
-            # marker last stood -- a level somewhere on the data rather than at zero.
+            # One horizontal line, placed at whatever the first of the two CHOSEN curves is doing
+            # where the vertical marker last stood -- a level somewhere on the data rather than at
+            # zero.
             theme = current_theme()
-            level = self._y_at(0, self.positions()[0]) if self.positions() else 0.0
+            first = self.cross_pair()[0]
+            level = self._y_at(first, self.positions()[0]) if self.positions() else 0.0
             line = pg.InfiniteLine(
                 pos=level, angle=0, movable=True,
                 pen=pg.mkPen(theme.accent, width=1.4, style=Qt.PenStyle.DashLine),
@@ -1388,12 +1638,82 @@ class CurveView(QWidget):
                 # where the vertical marker stands. Making it draggable there would let the two
                 # halves of one reading disagree.
                 movable=self._axes_mode != "vhs",
-                pen=pg.mkPen(getattr(theme, token), width=_GUIDE_WIDTH,
+                pen=pg.mkPen(colour_of(token), width=_GUIDE_WIDTH,
                              style=Qt.PenStyle.DotLine),
             )
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._h_markers.append(line)
+
+    # ---- which two curves a cross mode is about --------------------------
+
+    def cross_pair(self) -> tuple[int, int]:
+        """The two traces `vx`/`hx` read, as indices. Defaults to the first two on screen.
+
+        **The cross modes stay pairwise however many curves are plotted, on purpose.** They exist
+        to answer one shaped question — "at this x, how far apart are these two" — and the answer
+        is a single Δ. Over six drivers there is no such number: fifteen pairwise gaps are not a
+        reading, and picking one of them silently would be the window choosing which comparison the
+        Arbiter meant. So the tuner names the two, and the per-curve markers (`v`, `h`, `vh`) keep
+        answering for the rest, one number each, which is a shape that DOES generalise.
+        (`vhs` needs no pair either: it ties each marker to its own curve and compares nothing.)
+        """
+        pair = getattr(self, "_cross_indices", (0, 1))
+        count = len(self._traces)
+        if count < 2:
+            return (0, min(1, max(count - 1, 0)))
+        first = pair[0] if 0 <= pair[0] < count else 0
+        second = pair[1] if 0 <= pair[1] < count else 1
+        if first == second:
+            second = 1 if first == 0 else 0
+        return (first, second)
+
+    def set_cross_pair(self, first: int, second: int) -> None:
+        """Read the cross modes against these two traces."""
+        self._cross_indices = (int(first), int(second))
+        self._sync_cross_combos()
+        self._rebuild_h_markers()
+        self._render_crossings()
+        self._render_readout()
+
+    def _sync_cross_combos(self) -> None:
+        """Offer the choice of pair only where there is one to make.
+
+        With two traces the pair IS the selection and a control for it would be furniture; outside
+        a cross mode there is no pairwise question on screen at all. So both combos appear together
+        with the first Vx or Hx over a third curve, and go away again with it.
+        """
+        combos = getattr(self, "_cross_combos", [])
+        if not combos:
+            return
+        wanted = len(self._traces) > 2 and self._axes_mode in _CROSS_MODES
+        pair = self.cross_pair()
+        for slot, combo in enumerate(combos):
+            blocked = combo.blockSignals(True)
+            combo.clear()
+            for index, trace in enumerate(self._traces):
+                combo.addItem(trace.name.split(" ")[0], index)
+            at = combo.findData(pair[slot])
+            combo.setCurrentIndex(at if at >= 0 else slot)
+            combo.blockSignals(blocked)
+            combo.setVisible(wanted)
+        self._cross_label.setVisible(wanted)
+
+    def _on_cross_combo(self, slot: int) -> None:
+        combos = getattr(self, "_cross_combos", [])
+        if len(combos) < 2 or not self._traces:
+            return
+        chosen = [combos[0].currentData(), combos[1].currentData()]
+        if chosen[slot] is None:
+            return
+        other = 1 - slot
+        if chosen[other] == chosen[slot] or chosen[other] is None:
+            # A curve compared with itself reads "Δ 0.0" and means nothing. The slot the tuner did
+            # not touch is the one that moves.
+            chosen[other] = next(
+                (i for i in range(len(self._traces)) if i != chosen[slot]), chosen[slot]
+            )
+        self.set_cross_pair(int(chosen[0]), int(chosen[1]))
 
     def _render_crossings(self) -> None:
         """Dots where the single line meets each curve. Nothing to draw outside the cross modes."""
@@ -1404,11 +1724,14 @@ class CurveView(QWidget):
             return
         theme = current_theme()
         spots = []
-        for index, (x, y) in enumerate(self.crossings()):
-            token = self._marker_tokens[index] if index < len(self._marker_tokens) else "accent"
+        for slot, (x, y) in enumerate(self.crossings()):
+            # The dot wears the colour of the CURVE it sits on, not of a marker: with more than two
+            # traces on screen the reader's first question about a dot is which driver it belongs
+            # to.
+            index = self.cross_pair()[slot] if slot < 2 else slot
             spots.append({
                 "pos": (self._to_view(x), y), "size": 9,
-                "brush": pg.mkBrush(getattr(theme, token)),
+                "brush": pg.mkBrush(colour_of(trace_token(index))),
                 "pen": pg.mkPen(theme.panel, width=1.5),
             })
         if spots:
@@ -1416,19 +1739,27 @@ class CurveView(QWidget):
             self._plot.addItem(self._crossing_dots)
 
     def crossings(self) -> list[tuple[float, float]]:
-        """Where the single line meets each curve, as (x, y) in the axes' own units.
+        """Where the single line meets the two CHOSEN curves, as (x, y) in the axes' own units.
 
         `vx` is exact: a vertical line has one y per curve. `hx` is a choice — a level line can
         cross a response many times — and the choice is the crossing nearest the middle of what is
         currently on screen, because that is the one being pointed at. Zooming to the region of
         interest is therefore part of asking the question, which is honest about the ambiguity
         rather than hiding it behind a rule nobody can see.
+
+        Two, never N: see `cross_pair` for why that is the honest shape of this question.
         """
+        # Deduplicated: with a single curve on screen both halves of the pair are trace 0, and
+        # reporting it twice would print a Δ of zero between a curve and itself.
+        pair: list[int] = []
+        for index in self.cross_pair():
+            if index < len(self._traces) and index not in pair:
+                pair.append(index)
         if self._axes_mode == "vx":
             if not self._markers:
                 return []
             x = self.positions()[0]
-            return [(x, self._y_at(i, x)) for i in range(len(self._traces))]
+            return [(x, self._y_at(i, x)) for i in pair]
         if self._axes_mode == "hx":
             if not self._h_markers:
                 return []
@@ -1436,7 +1767,7 @@ class CurveView(QWidget):
             (low, high), _ = self._plot.getViewBox().viewRange()
             centre = self._from_view((low + high) / 2.0)
             out = []
-            for index in range(len(self._traces)):
+            for index in pair:
                 x = self._crossing_near(index, level, centre)
                 if x is not None:
                     out.append((x, level))
@@ -1572,11 +1903,19 @@ class CurveView(QWidget):
     def _cross_reading(self, digits: int) -> str:
         """One line, both curves. "At 2.5 kHz the channels are 6 dB apart" is a single fact about
         a pair, and it is the reason these modes exist — the per-curve markers cannot state it,
-        because there the two markers are in different places."""
+        because there the two markers are in different places.
+
+        Which two, when more than two are plotted, is `cross_pair()` — and the names printed here
+        come from it, so the sentence that leaves the window says which drivers were compared
+        rather than leaving the reader to assume the first two.
+        """
         crossings = self.crossings()
         if not crossings:
             return ""
-        names = [t.name for t in self._traces]
+        names = [
+            self._traces[index].name
+            for index in self.cross_pair() if index < len(self._traces)
+        ]
         if self._axes_mode == "vx":
             at = f"{crossings[0][0]:.{digits}f} {self._unit}".strip()
             unit = f" {self._y_unit}" if self._y_unit else ""
@@ -1680,6 +2019,9 @@ class CurveView(QWidget):
 
     def retranslate(self) -> None:
         self._shift_label.setText(i18n.t("curveShift"))
+        for combo in getattr(self, "_cross_combos", []):
+            if getattr(combo, "hover_tip", None) is not None:
+                combo.hover_tip.set_text(i18n.t("curveCrossPairTip"))
         for button, mode in self._axes_buttons:
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))

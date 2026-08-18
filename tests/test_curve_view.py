@@ -1614,30 +1614,17 @@ def test_one_curve_is_not_a_sum_and_says_so():
     assert i18n.t("curveSumTooFew") in view.sum_text()
 
 
-def test_on_the_impulse_the_sum_is_refused_in_words_rather_than_drawn_on_a_time_axis():
-    """The impulse's x is time and the sum's is frequency; they cannot share one pair of axes. The
-    strip that answers it there is a separate piece of work, and saying so beats a blank button."""
-    view = _view()  # the impulse view: x in ms
+def test_an_impulse_with_no_spectrum_says_it_has_nothing_to_add_up():
+    """An impulse whose capture REW would not give a response for still plots — the trace is the
+    payload of that view — and the sum then says the honest thing rather than drawing a strip over
+    no data. The engine's own wording: these curves carry no magnitude and phase."""
+    view = _view()  # the impulse view: x in ms, and no `freqs_hz` on either trace
+
     view.set_sum_shown(True)
 
     assert view.sum_result() is None
-    assert i18n.t("curveSumOnlyFrequency") in view.sum_text()
-    assert view._sum_btn.isEnabled() is False
-
-
-def test_the_missing_impulse_strip_reads_as_coming_not_as_an_error():
-    """User, 2026-08-18: it is the honest placeholder for work that is next, and a red paragraph
-    filed it under "broken". The wording stays; the red goes, and the sentence moves into the
-    tips — the toggle's, which is what somebody pressing Σ here is pointing at, and the verdict
-    button's, which is where every other thing the sum has to say now lives."""
-    view = _view()  # the impulse view: x in ms
-
-    view.set_sum_shown(True)
-
-    assert view._sum_note_btn.styleSheet() == "", "not a warning: nothing here is wrong"
-    assert i18n.t("curveSumOnlyFrequency") in _tip(view._sum_note_btn)
-    assert i18n.t("curveSumOnlyFrequency") in _tip(view._sum_btn), "and on the toggle itself"
-    assert current_theme().warn not in view._sum_btn.hover_tip.text(), "not painted as a failure"
+    assert i18n.t("curveSumNoData") in view.sum_text()
+    assert view.strip_shown() is False, "no strip over a sum that does not exist"
 
 
 def test_the_sum_survives_a_new_pair_and_a_reset_of_the_window():
@@ -1749,8 +1736,8 @@ def test_the_sum_toggle_is_offered_on_phase_and_impulse_and_not_on_the_magnitude
     assert phase._sum_btn.isVisibleTo(phase) is True
 
     impulse = _view()
-    assert impulse._sum_btn.isVisibleTo(impulse) is True, "the impulse keeps it, marked shut"
-    assert impulse._sum_btn.isEnabled() is False, "its own strip is the next piece of work"
+    assert impulse._sum_btn.isVisibleTo(impulse) is True, "the impulse offers it..."
+    assert impulse._sum_btn.isEnabled() is True, "...and it works now: the strip is under the plot"
 
     fr = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
 
@@ -1886,3 +1873,480 @@ def test_what_leaves_the_window_is_the_same_sentence_it_always_was():
     for text in sent:
         assert "<" not in text and "font-size" not in text
     assert "Predicted acoustic sum" in sent[1]
+
+
+# ---- more than two curves, and the groups a tune is argued about ------------------------------
+# CURVE-ANALYSIS-PLAN.md step 3, and the user's own list (2026-08-18): "Ws, Ms, TWs, SW+Ws, L, R,
+# ALL — до налаштувань та повторних зйомів".
+
+
+#: One car's glossary, in the shape the skill writes it (`naming.Glossary`, SCR-008). Written into
+#: the project the conftest points every test at, so nothing here can reach a real one.
+_GLOSSARY = {
+    "channels": [{"code": c} for c in
+                 ("sw", "w-L", "w-R", "m-L", "m-R", "tw-L", "tw-R")],
+    "pairs": {"Ws": ["w-L", "w-R"], "Ms": ["m-L", "m-R"], "TWs": ["tw-L", "tw-R"]},
+    "joints": {"SW+Ws": ["sw", "w-L", "w-R"]},
+    "sides": {"L": ["tw-L", "m-L", "w-L"], "R": ["tw-R", "m-R", "w-R"]},
+    "combos": {"ALL": ["tw-L", "tw-R", "m-L", "m-R", "w-L", "w-R"]},
+}
+
+#: What REW holds in these tests: every driver as a sweep at `_02`, the woofers also at `_01`, and
+#: one MMM capture — the mixture the pickers and the kind rule are written against.
+_IN_REW = [
+    "sw_02 (sw)", "w-L_02 (sw)", "w-R_02 (sw)", "m-L_02 (sw)", "m-R_02 (sw)",
+    "tw-L_02 (sw)", "tw-R_02 (sw)",
+    "w-L_01 (sw)", "w-R_01 (sw)", "w-L_01 (rta)",
+]
+
+
+def _project_glossary(glossary: dict = None) -> None:
+    """Give the test's project a glossary. `config.project_dir()` is the conftest's tmp folder."""
+    import json
+
+    from autosound_tcc.core import config
+
+    (config.project_dir() / "glossary.json").write_text(
+        json.dumps(glossary if glossary is not None else _GLOSSARY), encoding="utf-8"
+    )
+
+
+def _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"), kind="fr", glossary=_GLOSSARY):
+    """A window over a car with a glossary, on everything REW holds."""
+    _app()
+    _project_glossary(glossary)
+    return _dialog(list(chosen), bridge=_FrBridge(), kind=kind, available=_IN_REW)
+
+
+def _fetch(dialog) -> None:
+    """Run the in-flight worker synchronously, so the traces are in hand rather than raced."""
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+
+def _pick_group(dialog, name: str) -> None:
+    at = next(i for i in range(dialog._group_combo.count())
+              if str(dialog._group_combo.itemText(i)).startswith(name + " "))
+    dialog._group_combo.setCurrentIndex(at)
+
+
+def test_a_group_is_its_members_sweeps_at_one_config_version():
+    """The ask that started step 3: see what the woofers do together before touching the DSP. The
+    names are the car's own glossary, and what gets fetched is each member's `(sw)` capture — the
+    only method that carries a phase, which is what a sum is made of."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    _pick_group(dialog, "Ws")
+    _fetch(dialog)
+
+    assert dialog._chosen() == ["w-L_02 (sw)", "w-R_02 (sw)"]
+    _pick_group(dialog, "ALL")
+    _fetch(dialog)
+    assert dialog._chosen() == [
+        "tw-L_02 (sw)", "tw-R_02 (sw)", "m-L_02 (sw)", "m-R_02 (sw)",
+        "w-L_02 (sw)", "w-R_02 (sw)",
+    ], "in the glossary's own member order, six of them"
+    assert [t.name for t in dialog._view._traces] == dialog._chosen()
+
+
+def test_the_group_picker_says_which_kind_of_group_each_row_is():
+    """`Ws` is a pair and `L` is a side. A list of bare names does not say which, and choosing the
+    wrong one is a different question, not a typo."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    rows = [dialog._group_combo.itemText(i) for i in range(dialog._group_combo.count())]
+
+    assert f"Ws · {i18n.t('curveGroupKind_pairs')}" in rows
+    assert f"SW+Ws · {i18n.t('curveGroupKind_joints')}" in rows
+    assert f"L · {i18n.t('curveGroupKind_sides')}" in rows
+    assert f"ALL · {i18n.t('curveGroupKind_combos')}" in rows
+
+
+def test_the_version_starts_on_the_one_the_chosen_curves_already_share():
+    """That is the round the tuner is working in. Moving them to another version unasked would
+    answer a different question than the one on screen."""
+    dialog = _group_dialog(chosen=("w-L_01 (sw)", "w-R_01 (sw)"))
+    _fetch(dialog)
+
+    assert str(dialog._version_combo.currentData()) == "01"
+
+    _pick_group(dialog, "Ws")
+    _fetch(dialog)
+
+    assert dialog._chosen() == ["w-L_01 (sw)", "w-R_01 (sw)"], "the group at THAT version"
+
+
+def test_with_the_curves_on_different_versions_the_group_takes_the_newest_rew_holds():
+    """No agreed version means no round to stay in, and the newest is the one the car is at."""
+    dialog = _group_dialog(chosen=("w-L_01 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+
+    assert str(dialog._version_combo.currentData()) == "02"
+
+
+def test_the_version_can_be_moved_and_the_group_follows_it():
+    """A tuner comparing rounds says which round. The control is beside the group for that."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+    _pick_group(dialog, "Ws")
+    _fetch(dialog)
+
+    dialog._version_combo.setCurrentIndex(dialog._version_combo.findData("01"))
+    _fetch(dialog)
+
+    assert dialog._chosen() == ["w-L_01 (sw)", "w-R_01 (sw)"]
+
+
+def test_a_member_rew_has_no_sweep_for_is_named_on_screen_not_skipped():
+    """`curve_sum` sees only what it is handed, so it cannot tell the sum of a joint from the sum
+    of the two thirds of it that happened to be in REW. This sentence is the only place in the
+    whole path that can — so it is on screen, not in a log."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    # At `_01` REW holds the two woofers of this joint and not the sub.
+    _pick_group(dialog, "SW+Ws")
+    dialog._version_combo.setCurrentIndex(dialog._version_combo.findData("01"))
+    _fetch(dialog)
+
+    assert dialog._chosen() == ["w-L_01 (sw)", "w-R_01 (sw)"], "what REW does have"
+    assert dialog._status.isVisibleTo(dialog)
+    assert "sw_01 (sw)" in dialog._status.text(), "named, in the title it would have had"
+    assert "SW+Ws" in dialog._status.text() and "_01" in dialog._status.text()
+
+
+def test_a_group_with_nothing_in_rew_changes_nothing_and_says_so():
+    """Better than an empty plot: the selection that was being looked at stays on screen.
+
+    Reached the way it happens in a car: the curves on screen are a round the tweeters were not
+    captured in, so the group starts on that round and there is nothing of it to find.
+    """
+    dialog = _group_dialog(chosen=("w-L_01 (sw)", "w-R_01 (sw)"))
+    _fetch(dialog)
+    before = list(dialog._chosen())
+
+    _pick_group(dialog, "TWs")
+
+    assert dialog._chosen() == before
+    assert "TWs" in dialog._status.text() and dialog._status.isVisibleTo(dialog)
+    assert "_01" in dialog._status.text(), "and says which round it looked in"
+
+
+def test_without_a_glossary_the_group_picker_says_so_and_the_checklist_still_works():
+    """A curve window that cannot open without a project file is worse than one offering a control
+    fewer — TCC is pointed at folders that were never through intake."""
+    dialog = _group_dialog(glossary={})
+    _fetch(dialog)
+
+    assert dialog._group_combo.isEnabled() is False
+    assert dialog._group_combo.itemText(0) == i18n.t("curveGroupNoGlossary")
+
+    dialog._choose_actions["m-L_02 (sw)"].setChecked(True)
+    _fetch(dialog)
+
+    assert "m-L_02 (sw)" in dialog._chosen(), "the checkbox list is untouched by any of it"
+
+
+def test_the_checklist_takes_any_set_and_everything_downstream_follows_it():
+    """Three drivers, then six. Traces, delays, the bank and the reading are all per trace — the
+    `[:2]` slices were the work, not the model (CURVE-ANALYSIS-PLAN.md)."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    for title in ("w-L_02 (sw)", "m-L_02 (sw)", "tw-L_02 (sw)"):
+        dialog._choose_actions[title].setChecked(True)
+    for title in ("w-R_02 (sw)",):
+        dialog._choose_actions[title].setChecked(False)
+    _fetch(dialog)
+
+    assert len(dialog._view._traces) == 3
+    assert len(dialog._view.delays()) == 3, "one delay per trace, not per pair"
+    # Every one of the three is addressable, and each keeps its own number.
+    for index, ms in enumerate((0.1, 0.2, 0.3)):
+        dialog._view.set_delay_target(index)
+        dialog._view.set_delay(ms)
+    assert dialog._view.delays() == pytest.approx([0.1, 0.2, 0.3])
+    banked = delay_bank.load()
+    assert set(banked) == {"w-L_02 (sw)", "m-L_02 (sw)", "tw-L_02 (sw)"}, "all three banked"
+    reading = dialog._view.reading()
+    assert all(name in reading for name in banked), "and the sentence names all three"
+
+    for title in ("w-R_02 (sw)", "m-R_02 (sw)", "tw-R_02 (sw)"):
+        dialog._choose_actions[title].setChecked(True)
+    _fetch(dialog)
+
+    assert len(dialog._view._traces) == 6
+    assert len(dialog._view.delays()) == 6
+    assert len(dialog._view._markers) == 6, "one marker per curve, however many there are"
+
+
+def test_the_two_pickers_and_the_checklist_are_one_selection():
+    """Three controls each holding part of the truth is how a window comes to draw one set of
+    curves and report another. Whichever was used last is what `_chosen()` says."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    _pick_group(dialog, "L")
+    _fetch(dialog)
+
+    assert len(dialog._chosen()) == 3
+    assert [dialog._pickers[i].currentData() for i in (0, 1)] == dialog._chosen()[:2], \
+        "the pickers show the first two of it rather than a stale pair"
+    ticked = {t for t, a in dialog._choose_actions.items() if a.isChecked()}
+    assert ticked == set(dialog._chosen()), "and the list ticks all of it"
+    assert dialog._choose_btn.text() == i18n.t("curveChooseBtn").format(n=3)
+
+    # A picker is the fast path back to a pair, and says so by collapsing the selection to one.
+    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("m-R_02 (sw)"))
+    _fetch(dialog)
+
+    assert len(dialog._chosen()) == 2 and dialog._chosen()[1] == "m-R_02 (sw)"
+    assert dialog._group_combo.currentIndex() == 0, "and it lets go of the group it is not"
+
+
+def test_seven_traces_each_get_a_colour_of_their_own():
+    """A whole side is four drivers and ALL+C is seven. Two colours cycling would paint driver
+    three exactly like driver one, on a plot whose whole job is telling drivers apart."""
+    from autosound_tcc.ui.tcc.curve_view import colour_of, trace_token
+
+    names = [colour_of(trace_token(i)).name() for i in range(8)]
+
+    assert len(set(names)) == 8, "eight curves, eight colours"
+    theme = current_theme()
+    reserved = {theme.yellow, theme.warn, theme.ok, theme.muted, theme.faint}
+    assert not (set(names) & reserved), "and none of them is a colour that already MEANS something"
+
+
+def test_the_delay_radios_grow_with_the_selection():
+    """The radio is how a driver is chosen to be held back. With two of them, four of six drivers
+    were unreachable."""
+    view = _view()
+    assert sum(1 for b in view._target_buttons if b.isVisibleTo(view)) == 2
+
+    view.set_traces([Trace(f"d{i}_02 (sw)", *_impulse(4.0 + i * 0.1)) for i in range(6)])
+
+    live = [b for b in view._target_buttons if b.isVisibleTo(view)]
+    assert len(live) == 6
+    view.set_delay_target(5)
+    view.set_delay(0.42)
+    assert view.delays()[5] == pytest.approx(0.42)
+    assert view.delays()[:5] == pytest.approx([0.0] * 5), "and only that one moved"
+
+
+def test_the_delay_starts_on_the_earliest_arrival_of_however_many_there_are():
+    """It is the only driver a DSP can hold back — over a whole side as much as over a pair."""
+    view = _view()
+
+    view.set_traces([
+        Trace("a_02 (sw)", *_impulse(5.2)),
+        Trace("b_02 (sw)", *_impulse(4.9)),
+        Trace("c_02 (sw)", *_impulse(4.4)),
+        Trace("d_02 (sw)", *_impulse(5.6)),
+    ])
+
+    assert view.delay_target() == 2, "c arrives first"
+
+
+# ---- the cross modes stay pairwise (CURVE-ANALYSIS-PLAN.md, "Markers are pair-shaped") --------
+
+
+def test_the_cross_modes_read_the_two_curves_the_tuner_names():
+    """Vx answers "how far apart are THESE TWO at this x", and over six drivers there is no
+    N-curve form of that: fifteen pairwise gaps are not a reading. So the pair is chosen, and it
+    defaults to the first two."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("w-R_01 (sw)", level_db=84.0),
+                    _fr_trace("m-L_01 (sw)", level_db=70.0))
+    view.set_markers([1000.0], ["one"], ["accent"])
+    view.set_axes_mode("vx")
+
+    assert view.cross_pair() == (0, 1)
+    assert len(view.crossings()) == 2, "two curves, not three"
+    assert "Δ 6.0 dB" in view.reading()
+
+    view.set_cross_pair(0, 2)
+
+    assert [round(y) for _x, y in view.crossings()] == [90, 70]
+    assert "Δ 20.0 dB" in view.reading()
+    assert "m-L_01 (sw)" in view.reading() and "w-R_01 (sw)" not in view.reading(), \
+        "the sentence names the two that were compared"
+
+
+def test_the_pair_pickers_appear_only_where_there_is_a_pair_to_choose():
+    """With two curves the pair IS the selection; outside a cross mode there is no pairwise
+    question on screen at all."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    view.set_axes_mode("vx")
+    assert view._cross_combos[0].isVisibleTo(view) is False
+
+    view.set_traces([_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"),
+                     _fr_trace("m-L_01 (sw)")])
+
+    assert view._cross_combos[0].isVisibleTo(view) is True
+    assert [view._cross_combos[i].currentData() for i in (0, 1)] == [0, 1]
+
+    view.set_axes_mode("vh")
+
+    assert view._cross_combos[0].isVisibleTo(view) is False, "no cross mode, no pair to choose"
+
+
+def test_the_per_curve_markers_still_answer_for_every_curve():
+    """The half of the decision that is easy to lose: the cross modes narrow to two, and the
+    ordinary markers keep reading all of them, one number each."""
+    view = _fr_view(*[_fr_trace(f"d{i}_01 (sw)", level_db=90.0 - i) for i in range(5)])
+    view.set_markers([100.0, 200.0, 400.0, 800.0, 1600.0],
+                     [f"d{i}_01 (sw)" for i in range(5)],
+                     [f"trace#{i}" if i > 1 else ("accent", "info")[i] for i in range(5)])
+
+    view.set_axes_mode("v")
+
+    reading = view.reading()
+    assert all(f"d{i}_01 (sw)" in reading for i in range(5))
+    assert len(view.positions()) == 5
+
+
+# ---- the sum's own strip, under the impulse (user, 2026-08-18) --------------------------------
+
+
+def _impulse_with_spectrum(name: str, peak_ms: float, points: int = 240) -> Trace:
+    """An impulse trace as the worker now builds one: the time domain to DRAW, and the frequency
+    domain from the same measurement, which is what the strip under it adds up."""
+    xs, ys = _impulse(peak_ms)
+    freqs = [20.0 * (2 ** (i / 24.0)) for i in range(points)]
+    return Trace(
+        name, xs, ys,
+        magnitude_db=[90.0] * points, phase_deg=[0.0] * points, freqs_hz=freqs,
+        config_version="1", method="sw", start_time_s=0.00518,
+    )
+
+
+def _impulse_sum_view() -> CurveView:
+    _app()
+    view = CurveView(x_label="ms")
+    _KEEP.append(view)
+    view.set_traces([_impulse_with_spectrum("w-L_01 (sw)", 4.52),
+                     _impulse_with_spectrum("w-R_01 (sw)", 4.52)])
+    return view
+
+
+def test_the_strip_is_where_the_sum_goes_on_an_impulse():
+    """Decided by the user, 2026-08-18: not a second Y axis, because the impulse's x is TIME and
+    the sum's is frequency, so there is no pair of axes they can share. It is under the plot rather
+    than on another view because the delay is dragged HERE."""
+    view = _impulse_sum_view()
+
+    view.set_sum_shown(True)
+
+    assert view.strip_shown() is True
+    assert view._plot.getPlotItem().getAxis("right").isVisible() is False, "not on the time axis"
+    assert view._strip.parent() is view, "a child of the view, destroyed with it"
+    assert view._strip.plotItem.vb.menuEnabled() is False, "and it builds no ViewBox menu"
+    xs, _ys = view._strip_curve.getData()
+    assert xs[0] == pytest.approx(math.log10(20.0)), "hertz, on a log axis of its own"
+    pen = view._strip_curve.opts["pen"]
+    assert pen.style() == Qt.PenStyle.DashLine and pen.widthF() >= 2.0, "the sum's own pen"
+
+
+def test_the_strip_is_not_built_until_a_sum_is_drawn_on_an_impulse():
+    """A whole second PlotWidget, in the file whose crash history is how many of them get built —
+    so a window that never asks for one carries the graphics items it always carried."""
+    view = _impulse_sum_view()
+    assert view._strip is None
+
+    view.set_sum_shown(True)
+    built = view._strip
+    view.set_sum_shown(False)
+    view.set_sum_shown(True)
+
+    assert view._strip is built, "never rebuilt: construct/destroy cycles are what crash here"
+
+
+def test_with_the_sum_off_there_is_no_strip():
+    view = _impulse_sum_view()
+
+    assert view.strip_shown() is False
+    view.set_sum_shown(True)
+    assert view.strip_shown() is True
+    view.set_sum_shown(False)
+    assert view.strip_shown() is False, "and it leaves with the toggle, not just the curve"
+
+
+def test_the_strip_belongs_to_the_impulse_and_nowhere_else():
+    """On the phase and the frequency response the sum already has the right-hand axis. A second,
+    empty band under those would be a strip of window spent saying nothing."""
+    phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    phase.set_sum_shown(True)
+    assert phase.strip_shown() is False
+    assert phase._plot.getPlotItem().getAxis("right").isVisible() is True
+
+    fr = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    fr.set_sum_shown(True)
+    assert fr.strip_shown() is False
+
+
+def test_the_strip_follows_the_delay_being_dragged_on_the_impulse():
+    """The whole point of putting it there. Two identical drivers 0.5 ms apart cancel at 1 kHz —
+    read off `|2A cos(pi f tau)|`, not off a previous run of this code — and the strip has to show
+    that while the drag is happening, without a switch to another view."""
+    view = _impulse_sum_view()
+    view.set_sum_shown(True)
+    assert _at(view.sum_result(), 1000.0) == pytest.approx(96.02, abs=0.01)
+    _xs, before = view._strip_curve.getData()
+
+    view.set_delay_target(1)
+    view.set_delay(0.5)
+
+    assert _at(view.sum_result(), 1000.0) < 70.0, "a half cycle at 1 kHz is a cancellation"
+    _xs, after = view._strip_curve.getData()
+    assert before[len(before) // 2] != pytest.approx(after[len(after) // 2]), \
+        "and the drawn curve moved with it, not only the number behind it"
+    assert view.strip_shown() is True
+
+
+def test_the_impulse_sum_is_the_same_sum_the_phase_view_draws():
+    """One engine, one set of inputs, two places to draw it. A strip computing its own answer is
+    how two views of one window come to disagree about what the drivers do together."""
+    strip = _impulse_sum_view()
+    strip.set_sum_shown(True)
+
+    phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    phase.set_sum_shown(True)
+
+    assert _at(strip.sum_result(), 1000.0) == pytest.approx(_at(phase.sum_result(), 1000.0))
+    assert "ASSUMED, NOT CHECKED" in strip.sum_text(), "with the precondition still attached"
+
+
+def test_the_worker_brings_the_spectrum_back_with_the_impulse():
+    """The strip needs the frequency domain of a capture the impulse view draws in time. REW
+    returns both halves from one extra call, and the toggle is flipped while the window is open —
+    a strip that needed a re-fetch to appear would answer a second later than the question."""
+    _app()
+
+    worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "impulse")
+    got: list = []
+    worker.done.connect(got.append)
+    worker.run()
+
+    trace = got[-1][0]
+    assert len(trace.x) == 200, "the impulse is still what is drawn"
+    assert trace.freqs_hz is not None and trace.magnitude_db is not None
+    assert trace.phase_deg is not None, "and a sum needs both halves of it"
+
+
+def test_an_impulse_still_plots_when_rew_has_no_response_for_it():
+    """The trace is the payload of that view. Losing the sum's inputs costs the strip; losing the
+    trace would cost the curve the window was opened for."""
+    _app()
+
+    worker = _CurveWorker(_FakeBridge(), ["w-L_01 (sw)"], "impulse")  # no `frequency_response`
+    got: list = []
+    worker.done.connect(got.append)
+    worker.run()
+
+    trace = got[-1][0]
+    assert len(trace.x) == 200
+    assert trace.freqs_hz is None and trace.magnitude_db is None
