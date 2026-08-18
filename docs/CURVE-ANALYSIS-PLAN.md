@@ -95,6 +95,20 @@ Kept explicit so two agents (or two sessions) do not land in the same file.
 
 ## Method
 
-One branch per step, tests before code, `/code-review` before merge, and implementation by Opus-5
-agents with disjoint file scopes; the orchestrating session reviews and commits, and agents run no
-git commands. The first two steps are being built in parallel because their files do not overlap.
+One branch per step, tests before code, `/code-review` before merge, and implementation by agents
+with disjoint file scopes; the orchestrating session reviews and commits, and **agents run no git
+commands** — one agent's `git add -A` would sweep up another's half-finished work. The first two
+steps are built in parallel because their files do not overlap.
+
+**Which model does which job** (decided 2026-08-18, and it is the product's own Generator ↔ Critic
+rule turned on the code):
+
+| Work | Model | Why |
+| :-- | :-- | :-- |
+| Changes to code | Opus 5 | the user's floor for anything that edits the app |
+| Deciding what a test must ASSERT, where physics decides it | Fable 5, or the orchestrator | a weaker model writes tests that agree with the implementation instead of checking it against the physics — the same failure shape this project documents for tuning: it does not error, it concurs |
+| Mechanical and line-checkable: running suites, i18n en/uk parity, porting the translated READMEs, reading transcripts | Sonnet 5 | volume work whose output can be verified line by line |
+| Review | a model that did not write the code | anti-anchoring, for the same reason the method never lets one model both propose and approve |
+
+The model is chosen per task by the orchestrating session, so no session has to be switched to
+change tiers.
