@@ -378,6 +378,14 @@ stands cannot be applied — say which reference to move instead.",
         # without hovering anything.
         "curveBankBtn": "Delays read ({n})",
         "curveSumNoteBtn": "Σ forecast",
+        "curveGuidesTip": "Take every guide off the picture: the markers, the levels, the cross \
+line and its dots. Nothing is lost — each one comes back exactly where it was, and the reading \
+stays the same sentence, because a marker you cannot see is still a number you took. While they \
+are hidden they cannot be dragged.",
+        "curveStripLinkTip": "Follow the plot's frequency scale. On the phase the strip and the \
+plot are the same frequencies, so one zoom moves both and what you see at 3 kHz above is at 3 kHz \
+below. Switch it off to zoom into a null on its own, and back on to line them up again. Not \
+offered on the impulse: that plot's axis is time.",
         "curveReadoutBtn": "Reading →",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveClearLabel": "clear:",
@@ -870,6 +878,14 @@ Choose sweeps (sw) above to read this.",
         "curveBankLabelIn": "зчитані затримки в {set}:",
         "curveBankBtn": "Зчитані затримки ({n})",
         "curveSumNoteBtn": "Σ прогноз",
+        "curveGuidesTip": "Прибрати з картинки всі напрямні: маркери, рівні, перехресну лінію та \
+її точки. Нічого не втрачається — кожна повертається туди, де була, а показання лишаються тим \
+самим реченням, бо невидимий маркер — це все одно знятий тобою показник. Поки сховані, їх не \
+потягнеш.",
+        "curveStripLinkTip": "Слідувати за шкалою частот графіка. На фазі смуга і графік — це ті \
+самі частоти, тож один зум рухає обидва, і що видно на 3 кГц угорі, те й на 3 кГц унизу. Вимкни, \
+щоб наблизити провал окремо, і ввімкни, щоб знову їх зіставити. На імпульсній не пропонується: \
+там вісь — час.",
         "curveReadoutBtn": "Показання →",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveClearLabel": "очистити:",

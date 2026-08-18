@@ -2243,10 +2243,21 @@ def test_the_strip_is_where_the_sum_goes_on_an_impulse():
 
     assert view.strip_shown() is True
     assert view._plot.getPlotItem().getAxis("right").isVisible() is False, "not on the time axis"
-    assert view._strip.parent() is view, "a child of the view, destroyed with it"
+    # Through the splitter now, which is what makes the boundary draggable -- but still inside
+    # this view's own object tree, which is the property that matters: Qt destroys it with the
+    # view, in order, and nothing is left parked on a PlotItem to outlive it.
+    assert view._strip.parent() is view._split
+    assert view._split.parent() is view, "the splitter is the view's, so the strip dies with it"
     assert view._strip.plotItem.vb.menuEnabled() is False, "and it builds no ViewBox menu"
     xs, _ys = view._strip_curve.getData()
-    assert xs[0] == pytest.approx(math.log10(20.0)), "hertz, on a log axis of its own"
+    # `getData()` answers in DISPLAY coordinates, so a strip in log mode reports log10(Hz) even
+    # though it was handed raw hertz -- the transform is pyqtgraph's, not ours. That is the whole
+    # difference between the two drawing surfaces: the strip owns its items and log-modes them,
+    # while the right-hand ViewBox above owns nothing pyqtgraph will transform, so THAT curve is
+    # given log10 computed by hand. `getOriginalDataset` is what shows the hertz we passed.
+    assert xs[0] == pytest.approx(math.log10(20.0), rel=0.05), "log10 hertz, in display coordinates"
+    raw_x, _raw_y = view._strip_curve.getOriginalDataset()
+    assert raw_x[0] == pytest.approx(20.0, rel=0.05), "and plain hertz underneath"
     pen = view._strip_curve.opts["pen"]
     assert pen.style() == Qt.PenStyle.DashLine and pen.widthF() >= 2.0, "the sum's own pen"
 
@@ -2275,17 +2286,47 @@ def test_with_the_sum_off_there_is_no_strip():
     assert view.strip_shown() is False, "and it leaves with the toggle, not just the curve"
 
 
-def test_the_strip_belongs_to_the_impulse_and_nowhere_else():
-    """On the phase and the frequency response the sum already has the right-hand axis. A second,
-    empty band under those would be a strip of window spent saying nothing."""
+def test_the_strip_takes_the_phase_too_and_the_frequency_response_keeps_its_axis():
+    """The user's verdict after using it (2026-08-18): the phase reads better with the sum in a
+    band of its own, with the drivers thin under it, than squeezed onto a second scale over a plot
+    in degrees. The frequency response is already in dB, so there the sum stays over the curves it
+    was computed from and only got heavier."""
     phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
     phase.set_sum_shown(True)
-    assert phase.strip_shown() is False
-    assert phase._plot.getPlotItem().getAxis("right").isVisible() is True
+    assert phase.strip_shown() is True
+    assert phase._plot.getPlotItem().getAxis("right").isVisible() is False
 
     fr = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
     fr.set_sum_shown(True)
     assert fr.strip_shown() is False
+    assert fr._plot.getPlotItem().getAxis("right").isVisible() is True
+
+
+def test_the_phase_strip_follows_the_plot_until_it_is_unlinked():
+    """Asked for in both directions (user, 2026-08-18): the two pictures over one another while a
+    joint is read, and the strip on its own while a null is zoomed into."""
+    phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    phase.set_sum_shown(True)
+    assert phase.strip_linked() is True
+    assert phase._strip.getPlotItem().vb.linkedView(0) is phase._plot.getPlotItem().vb
+
+    phase.set_strip_linked(False)
+    assert phase.strip_linked() is False
+    assert phase._strip.getPlotItem().vb.linkedView(0) is None
+
+    phase.set_strip_linked(True)
+    assert phase._strip.getPlotItem().vb.linkedView(0) is phase._plot.getPlotItem().vb
+
+
+def test_the_impulse_strip_is_never_linked_because_that_x_is_time():
+    """Linking hertz to milliseconds would be two quantities forced onto one scale, so the impulse
+    strip opens on the audible band instead and the toggle is not offered."""
+    view = _impulse_sum_view()
+    view.set_sum_shown(True)
+
+    assert view.strip_linked() is False
+    assert view._strip.getPlotItem().vb.linkedView(0) is None
+    assert view._link_btn.isVisible() is False
 
 
 def test_the_strip_follows_the_delay_being_dragged_on_the_impulse():

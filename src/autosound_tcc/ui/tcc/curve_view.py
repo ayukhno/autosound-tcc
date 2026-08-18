@@ -42,12 +42,14 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QRadioButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from autosound_tcc.core import curve_sum
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
@@ -83,9 +85,21 @@ _GUIDE_WIDTH = 2.4
 #: the markers, and `warn`/`ok` carry a verdict in this palette — "wrong" and "fine" — which a
 #: prediction is neither of. Near-full alpha rather than full, so the dash still sits a step
 #: behind the measured curves it was computed from.
+#: One width for the sum wherever it is drawn — the strip and the right-hand axis both take it
+#: from here, so the prediction never reads as two different things in two views. 3.0 rather than
+#: the first 2.2 because the strip put the drivers' own curves beside it: among four thin lines a
+#: dash only slightly heavier than the rest is just another line (user, 2026-08-18, second look:
+#: "на АЧХ все супер, тільки зроби суму жирніше").
 _SUM_TOKEN = "yellow"
 _SUM_ALPHA = 235
-_SUM_WIDTH = 2.2
+_SUM_WIDTH = 3.0
+#: The drivers' own magnitudes in the strip, under the sum. Thin and a little translucent on
+#: purpose: they are there to be COMPARED with the sum — "is the joint filling in, and by how much
+#: over the drivers that make it" — and at the sum's weight four of them would bury the one curve
+#: the strip exists for. Each keeps its own trace colour, so the strip and the plot above name the
+#: same driver the same way.
+_STRIP_TRACE_WIDTH = 1.0
+_STRIP_TRACE_ALPHA = 165
 #: How far under its own loudest point the drawn sum is allowed to fall. `curve_sum` returns −inf
 #: at an exact null and says in as many words that the floor is the DRAWING's decision — without
 #: one, a synthetic cancellation takes the whole right-hand axis to −inf and the curve with it.
@@ -107,10 +121,26 @@ _OVERLAY_MARGIN_PX = 6
 #: `rounded_tooltip`, which is shared with every other tip in the app.
 _TIP_WRAP_CHARS = 72
 _TIP_FONT_PX = 15
-#: How tall the sum's own strip stands under an impulse, in pixels. Short on purpose: the plot
-#: above it is what is being worked in — the delay is DRAGGED there — and the strip answers one
-#: question, "is the joint filling in", which a band 6 dB deep is enough to show.
-_STRIP_HEIGHT_PX = 132
+#: How the plot and the sum's strip share the height. A THIRD to the strip by default — short,
+#: because the plot above is what is being worked in (the delay is dragged there) — but the
+#: boundary is a splitter handle the tuner drags (user, 2026-08-18: "треба щоб можна було кордон
+#: між верхнім і нижнім вікном двигати"), so this is only where it starts. The two minimums are
+#: what `setChildrenCollapsible(False)` needs to mean anything: without them a drag to the end
+#: leaves one of the two plots a few pixels tall, which is neither hidden nor usable.
+_STRIP_SHARE = 0.32
+_STRIP_MIN_PX = 84
+#: What the strip opens on when it is NOT following the plot above — the impulse, where the plot
+#: is in time, and the phase after the link has been switched off. The audible band, the same one
+#: `curve_dialog` opens a frequency view on: outside it a REW sweep is measurement noise, and
+#: auto-ranging over that flattens the part being argued about.
+_STRIP_BAND_HZ = (20.0, 20000.0)
+_PLOT_MIN_PX = 140
+#: Where the share the tuner dragged to is kept. In the app's own store, beside the theme, the
+#: zoom and the tree's collapse state — the same store this window's siblings already persist
+#: their layout in (`app_settings`), so a curve window opened tomorrow opens the way it was left.
+#: The FRACTION rather than the two pixel sizes: the window is resized between sessions and
+#: between machines, and pixels restored into a different height are not the same split.
+_SPLIT_KEY = "curve/sumSplitShare"
 #: The name a trace colour goes by when the palette has no token for it — `trace#N`, resolved
 #: against the CURRENT theme by `colour_of`. A hex string would have done, except that markers
 #: keep their colour name across a theme switch (`apply_theme` re-sets them with the same list),
@@ -377,6 +407,13 @@ class CurveView(QWidget):
         # Which way the markers read. On an FR the question is as often "how many dB is that dip"
         # as "at what frequency" (user, 2026-08-11), and on a joint it is both at once.
         self._axes_mode = "v"
+        #: Whether every guide is off the picture. Set before anything that draws one, because the
+        #: rule that decides a marker's visibility (`_marker_visible`) reads it on every pass.
+        self._guides_hidden = False
+        #: Whether the strip follows the plot's frequency scale. True by default because on the
+        #: phase the two pictures are read as one; meaningless on the impulse, where
+        #: `_strip_linkable` refuses it whatever this says.
+        self._strip_linked = True
         self._zoom_buttons: list[tuple[QPushButton, str]] = []
         self._axes_buttons: list[tuple[QPushButton, str]] = []
 
@@ -418,7 +455,27 @@ class CurveView(QWidget):
             self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
         self._legend = self._plot.addLegend(offset=(-8, 8), labelTextColor=theme.text)
-        layout.addWidget(self._plot, stretch=1)
+        # The plot goes in a SPLITTER rather than straight into the layout, so the boundary between
+        # it and the sum's strip is a handle the tuner drags (user, 2026-08-18). Built here and not
+        # with the strip: reparenting the plot after it has been laid out, drawn and had a button
+        # placed on it is a rearrangement of the one widget this window is about, and doing it once
+        # at construction costs a splitter with a single child in the windows that never show a
+        # strip. `setChildrenCollapsible(False)` because a boundary dragged to the end should give
+        # one side everything it can use, not make the other disappear — hiding the strip is what
+        # the Σ toggle is for, and a strip collapsed to nothing looks exactly like a broken one.
+        self._split = QSplitter(Qt.Orientation.Vertical)
+        self._split.setProperty("class", "curve-split")
+        self._split.setChildrenCollapsible(False)
+        self._split.setHandleWidth(8)
+        self._plot.setMinimumHeight(_PLOT_MIN_PX)
+        self._split.addWidget(self._plot)
+        self._split.splitterMoved.connect(self._on_split_moved)
+        layout.addWidget(self._split, stretch=1)
+        #: What share of the height the strip takes, as the tuner last left it. Read once here:
+        #: the store is on disk, this is asked on every show of the strip, and a window that has
+        #: not been dragged yet must not pay for a settings read per redraw.
+        self._settings = get_settings()
+        self._strip_share = self._read_split_share()
 
         #: Whether the predicted sum is drawn, and everything it produced last time it was.
         #: OFF by default, deliberately. This window is opened to compare two measured curves as
@@ -446,6 +503,10 @@ class CurveView(QWidget):
         self._strip: Optional[pg.PlotWidget] = None
         self._strip_failed = False
         self._strip_curve = None
+        #: The drivers' own magnitudes drawn thin in the strip, under the sum. Held so they can be
+        #: taken off again with the sum: they are redrawn from the traces on every pass, like the
+        #: sum itself, and a curve left behind would be a second driver drawn at the old delay.
+        self._strip_traces: list = []
         self._layout = layout
 
         # ON the chart, in the plot AREA's top-left corner (user, 2026-08-18, with the
@@ -580,6 +641,42 @@ class CurveView(QWidget):
             button.clicked.connect(lambda _checked, m=mode: self.set_axes_mode(m))
             row.addWidget(button)
             self._axes_buttons.append((button, mode))
+
+        # Take every guide off the picture at once and put it back (user, 2026-08-18: "додай кнопку
+        # сховати всі направляючі, типу '0' або 'Х'"). Beside the mode buttons because it is about
+        # the same objects they place, and "×" rather than "0": a nought reads as a value, and this
+        # is a crossing-out. The only other × in this window is the LABEL between the two cross-pair
+        # combos in the row above, which is not a button and does not act.
+        # A big X, and red (user, 2026-08-18: "велика 'X' і кнопка червоного кольору"). Bigger
+        # than the zoom buttons beside it and in the warning colour whatever its state, because it
+        # is the one control here that takes something OFF the picture -- the others move a view,
+        # this one removes what the numbers were read from. Red at rest, filled red when the
+        # guides are actually hidden, so the state is legible from across a car seat.
+        self._guides_btn = QPushButton("✕")
+        self._guides_btn.setProperty("class", "zoom-btn")
+        self._guides_btn.setCheckable(True)
+        self._guides_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._guides_btn.setFixedSize(34, 26)
+        font = self._guides_btn.font()
+        font.setPointSizeF(font.pointSizeF() * 1.35)
+        font.setBold(True)
+        self._guides_btn.setFont(font)
+        # The strip's link to the plot's frequency scale. Beside the guides toggle because both
+        # are about what the picture shows rather than about the measurements, and hidden entirely
+        # on the impulse, where there is no frequency above to link to.
+        self._link_btn = QPushButton("⇅")
+        self._link_btn.setProperty("class", "zoom-btn")
+        self._link_btn.setCheckable(True)
+        self._link_btn.setChecked(True)
+        self._link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._link_btn.setFixedSize(30, 24)
+        self._link_btn.setVisible(False)
+        attach_tip(self._link_btn, tip_html(i18n.t("curveStripLinkTip")))
+        self._link_btn.clicked.connect(self.set_strip_linked)
+        attach_tip(self._guides_btn, tip_html(i18n.t("curveGuidesTip")))
+        self._guides_btn.clicked.connect(self.set_guides_hidden)
+        row.addWidget(self._guides_btn)
+        row.addWidget(self._link_btn)
 
         for key, handler in (
             ("curveZoomAll", self.show_all),
@@ -1118,12 +1215,23 @@ class CurveView(QWidget):
     def _on_strip(self) -> bool:
         """Whether the sum belongs in its own strip rather than on the right-hand axis.
 
-        The impulse's x is TIME and the sum's is frequency, so those two cannot share one pair of
-        axes — the strip under the plot is the answer, and it is under the plot rather than on
-        another view because the delay is DRAGGED here: the tuner should watch the joint fill in
-        while dragging (user, 2026-08-18).
+        On the impulse it MUST: that x is TIME and the sum's is frequency, so those two cannot
+        share one pair of axes. The strip goes under the plot rather than on another view because
+        the delay is DRAGGED here, and the point is watching the joint fill in while dragging
+        (user, 2026-08-18).
+
+        On the phase it is the user's own verdict after using it ("давай і на фазі використовувати
+        вікно внизу — дуже клево"), and the reason is the same one that made the strip work: a sum
+        squeezed onto a second scale over a plot in degrees is a fourth line among the curves,
+        while a band of its own with the drivers drawn thin under it is a picture of one question.
+        The frequency response keeps the right-hand axis — there the plot is ALREADY in dB, so the
+        sum stands in the same units over the curves it was computed from, and the user asked for
+        nothing there but a heavier line.
+
+        Asked in this widget's own vocabulary, which is units: milliseconds is the impulse,
+        degrees is the phase, and the frequency response is the one that answers in dB.
         """
-        return self._unit == "ms"
+        return self._unit == "ms" or self._y_unit == "°"
 
     def _sum_possible(self) -> bool:
         """Whether this view has somewhere to draw a sum at all.
@@ -1203,6 +1311,10 @@ class CurveView(QWidget):
         on_strip = self._on_strip()
         self._plot.getPlotItem().showAxis("right", bool(drawn) and not on_strip)
         self._show_strip(bool(drawn) and on_strip)
+        # After the strip's visibility settles, not before: the link toggle is offered only while
+        # there is a strip on screen to link, and `_apply_strip_link` is what puts an unlinked
+        # strip back on its own band when the kind changed under it.
+        self._apply_strip_link()
         self._render_sum_note()
 
     def _compute_sum(self) -> tuple[str, bool]:
@@ -1279,32 +1391,98 @@ class CurveView(QWidget):
         return True
 
     def _draw_sum_on_strip(self, freqs, values) -> bool:
-        """The impulse: in the strip below the plot, which has a frequency axis of its own.
+        """The strip below the plot: every driver's magnitude thin, and the sum over them thick.
 
-        Raw hertz, not log10: this curve is owned by the strip's own `PlotItem`, so pyqtgraph's log
-        mode transforms it — which is the whole reason it is a `PlotDataItem` here and a
+        Raw hertz, not log10: these curves are owned by the strip's own `PlotItem`, so pyqtgraph's
+        log mode transforms them — which is the whole reason they are `PlotDataItem`s here and a
         `PlotCurveItem` on the second ViewBox above, where nothing would.
+
+        The drivers are drawn FIRST and the sum last, because pyqtgraph stacks in insertion order
+        and the sum is the answer: it crosses four thin lines and has to stay readable across all
+        of them.
         """
         if not self._ensure_strip():
             return False
+        floors = self._draw_traces_on_strip()
         self._strip_curve = self._strip.plot(
             freqs, values,
             pen=pg.mkPen(self._sum_colour(), width=_SUM_WIDTH, style=Qt.PenStyle.DashLine),
             connect="finite",
         )
         self._strip_curve.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        low, high = float(np.nanmin(values)), float(np.nanmax(values))
+        self._set_strip_range(np.concatenate([np.asarray(values, dtype=float), floors])
+                              if floors.size else values)
+        return True
+
+    def _draw_traces_on_strip(self):
+        """Each plotted driver's own magnitude, thin, in its own colour. Returns what it drew.
+
+        Asked for after the strip had been used for a day (user, 2026-08-18: "давай там покажемо
+        ще і обидві криві тоненько, а суму зробимо товще"), and it is what makes the strip a
+        reading rather than a shape: +6 dB over the drivers is two drivers adding, and the same
+        curve with no drivers under it is just a line that goes up and down.
+
+        A magnitude does not move when a driver is delayed — only the sum does — so these are
+        drawn from the measurement exactly as captured, and only the dashed curve over them
+        answers to the radio and the spin box.
+        """
+        for item in self._strip_traces:
+            self._strip.removeItem(item)
+        self._strip_traces = []
+        drawn: list = []
+        for index, trace in enumerate(self._traces):
+            if trace.magnitude_db is None:
+                continue
+            # `x` is the frequency axis wherever this window plots against hertz, and TIME on the
+            # impulse — where `freqs_hz` is the axis the capture also carries. The same choice
+            # `_sum_inputs` makes, for the same reason.
+            hz = trace.freqs_hz if trace.freqs_hz is not None else trace.x
+            magnitude = np.asarray(trace.magnitude_db, dtype=float)
+            colour = colour_of(trace_token(index))
+            colour.setAlpha(_STRIP_TRACE_ALPHA)
+            item = self._strip.plot(
+                np.asarray(hz, dtype=float), magnitude,
+                pen=pg.mkPen(colour, width=_STRIP_TRACE_WIDTH),
+                connect="finite",
+            )
+            item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            self._strip_traces.append(item)
+            drawn.append(magnitude[np.isfinite(magnitude)])
+        return np.concatenate(drawn) if drawn else np.asarray([], dtype=float)
+
+    def _set_strip_range(self, values) -> None:
+        """Fit the strip to the sum AND the drivers under it, without either flattening the other.
+
+        The top is whatever is loudest, which is normally the sum — two drivers add to ~6 dB over
+        either of them, and a band that cut that off would hide the one number the strip is read
+        for. The bottom is the drivers, which is the point of drawing them, but not without limit:
+        a measurement runs into the noise floor at the edges of its band, and 100 dB of that in a
+        band 132 px tall leaves the top 6 dB indistinguishable from a straight line. So the floor
+        is the same 60 dB window the sum's own null is floored into, taken from the top.
+        """
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if not finite.size:
+            return
+        high = float(finite.max())
+        low = max(float(finite.min()), high - _SUM_FLOOR_DB)
         pad = max((high - low) * 0.08, 1.0)
         self._strip.setYRange(low - pad, high + pad, padding=0)
-        return True
 
     def _clear_sum_curve(self) -> None:
         if self._sum_curve is not None and self._sum_vb is not None:
             self._sum_vb.removeItem(self._sum_curve)
         self._sum_curve = None
-        if self._strip_curve is not None and self._strip is not None:
-            self._strip.removeItem(self._strip_curve)
+        if self._strip is not None:
+            if self._strip_curve is not None:
+                self._strip.removeItem(self._strip_curve)
+            # The drivers' own lines go with the sum, always: they are the same redraw. Left
+            # behind, a driver would still be on screen after the selection that named it was
+            # replaced.
+            for item in self._strip_traces:
+                self._strip.removeItem(item)
         self._strip_curve = None
+        self._strip_traces = []
 
     # ---- the sum's own strip, under the impulse (user, 2026-08-18) -------
 
@@ -1322,29 +1500,34 @@ class CurveView(QWidget):
         return self._strip is not None
 
     def _build_strip(self) -> None:
-        """A short second plot under the impulse: x in hertz, y in dB, the sum and nothing else.
+        """A second plot under the main one: x in hertz, y in dB, the drivers and their sum.
 
         Not a second Y axis on the impulse (user, 2026-08-18): the impulse's x is TIME and the
         sum's is FREQUENCY, so there is no pair of axes they can share. It goes under the plot
         rather than on another view because the delay is dragged HERE, and the point of the whole
-        feature is watching the joint fill in while it is dragged.
+        feature is watching the joint fill in while it is dragged. The phase view sends its sum
+        here too — see `_on_strip`.
 
-        **Ownership, because this file has been bitten by it.** The widget is a child of this one,
-        in this one's layout, destroyed with it by Qt, in order. `enableMenu=False` at construction
-        for the reason spelled out at `self._plot`: `ViewBox.__init__` builds a whole `ViewBoxMenu`
-        otherwise, and constructing and dropping enough of those segfaults the process from inside
-        its own `__init__`. `_adopt_orphan_menus` then takes ownership of the parentless "Plot
-        Options" menu `PlotItem` builds whatever anyone says.
+        **Ownership, because this file has been bitten by it.** The widget goes into this widget's
+        own splitter, which is in this widget's layout: destroyed with the view by Qt, in order.
+        `enableMenu=False` at construction for the reason spelled out at `self._plot`:
+        `ViewBox.__init__` builds a whole `ViewBoxMenu` otherwise, and constructing and dropping
+        enough of those segfaults the process from inside its own `__init__`. `_adopt_orphan_menus`
+        then takes ownership of the parentless "Plot Options" menu `PlotItem` builds whatever
+        anyone says.
 
-        Guarded end to end: a pyqtgraph that moved these internals leaves the impulse without a
-        strip, not the window without a curve.
+        Guarded end to end: a pyqtgraph that moved these internals leaves the view without a strip,
+        not the window without a curve.
         """
         try:
             theme = current_theme()
             strip = pg.PlotWidget(background=theme.panel, enableMenu=False)
             strip.setMenuEnabled(False)
             strip.getPlotItem().hideButtons()
-            strip.setFixedHeight(_STRIP_HEIGHT_PX)
+            # A minimum, not a fixed height: the boundary is dragged now, and a fixed height is a
+            # handle that refuses to move. The minimum is what keeps a drag to the bottom from
+            # leaving a band too short to read a curve in.
+            strip.setMinimumHeight(_STRIP_MIN_PX)
             strip.setLogMode(x=True, y=False)
             axis = LogHzAxis(orientation="bottom")
             axis.setPen(pg.mkPen(theme.border2))
@@ -1356,23 +1539,150 @@ class CurveView(QWidget):
             strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
             strip.showGrid(x=True, y=True, alpha=0.18)
             self._adopt_orphan_menus(strip)
-            # Directly under the plot and above the two note buttons: the verdict for what is in
-            # the strip should read below it, not above the plot it is not about.
-            self._layout.insertWidget(1, strip)
+            # Hidden BEFORE it is put in the splitter. `QSplitter::insertWidget` shows what it is
+            # given unless the widget has been told otherwise explicitly, and a strip that flashes
+            # into the window at the moment the second Σ is pressed is a redraw nobody asked for.
             strip.setVisible(False)
+            # Under the plot, inside the splitter, so the boundary between them is a handle. The
+            # two note buttons stay below both: the verdict for what is in the strip should read
+            # under it, not above the plot it is not about.
+            self._split.addWidget(strip)
             self._strip = strip
+            self._apply_strip_link()
         except Exception:  # noqa: BLE001 — pyqtgraph moved; the strip is off, not the window
             self._strip = None
             self._strip_failed = True
 
+    def _strip_linkable(self) -> bool:
+        """Whether the strip CAN share the plot's x — only when the plot above is in hertz.
+
+        On the phase it can, and by default does: both are frequency on a log axis, so one zoom
+        moves both and a feature seen at 3 kHz above is at 3 kHz below (user, 2026-08-18: "той
+        самий масштаб і позиціювання, що і фаза"). On the impulse it cannot: that x is time, and
+        linking it to hertz would be two different quantities forced onto one scale.
+        """
+        return self._unit != "ms"
+
+    def _apply_strip_link(self) -> None:
+        """Link the strip's x to the plot's, or set it free on the audible band.
+
+        The link is pyqtgraph's own (`ViewBox.setXLink`), which is safe here only because both
+        views are in log-hertz: the plot's log mode and the strip's are the same transform, so the
+        linked coordinates mean the same thing on both. Unlinked, the strip opens on the band the
+        rest of this window uses for a frequency view rather than on whatever the last link left
+        behind, which would look like a zoom nobody asked for.
+        """
+        if self._strip is None:
+            return
+        try:
+            box = self._strip.getPlotItem().vb
+            if self._strip_linkable() and self._strip_linked:
+                box.setXLink(self._plot.getPlotItem().vb)
+            else:
+                box.setXLink(None)
+                low, high = _STRIP_BAND_HZ
+                box.setXRange(math.log10(low), math.log10(high), padding=0)
+        except Exception:  # noqa: BLE001 — a link is a convenience; the curve matters more
+            pass
+        self._update_link_button()
+
+    def set_strip_linked(self, on: bool) -> None:
+        """Follow the plot's frequency scale, or zoom the strip on its own.
+
+        Both directions are the point: a tuner reading a joint wants the two pictures over one
+        another, and a tuner reading the null itself wants to zoom into it without dragging the
+        phase along (user, 2026-08-18: unlink, and be able to come back).
+        """
+        self._strip_linked = bool(on)
+        self._apply_strip_link()
+
+    def strip_linked(self) -> bool:
+        """Whether the strip currently follows the plot's x. False on the impulse, always."""
+        return self._strip_linked and self._strip_linkable()
+
+    def _update_link_button(self) -> None:
+        """Show the link toggle only where a link is possible, and say which state it is in."""
+        button = getattr(self, "_link_btn", None)
+        if button is None:
+            return
+        offered = self._strip_linkable() and self._strip is not None and self._strip.isVisibleTo(self)
+        button.setVisible(offered)
+        if not offered:
+            return
+        if button.isChecked() != self._strip_linked:
+            blocked = button.blockSignals(True)
+            button.setChecked(self._strip_linked)
+            button.blockSignals(blocked)
+        theme = current_theme()
+        _restyle(button, f"color: {theme.accent}; border-color: {theme.accent};"
+                 if self._strip_linked else "")
+
     def _show_strip(self, on: bool) -> None:
-        """Put the strip on screen, or take it off. Never builds one to hide it."""
-        if self._strip is not None:
-            self._strip.setVisible(bool(on))
+        """Put the strip on screen, or take it off. Never builds one to hide it.
+
+        A hidden splitter child takes no height and Qt hides the handle beside it, so with the
+        sum off the window is exactly the shape it was before this feature existed — no dead band,
+        no handle for a boundary that is not there.
+        """
+        if self._strip is None:
+            return
+        was = self._strip.isVisibleTo(self)
+        self._strip.setVisible(bool(on))
+        if on and not was:
+            # Coming back: Qt gave the hidden child zero height, so the remembered share has to be
+            # laid out again. Only on the transition, because doing it on every redraw would undo
+            # a drag the moment the delay moved.
+            self._apply_split()
 
     def strip_shown(self) -> bool:
-        """Whether the sum's own strip is on screen: the impulse, Σ on, and a sum to draw."""
+        """Whether the sum's own strip is on screen: an impulse or a phase, Σ on, a sum to draw."""
         return self._strip is not None and self._strip.isVisibleTo(self)
+
+    # ---- the boundary between the two (user, 2026-08-18) -----------------
+
+    def _read_split_share(self) -> float:
+        """The strip's share of the height as it was last left, or the default.
+
+        Defensive about what comes back: `QSettings` returns whatever was written, a hand-edited
+        INI can hold anything, and a share of 0 or 1.4 is a window with one of its two plots
+        missing. Anything outside the range the minimums allow falls back to the default.
+        """
+        try:
+            share = float(self._settings.value(_SPLIT_KEY, _STRIP_SHARE))
+        except (TypeError, ValueError):
+            return _STRIP_SHARE
+        return share if 0.05 <= share <= 0.9 else _STRIP_SHARE
+
+    def _apply_split(self) -> None:
+        """Give the strip its remembered share of the height.
+
+        Per-mille rather than pixels: `setSizes` scales what it is given to the space there
+        actually is, and this runs before the first layout as often as after it — at which point
+        the splitter's own height is still whatever Qt guessed.
+        """
+        if self._strip is None:
+            return
+        strip = int(round(1000 * self._strip_share))
+        self._split.setSizes([1000 - strip, strip])
+
+    def _on_split_moved(self, *_args) -> None:
+        """Remember where the tuner put the boundary — for this window, and for the next one.
+
+        Only while the strip is on screen: hidden, it reports a height of zero, and banking that
+        would mean a boundary dragged today comes back tomorrow as no strip at all.
+        """
+        if self._strip is None or not self._strip.isVisibleTo(self):
+            return
+        sizes = self._split.sizes()
+        total = sum(sizes)
+        if len(sizes) < 2 or total <= 0:
+            return
+        self._strip_share = sizes[-1] / total
+        self._settings.setValue(_SPLIT_KEY, self._strip_share)
+
+    def split_share(self) -> float:
+        """What share of the height the strip has — the number the boundary is remembered as."""
+        return self._strip_share
 
     def _render_sum_note(self) -> None:
         """The sum's verdict as a button that names it, with the whole of it in the tip.
@@ -1419,6 +1729,91 @@ class CurveView(QWidget):
                 tip_html(i18n.t("curveSumTip") if possible else i18n.t("curveSumNoPlot"))
             )
 
+    # ---- taking every guide off the picture (user, 2026-08-18) -----------
+
+    def set_guides_hidden(self, on: bool) -> None:
+        """Take every guide off the picture at once, or put them all back where they were.
+
+        Every one: the per-curve vertical markers, the levels beside them, the single line the
+        cross modes read, and the dots where it meets each curve. The ask was for a look at the
+        curves themselves ("додай кнопку сховати всі направляючі"), and a button that hid four of
+        the five kinds would be a button you still have to tidy up after.
+
+        **Hidden, not cleared.** Every position is exactly where it was when they come back, and
+        `reading()` is the same sentence throughout — the numbers were read off the markers, and
+        not drawing a marker does not unread it. Dragging is off while they are hidden, because a
+        guide moved by a mouse that cannot see it is a reading nobody took.
+        """
+        self._guides_hidden = bool(on)
+        for index, line in enumerate(self._markers):
+            line.setVisible(self._marker_visible(index))
+            line.setMovable(not self._guides_hidden)
+        for line in self._h_markers:
+            # In place rather than through `_rebuild_h_markers`: rebuilding puts each level back
+            # onto its curve, which is where it STARTED, not where it was dragged to.
+            line.setVisible(not self._guides_hidden)
+            line.setMovable(self._h_marker_movable())
+        self._render_crossings()
+        self._update_guides_button()
+        self._update_link_button()
+        self._render_readout()
+
+    def guides_hidden(self) -> bool:
+        return self._guides_hidden
+
+    def _marker_visible(self, index: int) -> bool:
+        """Whether vertical marker `index` is drawn, by the mode and by the hide toggle.
+
+        One rule in one place because it was two: `set_markers` asked "is there a v in the mode"
+        and `set_axes_mode` knew about the cross modes as well, so a marker placed while Vx was
+        selected appeared and then vanished at the next mode change.
+        """
+        if self._guides_hidden:
+            return False
+        if self._axes_mode == "vx":
+            # A cross mode has exactly ONE line: the whole question is what a single position says
+            # about both curves at once, and a second line would be a second question.
+            return index == 0
+        if self._axes_mode == "hx":
+            return False
+        return "v" in self._axes_mode
+
+    def _h_marker_movable(self) -> bool:
+        """Whether a level line may be dragged: not while hidden, and never in `vhs`.
+
+        In sync mode the level is not a second thing to place — it IS the curve's value where the
+        vertical marker stands, and making it draggable would let the two halves of one reading
+        disagree.
+        """
+        return not self._guides_hidden and self._axes_mode != "vhs"
+
+    def _update_guides_button(self) -> None:
+        """Say ON the button whether the guides are hidden.
+
+        The same colouring the Σ toggle carries and for the same reason: `.zoom-btn` has no
+        `:checked` rule, and a toggle whose state cannot be read is a toggle that gets pressed
+        twice. It matters more here than there — with the guides gone there is nothing else on
+        screen to say why.
+        """
+        button = getattr(self, "_guides_btn", None)
+        if button is None:
+            return
+        if button.isChecked() != self._guides_hidden:
+            blocked = button.blockSignals(True)
+            button.setChecked(self._guides_hidden)
+            button.blockSignals(blocked)
+        theme = current_theme()
+        _restyle(
+            button,
+            # Filled when the guides are off, outlined when they are on. Red either way: the
+            # button says what it DOES, and its fill says whether it has been done -- a toggle
+            # that is only coloured in one of its two states reads as a warning about the state it
+            # is in rather than as a control (user asked for red, 2026-08-18).
+            f"color: {theme.ground}; background: {theme.warn}; border-color: {theme.warn};"
+            if self._guides_hidden
+            else f"color: {theme.warn}; border-color: {theme.warn};",
+        )
+
     def set_markers(
         self, positions: Sequence[float], names: Sequence[str] = (),
         tokens: Sequence[str] = (),
@@ -1444,7 +1839,8 @@ class CurveView(QWidget):
                 token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
             colour = colour_of(token)
             line = pg.InfiniteLine(
-                pos=self._to_view(float(position)), angle=90, movable=True,
+                pos=self._to_view(float(position)), angle=90,
+                movable=not self._guides_hidden,
                 # Thicker than the traces, deliberately. A guide the same weight as a dense
                 # impulse disappears into it — on the frequency response, where the trace is
                 # sparser, the same line read clearly, which is what made the difference visible
@@ -1458,7 +1854,7 @@ class CurveView(QWidget):
                 # the same height would overlap into one unreadable word until they separate.
                 labelOpts={"color": colour, "position": 0.94 - 0.07 * index},
             )
-            line.setVisible("v" in self._axes_mode)
+            line.setVisible(self._marker_visible(index))
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._markers.append(line)
@@ -1488,6 +1884,9 @@ class CurveView(QWidget):
                 self._strip.getAxis(axis_name).setPen(pg.mkPen(theme.border2))
             self._strip.getAxis("bottom").setTextPen(pg.mkPen(theme.muted))
             self._strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
+        # The hide-guides toggle carries its state as a colour written from the palette that was
+        # current when it was written — the same reason the plot's pens are rebuilt below.
+        self._update_guides_button()
         # Traces and markers are rebuilt rather than recoloured in place: both already know how to
         # draw themselves from the current theme, and two ways of doing it is one too many.
         traces, positions = list(self._traces), self.positions()
@@ -1571,10 +1970,14 @@ class CurveView(QWidget):
     def set_y_unit(self, unit: str) -> None:
         """dB on a frequency response, degrees on a phase, nothing on an impulse."""
         self._y_unit = unit
-        # It is also what tells the phase from the frequency response, and the Σ toggle is offered
-        # on one and not the other (`_sum_offered`). Only the button is touched: nothing about the
-        # sum itself has changed, and recomputing it here would do the work twice per kind switch.
+        # It is also what tells the phase from the frequency response, which decides both whether
+        # the Σ toggle is offered (`_sum_offered`) and WHERE a sum is drawn (`_on_strip`) — so the
+        # sum is re-rendered here rather than left to the next redraw. It used to be only the
+        # button, on the grounds that nothing about the sum had changed; since the phase moved to
+        # the strip that is no longer true, and a kind switch that leaves the sum on the surface
+        # the PREVIOUS kind used is a window disagreeing with itself until something else redraws.
         self._update_sum_button()
+        self._render_sum()
         self._render_readout()
 
     def set_axes_mode(self, mode: str) -> None:
@@ -1590,13 +1993,7 @@ class CurveView(QWidget):
         self._sync_cross_combos()
         self._rebuild_h_markers()
         for index, line in enumerate(self._markers):
-            # A cross mode has exactly ONE line: the whole question is what a single position says
-            # about both curves at once, and a second line would be a second question.
-            line.setVisible(
-                index == 0 if self._axes_mode == "vx"
-                else False if self._axes_mode == "hx"
-                else "v" in self._axes_mode
-            )
+            line.setVisible(self._marker_visible(index))
         self._render_crossings()
         self._render_readout()
 
@@ -1618,9 +2015,10 @@ class CurveView(QWidget):
             first = self.cross_pair()[0]
             level = self._y_at(first, self.positions()[0]) if self.positions() else 0.0
             line = pg.InfiniteLine(
-                pos=level, angle=0, movable=True,
+                pos=level, angle=0, movable=self._h_marker_movable(),
                 pen=pg.mkPen(theme.accent, width=1.4, style=Qt.PenStyle.DashLine),
             )
+            line.setVisible(not self._guides_hidden)
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._h_markers = [line]
@@ -1634,13 +2032,11 @@ class CurveView(QWidget):
             )
             line = pg.InfiniteLine(
                 pos=self._y_at(index, x), angle=0,
-                # In sync mode the level is not a second thing to place: it IS the curve's value
-                # where the vertical marker stands. Making it draggable there would let the two
-                # halves of one reading disagree.
-                movable=self._axes_mode != "vhs",
+                movable=self._h_marker_movable(),
                 pen=pg.mkPen(colour_of(token), width=_GUIDE_WIDTH,
                              style=Qt.PenStyle.DotLine),
             )
+            line.setVisible(not self._guides_hidden)
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._h_markers.append(line)
@@ -1720,7 +2116,10 @@ class CurveView(QWidget):
         if self._crossing_dots is not None:
             self._plot.removeItem(self._crossing_dots)
             self._crossing_dots = None
-        if self._axes_mode not in _CROSS_MODES or not self._traces:
+        # A dot marks where a hidden line meets a curve, so it goes with the line. Nothing is lost
+        # by not making it: the dots are derived from the markers on every pass, and `crossings()`
+        # — which is what the reading is built from — reads the lines, not these.
+        if self._guides_hidden or self._axes_mode not in _CROSS_MODES or not self._traces:
             return
         theme = current_theme()
         spots = []
@@ -2025,6 +2424,10 @@ class CurveView(QWidget):
         for button, mode in self._axes_buttons:
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))
+        if getattr(self._guides_btn, "hover_tip", None) is not None:
+            self._guides_btn.hover_tip.set_text(tip_html(i18n.t("curveGuidesTip")))
+        if getattr(self._link_btn, "hover_tip", None) is not None:
+            self._link_btn.hover_tip.set_text(tip_html(i18n.t("curveStripLinkTip")))
         self._send_btn.setText(i18n.t("curveSendMarkers"))
         # The two note buttons carry their own name twice: on the button and as the head of the
         # tip, so the hover says what it is answering about.
