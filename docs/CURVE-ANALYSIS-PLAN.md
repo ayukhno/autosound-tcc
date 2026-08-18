@@ -57,6 +57,27 @@ that ends an argument. If it can be wrong without saying so, it will end argumen
   immediately as **SCR-050** rather than left implicit. Nothing in TCC writes an APF to the ledger:
   the skill writes the project, TCC reads it (D-6).
 
+## Decisions taken 2026-08-18, evening (user, after using it)
+
+- **The sum lives in the strip on the impulse AND the phase; the right-hand axis stays only on
+  the FR.** In the strip every plotted trace's magnitude is drawn thin in its own colour under the
+  thick dashed sum, so the joint is read against the drivers that make it. The boundary between
+  plot and strip is a draggable splitter, remembered.
+- **On the phase the strip is X-linked to the phase plot** (same frequency scale and position),
+  with a toggle to unlink (zoom the sum alone) and to relink; on the impulse it cannot be linked
+  (time above) and opens on a default band.
+- **A big red X hides every guide line at once**, positions kept, the reading unchanged.
+- **The two ways of choosing curves — the pair pickers and the group/choose row — confused the
+  user, and the Advisor (Gemini 3.1 Pro, asked 2026-08-18) settled it: ONE visible selection, a
+  chip row.** Every chosen title as a chip with an × (its own colour), "+ add ▾" for arbitrary sets,
+  and `group ▾` / `_N` reduced to a FILL action that writes into the chips. The pair pickers go.
+  The Advisor's rule, worth keeping verbatim: *"the tuner must always know exactly which physical
+  measurements are contributing to the predicted sum on the screen … saying '(3)' while only
+  listing two names, or tucking active curves inside a closed checklist, breaks trust. If a tuner
+  commits a delay change based on a plotted sum, they must be 100% certain of what fed that sum."*
+  Their workflow, per the Advisor: load a group as a macro, look at the sum, isolate a problem by
+  removing one driver with its ×. Next round, same files.
+
 ## What each step touches
 
 Kept explicit so two agents (or two sessions) do not land in the same file.
