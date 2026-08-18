@@ -1430,14 +1430,32 @@ What the ask covers:
 2. **`analyze-joints` (or its wrapper) takes an APF to VERIFY, not only one to propose.** Same
    trust gate, same honest-by-construction rule: with no measured pair reproducing the complex
    solos it stays UNVERIFIED rather than blessing a number the Arbiter liked the look of.
-3. **The two hardware forms must not be conflated, in the package or in the UI.** A Helix "Phase"
-   control is a 2nd-order all-pass whose frequency the processor derives from that channel's
-   crossover — the user sets an ANGLE, not an `f0`. An `APF1`/`APF2` in an EQ slot is `f0` + `Q`
-   typed in. A front-end that offers a free `f0` where the DSP only takes an angle proposes
-   something nobody can enter, and the ledger's two fields (`phase_deg` vs an `eq` band) already
-   encode the difference — the profile should say which form a given processor offers, the way it
-   already says which EQ band vocabulary it has.
+3. **Scope, decided by the user 2026-08-18: `APF1` and `APF2` only — the Helix "Phase" control is
+   out.** The two are different hardware: a Helix Phase control is a 2nd-order all-pass whose
+   frequency the processor derives from that channel's crossover, so the user sets an ANGLE and
+   not an `f0`, and it exists on that vendor. `APF1`/`APF2` in an EQ slot is `f0` (+ `Q` for the
+   2nd order) typed in, and that form is portable across processors. TCC will offer only the
+   portable one; `phase_deg` stays a field the ledger records when a Helix user sets it by hand,
+   and nothing simulates it.
+
+4. **`apf1_response` does not exist in `dsp_math.py`.** There is `apf2_response` (and `apf_search`
+   on top of it), but nothing for the 1st order, which is half of what the user asked for and is
+   the simpler filter of the two: unit magnitude, phase running 0 → −180° through `f0`. One
+   function, and then `apf_search`'s sibling question ("would a 1st order do here?") becomes
+   askable.
+
+5. **`eq_complex` renders an all-pass band as a HIGH SHELF, silently.** Found while scoping this
+   (2026-08-18, not yet reported as a bug elsewhere): `EQ_TYPES` accepts `APF1`/`APF2` as
+   structured band types, and `eq_complex` loops every band through `peq_response`, whose `kind`
+   handling is `PK` → peaking, `LS` → low shelf, **everything else** → high shelf. There is no
+   guard. So a ledger that legitimately carries an APF band, passed to the simulator that renders
+   a channel's EQ (`xover_select.py` builds a realization's response this way), gets a curve that
+   is not the filter — no error, just a wrong answer. Whether it is reachable today depends on
+   whether any realization carries an APF band; it becomes reachable the moment this feature
+   exists. The fix is a real branch for `APF1`/`APF2` and an explicit refusal for an unknown kind.
 
 **Until this lands**, TCC's APF stays a simulation the Arbiter reads on screen and can paste into
 the dialogue by hand; nothing writes it to the ledger (D-6: the skill writes the project, TCC
-reads it).
+reads it). TCC must not grow its own all-pass maths either: two implementations of one filter is
+how the front-end and the method start disagreeing about what a proposal means. It uses the
+skill's, which is the reason items 4 and 5 are here rather than in TCC's own backlog.

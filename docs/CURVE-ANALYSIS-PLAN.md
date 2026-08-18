@@ -23,6 +23,12 @@ first, and so parallel work stays in disjoint files.
    Ws, Ms, TWs, SW+Ws, a whole side, or everything — the groups a tune is actually argued about.
 4. **An all-pass per driver.** APF1/APF2 applied to a trace, its effect visible on the phase and,
    more to the point, on the sum. Simulation only in TCC; the ask on the skill is SCR-050.
+   **APF1 and APF2 only — the Helix "Phase" control is deliberately out of scope** (user,
+   2026-08-18): it is one vendor's second-order all-pass with its frequency taken from the
+   crossover, so it takes an angle rather than an `f0`, while `APF1`/`APF2` as EQ bands are what
+   every processor with a PEQ slot can accept. The maths comes from the skill
+   (`dsp_math.apf2_response`), never from a second copy in TCC — which is why SCR-050 also asks
+   for the missing `apf1_response` and for the all-pass branch `eq_complex` does not have.
 
 ## The precondition, and why the sum is not allowed to hide it
 
@@ -80,6 +86,12 @@ Kept explicit so two agents (or two sessions) do not land in the same file.
   positional; only the summation of two overlapping sources can be re-tuned by rotating phase. The
   UI should make that hard to get wrong, since the whole point of showing the sum next to the APF
   is that the two are read together.
+- **The timing precondition is checkable after all**, and the method already wrote the rule down:
+  `phase_1_foundation.md` requires a shared Time Offset across the sweeps of a round, and
+  `naming-and-structure.md` §3 makes `_N` the DSP config version a capture was taken under. So the
+  enforceable rule is: every input to a sum is a `(sw)` capture carrying the same `_N`. A mixed
+  `_N` is not a timing quibble — the DSP changed between those captures, so it is a sum of two
+  different cars, and it has to be refused as loudly as a missing phase.
 
 ## Method
 
