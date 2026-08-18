@@ -226,10 +226,55 @@ class _PlotOptionsMenu(QMenu):
         return _UnbuiltSubmenu()
 
 
+class _NoWidgetAction:
+    """Stands in for the six `QWidgetAction`s `PlotItem.__init__` parents to itself, and never
+    becomes a Qt object at all.
+
+    Every report of the TEARDOWN SIGSEGV — five collected on 2026-08-18, and it killed about one
+    full-suite run in ten — ends in the same three frames: `~QGraphicsWidget` (the PlotItem) →
+    `QObjectPrivate::deleteChildren` → `~QWidgetActionWrapper` → `Shiboken::Object::destroy`.
+    Those actions are the only children of that kind a PlotItem has, and pyqtgraph 0.13.7 builds
+    them for a menu this window never shows (`_do_not_build_the_plot_options_menu` already keeps
+    them out of the menu, which is what fixed the CONSTRUCTION crash a week earlier). Not creating
+    them at all removes the frame — and, measured, the crash: **0 in 40 full-suite runs**, against
+    4 in 40 without it, on a still worktree.
+
+    `setDefaultWidget` is swallowed on purpose. The real one REPARENTS the ctrl form's group boxes
+    into the action, and losing that owner is exactly what broke `showGrid` / `setDownsampling` /
+    `setLogMode` when this was tried on 2026-08-13; here the boxes stay where `setupUi` put them,
+    on the form `_KeptCtrlForm` keeps alive.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        return lambda *args, **kwargs: None
+
+
+#: The ctrl forms pyqtgraph builds `self.ctrl` on, held so their group boxes — which `showGrid`,
+#: `setDownsampling`, `setClipToView` and `setLogMode` all read — outlive the local that built
+#: them. `PlotItem.__init__` rebinds that local two lines later, so without this they would be
+#: collected the moment the actions stopped owning them. Plain parentless QWidgets with ordinary
+#: children: nothing of the graphics scene is in them, which is why holding them costs nothing at
+#: teardown.
+_KEPT_CTRL_FORMS: list = []
+
+
+class _KeptCtrlForm(QWidget):
+    """The plain QWidget `PlotItem.__init__` calls `setupUi` on, kept alive by this module."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        _KEPT_CTRL_FORMS.append(self)
+
+
 class _QtWidgetsWithoutSubmenus:
-    """`PlotItem.py`'s view of `QtWidgets`, with only `QMenu` swapped."""
+    """`PlotItem.py`'s view of `QtWidgets`: `QMenu`, `QWidgetAction` and `QWidget` swapped."""
 
     QMenu = _PlotOptionsMenu
+    QWidgetAction = _NoWidgetAction
+    QWidget = _KeptCtrlForm
 
     def __init__(self, real) -> None:
         self._real = real

@@ -19,6 +19,29 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _end_qt_before_python_finalises():
+    """Destroy the QApplication here, while the interpreter is still whole.
+
+    The suite prints `passed` and the PROCESS then dies: exit 139, about one run in ten (4/40, and
+    2/12 on a tree nobody was editing). It leaves 16631 top-level widgets alive, and
+    `~QApplication` -- which PySide runs from an `atexit` handler inside `Py_FinalizeEx` --
+    destroys every one of them against Python halves that are already going. Running the same
+    destructor here changes nothing about WHAT is destroyed, only when: early enough that PySide
+    can still find the Python half of everything it touches.
+
+    Session-scoped, and it destroys the whole application rather than walking the widgets, because
+    both narrower shapes have been measured and both were worse: per-test widget teardown on
+    2026-08-13 (2 crashes in 5 runs), and a `deleteLater` sweep over top-level widgets on
+    2026-08-18 (6 in 6 on the plot files alone). `qt_shutdown`'s docstring lists every variant and
+    the frame it died in. Nothing here changes when a test's widgets die.
+    """
+    yield
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    qt_shutdown.destroy_application()
+
+
 @pytest.fixture(autouse=True)
 def _isolated_qsettings(tmp_path, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)

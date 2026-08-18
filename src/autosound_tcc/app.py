@@ -77,6 +77,7 @@ def main() -> int:
         from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
 
+        from autosound_tcc.ui.tcc import qt_shutdown
         from autosound_tcc.ui.tcc.main_window import MainWindow
         from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
     except ImportError as exc:
@@ -123,7 +124,16 @@ def main() -> int:
         return 0
     window = MainWindow()
     window.show()
-    return app.exec()
+    code = app.exec()
+    # Qt ends HERE rather than in whatever is left of the interpreter. Returning straight out of
+    # `exec()` leaves the window and the QApplication alive, so `~QApplication` runs from inside
+    # `Py_FinalizeEx` and takes the pyqtgraph plots down with it -- the SIGSEGV a person quitting
+    # TCC could meet, as "Python quit unexpectedly", after their work was already saved. Same
+    # destructor, run early enough that PySide can still find the Python half of what it touches;
+    # see ui/tcc/qt_shutdown.py for the stack and for the six teardowns that made it worse.
+    qt_shutdown.destroy_application()  # the window goes with it: `~QApplication` owns that walk
+    del window  # by now a wrapper around nothing; dropped so no dead reference outlives `main()`
+    return code
 
 
 if __name__ == "__main__":
