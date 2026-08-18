@@ -13,7 +13,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QSplitter, QWidget  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
 
@@ -1708,6 +1708,49 @@ def test_the_flaw_map_renders_with_its_verdict(tmp_path, monkeypatch):
     assert "250 Hz" in texts and "-12 dB" in texts
     assert i18n.t("flawAction_no_boost") in texts  # the verdict, in words as well as colour
     assert i18n.t("flawKind_cabin_null") in texts
+
+
+def test_a_flaw_row_says_on_hover_why_it_was_called_that_and_what_it_was_read_off(
+    tmp_path, monkeypatch
+):
+    """The row is a headline; the tip is the substance, and it used to be the reasoning and the
+    file names glued into one grey paragraph (user, 2026-08-18). Head, reason and captures are
+    three things and read as three."""
+    import json as _json
+    import re
+
+    from autosound_tcc.core import config
+
+    _app()
+    (tmp_path / "project.json").write_text(
+        _json.dumps({
+            "schema_version": 3,
+            "acoustics": {"flaws": [
+                {"f_hz": 152, "level_db": -12, "bw_oct": 0.17, "kind": "cabin_null",
+                 "action": "no_boost", "channels": ["w-L"],
+                 "why": "Interference, not a panel: the harmonics do not rise with it.",
+                 "evidence": ["w-L_01 (sw)", "w-L_01 (rta)"]},
+            ]},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    rows = [w for w in window._audio_section.findChildren(QWidget)
+            if getattr(w, "hover_tip", None) is not None]
+    assert rows, "the flaw row carries a tip"
+    tip = rows[0].hover_tip.text()
+    plain = re.sub(r"<[^>]+>", " ", tip.replace("<br>", "\n"))
+    # The head names the flaw the way a person would say it: what, where, and the verdict.
+    assert "152 Hz" in plain and i18n.t("flawKind_cabin_null") in plain
+    assert "w-L" in plain and i18n.t("flawAction_no_boost") in plain
+    assert "harmonics do not rise" in plain, "the reasoning is there in full"
+    # ...and the captures are under a label of their own rather than trailing the sentence.
+    assert i18n.t("flawEvidenceHead") in plain
+    assert plain.index(i18n.t("flawEvidenceHead")) > plain.index("harmonics do not rise")
+    assert "font-size" in tip, "laid out to be read, not at the default tooltip size"
 
 
 def test_a_project_with_no_flaw_map_says_so_rather_than_showing_nothing(tmp_path, monkeypatch):

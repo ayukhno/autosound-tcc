@@ -97,6 +97,8 @@ T: dict[Lang, dict[str, str]] = {
         # about a feature — so each value gets a short label a reader can scan, not a raw key.
         "acousticsNone": "No flaw map yet. Phase 0 measures what this cabin does to the sound, and the rows land here — each with what may and may not be done about it.",
         "flawHypothesis": "not settled",
+        "flawEvidenceHead": "Read off:",
+        "flawNoWhy": "No reason was recorded with this entry -- only the measurement itself.",
         "flawAllChannels": "all channels",
         "flawAction_notch": "cut",
         "flawAction_leave": "leave",
@@ -414,7 +416,6 @@ would change and why. Nothing here is applied.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
         "curveTitle": "Where exactly?",
-        "curveNoSecond": "— second curve: none —",
         "curveAxes_v": "Markers read frequency (vertical)",
         "curveAxes_h": "Markers read level (horizontal)",
         "curveAxes_vh": "Markers read both, placed separately",
@@ -455,17 +456,22 @@ come from a REW sweep.",
         # The glossary's own groups, which are the sets a tune is argued about (user, 2026-08-18:
         # "Ws, Ms, TWs, SW+Ws, L, R, ALL"). The type is on the row because `L` is a side and `Ws`
         # is a pair, and a list of bare names does not say which.
-        "curveGroupLabel": "group",
+        # `fill:` and not `group:` — the group and version pair is a SHORTCUT that writes into the
+        # chips, not a second way of saying what is plotted (user, 2026-08-18: "хай 'Обрати' буде
+        # основним, а групи це допомога швидкого вибору"). A label that named it as a selector was
+        # half of why the window had two rows that seemed to disagree.
+        "curveGroupLabel": "fill:",
         "curveGroupNone": "— no group —",
         "curveGroupKind_pairs": "pair",
         "curveGroupKind_joints": "joint",
         "curveGroupKind_sides": "side",
         "curveGroupKind_combos": "combo",
         "curveGroupNoGlossary": "— no glossary in this project —",
-        "curveGroupTip": "Put a whole group on screen at once — the woofers, the mids, sub+woofers, \
-one side, everything. The names come from this car's glossary, and the sweeps chosen are the ones \
-at the config version beside it. Nothing is fetched that the group does not name: a member REW \
-has no sweep for is reported, not skipped.",
+        "curveGroupTip": "Fill the selection with a whole group at once — the woofers, the mids, \
+sub+woofers, one side, everything. The names come from this car's glossary, and the sweeps chosen \
+are the ones at the config version beside it. Nothing is fetched that the group does not name: a \
+member REW has no sweep for is reported, not skipped. It FILLS and then lets go: take a chip off \
+afterwards and nothing re-fills, which is how you hear what one driver is doing to the joint.",
         "curveGroupVersionTip": "The DSP config version (_N) the group's sweeps are taken at. It \
 starts on the version the curves already on screen share, or on the newest this car has for those \
 drivers, and you can move it.",
@@ -477,7 +483,17 @@ sum of a different set.",
 was changed.",
         "curveChooseBtn": "Choose… ({n})",
         "curveChooseTip": "Tick any measurements you like — the sum takes as many as you give it. \
-A group above ticks its own members here, so the two controls always describe one selection.",
+The menu stays open, so a whole side is one trip through the list. Everything ticked is a chip \
+above, in its curve's own colour; a group beside this fills the same chips in one go.",
+        # The chips: the ONE visible selection. Advisor (Gemini 3.1 Pro, 2026-08-18) — whoever
+        # commits a delay off a plotted sum has to be certain what fed it, so every contributing
+        # measurement is named on screen and every one can be taken off from where it is named.
+        "curveChipRemoveTip": "Take {title} off the plot. The rest stay where they are and the sum \
+is recomputed without it — which is how you hear what this one driver is doing to the joint.",
+        "curveChipOnlyTip": "The only curve on screen. Add another before taking this one off — a \
+window plotting nothing has nothing to say.",
+        "curveChipMissingTip": "REW gave no curve for {title}, so it is not on the plot even though \
+it is selected — and it is not in the sum either. It is shown faint for that reason.",
         "curveAt": "at",
         "curveZoomAll": "Show everything the capture holds",
         "curveZoomAllShort": "A",
@@ -612,6 +628,8 @@ Choose sweeps (sw) above to read this.",
         "criticSaved": "Текст збережено у {path}",
         "acousticsNone": "Карти дефектів ще немає. Фаза 0 міряє, що ця машина робить зі звуком, і рядки з'являться тут — кожен із тим, що з ним можна й чого не можна.",
         "flawHypothesis": "не підтверджено",
+        "flawEvidenceHead": "Прочитано з:",
+        "flawNoWhy": "Причину із цим записом не зафіксували — тільки сам вимір.",
         "flawAllChannels": "усі канали",
         "flawAction_notch": "різати",
         "flawAction_leave": "лишити",
@@ -913,7 +931,6 @@ Choose sweeps (sw) above to read this.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",
         "curveTitle": "Де саме?",
-        "curveNoSecond": "— друга крива: немає —",
         "curveAxes_v": "Маркери читають частоту (вертикальні)",
         "curveAxes_h": "Маркери читають рівень (горизонтальні)",
         "curveAxes_vh": "Маркери читають і те, і те, ставляться окремо",
@@ -938,17 +955,18 @@ Choose sweeps (sw) above to read this.",
         "curveSumTooFew": "Одна крива — це не сума: постав на екран другий замір.",
         "curveSumNoData": "Ці криві не несуть ні АЧХ, ні фази, щоб їх додати — вони не з \
 розгортки REW.",
-        "curveGroupLabel": "група",
+        "curveGroupLabel": "заповнити:",
         "curveGroupNone": "— без групи —",
         "curveGroupKind_pairs": "пара",
         "curveGroupKind_joints": "стик",
         "curveGroupKind_sides": "сторона",
         "curveGroupKind_combos": "набір",
         "curveGroupNoGlossary": "— у цьому проєкті нема глосарію —",
-        "curveGroupTip": "Поставити на екран цілу групу — мідбаси, середні, саб+мідбаси, одну \
+        "curveGroupTip": "Заповнити вибір цілою групою — мідбаси, середні, саб+мідбаси, одну \
 сторону, все. Назви беруться з глосарію цієї машини, а свіпи — ті, що на версії конфігурації \
 поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не \
-мовчки пропускається.",
+мовчки пропускається. Група ЗАПОВНЮЄ і відпускає: прибереш потім один чіп — нічого не \
+підставляється назад, і саме так чути, що цей драйвер робить зі стиком.",
         "curveGroupVersionTip": "Версія конфігурації ДСП (_N), на якій беруться свіпи групи. \
 Починає з версії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — \
 і її можна змінити.",
@@ -957,8 +975,15 @@ Choose sweeps (sw) above to read this.",
         "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \
 не змінено.",
         "curveChooseBtn": "Обрати… ({n})",
-        "curveChooseTip": "Познач будь-які заміри — сума приймає стільки, скільки даси. Група \
-вище позначає тут своїх учасників, тож обидва контроли завжди описують один вибір.",
+        "curveChooseTip": "Познач будь-які заміри — сума приймає стільки, скільки даси. Меню не \
+закривається, тож ціла сторона — це один захід у список. Усе позначене стоїть чіпом вище, у \
+кольорі своєї кривої; група поруч заповнює ті самі чіпи одним рухом.",
+        "curveChipRemoveTip": "Прибрати {title} з графіка. Решта лишаються на місці, а сума \
+перераховується без нього — саме так чути, що цей драйвер робить зі стиком.",
+        "curveChipOnlyTip": "Єдина крива на екрані. Додай ще одну, перш ніж прибирати цю — вікно, \
+яке нічого не малює, нічого й не каже.",
+        "curveChipMissingTip": "REW не дав кривої для {title}, тож його нема на графіку, хоч він і \
+обраний — і в сумі його теж нема. Тому він блідий.",
         "curveAt": "на",
         "curveZoomAll": "Показати все, що є в замірі",
         "curveZoomAllShort": "A",

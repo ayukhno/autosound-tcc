@@ -94,6 +94,11 @@ from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+# Imported from the curve view because that is where it was written and where it is used most.
+# It belongs beside `rounded_tooltip`, whose widget it formats for, and moving it there is a
+# separate change: `curve_view.py` is being edited in another thread of work right now, and a
+# helper's address is not worth a merge conflict.
+from autosound_tcc.ui.tcc.curve_view import tip_html
 from autosound_tcc.ui.tcc.sidebar_section import (
     CollapsibleGroup,
     SidebarSection,
@@ -1017,9 +1022,29 @@ class MainWindow(QMainWindow):
         line.setProperty("class", "cline2")
         outer.addWidget(line)
 
+        # The tip is the row's whole substance -- a headline says WHAT was measured, and only
+        # this says why it was called that and what it was read off. It used to be `why` and the
+        # evidence glued together with `<br>` at the tooltip's default size: two unrelated things
+        # in one grey paragraph, and the reader had to guess where the reasoning stopped and the
+        # file names began (user, 2026-08-18: "хінти перегляньте, щоб читались зрозуміло").
+        # Now it is laid out like the curve window's: a bold head naming the flaw the way a person
+        # would say it, the reasoning as its own paragraph, and the captures under a label of
+        # their own.
         why = flaw.why or ""
         evidence = ", ".join(flaw.evidence)
-        tip = attach_tip(widget, "<br>".join(x for x in (why, evidence) if x))
+        head = " · ".join(part for part in (
+            flaw.headline,
+            i18n.t(f"flawKind_{flaw.kind}"),
+            ", ".join(flaw.channels) or i18n.t("flawAllChannels"),
+            i18n.t(f"flawAction_{flaw.action}"),
+        ) if part)
+        body = "\n\n".join(part for part in (
+            why,
+            f"{i18n.t('flawEvidenceHead')}\n{evidence}" if evidence else "",
+        ) if part) or i18n.t("flawNoWhy")
+        # Doubt is the tip's own colour as well as the dot's: a hypothesis reads as a verdict when
+        # its text looks like every other row's.
+        tip = attach_tip(widget, tip_html(body, head=head, warn=flaw.is_hypothesis))
         # The row that most needs copying: the whole point of the flaw map is that "do not EQ-boost
         # this null" outlives the session that found it, and the reason and the captures it was
         # read off are on hover. A verdict that can only be hovered cannot be quoted to anyone.
