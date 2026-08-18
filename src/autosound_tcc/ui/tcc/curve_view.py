@@ -1190,13 +1190,73 @@ class CurveView(QWidget):
             self._channel_delays[at] = None if ms is None else float(ms)
         self._render_readout()
 
+    def proposed_delays(self) -> list[float]:
+        """The delay set this window PROPOSES: the drags with their common part taken off.
+
+        **A delay set is only defined up to a common offset.** What the curves measure is the
+        DIFFERENCE between arrivals; where the tuner happened to drop them is not a measurement of
+        anything. Drag three drivers onto a common 14.8 ms and this window used to propose +10.690,
+        +10.670 and +10.000 — numbers that are both physically meaningless and past what most
+        processors will accept (user, 2026-08-18, checking the bank against their own project:
+        "затримки виходять значно більшими, ніж вони там є"). The same three with the common part
+        removed are 0.000, +0.670, +0.690, and 0.69 ms is 23 cm: a real car.
+
+        Nothing is lost. Every difference survives a constant shift, which is the whole point —
+        the spread of the landings is the same number before and after.
+
+        Taken over EVERY trace on screen, zeros included. Skipping the zeros was tried and is
+        wrong: a driver sitting at 0 is as often the reference the others were aligned TO as one
+        nobody has dragged, and this window cannot tell the two apart (`delay_bank.references`
+        records the same ambiguity). Counting it in errs the safe way — the offset is then 0, the
+        set is proposed exactly as read, and nothing is invented; skipping it re-based a set that
+        already had an origin and quietly moved the alignment (a set at 0 / +0.67 / +0.69 came back
+        as 0 / 0 / +0.02). It also makes this idempotent, which a second look at the same curves
+        depends on.
+
+        A no-op below two traces, and with nothing dragged. With one curve there is nothing to be
+        relative TO, and zeroing the only proposal would erase the tuner's work while putting
+        nothing in its place.
+
+        `delays()` stays RAW, and so do the spin box, the drag and the bank's stored value: that is
+        the tuner's own handle on the picture, and it must not jump under their fingers mid-drag.
+        This is what leaves the window, not what it is operated with.
+        """
+        raw = list(self._delays)
+        live = raw[:len(self._traces)]
+        if len(live) < 2 or not any(live):
+            return raw
+        offset = min(live)
+        # Every live entry, including a zero — which can only BE the minimum, so it stays at zero.
+        return [ms - offset for ms in live] + raw[len(live):]
+
+    def delay_reference_name(self) -> str:
+        """The driver the proposed set is stated FROM — the one that ends up taking no delay.
+
+        Named in the reading so nobody has to work out which zero is the origin: the set says
+        "hold these back until they meet this one", and which one that is IS the alignment. Empty
+        when there is no set to have an origin — one trace, or nothing dragged yet.
+        """
+        live = self.proposed_delays()[:len(self._traces)]
+        if len(live) < 2 or not any(self._delays[:len(self._traces)]):
+            return ""
+        for index, value in enumerate(live):
+            if not value:
+                return self._traces[index].name
+        return ""
+
     def total_delay_ms(self, index: Optional[int] = None):
         """A channel's delay if its proposal were applied, or None when the current one is not
-        known. The one number that has to stay non-negative."""
+        known. The one number that has to stay non-negative.
+
+        Against the PROPOSED delay, not the raw drag: what a DSP would receive is the normalised
+        set (`proposed_delays`), so the below-zero warning has to be about that number. Checking
+        the raw one warned about a channel nobody was ever going to be asked to set.
+        """
         at = self._shift_target if index is None else index
         if not (0 <= at < len(self._channel_delays)) or self._channel_delays[at] is None:
             return None
-        return self._channel_delays[at] + self._delays[at]
+        proposed = self.proposed_delays()
+        return self._channel_delays[at] + (proposed[at] if at < len(proposed) else 0.0)
 
     def delay_ms(self, index: Optional[int] = None) -> float:
         at = self._shift_target if index is None else index
@@ -2594,13 +2654,24 @@ class CurveView(QWidget):
             lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
         parts = [part for part in lines if part]
         proposals = []
+        # The set with its common part removed — see `proposed_delays`. Which drivers are IN the
+        # set is still decided by the raw drag (a driver nobody moved is not a proposal); what is
+        # PRINTED for each of them is the normalised number, including the 0.000 that names the
+        # one the rest are held back to meet.
+        proposed = self.proposed_delays()
+        reference = self.delay_reference_name()
         for index, trace in enumerate(self._traces):
             # EVERY driver that carries a proposal, not only the selected one. Alignment is what
             # the whole set says together, and a sentence naming one of two delayed curves would
             # describe a picture nobody is looking at.
-            delay = self._delays[index] if index < len(self._delays) else 0.0
-            if not delay:
+            #
+            # ...and the ORIGIN, whether or not it was dragged. It reads +0.000, and it has to be
+            # in the list: a set whose reference is named in the caveat but missing from the
+            # numbers is a set the reader has to assemble themselves.
+            raw = self._delays[index] if index < len(self._delays) else 0.0
+            if not raw and trace.name != reference:
                 continue
+            delay = proposed[index] if index < len(proposed) else 0.0
             # In ms AND samples, because that is the skill's own rule for every delay it states,
             # and signed, because an unsigned "0.150 ms" beside a channel already at 1.2 ms is two
             # different instructions depending on a sign the reader cannot see.
@@ -2630,7 +2701,14 @@ class CurveView(QWidget):
             # statement — the panel changes nothing; this goes to the composer, the Arbiter sends
             # it, and the delta is banked 🟡 like every other proposed change. Repeating it on
             # each driver was most of the sentence by the second one (user's screenshot).
-            parts.append(i18n.t("curveDelayHead") + " " + "; ".join(proposals))
+            head = i18n.t("curveDelayHead") + " " + "; ".join(proposals)
+            if reference:
+                # One clause, and only where a set was actually normalised. Without it the reader
+                # has to work out for themselves which of the numbers is the origin and why one of
+                # them is zero — and that is the difference between a set they can enter and a
+                # set they have to reverse-engineer.
+                head += ". " + i18n.t("curveDelayRelative").format(name=reference)
+            parts.append(head)
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is

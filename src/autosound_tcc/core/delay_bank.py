@@ -186,6 +186,20 @@ def as_sentence(
     t = lang_t or (lambda key: key)
     at = at or {}
     lines, impossible, landings = [], False, []
+    # **The common part comes off before anything is proposed.** A delay set is only defined up to
+    # a constant: the curves measure the DIFFERENCE between arrivals, and where the tuner dropped
+    # them is not a measurement of anything. A set banked by dragging three drivers onto a common
+    # 14.8 ms read +10.690 / +10.670 / +10.000, which is meaningless as a delay and beyond what
+    # most processors accept (user, 2026-08-18: "затримки виходять значно більшими, ніж вони там
+    # є"). Relative, the same set is 0.000 / +0.670 / +0.690 — 0.69 ms is 23 cm of car. Every
+    # difference survives the shift, so the landings below still have exactly the same spread.
+    #
+    # Stored raw and normalised HERE, on the way out: the stored number is what the tuner dragged
+    # and what gets restored onto the plot when a driver comes back on screen. This is a
+    # proposal, and only a proposal has to be enterable.
+    offset = min(bank.values()) if len(bank) > 1 else 0.0
+    origin = min(bank.items(), key=lambda kv: (kv[1], kv[0]))[0] if offset else ""
+    bank = {title: ms - offset for title, ms in bank.items()}
     # By where each driver ENDS UP, not by how far it moves. The outlier is the whole point of
     # sending this, and sorted by delay it sat in the middle of the list (user's own set,
     # 2026-08-12: four drivers inside 37 µs and one a millisecond out).
@@ -210,6 +224,11 @@ def as_sentence(
                 impossible = True
         lines.append(line)
     head = [t("curveBankAsk"), t("curveBankConvention")]
+    if origin:
+        # Named, because a set of differences with no stated origin is a set the reader has to
+        # reverse-engineer — and the origin IS the alignment: "hold the others back until they
+        # meet this one".
+        head.append(t("curveDelayRelative").format(name=origin))
     tail = [t("curveBankNotForWriting")]
     if reference:
         # Stated, not interpreted. A zero here may be the reference the set was built on or a

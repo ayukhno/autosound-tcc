@@ -367,6 +367,11 @@ T: dict[Lang, dict[str, str]] = {
         "curveDelayHead": "delay, to align (proposed, not applied):",
         "unitMs": "ms",
         "unitSmp": "smp",
+        # A delay set is only defined up to a common offset — see `curve_view.proposed_delays`.
+        # The set is stated FROM one driver, and this names it so nobody has to work out which of
+        # the numbers is the origin, or why one of them is zero.
+        "curveDelayRelative": "Relative to {name}, which takes none: only the differences between \
+these drivers were measured, so the set is stated from the one that needs the least.",
         "curveDelayLands": "arrival {was} → {now} ms",
         "curveDelayTotal": "channel → {total} ms",
         "curveDelayBelowZero": "⚠ below zero — the channel cannot go there",
@@ -887,6 +892,8 @@ Choose sweeps (sw) above to read this.",
         "curveDelayHead": "затримки для вирівнювання (пропозиція, не застосовано):",
         "unitMs": "мс",
         "unitSmp": "вибірок",
+        "curveDelayRelative": "Відносно {name}, який лишається без затримки: вимірювались лише \
+різниці між цими драйверами, тож набір подано від того, кому треба найменше.",
         "curveDelayLands": "прихід {was} → {now} мс",
         "curveDelayTotal": "на каналі → {total} мс",
         "curveDelayBelowZero": "⚠ нижче нуля — канал так не може",

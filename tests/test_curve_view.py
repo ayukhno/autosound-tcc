@@ -805,8 +805,15 @@ def test_a_negative_delay_is_a_correction_not_an_error():
 
 
 def test_the_total_is_checked_against_what_the_channel_already_has():
-    """"головне щоб загалом не йшло менш нуля" — and only the caller knows what is in there."""
+    """"головне щоб загалом не йшло менш нуля" — and only the caller knows what is in there.
+
+    On ONE curve, because that is the only place a negative proposal survives now: with two or
+    more, the set is stated from its own minimum (`proposed_delays`), so it can never ask a
+    channel to give back time it does not have. That is a consequence worth knowing, and
+    `test_taking_the_common_part_off_is_what_makes_a_set_applicable` is where it is asserted.
+    """
     view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.52))])
     view.set_unit("ms")
     view.set_markers([4.52], tokens=["accent"])
     view.set_channel_delay(1.2)
@@ -1046,8 +1053,11 @@ def test_the_whole_set_goes_out_for_analysis_and_says_it_is_not_a_change():
     dialog._bank_ask_btn.click()
 
     assert len(sent) == 1
-    assert "w-L_01 (sw): +0.198 ms (+19 smp)" in sent[0]
-    assert "m-L_01 (sw): +1.250 ms (+120 smp)" in sent[0]
+    # Banked at +0.198 and +1.250, PROPOSED with the common part off: only the 1.052 ms between
+    # them was ever measured. See `curve_view.proposed_delays`.
+    assert "w-L_01 (sw): +0.000 ms (+0 smp)" in sent[0]
+    assert "m-L_01 (sw): +1.052 ms (+101 smp)" in sent[0]
+    assert i18n.t("curveDelayRelative").format(name="w-L_01 (sw)") in sent[0]
     assert i18n.t("curveBankNotForWriting") in sent[0], "it says it is not to be written"
 
 
@@ -1115,7 +1125,14 @@ def test_the_ledger_join_is_a_split_not_a_guess():
     assert "c" not in delays, "no delay field is 'unknown', not zero"
 
 
-def test_a_set_that_cannot_be_applied_says_so_before_the_model_has_to_notice():
+def test_taking_the_common_part_off_is_what_makes_a_set_applicable():
+    """The same alignment, stated from its own earliest driver, is always enterable — which is the
+    point of normalising rather than a side effect of it.
+
+    Raw, this set asked w-L to give back half a millisecond it did not have (0.100 − 0.500 = −0.400
+    on the channel) and would have been refused. Every difference in it is preserved: the two
+    drivers are 0.750 ms apart before and after.
+    """
     from autosound_tcc.core import delay_bank
 
     text = delay_bank.as_sentence(
@@ -1125,10 +1142,28 @@ def test_a_set_that_cannot_be_applied_says_so_before_the_model_has_to_notice():
         current=lambda title: {"w-L_01 (sw)": 0.1, "m-L_01 (sw)": 1.0}.get(title),
     )
 
+    assert "w-L_01 (sw): +0.000 ms (+0 smp) | channel 0.100 → 0.100 ms" in text
+    assert "m-L_01 (sw): +0.750 ms (+72 smp) | channel 1.000 → 1.750 ms" in text, "0.750 apart"
+    assert i18n.t("curveDelayBelowZero") not in text, "nothing is being asked for that it cannot do"
+    assert i18n.t("curveBankImpossible") not in text
+    assert i18n.t("curveDelayRelative").format(name="w-L_01 (sw)") in text
+
+
+def test_a_set_that_cannot_be_applied_still_says_so_before_the_model_has_to_notice():
+    """The guard stays, and one driver is where it can still fire: with nothing to be relative to
+    there is no common part to take off, so a negative reading reaches the channel as it was read."""
+    from autosound_tcc.core import delay_bank
+
+    text = delay_bank.as_sentence(
+        {"w-L_01 (sw)": -0.5},
+        sample_rate_hz=96000,
+        lang_t=i18n.t,
+        current=lambda title: {"w-L_01 (sw)": 0.1}.get(title),
+    )
+
     assert "w-L_01 (sw): -0.500 ms (-48 smp) | channel 0.100 → -0.400 ms" in text
     assert i18n.t("curveDelayBelowZero") in text
     assert i18n.t("curveBankImpossible") in text
-    assert "m-L_01 (sw): +0.250 ms (+24 smp) | channel 1.000 → 1.250 ms" in text
 
 
 def test_with_no_ledger_the_lines_are_readings_alone():
@@ -1151,8 +1186,9 @@ def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
     dialog.set_delays_provider(lambda: dict(ledger))
-    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
-                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    # One curve: a negative proposal is rebased away the moment there are two of them to be
+    # relative to, and what this test is about is the ledger being re-read, not the sign.
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52))])
 
     dialog._view.set_delay(-0.2)
     assert dialog._view.total_delay_ms() == pytest.approx(0.8)
@@ -1166,8 +1202,13 @@ def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
 
 def test_an_impossible_total_is_coloured_not_just_worded():
     """A warning inside a sentence made of numbers is read last — and since 2026-08-18 the
-    sentence is behind a hover, so the colour has to be on the BUTTON as well as in the text."""
+    sentence is behind a hover, so the colour has to be on the BUTTON as well as in the text.
+
+    One curve, for the reason `test_the_total_is_checked_against_what_the_channel_already_has`
+    gives: a set of two or more is always stated from its own minimum and cannot go below zero.
+    """
     view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.52))])
     view.set_unit("ms")
     view.set_markers([4.52], tokens=["accent"])
     view.set_channel_delay(0.1)
@@ -1199,8 +1240,10 @@ def test_the_set_states_what_the_numbers_are_measured_from():
     )
 
     assert i18n.t("curveBankConvention") in text
-    assert "arrival 2.950 → 4.150 ms" in text
-    assert "arrival 4.120 → 5.300 ms" in text
+    # Both banked around 1.19 ms; proposed with the common 1.18 removed, so the landings move down
+    # by exactly that and the SPREAD — the number the set is judged on — does not move at all.
+    assert "arrival 2.950 → 2.970 ms" in text
+    assert "arrival 4.120 → 4.120 ms" in text
     assert "1.150 ms" in text, "and how far from aligned that leaves them"
 
 
@@ -3022,3 +3065,122 @@ def test_the_delay_radios_can_be_counted_at_a_glance():
         assert theme.accent in checked.split("}")[0], f"{mode}: and the chosen one still fills"
     # The NAME keeps its trace's colour, which is how a radio is matched to a curve without words.
     assert colour_of(trace_token(1)).name() in view._target_buttons[1].styleSheet()
+
+
+# ---- a delay set is only defined up to a common offset (user, 2026-08-18) ---------------------
+
+
+def test_the_proposal_is_the_differences_not_where_the_curves_were_dropped():
+    """The user's own bank, checked against their project file: three drivers dragged onto a common
+    ~14.8 ms and proposed as +10.690 / +10.670 / +10.000 ("затримки виходять значно більшими, ніж
+    вони там є"). Nothing was miscomputed — they dragged there and the window recorded it — but a
+    delay set is only defined up to a common offset, and 10.69 ms of delay on a driver is both
+    physically meaningless and past what most processors will take.
+
+    Relative, the same three are 0 / +0.67 / +0.69, and 0.69 ms is 23 cm: a real car.
+    """
+    view = _view()
+    arrivals = {"m-R_01 (sw)": 4.124, "tw-R_01 (sw)": 4.173, "w-R_01 (sw)": 4.979}
+    view.set_traces([Trace(name, *_impulse(ms)) for name, ms in arrivals.items()])
+    view.set_resolution(0.01, 96000)
+    for index, ms in enumerate((10.690, 10.670, 10.000)):  # dragged onto a common ~14.8 ms
+        view.set_delay_target(index)
+        view.set_delay(ms)
+
+    assert view.delays() == pytest.approx([10.690, 10.670, 10.000]), \
+        "the drag itself is untouched — that is the tuner's handle on the picture"
+    assert view.proposed_delays() == pytest.approx([0.690, 0.670, 0.0], abs=1e-9)
+    assert view.delay_reference_name() == "w-R_01 (sw)", "the latest arrival needs no delay"
+
+    reading = view.reading()
+
+    assert "m-R_01 (sw) +0.690" in reading and "tw-R_01 (sw) +0.670" in reading
+    assert "w-R_01 (sw) +0.000" in reading, "the origin is IN the set, at rest, not left out of it"
+    assert "+10.690" not in reading and "+10.000" not in reading
+    assert i18n.t("curveDelayRelative").format(name="w-R_01 (sw)") in reading, \
+        "and the sentence says what it is measured from"
+
+
+def test_normalising_moves_every_landing_by_one_number_and_no_difference():
+    """The property that makes it safe: a constant comes off all of them, so what the set SAYS
+    about the car — how far apart the drivers land — is bit for bit what it said before."""
+    view = _view()
+    view.set_traces([Trace(f"d{i}_01 (sw)", *_impulse(4.0 + i * 0.4)) for i in range(3)])
+    for index, ms in enumerate((10.690, 10.670, 10.000)):
+        view.set_delay_target(index)
+        view.set_delay(ms)
+
+    raw, proposed = view.delays(), view.proposed_delays()
+
+    gaps_raw = [raw[i] - raw[0] for i in range(3)]
+    gaps_proposed = [proposed[i] - proposed[0] for i in range(3)]
+    assert gaps_raw == pytest.approx(gaps_proposed, abs=1e-9)
+    assert min(proposed) == 0.0, "and the set now starts from zero, where a DSP can take it"
+
+
+def test_one_driver_alone_is_left_exactly_as_it_was_read():
+    """There is nothing to be relative TO, and zeroing the only proposal would erase the tuner's
+    work while putting nothing in its place."""
+    view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.52))])
+    view.set_delay(1.75)
+
+    assert view.proposed_delays()[0] == pytest.approx(1.75)
+    assert view.delay_reference_name() == "", "and no origin is claimed for a set of one"
+    assert "+1.750" in view.reading()
+    assert i18n.t("curveDelayRelative").format(name="w-L_01 (sw)") not in view.reading()
+
+
+def test_a_set_already_stated_from_zero_is_not_touched_again():
+    """Idempotence, and the reason the minimum is taken over every trace and not only the dragged
+    ones. A driver at 0 is as often the reference the others were aligned TO as one nobody has
+    reached, and this window cannot tell — so it counts. Skipping the zeros re-based a set that
+    already had an origin: 0 / +0.67 / +0.69 came back as 0 / 0 / +0.02, which is a different car.
+    """
+    view = _view()
+    view.set_traces([Trace(f"d{i}_01 (sw)", *_impulse(4.0 + i * 0.3)) for i in range(3)])
+    for index, ms in enumerate((0.0, 0.67, 0.69)):
+        view.set_delay_target(index)
+        view.set_delay(ms)
+
+    assert view.proposed_delays()[:3] == pytest.approx([0.0, 0.67, 0.69]), "already relative"
+    assert view.delay_reference_name() == "d0_01 (sw)", "the zero IS the origin here"
+    # And the origin is in the list even though nobody dragged it, or the caveat would name a
+    # driver the numbers never mention.
+    assert "d0_01 (sw) +0.000" in view.reading()
+
+
+def test_the_below_zero_check_reads_the_number_a_dsp_would_receive():
+    """`total_delay_ms` is the channel's ledger delay plus the PROPOSAL, and the proposal is the
+    normalised one — checking the raw drag warned about a number nobody would ever be asked for."""
+    view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.5)), Trace("w-R_01 (sw)", *_impulse(4.9))])
+    view.set_channel_delay(0.100, 0)
+    view.set_channel_delay(1.000, 1)
+    view.set_delay_target(0)
+    view.set_delay(-0.5)
+    view.set_delay_target(1)
+    view.set_delay(0.25)
+
+    # Raw, w-L would have been 0.100 − 0.500 = −0.400 and refused. Normalised it is asked for
+    # nothing, and w-R carries the whole 0.750 that was actually measured between them.
+    assert view.total_delay_ms(0) == pytest.approx(0.100)
+    assert view.total_delay_ms(1) == pytest.approx(1.750)
+    assert i18n.t("curveDelayBelowZero") not in view.reading()
+
+
+def test_the_ledger_delays_are_a_different_quantity_and_are_left_alone():
+    """`_channel_delays` come from the project and are already absolute per channel. Normalising a
+    PROPOSAL must not reach into them, or the totals would be computed against a moved ledger."""
+    view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.5)), Trace("w-R_01 (sw)", *_impulse(4.9))])
+    view.set_channel_delay(1.266, 0)
+    view.set_channel_delay(0.500, 1)
+    view.set_delay_target(0)
+    view.set_delay(10.69)
+    view.set_delay_target(1)
+    view.set_delay(10.00)
+
+    assert view._channel_delays[:2] == pytest.approx([1.266, 0.500]), "untouched by any of it"
+    assert view.total_delay_ms(0) == pytest.approx(1.266 + 0.69)
+    assert view.total_delay_ms(1) == pytest.approx(0.500)
