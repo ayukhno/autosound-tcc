@@ -2975,3 +2975,50 @@ def test_the_impulse_strip_opens_on_the_audible_band_and_stays_there():
     low, high = dialog._view._strip.getPlotItem().vb.viewRange()[0]
     assert low == pytest.approx(math.log10(20.0), abs=0.05)
     assert high == pytest.approx(math.log10(20000.0), abs=0.05)
+
+
+# ---- the grid, which REW has and this window did not (user, 2026-08-18) -----------------------
+
+
+def test_both_axes_keep_a_grid_through_every_kind_switch():
+    """The grid belongs to the axis ITEM, and `set_log_x` installs a NEW bottom axis on every kind
+    switch. `showGrid` cannot put it back: it only ticks pyqtgraph's own checkbox, which is already
+    ticked, so nothing emits and `updateGrid` never runs. Measured before the fix on a frequency
+    view: `bottom.grid` False while `left.grid` was 255 — one direction of the same picture had
+    lines and the other had none, which is exactly what the screenshot showed."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    for kind in ("fr", "phase", "impulse", "fr"):
+        dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData(kind))
+        dialog._worker.wait(4000)
+        dialog._worker.run()
+        item = dialog._view._plot.getPlotItem()
+        assert item.getAxis("bottom").grid, f"{kind}: nothing to measure frequency against"
+        assert item.getAxis("left").grid, f"{kind}: nothing to measure level against"
+
+
+def test_the_delay_radios_can_be_counted_at_a_glance():
+    """User, 2026-08-18: "сорі, я не побачив що їх вже три". An unstyled radio indicator is a dark
+    circle on this dark ground, so a row of three read as one control and two smudges.
+
+    Asserted through the CLASS and the rule that paints it rather than through pixels: a test that
+    pinned hex values would break on every palette tweak and tell nobody anything."""
+    from autosound_tcc.ui.tcc.curve_view import colour_of, trace_token
+    from autosound_tcc.ui.tcc.theme import build_qss, get_theme
+
+    view = _view()
+
+    assert [b.property("class") for b in view._target_buttons[:2]] == ["delay-radio"] * 2
+    for mode in ("dark", "light"):
+        theme = get_theme(mode)
+        qss = build_qss(theme)
+        ring = qss.split('QRadioButton[class~="delay-radio"]::indicator')[1].split("}")[0]
+        assert f"border: 2px solid {theme.muted}" in ring, f"{mode}: an unselected ring to count"
+        checked = qss.split('QRadioButton[class~="delay-radio"]::indicator:checked')[1]
+        assert theme.accent in checked.split("}")[0], f"{mode}: and the chosen one still fills"
+    # The NAME keeps its trace's colour, which is how a radio is matched to a curve without words.
+    assert colour_of(trace_token(1)).name() in view._target_buttons[1].styleSheet()

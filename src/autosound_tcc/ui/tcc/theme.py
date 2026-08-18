@@ -391,6 +391,41 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('accent', 26, 'panel3')};
         color: {t.accent};
     }}
+    /* .delay-radio — the curve window's "which driver is being delayed" radios, one per trace.
+
+    An unstyled radio indicator is drawn by the native style: a dark circle on this dark ground,
+    which is why a row of THREE read as one bright control and two smudges and the user counted two
+    (2026-08-18: "сорі, я не побачив що їх вже три"). The unselected state gets a ring in `muted`
+    — the same token the axis labels use, so it is legible in both palettes without being loud —
+    and the selected one keeps the accent FILL, so "here are your curves" and "this is the one you
+    are editing" stay two different statements.
+
+    The label is normal control type rather than the faint 11 px `.phead-sub` it wore; its COLOUR
+    is written per widget from the trace's own pen (`curve_view.set_traces`), which is why no
+    `color` is set here. */
+    QRadioButton[class~="delay-radio"] {{
+        font-size: 12px;
+        font-weight: 600;
+        spacing: 5px;
+        padding: 0 3px;
+        background: transparent;
+    }}
+    QRadioButton[class~="delay-radio"]::indicator {{
+        width: 11px;
+        height: 11px;
+        /* Under half the rendered 15px (11 + 2px border either side), or Qt treats the radius as
+        invalid and draws a square — the same rule `.edit-chip` records. */
+        border-radius: 7px;
+        border: 2px solid {t.muted};
+        background: {t.panel3};
+    }}
+    QRadioButton[class~="delay-radio"]::indicator:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QRadioButton[class~="delay-radio"]::indicator:checked {{
+        border: 2px solid {t.accent};
+        background: {t.accent};
+    }}
     /* .curve-chip — one chosen measurement in the curve window's selection row, with the × that
     takes it off the plot. The frame is shared; the BORDER and the name are coloured per chip, from
     the pen its own trace is drawn with (`curve_view.trace_colour`), so the row reads as a legend of

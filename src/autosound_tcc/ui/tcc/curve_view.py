@@ -75,9 +75,34 @@ _ARBITER_TOKEN = "ok"
 #: one-marker-per-curve modes cannot ask, because there the two markers are at different places.
 _MODE_LABELS = {"v": "V", "h": "H", "vh": "VH", "vhs": "VHs", "vx": "Vx", "hx": "Hx"}
 _CROSS_MODES = ("vx", "hx")
+#: How strongly the grid is drawn. pyqtgraph scales this per tick level -- level 0 (the decades)
+#: gets the full share and level 1 (the 2-3-4-5-6-8 ladder) half of it -- so one number gives the
+#: two weights REW's axis has. At the old 0.18 that worked out to 46 and 23 of 255, which is not a
+#: grid, it is a rumour (user, 2026-08-18, with REW's own axis beside ours). At this value it is
+#: 166 and 83: readable across a car seat, and still behind seven traces drawn at full alpha.
+_GRID_ALPHA = 1.0
+#: How far the grid's colour is mixed from `muted` towards the panel it is drawn on. This is the
+#: lever, not the alpha: `border2` — the app's hairline between panels, which the axes wore — is
+#: 0x33404f on a 0x161b22 panel, and raising `showGrid`'s alpha from 0.18 through 0.5 and 0.65 to
+#: 1.0 changed almost nothing on screen (rendered and compared at each step). Alpha modulates a
+#: colour that was never far enough from the background to modulate. Mixed from `muted` instead:
+#: bright enough to count decades off across a car seat, dark enough to stay behind a trace drawn
+#: at full strength, and it lands correctly in both palettes because it is a mix of two tokens.
+_GRID_MIX = 70
 #: Guides are drawn heavier than the traces they cross. At trace weight they vanish into a dense
 #: impulse — 262 144 points is a solid block of pixels, and a 1 px line over it is not a line.
 _GUIDE_WIDTH = 2.4
+#: How close two level lines may START to each other before `_h_marker_levels` gives up on putting
+#: them on their own curves and spreads them out instead. A fraction of the VISIBLE height rather
+#: than a number of pixels: the same 0.01 of an impulse sample is a hair on one zoom and half the
+#: window on another, and what has to be readable is the gap on screen. 6% of the height is about
+#: 20 px in this window — a hand's width apart at a glance, and small enough that two drivers a real
+#: decibel apart on a frequency response keep the placement that says so.
+_H_MARKER_MIN_GAP = 0.06
+#: How much of the visible height the spread-out levels are laid across. The middle half: high
+#: enough to be clear of the axis labels at the bottom, low enough that the top line is not read as
+#: part of the frame.
+_H_MARKER_SPREAD = 0.5
 #: The predicted sum's pen. Dashed, because it is a PREDICTION standing among measurements — but
 #: readable, which the first attempt was not: `text` at alpha 150 and 1.2 px came out as a thin
 #: grey dash nobody could follow across the plot (user, 2026-08-18, with the screenshot). Yellow
@@ -170,6 +195,35 @@ def colour_of(token: str) -> QColor:
         hue = _TRACE_HUES[(index - len(_TRACE_TOKENS)) % len(_TRACE_HUES)]
         return QColor.fromHsv(hue, base.saturation(), base.value())
     return QColor(getattr(current_theme(), str(token), None) or str(token))
+
+
+def _grid_colour() -> QColor:
+    """The colour the axes and their grid are drawn in — see `_GRID_MIX` for why it is a mix.
+
+    Mixed here rather than through `Theme.mix`, which answers in the CSS `rgb(r, g, b)` spelling a
+    stylesheet wants and pyqtgraph refuses ("Unable to convert rgb(75, 83, 93) to QColor"). Same
+    arithmetic, a QColor out: this side of the app draws with pens, not with sheets.
+    """
+    theme = current_theme()
+    muted, panel = QColor(theme.muted), QColor(theme.panel)
+    share = _GRID_MIX / 100.0
+    return QColor(
+        round(muted.red() * share + panel.red() * (1 - share)),
+        round(muted.green() * share + panel.green() * (1 - share)),
+        round(muted.blue() * share + panel.blue() * (1 - share)),
+    )
+
+
+def trace_colour(index: int) -> QColor:
+    """The colour trace `index` is drawn in — for whatever names the same trace OUTSIDE the plot.
+
+    One call rather than two, and it lives here because this is where the pens are made:
+    `_TRACE_TOKENS` and `_TRACE_HUES` are this widget's own, and the chip row in `curve_dialog` —
+    which is a legend of the selection, one chip per plotted curve — would have to hold a second
+    copy of them to colour itself. Two copies of a palette drift the first time a hue moves, and a
+    legend that disagrees with the plot is worse than no legend at all.
+    """
+    return colour_of(trace_token(index))
 
 
 def tip_html(text: str, head: str = "", warn: bool = False) -> str:
@@ -336,36 +390,69 @@ class LogHzAxis(pg.AxisItem):
     and it is not a matter of taste: the numbers on this axis are the vocabulary the whole trade
     speaks in — nobody says "the null at four times ten to the second".
 
-    Ticks are chosen from the 1-2-3-5 series per decade, most significant first, and thinned to
-    whatever the axis is actually wide enough to print.
+    Two tick levels, because they do two different jobs. The DECADES are the frame of the picture
+    and carry the heavier grid line; the 2-3-4-5-6-8 ladder between them is what lets a frequency
+    be read off the grid without a label under it, which is what REW's axis does and what this one
+    did not (user, 2026-08-18: "а що до сітки, має сенс її мати", with REW's axis beside it).
+
+    **Labels are thinned; LINES are not.** Crowding is a problem for text and not for a 1-pixel
+    line, so the thinning moved out of `tickValues` — which decides what is DRAWN — and into
+    `tickStrings`, which decides what is READ. Before this the two thinned together: as the window
+    narrowed the grid lost lines along with the labels, leaving a picture with nothing to measure
+    against at exactly the width where measuring by eye matters most.
     """
 
-    _MAJOR = (1, 2, 5)
-    _MINOR = (3, 4, 6, 8)
+    #: The decade line: 10, 100, 1k, 10k. Level 0, so pyqtgraph draws its grid at full alpha.
+    _MAJOR = (1,)
+    #: REW's own ladder inside a decade. Level 1, drawn at half alpha — present, not competing.
+    _MINOR = (2, 3, 4, 5, 6, 8)
+    #: Which multiples get a LABEL when there is room, in order of preference. The 1-2-5 series
+    #: first because it is the vocabulary the trade speaks in (20, 50, 100, 200, 500, 1k), and the
+    #: rest afterwards if the axis is wide enough to print them.
+    _LABEL_FIRST = (1, 2, 5)
+    _LABEL_THEN = (3, 4, 6, 8)
     #: Pixels a label needs before another one may be placed. Measured against the widest string
     #: this axis ever prints ("20kHz"), with room to breathe.
     _MIN_LABEL_PX = 34
+    #: Which of the drawn values earned a label at the last `tickValues`. A frozenset because it is
+    #: a class default that must never be mutated in place by one axis on behalf of another.
+    _labelled: frozenset = frozenset()
 
     def tickValues(self, minVal, maxVal, size):  # noqa: N802 (Qt/pyqtgraph naming)
-        # Values arrive in LOG10 space because the plot is in log mode.
-        low, high = 10.0 ** min(minVal, maxVal), 10.0 ** max(minVal, maxVal)
+        # Values arrive in LOG10 space because the plot is in log mode. Widened by a hair on the
+        # way back out of it: `10 ** log10(20)` is 20.000000000000004, so an axis whose edge is
+        # exactly 20 Hz filtered its own edge tick out and opened with no grid line at 20.
+        low = 10.0 ** min(minVal, maxVal) * (1 - 1e-9)
+        high = 10.0 ** max(minVal, maxVal) * (1 + 1e-9)
         decades = range(int(math.floor(math.log10(max(low, 1e-9)))),
                         int(math.ceil(math.log10(max(high, 1e-9)))) + 1)
-        out = []
-        for step, group in ((0, self._MAJOR), (1, self._MINOR)):
-            values = [
+
+        def series(multiples):
+            return sorted(
                 math.log10(mult * 10 ** decade)
                 for decade in decades
-                for mult in group
+                for mult in multiples
                 if low <= mult * 10 ** decade <= high
-            ]
+            )
+
+        # What gets a label, decided here because this is the only place that knows the axis's
+        # width in pixels — `tickStrings` is handed values and a spacing, never a size.
+        labelled = self._thin(series(self._LABEL_FIRST), size, minVal, maxVal, [])
+        labelled = labelled + self._thin(
+            series(self._LABEL_THEN), size, minVal, maxVal, [(0, labelled)]
+        )
+        self._labelled = frozenset(round(value, 9) for value in labelled)
+
+        out = []
+        for step, group in ((0, self._MAJOR), (1, self._MINOR)):
+            values = series(group)
             if values:
-                out.append((step, self._thin(values, size, minVal, maxVal, out)))
+                out.append((step, values))
         return out
 
     def _thin(self, values, size, minVal, maxVal, already):
-        """Drop what will not fit. Crowding is what made the default unreadable, and a tick with
-        no room is worse than no tick: it overprints the one that had room."""
+        """Drop what will not fit. Crowding is what made the default unreadable, and a label with
+        no room is worse than no label: it overprints the one that had room."""
         span = abs(maxVal - minVal) or 1.0
         per_unit = (size or 1.0) / span
         taken = [v for _, group in already for v in group]
@@ -379,6 +466,11 @@ class LogHzAxis(pg.AxisItem):
     def tickStrings(self, values, scale, spacing):  # noqa: N802 (Qt/pyqtgraph naming)
         out = []
         for value in values:
+            if round(value, 9) not in self._labelled:
+                # Drawn, and deliberately not named — see the class docstring. A grid line every
+                # tuner can count off is worth more than a label that would collide.
+                out.append("")
+                continue
             hz = 10.0 ** value
             if hz >= 1000:
                 thousands = hz / 1000.0
@@ -438,6 +530,11 @@ class CurveView(QWidget):
     #: view keeps nothing across a pair — a delay read here is worth as much as the six read
     #: before it, and holding only the current one is what left the rest in the Arbiter's head.
     delayChanged = Signal()
+    #: The predicted sum was switched on or off. Carried out of the view because the WINDOW has
+    #: controls that only make sense with a sum on screen — the group picker fills the selection in
+    #: order to sum it — and the alternative was the dialog polling `sum_shown()` on a timer or
+    #: reaching into the button.
+    sumToggled = Signal(bool)
 
     def __init__(self, x_label: str = "ms", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -459,6 +556,9 @@ class CurveView(QWidget):
         #: phase the two pictures are read as one; meaningless on the impulse, where
         #: `_strip_linkable` refuses it whatever this says.
         self._strip_linked = True
+        #: Whether the strip is mid-follow. `setXRange` emits a range-changed signal of its own,
+        #: and a follower that answers its own move never settles — see `_follow_plot_x`.
+        self._following_x = False
         self._zoom_buttons: list[tuple[QPushButton, str]] = []
         self._axes_buttons: list[tuple[QPushButton, str]] = []
 
@@ -474,7 +574,7 @@ class CurveView(QWidget):
         # (reproduced in the suite, 2026-08-12). We do not use the menu at all: everything it
         # offers is on the A/D/−/+ buttons, and in the dark theme it renders white-on-white.
         self._plot = pg.PlotWidget(background=theme.panel, enableMenu=False)
-        self._plot.showGrid(x=True, y=True, alpha=0.18)
+        self._plot.showGrid(x=True, y=True, alpha=_GRID_ALPHA)
         # No axis label under the ticks: it is a whole row of window spent centring one word, and
         # the readout wants that row (user, 2026-08-11). The unit moves to the right end of the
         # readout, where it labels the numbers rather than the axis.
@@ -497,7 +597,7 @@ class CurveView(QWidget):
         # the scene rather than the widget: the ViewBox owns the mouse inside the plot area.
         self._plot.getPlotItem().scene().sigMouseClicked.connect(self._on_scene_click)
         for axis in ("bottom", "left"):
-            self._plot.getAxis(axis).setPen(pg.mkPen(theme.border2))
+            self._plot.getAxis(axis).setPen(pg.mkPen(_grid_colour()))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
         self._legend = self._plot.addLegend(offset=(-8, 8), labelTextColor=theme.text)
         # The plot goes in a SPLITTER rather than straight into the layout, so the boundary between
@@ -604,6 +704,11 @@ class CurveView(QWidget):
         self._readout_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         attach_tip(self._readout_btn, "")
         notes.addWidget(self._readout_btn)
+        #: Where the WINDOW's own note buttons go — see `add_note`. Recorded rather than counted
+        #: later, for the same reason `_radio_slot` is: the cross-pair combos are appended after
+        #: this point, so an inserted note has to land before them and not after.
+        self._notes_row = notes
+        self._note_slot = notes.count()
         # WHICH two curves the cross modes read. Only on screen when there is a choice to make —
         # more than two traces and a cross mode selected — and in this row rather than beside the
         # mode buttons because that row is already full at seven drivers, and because what these
@@ -683,7 +788,7 @@ class CurveView(QWidget):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFixedSize(30, 24)
             attach_tip(button, i18n.t(f"curveAxes_{mode}"))
-            button.clicked.connect(lambda _checked, m=mode: self.set_axes_mode(m))
+            button.clicked.connect(lambda _checked, m=mode: self._on_mode_button(m))
             row.addWidget(button)
             self._axes_buttons.append((button, mode))
 
@@ -697,20 +802,22 @@ class CurveView(QWidget):
         # is the one control here that takes something OFF the picture -- the others move a view,
         # this one removes what the numbers were read from. Red at rest, filled red when the
         # guides are actually hidden, so the state is legible from across a car seat.
+        # All of that is `.guides-btn` in `theme.py` and not a QFont plus an inline stylesheet: a
+        # QSS `font-size` beats a font set in code, so while this button wore `.zoom-btn` the
+        # enlarged glyph never reached the screen -- and the inline colours were only written by
+        # `_update_guides_button`, which nothing called at construction, so it opened grey (user,
+        # 2026-08-18, with the screenshot).
         self._guides_btn = QPushButton("✕")
-        self._guides_btn.setProperty("class", "zoom-btn")
+        self._guides_btn.setProperty("class", "guides-btn")
         self._guides_btn.setCheckable(True)
         self._guides_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._guides_btn.setFixedSize(34, 26)
-        font = self._guides_btn.font()
-        font.setPointSizeF(font.pointSizeF() * 1.35)
-        font.setBold(True)
-        self._guides_btn.setFont(font)
         # The strip's link to the plot's frequency scale. Beside the guides toggle because both
         # are about what the picture shows rather than about the measurements, and hidden entirely
-        # on the impulse, where there is no frequency above to link to.
+        # on the impulse, where there is no frequency above to link to. `.link-btn` gives it the
+        # orange ring the user asked for -- see the class in `theme.py` for which token and why.
         self._link_btn = QPushButton("⇅")
-        self._link_btn.setProperty("class", "zoom-btn")
+        self._link_btn.setProperty("class", "link-btn")
         self._link_btn.setCheckable(True)
         self._link_btn.setChecked(True)
         self._link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -777,6 +884,11 @@ class CurveView(QWidget):
         self._cross_indices = (0, 1)
         self._render_sum()
         self._render_readout()
+        # Both toggles put into their opening state HERE, at the end of construction. Neither used
+        # to be, and the ✕ opened grey because of it: its look was written only by
+        # `_update_guides_button`, which nothing called until a theme switch or the first press.
+        self._update_guides_button()
+        self._update_link_button()
 
     def _place_sum_button(self, *_args) -> None:
         """Keep the Σ toggle in the plot AREA's top-left corner — inside the axes, not over them.
@@ -899,7 +1011,7 @@ class CurveView(QWidget):
             return
         theme = current_theme()
         axis = self._plot.getPlotItem().getAxis("right")
-        axis.setPen(pg.mkPen(theme.border2))
+        axis.setPen(pg.mkPen(_grid_colour()))
         axis.setTextPen(pg.mkPen(self._sum_colour()))
 
     def _sum_colour(self) -> QColor:
@@ -945,7 +1057,13 @@ class CurveView(QWidget):
         while len(self._target_buttons) < count:
             index = len(self._target_buttons)
             button = QRadioButton(str(index + 1))
-            button.setProperty("class", "phead-sub")
+            # `.delay-radio` and not `.phead-sub`: that class is for secondary captions, and it
+            # made a CONTROL's own name faint 11 px type. More to the point, an unstyled radio
+            # indicator on this dark ground is a dark circle on a dark background, so a row of
+            # three read as one bright control and two smudges — the user counted two (2026-08-18:
+            # "сорі, я не побачив що їх вже три"). The class gives the unselected state a ring
+            # that can be counted; see `theme.py`.
+            button.setProperty("class", "delay-radio")
             button.setChecked(index == 0)
             button.toggled.connect(
                 lambda checked, i=index: self.set_delay_target(i) if checked else None
@@ -965,6 +1083,28 @@ class CurveView(QWidget):
         """
         self._action_row.insertWidget(self._delay_slot, button)
 
+    def add_note(self, button: QWidget) -> None:
+        """Put one of the WINDOW's own note buttons in this view's notes row, beside its two.
+
+        The same shape as `add_delay_action` and for the same reason. The view owns the plot and
+        the dialog owns the delay bank, but a tuner reads "Σ forecast", "Reading →" and "Delays
+        read (n)" as one line of the same kind of thing — three counts with their text behind them
+        — and three of them on three rows was three rows of a window that is short of height now
+        that it carries a strip (user, 2026-08-18: "ось ці кнопки всі стануть в ряд в самому низу,
+        щоб не займати простір").
+        """
+        self._notes_row.insertWidget(self._note_slot, button)
+        self._note_slot += 1
+
+    def add_note_action(self, button: QWidget) -> None:
+        """Put an action at the RIGHT-hand end of the notes row, past the stretch.
+
+        The notes on the left say what is on screen; the actions on the right undo it. The stretch
+        between them is what keeps a long note from pushing a button off the row, and what makes
+        the clear buttons stay in the same place while a note appears and disappears with the sum.
+        """
+        self._notes_row.addWidget(button)
+
     def on_send(self, handler: Callable[[str], None]) -> None:
         self._send_btn.clicked.connect(lambda: handler(self.statement()))
 
@@ -977,7 +1117,11 @@ class CurveView(QWidget):
         answer being read. `force` is the Clear button: there the whole point is to put them back
         in the middle of the screen, spread apart, and start the reading over ("очистка Маркери це
         повинно бути як дабл-клік — поставити по центру з зміщенням").
+
+        Either way it is a gesture ABOUT the markers, so it ends the hide first (`_guides_wanted`):
+        fetching invisible lines back into a view answers nothing, and the button looks broken.
         """
+        self._guides_wanted()
         (low, high), _ = self._plot.getViewBox().viewRange()
         if high <= low:
             return
@@ -1205,7 +1349,14 @@ class CurveView(QWidget):
                 name = self._traces[index].name.split(" ")[0]
                 button.setText(name.rpartition("_")[0] if len(self._traces) > 2 else name)
                 button.setVisible(True)
-                button.setStyleSheet(f"color: {colour_of(trace_token(index)).name()}")
+                # The NAME takes the trace's colour, so a radio can be matched to a curve without
+                # reading it; the indicator's own ring and fill come from `.delay-radio` and stay
+                # the same on every radio, which is what keeps "these are your curves" and "this is
+                # the one being delayed" two separate statements. Selector-scoped, so the sheet
+                # cannot reach into the `::indicator` rules the class provides.
+                button.setStyleSheet(
+                    f"QRadioButton {{ color: {colour_of(trace_token(index)).name()}; }}"
+                )
             else:
                 button.setVisible(False)
         for index, trace in enumerate(self._traces):
@@ -1245,6 +1396,7 @@ class CurveView(QWidget):
             button.blockSignals(blocked)
         self._render_sum()
         self._render_readout()
+        self.sumToggled.emit(self._sum_on)
 
     def sum_shown(self) -> bool:
         return self._sum_on
@@ -1574,15 +1726,21 @@ class CurveView(QWidget):
             # leaving a band too short to read a curve in.
             strip.setMinimumHeight(_STRIP_MIN_PX)
             strip.setLogMode(x=True, y=False)
+            # No `enableAutoRange(x=False)` here, unlike `set_log_x`: measured, the strip's x
+            # auto-range is already off by the time anything is drawn, because BOTH branches of
+            # `_apply_strip_link` set an explicit range — the plot's span when it is following, and
+            # `_STRIP_BAND_HZ` when it is not — and `setXRange` disables the auto-range as it goes.
+            # A line that changes nothing is worse than no line: it reads as a fact about pyqtgraph
+            # that is not true.
             axis = LogHzAxis(orientation="bottom")
-            axis.setPen(pg.mkPen(theme.border2))
+            axis.setPen(pg.mkPen(_grid_colour()))
             axis.setTextPen(pg.mkPen(theme.muted))
             strip.setAxisItems({"bottom": axis})
-            strip.getAxis("left").setPen(pg.mkPen(theme.border2))
+            strip.getAxis("left").setPen(pg.mkPen(_grid_colour()))
             # The left axis wears the sum's own colour, the same pairing of scale with curve the
             # right-hand axis uses on the frequency views.
             strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
-            strip.showGrid(x=True, y=True, alpha=0.18)
+            strip.showGrid(x=True, y=True, alpha=_GRID_ALPHA)
             self._adopt_orphan_menus(strip)
             # Hidden BEFORE it is put in the splitter. `QSplitter::insertWidget` shows what it is
             # given unless the widget has been told otherwise explicitly, and a strip that flashes
@@ -1593,6 +1751,9 @@ class CurveView(QWidget):
             # under it, not above the plot it is not about.
             self._split.addWidget(strip)
             self._strip = strip
+            # The plot's own range-changed signal is what the strip follows — one way, and the
+            # only wire between the two. Connected once, here, because the strip is built once.
+            self._plot.getPlotItem().vb.sigXRangeChanged.connect(self._follow_plot_x)
             self._apply_strip_link()
         except Exception:  # noqa: BLE001 — pyqtgraph moved; the strip is off, not the window
             self._strip = None
@@ -1608,23 +1769,72 @@ class CurveView(QWidget):
         """
         return self._unit != "ms"
 
-    def _apply_strip_link(self) -> None:
-        """Link the strip's x to the plot's, or set it free on the audible band.
+    def _follow_plot_x(self, *_args) -> None:
+        """Put the strip on the plot's frequency span. ONE way, always: the strip follows.
 
-        The link is pyqtgraph's own (`ViewBox.setXLink`), which is safe here only because both
-        views are in log-hertz: the plot's log mode and the strip's are the same transform, so the
-        linked coordinates mean the same thing on both. Unlinked, the strip opens on the band the
-        rest of this window uses for a frequency view rather than on whatever the last link left
-        behind, which would look like a zoom nobody asked for.
+        This used to be `ViewBox.setXLink`, and that is the bug the user photographed (2026-08-18:
+        a phase axis ticking out to 500000k with the curves crushed into a corner). pyqtgraph's
+        link is TWO-WAY — the slave's `updateViewRange` calls `linkedViewChanged` on the MASTER —
+        and it lines the two up by dividing a view's width by its SCREEN width. So any moment when
+        the strip's own range or geometry is not yet settled arrives on the plot as a range
+        computed from nonsense. Measured, with the plot showing 20 Hz … 20 kHz: turning Σ on took
+        it from **(1.241, 4.361) to (-307.60, 308.20)** — a span of 615 log-decades — from inside
+        `addItem` on the STRIP, and nothing afterwards took it back.
+
+        Copying the numbers cannot do that, because the strip has no way to speak back. It also
+        cannot be got wrong by a geometry that has not settled: both views are in log-hertz, the
+        same transform on both sides, so the same two numbers mean the same two frequencies.
+
+        Guarded against re-entry: `setXRange` on the strip emits its own range-changed signal, and
+        a follower that answers its own move never settles.
+        """
+        if self._strip is None or self._following_x:
+            return
+        if not (self._strip_linkable() and self._strip_linked):
+            return
+        self._following_x = True
+        try:
+            low, high = self._plot.getPlotItem().vb.viewRange()[0]
+            self._strip.getPlotItem().vb.setXRange(low, high, padding=0)
+        except (RuntimeError, AttributeError, TypeError, ValueError):
+            pass  # torn down, or pyqtgraph moved: the curve matters more than the alignment
+        finally:
+            self._following_x = False
+
+    def _match_axis_widths(self) -> None:
+        """Give the strip's left axis the plot's width, so equal numbers are equal POSITIONS.
+
+        With the link done by copying numbers rather than by pyqtgraph's screen-space maths, the
+        two pictures share a scale automatically and share a POSITION only if the space left of
+        them is the same. It is not: the phase axis prints "-180" and the strip's prints "84".
+        Pinned once here rather than tracked, because a width set from inside a resize is how a
+        layout comes to oscillate — and this is worth a few pixels of accuracy, not a loop.
+        """
+        try:
+            width = self._plot.getPlotItem().getAxis("left").width()
+            if width > 1:
+                self._strip.getPlotItem().getAxis("left").setWidth(width)
+        except (RuntimeError, AttributeError, TypeError):
+            pass
+
+    def _apply_strip_link(self, *_args) -> None:
+        """Have the strip follow the plot's x, or set it free on the audible band.
+
+        Unlinked, the strip opens on the band the rest of this window uses for a frequency view
+        rather than on whatever the last link left behind, which would look like a zoom nobody
+        asked for. See `_follow_plot_x` for why the following half is not `setXLink`.
         """
         if self._strip is None:
             return
         try:
             box = self._strip.getPlotItem().vb
+            # Never pyqtgraph's own link, in either state — including a stale one left by an older
+            # build of this window.
+            box.setXLink(None)
             if self._strip_linkable() and self._strip_linked:
-                box.setXLink(self._plot.getPlotItem().vb)
+                self._match_axis_widths()
+                self._follow_plot_x()
             else:
-                box.setXLink(None)
                 low, high = _STRIP_BAND_HZ
                 box.setXRange(math.log10(low), math.log10(high), padding=0)
         except Exception:  # noqa: BLE001 — a link is a convenience; the curve matters more
@@ -1658,9 +1868,10 @@ class CurveView(QWidget):
             blocked = button.blockSignals(True)
             button.setChecked(self._strip_linked)
             button.blockSignals(blocked)
-        theme = current_theme()
-        _restyle(button, f"color: {theme.accent}; border-color: {theme.accent};"
-                 if self._strip_linked else "")
+        # No colours written here: `.link-btn` in `theme.py` carries the orange ring in both states
+        # and tells them apart by the fill, so a theme switch repaints it like everything else and
+        # the ring is there before anything has called this (the bug the ✕ had — see
+        # `_update_guides_button`).
 
     def _show_strip(self, on: bool) -> None:
         """Put the strip on screen, or take it off. Never builds one to hide it.
@@ -1833,12 +2044,19 @@ class CurveView(QWidget):
         return not self._guides_hidden and self._axes_mode != "vhs"
 
     def _update_guides_button(self) -> None:
-        """Say ON the button whether the guides are hidden.
+        """Keep the button's own checked state in step with whether the guides are hidden.
 
-        The same colouring the Σ toggle carries and for the same reason: `.zoom-btn` has no
-        `:checked` rule, and a toggle whose state cannot be read is a toggle that gets pressed
-        twice. It matters more here than there — with the guides gone there is nothing else on
-        screen to say why.
+        The COLOURS are not written here any more — they are `.guides-btn` in `theme.py`, red
+        outlined at rest and filled red while the guides are off, through a `:checked` rule. Both
+        halves of that move were bugs, not tidying: an inline stylesheet is only written when
+        something CALLS this, and nothing called it at construction, so the ✕ opened looking
+        exactly like the grey zoom buttons beside it; and a QSS `font-size` from the application
+        sheet beats a QFont set in code, so while the button wore `.zoom-btn` the big red X that
+        was asked for was never big (user, 2026-08-18, with the screenshot).
+
+        What is left has to stay: `set_guides_hidden` can be called in code (the marker controls
+        end the hide themselves), and a toggle that does not follow its own state is a toggle that
+        gets pressed twice.
         """
         button = getattr(self, "_guides_btn", None)
         if button is None:
@@ -1847,17 +2065,6 @@ class CurveView(QWidget):
             blocked = button.blockSignals(True)
             button.setChecked(self._guides_hidden)
             button.blockSignals(blocked)
-        theme = current_theme()
-        _restyle(
-            button,
-            # Filled when the guides are off, outlined when they are on. Red either way: the
-            # button says what it DOES, and its fill says whether it has been done -- a toggle
-            # that is only coloured in one of its two states reads as a warning about the state it
-            # is in rather than as a control (user asked for red, 2026-08-18).
-            f"color: {theme.ground}; background: {theme.warn}; border-color: {theme.warn};"
-            if self._guides_hidden
-            else f"color: {theme.warn}; border-color: {theme.warn};",
-        )
 
     def set_markers(
         self, positions: Sequence[float], names: Sequence[str] = (),
@@ -1918,7 +2125,7 @@ class CurveView(QWidget):
         self._plot.setBackground(theme.panel)
         for axis_name in ("bottom", "left"):
             axis = self._plot.getAxis(axis_name)
-            axis.setPen(pg.mkPen(theme.border2))
+            axis.setPen(pg.mkPen(_grid_colour()))
             axis.setTextPen(pg.mkPen(theme.muted))
         if self._legend is not None:
             self._legend.setLabelTextColor(theme.text)
@@ -1926,7 +2133,7 @@ class CurveView(QWidget):
         if self._strip is not None:
             self._strip.setBackground(theme.panel)
             for axis_name in ("bottom", "left"):
-                self._strip.getAxis(axis_name).setPen(pg.mkPen(theme.border2))
+                self._strip.getAxis(axis_name).setPen(pg.mkPen(_grid_colour()))
             self._strip.getAxis("bottom").setTextPen(pg.mkPen(theme.muted))
             self._strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
         # The hide-guides toggle carries its state as a colour written from the palette that was
@@ -1956,11 +2163,38 @@ class CurveView(QWidget):
         """
         self._log_x = bool(on)
         self._plot.setLogMode(x=self._log_x, y=False)
+        # ...and then take the x auto-range back off, because `PlotItem.updateLogMode` ends with a
+        # bare `enableAutoRange()` that turns BOTH axes back on. From that moment the x range is at
+        # the mercy of every item added or removed, in whatever coordinates that item happens to
+        # carry — and a kind switch is exactly when those coordinates change underneath it: the
+        # impulse's x is milliseconds and the other two are log-hertz.
+        #
+        # Measured, driving 180 sequences of kind switches, Σ and zoom through the window and
+        # watching every `setRange` on the log axis: **138 of the 180 widened the frequency range
+        # without this line, and 0 with it**. One of them, caught in the act inside `set_traces` on
+        # an impulse -> phase switch: `x (0.551, 4.466) -> (-307.600, 308.200)`, which a log axis
+        # labels out past 10^308 Hz with the curves crushed into a corner. That is the shape of
+        # what the user photographed (2026-08-18: ticks running to 500000k).
+        #
+        # This window never wants an auto-ranged x: it states its own span on every fetch
+        # (`curve_dialog._frame` -> `focus_x`) and by hand after that (`show_all`, `show_detail`,
+        # `zoom`). Y is untouched — that one IS asked for, by `autoscale_y`.
+        self._plot.getViewBox().enableAutoRange(axis="x", enable=False)
         # The frequency axis only makes sense in log mode; time keeps pyqtgraph's own.
         theme = current_theme()
         axis = self._hz_axis if self._log_x else pg.AxisItem(orientation="bottom")
-        axis.setPen(pg.mkPen(theme.border2))
+        axis.setPen(pg.mkPen(_grid_colour()))
         axis.setTextPen(pg.mkPen(theme.muted))
+        # The grid belongs to the axis ITEM, and this call installs a new one — so it has to be
+        # given the grid before it goes in. This is the whole of "the grid is nearly invisible"
+        # (user, 2026-08-18, with REW's axis beside ours): there WAS no vertical grid on any view
+        # this window opens on. `showGrid` in `__init__` set it on the axis pyqtgraph built, every
+        # kind switch replaced that axis with one whose grid flag was False, and asking `showGrid`
+        # again changes nothing because it only ticks pyqtgraph's own checkbox — already ticked, so
+        # no `toggled`, so no `updateGrid`. Measured on a frequency view: `bottom.grid = False`
+        # while `left.grid = 255`, which is exactly why one direction of the same picture had lines
+        # and the other did not. `setGrid` on the item skips the checkbox entirely.
+        axis.setGrid(int(_GRID_ALPHA * 255))
         self._plot.setAxisItems({"bottom": axis})
         # The sum lives on a ViewBox pyqtgraph's log mode does not reach, so its x coordinates are
         # computed against this flag — which has just changed.
@@ -2025,6 +2259,31 @@ class CurveView(QWidget):
         self._render_sum()
         self._render_readout()
 
+    def _guides_wanted(self) -> None:
+        """A control ABOUT the guides was pressed, so the guides come back.
+
+        With them hidden the mode buttons and the marker actions all appear dead: they place and
+        move lines nothing is drawing, so the picture does not answer and the control looks broken
+        (user, 2026-08-18: "коли нажав любу іншу то Х скинувся"). Pressing one of them is a
+        statement that the tuner wants the guides, and this is where the hide ends.
+
+        Deliberately not wired to the rest of the row. The Σ toggle, the strip's link toggle, the
+        zoom buttons and the delay controls are about the curves or about the view, not about the
+        guides — and a tuner who took every line off in order to LOOK at the traces would lose that
+        the moment they zoomed in.
+
+        On the button handlers rather than inside `set_axes_mode`, because the window calls that
+        itself on every kind switch (`curve_dialog._apply_kind`): in the setter it would put the
+        guides back behind the tuner while they were reading a curve.
+        """
+        if self._guides_hidden:
+            self.set_guides_hidden(False)
+
+    def _on_mode_button(self, mode: str) -> None:
+        """The guides come back, then the mode changes — see `_guides_wanted` for which do that."""
+        self._guides_wanted()
+        self.set_axes_mode(mode)
+
     def set_axes_mode(self, mode: str) -> None:
         """`v` reads frequencies, `h` reads levels, `vh` reads both.
 
@@ -2042,12 +2301,62 @@ class CurveView(QWidget):
         self._render_crossings()
         self._render_readout()
 
-    def _rebuild_h_markers(self) -> None:
-        """One horizontal marker per vertical one, on its own curve's value at that x.
+    def _visible_y(self) -> Optional[tuple[float, float]]:
+        """The Y span currently on screen, or None while there is no settled view to ask."""
+        try:
+            low, high = self._plot.getViewBox().viewRange()[1]
+        except (RuntimeError, TypeError, ValueError):  # torn down, or nothing plotted yet
+            return None
+        return (float(low), float(high)) if high > low else None
 
-        Starting them ON the curve is what makes them useful immediately: the first thing anybody
-        wants from a level marker is "what is this trace doing here", and a line parked at zero
-        answers nothing.
+    def _h_marker_levels(self, on_curve: Sequence[float]) -> list[float]:
+        """Where the level lines START: on their own curves, unless that draws lines nobody can read.
+
+        The on-curve start is a preference, not a rule, and this is where the drawing surrenders it.
+        What it wanted is still right — the first thing anybody asks of a level marker is "what is
+        this trace doing here", and a line parked at zero answers nothing. What it did NOT survive
+        is an impulse: outside the arrival every trace sits at about the same value, and the markers
+        start on each trace's own peak, so two lines landed within a hair of each other at the
+        bottom edge of a view scaled to ±peak, and read as one line at the bottom of the picture
+        (user, 2026-08-18: "коли вибираю горизонтальні маркери, вони в самому низу — зручно було,
+        коли вони по середині рознесені між собою"). A wrapped phase does the same at −180°.
+
+        So: keep the on-curve placement while every line is inside the visible span and no two are
+        within `_H_MARKER_MIN_GAP` of the height apart — which is the frequency-response case, where
+        two drivers at one frequency are a real and readable number of decibels apart — and spread
+        them evenly across the middle of the picture when they are not. They are draggable to
+        anywhere afterwards either way, and `reading()` is the same sentence whichever start they
+        were given: a starting point is not an answer.
+        """
+        levels = [float(value) for value in on_curve]
+        span = self._visible_y()
+        if span is None or not levels:
+            return levels
+        low, high = span
+        height = high - low
+        gap = height * _H_MARKER_MIN_GAP
+        inside = all(low <= value <= high for value in levels)
+        apart = all(
+            abs(a - b) >= gap
+            for index, a in enumerate(levels) for b in levels[index + 1:]
+        )
+        if inside and apart:
+            return levels
+        # Evenly across the middle band, in marker order, top down: the order the reading names
+        # them in is the order they are stacked in, so a line can be matched to its curve by eye
+        # before anything has been dragged.
+        middle = (low + high) / 2.0
+        if len(levels) == 1:
+            return [middle]
+        band = height * _H_MARKER_SPREAD
+        step = band / (len(levels) - 1)
+        return [middle + band / 2.0 - step * index for index in range(len(levels))]
+
+    def _rebuild_h_markers(self) -> None:
+        """One horizontal marker per vertical one, started on its own curve's value at that x.
+
+        Where that would draw two lines nobody can tell apart, they are spread across the middle of
+        the view instead — see `_h_marker_levels`, which owns that decision for both shapes below.
         """
         for line in self._h_markers:
             self._plot.removeItem(line)
@@ -2055,10 +2364,12 @@ class CurveView(QWidget):
         if self._axes_mode == "hx":
             # One horizontal line, placed at whatever the first of the two CHOSEN curves is doing
             # where the vertical marker last stood -- a level somewhere on the data rather than at
-            # zero.
+            # zero. Through the same helper, which for a single line only has to keep it on screen.
             theme = current_theme()
             first = self.cross_pair()[0]
-            level = self._y_at(first, self.positions()[0]) if self.positions() else 0.0
+            level = self._h_marker_levels(
+                [self._y_at(first, self.positions()[0])] if self.positions() else [0.0]
+            )[0]
             line = pg.InfiniteLine(
                 pos=level, angle=0, movable=self._h_marker_movable(),
                 pen=pg.mkPen(theme.accent, width=1.4, style=Qt.PenStyle.DashLine),
@@ -2071,12 +2382,15 @@ class CurveView(QWidget):
         if "h" not in self._axes_mode:
             return
         theme = current_theme()
-        for index, x in enumerate(self.positions()):
+        levels = self._h_marker_levels(
+            [self._y_at(index, x) for index, x in enumerate(self.positions())]
+        )
+        for index, _x in enumerate(self.positions()):
             token = self._marker_tokens[index] if index < len(self._marker_tokens) else (
                 _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
             )
             line = pg.InfiniteLine(
-                pos=self._y_at(index, x), angle=0,
+                pos=levels[index], angle=0,
                 movable=self._h_marker_movable(),
                 pen=pg.mkPen(colour_of(token), width=_GUIDE_WIDTH,
                              style=Qt.PenStyle.DotLine),
@@ -2141,6 +2455,11 @@ class CurveView(QWidget):
         self._cross_label.setVisible(wanted)
 
     def _on_cross_combo(self, slot: int) -> None:
+        # Naming the two curves a cross mode reads is a gesture about the guides — the line and its
+        # dots are what would move — so it ends the hide (`_guides_wanted`). Safe to do here rather
+        # than on the signal because `_sync_cross_combos` blocks these signals when IT moves them:
+        # nothing but a hand reaches this method.
+        self._guides_wanted()
         combos = getattr(self, "_cross_combos", [])
         if len(combos) < 2 or not self._traces:
             return
