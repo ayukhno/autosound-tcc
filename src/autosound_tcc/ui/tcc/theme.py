@@ -373,6 +373,48 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 5px 14px 5px 28px;
         min-height: 22px;
     }}
+    /* .mini-select on a SPIN BOX — the curve window's delay field, which wears the same class as
+    the combos it stands between and rendered white with light text on it in the dark theme (user,
+    2026-08-18, with the picture). Every rule above is `QComboBox[...]`, so not one of them ever
+    reached a QDoubleSpinBox, and the palette does not cover for that: `apply_theme` sets Window,
+    Base and Text but never `Button`, and the macOS style paints a spin box's field from its own
+    native drawing rather than from the palette at all. A rule that matches is the only thing that
+    reaches it -- and because it lives in the application sheet, a live theme switch re-polishes
+    it along with everything else, which a per-widget stylesheet would not have done.
+    `QAbstractSpinBox` rather than `QDoubleSpinBox` so an integer one added later is not a second
+    white box nobody notices.
+
+    The up/down steppers are deliberately NOT given rules of their own. A rule on `::up-button`
+    makes QStyleSheetStyle take the sub-control over, and with no `image:` to draw there is then
+    no arrow at all -- rendered and looked at, both themes, 2026-08-18. Left alone, the base style
+    draws its own steppers over our frame and they read correctly in both. Those arrows are how
+    the delay is stepped by exactly what the DSP accepts (`CurveView.set_resolution`). */
+    QAbstractSpinBox[class~="mini-select"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 4px 4px 4px 9px;
+        font-size: 12px;
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
+    }}
+    QAbstractSpinBox[class~="mini-select"]:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QAbstractSpinBox[class~="mini-select"]:focus {{
+        border-color: {t.accent};
+    }}
+    /* The editable half is a QLineEdit child of the spin box, and it is drawn with its own
+    palette. Transparent so the box's one background shows through it rather than a second,
+    slightly different rectangle inside the frame. */
+    QAbstractSpinBox[class~="mini-select"] QLineEdit {{
+        background: transparent;
+        color: {t.text};
+        border: none;
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
+    }}
 
     /* Fallback styling for native tooltips -- every widget in this app's own code now uses
     `.rounded-tip`/`rounded_tooltip.attach()` instead (native QToolTip's window frame ignores its

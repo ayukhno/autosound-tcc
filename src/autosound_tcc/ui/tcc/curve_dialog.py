@@ -29,7 +29,8 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config, delay_bank
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
-from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
+from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace, tip_html
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
 #: What can be plotted, and how each one is fetched and labelled. Impulse first because that is
@@ -267,23 +268,19 @@ class CurveDialog(QDialog):
         # Two pickers, because a disagreement is nearly always about a pair. The second may be
         # empty: one curve is a legitimate thing to argue about too.
         self._pickers: list[QComboBox] = []
-        options = list(available) or list(titles)
-        if options:
+        #: Everything REW holds, whatever this kind can draw of it. The pickers show a SUBSET —
+        #: see `_fill_pickers` — so the full list has to live somewhere that is not a widget.
+        self._options = list(available) or list(titles)
+        if self._options:
             picker_row = QHBoxLayout()
             picker_row.setSpacing(8)
             for index in range(2):
                 combo = QComboBox()
                 combo.setProperty("class", "mini-select")
-                if index:
-                    combo.addItem(i18n.t("curveNoSecond"), "")
-                for title in options:
-                    combo.addItem(title, title)
-                wanted = titles[index] if index < len(titles) else ""
-                at = combo.findData(wanted)
-                combo.setCurrentIndex(at if at >= 0 else 0)
                 combo.currentIndexChanged.connect(self._on_selection_changed)
                 picker_row.addWidget(combo, 1)
                 self._pickers.append(combo)
+            self._fill_pickers(titles)
             layout.addLayout(picker_row)
 
         # The kind is a property of the WINDOW, not of a measurement: two curves in different
@@ -315,10 +312,17 @@ class CurveDialog(QDialog):
         bank_row = QHBoxLayout()
         bank_row.setContentsMargins(0, 0, 0, 0)
         bank_row.setSpacing(8)
-        self._bank_label = QLabel("")
-        self._bank_label.setProperty("class", "phead-sub")
-        self._bank_label.setWordWrap(True)
-        bank_row.addWidget(self._bank_label, stretch=1)
+        # The set behind a button that COUNTS it, not a line of small grey type running the width
+        # of the window (user, 2026-08-18). The count is the part worth seeing without hovering:
+        # seven readings on a nine-driver car is the fact that decides whether the set is worth
+        # sending yet. The list itself is the tip.
+        self._bank_btn = QPushButton("")
+        self._bank_btn.setProperty("class", "clear-btn")
+        self._bank_btn.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self._bank_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        attach_tip(self._bank_btn, "")
+        bank_row.addWidget(self._bank_btn)
+        bank_row.addStretch(1)
         # "Clear" is two different things and one button cannot be both: the delays are a set
         # being built up over an afternoon, the markers are one reading being dragged (user,
         # 2026-08-12). They sit down here together; the ACTIONS go up with the controls.
@@ -427,24 +431,27 @@ class CurveDialog(QDialog):
         self._render_bank()
 
     def _render_bank(self) -> None:
-        """The banked set under the plot, and the same numbers beside the titles in the pickers.
+        """The banked set behind its own button, and the same numbers beside the titles in the
+        pickers.
 
         In the pickers because that is where the Arbiter is choosing the next pair: seeing that
         w-L already carries +0.198 ms is what stops the same channel being read twice against two
         different partners and banked twice with different answers.
         """
         bank = delay_bank.load(session=self._session())
+        head = i18n.t("curveBankLabel")
         if bank:
             shown = ", ".join(f"{title} {ms:+.3f}" for title, ms in sorted(bank.items()))
             series = self._session()
-            head = i18n.t("curveBankLabel")
             if series:
                 # Named, because the same channel can carry a different correction in another
                 # series and a list with no series on it says which one is being looked at.
                 head = i18n.t("curveBankLabelIn").format(set=series)
-            self._bank_label.setText(f"{head} {shown}")
         else:
-            self._bank_label.setText(i18n.t("curveBankEmpty"))
+            shown = i18n.t("curveBankEmpty")
+        self._bank_btn.setText(i18n.t("curveBankBtn").format(n=len(bank)))
+        if getattr(self._bank_btn, "hover_tip", None) is not None:
+            self._bank_btn.hover_tip.set_text(tip_html(shown, head=head))
         self._bank_ask_btn.setEnabled(bool(bank))
         self._bank_clear_btn.setEnabled(bool(bank))
         for combo in self._pickers:
@@ -483,14 +490,16 @@ class CurveDialog(QDialog):
         is the family under discussion.
 
         A driver left at zero is NOT here — it is the reference, and it has an entry.
+
+        Read off everything REW holds, not off the picker rows: the pickers show only what the
+        current kind can draw (`_fill_pickers`), and which measurements exist is a fact about the
+        project rather than about the view somebody happens to be on.
         """
         if not seen:
             return []
         suffixes = {t.partition(" ")[2] for t in seen}
-        options = [str(c.itemData(row) or "") for c in self._pickers[:1]
-                   for row in range(c.count())]
         return [
-            title for title in options
+            title for title in self._options
             if title and title not in seen and title.partition(" ")[2] in suffixes
         ]
 
@@ -589,14 +598,50 @@ class CurveDialog(QDialog):
         self._kind_combo.blockSignals(blocked)
         self._mark_availability()
 
-    def _mark_availability(self) -> None:
-        """Grey out what cannot be shown — in the measurement pickers and in the kind picker both.
+    def _fill_pickers(self, wanted: Sequence[str] = ()) -> None:
+        """Put the measurements this kind can actually draw into the two pickers.
 
-        Marked and left on screen rather than dropped, which is this app's habit for a choice that
-        exists and does not apply here (`main_window._fill_combo` keeps an unavailable model
-        visible and marked): a measurement REW holds and cannot draw in this mode is a different
-        thing from one that is not there at all, and a list that silently shortens itself when the
-        kind changes is a list nobody can read as the whole list.
+        An MMM/RTA capture is ABSENT here on the impulse and the phase, not greyed (user,
+        2026-08-18, overruling the habit for this one list). The reasoning is the window's own
+        invariant: `kind_for` moves the window to the magnitude the moment an MMM capture is
+        chosen, so while the kind is impulse or phase no MMM row can ever BE the chosen one. A row
+        that can never be chosen is not a marked choice, it is noise — and these lists are long,
+        one sweep and one MMM capture per channel.
+
+        The kind picker keeps its grey-out, because there the marked row is a choice somebody just
+        asked for out loud and is owed an explanation for.
+
+        `wanted[index]` is what each picker should land on; whatever it is showing now is the
+        fallback, which is what makes this safe to call from a selection change — choosing an MMM
+        capture on the impulse view brings the whole family back and keeps the choice.
+        """
+        shown = [t for t in self._options if self._kind == "fr" or not _is_rta(t)]
+        for index, combo in enumerate(self._pickers):
+            target = str(wanted[index]) if index < len(wanted) else str(combo.currentData() or "")
+            blocked = combo.blockSignals(True)
+            combo.clear()
+            if index:
+                combo.addItem(i18n.t("curveNoSecond"), "")
+            for title in shown:
+                combo.addItem(title, title)
+            at = combo.findData(target)
+            combo.setCurrentIndex(at if at >= 0 else 0)
+            combo.blockSignals(blocked)
+        # The rows are new objects, so the delays `_render_bank` wrote beside the titles went with
+        # the old ones. Guarded because the pickers are built before the bank's own widgets are.
+        if getattr(self, "_bank_btn", None) is not None:
+            self._render_bank()
+
+    def _mark_availability(self) -> None:
+        """Grey out what cannot be shown in the KIND picker, and drop what cannot be drawn from
+        the measurement pickers.
+
+        Two different answers to the same question, on purpose. A kind is marked and left on
+        screen, which is this app's habit for a choice that exists and does not apply here
+        (`main_window._fill_combo` keeps an unavailable model visible and marked): it was asked
+        for out loud and it is owed a reason. A measurement that cannot be drawn in this mode is
+        not a refused request, it is one row of a long list that this kind has nothing to do with
+        — see `_fill_pickers`.
 
         Both directions, because the mixed pair can be built from either end — an MMM capture
         chosen while the impulse is up, or the impulse asked for while one is already plotted.
@@ -606,14 +651,7 @@ class CurveDialog(QDialog):
         fact — which is why the model picker's own badges were taken off (user, 2026-08-12).
         """
         faint = QColor(current_theme().faint)
-        # A magnitude is the one thing every capture holds, so on `fr` nothing is shut.
-        rta_shut = self._kind != "fr"
-        for combo in self._pickers:
-            for row in range(combo.count()):
-                title = str(combo.itemData(row) or "")
-                self._mark_row(
-                    combo, row, rta_shut and _is_rta(title), i18n.t("curveRtaTip"), faint
-                )
+        self._fill_pickers()
         has_rta = any(_is_rta(t) for t in self._chosen())
         for row in range(self._kind_combo.count()):
             key = str(self._kind_combo.itemData(row) or "")
@@ -732,18 +770,12 @@ class CurveDialog(QDialog):
         """
         self._markers = [float(m) for m in (markers or [])]
         self._titles = list(titles)
-        options = list(available) or list(titles)
-        for index, combo in enumerate(self._pickers):
-            blocked = combo.blockSignals(True)
-            combo.clear()
-            if index:
-                combo.addItem(i18n.t("curveNoSecond"), "")
-            for title in options:
-                combo.addItem(title, title)
-            wanted = titles[index] if index < len(titles) else ""
-            at = combo.findData(wanted)
-            combo.setCurrentIndex(at if at >= 0 else 0)
-            combo.blockSignals(blocked)
+        self._options = list(available) or list(titles)
+        # The kind this new question will settle on decides which of them are on offer, so it is
+        # asked before the rows are built rather than after — `_settle_kind` below refills them
+        # again from whatever it ends up on.
+        self._kind = kind_for(titles, kind)
+        self._fill_pickers(titles)
         # Re-read: the window outlives the project, and switching projects switches processors —
         # and switching projects switches the bank with it.
         self._apply_delay_resolution()

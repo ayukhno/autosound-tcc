@@ -21,6 +21,7 @@ from __future__ import annotations
 import html
 import importlib
 import math
+import textwrap
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -35,7 +36,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QRadioButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -62,12 +62,16 @@ _CROSS_MODES = ("vx", "hx")
 #: Guides are drawn heavier than the traces they cross. At trace weight they vanish into a dense
 #: impulse — 262 144 points is a solid block of pixels, and a 1 px line over it is not a line.
 _GUIDE_WIDTH = 2.4
-#: The predicted sum's colour, and how far it is faded. Neutral rather than a third accent, and
-#: dashed: it is a PREDICTION standing among measurements, and a saturated solid line beside the
-#: two trace colours would be read as another driver somebody captured.
-_SUM_TOKEN = "text"
-_SUM_ALPHA = 150
-_SUM_WIDTH = 1.2
+#: The predicted sum's pen. Dashed, because it is a PREDICTION standing among measurements — but
+#: readable, which the first attempt was not: `text` at alpha 150 and 1.2 px came out as a thin
+#: grey dash nobody could follow across the plot (user, 2026-08-18, with the screenshot). Yellow
+#: is the one bright token left over: `accent` and `info` are the two traces, `muted` and `ok` are
+#: the markers, and `warn`/`ok` carry a verdict in this palette — "wrong" and "fine" — which a
+#: prediction is neither of. Near-full alpha rather than full, so the dash still sits a step
+#: behind the measured curves it was computed from.
+_SUM_TOKEN = "yellow"
+_SUM_ALPHA = 235
+_SUM_WIDTH = 2.2
 #: How far under its own loudest point the drawn sum is allowed to fall. `curve_sum` returns −inf
 #: at an exact null and says in as many words that the floor is the DRAWING's decision — without
 #: one, a synthetic cancellation takes the whole right-hand axis to −inf and the curve with it.
@@ -75,6 +79,56 @@ _SUM_FLOOR_DB = 60.0
 #: Fallback delay step, in ms, when no profile has been read. What DSPs seen so far let you TYPE;
 #: the hardware resolves in whole samples, which is a different number — see `set_resolution`.
 _DEFAULT_STEP_MS = 0.01
+#: How far the Σ toggle sits from the corner of the plot AREA, in pixels. Inside the axes, over
+#: the data, at the end furthest from the legend — which is anchored to the top RIGHT, so the pill
+#: naming each driver and its delay is never covered.
+_OVERLAY_MARGIN_PX = 6
+#: How the hover tips that replaced the paragraphs under the plot are built.
+#:
+#: `_TIP_FONT_PX` because the paragraphs they replaced were 11 px `phead-sub` grey and the user
+#: could not read them (2026-08-18). `_TIP_WRAP_CHARS` because the shared tip widget is a QLabel
+#: with word wrap OFF, so a long sentence asks for a label as wide as the sentence and
+#: `adjustSize` clips it to two thirds of the screen: measured here, a 200-character line wants
+#: 1434 px and gets 533. Wrapping the text ourselves is the only lever this side of
+#: `rounded_tooltip`, which is shared with every other tip in the app.
+_TIP_WRAP_CHARS = 72
+_TIP_FONT_PX = 15
+
+
+def tip_html(text: str, head: str = "", warn: bool = False) -> str:
+    """`text` as a hover tip: large, wrapped, with a bold head, warning-coloured when in doubt.
+
+    The three paragraphs that used to stand under the plot are behind buttons now (user,
+    2026-08-18: they took the space and could not be read), so the text that was a wall of small
+    grey type is the same text laid out to be read — which is the whole point of moving it.
+
+    Nothing that LEAVES the window comes through here: `statement()` and the bank's own sentence
+    are built from the plain strings and are unchanged. This is drawing, only.
+    """
+    theme = current_theme()
+    lines: list[str] = []
+    for paragraph in str(text).split("\n"):
+        wrapped = textwrap.wrap(
+            paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
+        )
+        lines.extend(html.escape(part) for part in (wrapped or [""]))
+    body = "<br>".join(lines)
+    if head:
+        body = f"<b>{html.escape(head)}</b><br>{body}"
+    if warn:
+        body = f'<span style="color: {theme.warn}">{body}</span>'
+    return f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">{body}</div>'
+
+
+def _restyle(widget: QWidget, sheet: str) -> None:
+    """Give a widget its own stylesheet, and only when it is not the one it already has.
+
+    `setStyleSheet` re-polishes the widget on every call, and the state colours here are decided
+    inside `_render_readout` — which runs on every step of every marker drag. A re-polish per
+    mouse move, for a colour that changes twice in a session, is not a trade worth making.
+    """
+    if widget.styleSheet() != sheet:
+        widget.setStyleSheet(sheet)
 
 
 class _UnbuiltSubmenu:
@@ -332,34 +386,58 @@ class CurveView(QWidget):
         self._sum_text = ""
         self._sum_doubted = False
 
-        # Directly under the plot, not in the readout: the verdict is about the CURVE, and the
-        # readout is about the markers. It carries the summability verdict and the timing
-        # assumption verbatim from `curve_sum` — a drawn sum ends an argument, so a sum that
-        # cannot be believed has to say so where the eye already is (CURVE-ANALYSIS-PLAN.md,
-        # "The precondition"). Hidden entirely while the sum is off, which is why turning it off
-        # leaves this window exactly the shape it was before the feature existed.
-        self._sum_label = QLabel("")
-        self._sum_label.setProperty("class", "phead-sub")
-        self._sum_label.setWordWrap(True)
-        self._sum_label.setMinimumWidth(80)
-        self._sum_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._sum_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._sum_label.setVisible(False)
-        layout.addWidget(self._sum_label)
+        # ON the chart, in the plot AREA's top-left corner (user, 2026-08-18, with the
+        # screenshot): the toggle belongs to the picture it changes rather than to the row of
+        # controls under it, where it stood among eight other square buttons and had to be hunted
+        # for. A child widget of the plot rather than a graphics item, because it is a button —
+        # checkable, hoverable, and wearing the same stylesheet as every other button here.
+        # `_place_sum_button` keeps it in the corner; nothing inside the plot moves, so the legend
+        # pill naming each driver and its delay stays exactly where it was.
+        self._sum_btn = QPushButton("Σ", self._plot)
+        self._sum_btn.setProperty("class", "zoom-btn")
+        self._sum_btn.setCheckable(True)
+        self._sum_btn.setChecked(self._sum_on)
+        self._sum_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sum_btn.setFixedSize(30, 24)
+        # Not in the tab order: it floats over the data, and a focus rectangle wandering onto a
+        # control drawn on top of the plot is one more thing on screen that is not the curve.
+        self._sum_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        attach_tip(self._sum_btn, tip_html(i18n.t("curveSumTip")))
+        self._sum_btn.clicked.connect(self.set_sum_shown)
+        self._plot.getPlotItem().vb.sigResized.connect(self._place_sum_button)
+        self._place_sum_button()
 
-        # Its own row, above the buttons (user, 2026-08-11). Sharing a line with eight controls
-        # left the reading fighting them for width — it stretched the window when it could and was
-        # cut when it could not, and the numbers ARE the output of this panel.
-        self._readout = QLabel("")
-        self._readout.setProperty("class", "kv-val")
-        self._readout.setTextFormat(Qt.TextFormat.RichText)
-        self._readout.setWordWrap(True)
-        # A wrapping label still reports its unwrapped width as what it "wants"; without this the
-        # window would keep growing to fit the reading on one line anyway.
-        self._readout.setMinimumWidth(80)
-        self._readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._readout.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self._readout)
+        # What used to be four lines of small grey text and a red sentence under the plot: two
+        # compact buttons that NAME what stands behind them, with the whole text in a hover tip
+        # (user, 2026-08-18: "займають місце і не читаються"). The verdict is about the CURVE and
+        # the reading is about the MARKERS, so they stay two things, side by side, one row high.
+        notes = QHBoxLayout()
+        notes.setContentsMargins(2, 0, 2, 0)
+        notes.setSpacing(6)
+        # The summability verdict and the timing assumption, verbatim from `curve_sum` — a drawn
+        # sum ends an argument, so a sum that cannot be believed has to say so where the eye
+        # already is (CURVE-ANALYSIS-PLAN.md, "The precondition"). It says it on the BUTTON, in
+        # colour, because a reader who is not going to read a paragraph will not read it in a tip
+        # either. Hidden entirely while the sum is off, which is why turning it off leaves this
+        # window exactly the shape it was before the feature existed.
+        self._sum_note_btn = QPushButton(i18n.t("curveSumNoteBtn"))
+        self._sum_note_btn.setProperty("class", "clear-btn")
+        self._sum_note_btn.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self._sum_note_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        attach_tip(self._sum_note_btn, "")
+        self._sum_note_btn.setVisible(False)
+        notes.addWidget(self._sum_note_btn)
+        # The markers' own reading — the sentence that goes to the model. Same treatment: it was a
+        # full-width paragraph that grew a red half whenever a total went below zero, and both the
+        # length and the red were the reason it stopped being read.
+        self._readout_btn = QPushButton(i18n.t("curveReadoutBtn"))
+        self._readout_btn.setProperty("class", "clear-btn")
+        self._readout_btn.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self._readout_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        attach_tip(self._readout_btn, "")
+        notes.addWidget(self._readout_btn)
+        notes.addStretch(1)
+        layout.addLayout(notes)
 
         row = QHBoxLayout()
         row.setContentsMargins(2, 0, 2, 0)
@@ -409,19 +487,6 @@ class CurveView(QWidget):
         row.addWidget(self._shift_box)
         #: Where the delay group's action goes — see `add_delay_action`.
         self._delay_slot = row.count()
-
-        # Between the delay group and the marker modes, because it belongs to both: it is drawn
-        # from the delays and it changes what the plot shows. Same size and class as the mode
-        # buttons, so a checked state already looks checked.
-        self._sum_btn = QPushButton("Σ")
-        self._sum_btn.setProperty("class", "zoom-btn")
-        self._sum_btn.setCheckable(True)
-        self._sum_btn.setChecked(self._sum_on)
-        self._sum_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._sum_btn.setFixedSize(30, 24)
-        attach_tip(self._sum_btn, i18n.t("curveSumTip"))
-        self._sum_btn.clicked.connect(self.set_sum_shown)
-        row.addWidget(self._sum_btn)
 
         for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
             button = QPushButton(_MODE_LABELS[mode])
@@ -487,6 +552,50 @@ class CurveView(QWidget):
         self._marker_names: list[str] = []
         self._render_sum()
         self._render_readout()
+
+    def _place_sum_button(self, *_args) -> None:
+        """Keep the Σ toggle in the plot AREA's top-left corner — inside the axes, not over them.
+
+        Driven by the ViewBox's own resize signal rather than by this widget's `resizeEvent`: the
+        area the button has to sit in is the ViewBox's, and that settles AFTER the layout has
+        finished with the plot. Scene coordinates map one-to-one onto the plot widget's (measured:
+        a ViewBox at scene x=36 maps to widget x=36), and `mapFromScene` says so rather than
+        assuming it.
+
+        A Qt slot, so it can also arrive while the window is being torn down and the plot's C++
+        half is already gone — the same `RuntimeError` `_resize_sum_axis` swallows, for the same
+        reason: there is nothing left to place by then.
+        """
+        button = getattr(self, "_sum_btn", None)
+        if button is None:
+            return
+        try:
+            corner = self._plot.mapFromScene(
+                self._plot.getPlotItem().vb.sceneBoundingRect().topLeft()
+            )
+        except RuntimeError:
+            return
+        button.move(corner.x() + _OVERLAY_MARGIN_PX, corner.y() + _OVERLAY_MARGIN_PX)
+        # The plot's viewport is a sibling child of the same QGraphicsView, and stacking order is
+        # creation order: a control drawn on the chart has to be told it is on top.
+        button.raise_()
+
+    def _sum_offered(self) -> bool:
+        """Whether the Σ toggle is on screen at all: the phase and the impulse, never the FR.
+
+        The user's own rule (2026-08-18) and it is about their workflow, not about the maths: the
+        frequency response is where MMM/RTA captures get compared, and an MMM capture carries no
+        phase, so on that view the answer to Σ is usually a refusal. A control that mostly refuses
+        is a control that teaches people to ignore it.
+
+        The CAPABILITY is untouched — `set_sum_shown(True)` still computes and draws the sum of
+        two sweeps on a frequency response, and every test of the engine goes through that path.
+        Only the button is not offered there.
+
+        Asked in this widget's own vocabulary, which is units: the impulse's x is time, the
+        phase's y is degrees, and the frequency response is the one that answers in dB.
+        """
+        return self._unit == "ms" or self._y_unit == "°"
 
     def _ensure_sum_axis(self) -> bool:
         """Build the right-hand axis the first time a sum is actually drawn, and only then.
@@ -934,7 +1043,7 @@ class CurveView(QWidget):
         self._update_sum_button()
         if not self._sum_on:
             self._plot.getPlotItem().hideAxis("right")
-            self._sum_label.setVisible(False)
+            self._sum_note_btn.setVisible(False)
             return
 
         self._sum_text, self._sum_doubted = self._compute_sum()
@@ -948,12 +1057,16 @@ class CurveView(QWidget):
         # The right-hand axis appears with the curve and leaves with it: an axis over an empty
         # ViewBox is a scale for nothing, printed in the colour of a line that is not there.
         self._plot.getPlotItem().showAxis("right", bool(drawn))
-        self._render_sum_label()
+        self._render_sum_note()
 
     def _compute_sum(self) -> tuple[str, bool]:
         """`(what to print, is it doubtful)`, computing the sum on the way if there is one."""
         if not self._sum_possible():
-            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumOnlyFrequency')}", True
+            # NOT doubtful, which is why this one branch does not raise the flag: nothing here is
+            # wrong with the measurements or with the sum. It is the one view whose strip has not
+            # been built yet, and colouring "coming" as a warning files it under "broken" (user,
+            # 2026-08-18).
+            return f"{i18n.t('curveSumNone')} {i18n.t('curveSumOnlyFrequency')}", False
         if len(self._traces) < 2:
             return f"{i18n.t('curveSumNone')} {i18n.t('curveSumTooFew')}", True
         inputs = self._sum_inputs()
@@ -1018,26 +1131,51 @@ class CurveView(QWidget):
             self._sum_vb.removeItem(self._sum_curve)
         self._sum_curve = None
 
-    def _render_sum_label(self) -> None:
-        body = html.escape(self._sum_text).replace("\n", "<br>")
-        if self._sum_doubted:
-            # A sum nobody may believe has to look different from one they may, or the verdict is
-            # a paragraph of grey text under a confident-looking curve.
-            body = f'<span style="color: {current_theme().warn}">{body}</span>'
-        self._sum_label.setText(body)
-        self._sum_label.setVisible(bool(self._sum_text))
+    def _render_sum_note(self) -> None:
+        """The sum's verdict as a button that names it, with the whole of it in the tip.
+
+        The colour is on the BUTTON and not only in the text: the reason the paragraph was
+        replaced is that nobody was reading it, so a sum nobody may believe has to be visible
+        without being read (user, 2026-08-18). Normal when the set is summable, the warning colour
+        when it is not.
+        """
+        button = self._sum_note_btn
+        button.setVisible(bool(self._sum_text))
+        if getattr(button, "hover_tip", None) is not None:
+            button.hover_tip.set_text(
+                tip_html(self._sum_text, head=i18n.t("curveSumNoteBtn"), warn=self._sum_doubted)
+            )
+        theme = current_theme()
+        # Empty puts it back on `.clear-btn`'s own colours: a per-widget sheet is merged over the
+        # class rule, so clearing it is how "normal" is said.
+        warn = f"color: {theme.warn}; border-color: {theme.warn};"
+        _restyle(button, warn if self._sum_doubted else "")
 
     def _update_sum_button(self) -> None:
-        """Marked and left in place when it does not apply here — this window's habit for a choice
-        that exists elsewhere (`curve_dialog._mark_availability`)."""
+        """Show the Σ toggle where it applies, and say ON it whether the sum is on.
+
+        Not on the frequency response at all — see `_sum_offered`. On the impulse it stays, marked
+        unavailable, which is this window's habit for a choice that exists elsewhere
+        (`curve_dialog._mark_availability`): the sum's own strip under a time axis is the next
+        piece of work, and a control that disappears teaches nothing about why.
+
+        The checked state is coloured here rather than in the stylesheet, which has no `:checked`
+        rule for `.zoom-btn`. A toggle floating over the data whose state cannot be read is worse
+        than one in a row of controls: there is nothing beside it to compare it with.
+        """
         button = getattr(self, "_sum_btn", None)
         if button is None:
             return
+        button.setVisible(self._sum_offered())
         possible = self._sum_possible()
         button.setEnabled(possible)
+        theme = current_theme()
+        _restyle(
+            button, f"color: {theme.accent}; border-color: {theme.accent};" if self._sum_on else ""
+        )
         if getattr(button, "hover_tip", None) is not None:
             button.hover_tip.set_text(
-                i18n.t("curveSumTip") if possible else i18n.t("curveSumOnlyFrequency")
+                tip_html(i18n.t("curveSumTip") if possible else i18n.t("curveSumOnlyFrequency"))
             )
 
     def set_markers(
@@ -1112,6 +1250,9 @@ class CurveView(QWidget):
             self.set_traces(traces)
         self._render_crossings()
         self._render_sum()
+        # The two note buttons carry their state as a colour written from the palette that was
+        # current when it was written — the same reason the plot's pens are rebuilt above.
+        self._render_readout()
         if positions:
             self.set_markers(positions, names, tokens)
 
@@ -1184,6 +1325,10 @@ class CurveView(QWidget):
     def set_y_unit(self, unit: str) -> None:
         """dB on a frequency response, degrees on a phase, nothing on an impulse."""
         self._y_unit = unit
+        # It is also what tells the phase from the frequency response, and the Σ toggle is offered
+        # on one and not the other (`_sum_offered`). Only the button is touched: nothing about the
+        # sum itself has changed, and recomputing it here would do the work twice per kind switch.
+        self._update_sum_button()
         self._render_readout()
 
     def set_axes_mode(self, mode: str) -> None:
@@ -1514,13 +1659,21 @@ class CurveView(QWidget):
             )
             unit.setText(axes)
         text = self.reading()
-        body = html.escape(text).replace("\n", "<br>") if text else i18n.t("curveNoMarkers")
         totals = [self.total_delay_ms(i) for i in range(len(self._traces) or 1)]
-        if any(total is not None and total < 0 for total in totals):
-            # The one reading in this panel that is not merely a number but a claim the hardware
-            # will reject. Coloured, because a warning inside a sentence of numbers is read last.
-            body = f'<span style="color: {current_theme().warn}">{body}</span>'
-        self._readout.setText(body)
+        # The one reading in this panel that is not merely a number but a claim the hardware will
+        # reject. It colours the BUTTON, not a word inside the sentence: a warning inside a
+        # sentence made of numbers is read last, and this sentence is now behind a hover.
+        impossible = any(total is not None and total < 0 for total in totals)
+        if getattr(self._readout_btn, "hover_tip", None) is not None:
+            self._readout_btn.hover_tip.set_text(tip_html(
+                text or i18n.t("curveNoMarkers"),
+                head=i18n.t("curveReadoutBtn"), warn=impossible,
+            ))
+        theme = current_theme()
+        _restyle(
+            self._readout_btn,
+            f"color: {theme.warn}; border-color: {theme.warn};" if impossible else "",
+        )
         # A predicted sum on screen is worth sending on its own — it is a statement about the pair
         # whether or not a marker has been placed.
         self._send_btn.setEnabled(bool(self.statement()))
@@ -1531,6 +1684,10 @@ class CurveView(QWidget):
             if getattr(button, "hover_tip", None) is not None:
                 button.hover_tip.set_text(i18n.t(f"curveAxes_{mode}"))
         self._send_btn.setText(i18n.t("curveSendMarkers"))
+        # The two note buttons carry their own name twice: on the button and as the head of the
+        # tip, so the hover says what it is answering about.
+        self._sum_note_btn.setText(i18n.t("curveSumNoteBtn"))
+        self._readout_btn.setText(i18n.t("curveReadoutBtn"))
         # The sum's own line is half translated framing and half `curve_sum`'s English, so it is
         # rebuilt rather than patched — see `_compute_sum`.
         self._render_sum()

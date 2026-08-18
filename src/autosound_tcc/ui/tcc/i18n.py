@@ -372,6 +372,13 @@ T: dict[Lang, dict[str, str]] = {
 stands cannot be applied — say which reference to move instead.",
         "curveBankLabel": "delays read:",
         "curveBankLabelIn": "delays read in {set}:",
+        # The three buttons that took the place of the paragraphs under the plot (user,
+        # 2026-08-18). Each NAMES what is behind it and shows it on hover; the count is on the
+        # bank's own button because "how many drivers have I read" is the part worth seeing
+        # without hovering anything.
+        "curveBankBtn": "Delays read ({n})",
+        "curveSumNoteBtn": "Σ forecast",
+        "curveReadoutBtn": "Reading →",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveClearLabel": "clear:",
         "curveClearDelay": "Delays",
@@ -413,7 +420,8 @@ would change and why. Nothing here is applied.",
 screen, dashed, on the right-hand dB axis, with each driver's delay already applied. It is \
 arithmetic on measurements you already have, so a guess costs nothing and nothing is written \
 anywhere. It only means something if every measurement was captured against ONE shared timing \
-reference; the line under the plot says what has been checked and what has not.",
+reference; the Σ button under the plot carries the verdict — what has been checked and what has \
+not.",
         "curveSumHead": "Predicted sum, dashed, right axis in dB:",
         # Signed, and worded for both signs on purpose: the same reading is −18 dB at a null and
         # +6 dB for a pair that adds up everywhere, and "worst cancellation +6 dB" reads as a
@@ -421,8 +429,11 @@ reference; the line under the plot says what has been checked and what has not."
         "curveSumWorst": "Deepest point of the sum: {depth} dB against the loudest single driver \
 there, at {hz} Hz.",
         "curveSumNone": "No sum drawn.",
+        # Not a failure and worded so it does not read as one (user, 2026-08-18): the strip is the
+        # next piece of work on this window, and the sum is drawn on the other two views today.
         "curveSumOnlyFrequency": "A sum is drawn on the frequency response and on the phase. The \
-impulse's axis is time, so there it needs a strip of its own — not built yet.",
+impulse's axis is time, so here the sum gets a strip of its own under the plot — that strip is \
+coming; until it lands, switch to the phase to see the joint.",
         "curveSumTooFew": "One curve is not a sum: put a second measurement on screen.",
         "curveSumNoData": "These curves carry no magnitude and phase to add up — they did not \
 come from a REW sweep.",
@@ -824,6 +835,9 @@ Choose sweeps (sw) above to read this.",
 вигляді не застосувати — скажи, яку опорну точку рухати натомість.",
         "curveBankLabel": "зчитані затримки:",
         "curveBankLabelIn": "зчитані затримки в {set}:",
+        "curveBankBtn": "Зчитані затримки ({n})",
+        "curveSumNoteBtn": "Σ прогноз",
+        "curveReadoutBtn": "Показання →",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveClearLabel": "очистити:",
         "curveClearDelay": "Затримки",
@@ -861,13 +875,13 @@ Choose sweeps (sw) above to read this.",
 екрані, пунктиром, по правій осі в дБ, із уже застосованими затримками кожного драйвера. Це \
 арифметика над уже знятими замірами, тож припущення нічого не коштує і нікуди нічого не \
 пишеться. Вона щось означає лише тоді, коли всі заміри знято від ОДНОГО спільного часового \
-опору; рядок під графіком каже, що перевірено, а що ні.",
+опору; кнопка Σ під графіком несе висновок — що перевірено, а що ні.",
         "curveSumHead": "Передбачена сума, пунктир, права вісь у дБ:",
         "curveSumWorst": "Найнижча точка суми: {depth} дБ відносно найгучнішого окремого драйвера \
 там, на {hz} Гц.",
         "curveSumNone": "Суму не намальовано.",
-        "curveSumOnlyFrequency": "Суму малюємо на АЧХ і на фазі. В імпульсної вісь — час, тож там \
-їй потрібна власна смуга: її ще не зроблено.",
+        "curveSumOnlyFrequency": "Суму малюємо на АЧХ і на фазі. В імпульсної вісь — час, тож тут \
+сума отримає власну смугу під графіком — вона в роботі; поки її нема, дивись стик на фазі.",
         "curveSumTooFew": "Одна крива — це не сума: постав на екран другий замір.",
         "curveSumNoData": "Ці криві не несуть ні АЧХ, ні фази, щоб їх додати — вони не з \
 розгортки REW.",

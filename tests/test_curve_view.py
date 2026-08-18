@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.curve_dialog import CurveDialog, _CurveWorker  # noqa: E402
 from autosound_tcc.ui.tcc.curve_view import CurveView, Trace  # noqa: E402
+from autosound_tcc.ui.tcc.theme import current_theme  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -61,6 +62,20 @@ def _dialog(*args, **kwargs) -> CurveDialog:
     made = CurveDialog(*args, **kwargs)
     _KEEP.append(made)
     return made
+
+
+def _tip(widget) -> str:
+    """A hover tip as the plain sentence it is made of.
+
+    The tips are rich text now — a bold head, a font size, and line breaks put in by hand because
+    the shared tip label does not wrap — so a test that asks whether the tip says something has to
+    take the markup back off first, or it is testing where the breaks landed.
+    """
+    import html as html_module
+    import re
+
+    text = re.sub(r"<[^>]+>", "", widget.hover_tip.text().replace("<br>", " "))
+    return " ".join(html_module.unescape(text).split())
 
 
 def _view() -> CurveView:
@@ -123,7 +138,7 @@ def test_with_no_markers_there_is_nothing_to_send():
 
     assert view.reading() == ""
     assert not view._send_btn.isEnabled()
-    assert view._readout.text() == i18n.t("curveNoMarkers")
+    assert i18n.t("curveNoMarkers") in _tip(view._readout_btn)
 
 
 def test_re_setting_traces_does_not_stack_up_legend_rows():
@@ -306,26 +321,50 @@ def test_asking_for_phase_with_an_mmm_capture_on_screen_is_refused_in_words():
     assert "w-R_01 (rta)" in dialog._status.text()
 
 
-def test_an_rta_row_greys_out_and_explains_itself_rather_than_leaving_the_picker():
-    """What is wrong stays visible and says why — the model picker's habit (`_fill_combo`). A
-    measurement REW holds and cannot draw in this mode is a different thing from one that is not
-    there at all."""
+def test_an_rta_row_is_absent_from_the_pickers_in_impulse_and_phase():
+    """User, 2026-08-18, overruling this window's grey-out habit for THIS list: with an MMM
+    capture chosen the window is on the magnitude by construction (`kind_for`), so in impulse or
+    phase no MMM row can ever be the chosen one — and a row that can never be chosen is noise in
+    a list holding a sweep and an MMM capture for every channel."""
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)"]
     dialog = _dialog(every[:2], bridge=_FrBridge(), kind="impulse", available=every)
     dialog._worker.wait(4000)
 
-    combo = dialog._pickers[0]
-    row = combo.findData("w-R_01 (rta)")
-    assert row >= 0, "the MMM capture stays on the list"
-    assert not combo.model().item(row).isEnabled()
-    assert combo.itemData(row, Qt.ItemDataRole.ToolTipRole) == i18n.t("curveRtaTip")
+    for combo in dialog._pickers:
+        assert combo.findData("w-R_01 (rta)") < 0, "gone, not greyed"
+        assert combo.findData("w-L_01 (sw)") >= 0, "and the sweeps are all still there"
+
+    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
+    dialog._worker.wait(4000)
+
+    assert dialog._kind == "phase"
+    assert all(c.findData("w-R_01 (rta)") < 0 for c in dialog._pickers), "phase has none either"
 
     dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("fr"))
     dialog._worker.wait(4000)
 
-    assert combo.model().item(row).isEnabled(), "the frequency response can draw it, so it opens"
-    assert combo.itemData(row, Qt.ItemDataRole.ToolTipRole) is None
+    for combo in dialog._pickers:
+        row = combo.findData("w-R_01 (rta)")
+        assert row >= 0, "the magnitude is the one thing every capture holds, so it comes back"
+        assert combo.model().item(row).isEnabled()
+
+
+def test_choosing_an_mmm_capture_brings_its_family_back_and_keeps_the_choice():
+    """The list can only shorten itself safely if choosing FROM the short list still works. On the
+    frequency response the MMM rows are there; picking one must leave the window on it."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(every[:2], bridge=_FrBridge(), kind="fr", available=every)
+    dialog._worker.wait(4000)
+    combo = dialog._pickers[1]
+
+    combo.setCurrentIndex(combo.findData("w-R_01 (rta)"))
+    dialog._worker.wait(4000)
+
+    assert dialog._kind == "fr", "an MMM capture decides the kind for the whole selection"
+    assert combo.currentData() == "w-R_01 (rta)", "and the choice survives the refill"
+    assert dialog._chosen() == ["w-L_01 (sw)", "w-R_01 (rta)"]
 
 
 def test_the_kind_picker_shuts_impulse_and_phase_while_an_mmm_capture_is_in_the_pair():
@@ -974,7 +1013,8 @@ def test_with_nothing_banked_there_is_nothing_to_analyse():
     dialog._render_bank()
 
     assert not dialog._bank_ask_btn.isEnabled()
-    assert i18n.t("curveBankEmpty") in dialog._bank_label.text()
+    assert i18n.t("curveBankEmpty") in _tip(dialog._bank_btn)
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=0)
 
 
 def test_both_drivers_on_screen_are_banked_each_with_its_own():
@@ -1081,19 +1121,24 @@ def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
 
 
 def test_an_impossible_total_is_coloured_not_just_worded():
-    """A warning inside a sentence made of numbers is read last."""
+    """A warning inside a sentence made of numbers is read last — and since 2026-08-18 the
+    sentence is behind a hover, so the colour has to be on the BUTTON as well as in the text."""
     view = _view()
     view.set_unit("ms")
     view.set_markers([4.52], tokens=["accent"])
     view.set_channel_delay(0.1)
 
+    warn = current_theme().warn
+
     view.set_delay(-0.5)
 
-    assert "color:" in view._readout.text()
+    assert warn in view._readout_btn.styleSheet(), "on the button, where it is seen unhovered"
+    assert warn in view._readout_btn.hover_tip.text(), "and in the sentence it belongs to"
 
     view.set_delay(0.5)
 
-    assert "color:" not in view._readout.text()
+    assert view._readout_btn.styleSheet() == ""
+    assert warn not in view._readout_btn.hover_tip.text()
 
 
 def test_the_set_states_what_the_numbers_are_measured_from():
@@ -1157,8 +1202,8 @@ def test_each_capture_series_keeps_its_own_corrections():
     assert delay_bank.load(session="cap_001") == {}, "another series, another answer"
     assert delay_bank.load(session="cap_002") == {"w-L_01 (sw)": 0.26}
     dialog._render_bank()
-    assert "cap_001" in dialog._bank_label.text() or i18n.t("curveBankEmpty") in \
-        dialog._bank_label.text()
+    tip = _tip(dialog._bank_btn)
+    assert "cap_001" in tip or i18n.t("curveBankEmpty") in tip
 
 
 def test_clearing_one_series_leaves_the_others_alone():
@@ -1200,12 +1245,14 @@ def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
                        Trace("w-R_01 (sw)", *_impulse(4.78))])
     plotted = [t.name for t in dialog._view._traces]
-    assert i18n.t("curveBankEmpty") in dialog._bank_label.text()
+    assert i18n.t("curveBankEmpty") in _tip(dialog._bank_btn)
 
     series[0] = "cap_001"
     dialog.session_switched()
 
-    assert "cap_001" in dialog._bank_label.text() and "+0.260" in dialog._bank_label.text()
+    tip = _tip(dialog._bank_btn)
+    assert "cap_001" in tip and "+0.260" in tip
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1), "the count is on it"
     assert [t.name for t in dialog._view._traces] == plotted
 
 
@@ -1527,8 +1574,9 @@ def test_a_set_that_cannot_be_summed_draws_nothing_and_says_which_one_and_why():
     assert view._plot.getPlotItem().getAxis("right").isVisible() is False
     assert i18n.t("curveSumNone") in view.sum_text()
     assert "w-R_01 (rta)" in view.sum_text(), "it names the measurement that decided it"
-    assert view._sum_label.isVisibleTo(view)
-    assert "color:" in view._sum_label.text(), "a refusal is not read last"
+    assert view._sum_note_btn.isVisibleTo(view)
+    assert "w-R_01 (rta)" in _tip(view._sum_note_btn), "and the tip carries all of it"
+    assert current_theme().warn in view._sum_note_btn.styleSheet(), "a refusal is not read last"
 
 
 def test_a_mixed_config_version_is_drawn_and_labelled_two_different_cars():
@@ -1543,7 +1591,7 @@ def test_a_mixed_config_version_is_drawn_and_labelled_two_different_cars():
     assert view.sum_result() is not None and view._sum_curve is not None, "drawn"
     assert view.sum_result().summability.status == "mixed_config"
     assert "DIFFERENT DSP config versions" in view.sum_text()
-    assert "color:" in view._sum_label.text(), "and it does not look like a believable one"
+    assert current_theme().warn in view._sum_note_btn.styleSheet(), "and it does not look believed"
 
 
 def test_the_timing_assumption_is_printed_with_every_sum_that_is_drawn():
@@ -1575,6 +1623,21 @@ def test_on_the_impulse_the_sum_is_refused_in_words_rather_than_drawn_on_a_time_
     assert view.sum_result() is None
     assert i18n.t("curveSumOnlyFrequency") in view.sum_text()
     assert view._sum_btn.isEnabled() is False
+
+
+def test_the_missing_impulse_strip_reads_as_coming_not_as_an_error():
+    """User, 2026-08-18: it is the honest placeholder for work that is next, and a red paragraph
+    filed it under "broken". The wording stays; the red goes, and the sentence moves into the
+    tips — the toggle's, which is what somebody pressing Σ here is pointing at, and the verdict
+    button's, which is where every other thing the sum has to say now lives."""
+    view = _view()  # the impulse view: x in ms
+
+    view.set_sum_shown(True)
+
+    assert view._sum_note_btn.styleSheet() == "", "not a warning: nothing here is wrong"
+    assert i18n.t("curveSumOnlyFrequency") in _tip(view._sum_note_btn)
+    assert i18n.t("curveSumOnlyFrequency") in _tip(view._sum_btn), "and on the toggle itself"
+    assert current_theme().warn not in view._sum_btn.hover_tip.text(), "not painted as a failure"
 
 
 def test_the_sum_survives_a_new_pair_and_a_reset_of_the_window():
@@ -1640,3 +1703,186 @@ def test_a_sum_on_screen_is_worth_sending_with_no_marker_placed():
     assert view.reading() == "", "no markers, no delay: nothing to read"
     assert view._send_btn.isEnabled()
     assert "Predicted acoustic sum" in view.statement()
+
+
+# ---- the window the user reviewed on 2026-08-18 -----------------------------------------------
+
+
+def _phase_view(*traces: Trace) -> CurveView:
+    """A view on the phase, which is the kind the Σ toggle is offered on and a sum is drawn on."""
+    _app()
+    view = CurveView(x_label="Hz")
+    _KEEP.append(view)
+    view.set_unit("Hz")
+    view.set_y_unit("°")
+    view.set_log_x(True)
+    view.set_traces(list(traces))
+    return view
+
+
+def test_the_sum_toggle_floats_in_the_plots_own_top_left_corner():
+    """User, 2026-08-18, with the screenshot: it belongs to the picture it changes, not to the row
+    of eight square buttons under it. Inside the axes, and at the end furthest from the legend —
+    which is anchored top RIGHT, so the pill naming each driver and its delay is never covered."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    view.resize(880, 460)
+    view.show()
+    _app().processEvents()
+
+    assert view._sum_btn.parent() is view._plot, "a control ON the chart, not beside it"
+    area = view._plot.getPlotItem().vb.sceneBoundingRect()
+    corner = view._plot.mapFromScene(area.topLeft())
+    button = view._sum_btn.geometry()
+    assert corner.x() <= button.left() <= corner.x() + 16, "inside the data, not over the axis"
+    assert corner.y() <= button.top() <= corner.y() + 16
+    legend = view._legend.sceneBoundingRect()
+    assert not legend.intersects(
+        view._plot.mapToScene(button).boundingRect()
+    ), "and it does not sit on the delay pill"
+
+
+def test_the_sum_toggle_is_offered_on_phase_and_impulse_and_not_on_the_magnitude():
+    """User, 2026-08-18: the FR view is where MMM/RTA captures are compared and those cannot be
+    summed at all, so the control there mostly refuses. The CAPABILITY stays — a sum of two sweeps
+    still draws on a frequency response; only the button is not on offer."""
+    phase = _phase_view(_fr_trace("w-L_01 (sw)"))
+    assert phase._sum_btn.isVisibleTo(phase) is True
+
+    impulse = _view()
+    assert impulse._sum_btn.isVisibleTo(impulse) is True, "the impulse keeps it, marked shut"
+    assert impulse._sum_btn.isEnabled() is False, "its own strip is the next piece of work"
+
+    fr = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    assert fr._sum_btn.isVisibleTo(fr) is False
+    fr.set_sum_shown(True)
+    assert fr.sum_result() is not None, "and the sum itself is untouched there"
+
+
+def test_the_toggle_follows_the_kind_the_window_switches_to():
+    """The kind changes under the same view — `_apply_kind` re-points units, it does not rebuild
+    the widget — so the toggle has to appear and disappear with it."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="fr", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    assert dialog._view._sum_btn.isVisibleTo(dialog._view) is False
+
+    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
+    dialog._worker.wait(4000)
+
+    assert dialog._view._sum_btn.isVisibleTo(dialog._view) is True
+
+
+def test_the_predicted_sum_is_drawn_to_be_followed_across_the_plot():
+    """It came out as a thin grey dash nobody could read (user, 2026-08-18). Bolder than a trace,
+    near-full alpha, still dashed — and in a colour that is neither of the two trace colours, so
+    the eye does not have to work out which of three orange-ish lines is the prediction."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+
+    from autosound_tcc.ui.tcc.theme import apply_theme
+
+    app = _app()
+    view.set_sum_shown(True)
+
+    # Both themes, because the palette swaps under it and a colour that reads in one can vanish
+    # in the other — which is how the first one ended up grey on grey.
+    for mode in ("dark", "light"):
+        apply_theme(app, mode)
+        view.apply_theme()
+        pen = view._sum_curve.opts["pen"]
+        theme = current_theme()
+        assert pen.style() == Qt.PenStyle.DashLine, f"{mode}: a prediction, not a measurement"
+        assert pen.widthF() >= 2.0, f"{mode}: thicker than the 1.0 px traces it is drawn from"
+        assert pen.color().alpha() >= 230, f"{mode}: not faded away"
+        drawn = pen.color().name()
+        assert drawn not in (theme.accent, theme.info), f"{mode}: not either driver's colour"
+        assert drawn not in (theme.border2, theme.muted, theme.faint), f"{mode}: nor the grid's"
+    apply_theme(app, "light")
+
+
+def test_the_delay_box_follows_the_theme_like_the_combos_beside_it():
+    """It stayed white with light text on it in the dark theme (user, 2026-08-18): every
+    `.mini-select` rule was written `QComboBox[...]`, so not one of them reached the spin box, and
+    the palette does not cover for it — the native style paints the field itself.
+
+    Asserted on the EFFECTIVE palette after a live switch, not on the sheet alone: the fault was
+    never that the sheet was wrong, it was that nothing in it applied here."""
+    from PySide6.QtGui import QPalette
+
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT, apply_theme
+
+    app = _app()
+    view = _view()
+    box = view._shift_box
+    assert box.property("class") == "mini-select", "it wears the class the combos wear"
+
+    apply_theme(app, "dark")
+    box.ensurePolished()
+    dark = box.palette().color(QPalette.ColorRole.Window).name()
+
+    apply_theme(app, "light")
+    box.ensurePolished()
+    light = box.palette().color(QPalette.ColorRole.Window).name()
+
+    assert dark == PALETTE_DARK["panel3"], "the dark theme reaches it..."
+    assert light == PALETTE_LIGHT["panel3"], "...and so does the light one"
+    assert dark != light, "and a live switch moves it, not only construction"
+
+
+def test_the_three_paragraphs_under_the_plot_are_buttons_with_the_text_in_the_tip():
+    """User, 2026-08-18: "займають місце і не читаються". Each one names what stands behind it —
+    and what leaves the window is unchanged, which is the half of this that must not break."""
+    _app()
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="phase", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    view = dialog._view
+    view.set_markers([100.0, 1000.0], tokens=["accent", "info"])
+    view.set_sum_shown(True)
+
+    assert view._sum_note_btn.text() == i18n.t("curveSumNoteBtn")
+    assert view._readout_btn.text() == i18n.t("curveReadoutBtn")
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1), "with the count on it"
+    # Each tip carries the whole of what its paragraph used to say, laid out to be read.
+    assert view.sum_text().split("\n")[0] in _tip(view._sum_note_btn)
+    assert "ASSUMED, NOT CHECKED" in _tip(view._sum_note_btn)
+    assert view.reading() in _tip(view._readout_btn)
+    assert "w-L_01 (sw) +0.198" in _tip(dialog._bank_btn)
+    for button in (view._sum_note_btn, view._readout_btn, dialog._bank_btn):
+        assert "font-size: 15px" in button.hover_tip.text(), "large enough to read"
+        assert "<b>" in button.hover_tip.text(), "and it says what it is answering about"
+        # `.clear-btn` is this window's low family, pinned to 20 px in the stylesheet: these
+        # report a set, they do not offer to do anything, and four lines of prose became one row.
+        assert button.property("class") == "clear-btn"
+        button.ensurePolished()
+        assert button.sizeHint().height() <= 24, "one row of window, not four"
+
+
+def test_what_leaves_the_window_is_the_same_sentence_it_always_was():
+    """The paragraphs moved into tips; the model gets exactly what it got before. `statement()`
+    and the bank's own sentence are built from the plain strings, and no markup may reach them."""
+    _app()
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FrBridge(), kind="fr")
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    dialog._view.set_sum_shown(True)
+    sent: list[str] = []
+    dialog.readingSent.connect(sent.append)
+
+    dialog._bank_ask_btn.click()
+    dialog._view._send_btn.click()
+
+    assert len(sent) == 2
+    for text in sent:
+        assert "<" not in text and "font-size" not in text
+    assert "Predicted acoustic sum" in sent[1]
