@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-13: SCR-049** (the project backup nobody wrote down). SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-18: SCR-049** (the project backup nobody wrote down) **and SCR-050** (an all-pass the Arbiter dialled, as an input the method can check). SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1400,3 +1400,44 @@ What the ask covers:
    at install time and changed their mind — or who wants to do it by hand.
 
 Until this lands, the installer's line should not claim the skill "offers" anything.
+
+## SCR-050 — an all-pass the Arbiter dialled, as an input the method can check
+
+**Status**: proposed (2026-08-18 — raised while designing TCC's curve analysis: summed response,
+N-way sum, per-driver APF)
+**Target**: skill — the review package / data contract, and `analyze-joints`' input side
+**TCC dependency**: TCC does the interactive part (APF applied to a measured trace, its effect on
+the predicted sum drawn live). This ask is only about what happens to that number afterwards.
+
+**What already exists, so that this ask stays narrow**: the maths (`dsp_math.apf2_response`,
+`apf_search`, `robust_worst_null`), the method (`phase_2_eq` §"align joints with APF rather than
+raw delay", `analyze-joints` emitting an APF column with a trust gate), and the storage — the
+ledger carries `phase_deg` per channel *and* `APF1`/`APF2` among the structured EQ types. Nothing
+below asks for new maths or a new field.
+
+**The gap**: every APF in the method today is one the SKILL computed. TCC is about to let the
+Arbiter dial one by hand while watching the predicted sum move — which is exactly how the Helix
+phase control is used in the car (`helix-phase-allpass.md`) — and there is nowhere for that number
+to go. A hand-dialled APF cannot enter the review package as a *proposal to be checked*, so the
+Critic never sees it, and the journal cannot say the Arbiter tried it.
+
+What the ask covers:
+
+1. **The review package accepts a candidate APF as an input.** Driver, order, `f0`, `Q` (or the
+   Helix phase angle), and what it does to the joint on the measurements already in hand. The
+   Critic's job on it is the one it is good at: does this rotation fix the joint, or does it move
+   the problem and drag the timing above the turn frequency with it.
+2. **`analyze-joints` (or its wrapper) takes an APF to VERIFY, not only one to propose.** Same
+   trust gate, same honest-by-construction rule: with no measured pair reproducing the complex
+   solos it stays UNVERIFIED rather than blessing a number the Arbiter liked the look of.
+3. **The two hardware forms must not be conflated, in the package or in the UI.** A Helix "Phase"
+   control is a 2nd-order all-pass whose frequency the processor derives from that channel's
+   crossover — the user sets an ANGLE, not an `f0`. An `APF1`/`APF2` in an EQ slot is `f0` + `Q`
+   typed in. A front-end that offers a free `f0` where the DSP only takes an angle proposes
+   something nobody can enter, and the ledger's two fields (`phase_deg` vs an `eq` band) already
+   encode the difference — the profile should say which form a given processor offers, the way it
+   already says which EQ band vocabulary it has.
+
+**Until this lands**, TCC's APF stays a simulation the Arbiter reads on screen and can paste into
+the dialogue by hand; nothing writes it to the ledger (D-6: the skill writes the project, TCC
+reads it).
