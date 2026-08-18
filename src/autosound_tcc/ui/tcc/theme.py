@@ -333,6 +333,102 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="zoom-btn"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .guides-btn — the ✕ beside the mode buttons that takes every guide off the picture at once.
+
+    Its own class rather than a `.zoom-btn` with an inline stylesheet, for two reasons that were
+    both watched happening (user, 2026-08-18, with the screenshot). A QSS `font-size` from THIS
+    sheet beats a QFont set in code, so the 1.35× font the widget was given never reached the
+    screen while `.zoom-btn {{ font-size: 12px }}` matched it — the "big X" that was asked for was
+    never big. And an inline sheet is only written when something calls the updater, which nothing
+    did at construction, so the button opened grey and identical to the zoom buttons beside it.
+
+    Red in both states, because the button says what it DOES; FILLED while the guides are hidden,
+    because that is a state the tuner has to be able to read from across a car seat. `:checked`
+    carries that here, so nothing has to write a colour by hand at all. */
+    QPushButton[class~="guides-btn"] {{
+        background: {t.panel3};
+        color: {t.warn};
+        border: 1px solid {t.warn};
+        border-radius: 5px;
+        padding: 0;
+        font-size: 17px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="guides-btn"]:hover {{
+        background: {t.mix('warn', 16, 'panel3')};
+    }}
+    QPushButton[class~="guides-btn"]:checked {{
+        background: {t.warn};
+        color: {t.ground};
+    }}
+    /* .link-btn — the "⇅" that ties the sum's strip to the plot's frequency scale.
+
+    An orange ring, always (user, 2026-08-18: "ободок помаранчевого кольору, щоб на неї звертали
+    увагу"). It is the only control in that row that changes the RELATIONSHIP between two plots
+    rather than the view of one, and a grey 1px `.zoom-btn` border said nothing about that.
+
+    `accent` and not `warn` or `yellow`, chosen rather than reached for: `accent` IS this palette's
+    orange (#e8973c dark, #c56f18 light) and carries no verdict; `warn` is red-leaning and means
+    "wrong", which a healthy, useful control must never borrow; `yellow` is the predicted sum's own
+    colour on every drawing surface in this window, and a button wearing it would claim to be the
+    sum rather than to frame it. 2px rather than 1 is the part that makes it announce itself.
+
+    The two states are told apart by the FILL, not by whether the ring is there: the ring is the
+    "look at me", so it has to be present linked and free alike. */
+    QPushButton[class~="link-btn"] {{
+        background: {t.panel3};
+        color: {t.muted};
+        border: 2px solid {t.accent};
+        border-radius: 5px;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="link-btn"]:hover {{
+        background: {t.mix('accent', 14, 'panel3')};
+    }}
+    QPushButton[class~="link-btn"]:checked {{
+        background: {t.mix('accent', 26, 'panel3')};
+        color: {t.accent};
+    }}
+    /* .curve-chip — one chosen measurement in the curve window's selection row, with the × that
+    takes it off the plot. The frame is shared; the BORDER and the name are coloured per chip, from
+    the pen its own trace is drawn with (`curve_view.trace_colour`), so the row reads as a legend of
+    the plot rather than as a list of strings. Neither colour is set here for that reason.
+
+    Same radius rule as `.edit-chip`: stay under half the rendered height or Qt treats the radius as
+    invalid and draws a square corner. */
+    QFrame[class~="curve-chip"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        border-radius: 9px;
+    }}
+    QLabel[class~="curve-chip-name"] {{
+        background: transparent;
+        font-size: 11.5px;
+        font-weight: 600;
+    }}
+    /* The × is a target, not a decoration: it is the one gesture that takes a driver out of the
+    predicted sum, so it gets a hit area of its own rather than a glyph squeezed against the name.
+    Disabled on the last chip left — a window plotting nothing has nothing to say. */
+    QPushButton[class~="curve-chip-x"] {{
+        background: transparent;
+        border: none;
+        color: {t.muted};
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0;
+        min-width: 16px;
+        max-width: 16px;
+        min-height: 16px;
+        max-height: 16px;
+    }}
+    QPushButton[class~="curve-chip-x"]:hover {{
+        color: {t.warn};
+    }}
+    QPushButton[class~="curve-chip-x"]:disabled {{
+        color: {t.faint};
+    }}
     /* .is-missing — the picker's current choice is not on offer on this machine. Red text, not a
     red background: the model is still SELECTED and still what the project asks for, which is a
     different statement from "this setting is wrong". */

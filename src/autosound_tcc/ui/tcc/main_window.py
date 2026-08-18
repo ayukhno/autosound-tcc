@@ -1032,7 +1032,11 @@ class MainWindow(QMainWindow):
         # their own.
         why = flaw.why or ""
         evidence = ", ".join(flaw.evidence)
-        head = " · ".join(part for part in (
+        # NOT `head`: that name is the headline LABEL a few lines up, and shadowing it made
+        # `copy_menu.full_text(head)` read a string instead of a widget -- the copy menu lost its
+        # "copy value" entry and the row it offered began with a stray separator (caught by
+        # `test_copy_menu.py`, which the author of this line had not run).
+        tip_head = " · ".join(part for part in (
             flaw.headline,
             i18n.t(f"flawKind_{flaw.kind}"),
             ", ".join(flaw.channels) or i18n.t("flawAllChannels"),
@@ -1044,7 +1048,7 @@ class MainWindow(QMainWindow):
         ) if part) or i18n.t("flawNoWhy")
         # Doubt is the tip's own colour as well as the dot's: a hypothesis reads as a verdict when
         # its text looks like every other row's.
-        tip = attach_tip(widget, tip_html(body, head=head, warn=flaw.is_hypothesis))
+        tip = attach_tip(widget, tip_html(body, head=tip_head, warn=flaw.is_hypothesis))
         # The row that most needs copying: the whole point of the flaw map is that "do not EQ-boost
         # this null" outlives the session that found it, and the reason and the captures it was
         # read off are on hover. A verdict that can only be hovered cannot be quoted to anyone.

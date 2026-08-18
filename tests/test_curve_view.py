@@ -78,6 +78,20 @@ def _tip(widget) -> str:
     return " ".join(html_module.unescape(text).split())
 
 
+def _chips(dialog) -> list:
+    """The chips actually on the row, in order. The pool keeps hidden spares — see
+    `CurveDialog._render_chips` — and a spare is not part of the selection."""
+    return [chip for chip in dialog._chips if not chip.isHidden()]
+
+
+def _chip_colour(chip) -> str:
+    """The colour a chip is wearing, out of the per-widget stylesheet it is written into."""
+    import re
+
+    found = re.search(r"color:\s*(#[0-9a-fA-F]{6})", chip._name.styleSheet())
+    return found.group(1).lower() if found else ""
+
+
 def _view() -> CurveView:
     _app()
     view = CurveView()
@@ -230,13 +244,16 @@ def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
     assert dialog._view._marker_names == ["w-L_01 (sw)", "w-R_01 (sw)"]
 
 
-def test_the_pickers_let_the_argument_move_to_another_pair():
+def test_the_choose_menu_moves_the_argument_to_another_measurement():
+    """The two pair pickers are gone (user, 2026-08-18: "ці вибори не потрібні"); every single
+    measurement goes on and off through the one checklist."""
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
     dialog = _dialog(every[:2], bridge=_FakeBridge(), available=every)
     dialog._worker.wait(4000)
 
-    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("m-L_01 (sw)"))
+    dialog._choose_actions["w-R_01 (sw)"].setChecked(False)
+    dialog._choose_actions["m-L_01 (sw)"].setChecked(True)
     dialog._worker.wait(4000)
 
     assert dialog._chosen() == ["w-L_01 (sw)", "m-L_01 (sw)"]
@@ -248,7 +265,7 @@ def test_one_curve_is_a_legitimate_thing_to_argue_about():
     dialog = _dialog(every, bridge=_FakeBridge(), available=every)
     dialog._worker.wait(4000)
 
-    dialog._pickers[1].setCurrentIndex(0)  # the "— none —" row
+    _chips(dialog)[1]._x.click()
     dialog._worker.wait(4000)
 
     assert dialog._chosen() == ["w-L_01 (sw)"]
@@ -321,7 +338,7 @@ def test_asking_for_phase_with_an_mmm_capture_on_screen_is_refused_in_words():
     assert "w-R_01 (rta)" in dialog._status.text()
 
 
-def test_an_rta_row_is_absent_from_the_pickers_in_impulse_and_phase():
+def test_an_rta_row_is_absent_from_the_choose_menu_in_impulse_and_phase():
     """User, 2026-08-18, overruling this window's grey-out habit for THIS list: with an MMM
     capture chosen the window is on the magnitude by construction (`kind_for`), so in impulse or
     phase no MMM row can ever be the chosen one — and a row that can never be chosen is noise in
@@ -331,39 +348,37 @@ def test_an_rta_row_is_absent_from_the_pickers_in_impulse_and_phase():
     dialog = _dialog(every[:2], bridge=_FrBridge(), kind="impulse", available=every)
     dialog._worker.wait(4000)
 
-    for combo in dialog._pickers:
-        assert combo.findData("w-R_01 (rta)") < 0, "gone, not greyed"
-        assert combo.findData("w-L_01 (sw)") >= 0, "and the sweeps are all still there"
+    assert "w-R_01 (rta)" not in dialog._choose_actions, "gone, not greyed"
+    assert "w-L_01 (sw)" in dialog._choose_actions, "and the sweeps are all still there"
 
     dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
     dialog._worker.wait(4000)
 
     assert dialog._kind == "phase"
-    assert all(c.findData("w-R_01 (rta)") < 0 for c in dialog._pickers), "phase has none either"
+    assert "w-R_01 (rta)" not in dialog._choose_actions, "phase has none either"
 
     dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("fr"))
     dialog._worker.wait(4000)
 
-    for combo in dialog._pickers:
-        row = combo.findData("w-R_01 (rta)")
-        assert row >= 0, "the magnitude is the one thing every capture holds, so it comes back"
-        assert combo.model().item(row).isEnabled()
+    action = dialog._choose_actions.get("w-R_01 (rta)")
+    assert action is not None, "the magnitude is the one thing every capture holds, so it comes back"
+    assert action.isEnabled()
 
 
 def test_choosing_an_mmm_capture_brings_its_family_back_and_keeps_the_choice():
     """The list can only shorten itself safely if choosing FROM the short list still works. On the
-    frequency response the MMM rows are there; picking one must leave the window on it."""
+    frequency response the MMM rows are there; ticking one must leave the window on it."""
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)"]
     dialog = _dialog(every[:2], bridge=_FrBridge(), kind="fr", available=every)
     dialog._worker.wait(4000)
-    combo = dialog._pickers[1]
 
-    combo.setCurrentIndex(combo.findData("w-R_01 (rta)"))
+    dialog._choose_actions["w-R_01 (sw)"].setChecked(False)
+    dialog._choose_actions["w-R_01 (rta)"].setChecked(True)
     dialog._worker.wait(4000)
 
     assert dialog._kind == "fr", "an MMM capture decides the kind for the whole selection"
-    assert combo.currentData() == "w-R_01 (rta)", "and the choice survives the refill"
+    assert dialog._choose_actions["w-R_01 (rta)"].isChecked(), "and the tick survives the refill"
     assert dialog._chosen() == ["w-L_01 (sw)", "w-R_01 (rta)"]
 
 
@@ -388,7 +403,8 @@ def test_swapping_the_mmm_capture_for_a_sweep_puts_the_impulse_back_on_offer():
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_FrBridge(), available=every)
     dialog._worker.wait(4000)
 
-    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("w-R_01 (sw)"))
+    dialog._choose_actions["w-R_01 (rta)"].setChecked(False)
+    dialog._choose_actions["w-R_01 (sw)"].setChecked(True)
     dialog._worker.wait(4000)
     dialog._worker.run()
 
@@ -455,22 +471,52 @@ def test_the_frequency_axis_speaks_the_trade_s_own_numbers():
     from autosound_tcc.ui.tcc.curve_view import LogHzAxis
 
     axis = LogHzAxis(orientation="bottom")
+    axis.tickValues(math.log10(20), math.log10(20000), 1400)  # decides which values get a label
 
     strings = axis.tickStrings([math.log10(v) for v in (20, 100, 1000, 2000, 20000)], 1, 1)
 
     assert strings == ["20", "100", "1k", "2k", "20k"]
 
 
-def test_the_axis_thins_ticks_rather_than_overprinting_them():
+def test_the_axis_thins_labels_and_never_the_grid_lines():
+    """User, 2026-08-18, with REW's axis beside ours: a grid is what lets a frequency be read
+    without a label under it. Crowding is a problem for TEXT — a 1-pixel line has room at any
+    width — so the two used to thin together and the picture lost its ruler exactly when the
+    window got narrow enough to need one."""
     from autosound_tcc.ui.tcc.curve_view import LogHzAxis
 
     axis = LogHzAxis(orientation="bottom")
     lo, hi = math.log10(20), math.log10(20000)
 
-    roomy = sum(len(group) for _, group in axis.tickValues(lo, hi, 1400))
-    cramped = sum(len(group) for _, group in axis.tickValues(lo, hi, 200))
+    def lines_and_labels(size):
+        levels = axis.tickValues(lo, hi, size)
+        lines = sum(len(group) for _, group in levels)
+        labels = sum(
+            1 for _step, group in levels for text in axis.tickStrings(group, 1, 1) if text
+        )
+        return lines, labels
 
-    assert cramped < roomy, "a tick with no room overprints the one that had room"
+    roomy_lines, roomy_labels = lines_and_labels(1400)
+    cramped_lines, cramped_labels = lines_and_labels(200)
+
+    assert cramped_labels < roomy_labels, "a label with no room overprints the one that had room"
+    assert cramped_lines == roomy_lines, "the grid is the same ruler at either width"
+    assert cramped_labels >= 3, "and something is still named, or the ruler has no origin"
+
+
+def test_the_grid_has_two_weights_the_way_rews_does():
+    """Decades heavier, the 2-3-4-5-6-8 ladder between them fainter but present — that ladder is
+    what makes 300 Hz findable on a picture whose labels stop at 100 and 1k."""
+    from autosound_tcc.ui.tcc.curve_view import LogHzAxis
+
+    axis = LogHzAxis(orientation="bottom")
+
+    levels = dict(axis.tickValues(math.log10(20), math.log10(20000), 900))
+
+    assert [round(10 ** v) for v in levels[0]] == [100, 1000, 10000], "the decades, alone"
+    ladder = [round(10 ** v) for v in levels[1]]
+    for hz in (20, 30, 50, 200, 500, 2000, 5000, 20000):
+        assert hz in ladder, f"{hz} Hz has no grid line"
 
 
 def test_horizontal_markers_read_the_level_and_start_on_the_curve():
@@ -952,9 +998,9 @@ def test_a_driver_brings_its_delay_with_it_wherever_it_is_plotted():
     assert delay_bank.load() == {"w-R_01 (sw)": 0.4}, "and restoring banked nothing new"
 
 
-def test_the_pickers_show_what_each_measurement_already_carries():
-    """Where the Arbiter chooses the next pair is where they need to see that this channel has
-    already been read once."""
+def test_the_choose_menu_shows_what_each_measurement_already_carries():
+    """Where the Arbiter chooses what to look at next is where they need to see that this channel
+    has already been read once."""
     from autosound_tcc.core import delay_bank
 
     delay_bank.put("w-R_01 (sw)", 0.4)
@@ -963,10 +1009,8 @@ def test_the_pickers_show_what_each_measurement_already_carries():
     dialog._worker.wait(4000)
     dialog._render_bank()
 
-    combo = dialog._pickers[0]
-    at = combo.findData("w-R_01 (sw)")
-    assert "+0.400 ms" in combo.itemText(at)
-    assert combo.itemText(combo.findData("m-L_01 (sw)")) == "m-L_01 (sw)", "untouched stays plain"
+    assert "+0.400 ms" in dialog._choose_actions["w-R_01 (sw)"].text()
+    assert dialog._choose_actions["m-L_01 (sw)"].text() == "m-L_01 (sw)", "untouched stays plain"
 
 
 def test_zero_forgets_the_entry_rather_than_banking_a_zero():
@@ -2084,9 +2128,9 @@ def test_the_checklist_takes_any_set_and_everything_downstream_follows_it():
     assert len(dialog._view._markers) == 6, "one marker per curve, however many there are"
 
 
-def test_the_two_pickers_and_the_checklist_are_one_selection():
-    """Three controls each holding part of the truth is how a window comes to draw one set of
-    curves and report another. Whichever was used last is what `_chosen()` says."""
+def test_the_chips_and_the_checklist_are_one_selection():
+    """Two controls each holding part of the truth is how a window comes to draw one set of curves
+    and report another. Whichever was used last is what `_chosen()` says, and both show it."""
     dialog = _group_dialog()
     _fetch(dialog)
 
@@ -2094,17 +2138,20 @@ def test_the_two_pickers_and_the_checklist_are_one_selection():
     _fetch(dialog)
 
     assert len(dialog._chosen()) == 3
-    assert [dialog._pickers[i].currentData() for i in (0, 1)] == dialog._chosen()[:2], \
-        "the pickers show the first two of it rather than a stale pair"
+    assert [chip.title() for chip in _chips(dialog)] == dialog._chosen(), \
+        "the chips name all of it, in the order it is plotted"
     ticked = {t for t, a in dialog._choose_actions.items() if a.isChecked()}
     assert ticked == set(dialog._chosen()), "and the list ticks all of it"
     assert dialog._choose_btn.text() == i18n.t("curveChooseBtn").format(n=3)
 
-    # A picker is the fast path back to a pair, and says so by collapsing the selection to one.
-    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("m-R_02 (sw)"))
+    # And back the other way: a × on a chip unticks the same row in the menu.
+    dropped = _chips(dialog)[1].title()
+    _chips(dialog)[1]._x.click()
     _fetch(dialog)
 
-    assert len(dialog._chosen()) == 2 and dialog._chosen()[1] == "m-R_02 (sw)"
+    assert dropped not in dialog._chosen()
+    assert dialog._choose_actions[dropped].isChecked() is False, "the menu followed the chip"
+    assert [chip.title() for chip in _chips(dialog)] == dialog._chosen()
     assert dialog._group_combo.currentIndex() == 0, "and it lets go of the group it is not"
 
 
@@ -2304,18 +2351,36 @@ def test_the_strip_takes_the_phase_too_and_the_frequency_response_keeps_its_axis
 
 def test_the_phase_strip_follows_the_plot_until_it_is_unlinked():
     """Asked for in both directions (user, 2026-08-18): the two pictures over one another while a
-    joint is read, and the strip on its own while a null is zoomed into."""
+    joint is read, and the strip on its own while a null is zoomed into.
+
+    Asserted as SPANS rather than as `linkedView`. pyqtgraph's own link is not used any more — it
+    is two-way, and the strip's half of it put a range of 615 log-decades on the plot (see
+    `_follow_plot_x`) — so what has to hold is the behaviour, not the object.
+    """
+    def strip_span(view):
+        return tuple(view._strip.getPlotItem().vb.viewRange()[0])
+
+    def plot_span(view):
+        return tuple(view._plot.getPlotItem().vb.viewRange()[0])
+
     phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
     phase.set_sum_shown(True)
+    phase.focus_x(20.0, 20000.0)
     assert phase.strip_linked() is True
-    assert phase._strip.getPlotItem().vb.linkedView(0) is phase._plot.getPlotItem().vb
+    assert strip_span(phase) == pytest.approx(plot_span(phase), abs=0.001)
 
     phase.set_strip_linked(False)
     assert phase.strip_linked() is False
-    assert phase._strip.getPlotItem().vb.linkedView(0) is None
+    phase.focus_x(100.0, 1000.0)
+    assert strip_span(phase) != pytest.approx(plot_span(phase), abs=0.001), \
+        "unlinked, the plot moves alone"
+    assert strip_span(phase)[0] == pytest.approx(math.log10(20.0), abs=0.05), "on its own band"
 
     phase.set_strip_linked(True)
-    assert phase._strip.getPlotItem().vb.linkedView(0) is phase._plot.getPlotItem().vb
+    assert strip_span(phase) == pytest.approx(plot_span(phase), abs=0.001)
+    phase.focus_x(30.0, 3000.0)
+    assert strip_span(phase) == pytest.approx(plot_span(phase), abs=0.001), \
+        "and it keeps following after that, not only at the moment of relinking"
 
 
 def test_the_impulse_strip_is_never_linked_because_that_x_is_time():
@@ -2391,3 +2456,522 @@ def test_an_impulse_still_plots_when_rew_has_no_response_for_it():
     trace = got[-1][0]
     assert len(trace.x) == 200
     assert trace.freqs_hz is None and trace.magnitude_db is None
+
+
+# ---- ONE visible selection: the chip row (Advisor, 2026-08-18; user, same day) ----------------
+# "the tuner must always know exactly which physical measurements are contributing to the
+# predicted sum on the screen ... Saying '(3)' while only listing two names, or tucking active
+# curves inside a closed checklist, breaks trust."
+
+
+def test_the_chips_name_every_plotted_curve_in_that_curve_s_own_colour():
+    """The row IS the legend. A chip whose colour is not its trace's would be a legend that lies,
+    which is worse than none — the delay a tuner commits is read off the plot beside it."""
+    from autosound_tcc.ui.tcc.curve_view import trace_colour
+
+    dialog = _group_dialog()
+    _fetch(dialog)
+    _pick_group(dialog, "L")
+    _fetch(dialog)
+
+    chips = _chips(dialog)
+
+    assert [chip.title() for chip in chips] == dialog._chosen()
+    assert [t.name for t in dialog._view._traces] == dialog._chosen(), "and that IS what is drawn"
+    assert [_chip_colour(chip) for chip in chips] == [
+        trace_colour(index).name().lower() for index in range(len(chips))
+    ]
+
+
+def test_the_x_on_a_chip_takes_that_driver_off_and_the_plot_follows():
+    """The Advisor's own workflow: load a group, look at the sum, then isolate a problem by
+    removing one driver to hear what its absence does to the joint."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+    _pick_group(dialog, "L")
+    _fetch(dialog)
+    dropped = _chips(dialog)[0].title()
+
+    _chips(dialog)[0]._x.click()
+    _fetch(dialog)
+
+    assert dropped not in dialog._chosen()
+    assert len(dialog._chosen()) == 2
+    assert [t.name for t in dialog._view._traces] == dialog._chosen(), "the plot lost it too"
+    assert dropped not in [chip.title() for chip in _chips(dialog)]
+
+
+def test_a_group_fills_the_chips_and_taking_one_off_does_not_refill_it():
+    """A FILL, not a claim of ownership. If the group re-asserted itself the Advisor's workflow
+    would be impossible: the driver you just removed would come straight back."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    _pick_group(dialog, "ALL")
+    _fetch(dialog)
+    assert len(_chips(dialog)) == 6
+
+    _chips(dialog)[2]._x.click()
+    _fetch(dialog)
+
+    assert len(_chips(dialog)) == 5, "five, and it stays five"
+    assert dialog._group is None
+    assert dialog._group_combo.currentIndex() == 0, "— no group —: these chips are not ALL any more"
+
+    # ...and touching the version, which used to re-resolve the group, changes nothing now.
+    before = list(dialog._chosen())
+    dialog._version_combo.setCurrentIndex(dialog._version_combo.findData("01"))
+    _fetch(dialog)
+
+    assert dialog._chosen() == before
+
+
+def test_seven_chips_wrap_onto_a_second_line_rather_than_squeezing_the_window():
+    """A whole side plus the sub is seven names, and a name squeezed to an ellipsis is not the
+    evidence this row exists to be."""
+    dialog = _group_dialog(chosen=_IN_REW[:7], kind="fr")
+    _fetch(dialog)
+
+    assert len(_chips(dialog)) == 7
+    row = dialog._chip_row
+    one_line = row.heightForWidth(4000)
+    at_window_width = row.heightForWidth(760)
+
+    assert at_window_width > one_line, "seven names do not fit one line of this window"
+    assert at_window_width >= 2 * one_line, "so they take at least two"
+    assert all(chip.sizeHint().width() > 40 for chip in _chips(dialog)), "and none is squeezed"
+
+
+def test_the_last_chip_cannot_be_taken_off():
+    """With nothing selected `_reload` has nothing to fetch, so the previous curves would stay on
+    the plot beside an empty row — the window drawing one thing while its selection says another."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    _chips(dialog)[1]._x.click()
+    dialog._worker.wait(4000)
+
+    chips = _chips(dialog)
+    assert len(chips) == 1
+    assert chips[0]._x.isEnabled() is False
+    chips[0]._x.click()
+    assert dialog._chosen() == ["w-L_01 (sw)"], "and clicking it anyway changes nothing"
+    # The same rule from the other control: the last tick cannot be taken off either.
+    dialog._choose_actions["w-L_01 (sw)"].trigger()
+    assert dialog._chosen() == ["w-L_01 (sw)"]
+    assert dialog._choose_actions["w-L_01 (sw)"].isChecked() is True, "the tick goes back on"
+
+
+def test_a_measurement_rew_could_not_draw_is_faint_and_does_not_shift_the_others_colours():
+    """The worker keeps going when one curve fails, so the traces are shorter than the selection
+    from that point on. Colouring the chips by POSITION would then name the wrong driver for the
+    whole tail of the row — in the one case where the tuner most needs to know what fed the sum."""
+    from autosound_tcc.ui.tcc.curve_view import trace_colour
+
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)"]
+    dialog = _dialog(every, bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    # REW answered for the first and the last; the middle one is missing from the traces.
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("m-L_01 (sw)", *_impulse(4.78))])
+
+    chips = _chips(dialog)
+    assert [chip.title() for chip in chips] == every
+    assert _chip_colour(chips[0]) == trace_colour(0).name().lower()
+    assert _chip_colour(chips[2]) == trace_colour(1).name().lower(), "m-L is trace TWO on the plot"
+    assert _chip_colour(chips[1]) == current_theme().faint.lower(), "and the absent one is faint"
+    assert i18n.t("curveChipMissingTip").format(title="w-R_01 (sw)") in _tip(chips[1]._x)
+
+
+def test_the_chips_are_repainted_when_the_theme_changes():
+    """A chip's colour is a PEN's colour, written per widget — nothing about a stylesheet switch
+    reaches it, which is the same reason the plot itself has to be told."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+    before = [_chip_colour(chip) for chip in _chips(dialog)]
+
+    from autosound_tcc.ui.tcc.theme import apply_theme
+
+    # To the OTHER palette, whichever this run happens to be standing on: tests before this one
+    # switch the theme and leave it switched, and "to light" is not a change when it is light.
+    was = current_theme().mode
+    try:
+        apply_theme(_app(), "light" if was == "dark" else "dark")
+        dialog.apply_theme()
+        after = [_chip_colour(chip) for chip in _chips(dialog)]
+    finally:
+        apply_theme(_app(), was)
+        dialog.apply_theme()
+
+    assert after != before, "the two palettes do not paint a trace the same"
+    assert all(colour for colour in after), "and every chip still carries one"
+    assert [_chip_colour(chip) for chip in _chips(dialog)] == before, "and back again"
+
+
+def test_reset_re_points_the_chip_row_at_the_new_question():
+    """The window is re-pointed rather than rebuilt (pyqtgraph's PlotItem segfaults on enough
+    construct/destroy cycles), so every control has to come with it — this row included."""
+    _app()
+    first = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(first, bridge=_FakeBridge(), available=first)
+    dialog._worker.wait(4000)
+
+    second = ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"]
+    dialog.reset(second, available=second)
+    dialog._worker.wait(4000)
+
+    assert [chip.title() for chip in _chips(dialog)] == second
+    assert dialog._chosen() == second
+    assert {t for t, a in dialog._choose_actions.items() if a.isChecked()} == set(second)
+
+
+def test_the_selection_has_exactly_one_writer_and_one_reader():
+    """The invariant the whole row rests on, checked in the source rather than through the UI: a
+    second path that writes `_selection` would put the window back where it started — two controls
+    each holding part of the truth, drawing one set of curves and reporting another.
+
+    `__init__` and `reset` seed it (they run before the widgets exist, or before the project has
+    been re-read); every other change goes through `_set_selection`, and every reader asks
+    `_chosen()`.
+    """
+    import ast
+    import inspect
+
+    from autosound_tcc.ui.tcc import curve_dialog as module
+
+    tree = ast.parse(inspect.getsource(module))
+    writers, readers = set(), set()
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for node in ast.walk(function):
+            # `AnnAssign` as well as `Assign`: the seed in `__init__` carries its type annotation
+            # (`self._selection: list[str] = ...`), and a check that missed it would be a check
+            # that passes because it is looking at the wrong node.
+            targets = (
+                node.targets if isinstance(node, ast.Assign)
+                else [node.target] if isinstance(node, ast.AnnAssign)
+                else []
+            )
+            for target in targets:
+                if (isinstance(target, ast.Attribute) and target.attr == "_selection"
+                        and isinstance(target.value, ast.Name) and target.value.id == "self"):
+                    writers.add(function.name)
+            if (isinstance(node, ast.Attribute) and node.attr == "_selection"
+                    and isinstance(node.ctx, ast.Load)
+                    and isinstance(node.value, ast.Name) and node.value.id == "self"):
+                readers.add(function.name)
+
+    assert writers == {"__init__", "reset", "_set_selection"}
+    assert readers == {"_chosen"}, "everything else asks `_chosen()`"
+
+
+def test_the_choose_menu_stays_open_across_a_tick():
+    """Qt closes a menu on every activation, which for a checklist is one opening per driver.
+    A whole side is four ticks; four trips through a twenty-row list is why nobody would use it."""
+    from PySide6.QtCore import QEvent, QPoint, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    dialog = _group_dialog()
+    _fetch(dialog)
+    menu = dialog._choose_menu
+    action = dialog._choose_actions["m-L_02 (sw)"]
+    menu.popup(QPoint(0, 0))
+    menu.setActiveAction(action)
+
+    menu.mouseReleaseEvent(QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(1.0, 1.0), QPointF(1.0, 1.0),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    ))
+    _fetch(dialog)
+
+    assert action.isChecked() is True, "the row toggled"
+    assert "m-L_02 (sw)" in dialog._chosen(), "and the selection took it"
+    assert menu.isVisible() is True, "and the menu is still standing, ready for the next one"
+    assert dialog._choose_actions["m-L_02 (sw)"] is action, \
+        "the actions were not rebuilt under it — destroying one mid-`toggled` ends the process"
+    menu.close()
+
+
+def test_the_group_shortcut_is_offered_only_while_the_sum_is_on():
+    """User, 2026-08-18: "поки я не включив суму немає сенсу показувати ось ці групи". A group IS
+    "these drivers, added up", so with Σ off it answers a question nobody asked."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    assert dialog._view.sum_shown() is False
+    assert dialog._group_box.isVisibleTo(dialog) is False
+
+    dialog._view.set_sum_shown(True)
+
+    assert dialog._group_box.isVisibleTo(dialog) is True
+
+    dialog._view.set_sum_shown(False)
+
+    assert dialog._group_box.isVisibleTo(dialog) is False
+    # ...and what is NOT hidden with it: the window must stay usable without a sum.
+    assert dialog._choose_btn.isVisibleTo(dialog) is True
+    assert dialog._kind_combo.isVisibleTo(dialog) is True
+    assert all(chip.isVisibleTo(dialog) for chip in _chips(dialog))
+
+
+# ---- the ✕, the link ring, and what puts the guides back (user, 2026-08-18) -------------------
+
+
+def test_the_guides_button_is_red_and_big_from_the_moment_the_window_opens():
+    """It opened grey: its look was an inline stylesheet written only by `_update_guides_button`,
+    and nothing called that at construction. The font was set as a QFont, which a QSS `font-size`
+    on `.zoom-btn` beat outright — so the "big red X" that was asked for was neither."""
+    from autosound_tcc.ui.tcc.theme import build_qss
+
+    view = _view()
+
+    assert view._guides_btn.property("class") == "guides-btn"
+    assert view._guides_btn.styleSheet() == "", "the class paints it, not a sheet written by hand"
+    qss = build_qss(current_theme())
+    rule = qss.split('QPushButton[class~="guides-btn"]')[1]
+    assert current_theme().warn in rule, "red at rest"
+    assert "font-size: 17px" in rule, "and bigger than the 12px zoom buttons beside it"
+    assert 'QPushButton[class~="guides-btn"]:checked' in qss, "filled while the guides are off"
+
+
+def test_the_link_button_wears_an_orange_ring_in_both_states():
+    """User, 2026-08-18: "ободок помаранчевого кольору, щоб на неї звертали увагу". `accent` IS
+    this palette's orange; `warn` means "wrong" and `yellow` is the predicted sum's own colour."""
+    from autosound_tcc.ui.tcc.theme import build_qss, get_theme
+
+    view = _view()
+
+    assert view._link_btn.property("class") == "link-btn"
+    assert view._link_btn.styleSheet() == ""
+    for mode in ("dark", "light"):
+        theme = get_theme(mode)
+        rule = build_qss(theme).split('QPushButton[class~="link-btn"]')[1]
+        assert f"border: 2px solid {theme.accent}" in rule, f"the ring, in {mode}"
+        assert theme.warn not in rule, "and it must not read as an error"
+    assert view._link_btn.isVisibleTo(view) is False, "still not offered on an impulse"
+
+
+def test_pressing_a_marker_control_puts_the_guides_back():
+    """User: "коли нажав любу іншу то Х скинувся". With the guides hidden the mode buttons place
+    lines nothing draws, so they look broken — pressing one means the tuner wants the guides."""
+    view = _view()
+    view.set_markers([4.52, 4.78])
+    view.set_guides_hidden(True)
+    assert view.guides_hidden() is True
+
+    button = next(b for b, mode in view._axes_buttons if mode == "vh")
+    button.click()
+
+    assert view.guides_hidden() is False
+    assert view._axes_mode == "vh", "and it did what it says as well"
+    assert view._guides_btn.isChecked() is False, "the ✕ says so too"
+
+    # The markers' own action does it as well: fetching invisible lines back answers nothing.
+    view.set_guides_hidden(True)
+    view.bring_markers_into_view(force=True)
+    assert view.guides_hidden() is False
+
+
+def test_the_view_controls_leave_the_hide_alone():
+    """The other half of the rule. A tuner who took every line off in order to LOOK at the traces
+    would lose that the moment they zoomed in, and the Σ and link toggles are not about guides."""
+    view = _view()
+    view.set_markers([4.52, 4.78])
+    view.set_guides_hidden(True)
+
+    for button, _key in view._zoom_buttons:
+        button.click()
+        assert view.guides_hidden() is True, "a zoom is about the view, not about the guides"
+    view.set_sum_shown(True)
+    view.set_strip_linked(False)
+
+    assert view.guides_hidden() is True
+
+
+def test_the_kind_switching_under_the_window_does_not_put_the_guides_back():
+    """`set_axes_mode` is called by the dialog on every kind switch, so the release cannot live in
+    the setter: it would put the guides back behind a tuner who is reading a curve."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._view.set_guides_hidden(True)
+
+    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("fr"))
+    dialog._worker.wait(4000)
+
+    assert dialog._view.guides_hidden() is True
+
+
+# ---- where the level markers start (user, 2026-08-18) ----------------------------------------
+
+
+def test_two_levels_that_would_land_on_top_of_each_other_are_spread_out():
+    """User: "коли вибираю горизонтальні маркери, вони в самому низу — зручно було, коли вони по
+    середині рознесені між собою". Two drivers at the same level put both lines in one place, and
+    on an impulse — where the trace is at ~0 almost everywhere — that place is the bottom edge."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("w-R_01 (sw)", level_db=90.0))
+    view.set_markers([1000.0, 1000.0], tokens=["accent", "info"])
+
+    view.set_axes_mode("vh")
+
+    low, high = view._visible_y()
+    levels = view.levels()
+    assert len(levels) == 2
+    assert abs(levels[0] - levels[1]) > (high - low) * 0.05, "two lines, not one"
+    assert all(low <= level <= high for level in levels), "and both inside the picture"
+    # Still just a starting point: they drag anywhere afterwards.
+    view._h_markers[1].setValue(low + (high - low) * 0.1)
+    assert view.levels()[1] == pytest.approx(low + (high - low) * 0.1)
+
+
+def test_levels_far_enough_apart_still_start_on_their_own_curves():
+    """The on-curve start is right where it works, and that is most of the frequency response:
+    "what is this trace doing here" is the first thing anybody asks of a level marker."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("w-R_01 (sw)", level_db=70.0))
+    view.set_markers([1000.0, 1000.0], tokens=["accent", "info"])
+
+    view.set_axes_mode("vh")
+
+    assert view.levels()[0] == pytest.approx(90.0, abs=0.01)
+    assert view.levels()[1] == pytest.approx(70.0, abs=0.01)
+
+
+def test_a_level_that_would_start_off_screen_is_brought_into_the_picture():
+    """The other half of unreadable: a line outside the visible span is a reading nobody can see,
+    and the phase reaches −180 at the very bottom of its own axis."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("w-R_01 (sw)", level_db=89.0))
+    view.set_markers([1000.0, 1000.0], tokens=["accent", "info"])
+    view._plot.getViewBox().setYRange(0.0, 10.0, padding=0)
+
+    view.set_axes_mode("vh")
+
+    assert all(0.0 <= level <= 10.0 for level in view.levels())
+
+
+# ---- one row at the bottom instead of three (user, 2026-08-18) --------------------------------
+
+
+def test_the_notes_and_the_delay_bank_share_one_row():
+    """User, with the screenshot of three stacked lines: "ось ці кнопки всі стануть в ряд в самому
+    низу, щоб не займати простір". They belonged to two widgets, which is why they were stacked."""
+    _app()
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="fr", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    view = dialog._view
+    row = view._notes_row
+
+    order = [row.itemAt(i).widget() for i in range(row.count())]
+
+    for button in (view._sum_note_btn, view._readout_btn, dialog._bank_btn,
+                   dialog._bank_clear_btn, dialog._markers_clear_btn):
+        assert button in order, "one row, both widgets' buttons on it"
+    assert order.index(view._sum_note_btn) < order.index(view._readout_btn)
+    assert order.index(view._readout_btn) < order.index(dialog._bank_btn)
+    assert order.index(dialog._bank_btn) < order.index(dialog._bank_clear_btn), \
+        "notes on the left, the actions that undo them on the right"
+    # Nothing regressed on the way: the count, the tip and the warning colour are what these are.
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1)
+    assert "w-L_01 (sw) +0.198" in _tip(dialog._bank_btn)
+    assert view.reading() in _tip(view._readout_btn)
+
+
+# ---- the x range stays the one the window stated (user, 2026-08-18: ticks to 500000k) ---------
+
+
+def _log_span(view) -> tuple:
+    return tuple(view._plot.getPlotItem().vb.viewRange()[0])
+
+
+def test_a_kind_switch_cannot_run_the_frequency_axis_away():
+    """`PlotItem.updateLogMode` ends with a bare `enableAutoRange()` — both axes — so after every
+    `set_log_x` the x range was at the mercy of any item added or removed, in whatever coordinates
+    it carried. On a kind switch those coordinates change underneath it (ms above, log-hertz
+    below), and the axis ran out past 10^8 Hz with the curves crushed into the left third."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    for kind in ("phase", "fr", "impulse", "phase"):
+        dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData(kind))
+        dialog._worker.wait(4000)
+        dialog._worker.run()
+        low, high = _log_span(dialog._view)
+        if kind == "impulse":
+            continue  # milliseconds; the band below is a statement about frequency
+        # Inside a decade either side of the band this window opens a frequency view on.
+        assert 0.3 <= low <= 1.4, f"{kind}: left edge at 10^{low:.2f} Hz"
+        assert 4.3 <= high <= 5.3, f"{kind}: right edge at 10^{high:.2f} Hz"
+        assert dialog._view._plot.getPlotItem().vb.autoRangeEnabled()[0] is False, \
+            "and the x range is this window's to state, never pyqtgraph's to guess"
+
+
+def test_the_sum_going_on_does_not_move_the_frequency_axis():
+    """The strip appears, the window relays out, and everything that follows a resize gets a say.
+    None of them may move the span the tuner is reading."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="phase", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    before = _log_span(dialog._view)
+
+    dialog._view.set_sum_shown(True)
+    dialog._view.set_sum_shown(False)
+    dialog._view.set_sum_shown(True)
+
+    assert _log_span(dialog._view) == pytest.approx(before, abs=0.01)
+
+
+def test_the_linked_strip_reads_the_same_frequencies_as_the_plot_above():
+    """"той самий масштаб і позиціювання, що і фаза" — and the two boxes have different left-axis
+    widths, so pyqtgraph aligns them in SCREEN x rather than copying the numbers. What must hold
+    is that the strip is looking at the same octaves, not at its own data bounds."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="phase", available=every)
+    dialog.show()  # a link is lined up in SCREEN x, so both boxes need a geometry
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+    dialog._view.set_sum_shown(True)
+    _app().processEvents()
+
+    assert dialog._view.strip_linked() is True
+    plot_low, plot_high = _log_span(dialog._view)
+    strip_low, strip_high = dialog._view._strip.getPlotItem().vb.viewRange()[0]
+
+    assert abs(strip_low - plot_low) < 0.2 and abs(strip_high - plot_high) < 0.2
+
+
+def test_the_impulse_strip_opens_on_the_audible_band_and_stays_there():
+    """There is nothing to link to — the plot above is in milliseconds — so the strip states its
+    own band, and no auto-range over its contents is allowed to drift it off."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    dialog._view.set_sum_shown(True)
+
+    assert dialog._view.strip_linked() is False
+    low, high = dialog._view._strip.getPlotItem().vb.viewRange()[0]
+    assert low == pytest.approx(math.log10(20.0), abs=0.05)
+    assert high == pytest.approx(math.log10(20000.0), abs=0.05)
