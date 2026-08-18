@@ -12,10 +12,11 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
-from autosound_tcc.ui.tcc.curve_dialog import CurveDialog  # noqa: E402
+from autosound_tcc.ui.tcc.curve_dialog import CurveDialog, _CurveWorker  # noqa: E402
 from autosound_tcc.ui.tcc.curve_view import CurveView, Trace  # noqa: E402
 
 
@@ -150,6 +151,15 @@ class _FakeBridge:
         return [x / 1000.0 for x in xs], ys  # REW reports seconds; the panel plots ms
 
 
+class _FrBridge(_FakeBridge):
+    """REW's own answer shapes on the frequency-response endpoint: a sweep carries a phase, an
+    MMM capture's comes back null (`rew-api-quirks.md`)."""
+
+    def frequency_response(self, mid):
+        freqs = [20.0 * (2 ** (i / 12.0)) for i in range(120)]
+        return freqs, [80.0 - 0.001 * f for f in freqs], (None if "rta" in mid else [0.0] * 120)
+
+
 def test_the_dialog_plots_what_rew_holds_in_milliseconds():
     _app()
     bridge = _FakeBridge()
@@ -226,16 +236,121 @@ def test_one_curve_is_a_legitimate_thing_to_argue_about():
 
 
 def test_an_rta_capture_is_plotted_as_frequency_response_not_asked_for_an_impulse():
-    """An MMM/RTA capture has no impulse response — REW answers HTTP 400 — so asking for one is a
-    broken window. The method suffix already says which kind a measurement is."""
+    """An MMM/RTA capture has no impulse response — REW answers HTTP 400 — and no phase — the
+    field comes back null. The method suffix already says which kind a measurement is."""
     from autosound_tcc.ui.tcc.curve_dialog import kind_for
 
     assert kind_for(["w-L_01 (rta)", "w-R_01 (rta)"]) == "fr"
     assert kind_for(["w-L_01 (sw)", "w-R_01 (sw)"]) == "impulse"
-    # A mixed pair keeps the impulse: the sweep can provide one, and the caller asked.
-    assert kind_for(["w-L_01 (sw)", "w-R_01 (rta)"], "impulse") == "impulse"
-    # ...but an explicit `impulse` over an all-RTA selection is a request that cannot be honoured.
+    # An explicit `impulse` over an all-RTA selection is a request that cannot be honoured.
     assert kind_for(["w-L_01 (rta)"], "impulse") == "fr"
+    # ...and neither can a MIXED one. One kind is plotted on one pair of axes, so the RTA half
+    # decides for both -- this is the case the first fix missed (user: "in phase and impulse
+    # mode, do not show RTA").
+    assert kind_for(["w-L_01 (sw)", "w-R_01 (rta)"], "impulse") == "fr"
+    assert kind_for(["w-L_01 (sw)", "w-R_01 (rta)"], "phase") == "fr"
+    # A capture tagged with an experiment in flight is still an MMM capture: the suffix is not
+    # always the last thing in the title.
+    assert kind_for(["w-L_02 (rta) INV"], "impulse") == "fr"
+
+
+def test_a_mixed_pair_shows_the_magnitude_instead_of_failing_on_the_rta_half():
+    """One sweep and one MMM capture, opened on an impulse: the window used to fetch both, fail on
+    the RTA half, and reach the Arbiter as "no phase in this measurement"."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    assert dialog._kind == "fr"
+    assert dialog._kind_combo.currentData() == "fr", "a picker reading `impulse` over an FR lies"
+    assert dialog._chosen() == every, "the measurement the Arbiter chose is not dropped for it"
+    assert "w-R_01 (rta)" in dialog._status.text(), "and the window says which one is the reason"
+    assert dialog._status.isVisibleTo(dialog)
+
+
+def test_two_mmm_captures_open_on_the_magnitude_which_is_all_they_hold():
+    _app()
+    every = ["w-L_01 (rta)", "w-R_01 (rta)"]
+    dialog = _dialog(every, bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    assert dialog._kind == "fr"
+    assert [t.name for t in dialog._view._traces] == every, "both are plotted, neither is dropped"
+    assert all(title in dialog._status.text() for title in every)
+
+
+def test_asking_for_phase_with_an_mmm_capture_on_screen_is_refused_in_words():
+    """The kind switch has to do something explainable. It stays on the magnitude and names the
+    measurement that decided it — the alternatives were a REW 400 and a silently dropped curve."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(every, bridge=_FrBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    assert dialog._kind == "fr" and dialog._kind_combo.currentData() == "fr"
+    assert dialog._chosen() == every
+    assert "w-R_01 (rta)" in dialog._status.text()
+
+
+def test_an_rta_row_greys_out_and_explains_itself_rather_than_leaving_the_picker():
+    """What is wrong stays visible and says why — the model picker's habit (`_fill_combo`). A
+    measurement REW holds and cannot draw in this mode is a different thing from one that is not
+    there at all."""
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(every[:2], bridge=_FrBridge(), kind="impulse", available=every)
+    dialog._worker.wait(4000)
+
+    combo = dialog._pickers[0]
+    row = combo.findData("w-R_01 (rta)")
+    assert row >= 0, "the MMM capture stays on the list"
+    assert not combo.model().item(row).isEnabled()
+    assert combo.itemData(row, Qt.ItemDataRole.ToolTipRole) == i18n.t("curveRtaTip")
+
+    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("fr"))
+    dialog._worker.wait(4000)
+
+    assert combo.model().item(row).isEnabled(), "the frequency response can draw it, so it opens"
+    assert combo.itemData(row, Qt.ItemDataRole.ToolTipRole) is None
+
+
+def test_the_kind_picker_shuts_impulse_and_phase_while_an_mmm_capture_is_in_the_pair():
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(every, bridge=_FrBridge(), available=every)
+    dialog._worker.wait(4000)
+    kinds = dialog._kind_combo
+
+    shut = {str(kinds.itemData(row)) for row in range(kinds.count())
+            if not kinds.model().item(row).isEnabled()}
+
+    assert shut == {"impulse", "phase"}
+    tip = kinds.itemData(kinds.findData("impulse"), Qt.ItemDataRole.ToolTipRole)
+    assert tip == i18n.t("curveKindRtaTip")
+
+
+def test_swapping_the_mmm_capture_for_a_sweep_puts_the_impulse_back_on_offer():
+    _app()
+    every = ["w-L_01 (sw)", "w-R_01 (sw)", "w-R_01 (rta)"]
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_FrBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    dialog._pickers[1].setCurrentIndex(dialog._pickers[1].findData("w-R_01 (sw)"))
+    dialog._worker.wait(4000)
+    dialog._worker.run()
+
+    kinds = dialog._kind_combo
+    assert all(kinds.model().item(row).isEnabled() for row in range(kinds.count()))
+    # Still on the magnitude, because that is where the Arbiter is: the kind does not jump back
+    # on its own, it only stops being refused.
+    assert dialog._kind == "fr" and not dialog._status.text()
 
 
 def test_marker_positions_are_hz_not_log_hz():
@@ -252,6 +367,9 @@ def test_marker_positions_are_hz_not_log_hz():
 
 
 def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
+    """Tested on the worker rather than through the dialog: the dialog no longer ASKS for an
+    impulse over a pair with an MMM capture in it, but REW can still refuse any single curve for
+    its own reasons, and the one it can produce must reach the screen anyway."""
     _app()
 
     class _HalfBroken(_FakeBridge):
@@ -260,11 +378,10 @@ def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
                 raise RuntimeError("HTTP Error 400: Bad Request")
             return super().impulse_response(mid)
 
-    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (rta)"], bridge=_HalfBroken(), kind="impulse")
-    dialog._worker.wait(4000)
+    worker = _CurveWorker(_HalfBroken(), ["w-L_01 (sw)", "w-R_01 (rta)"], "impulse")
     got = []
-    dialog._worker.done.connect(got.append)
-    dialog._worker.run()
+    worker.done.connect(got.append)
+    worker.run()
 
     assert [t.name for t in got[-1]] == ["w-L_01 (sw)"]
 

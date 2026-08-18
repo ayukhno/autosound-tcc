@@ -418,6 +418,12 @@ would change and why. Nothing here is applied.",
         "curveKind_impulse": "impulse",
         "curveKind_fr": "frequency response",
         "curveKind_phase": "phase",
+        "curveRtaOnly": "Showing the frequency response: {titles} — an MMM capture, and REW has \
+neither an impulse nor a phase for one.",
+        "curveRtaTip": "An MMM capture: REW has no impulse and no phase for it. Switch to the \
+frequency response to put this one on the plot.",
+        "curveKindRtaTip": "Not for an MMM capture — REW has no impulse and no phase for one. \
+Choose sweeps (sw) above to read this.",
         "curveBtn": "Curves — put a marker where you mean",
         "curveNothing": "No measurements to plot yet — read them from REW first.",
         "curveLoading": "Reading the curves from REW…",
@@ -843,6 +849,12 @@ would change and why. Nothing here is applied.",
         "curveKind_impulse": "імпульсна",
         "curveKind_fr": "АЧХ",
         "curveKind_phase": "фаза",
+        "curveRtaOnly": "Показано АЧХ: {titles} — замір MMM, а для нього REW не має ні \
+імпульсної, ні фази.",
+        "curveRtaTip": "Замір MMM: REW не має для нього ні імпульсної, ні фази. Щоб побачити \
+його на графіку, перейди на АЧХ.",
+        "curveKindRtaTip": "Не для заміру MMM — REW не має для нього ні імпульсної, ні фази. \
+Щоб це читати, обери вище заміри свіпом (sw).",
         "curveBtn": "Криві — постав маркер там, де маєш на увазі",
         "curveNothing": "Ще нема чого малювати — спершу прочитай заміри з REW.",
         "curveLoading": "Читаю криві з REW…",

@@ -16,6 +16,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -29,6 +30,7 @@ from autosound_tcc.core import config, delay_bank
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.curve_view import _TRACE_TOKENS, CurveView, Trace
+from autosound_tcc.ui.tcc.theme import current_theme
 
 #: What can be plotted, and how each one is fetched and labelled. Impulse first because that is
 #: where the argument that prompted this happened; the others are the same widget with a different
@@ -48,23 +50,43 @@ _IMPULSE_WINDOW_MS = 4.0
 #: What an FR view opens on. REW reports out to 47 kHz and down to 4 Hz; outside the audible band
 #: it is measurement noise, and auto-ranging over it flattens the part being argued about.
 _FR_BAND_HZ = (20.0, 20000.0)
+#: The suffix a title carries when the capture behind it is an MMM/RTA one. A CONVENTION written
+#: by the skill's naming grammar (`naming-and-structure.md`, §"Method suffix"), not a fact REW
+#: reports: the API has no field for how a measurement was taken, so short of asking for the
+#: impulse and being told 400, the name is the only thing there is to go on. The rest of TCC reads
+#: the same suffix (`state/measurement_view.py`).
+_RTA_SUFFIX = "(rta)"
+
+
+def _is_rta(title: str) -> bool:
+    """Whether this title names an MMM/RTA capture.
+
+    Matched anywhere in the title rather than only at the end, because an experiment in flight
+    tags the name AFTER the method suffix ("w-L_2 (rta) INV") — the same trailing "extra" the
+    measurement panel's `_classify_title` already allows for — and a tagged capture is still an
+    MMM one with no impulse in it.
+    """
+    return _RTA_SUFFIX in str(title).casefold()
 
 
 def kind_for(titles: Sequence[str], asked: str = "") -> str:
-    """Which curve these measurements can actually show.
+    """Which curve ALL of these measurements can actually show.
 
-    An MMM/RTA capture has NO impulse response — REW answers 400 — so asking for one is an error
-    the Arbiter sees as a broken window (user, 2026-08-11). The method suffix already says which
-    kind a measurement is, so the window can pick rather than fail: any sweep in the selection
-    means an impulse is available, all-RTA means frequency response.
+    An MMM/RTA capture has no impulse response — REW answers 400 — and no phase — the field comes
+    back null (`rew-api-quirks.md`). Asking for either is an error the Arbiter sees as a broken
+    window (user, 2026-08-11).
+
+    ONE such title decides it for the whole selection. The window plots a single kind on a single
+    pair of axes, so a MIXED sweep+RTA pair asked for an impulse fetched both, failed on the RTA
+    half, and put "no phase in this measurement" in front of the Arbiter: the first fix only
+    caught the case where EVERY title was RTA, and the mixed one was reported again.
+
+    A magnitude is the one thing every capture holds, so that is what such a selection shows —
+    even when the caller asked for something else, because there is nothing else on offer and
+    answering "impulse" here would only move the failure into the worker.
     """
-    all_rta = bool(titles) and all(str(t).rstrip().endswith("(rta)") for t in titles)
-    if asked in KINDS and not all_rta:
-        return asked
-    if all_rta:
-        # An MMM capture has a magnitude and nothing else: no impulse, no phase.
-        return "fr"
-    return asked if asked in KINDS else "impulse"
+    wanted = asked if asked in KINDS else "impulse"
+    return "fr" if any(_is_rta(t) for t in titles) else wanted
 
 
 def _peak_x(trace) -> float:
@@ -151,6 +173,9 @@ class CurveDialog(QDialog):
         self._markers = list(markers)
         self._bridge = bridge or RewBridge()
         self._worker: Optional[_CurveWorker] = None
+        #: Why what is on screen is not what was asked for, in words. Empty when nothing was
+        #: refused — the status line is then free to disappear, as it did before.
+        self._note = ""
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
         self._restoring = False
@@ -185,7 +210,7 @@ class CurveDialog(QDialog):
                 wanted = titles[index] if index < len(titles) else ""
                 at = combo.findData(wanted)
                 combo.setCurrentIndex(at if at >= 0 else 0)
-                combo.currentIndexChanged.connect(lambda _i: self._reload())
+                combo.currentIndexChanged.connect(self._on_selection_changed)
                 picker_row.addWidget(combo, 1)
                 self._pickers.append(combo)
             layout.addLayout(picker_row)
@@ -255,8 +280,10 @@ class CurveDialog(QDialog):
         self._titles = list(titles)
         self._apply_delay_resolution()
         self._render_bank()
-        self._apply_kind()
-        self._reload()
+        # Asked again over what the PICKERS ended up on, not over `titles`: a title the caller
+        # named but `available` does not hold leaves its picker on some other measurement, and the
+        # kind has to answer for what will actually be fetched.
+        self._settle_kind(kind)
 
     # ---- the delay bank -----------------------------------------------------
 
@@ -448,7 +475,30 @@ class CurveDialog(QDialog):
         )
 
     def _on_kind_changed(self, _index: int) -> None:
-        self._kind = str(self._kind_combo.currentData() or "impulse")
+        self._settle_kind(str(self._kind_combo.currentData() or "impulse"))
+
+    def _on_selection_changed(self, _index: int) -> None:
+        """The pair changed, and what it can show may have changed with it — swapping a sweep for
+        an MMM capture takes the impulse and the phase away with it."""
+        self._settle_kind(self._kind)
+
+    def _settle_kind(self, asked: str) -> None:
+        """Put the window on the kind this selection can answer, then fetch.
+
+        `kind_for` has the last word, not the picker: an MMM capture in the pair carries neither
+        an impulse nor a phase, so the window stays on the magnitude — and SAYS which measurement
+        is the reason. Quietly fetching the sweep alone was the other option and it is worse: that
+        is the window deciding which of the two curves the Arbiter meant.
+        """
+        asked = asked if asked in KINDS else "impulse"
+        self._kind = kind_for(self._chosen(), asked)
+        # In words as well as greyed out in the picker: a disabled row explains itself only to
+        # somebody who thinks to hover it, and this one has just refused something that was asked
+        # for out loud.
+        rta = [t for t in self._chosen() if _is_rta(t)]
+        self._note = (
+            "" if self._kind == asked else i18n.t("curveRtaOnly").format(titles=", ".join(rta))
+        )
         self._apply_kind()
         self._reload()
 
@@ -460,6 +510,62 @@ class CurveDialog(QDialog):
         # A frequency response is as often read for its level as for its frequency, so it opens
         # with both; an impulse is an arrival time and nothing else.
         self._view.set_axes_mode("vh" if self._kind in ("fr", "phase") else "v")
+        # The kind picker is MOVED from here, not merely read: `kind_for` can overrule what was
+        # asked for, and a combo still reading "impulse" above a frequency response is the window
+        # lying about what is on screen.
+        blocked = self._kind_combo.blockSignals(True)
+        self._kind_combo.setCurrentIndex(max(0, self._kind_combo.findData(self._kind)))
+        self._kind_combo.blockSignals(blocked)
+        self._mark_availability()
+
+    def _mark_availability(self) -> None:
+        """Grey out what cannot be shown — in the measurement pickers and in the kind picker both.
+
+        Marked and left on screen rather than dropped, which is this app's habit for a choice that
+        exists and does not apply here (`main_window._fill_combo` keeps an unavailable model
+        visible and marked): a measurement REW holds and cannot draw in this mode is a different
+        thing from one that is not there at all, and a list that silently shortens itself when the
+        kind changes is a list nobody can read as the whole list.
+
+        Both directions, because the mixed pair can be built from either end — an MMM capture
+        chosen while the impulse is up, or the impulse asked for while one is already plotted.
+
+        No text badge on the rows. A measurement's title already ends in `(rta)` and the kind rows
+        are already named after their kind, so a badge would restate the row instead of adding a
+        fact — which is why the model picker's own badges were taken off (user, 2026-08-12).
+        """
+        faint = QColor(current_theme().faint)
+        # A magnitude is the one thing every capture holds, so on `fr` nothing is shut.
+        rta_shut = self._kind != "fr"
+        for combo in self._pickers:
+            for row in range(combo.count()):
+                title = str(combo.itemData(row) or "")
+                self._mark_row(
+                    combo, row, rta_shut and _is_rta(title), i18n.t("curveRtaTip"), faint
+                )
+        has_rta = any(_is_rta(t) for t in self._chosen())
+        for row in range(self._kind_combo.count()):
+            key = str(self._kind_combo.itemData(row) or "")
+            self._mark_row(
+                self._kind_combo, row, has_rta and key != "fr", i18n.t("curveKindRtaTip"), faint
+            )
+
+    @staticmethod
+    def _mark_row(combo: QComboBox, row: int, shut: bool, tip: str, faint: QColor) -> None:
+        """One row's "not on offer here" state, set BOTH ways.
+
+        The clearing half matters as much as the marking half: the kind goes back and forth all
+        afternoon, and a row greyed once and never un-greyed is worse than one never marked.
+
+        The colour is set explicitly rather than left to Qt's disabled palette because the
+        `.mini-select` stylesheet pins `color` on the popup view, and a QSS colour wins over the
+        palette in every state — a disabled row would otherwise look exactly like a live one.
+        """
+        item = combo.model().item(row)
+        if item is not None:
+            item.setEnabled(not shut)
+        combo.setItemData(row, faint if shut else None, Qt.ItemDataRole.ForegroundRole)
+        combo.setItemData(row, tip if shut else None, Qt.ItemDataRole.ToolTipRole)
 
     def _chosen(self) -> list[str]:
         if not self._pickers:
@@ -483,7 +589,11 @@ class CurveDialog(QDialog):
         self._worker.start()
 
     def _on_curves(self, traces: list) -> None:
-        self._status.setVisible(False)
+        # The status line ends up carrying the refusal note, if there is one, and disappears when
+        # there is not. It is written HERE rather than where the note is decided because `_reload`
+        # puts "Reading the curves from REW…" over whatever was there.
+        self._status.setText(self._note)
+        self._status.setVisible(bool(self._note))
         self._view.set_traces(traces)
         # A pair already argued about comes back with its answer on it. `set_traces` clears the
         # delay by design (a new pair is a new question); the bank is what makes coming BACK to a
@@ -549,7 +659,6 @@ class CurveDialog(QDialog):
         reachable in the app by opening this window twenty times during a tune (2026-08-12).
         One window, re-pointed, avoids the whole class rather than betting on the collector.
         """
-        self._kind = kind_for(titles, kind)
         self._markers = [float(m) for m in (markers or [])]
         self._titles = list(titles)
         options = list(available) or list(titles)
@@ -564,20 +673,21 @@ class CurveDialog(QDialog):
             at = combo.findData(wanted)
             combo.setCurrentIndex(at if at >= 0 else 0)
             combo.blockSignals(blocked)
-        at = self._kind_combo.findData(self._kind)
-        blocked = self._kind_combo.blockSignals(True)
-        self._kind_combo.setCurrentIndex(max(0, at))
-        self._kind_combo.blockSignals(blocked)
         # Re-read: the window outlives the project, and switching projects switches processors —
         # and switching projects switches the bank with it.
         self._apply_delay_resolution()
         self._render_bank()
-        self._apply_kind()
-        self._reload()
+        # The kind combo is not moved here: `_settle_kind` -> `_apply_kind` does it, and a second
+        # writer of the same index is exactly how a picker comes to disagree with the `self._kind`
+        # the worker is fetching for.
+        self._settle_kind(kind)
 
     def apply_theme(self) -> None:
         """Passed through from the window: a plot does not repaint from a stylesheet."""
         self._view.apply_theme()
+        # Nor does a row foreground written as a hex value out of the palette that was current
+        # when it was greyed out.
+        self._mark_availability()
 
     def _on_failed(self, message: str) -> None:
         self._status.setVisible(True)
