@@ -266,6 +266,11 @@ it is done and you come back here, the list is read again. TCC holds none of tho
 the terminal and the session in it are yours.",
         "configureModelsSetupOpened": "omp's setup is open in a terminal. When it is done, come \
 back to this window — the list is read again.",
+        # The MCP server is what a session reaches TCC through. When it did not start, the reason
+        # was known minutes earlier and had nowhere to go — now it travels with the message.
+        "mcpDown": "The MCP server is not running, so a session has nothing to reach TCC through. \
+Start TCC again; if it keeps happening, the reason is here and in the log:",
+        "mcpDownLog": "log:",
         "modelClipboardOnly": "clipboard only",
         # A route whose CLI is not installed: shown greyed rather than left out, because an option
         # that is absent reads as one that does not exist (user, 2026-08-19).
@@ -852,6 +857,9 @@ Choose sweeps (sw) above to read this.",
 даних не тримає: термінал і сесія в ньому — твої.",
         "configureModelsSetupOpened": "Налаштування omp відкрито в терміналі. Коли закінчиш — \
 повернись у це вікно, список перечитається.",
+        "mcpDown": "MCP-сервер не працює, тож сесії нема через що дістатися до TCC. Запусти TCC \
+ще раз; якщо повторюється — причина тут і в лозі:",
+        "mcpDownLog": "лог:",
         "modelClipboardOnly": "лише буфер",
         "modelInstallCli": "постав {cli} CLI",
         "modelRecommended": "рекомендована пара",

@@ -42,7 +42,7 @@ from autosound_tcc.ui.tcc.curve_view import (
     trace_colour,
 )
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.theme import current_theme
+from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 
 #: What can be plotted, and how each one is fetched and labelled. Impulse first because that is
 #: where the argument that prompted this happened; the others are the same widget with a different
@@ -524,7 +524,7 @@ class CurveDialog(QDialog):
         # units on one pair of axes would be a picture of nothing. Switching it re-fetches. It is
         # the one control that did not move when the selection became a chip row, because it
         # answers "what is drawn" and not "which measurements".
-        self._kind_combo = QComboBox()
+        self._kind_combo = mini_combo()
         self._kind_combo.setProperty("class", "mini-select")
         for key in KINDS:
             self._kind_combo.addItem(i18n.t(f"curveKind_{key}"), key)
@@ -744,13 +744,13 @@ class CurveDialog(QDialog):
         (which set · what to draw · which group · which measurements · and here they are) it was a
         word explaining a layout that no longer needs explaining.
         """
-        self._version_combo = QComboBox()
+        self._version_combo = mini_combo()
         self._version_combo.setProperty("class", "mini-select")
         self._version_combo.setFixedWidth(96)
         attach_tip(self._version_combo, tip_html(i18n.t("curveGroupVersionTip")))
         self._version_combo.currentIndexChanged.connect(self._on_version_chosen)
 
-        self._group_combo = QComboBox()
+        self._group_combo = mini_combo()
         self._group_combo.setProperty("class", "mini-select")
         # A group's row is its name AND its kind ("SW+Ws · joint"), and in a flow layout a combo
         # gets exactly the width it asks for — so it has to ask for enough to print one. The

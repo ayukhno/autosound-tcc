@@ -52,6 +52,7 @@ import json
 import secrets
 import socket
 import threading
+import time
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -941,6 +942,11 @@ class TccMcpServer:
         self._thread: Optional[threading.Thread] = None
         self._server: Any = None
         self._ready = threading.Event()
+        #: What killed the serving thread, when something did. The thread cannot raise into
+        #: `start()` — it is a different stack — so a death there used to be invisible: the caller
+        #: held a server object that answered nothing (`start()` sets `_ready` BEFORE serving, so
+        #: even the wait succeeded).
+        self.failure: Optional[BaseException] = None
 
     @property
     def url(self) -> Optional[str]:
@@ -963,14 +969,49 @@ class TccMcpServer:
 
         def _serve() -> None:
             self._ready.set()
-            asyncio.run(self._server.serve())
+            try:
+                asyncio.run(self._server.serve())
+            except BaseException as exc:  # noqa: BLE001 — the thread's death has to be reportable
+                self.failure = exc
 
         self._thread = threading.Thread(target=_serve, name="tcc-mcp", daemon=True)
         self._thread.start()
         self._ready.wait(timeout=5.0)
+        self._wait_until_serving()
         if write_config:
             write_mcp_config(self.project_dir, self.port, self.token)
         return self.port
+
+    def _wait_until_serving(self, timeout: float = 5.0) -> None:
+        """Return once uvicorn says it is up — or raise with what stopped it.
+
+        `_ready` only says the THREAD started, and it is set before `serve()` is even called, so
+        `start()` used to report success for a server that had already died on its first line: the
+        window then held an object that answered nothing, and the only sign was a chat message
+        hours later saying the server was not running, with no reason attached (user, on Windows
+        11, 2026-08-19). Uvicorn publishes `started`; this waits for it.
+
+        A timeout is NOT a failure: a slow machine's server is still a server, and killing a
+        working one because it took four seconds would be the worse error. Only a dead thread or a
+        recorded exception raises.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if getattr(self._server, "started", False):
+                return
+            if self.failure is not None:
+                raise RuntimeError(f"the MCP server stopped as it started: {self.failure}")
+            if self._thread is not None and not self._thread.is_alive():
+                raise RuntimeError(
+                    "the MCP server's thread ended before it started serving"
+                    + (f": {self.failure}" if self.failure else "")
+                )
+            time.sleep(0.05)
+
+    @property
+    def serving(self) -> bool:
+        """Whether uvicorn is actually up — not merely whether a thread was created."""
+        return bool(getattr(self._server, "started", False))
 
     def stop(self, timeout: float = 5.0) -> None:
         if self._server is not None:

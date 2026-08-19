@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config, model_choices, project_settings
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.theme import mini_combo
 
 ACTIVE_OMP_KEY = "ai/active_omp"
 
@@ -177,7 +178,9 @@ class ProjectGateDialog(QDialog):
         self._sync_ok()
 
     def _model_combo(self, entries) -> QComboBox:
-        combo = QComboBox()
+        # `mini_combo`, so the drop-down is as wide as its widest row whatever the dialog's width
+        # — on Windows the model names came back as "AGY · Gem...sh (High)" (see `theme.MiniCombo`).
+        combo = mini_combo()
         self._fill_combo(combo, entries)
         return combo
 

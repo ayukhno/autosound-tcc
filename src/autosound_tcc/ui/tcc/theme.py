@@ -16,9 +16,47 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QComboBox, QWidget
 
 Mode = Literal["dark", "light"]
+
+
+#: What a `.mini-select` popup spends on something other than the label: 28 px of left padding
+#: reserving the check mark, 14 px on the right, the view's own 3 px either side, and room for a
+#: scrollbar when the list is long. Measured off the stylesheet in this file rather than guessed —
+#: if those numbers change, this one follows them.
+_POPUP_CHROME_PX = 28 + 14 + 6 + 18
+
+
+class MiniCombo(QComboBox):
+    """A `.mini-select` whose DROP-DOWN is as wide as its widest row, whatever the box's width.
+
+    Qt sizes a popup to the closed box unless told otherwise. These combos are narrow on purpose —
+    they sit in tight rows — and `AdjustToContents` only grows the box when the layout lets it, so
+    on a platform where the UI font is wider the rows came back elided: `AGY · Gem...sh (High)`,
+    `x...h`, and in the narrowest one nothing but `...` (user, on Windows 11, 2026-08-19). The
+    label is the whole point of the list; the closed box may elide, the list may not.
+
+    Done at `showPopup` rather than after filling: the contents change (a catalogue arrives, a
+    language switches, a project is loaded) and a width computed once goes stale without anybody
+    noticing. Here it is right every time it is opened, and costs one pass over the rows.
+    """
+
+    def showPopup(self) -> None:  # noqa: N802 (Qt override)
+        view = self.view()
+        if view is not None and self.count():
+            metrics = self.fontMetrics()
+            widest = max(metrics.horizontalAdvance(self.itemText(i)) for i in range(self.count()))
+            view.setMinimumWidth(widest + _POPUP_CHROME_PX)
+        super().showPopup()
+
+
+def mini_combo() -> MiniCombo:
+    """A themed `.mini-select` that grows to fit its content — and whose popup always does."""
+    combo = MiniCombo()
+    combo.setProperty("class", "mini-select")
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    return combo
 
 
 def apply_caps(widget: QWidget, spacing_px: float = 1.0, upper: bool = True) -> None:

@@ -2306,3 +2306,43 @@ def test_a_route_whose_cli_is_missing_is_greyed_and_says_what_it_needs():
     assert i18n.t("modelInstallCli").format(cli="codex") in rows[1]
     assert combo.model().item(0).isEnabled() is True
     assert combo.model().item(1).isEnabled() is False, "not selectable, and looks it"
+
+
+def test_a_drop_down_is_as_wide_as_its_widest_row_whatever_the_box():
+    """User, on Windows 11, 2026-08-19: the lists came back elided — "AGY · Gem...sh (High)",
+    "x...h", and in the narrowest one nothing but "...". Qt sizes a popup to the CLOSED box, and
+    these combos are narrow on purpose; the stylesheet then spends 28 px of the row on the check
+    mark. The closed box may elide. The list may not."""
+    from autosound_tcc.ui.tcc.theme import mini_combo
+
+    _app()
+    combo = mini_combo()
+    combo.addItem("AGY · Gemini 3.7 Flash (High)", "a")
+    combo.addItem("SDK · Claude Opus 5", "b")
+    combo.setFixedWidth(60)  # as tight as the narrowest row in the app
+
+    combo.showPopup()
+    combo.hidePopup()
+
+    widest = combo.fontMetrics().horizontalAdvance("AGY · Gemini 3.7 Flash (High)")
+    assert combo.view().minimumWidth() >= widest, "the longest label fits, uncut"
+    assert combo.view().minimumWidth() > combo.width(), "and the popup is free of the box's width"
+
+
+def test_the_popup_width_follows_the_contents_it_is_opened_with():
+    """Computed at showPopup, not once at build time: a catalogue arrives, a language switches, a
+    project is loaded — a width measured once goes stale without anybody noticing."""
+    from autosound_tcc.ui.tcc.theme import mini_combo
+
+    _app()
+    combo = mini_combo()
+    combo.addItem("EN", "en")
+    combo.showPopup()
+    combo.hidePopup()
+    narrow = combo.view().minimumWidth()
+
+    combo.addItem("AGY · Gemini 3.7 Flash (Medium)", "x")
+    combo.showPopup()
+    combo.hidePopup()
+
+    assert combo.view().minimumWidth() > narrow

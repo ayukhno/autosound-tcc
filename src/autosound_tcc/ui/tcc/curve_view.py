@@ -53,7 +53,7 @@ from autosound_tcc.core.allpass import Allpass, AllpassError
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.theme import current_theme
+from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 
 # The two trace colours, in order. Deliberately the theme's own accent + info rather than
 # pyqtgraph's defaults: a plot that does not belong to the window it is in reads as a screenshot
@@ -856,7 +856,7 @@ class CurveView(QWidget):
         self._apf_label.setProperty("class", "phead-sub")
         attach_tip(self._apf_label, tip_html(i18n.t("curveApfTip")))
         settings.addWidget(self._apf_label)
-        self._apf_kind = QComboBox()
+        self._apf_kind = mini_combo()
         self._apf_kind.setProperty("class", "mini-select")
         self._apf_kind.setFixedWidth(84)
         self._apf_kind.addItem(i18n.t("curveApfNone"), 0)
@@ -939,7 +939,7 @@ class CurveView(QWidget):
         self._cross_label.setProperty("class", "phead-sub")
         self._cross_combos: list[QComboBox] = []
         for slot in (0, 1):
-            combo = QComboBox()
+            combo = mini_combo()
             combo.setProperty("class", "mini-select")
             combo.setFixedWidth(96)
             combo.currentIndexChanged.connect(

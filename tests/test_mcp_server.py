@@ -841,3 +841,52 @@ def test_no_configured_critic_leaves_the_scripts_own_default_alone(tmp_path, mon
     asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))
 
     assert seen["model"] is None
+
+
+def test_a_server_that_dies_as_it_starts_is_a_failure_of_start(monkeypatch, tmp_path):
+    """`_ready` says the THREAD started, and it is set before `serve()` is even called — so a
+    server that died on its first line reported success, and the only sign was a chat message
+    hours later saying it was not running, with no reason attached (user, Windows 11,
+    2026-08-19)."""
+    import uvicorn
+
+    class _DeadServer:
+        started = False
+
+        def __init__(self, config):
+            self.config = config
+
+        async def serve(self, sockets=None):
+            raise OSError("port 8765 is not available")
+
+    monkeypatch.setattr(uvicorn, "Server", _DeadServer)
+    server = mcp_server.TccMcpServer(project_dir=tmp_path)
+
+    with pytest.raises(RuntimeError) as caught:
+        server.start(write_config=False)
+
+    assert "port 8765 is not available" in str(caught.value)
+    assert server.serving is False
+
+
+def test_a_slow_start_is_not_treated_as_a_death(monkeypatch, tmp_path):
+    """A timeout is not a failure: a slow machine's server is still a server, and killing a
+    working one because it took four seconds would be the worse error."""
+    import uvicorn
+
+    class _SlowServer:
+        started = False
+
+        def __init__(self, config):
+            self.config = config
+
+        async def serve(self, sockets=None):
+            await asyncio.sleep(30)
+
+    monkeypatch.setattr(uvicorn, "Server", _SlowServer)
+    server = mcp_server.TccMcpServer(project_dir=tmp_path)
+
+    port = server.start(write_config=False)  # must not raise
+
+    assert port and server.failure is None
+    server.stop(timeout=0.1)

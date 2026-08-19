@@ -106,6 +106,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
 )
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
+from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
@@ -179,11 +180,9 @@ def _preset_label(key: str) -> str:
 
 def _mini_combo() -> QComboBox:
     """A themed `.mini-select` combo that grows to fit its content, so the popup never clips its
-    labels (the language picker was collapsing "EN"/"UK" down to "E"/"U")."""
-    combo = QComboBox()
-    combo.setProperty("class", "mini-select")
-    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-    return combo
+    labels (the language picker was collapsing "EN"/"UK" down to "E"/"U", and on Windows every
+    list came back elided — see `theme.MiniCombo`)."""
+    return theme_mini_combo()
 
 
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
@@ -2268,6 +2267,7 @@ class MainWindow(QMainWindow):
         # Set before anything that reads it: the status refresh below runs whether or not the
         # server ends up starting.
         self._mcp_server = None
+        self._mcp_error = ""
         self._bridge = QtUiBridge(self)
         self._bridge.confirmationRequested.connect(self._dialog.confirm_bar.enqueue)
         self._bridge.clipboardRequested.connect(lambda text: QGuiApplication.clipboard().setText(text))
@@ -2295,6 +2295,12 @@ class MainWindow(QMainWindow):
             self._mcp_server.start()
         except Exception as exc:  # port taken, unwritable project folder, ...
             self._mcp_server = None
+            # Kept, because the status strip shows the LAST notification and this one is minutes
+            # older than the moment it matters: the chat says the server is not running when a
+            # session is launched, and until now it could not say why (user, on Windows 11,
+            # 2026-08-19). Logged too, with the traceback, so a report can carry the cause.
+            self._mcp_error = f"{type(exc).__name__}: {exc}"
+            app_log.logger().exception("the MCP server did not start: %s", exc)
             self._status_strip.notify(f"MCP: {exc}", level="warn")
 
     def _publish_snapshot(self) -> None:
@@ -2527,7 +2533,15 @@ class MainWindow(QMainWindow):
 
     def _launch_session(self, opening: Optional[str] = None, fresh: bool = False) -> None:
         if self._mcp_server is None:
-            self._dialog._add_system_message("⚠️ MCP server is not running — start TCC again.")
+            # WITH the reason. "Start TCC again" is advice that does not survive a second failure,
+            # and the cause was already known minutes ago — it just had nowhere to go.
+            reason = getattr(self, "_mcp_error", "")
+            where = app_log.log_path()
+            self._dialog._add_system_message(
+                "⚠️ " + i18n.t("mcpDown")
+                + (f" {reason}" if reason else "")
+                + (f"\n{i18n.t('mcpDownLog')} {where}" if where else "")
+            )
             return
 
         server = self._mcp_server
