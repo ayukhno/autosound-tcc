@@ -55,12 +55,15 @@ has to be there beforehand.
 
 Three things it cannot get for you, because they are yours:
 
-- **[REW](https://www.roomeqwizard.com/)**, with its API switched on. This is where measurements
-  come from, and TCC's own REW indicator tells you whether it is reachable. On macOS: open
-  *Preferences → API*, tick **Start the API when REW starts** and press **Start server**; the panel
-  then reads *"API server is running on port 4735"*, and from then on it comes up with REW. On
-  Windows that box does not exist, so the installer puts a **REW (API on)** shortcut on your
-  Desktop that starts REW with the API on — start REW from it.
+- **[REW](https://www.roomeqwizard.com/) — a beta build**, with its API switched on. This is where
+  measurements come from, and TCC's own REW indicator tells you whether it is reachable. **The API
+  is in the betas only**: the release version (V5.31.3, July 2024) has no *API* tab in its
+  preferences at all, and that is the one a web search hands you — take the build from
+  [roomeqwizard.com/beta.html](https://www.roomeqwizard.com/beta.html) instead (downloads at
+  AV NIRVANA, the REW forum). Then in REW: open *Preferences → API*, tick **Start the API when REW
+  starts** and press **Start server**; the panel then reads *"API server is running on port 4735"*,
+  and from then on it comes up with REW. That panel is the same on macOS and Windows; on Windows the
+  installer also puts a **REW (API on)** shortcut on your Desktop, which does it in one click.
 - **A calibrated measurement microphone, and a DSP.** The hardware half of the job.
 - **A paid Claude subscription (Pro or Max).** The skill's FAQ explains
   [the plans and what a session actually costs](https://github.com/ayukhno/autosound-tuning-skill/blob/main/FAQ.md#subscription-options-quotas--budgets-as-of-july-2026).

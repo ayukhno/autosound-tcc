@@ -66,10 +66,14 @@ Start Menu; the reviewer's doctor runs in **Git Bash**. Options are `-Terminal`,
 `-NoGitHub` on the scriptblock form (`& ([scriptblock]::Create((irm …))) -Terminal`). The
 interactive sign-in block has run there too (Claude in the browser, agy's TUI, gh's device code —
 gh asks one extra "Authenticate Git with your GitHub credentials?", answer Yes). REW detection has
-run on a PC with REW too. **Windows REW has no "start the API when REW starts" box** — only a
-Start-server button — so the installer puts a **"REW (API on)"** shortcut on the Desktop
-(`roomeqwizard.exe -api`, REW's own switch) and the Windows getting-started should say "start REW
-from that shortcut"; the macOS text keeps the checkbox.
+run on a PC with REW too. The installer puts a **"REW (API on)"** shortcut on the Desktop
+(`roomeqwizard.exe -api`, REW's own switch) — one click that cannot be forgotten.
+
+~~**Windows REW has no "start the API when REW starts" box.**~~ **Wrong, corrected 2026-08-19.**
+It was never a platform difference: the API arrived in REW's 5.40 betas, and the release build
+(V5.31.3, July 2024) — which is what a web search hands you, and what that PC had — has no *API*
+tab at all. On a beta the panel is identical on macOS and Windows. Both READMEs and both installers
+now say: take a beta from roomeqwizard.com/beta.html (downloads at AV NIRVANA), then tick the box.
 
 **[skill] The app's icon needs the next tag.** `make-macos-app.sh` is fixed on `main`, but the
 clone is the tag, so `v3.0.4` (or later) is what makes the icon appear on a fresh install.
