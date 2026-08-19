@@ -5,6 +5,32 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.1] — 2026-08-19 · what the first Windows tester found
+
+A day of the beta being used on a machine we cannot see. Every item here is something that made
+the app harder to report on, or a claim of ours that turned out to be wrong.
+
+### Fixed
+
+- **A terminal window jumped in front of the app at every AI session** (Windows). It is the Agent
+  SDK's own `claude` process: it is started through `anyio.open_process` with no creation flags, so
+  Windows gives a console program started by a windowed app a console — piping its input and output
+  does not prevent that, only `CREATE_NO_WINDOW` does. TCC does not own that call, so the default is
+  moved underneath it once at startup (`core/child.py`). Two more children had been missed: the omp
+  session, which is driven through its own stdin, and the project panel's `git`. `subprocess` itself
+  is deliberately untouched — the terminal launcher opens a window because somebody asked for one.
+- **The REW indicator now says which REW has an API.** The one thing on screen at the moment it
+  fails: the API is in REW's beta builds only, and the release version (V5.31.3) has no API tab at
+  all — which is what a web search hands you.
+
+### Added
+
+- **Both versions in the title bar** — `(TCC 0.1.1 · skill 3.0.7)`, from the same reader the
+  Installation tab uses. The title bar is in every screenshot anybody sends.
+- **A Logs tab in the repair window, with a copy button.** The end of the log file and the path it
+  came from, re-read every time the tab is opened, and the path travels with the copied text — a log
+  with no filename is one nobody can ask about again.
+
 ## [v0.1.0] — 2026-08-19 · the beta the first outside tester gets
 
 Forty-five commits since v0.0.4, and most of them are one line of work: **the curve window stopped
