@@ -5,6 +5,26 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.9] — 2026-08-19 · what the update buttons must not touch
+
+### Fixed
+
+- **"Update the method" offered to move a git SUBMODULE.** A submodule is detached and clean —
+  exactly what an installed release looks like — so all three existing guards passed it, and the
+  button would have checked a release tag out inside somebody's working repository and left the
+  parent's pin modified. Found by the question "what happens if I press this on my own machine?",
+  which was a better test than the three that were written. It now refuses and names the
+  repository the submodule belongs to.
+- **The diagnostics gear stood a head above the reload button beside it.** A larger font grows a
+  QPushButton, so the glyph and the box moved together; the box is now pinned to the neighbour's
+  size in code, on every theme and zoom change, and only the glyph is larger.
+
+### Changed
+
+- **A newer build of the same version says WHEN**: "a newer build is out, from 2026-08-19" instead
+  of a commit hash. One anonymous API call, made only when there is something newer — an up-to-date
+  machine asks nothing.
+
 ## [v0.1.8] — 2026-08-19 · no hashes in a sentence meant for a person
 
 ### Fixed

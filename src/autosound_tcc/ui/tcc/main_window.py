@@ -1860,6 +1860,8 @@ class MainWindow(QMainWindow):
     def _apply_theme(self, mode: str) -> None:
         app = QApplication.instance()
         apply_theme(app, mode, scale=self._zoom)
+        # After the sheet, never before: the size being copied is the styled one.
+        QTimer.singleShot(0, self._match_icon_buttons)
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
         self._repolish_all()
@@ -1904,6 +1906,8 @@ class MainWindow(QMainWindow):
         self._settings.setValue(_ZOOM_KEY, self._zoom)
         apply_theme(QApplication.instance(), self._mode, scale=self._zoom)
         self._repolish_all()
+        # Zoom scales every font in the sheet, so the box being copied has just changed size.
+        QTimer.singleShot(0, self._match_icon_buttons)
         self._zoom_label.setText(f"{round(self._zoom * 100)}%")
 
     def _zoom_out(self) -> None:
@@ -2321,6 +2325,19 @@ class MainWindow(QMainWindow):
             self._mcp_error = f"{type(exc).__name__}: {exc}"
             app_log.logger().exception("the MCP server did not start: %s", exc)
             self._status_strip.notify(f"MCP: {exc}", level="warn")
+
+    def _match_icon_buttons(self) -> None:
+        """Pin the diagnostics button to the reload button's size, whatever the platform did.
+
+        Both are header icon buttons and must read as a pair. The gear is deliberately the larger
+        GLYPH of the two, and a larger font grows a QPushButton — so the box is taken from the
+        neighbour rather than described twice in the stylesheet, which is how they came out
+        different sizes on Windows and on macOS at once. Re-run on every theme or zoom change,
+        because both move the metrics this is copying.
+        """
+        if not hasattr(self, "_diag_btn") or not hasattr(self, "_header_refresh_btn"):
+            return
+        self._diag_btn.setFixedSize(self._header_refresh_btn.sizeHint())
 
     def _set_title(self) -> None:
         """The project, then both versions — and a word when something newer exists.

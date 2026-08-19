@@ -28,6 +28,7 @@ pays PySide6's source-reading import hook (see `core/install_report.py`).
 from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
 import sys
@@ -159,6 +160,14 @@ def _is_ours(repo: Path) -> tuple[bool, tuple[str, str]]:
     ok, _ = _git("rev-parse", "--git-dir", cwd=repo)
     if not ok:
         return False, ("not_a_checkout", "")
+    # A SUBMODULE is detached and clean, which is exactly what an installed release looks like —
+    # so every other test here passes it, and pressing the button would have checked a release tag
+    # out inside somebody's working repository and left the parent's pin modified. Found by the
+    # question "what happens if I press this on the local machine?" (user, 2026-08-19), which is a
+    # better test than the three I had written.
+    inside, parent = _git("rev-parse", "--show-superproject-working-tree", cwd=repo)
+    if inside and parent:
+        return False, ("submodule", parent)
     on_branch, branch = _git("symbolic-ref", "--quiet", "--short", "HEAD", cwd=repo)
     if on_branch:
         return False, ("on_branch", branch)
@@ -202,6 +211,25 @@ def _remote_version(sha: str) -> str:
     return match.group(1) if match else ""
 
 
+def _remote_date(sha: str) -> str:
+    """The day that commit was made, as `2026-08-19`, or "".
+
+    What a person can actually use when the version number has not moved: "a newer build, from the
+    19th" says how far behind they are; `0ef59ea` says nothing to anyone but a maintainer (user,
+    2026-08-19: "нову версію треба бачити зрозумілу, а не код"). One anonymous API call, made only
+    when there IS something newer.
+    """
+    url = f"https://api.github.com/repos/ayukhno/autosound-tcc/commits/{sha}"
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=_ASK_TIMEOUT) as response:
+            data = json.loads(response.read(200000).decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001 — rate-limited, offline, moved: the row simply says less
+        return ""
+    stamp = str(((data.get("commit") or {}).get("committer") or {}).get("date") or "")
+    return stamp[:10]
+
+
 def check_tcc() -> Status:
     """TCC: the commit this build came from against the head of the repository it came from.
 
@@ -226,7 +254,8 @@ def check_tcc() -> Status:
     # the installation block below. What is left on screen is the two version numbers, and when
     # they are the SAME number the row says so in words instead (user, 2026-08-19: "незрозумілі
     # цифри та букви").
-    return Status("tcc", version, _remote_version(head) or version, True)
+    return Status("tcc", version, _remote_version(head) or version, True,
+                  detail=_remote_date(head))
 
 
 def check_all() -> tuple[Status, Status]:

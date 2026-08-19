@@ -20,9 +20,10 @@ def _git_answers(monkeypatch, answers: dict):
 
     def fake(*args, cwd=None):
         calls.append(args)
-        for key, value in answers.items():
+        # Longest key first: "--show-superproject-working-tree" and "--git-dir" are both rev-parse.
+        for key in sorted(answers, key=len, reverse=True):
             if key in args:
-                return value
+                return answers[key]
         return True, ""
 
     monkeypatch.setattr(updates, "_git", fake)
@@ -62,7 +63,8 @@ def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
     """On a branch means somebody works there. The installer's clone is detached at a tag."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
     _git_answers(monkeypatch, {
-        "rev-parse": (True, ".git"),
+        "--git-dir": (True, ".git"),
+        "--show-superproject-working-tree": (True, ""),
         "symbolic-ref": (True, "main"),
         "ls-remote": (True, "sha\trefs/tags/v9.9.9"),
     })
@@ -79,7 +81,8 @@ def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
 def test_uncommitted_changes_also_stop_it(monkeypatch, tmp_path):
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
     _git_answers(monkeypatch, {
-        "rev-parse": (True, ".git"),
+        "--git-dir": (True, ".git"),
+        "--show-superproject-working-tree": (True, ""),
         "symbolic-ref": (False, ""),
         "status": (True, " M skills/autosound-tuning/SKILL.md"),
     })
@@ -229,3 +232,52 @@ def test_an_unreadable_remote_version_falls_back_to_the_installed_number(monkeyp
 
     assert updates._remote_version("d" * 40) == ""
     assert status.newer is True and status.latest == "0.1.7"
+
+
+def test_a_newer_build_carries_the_day_it_was_made(monkeypatch):
+    """A date is something a person can act on; a hash is not. Asked for only when there IS
+    something newer, so an up-to-date machine makes no API call at all."""
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.8")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    monkeypatch.setattr(updates, "_remote_version", lambda sha: "0.1.8")
+    asked = []
+    monkeypatch.setattr(updates, "_remote_date", lambda sha: asked.append(sha) or "2026-08-19")
+    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
+
+    status = updates.check_tcc()
+
+    assert status.newer is True and status.detail == "2026-08-19"
+    assert asked == ["b" * 40]
+
+
+def test_an_up_to_date_machine_asks_the_api_nothing(monkeypatch):
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.8")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    def boom(sha):
+        raise AssertionError("no API call when there is nothing newer")
+    monkeypatch.setattr(updates, "_remote_date", boom)
+    _git_answers(monkeypatch, {"ls-remote": (True, "a" * 40 + "\tHEAD")})
+
+    assert updates.check_tcc().newer is False
+
+
+
+def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
+    """The case the other guards let through: a submodule is detached and clean, exactly like a
+    release checkout. Updating it would check a tag out inside somebody's working repository and
+    leave the parent's pin modified."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.7")
+    _git_answers(monkeypatch, {
+        "--git-dir": (True, ".git"),
+        "--show-superproject-working-tree": (True, "/Users/somebody/dev/autosound-tcc"),
+        "ls-remote": (True, "sha\trefs/tags/v3.0.8"),
+    })
+
+    status = updates.check_skill()
+
+    assert status.updatable is False
+    assert status.reason == "submodule"
+    assert status.detail.endswith("autosound-tcc")
+    ok, why, _detail = updates.apply_skill()
+    assert ok is False and why == "submodule", "and the button cannot do it either"

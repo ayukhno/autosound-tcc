@@ -462,8 +462,10 @@ class DiagnosticsDialog(QDialog):
                 what=title, here=here, there=status.latest))
         elif status.newer:
             # Same version number, different build — which is the normal case for TCC, because it
-            # installs from a branch and the number only moves when a release is cut.
-            label.setText(i18n.t("updNewerBuild").format(what=title, here=here))
+            # installs from a branch and the number only moves when a release is cut. The date
+            # says how far behind; a hash said nothing to anybody but a maintainer.
+            key = "updNewerBuildOn" if status.detail else "updNewerBuild"
+            label.setText(i18n.t(key).format(what=title, here=here, date=status.detail))
         elif status.reason:
             label.setText(f"{title} {here} — {_reason(status.reason, status.detail)}")
         elif not status.latest:

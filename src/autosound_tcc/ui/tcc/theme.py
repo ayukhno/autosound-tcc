@@ -311,8 +311,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="diag-btn"] {{
         color: {t.accent};
         border-color: {t.accent_dim};
-        font-size: 26px;
-        padding: 0px 8px;
+        /* Bigger GLYPH, same BOX: the button is pinned to its neighbour's size in code
+           (`_match_icon_buttons`), because a font-size alone grew the whole control and it stood
+           a head above the reload button beside it (user, on Windows and on macOS, 2026-08-19).
+           17px is as large as the glyph goes before it touches that box on either platform. */
+        font-size: 17px;
+        padding: 0px;
     }}
     QPushButton[class~="diag-btn"]:hover {{
         color: {t.accent};
