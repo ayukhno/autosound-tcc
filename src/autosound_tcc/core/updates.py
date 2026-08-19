@@ -99,9 +99,9 @@ def newest_tag() -> str:
 
 
 def _skill_repo_dir() -> Optional[Path]:
-    """The method's git repository root — two levels above the skill folder itself."""
+    """The method's git repository root, through the installer's symlink or junction."""
     try:
-        return vendor_loader.skill_dir().parents[1]
+        return vendor_loader.skill_repo_root()
     except Exception:  # noqa: BLE001
         return None
 

@@ -92,6 +92,31 @@ def skill_dir() -> Path:
     return _SUBMODULE_DIR
 
 
+def skill_repo_root() -> Optional[Path]:
+    """The repository the skill folder lives in — where `plugin.json` and `.git` are.
+
+    `skill_dir()` returns the path TCC FOUND, which on an installed machine is a link into the
+    clone: a symlink on macOS, a junction on Windows, both made by the installer. Two levels up
+    from the link is `~/.claude`, which has no manifest and is not a git checkout — so the version
+    came back empty and the update check said "not a git checkout" on every installed machine,
+    while a developer's submodule checkout (a real path) worked and hid it (user's screenshot,
+    Windows, 2026-08-19: the title bar said `(TCC 0.1.2)` with no skill beside it).
+
+    So: follow the link first, then walk up looking for the marker rather than counting levels.
+    Returns None when neither is found, which is a real answer — a skill folder unpacked on its
+    own is not in a repository and cannot be updated in place.
+    """
+    here = skill_dir()
+    try:
+        here = here.resolve()
+    except OSError:  # a broken link, a permission wall — the unresolved path still gets a look
+        pass
+    for parent in (here, *here.parents)[:4]:
+        if (parent / ".claude-plugin" / "plugin.json").is_file() or (parent / ".git").exists():
+            return parent
+    return None
+
+
 def rew_tool_dir() -> Path:
     return skill_dir() / "rew_tool"
 

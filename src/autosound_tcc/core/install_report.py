@@ -113,6 +113,12 @@ def app_version() -> str:
     return _package_version("autosound-tcc")
 
 
+def _manifest() -> Optional[Path]:
+    """The plugin manifest, through the installer's link. None when there is no repository."""
+    root = vendor_loader.skill_repo_root()
+    return None if root is None else root / ".claude-plugin" / "plugin.json"
+
+
 def skill_version() -> str:
     """The method's version, from the plugin manifest at the skill repository's root, or "".
 
@@ -120,7 +126,9 @@ def skill_version() -> str:
     on screen in any screenshot, which is where a version is worth most (user, 2026-08-19).
     """
     try:
-        path = vendor_loader.skill_dir().parents[1] / ".claude-plugin" / "plugin.json"
+        path = _manifest()
+        if path is None:
+            return ""
         return str(json.loads(path.read_text(encoding="utf-8")).get("version") or "")
     except Exception:  # noqa: BLE001 — a checkout without the manifest is still a skill
         return ""
@@ -133,8 +141,9 @@ def _skill() -> Section:
         path = vendor_loader.skill_dir()
         usable = vendor_loader.is_available()
         items.append(Item("found", "yes" if usable else "no", str(path)))
-        # `plugin.json` sits at the REPOSITORY root, two levels above the skill folder itself.
-        manifest = path.parents[1] / ".claude-plugin" / "plugin.json"
+        # `plugin.json` sits at the REPOSITORY root — reached by following the installer's link,
+        # never by counting levels up from the link itself (see vendor_loader.skill_repo_root).
+        manifest = _manifest()
         version = skill_version()
         items.append(Item("version", version or "unknown", str(manifest) if version else ""))
         if not usable:

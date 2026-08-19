@@ -5,6 +5,19 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.3] — 2026-08-19 · the method's version, on the machines that have one
+
+### Fixed
+
+- **The skill's version was missing everywhere it was promised** — the title bar said `(TCC 0.1.2)`
+  with nothing beside it, the Installation tab said `The method ? — not a git checkout`, and the
+  update row could not offer anything (user's screenshot, Windows 11). On an INSTALLED machine the
+  skill is reached through a link the installer made — a symlink on macOS, a junction on Windows —
+  and the manifest was looked for two levels up from the link, which is `~/.claude`: no manifest,
+  no git. A developer's checkout is a real path, so it worked here and hid the bug on every machine
+  that matters. `vendor_loader.skill_repo_root()` now follows the link and then looks for the
+  marker instead of counting levels, and both readers go through it.
+
 ## [v0.1.2] — 2026-08-19 · updating from inside the window
 
 ### Added
