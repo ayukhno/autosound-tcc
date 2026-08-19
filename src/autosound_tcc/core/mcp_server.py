@@ -963,7 +963,20 @@ class TccMcpServer:
         mcp = build_server(self.project_dir, self.bridge, self.bus, self.registry)
         app = _TokenGuard(mcp.streamable_http_app(), self.token)
         uvicorn_config = uvicorn.Config(
-            app, host="127.0.0.1", port=self.port, log_level="warning", access_log=False
+            app, host="127.0.0.1", port=self.port, log_level="warning", access_log=False,
+            # `log_config=None`, and it is not a tidy-up: uvicorn's DEFAULT log config builds a
+            # colour formatter whose `__init__` calls `sys.stdout.isatty()`, and a windowed
+            # process on Windows has **no stdout at all** — `sys.stdout` is `None`. So merely
+            # CONSTRUCTING this Config raised `ValueError: Unable to configure formatter
+            # 'default'` from an `AttributeError: 'NoneType' object has no attribute 'isatty'`,
+            # and TCC came up with no MCP server and no way for a session to reach it (user, on
+            # Windows 11, 2026-08-19; on macOS the .app launcher is a shell script, so stdout is
+            # real and this never fired).
+            #
+            # Passing None tells uvicorn to configure no logging of its own, which is what we want
+            # anyway: `core/app_log` already owns this process's logging, and uvicorn's loggers
+            # propagate into it. One less thing writing to a stream that may not exist.
+            log_config=None,
         )
         self._server = uvicorn.Server(uvicorn_config)
 

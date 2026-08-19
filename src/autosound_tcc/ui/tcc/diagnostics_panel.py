@@ -14,21 +14,25 @@ and `set_report()` brings the answer back.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from autosound_tcc.core import self_check
+from autosound_tcc.core import install_report, self_check
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -181,6 +185,43 @@ class _CheckRow(QWidget):
         self.fixed.emit(message)
 
 
+#: How often, and for how long, the panel looks to see whether the tool probes have finished.
+_TOOLS_POLL_MS = 250
+_TOOLS_TRIES = 60
+
+
+class _ToolsProbe:
+    """Ask each command-line tool its version, on a plain thread, and hold the answer.
+
+    ONLY that section: eight `--version` calls is a window that stops repainting, while the rest
+    of the report must NOT leave the GUI thread — its metadata lookups are milliseconds here.
+
+    A `threading.Thread` and not a `QThread`, and this one is measured rather than assumed: the
+    same probes take **1.2 s on a plain thread and 10.7 s on a QThread** (2026-08-19). PySide6
+    installs an import hook that reads the SOURCE of modules imported while it is active, and a
+    Qt-owned thread pays it. Nothing here touches Qt, so it may also outlive the dialog that
+    started it — which is the other half of why: a running QThread destroyed is `qFatal`.
+    """
+
+    def __init__(self) -> None:
+        self.section = None
+        self._thread = threading.Thread(target=self._run, name="tcc-tools", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            self.section = install_report.tools()
+        except Exception as exc:  # noqa: BLE001 — a section that cannot be read still says so
+            self.section = install_report.Section(
+                "Command-line tools",
+                [install_report.Item("probe", "failed", f"{type(exc).__name__}: {exc}")],
+            )
+
+    @property
+    def running(self) -> bool:
+        return self._thread.is_alive()
+
+
 class DiagnosticsDialog(QDialog):
     """Non-modal so it can stay open beside the tune it describes."""
 
@@ -226,7 +267,17 @@ class DiagnosticsDialog(QDialog):
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(2)
         scroll.setWidget(body)
-        outer.addWidget(scroll, stretch=1)
+
+        # TWO tabs: what is wrong with this PROJECT, and what is installed on this MACHINE. The
+        # second one is here rather than in a window of its own because this is the window a
+        # person already opens when something is off, and the first question every report from a
+        # machine nobody can see has needed is "which versions am I looking at" (user,
+        # 2026-08-19).
+        self._tabs = QTabWidget()
+        self._tabs.addTab(scroll, i18n.t("diagTabProject"))
+        self._tabs.addTab(self._build_install_tab(), i18n.t("diagTabInstall"))
+        self._tabs.currentChanged.connect(self._on_tab)
+        outer.addWidget(self._tabs, stretch=1)
 
         self._checked = QLabel("")
         self._checked.setProperty("class", "phead-sub")
@@ -248,6 +299,102 @@ class DiagnosticsDialog(QDialog):
 
         i18n.on_language_changed(self._retranslate)
         self._render()
+
+    # ---- what is installed ---------------------------------------------------
+
+    def _build_install_tab(self) -> QWidget:
+        """One selectable, copyable block. Not a table: it is written to be PASTED — into a
+        message, an issue, a screenshot — and a monospace block survives all three."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+        blurb = QLabel(i18n.t("diagInstallBlurb"))
+        blurb.setWordWrap(True)
+        blurb.setProperty("class", "phead-sub")
+        layout.addWidget(blurb)
+        self._install_text = QPlainTextEdit()
+        self._install_text.setReadOnly(True)
+        self._install_text.setPlainText(i18n.t("diagInstallReading"))
+        # Monospace, because the report aligns itself with spaces.
+        self._install_text.setProperty("class", "mn")
+        self._install_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self._install_text, stretch=1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self._copy_btn = QPushButton(i18n.t("diagInstallCopy"))
+        self._copy_btn.setProperty("class", "reason-btn")
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.clicked.connect(self._copy_install)
+        row.addWidget(self._copy_btn)
+        layout.addLayout(row)
+        self._install_worker: Optional[_ToolsProbe] = None
+        self._install_read = False
+        # The timer belongs to this dialog, so it stops when the dialog goes; the thread does not,
+        # because it holds nothing of Qt's.
+        self._install_tries = 0
+        self._install_timer = QTimer(self)
+        self._install_timer.setInterval(_TOOLS_POLL_MS)
+        self._install_timer.timeout.connect(self._poll_tools)
+        return page
+
+    def _poll_tools(self) -> None:
+        """Put the tools section in as soon as it lands, and stop asking either way."""
+        self._install_tries += 1
+        probe = self._install_worker
+        if probe is None or (probe.section is None and self._install_tries < _TOOLS_TRIES
+                             and probe.running):
+            return
+        self._install_timer.stop()
+        self._render_install(probe.section if probe is not None else None)
+
+    def _on_tab(self, index: int) -> None:
+        """Read the report the first time the tab is opened, and never on the way to the other one.
+
+        Eight subprocesses is not something to pay for opening a dialog about a contract check.
+        """
+        if index == 1 and not self._install_read:
+            self.refresh_install()
+
+    def refresh_install(self) -> None:
+        """Everything that reads a file, now; everything that runs a program, on a thread.
+
+        The block is on screen the moment the tab opens — versions, paths, where the skill is —
+        with the tools section filling in a second later, rather than an empty box and a wait.
+        """
+        if self._install_worker is not None and self._install_worker.running:
+            return
+        self._install_read = True
+        self._render_install(None)
+        self._install_worker = _ToolsProbe()
+        self._install_tries = 0
+        self._install_timer.start()
+
+    def _render_install(self, tools_section) -> None:
+        try:
+            sections = install_report.report(
+                extra=self._install_extra(),
+                with_tools=False,
+                tools_section=tools_section,
+            )
+            text = install_report.as_text(sections)
+        except Exception as exc:  # noqa: BLE001
+            text = f"{type(exc).__name__}: {exc}"
+        if tools_section is None:
+            text += "\n" + i18n.t("diagInstallReading")
+        self._install_text.setPlainText(text)
+
+    def _install_extra(self) -> dict:
+        """Facts only the running window knows. Set by the window through `set_install_extra`;
+        empty is a fine answer, and the report says the rest either way."""
+        return dict(getattr(self, "_install_extra_facts", {}) or {})
+
+    def set_install_extra(self, facts: dict) -> None:
+        self._install_extra_facts = dict(facts or {})
+
+    def _copy_install(self) -> None:
+        QGuiApplication.clipboard().setText(self._install_text.toPlainText())
+        self._copy_btn.setText(i18n.t("diagInstallCopied"))
 
     # ---- state ---------------------------------------------------------------
 
@@ -286,7 +433,18 @@ class DiagnosticsDialog(QDialog):
         self._title.setText(i18n.t("diagTitle"))
         self._refresh_btn.setText(i18n.t("diagRefresh"))
         self._close_btn.setText(i18n.t("diagClose"))
+        self._tabs.setTabText(0, i18n.t("diagTabProject"))
+        self._tabs.setTabText(1, i18n.t("diagTabInstall"))
+        self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._render()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Nothing to wait for: the probe is a plain daemon thread holding no Qt object, and the
+        timer that reads it belongs to this dialog and dies with it."""
+        timer = getattr(self, "_install_timer", None)
+        if timer is not None:
+            timer.stop()
+        super().closeEvent(event)
 
     # ---- rendering -----------------------------------------------------------
 

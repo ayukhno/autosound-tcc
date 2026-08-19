@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
+from autosound_tcc.core import child
 from autosound_tcc.core import claude_sdk, model_overrides
 
 # How a model is reached — and, more to the point, WHOSE BILL it lands on. This is the axis the
@@ -386,8 +387,7 @@ def _fetch_agy_choices() -> list[Choice]:
     for _ in range(2):
         try:
             proc = subprocess.run(
-                ["agy", "models"], capture_output=True, text=True, timeout=CLI_TIMEOUT_S
-            )
+                ["agy", "models"], capture_output=True, text=True, timeout=CLI_TIMEOUT_S, **child.quiet())
         except (subprocess.TimeoutExpired, OSError):
             return []
         if proc.returncode == 0 and (proc.stdout or "").strip():
@@ -444,8 +444,7 @@ def omp_catalogue() -> list[Choice]:
             ["omp", "models", "--json"],
             capture_output=True,
             text=True,
-            timeout=CATALOGUE_TIMEOUT_S,
-        )
+            timeout=CATALOGUE_TIMEOUT_S, **child.quiet())
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise OmpCatalogueError(str(exc)) from None
     if proc.returncode != 0:

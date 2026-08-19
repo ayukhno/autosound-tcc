@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from autosound_tcc.core import child
 from autosound_tcc.core import vendor_loader
 
 # Local file I/O and a JSON dump; anything near this is a hang, not slowness.
@@ -58,8 +59,7 @@ def _run(args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            env=vendor_loader.child_env(),
-        )
+            env=vendor_loader.child_env(), **child.quiet())
     except subprocess.TimeoutExpired:
         raise ProfileWriterError(f"dsp_profile.py timed out after {timeout_s:.0f}s") from None
     except OSError as exc:

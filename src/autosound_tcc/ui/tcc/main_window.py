@@ -1402,6 +1402,10 @@ class MainWindow(QMainWindow):
             self._diag_dialog.set_report(self._contract_report)
         elif self._contract_report is not None:
             self._diag_dialog.set_report(self._contract_report)
+        # The facts only a running window has, refreshed on every open rather than captured once:
+        # the server may have been restarted, and a report that names a dead port is worse than one
+        # that names none.
+        self._diag_dialog.set_install_extra(self._install_facts())
         self._diag_dialog.show()
         self._diag_dialog.raise_()
         self._diag_dialog.activateWindow()
@@ -2302,6 +2306,18 @@ class MainWindow(QMainWindow):
             self._mcp_error = f"{type(exc).__name__}: {exc}"
             app_log.logger().exception("the MCP server did not start: %s", exc)
             self._status_strip.notify(f"MCP: {exc}", level="warn")
+
+    def _install_facts(self) -> dict:
+        """What the installation report cannot ask for itself: this window's own live state."""
+        server = self._mcp_server
+        facts = {
+            "MCP": (server.url if server is not None and getattr(server, "serving", False)
+                    else (getattr(self, "_mcp_error", "") or "not running")),
+        }
+        model = getattr(self, "_running_model", None)
+        if model:
+            facts["session"] = str(model)
+        return facts
 
     def _publish_snapshot(self) -> None:
         """Mirror what's on screen into the bridge, for `get_tcc_state` to read off-thread."""

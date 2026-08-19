@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from concurrent.futures import Future
 
 import pytest
@@ -890,3 +891,18 @@ def test_a_slow_start_is_not_treated_as_a_death(monkeypatch, tmp_path):
 
     assert port and server.failure is None
     server.stop(timeout=0.1)
+
+
+def test_the_server_starts_in_a_process_with_no_stdout(monkeypatch, tmp_path):
+    """A windowed process on Windows has no stdout — `sys.stdout` is None — and uvicorn's default
+    log config builds a colour formatter that calls `sys.stdout.isatty()`. Constructing the Config
+    raised, so TCC came up with no MCP server at all (user, Windows 11, 2026-08-19)."""
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    server = mcp_server.TccMcpServer(project_dir=tmp_path)
+    try:
+        port = server.start(write_config=False)
+        assert port
+    finally:
+        server.stop(timeout=2.0)

@@ -84,6 +84,16 @@ T: dict[Lang, dict[str, str]] = {
         "diagMissing": "missing",
         "diagUnavailable": "Contract check unavailable",
         "diagCheckedAt": "checked {at} · {ms} ms",
+        # The second tab: what is installed on this machine, for a report from a machine nobody
+        # debugging it can see (user, 2026-08-19).
+        "diagTabProject": "Project",
+        "diagTabInstall": "Installation",
+        "diagInstallBlurb": "What is installed on this machine — versions, where each piece came \
+from, which command-line tools answer. Copy it into a message when you report something: it \
+answers the first five questions anybody would ask.",
+        "diagInstallReading": "reading…",
+        "diagInstallCopy": "Copy",
+        "diagInstallCopied": "Copied",
         "diagRefresh": "Re-check",
         "diagClose": "Close",
         "diagStripIssues": "Project contract: {n} issue(s) — see Diagnostics (⚕)",
@@ -684,6 +694,14 @@ Choose sweeps (sw) above to read this.",
         "diagMissing": "немає",
         "diagUnavailable": "Перевірка контракту недоступна",
         "diagCheckedAt": "перевірено {at} · {ms} мс",
+        "diagTabProject": "Проєкт",
+        "diagTabInstall": "Установка",
+        "diagInstallBlurb": "Що встановлено на цій машині — версії, звідки взялася кожна частина, \
+які CLI відповідають. Скопіюй у повідомлення, коли про щось звітуєш: це відповідає на перші пʼять \
+питань, які тобі поставлять.",
+        "diagInstallReading": "читаю…",
+        "diagInstallCopy": "Копіювати",
+        "diagInstallCopied": "Скопійовано",
         "diagRefresh": "Перевірити ще раз",
         "diagClose": "Закрити",
         "diagStripIssues": "Контракт проєкту: проблем {n} — див. Діагностику (⚕)",

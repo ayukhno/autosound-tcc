@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from autosound_tcc.core import child
 from autosound_tcc.core import config, vendor_loader
 
 DEFAULT_TIMEOUT_S = 600.0
@@ -171,8 +172,7 @@ def run(
             env=env,
             capture_output=True,
             text=True,
-            timeout=timeout_s,
-        )
+            timeout=timeout_s, **child.quiet())
     except subprocess.TimeoutExpired:
         return CriticResult(
             MODE_ERROR, "", None, role, f"reviewer timed out after {timeout_s:.0f}s",
@@ -267,6 +267,7 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
             text=True,
             timeout=60,
             env=vendor_loader.child_env(),
+            **child.quiet(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         return f"doctor failed: {exc}"

@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from autosound_tcc.core import child as child_process
 from autosound_tcc.core import config, vendor_loader
 
 # Generous next to critic.py's model calls: this is local file I/O plus at most one REW probe
@@ -160,19 +161,22 @@ def run(
         argv.append("--no-rew")
 
     try:
-        child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                 env=vendor_loader.child_env())
+        # `child_process.quiet()`: no stdin to wait on, and no console window flashed on Windows
+        # every time the checker runs (see `core/child.py`). Named on import to keep the local
+        # variable `child` — the process — as it was.
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env=vendor_loader.child_env(), **child_process.quiet())
     except OSError as exc:
         return failed(str(exc))
     if register is not None:
-        register(child)
+        register(proc)
     try:
-        stdout, stderr = child.communicate(timeout=timeout_s)
+        stdout, stderr = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
-        child.kill()
-        child.communicate()
+        proc.kill()
+        proc.communicate()
         return failed(f"contract.py timed out after {timeout_s:.0f}s")
-    proc = subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
+    proc = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
     if proc.returncode is not None and proc.returncode < 0:
         # Killed rather than finished -- a cancel from `register`'s owner. Not an error the user
         # needs told about; the caller that cancelled is on its way out.

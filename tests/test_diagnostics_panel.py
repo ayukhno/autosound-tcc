@@ -10,6 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from autosound_tcc.core.contract_check import ContractReport  # noqa: E402
@@ -245,3 +246,72 @@ def test_asking_records_the_time_and_never_claims_success(monkeypatch):
     text = _texts(dialog)
     assert i18n.t("diagAgoNow") in text
     assert i18n.t("diagOk") not in text
+
+
+# ---- the installation tab (user, 2026-08-19) ---------------------------------------------------
+
+
+def test_the_tool_probe_never_owns_a_qthread():
+    """Measured, not assumed: the same probes take 1.2 s on a plain thread and 10.7 s on a
+    QThread, because PySide6's import hook reads the source of modules imported while it is
+    active. And a plain thread may outlive the dialog, where a QThread destroyed running is
+    `qFatal`."""
+    import inspect
+
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    code = "\n".join(
+        line for line in inspect.getsource(diagnostics_panel).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    body = code.split('"""')
+    assert not any("QThread" in part for part in body[::2]), "no QThread in the code itself"
+    assert "threading.Thread" in code and "daemon=True" in code
+
+
+def test_the_dialog_has_a_second_tab_with_what_is_installed():
+    """A report from a machine nobody debugging it can see starts with "which versions am I looking
+    at". That question is now a tab, in the window a person already opens when something is off."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    assert dialog._tabs.count() == 2
+    assert dialog._tabs.tabText(0) == i18n.t("diagTabProject")
+    assert dialog._tabs.tabText(1) == i18n.t("diagTabInstall")
+
+
+def test_the_report_is_read_only_when_the_tab_is_opened():
+    """Eight `--version` subprocesses is not something to pay for opening a dialog about a contract
+    check."""
+    _app()
+    dialog = DiagnosticsDialog()
+
+    assert dialog._install_read is False
+
+    dialog._tabs.setCurrentIndex(1)
+
+    assert dialog._install_read is True
+    # Everything that reads a file is already on screen; only the tool probes are on a thread.
+    assert "[Autosound TCC]" in dialog._install_text.toPlainText()
+    probe = dialog._install_worker
+    assert probe is not None
+    for _ in range(200):
+        if not probe.running:
+            break
+        QTest.qWait(50)
+    dialog._poll_tools()
+    text = dialog._install_text.toPlainText()
+    assert "[Command-line tools]" in text
+
+
+def test_the_window_hands_it_the_facts_only_the_window_knows():
+    """The MCP server's URL — or the reason it is not running — is state of the running window, so
+    it is passed in rather than reached for: `core/install_report` holds no Qt."""
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_install_extra({"MCP": "not running: ValueError"})
+
+    assert dialog._install_extra()["MCP"] == "not running: ValueError"

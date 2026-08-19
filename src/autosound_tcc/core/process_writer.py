@@ -33,6 +33,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+from autosound_tcc.core import child
 from autosound_tcc.core import vendor_loader
 
 try:  # POSIX only; Windows falls back to the thread lock alone.
@@ -126,6 +127,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
                 text=True,
                 timeout=timeout_s,
                 env=vendor_loader.child_env(),
+                **child.quiet(),
             )
     except subprocess.TimeoutExpired:
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None

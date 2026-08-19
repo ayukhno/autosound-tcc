@@ -27,6 +27,8 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
+from autosound_tcc.core import child
+
 #: The command that installs it, kept in one place so the message never drifts from the README.
 INSTALL_HINT = (
     "uv tool install --upgrade "
@@ -117,8 +119,7 @@ def probe_signed_in() -> Optional[bool]:
             [binary, "auth", "status"],
             capture_output=True,
             text=True,
-            timeout=_AUTH_TIMEOUT_S,
-        )
+            timeout=_AUTH_TIMEOUT_S, **child.quiet())
     except (OSError, subprocess.SubprocessError):
         _SIGNED_IN = None
         return _SIGNED_IN
