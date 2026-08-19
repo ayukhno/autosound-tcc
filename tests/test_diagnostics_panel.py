@@ -527,3 +527,33 @@ def test_a_newer_build_of_the_same_version_is_said_in_words(monkeypatch):
     label, button = dialog._update_rows["tcc"]
     assert label.text() == i18n.t("updNewerBuild").format(what=i18n.t("updTccName"), here="0.1.7")
     assert button.isEnabled()
+
+
+def test_up_to_date_beats_the_reason_the_button_is_off():
+    """A submodule cannot be updated in place — but when it is already on the newest release, why
+    the button is off is not the question the reader has."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("skill", "3.0.8", "3.0.8", False,
+                                       "submodule", "/Users/somebody/dev/autosound-tcc",
+                                       updatable=False))
+
+    label, button = dialog._update_rows["skill"]
+    assert label.text() == i18n.t("updCurrent").format(what=i18n.t("updSkillName"), here="3.0.8")
+    assert not button.isEnabled(), "still not something this app may move"
+
+
+def test_the_reason_is_shown_when_there_IS_something_it_cannot_install():
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("skill", "3.0.7", "3.0.8", False,
+                                       "submodule", "/Users/somebody/dev/autosound-tcc",
+                                       updatable=False))
+
+    assert i18n.t("updWhy_submodule") in dialog._update_rows["skill"][0].text()

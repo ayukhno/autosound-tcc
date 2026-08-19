@@ -6,12 +6,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        **The app fills in most of this for you.** Open the repair window (the ⚠︎ / diagnostics
-        button), go to **Installation** and press **Report a problem** — it opens this form with
+        **The app fills in most of this for you.** Open the repair window (the orange ⚙ in the
+        header), go to **Installation** and press **Report a problem** — it opens this form with
         the installation block already in it. The **Log** tab beside it has its own Copy button.
 
         Nothing here should carry personal data: no names, plates, addresses, or photos. Versions,
-        paths and log lines are what this is for.
+        paths and log lines are what this is for — and note that a path contains your computer's
+        user name (`/Users/<you>/…`). This is a public repository; edit those out if you mind.
   - type: textarea
     id: what
     attributes:

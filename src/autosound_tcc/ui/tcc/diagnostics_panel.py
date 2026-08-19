@@ -466,6 +466,12 @@ class DiagnosticsDialog(QDialog):
             # says how far behind; a hash said nothing to anybody but a maintainer.
             key = "updNewerBuildOn" if status.detail else "updNewerBuild"
             label.setText(i18n.t(key).format(what=title, here=here, date=status.detail))
+        elif status.latest and status.latest == here:
+            # Up to date FIRST, whatever else is true of this installation. A caveat about why the
+            # button cannot act — a submodule, a working tree — is an answer to "why can I not
+            # update", and that is not the question when there is nothing to update (spotted by
+            # reading the row after a submodule bump, 2026-08-19).
+            label.setText(i18n.t("updCurrent").format(what=title, here=here))
         elif status.reason:
             label.setText(f"{title} {here} — {_reason(status.reason, status.detail)}")
         elif not status.latest:

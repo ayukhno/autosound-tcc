@@ -5,6 +5,17 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.10] — 2026-08-19 · up to date is the answer, when it is
+
+### Fixed
+
+- **A row on the newest release still explained why its button was off** — "the method 3.0.8 — a
+  submodule of a checkout — update it with git" — which answers "why can I not update" at a moment
+  when nothing needs updating. Up to date now wins over every caveat; the caveat comes back the
+  moment there IS something the app may not install itself.
+- The beta-report form says out loud that a path carries your computer's user name, since the
+  repository is public.
+
 ## [v0.1.9] — 2026-08-19 · what the update buttons must not touch
 
 ### Fixed
