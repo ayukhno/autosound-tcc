@@ -1304,13 +1304,45 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 600;
     }}
 
+    /* ---- every button nobody gave a class to ----
+
+    The floor, not a style: a plain `QPushButton` is drawn by the platform, and the platform draws
+    a LIGHT button — while this sheet has already told its children to use light text. Grey on grey,
+    which reads as disabled. Found twice on Windows in the dark theme: the quit dialog's Save/Discard
+    (2026-08-19) and then the omp catalogue dialog's own Ok/Cancel/"Configure omp…", which is a
+    QDialog with a QDialogButtonBox and so was never a message box at all (user's screenshot, same
+    day). Fixing it per dialog is how the second one happened, so this is the base rule for the
+    type: anything with a `class` overrides it, since an attribute selector outranks a bare one. */
+    QPushButton, QDialogButtonBox QPushButton {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 6px;
+        padding: 5px 14px;
+    }}
+    QPushButton:hover, QDialogButtonBox QPushButton:hover {{
+        border-color: {t.accent_dim};
+        background: {t.mix('accent', 10, 'panel3')};
+    }}
+    QPushButton:pressed, QDialogButtonBox QPushButton:pressed {{
+        background: {t.mix('accent', 30, 'panel3')};
+    }}
+    QPushButton:disabled, QDialogButtonBox QPushButton:disabled {{
+        color: {t.faint};
+        border-color: {t.border};
+        background: {t.panel2};
+    }}
+    /* The answer the dialog expects, visible before it is read. */
+    QPushButton:default, QDialogButtonBox QPushButton:default {{
+        border: 1px solid {t.accent};
+        background: {t.mix('accent', 20, 'panel3')};
+        font-weight: 600;
+    }}
+
     /* ---- a standard message box, which is otherwise drawn by the platform ----
 
-    Qt builds these buttons itself, and nothing in this sheet reached them: on Windows in the dark
-    theme they came out grey-on-grey and read as DISABLED — on the one dialog that asks whether to
-    save a session before quitting (user, 2026-08-19, with the screenshot). Styled with the same
-    tokens as the app's own buttons, and the default one carries the accent so the answer the
-    dialog expects is visible before it is read. */
+    Inherits the button rules above; what is its own here is the width, so three short answers do
+    not come out as three different sizes. */
     QMessageBox {{
         background: {t.panel};
     }}
@@ -1318,25 +1350,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
     }}
     QMessageBox QPushButton {{
-        background: {t.panel3};
-        color: {t.text};
-        border: 1px solid {t.border2};
-        border-radius: 6px;
         padding: 6px 18px;
         font-size: 13px;
         min-width: 84px;
-    }}
-    QMessageBox QPushButton:hover {{
-        border-color: {t.accent_dim};
-        background: {t.mix('accent', 10, 'panel3')};
-    }}
-    QMessageBox QPushButton:default {{
-        border: 1px solid {t.accent};
-        background: {t.mix('accent', 20, 'panel3')};
-        font-weight: 600;
-    }}
-    QMessageBox QPushButton:pressed {{
-        background: {t.mix('accent', 30, 'panel3')};
     }}
 
     /* ---- feedback modal (.fb-*) ---- */

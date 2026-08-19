@@ -89,4 +89,15 @@ def _isolated_machine_config(tmp_path, monkeypatch):
 
     monkeypatch.setattr(model_choices, "_CLI_CACHE", {}, raising=False)
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: False, raising=False)
+    # ...and off the network. Opening the diagnostics dialog's Installation tab asks GitHub what
+    # the newest TCC and method are; a suite that does that is slow when the network is there and
+    # red when it is not. Tests about the update rows patch this themselves.
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(
+        updates, "check_all",
+        lambda: (updates.Status("tcc", "0.0.0", "", False, "offline in tests", updatable=False),
+                 updates.Status("skill", "0.0.0", "", False, "offline in tests", updatable=False)),
+        raising=False,
+    )
     yield

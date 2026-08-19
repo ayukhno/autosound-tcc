@@ -5,6 +5,31 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.2] — 2026-08-19 · updating from inside the window
+
+### Added
+
+- **"Update TCC" and "Update the method", in the Installation tab** (`core/updates.py`), with the
+  answer to "is there a newer one" beside each. The two halves install differently, so they update
+  differently. The method is a shallow checkout parked on a release tag: TCC fetches the newest
+  `v3.*` and checks it out itself, the way the installer does, in about a second — and refuses on
+  any checkout that is on a branch or has uncommitted changes, because that is somebody's own work,
+  not an installed release. TCC's own update is handed to a terminal the person can watch: it
+  cannot replace the files of the process doing the asking — on Windows the running `.exe` and its
+  loaded DLLs are locked and `uv` would fail halfway — so the window says the one thing that
+  matters, close TCC first. TCC is compared by **commit**, not version: it installs from the
+  default branch, so a build three days of fixes behind still calls itself 0.1.1.
+- "Could not ask GitHub" is a state of its own, and never reads as "up to date".
+
+### Fixed
+
+- **Buttons nobody had given a class to came out grey-on-grey in the dark theme** and read as
+  disabled — the omp catalogue dialog's Ok/Cancel/"Configure omp…" (a QDialogButtonBox, so the
+  message-box rule never reached it) and the `models…` button in the model strip (user's
+  screenshot). The platform draws a light button while this sheet has already told its children to
+  use light text. There is now a base rule for the type, so the next unclassed button is right by
+  default instead of by being noticed.
+
 ## [v0.1.1] — 2026-08-19 · what the first Windows tester found
 
 A day of the beta being used on a machine we cannot see. Every item here is something that made

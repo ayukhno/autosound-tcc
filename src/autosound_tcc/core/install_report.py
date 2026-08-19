@@ -88,12 +88,15 @@ def _package_version(name: str) -> str:
         return ""
 
 
-def _install_source() -> tuple[str, str]:
+def install_source() -> tuple[str, str]:
     """`(url, commit)` for a package installed from git, both "" otherwise.
 
     pip and uv write `direct_url.json` beside the metadata when a package came from a URL rather
     than an index, and it carries the exact commit. That is the one fact a bug report needs and a
     version number cannot give: `0.1.0` is every build since the tag, the commit is the build.
+
+    Public for the same reason: `core/updates.py` compares this commit against the head of the
+    repository, because the version number cannot tell an old build from a new one.
     """
     try:
         raw = distribution("autosound-tcc").read_text("direct_url.json")
@@ -167,7 +170,7 @@ def _tools() -> Section:
 
 
 def _app() -> Section:
-    url, commit = _install_source()
+    url, commit = install_source()
     items = [Item("version", _package_version("autosound-tcc") or "unknown")]
     if commit:
         items.append(Item("commit", commit[:12], url))

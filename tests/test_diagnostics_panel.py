@@ -350,3 +350,91 @@ def test_copying_the_log_takes_the_path_with_it(monkeypatch, tmp_path):
 
     copied = QGuiApplication.clipboard().text()
     assert str(log) in copied and "second line" in copied
+
+
+def test_the_update_row_only_offers_a_button_when_there_is_something_to_install():
+    """A live "Update" button on an up-to-date install is a question, not an offer."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
+    label, button = dialog._update_rows["skill"]
+    assert "3.0.7" in label.text() and button.isEnabled()
+
+    dialog._show_update(updates.Status("skill", "3.0.7", "3.0.7", False))
+    assert not button.isEnabled()
+    assert i18n.t("updCurrent").format(what=i18n.t("updSkillName"), here="3.0.7") == label.text()
+
+
+def test_an_installation_that_is_not_ours_says_so_and_stays_disabled():
+    """Somebody's own checkout: the reason is on screen, and no button to break it with."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("tcc", "0.1.1", "", False,
+                                       "running from a source checkout — update it with git",
+                                       updatable=False))
+
+    label, button = dialog._update_rows["tcc"]
+    assert "source checkout" in label.text()
+    assert not button.isEnabled()
+
+
+def test_could_not_ask_is_not_the_same_as_up_to_date():
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("tcc", "0.1.1", "", False))
+
+    assert dialog._update_rows["tcc"][0].text() == i18n.t("updUnknown")
+
+
+def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
+    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (True, "v3.0.7"))
+
+    dialog._update_skill()
+
+    assert "3.0.7" in dialog._update_rows["skill"][0].text()
+
+
+def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
+    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (False, "fetch failed: no network"))
+
+    dialog._update_skill()
+
+    label, button = dialog._update_rows["skill"]
+    assert "no network" in label.text()
+    assert button.isEnabled(), "a failure the person can retry must leave them the button"
+
+
+def test_updating_tcc_is_handed_to_a_terminal(monkeypatch):
+    """TCC cannot replace its own running files -- on Windows not at all -- so it does not try."""
+    from autosound_tcc.core import terminal_launcher, updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.1", "abc123", True))
+    seen = []
+    monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
+
+    dialog._update_tcc()
+
+    assert seen == [updates.TCC_INSTALL_COMMAND]
+    assert "uv tool install" in seen[0] and "--python 3.12" in seen[0]
+    assert dialog._update_rows["tcc"][0].text() == i18n.t("updTccHanded")

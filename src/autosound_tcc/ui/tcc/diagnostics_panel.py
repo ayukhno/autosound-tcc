@@ -32,7 +32,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import app_log, install_report, self_check
+from autosound_tcc.core import (
+    app_log,
+    install_report,
+    self_check,
+    terminal_launcher,
+    updates,
+)
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -188,6 +194,8 @@ class _CheckRow(QWidget):
 #: How often, and for how long, the panel looks to see whether the tool probes have finished.
 _TOOLS_POLL_MS = 250
 _TOOLS_TRIES = 60
+#: Longer than the tools probe: this one waits on GitHub, not on local binaries.
+_UPDATE_TRIES = 120
 
 
 class _ToolsProbe:
@@ -216,6 +224,30 @@ class _ToolsProbe:
                 "Command-line tools",
                 [install_report.Item("probe", "failed", f"{type(exc).__name__}: {exc}")],
             )
+
+    @property
+    def running(self) -> bool:
+        return self._thread.is_alive()
+
+
+class _UpdateProbe:
+    """Asks GitHub what the newest TCC and the newest method are, on a plain thread.
+
+    Two `git ls-remote` calls, so this is network-bound and can take seconds on a tethered phone in
+    a car park — which is exactly where this tab gets opened. Same shape and the same reason as
+    `_ToolsProbe`: nothing of Qt's, so it may outlive the dialog that started it.
+    """
+
+    def __init__(self) -> None:
+        self.result = None
+        self._thread = threading.Thread(target=self._run, name="tcc-updates", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            self.result = updates.check_all()
+        except Exception:  # noqa: BLE001 — an unanswered question is a row that says so
+            self.result = None
 
     @property
     def running(self) -> bool:
@@ -314,6 +346,7 @@ class DiagnosticsDialog(QDialog):
         blurb.setWordWrap(True)
         blurb.setProperty("class", "phead-sub")
         layout.addWidget(blurb)
+        layout.addWidget(self._build_update_row())
         self._install_text = QPlainTextEdit()
         self._install_text.setReadOnly(True)
         self._install_text.setPlainText(i18n.t("diagInstallReading"))
@@ -338,6 +371,106 @@ class DiagnosticsDialog(QDialog):
         self._install_timer.setInterval(_TOOLS_POLL_MS)
         self._install_timer.timeout.connect(self._poll_tools)
         return page
+
+    def _build_update_row(self) -> QWidget:
+        """Two lines, two buttons: is there a newer one, and the thing that installs it.
+
+        Above the report rather than below it, because it is the one part of this tab a person can
+        ACT on — the block underneath is for pasting into a message. The buttons are disabled until
+        the check comes back, and stay disabled when there is nothing to do: a live "Update" button
+        on an up-to-date install is a question mark, not an offer.
+        """
+        box = QWidget()
+        grid = QVBoxLayout(box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(4)
+        self._update_rows = {}
+        for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            label = QLabel(i18n.t("updChecking"))
+            label.setWordWrap(True)
+            label.setProperty("class", "mn")
+            row.addWidget(label, stretch=1)
+            button = QPushButton(i18n.t(key))
+            button.setProperty("class", "reason-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setEnabled(False)
+            button.clicked.connect(
+                self._update_tcc if name == "tcc" else self._update_skill)
+            row.addWidget(button)
+            grid.addLayout(row)
+            self._update_rows[name] = (label, button)
+        self._update_probe: Optional[_UpdateProbe] = None
+        self._update_tries = 0
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(_TOOLS_POLL_MS)
+        self._update_timer.timeout.connect(self._poll_updates)
+        return box
+
+    def _poll_updates(self) -> None:
+        self._update_tries += 1
+        probe = self._update_probe
+        if probe is None or (probe.result is None and self._update_tries < _UPDATE_TRIES
+                             and probe.running):
+            return
+        self._update_timer.stop()
+        if probe is None or probe.result is None:
+            for name, (label, _btn) in self._update_rows.items():
+                label.setText(i18n.t("updUnknown"))
+            return
+        for status in probe.result:
+            self._show_update(status)
+
+    def _show_update(self, status) -> None:
+        """One row's worth of the answer, in the words that tell a person what to do next."""
+        label, button = self._update_rows[status.name]
+        title = i18n.t("updTccName") if status.name == "tcc" else i18n.t("updSkillName")
+        here = status.installed or "?"
+        # Assigned every time, not only switched on: this row is re-rendered after an update and
+        # on every re-check, and a button still live over "up to date" is an offer to do nothing.
+        button.setEnabled(status.newer and status.updatable)
+        if status.newer:
+            label.setText(i18n.t("updAvailable").format(
+                what=title, here=here, there=status.latest))
+        elif status.note:
+            label.setText(f"{title} {here} — {status.note}")
+        elif not status.latest:
+            label.setText(i18n.t("updUnknown"))
+        else:
+            label.setText(i18n.t("updCurrent").format(what=title, here=here))
+
+    def _update_skill(self) -> None:
+        """Done here, in the app: it is another folder's git checkout and takes about a second."""
+        label, button = self._update_rows["skill"]
+        button.setEnabled(False)
+        label.setText(i18n.t("updWorking"))
+        # Blocking on purpose, and it is allowed to be: a shallow fetch of one tag is a second at
+        # most, and the alternative -- a thread for a call this short -- is a window that can be
+        # clicked twice before the first one lands.
+        ok, what = updates.apply_skill()
+        if ok:
+            label.setText(i18n.t("updSkillDone").format(version=what.lstrip("v")))
+            self._install_read = False
+            self.refresh_install()
+        else:
+            label.setText(i18n.t("updFailed").format(why=what))
+            button.setEnabled(True)
+
+    def _update_tcc(self) -> None:
+        """Handed to a terminal, with the reason said out loud.
+
+        TCC cannot replace its own files while it is running -- on Windows it cannot at all, and
+        the failure would land halfway through -- so the command goes to a window the person can
+        watch, and the app says the one thing that matters: close TCC first.
+        """
+        label, _button = self._update_rows["tcc"]
+        try:
+            terminal_launcher.run_line(updates.TCC_INSTALL_COMMAND)
+        except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
+            label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
+            return
+        label.setText(i18n.t("updTccHanded"))
 
     def _poll_tools(self) -> None:
         """Put the tools section in as soon as it lands, and stop asking either way."""
@@ -422,6 +555,10 @@ class DiagnosticsDialog(QDialog):
         self._install_worker = _ToolsProbe()
         self._install_tries = 0
         self._install_timer.start()
+        if self._update_probe is None or not self._update_probe.running:
+            self._update_probe = _UpdateProbe()
+            self._update_tries = 0
+            self._update_timer.start()
 
     def _render_install(self, tools_section) -> None:
         try:
@@ -489,6 +626,8 @@ class DiagnosticsDialog(QDialog):
         self._tabs.setTabText(0, i18n.t("diagTabProject"))
         self._tabs.setTabText(1, i18n.t("diagTabInstall"))
         self._tabs.setTabText(2, i18n.t("diagTabLog"))
+        for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
+            self._update_rows[name][1].setText(i18n.t(key))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
         self._render()

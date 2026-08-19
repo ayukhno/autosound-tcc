@@ -1,0 +1,196 @@
+"""Is there a newer TCC, is there a newer method, and what installs it.
+
+Two questions a tester should never have to ask in a chat. The versions are already on screen
+(`core/install_report.py`); this adds the other half — what is on the server — and the one command
+that closes the gap.
+
+**The two halves are installed differently, so they update differently.**
+
+*The method* is a shallow git checkout parked on a release tag (`v3.*`), which the installer
+updates with a fetch and a checkout. TCC can do exactly that itself, in a thread, in under a
+second: it is another folder's git repository, and nothing of ours is holding it open.
+
+*TCC* is a `uv` tool, and updating it means replacing the files of the process doing the asking.
+On macOS that quietly works and takes effect at the next start; on Windows it cannot — the running
+`.exe` and its loaded DLLs are locked, and `uv` would fail in the middle with a permission error
+that reads like a bug. So TCC's update is handed to a terminal the person can watch and told to
+run after the app is closed. Which is also the honest shape: it downloads several hundred
+megabytes, and that belongs in a window with output, not behind a spinner.
+
+Nothing here raises and nothing here writes without being asked: `check_*` only reads and asks the
+network, `apply_skill()` is the one function that changes anything, and it refuses on any checkout
+that looks like somebody's own working tree.
+
+Qt-free, and every import is at the top — this is called from a worker thread, and an import there
+pays PySide6's source-reading import hook (see `core/install_report.py`).
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from autosound_tcc.core import child, install_report, vendor_loader
+
+#: Where each half comes from. The installer's own constants, kept identical on purpose: an update
+#: that pulled from a different place than the install did would be a second source of truth.
+TCC_REPO = "https://github.com/ayukhno/autosound-tcc"
+SKILL_REPO = "https://github.com/ayukhno/autosound-tuning-skill"
+
+#: The method installs from a release tag, never from `main` — the installer asks for the newest
+#: `v3.*` and so do we.
+SKILL_TAG_GLOB = "v3.*"
+
+#: A network round trip to GitHub, on a machine that may be tethered in a car park.
+_ASK_TIMEOUT = 12.0
+
+#: What the installer runs, and therefore what the button offers. `--python 3.12` is not optional:
+#: without it `uv` picked the system interpreter and the GUI extras landed where they could not be
+#: imported (install.sh carries the same comment).
+TCC_INSTALL_COMMAND = (
+    f'uv tool install --python 3.12 --upgrade "autosound-tcc[gui,claude] @ git+{TCC_REPO}"'
+)
+
+
+@dataclass(frozen=True)
+class Status:
+    """One half of the installation: what is here, what is out there, and what to do about it."""
+
+    name: str
+    #: What is installed, as a person reads it — a version, or "" when it cannot be told.
+    installed: str
+    #: What the server has. "" means the question could not be asked, which is NOT "up to date".
+    latest: str
+    #: True only when both are known AND they differ in the direction that matters.
+    newer: bool
+    #: Why, when the answer needs one: unreachable network, a developer's own checkout, a source run.
+    note: str = ""
+    #: False when this installation is not ours to touch (a checkout, a hand-made symlink).
+    updatable: bool = True
+
+
+def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
+    """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash."""
+    try:
+        done = subprocess.run(
+            ["git", *args], capture_output=True, text=True, timeout=_ASK_TIMEOUT,
+            check=False, cwd=str(cwd) if cwd else None, **child.quiet())
+    except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
+        return False, f"{type(exc).__name__}: {exc}"
+    out = (done.stdout or "").strip() or (done.stderr or "").strip()
+    return done.returncode == 0, out
+
+
+def _version_key(text: str) -> tuple:
+    """`v3.0.10` -> (3, 0, 10), so 3.0.10 sorts after 3.0.9 — which a string compare gets wrong."""
+    return tuple(int(part) for part in re.findall(r"\d+", text)) or (0,)
+
+
+def newest_tag() -> str:
+    """The newest `v3.*` tag in the method's repository, or "" if it cannot be asked."""
+    ok, out = _git("ls-remote", "--tags", "--refs", SKILL_REPO, SKILL_TAG_GLOB)
+    if not ok or not out:
+        return ""
+    tags = [line.rsplit("/", 1)[-1] for line in out.splitlines() if "/" in line]
+    return max(tags, key=_version_key) if tags else ""
+
+
+def _skill_repo_dir() -> Optional[Path]:
+    """The method's git repository root — two levels above the skill folder itself."""
+    try:
+        return vendor_loader.skill_dir().parents[1]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _is_ours(repo: Path) -> tuple[bool, str]:
+    """Whether this checkout is the installer's to move, and if not, why not.
+
+    The installer parks its clone on a tag, detached, with nothing modified. A developer's clone
+    sits on a branch and usually has edits. Moving THAT would throw away somebody's work, so the
+    two are told apart before anything is fetched — the same care `install.sh` takes before it
+    touches `~/.claude/skills/autosound-tuning`.
+    """
+    ok, _ = _git("rev-parse", "--git-dir", cwd=repo)
+    if not ok:
+        return False, "not a git checkout"
+    on_branch, branch = _git("symbolic-ref", "--quiet", "--short", "HEAD", cwd=repo)
+    if on_branch:
+        return False, f"on branch {branch} — a working tree, not an installed release"
+    dirty_ok, dirty = _git("status", "--porcelain", cwd=repo)
+    if dirty_ok and dirty:
+        return False, "has uncommitted changes"
+    return True, ""
+
+
+def check_skill() -> Status:
+    """The method: the version installed here against the newest release tag."""
+    installed = install_report.skill_version()
+    repo = _skill_repo_dir()
+    latest = newest_tag()
+    latest_version = latest.lstrip("v")
+    if repo is None:
+        return Status("skill", installed, latest_version, False,
+                      "the method was not found on this machine", updatable=False)
+    ours, why = _is_ours(repo)
+    if not ours:
+        return Status("skill", installed, latest_version, False, why, updatable=False)
+    if not installed or not latest:
+        return Status("skill", installed, latest_version, False,
+                      "" if installed else "no version in the manifest")
+    return Status("skill", installed, latest_version,
+                  _version_key(latest_version) > _version_key(installed))
+
+
+def check_tcc() -> Status:
+    """TCC: the commit this build came from against the head of the repository it came from.
+
+    Compared by COMMIT, not by version. TCC installs from the default branch, so the version in
+    the metadata only moves when a release is cut — a build three days of fixes behind still calls
+    itself 0.1.1. The commit is what actually differs, and `direct_url.json` records the one this
+    install was built from.
+    """
+    installed = install_report.app_version()
+    _url, commit = install_report.install_source()
+    if not commit:
+        return Status("tcc", installed, "", False,
+                      "running from a source checkout — update it with git", updatable=False)
+    ok, out = _git("ls-remote", TCC_REPO, "HEAD")
+    head = out.split()[0] if ok and out.split() else ""
+    if not head:
+        return Status("tcc", installed, "", False, "could not reach GitHub")
+    return Status("tcc", installed, head[:12], head != commit)
+
+
+def check_all() -> tuple[Status, Status]:
+    """Both halves. Two network calls; run it off the GUI thread."""
+    return check_tcc(), check_skill()
+
+
+def apply_skill(tag: str = "") -> tuple[bool, str]:
+    """Move the method's checkout onto `tag` (default: the newest release). `(ok, what happened)`.
+
+    Exactly what the installer does, for exactly the same reason it does it that way: the clone is
+    `--depth 1`, so the tag being asked for is not in it yet. Fetch it BY NAME and check out
+    `FETCH_HEAD`, which works the same whether the ref is a tag, a branch or a sha.
+    """
+    repo = _skill_repo_dir()
+    if repo is None:
+        return False, "the method was not found on this machine"
+    ours, why = _is_ours(repo)
+    if not ours:
+        return False, f"left alone: {why}"
+    target = tag or newest_tag()
+    if not target:
+        return False, "could not ask GitHub which release is newest"
+    ok, out = _git("fetch", "--quiet", "--depth", "1", "origin", target, cwd=repo)
+    if not ok:
+        return False, f"fetch failed: {out}"
+    ok, out = _git("-c", "advice.detachedHead=false", "checkout", "--quiet", "FETCH_HEAD",
+                   cwd=repo)
+    if not ok:
+        return False, f"checkout failed: {out}"
+    return True, target

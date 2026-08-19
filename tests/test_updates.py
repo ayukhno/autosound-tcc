@@ -1,0 +1,165 @@
+"""Is there a newer one, and is this installation ours to move.
+
+Every test here fakes the two things that talk to the world — `git` and the installed metadata —
+so the suite never asks GitHub anything. What is actually under test is the judgement: which
+comparison decides "newer", and what stops the button touching somebody's own checkout.
+"""
+
+from __future__ import annotations
+
+import subprocess
+
+import pytest
+
+from autosound_tcc.core import install_report, updates
+
+
+def _git_answers(monkeypatch, answers: dict):
+    """Fake `git` by first argument (`ls-remote`, `symbolic-ref`, …) -> (ok, output)."""
+    calls = []
+
+    def fake(*args, cwd=None):
+        calls.append(args)
+        for key, value in answers.items():
+            if key in args:
+                return value
+        return True, ""
+
+    monkeypatch.setattr(updates, "_git", fake)
+    return calls
+
+
+def test_a_newer_tag_is_an_update_and_the_same_tag_is_not(monkeypatch, tmp_path):
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.6")
+    _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
+
+    assert updates.check_skill().newer is True
+
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.7")
+    status = updates.check_skill()
+    assert status.newer is False
+    assert status.latest == "3.0.7"
+
+
+def test_ten_is_newer_than_nine(monkeypatch, tmp_path):
+    """The one comparison a string gets wrong: "3.0.10" < "3.0.9" alphabetically."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.9")
+    _git_answers(monkeypatch, {
+        "ls-remote": (True, "a\trefs/tags/v3.0.9\nb\trefs/tags/v3.0.10"),
+    })
+
+    status = updates.check_skill()
+
+    assert status.latest == "3.0.10"
+    assert status.newer is True
+
+
+def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
+    """On a branch means somebody works there. The installer's clone is detached at a tag."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    _git_answers(monkeypatch, {
+        "rev-parse": (True, ".git"),
+        "symbolic-ref": (True, "main"),
+        "ls-remote": (True, "sha\trefs/tags/v9.9.9"),
+    })
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.0")
+
+    status = updates.check_skill()
+
+    assert status.updatable is False
+    assert "branch main" in status.note
+    ok, why = updates.apply_skill()
+    assert ok is False and "left alone" in why
+
+
+def test_uncommitted_changes_also_stop_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    _git_answers(monkeypatch, {
+        "rev-parse": (True, ".git"),
+        "symbolic-ref": (False, ""),
+        "status": (True, " M skills/autosound-tuning/SKILL.md"),
+    })
+
+    ok, why = updates.apply_skill()
+
+    assert ok is False and "uncommitted" in why
+
+
+def test_the_method_is_updated_the_way_the_installer_does_it(monkeypatch, tmp_path):
+    """Fetch the tag BY NAME into a --depth 1 clone, then check out FETCH_HEAD."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    calls = _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
+
+    ok, what = updates.apply_skill()
+
+    assert ok is True and what == "v3.0.7"
+    fetch = [c for c in calls if "fetch" in c][0]
+    assert "--depth" in fetch and "v3.0.7" in fetch
+    assert any("FETCH_HEAD" in c for c in calls)
+
+
+def test_tcc_is_compared_by_commit_not_by_version(monkeypatch):
+    """TCC installs from the default branch, so its version number stands still while the build
+    moves. The commit is the only thing that differs between a fresh install and a stale one."""
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.1")
+    monkeypatch.setattr(install_report, "install_source",
+                        lambda: ("git+https://…", "a" * 40))
+    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
+
+    status = updates.check_tcc()
+
+    assert status.newer is True
+    assert status.installed == "0.1.1"
+
+    monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "b" * 40))
+    assert updates.check_tcc().newer is False
+
+
+def test_a_source_checkout_is_told_to_use_git(monkeypatch):
+    """Running from a clone has no `direct_url.json` and no business calling `uv`."""
+    monkeypatch.setattr(install_report, "install_source", lambda: ("", ""))
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.1")
+
+    status = updates.check_tcc()
+
+    assert status.updatable is False
+    assert "git" in status.note
+
+
+def test_an_unreachable_github_is_not_up_to_date(monkeypatch):
+    """The difference that matters: "we asked and there is nothing new" vs "we could not ask"."""
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.1")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    _git_answers(monkeypatch, {"ls-remote": (False, "could not resolve host")})
+
+    status = updates.check_tcc()
+
+    assert status.newer is False
+    assert status.latest == ""
+    assert "reach" in status.note
+
+
+def test_the_probe_never_raises_when_git_is_missing(monkeypatch):
+    """No git on the machine is a row that says so, not a traceback in a panel."""
+    def boom(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+
+    ok, out = updates._git("ls-remote", "x")
+
+    assert ok is False and "FileNotFoundError" in out
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("v3.0.7", (3, 0, 7)),
+    ("3.0.10", (3, 0, 10)),
+    ("nothing", (0,)),
+])
+def test_version_keys(text, expected):
+    assert updates._version_key(text) == expected

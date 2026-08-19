@@ -98,6 +98,56 @@ def _posix_command(
     )
 
 
+def run_line(line: str) -> None:
+    """Open a terminal running one shell line, and LEAVE it open when the line finishes.
+
+    For the commands a person has to be able to watch and read the ending of — the updater above
+    all: it downloads hundreds of megabytes, and when it fails it fails in a sentence that must
+    still be on screen afterwards. Deliberately not `core/child.py`'s quiet spawn: this one is a
+    window on purpose.
+
+    `line` is a shell line this app composed, never user text.
+    """
+    if sys.platform == "darwin":
+        app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
+        if app == "iTerm":
+            script = (
+                'tell application "iTerm"\n'
+                "  activate\n"
+                "  set w to (create window with default profile)\n"
+                f"  tell current session of w to write text {_applescript_literal(line)}\n"
+                "end tell"
+            )
+        else:
+            script = (
+                f'tell application "Terminal" to do script {_applescript_literal(line)}\n'
+                'tell application "Terminal" to activate'
+            )
+        subprocess.run(["osascript", "-e", script], check=True)
+        return
+    if sys.platform.startswith("win"):
+        # `/k` keeps the window after the command ends — the whole point here.
+        if shutil.which("wt"):
+            subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True)
+            return
+        subprocess.Popen(f'start "" cmd /k {line}', shell=True, close_fds=True)
+        return
+    for argv, wants_shell_string in (
+        (["x-terminal-emulator", "-e"], True),
+        (["gnome-terminal", "--"], False),
+        (["konsole", "-e"], False),
+        (["xfce4-terminal", "-e"], True),
+        (["xterm", "-e"], True),
+    ):
+        if not shutil.which(argv[0]):
+            continue
+        held = f"{line}; echo; read -p 'Enter to close '"
+        tail = [held] if wants_shell_string else ["bash", "-lc", held]
+        subprocess.Popen([*argv, *tail], close_fds=True)
+        return
+    raise TerminalLaunchError("no supported terminal emulator found on PATH")
+
+
 def _applescript_literal(text: str) -> str:
     """Quote a Python string as an AppleScript string literal.
 
