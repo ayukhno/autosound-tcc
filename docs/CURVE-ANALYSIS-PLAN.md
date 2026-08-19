@@ -23,6 +23,8 @@ first, and so parallel work stays in disjoint files.
    Ws, Ms, TWs, SW+Ws, a whole side, or everything — the groups a tune is actually argued about.
 4. **An all-pass per driver.** APF1/APF2 applied to a trace, its effect visible on the phase and,
    more to the point, on the sum. Simulation only in TCC; the ask on the skill is SCR-050.
+   **Landed 2026-08-19** (TCC `ab494ac`, skill `343c0f5` + `70234d2`) — see "Decisions taken
+   2026-08-19" below for what was decided while building it.
    **APF1 and APF2 only — the Helix "Phase" control is deliberately out of scope** (user,
    2026-08-18): it is one vendor's second-order all-pass with its frequency taken from the
    crossover, so it takes an angle rather than an `f0`, while `APF1`/`APF2` as EQ bands are what
@@ -78,6 +80,40 @@ that ends an argument. If it can be wrong without saying so, it will end argumen
   Their workflow, per the Advisor: load a group as a macro, look at the sum, isolate a problem by
   removing one driver with its ×. Next round, same files.
 
+## Decisions taken 2026-08-19 (building step 4)
+
+- **The all-pass edits the driver the radio has chosen — the same driver the delay box edits.**
+  A row of its own under the delay's (that row is full at two drivers and over at seven), but
+  one editing model: "which driver am I changing" has one answer, not two. The row names the
+  driver in its own colour so the answer does not need a glance upward.
+- **On the impulse the drawn trace stays as captured.** An all-pass smears an impulse, and
+  re-filtering the time series is a round trip through the FFT this window does not make; the
+  strip's sum carries the filter, and the strip is where the joint is read anyway. On the phase
+  the trace rotates around `f0`; on the frequency response it does not move — unit magnitude is
+  what makes it an all-pass, and the tip says so.
+- **The filter is the skill's, probed before it is kept.** `core/allpass.py` holds the parameter
+  set (validated once, spelled `APF1`/`APF2` as the ledger spells them, one `label()` for the
+  legend, the reading and the sum's sentence) and calls `dsp_math` through `vendor_loader`; a
+  filter that cannot be computed is refused on the row rather than named in a legend the plot
+  cannot show. `curve_sum` applies it on the result grid — a closed form can be stated exactly
+  wherever the sum is stated — and refuses, by name, one it cannot compute.
+- **Banked beside the delay, in the same entry.** The Advisor's workflow (load a group, look at
+  the sum, isolate a driver with its ×) loses a filter on the first × unless the bank keeps it —
+  a driver taken off the plot and put back is a new selection to the view. So `delay_bank` entries
+  carry `apf`, the driver comes back with both, one clear clears both, the button counts a driver
+  once whatever it carries, and the "Delays" sentence has an all-pass block with its own caveat:
+  simulated on the sweeps in hand, never verified by a summation sweep. **Naming not revisited:**
+  the group is still called "Затримки"/"Delays" while it now carries all-passes too — the user's
+  names, left for the user to change.
+- **Its own clause in the reading, its own signal in the view.** `ta_ms` and an EQ band are two
+  settings typed in two places, so the reading says "all-pass, to rotate phase (proposed, not
+  applied): m-L: APF2 250 Hz Q 0.71" as a clause of its own; `allpassChanged` is a signal of its
+  own so the window can tell what moved.
+- **What the skill does with the number afterwards is SCR-050 items 1–2, and both landed the
+  same day**: `analyze-joints --apf` verifies a candidate under the joint's own trust gate, and
+  the Critic's package format has an `Origin:` line. What still does not happen automatically:
+  TCC does not run `--apf` itself; the Generator does, and quotes the line.
+
 ## What each step touches
 
 Kept explicit so two agents (or two sessions) do not land in the same file.
@@ -88,7 +124,7 @@ Kept explicit so two agents (or two sessions) do not land in the same file.
 | 2 sum engine | `core/curve_sum.py` (new), `tests/test_curve_sum.py` (new) |
 | 2 sum drawing | `ui/tcc/curve_view.py`, `ui/tcc/curve_dialog.py` (worker fetches magnitude AND phase) |
 | 3 N curves | `ui/tcc/curve_dialog.py` (selector, bank), `ui/tcc/curve_view.py` (delay radio, markers) |
-| 4 APF | `core/curve_sum.py` (apply an all-pass to an input), `ui/tcc/curve_view.py`, `i18n.py` |
+| 4 APF | `core/allpass.py` (new), `core/curve_sum.py` (apply an all-pass to an input), `core/delay_bank.py` (banked beside the delay), `ui/tcc/curve_view.py`, `ui/tcc/curve_dialog.py`, `i18n.py`; skill: `dsp_math.py`, `rew_tool.py analyze-joints --apf` |
 
 ## Consequences worth naming before they surprise someone
 

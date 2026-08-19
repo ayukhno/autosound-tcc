@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-18: SCR-049** (the project backup nobody wrote down) **and SCR-050** (an all-pass the Arbiter dialled, as an input the method can check). SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-19: SCR-049** (the project backup nobody wrote down). SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1403,8 +1403,32 @@ Until this lands, the installer's line should not claim the skill "offers" anyth
 
 ## SCR-050 — an all-pass the Arbiter dialled, as an input the method can check
 
-**Status**: proposed (2026-08-18 — raised while designing TCC's curve analysis: summed response,
-N-way sum, per-driver APF)
+**Status**: **DONE** (2026-08-19 — skill `343c0f5` + `70234d2` on `feat/scr-050-apf`, TCC
+`ab494ac` + the pin bump on `feat/curve-sum`). Raised 2026-08-18 while designing TCC's curve
+analysis: summed response, N-way sum, per-driver APF.
+
+What landed, item by item — read the list below for the ask itself:
+
+- **4 → `dsp_math.apf1_response(freqs, f0)`**: −90° at `f0`, 0 → −180° overall, a pure 1/(π·f0)
+  delay far below `f0`; same convention as `apf2_response`, held by the selftest to
+  `apf1² ≡ apf2(Q 0.5)`.
+- **5 → `eq_complex` dispatches by kind** (`PK`, `LS`/`LSH`, `HS`/`HSH`, `APF1`, `APF2`) and
+  **raises on a kind it does not know**; `peq_response` refuses anything but a peak or a shelf.
+  `dsp_math.py` gained the selftest it never had (TCC runs it: twelve skill selftests now).
+- **2 → `analyze-joints --apf "ch,APF2,f0,Q"` / `"ch,APF1,f0"`**: a candidate to VERIFY. Under
+  each joint touching the channel, one line — the worst null as it stands → with the candidate
+  and nothing else changed (what TCC's sum showed) → with the candidate plus the best further
+  delay — under the same trust gate as the row (no pair → UNVERIFIED; gate tripped → nothing).
+- **1 → the package format** (`data-contract-template.md` §3) has an `Origin:` line: a
+  hand-dialled candidate enters the Critic's package as a candidate, in the ledger's own words,
+  never as something already checked; `phase_2_eq.md` says to run `--apf` before packaging.
+- **3 (scope)** held: `APF1`/`APF2` only; the Helix phase ANGLE is not accepted anywhere.
+
+TCC's side (`core/allpass.py`, the APF row in the curve window, the bank) takes the filter from
+`dsp_math` through `vendor_loader` and holds no copy — the reason items 4 and 5 were here.
+What is still open is not this SCR's: nothing consumes `--apf`'s output automatically (the
+Generator runs it and quotes the line), and the number never enters the ledger except through
+`apply.propose` like any other proposal (D-6).
 **Target**: skill — the review package / data contract, and `analyze-joints`' input side
 **TCC dependency**: TCC does the interactive part (APF applied to a measured trace, its effect on
 the predicted sum drawn live). This ask is only about what happens to that number afterwards.
