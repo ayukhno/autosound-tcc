@@ -483,6 +483,7 @@ def test_reporting_a_problem_carries_the_installation_block_into_the_form(monkey
 
     _app()
     dialog = DiagnosticsDialog()
+    dialog._install_read = True
     dialog._install_text.setPlainText("[Autosound TCC]\n  version  0.1.4\n")
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
@@ -494,3 +495,20 @@ def test_reporting_a_problem_carries_the_installation_block_into_the_form(monkey
     assert url.startswith("https://github.com/ayukhno/autosound-tcc/issues/new?")
     assert "template=beta-report.yml" in url
     assert "0.1.4" in url, "the installation block travels with the report"
+
+
+def test_a_report_from_a_tab_that_was_never_opened_still_carries_the_versions(monkeypatch):
+    """The button is in the bottom row now, so it can be pressed from any tab — including before
+    the Installation tab has ever been read, when its box still says "reading…"."""
+    from PySide6.QtGui import QDesktopServices
+
+    _app()
+    dialog = DiagnosticsDialog()
+    assert dialog._install_read is False
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+
+    dialog._open_issue()
+
+    assert len(opened) == 1
+    assert "Autosound+TCC" in opened[0] or "Autosound%20TCC" in opened[0]

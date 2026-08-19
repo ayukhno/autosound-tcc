@@ -305,6 +305,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
         border-color: {t.accent};
     }}
+    /* The one icon button that is looked FOR rather than come across: diagnostics. */
+    QPushButton[class~="diag-btn"] {{
+        color: {t.accent};
+        border-color: {t.accent_dim};
+    }}
+    QPushButton[class~="diag-btn"]:hover {{
+        color: {t.accent};
+        background: {t.mix('accent', 14, 'panel3')};
+        border-color: {t.accent};
+    }}
 
     /* .zoomgroup — A-/percent/A+ as one bordered block with divider lines, ported from the
     prototype's disconnected three-pill look at the user's request (2026-07-26 feedback). */

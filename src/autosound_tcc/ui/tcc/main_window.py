@@ -749,8 +749,12 @@ class MainWindow(QMainWindow):
 
         # Diagnostics sits next to the reload button on purpose: both answer "what is actually on
         # disk right now", and §8 wants that question reachable in every mode, not buried in a menu.
-        self._diag_btn = QPushButton("⚕")
-        self._diag_btn.setProperty("class", "icon-btn")
+        # A gear, not the old medical mark: what opens here is the state of the installation and
+        # the repairs for it, and ⚕ read as something clinical nobody could place. Orange, the
+        # app's accent, because this is the button somebody is looking for when something is wrong
+        # (user, 2026-08-19).
+        self._diag_btn = QPushButton("⚙")
+        self._diag_btn.setProperty("class", "icon-btn diag-btn")
         self._diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._diag_btn.clicked.connect(self._open_diagnostics)
         self._diag_tip = attach_tip(self._diag_btn, i18n.t("diagBtnTip"))

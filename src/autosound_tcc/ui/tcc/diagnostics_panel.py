@@ -322,6 +322,15 @@ class DiagnosticsDialog(QDialog):
         outer.addWidget(self._checked)
 
         buttons = QHBoxLayout()
+        # Left of the stretch, away from this dialog's own two actions: it is not "another button
+        # about this window", it is the way out of the window into a report. And it lives HERE
+        # rather than on the Installation tab so it is on screen whichever tab is open — a button
+        # that has to be found is a report that does not get written (user, 2026-08-19).
+        self._report_btn = QPushButton(i18n.t("diagReport"))
+        self._report_btn.setProperty("class", "reason-btn")
+        self._report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._report_btn.clicked.connect(self._open_issue)
+        buttons.addWidget(self._report_btn)
         buttons.addStretch(1)
         self._refresh_btn = QPushButton(i18n.t("diagRefresh"))
         self._refresh_btn.setProperty("class", "reason-btn")
@@ -361,11 +370,6 @@ class DiagnosticsDialog(QDialog):
         layout.addWidget(self._install_text, stretch=1)
         row = QHBoxLayout()
         row.addStretch(1)
-        self._report_btn = QPushButton(i18n.t("diagReport"))
-        self._report_btn.setProperty("class", "reason-btn")
-        self._report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._report_btn.clicked.connect(self._open_issue)
-        row.addWidget(self._report_btn)
         self._copy_btn = QPushButton(i18n.t("diagInstallCopy"))
         self._copy_btn.setProperty("class", "reason-btn")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -625,6 +629,15 @@ class DiagnosticsDialog(QDialog):
         Copy button, and the form has a field waiting for it.
         """
         report = self._install_text.toPlainText()
+        if not self._install_read:
+            # The tab was never opened, so the box still holds "reading…". Compose the report now,
+            # WITHOUT the tools section: that one starts eight processes, and the versions and
+            # paths — which are what the form needs — are file reads that cost nothing.
+            try:
+                report = install_report.as_text(install_report.report(
+                    extra=self._install_extra(), with_tools=False))
+            except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
+                report = f"{type(exc).__name__}: {exc}"
         query = urllib.parse.urlencode({
             "template": "beta-report.yml",
             "labels": "beta",
