@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-19: SCR-049** (the project backup nobody wrote down). SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-19: SCR-049** (the project backup nobody wrote down) **and SCR-051** (the reviewer cannot go through omp). SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1483,3 +1483,41 @@ the dialogue by hand; nothing writes it to the ledger (D-6: the skill writes the
 reads it). TCC must not grow its own all-pass maths either: two implementations of one filter is
 how the front-end and the method start disagreeing about what a proposal means. It uses the
 skill's, which is the reason items 4 and 5 are here rather than in TCC's own backlog.
+
+## SCR-051 — the reviewer's transports do not include omp, so half the picker is clipboard-only
+
+**Status**: proposed (2026-08-19 — found while the user was looking at TCC's critic picker with
+omp installed)
+**Target**: skill — `scripts/autosound_ai.py`, its `_PROVIDERS` table and `cli_command`
+**TCC dependency**: none to build. TCC already labels each critic entry with what will happen
+(`model_choices.critic_reaches` → the "clipboard only" badge); this ask changes what that function
+can honestly answer, and the badge follows.
+
+**The gap.** The reviewer resolves a model to a VENDOR and then looks for that vendor's own key or
+CLI: `google` → `GEMINI_API_KEY` / `agy`|`gemini`, `anthropic` → `ANTHROPIC_API_KEY` / `claude`,
+`openai` → `OPENAI_API_KEY` / `codex`. omp is not in that table. So a GPT model **that omp already
+holds credentials for** is marked clipboard-only in the picker, and the Arbiter is told to install
+a second OpenAI client for a model they can already reach — which is exactly the question the user
+asked when they saw it ("це ж через omp — теж треба ставити клієнта Codex?").
+
+Since 2026-08-19 the installer puts omp on every machine that gets the app, so this is now the
+common case rather than an edge one: the broker is there, the models are listed, and the reviewer
+is the only part of the system that cannot use them.
+
+What the ask covers:
+
+1. **omp as a transport of last resort in `_PROVIDERS`**, tried after the vendor's own key and
+   CLI: `omp -p --model <selector> <prompt>`. It is non-interactive (`-p, --print`), takes the
+   model as a fuzzy selector, and returns text on stdout — the same shape `cli_command` already
+   builds for the three vendors.
+2. **The effort axis, decided per vendor as it already is.** omp takes `--thinking <level>`;
+   the table's existing note (Anthropic and OpenAI take a flag, Google publishes the tier as its
+   own model) grows one row rather than a special case.
+3. **`gemini_critic.sh --doctor` reports it**, so "the reviewer cannot reach this model" and "the
+   reviewer can reach it through omp, metered" are two different verdicts on that screen.
+
+**Why it is worth doing rather than telling people to install another CLI**: the method's own rule
+is that the Critic is a DIFFERENT vendor from the Generator. With omp on the machine that is one
+setting away for any vendor; without this, every vendor except Google needs its own CLI or key
+before the rule can be followed, and the fallback — a package in the clipboard, pasted by hand —
+is the path people quietly stop taking.
