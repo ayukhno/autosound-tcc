@@ -254,6 +254,29 @@ def test_without_a_model_reading_the_markers_start_on_the_first_two_peaks():
     assert dialog._view._marker_names == [i18n.t("curveMarkerOne"), i18n.t("curveMarkerTwo")]
 
 
+def test_a_restored_delay_moves_the_opening_marker_with_the_curve_it_points_at():
+    """The markers open on the peaks AS DRAWN. A driver that comes back with its banked delay is
+    drawn where that delay put it, and a marker left on the raw arrival would point at the empty
+    space the curve moved out of — with its level line, which reads the drawn curve, then starting
+    off the peak (2026-08-19)."""
+    from autosound_tcc.core import delay_bank
+
+    delay_bank.put("w-R_01 (sw)", 0.4)
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    positions = dialog._view.positions()
+    assert abs(positions[0] - 4.52) < 0.05, "the undelayed driver's peak, as before"
+    assert abs(positions[1] - (4.78 + 0.4)) < 0.05, "the delayed driver's peak, where it is drawn"
+    # ...and the Δ read between them is the DRAWN spread (the fixture samples every 0.04 ms, so
+    # the second peak sits at 4.80 + 0.40).
+    assert f"Δ {positions[1] - positions[0]:.3f} ms" in dialog._view.reading()
+    assert "Δ 0.680 ms" in dialog._view.reading()
+
+
 def test_on_a_frequency_view_the_pair_opens_inside_the_band_not_at_its_edges():
     """Max |y| of a response or a phase curve is a band edge — 20 Hz or 20 kHz — which is the one
     place nobody is pointing. So on the FR and the phase the pair opens at the geometric thirds of

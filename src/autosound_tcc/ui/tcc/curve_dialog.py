@@ -1496,7 +1496,20 @@ class CurveDialog(QDialog):
             low, high = _FR_BAND_HZ
             ratio = high / low
             return [low * ratio ** (1 / 3), low * ratio ** (2 / 3)], names, []
-        peaks = [_peak_x(t) for t in traces if len(t.x)] or [0.0]
+        # The peaks of the curves AS DRAWN, not as captured: `_on_curves` has just put each
+        # driver's banked delay back on it, and a marker opened on the raw arrival stood in the
+        # empty space the curve had moved out of — a pointer at nothing, with the level line
+        # (which reads the drawn curve) then starting off the peak it was meant to be on
+        # (2026-08-19, seen in a render). The arrival as captured is still what the bank keeps
+        # (`_bank_current_delay`); this is only where the pointing starts.
+        peaks = []
+        for index, trace in enumerate(traces):
+            if not len(trace.x):
+                continue
+            x, y = self._view._shifted(index, trace)
+            y = np.asarray(y, dtype=float)
+            peaks.append(float(np.asarray(x, dtype=float)[int(np.argmax(np.abs(y)))]))
+        peaks = peaks or [0.0]
         return [peaks[0], peaks[min(1, len(peaks) - 1)]], names, []
 
     def reset(self, titles, markers=(), kind="impulse", available=()) -> None:
