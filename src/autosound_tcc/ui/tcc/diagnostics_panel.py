@@ -451,8 +451,10 @@ class DiagnosticsDialog(QDialog):
         ok, what = updates.apply_skill()
         if ok:
             label.setText(i18n.t("updSkillDone").format(version=what.lstrip("v")))
+            # The report underneath must show the new version — but the row keeps what it just
+            # said until the next Re-check, because that sentence is the receipt for the press.
             self._install_read = False
-            self.refresh_install()
+            self.refresh_install(check_updates=False)
         else:
             label.setText(i18n.t("updFailed").format(why=what))
             button.setEnabled(True)
@@ -466,7 +468,7 @@ class DiagnosticsDialog(QDialog):
         """
         label, _button = self._update_rows["tcc"]
         try:
-            terminal_launcher.run_line(updates.TCC_INSTALL_COMMAND)
+            terminal_launcher.run_line(updates.tcc_install_line())
         except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
             label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
             return
@@ -542,12 +544,21 @@ class DiagnosticsDialog(QDialog):
             # when something is going wrong.
             self.refresh_log()
 
-    def refresh_install(self) -> None:
+    def refresh_install(self, check_updates: bool = True) -> None:
         """Everything that reads a file, now; everything that runs a program, on a thread.
 
         The block is on screen the moment the tab opens — versions, paths, where the skill is —
         with the tools section filling in a second later, rather than an empty box and a wait.
+
+        `check_updates=False` re-reads the report WITHOUT asking GitHub again: used straight after
+        an update, where the row has just said what it installed and replacing that with "checking
+        for updates…" would take the answer away at the moment it was earned.
         """
+        # Before the early return below, not after: the tools probe can be a slow one, and
+        # "Re-check" doing nothing at all because a previous probe is still running is the kind of
+        # dead button people press three times.
+        if check_updates:
+            self._start_update_check()
         if self._install_worker is not None and self._install_worker.running:
             return
         self._install_read = True
@@ -555,10 +566,19 @@ class DiagnosticsDialog(QDialog):
         self._install_worker = _ToolsProbe()
         self._install_tries = 0
         self._install_timer.start()
-        if self._update_probe is None or not self._update_probe.running:
-            self._update_probe = _UpdateProbe()
-            self._update_tries = 0
-            self._update_timer.start()
+
+    def _start_update_check(self) -> None:
+        """Ask GitHub again — unless it is already being asked."""
+        if self._update_probe is not None and self._update_probe.running:
+            return
+        # Back to "checking", buttons off: a row still saying "a newer one is out" with a live
+        # button while the question is being asked again is an offer we cannot honour yet.
+        for label, button in self._update_rows.values():
+            label.setText(i18n.t("updChecking"))
+            button.setEnabled(False)
+        self._update_probe = _UpdateProbe()
+        self._update_tries = 0
+        self._update_timer.start()
 
     def _render_install(self, tools_section) -> None:
         try:
@@ -615,8 +635,20 @@ class DiagnosticsDialog(QDialog):
         self._verdict.setText(i18n.t("diagFixDone").format(what=message))
 
     def _on_refresh(self) -> None:
+        """Re-check means everything this window shows, not only the project.
+
+        The update rows are the part a person presses this button to see move — after an update
+        was installed, or after the network came back (user, 2026-08-19). The Installation tab is
+        marked unread rather than read here: it starts eight subprocesses, and if the person is
+        looking at another tab that cost belongs at the moment they open it, not now.
+        """
         self.set_report(None)
         self.refreshRequested.emit()
+        self._install_read = False
+        if self._tabs.currentIndex() == 1:
+            self.refresh_install()
+        elif self._tabs.currentIndex() == 2:
+            self.refresh_log()
 
     def _retranslate(self) -> None:
         self.setWindowTitle(i18n.t("diagTitle"))

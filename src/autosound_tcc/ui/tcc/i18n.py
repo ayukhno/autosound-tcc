@@ -99,8 +99,8 @@ T: dict[Lang, dict[str, str]] = {
         "updUnknown": "could not ask GitHub — no network, or it is having a day",
         "updWorking": "updating…",
         "updSkillDone": "The method is now {version} — reopen the AI session to pick it up",
-        "updTccHanded": "The command is running in a terminal. Close TCC so it can replace it, "
-                        "then start TCC again.",
+        "updTccHanded": "A terminal is open and waiting for TCC to close. Quit TCC — the update "
+                        "runs by itself, then start TCC again.",
         "updFailed": "did not work: {why}",
         "diagLogNone": "no log file — this run writes to the terminal only",
         "diagInstallBlurb": "What is installed on this machine — versions, where each piece came \
@@ -726,8 +726,8 @@ Choose sweeps (sw) above to read this.",
         "updUnknown": "не вдалося спитати GitHub — немає мережі, або в нього свій день",
         "updWorking": "оновлюю…",
         "updSkillDone": "Скіл тепер {version} — переоткрий сесію з ШІ, щоб він її підхопив",
-        "updTccHanded": "Команда пішла в термінал. Закрий ТСС, щоб її можна було замінити, "
-                        "а потім запусти знову.",
+        "updTccHanded": "Термінал відкрито і він чекає, поки ТСС закриється. Закрий ТСС — "
+                        "оновлення піде саме, потім запусти знову.",
         "updFailed": "не вийшло: {why}",
         "diagLogNone": "лог-файла немає — цей запуск пише лише в термінал",
         "diagInstallBlurb": "Що встановлено на цій машині — версії, звідки взялася кожна частина, \

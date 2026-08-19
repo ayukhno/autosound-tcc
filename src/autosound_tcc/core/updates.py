@@ -27,8 +27,10 @@ pays PySide6's source-reading import hook (see `core/install_report.py`).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -53,6 +55,41 @@ _ASK_TIMEOUT = 12.0
 TCC_INSTALL_COMMAND = (
     f'uv tool install --python 3.12 --upgrade "autosound-tcc[gui,claude] @ git+{TCC_REPO}"'
 )
+
+
+def tcc_install_line(pid: Optional[int] = None) -> str:
+    """The update command, with a wait for THIS process in front of it.
+
+    Telling somebody to close the app first is not enough — it was tried, and the update ran
+    anyway while the app was open. `uv` then replaced the package, tried to clear the old
+    `Scripts` directory, and could not: the running executable is in it, and Windows will not
+    delete a file that is open. It ends in `error: failed to remove directory … Access is denied
+    (os error 5)` after appearing to succeed (user, Windows 11, 2026-08-19).
+
+    So the window waits for our own process id to disappear and only then runs `uv`. The person
+    closes TCC when they are ready, and the update happens on a machine where nothing holds the
+    files. macOS would survive replacing them under a running process, but not always cleanly —
+    TCC imports lazily, so a module first needed after the swap would be read from a directory
+    that is no longer the one it started with. One behaviour on both platforms is also one thing
+    to explain.
+    """
+    if pid is None:
+        pid = os.getpid()
+    if sys.platform.startswith("win"):
+        # `&` in cmd is "then", regardless of what the previous command returned. Wait-Process
+        # returns at once if the id is already gone, which is the case when TCC was closed first.
+        return (
+            f'echo Close TCC now - this window is waiting for it, then it will update. '
+            f'& powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue" '
+            f'& {TCC_INSTALL_COMMAND} '
+            f'& echo. & echo Done - start TCC again.'
+        )
+    return (
+        f"echo 'Close TCC now — this window is waiting for it, then it will update.'; "
+        f"while kill -0 {pid} 2>/dev/null; do sleep 1; done; "
+        f"{TCC_INSTALL_COMMAND}; "
+        f"echo; echo 'Done — start TCC again.'"
+    )
 
 
 @dataclass(frozen=True)

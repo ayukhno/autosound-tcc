@@ -435,6 +435,42 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch):
 
     dialog._update_tcc()
 
-    assert seen == [updates.TCC_INSTALL_COMMAND]
-    assert "uv tool install" in seen[0] and "--python 3.12" in seen[0]
+    assert len(seen) == 1
+    assert updates.TCC_INSTALL_COMMAND in seen[0]
+    assert "--python 3.12" in seen[0]
+    assert str(os.getpid()) in seen[0], "the window waits for THIS process before it replaces it"
     assert dialog._update_rows["tcc"][0].text() == i18n.t("updTccHanded")
+
+
+def test_re_check_asks_about_updates_again(monkeypatch):
+    """The button says Re-check, and the update rows are what a person presses it to see move —
+    after installing one, or after the network came back."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(1)
+    dialog._show_update(updates.Status("skill", "3.0.7", "3.0.8", True))
+    asked = []
+    monkeypatch.setattr(updates, "check_all", lambda: asked.append(1) or (
+        updates.Status("tcc", "0.1.3", "", False), updates.Status("skill", "3.0.8", "3.0.8", False)))
+
+    dialog._on_refresh()
+
+    label, button = dialog._update_rows["skill"]
+    assert label.text() == i18n.t("updChecking"), "the stale answer must not stay on screen"
+    assert not button.isEnabled(), "nor a button we cannot honour while the question is open"
+    dialog._update_probe._thread.join(timeout=5)
+    assert asked, "the probe actually ran"
+
+
+def test_re_check_from_another_tab_does_not_pay_for_the_probes():
+    """Eight subprocesses belong to the moment the tab is opened, not to a button on another one."""
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(0)
+    dialog._install_read = True
+
+    dialog._on_refresh()
+
+    assert dialog._install_read is False, "but it is marked stale, so opening it re-reads"

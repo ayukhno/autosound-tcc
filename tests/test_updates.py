@@ -163,3 +163,25 @@ def test_the_probe_never_raises_when_git_is_missing(monkeypatch):
 ])
 def test_version_keys(text, expected):
     assert updates._version_key(text) == expected
+
+
+def test_the_update_waits_for_this_process_before_it_replaces_it(monkeypatch):
+    """Telling somebody to close the app first was tried and was not enough: `uv` replaced the
+    package while TCC was open, then failed clearing the old `Scripts` -- Windows will not delete a
+    running executable -- and the install was left half-swapped and would not start (user, Windows
+    11, 2026-08-19). The window waits for our pid instead of asking."""
+    monkeypatch.setattr(updates.sys, "platform", "win32")
+    line = updates.tcc_install_line(pid=4242)
+    assert "Wait-Process -Id 4242" in line
+    assert line.index("Wait-Process") < line.index("uv tool install"), "wait first, then install"
+
+    monkeypatch.setattr(updates.sys, "platform", "darwin")
+    line = updates.tcc_install_line(pid=4242)
+    assert "kill -0 4242" in line
+    assert line.index("kill -0") < line.index("uv tool install")
+
+
+def test_the_wait_defaults_to_our_own_process():
+    import os
+
+    assert str(os.getpid()) in updates.tcc_install_line()

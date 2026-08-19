@@ -5,6 +5,23 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.4] — 2026-08-19 · the update waits for the app to close
+
+### Fixed
+
+- **"Update TCC" left the install unable to start.** The button opened a terminal and told the
+  person to close TCC first; the command ran immediately anyway. `uv` replaced the package, then
+  failed to clear the old `Scripts` directory — Windows will not delete a running executable —
+  and ended in `Access is denied (os error 5)` after reporting the new version as installed. What
+  was left did not start (user, Windows 11). The window now WAITS for TCC's own process to
+  disappear (`Wait-Process` on Windows, `kill -0` elsewhere) and runs `uv` after it, so the swap
+  happens on a machine where nothing holds the files. Recovery from the half-swapped state is
+  `uv tool uninstall autosound-tcc` followed by a plain install.
+- **"Re-check" now re-asks about updates too**, and does so even while the slower tool probes are
+  still running — the rows go back to "checking" and their buttons off, rather than a stale offer
+  standing over an open question. After a successful method update the row keeps what it just
+  said, because that sentence is the receipt for the press.
+
 ## [v0.1.3] — 2026-08-19 · the method's version, on the machines that have one
 
 ### Fixed
