@@ -5,7 +5,9 @@
 without working in a terminal.
 
 - **Shows the whole rig at once**: the DSP tree, crossovers, delays, gains and per-channel EQ
-- **Reads REW live**: measurements come over its API, and you can drag delay markers on the curves
+- **Reads REW live**: measurements come over its API — and the curve window predicts what the
+  drivers do TOGETHER, so a delay or an all-pass can be tried on the measured curves before
+  anything is typed into the DSP and re-swept
 - **Keeps the plan in view**: the phase you are on, what is done, what is still waiting
 - **Puts the AI in a panel**, instead of a terminal full of scrolling text
 - **Never writes to your processor**: nothing reaches the DSP unless you put it there. EQ does
@@ -83,10 +85,11 @@ can wait until after your first session.
 ## Install
 
 One line installs, updates and removes, on macOS and on Windows. It installs everything by default
-— Claude Code, the method, the app, the Gemini reviewer — shows what is already on the machine,
-lists everything it will download and where from, asks once, and then runs on its own for ten to
-twenty minutes. The one interruption comes right after that question: on a Mac that has never been
-used for programming it asks for your Mac password, once, for Apple's Command Line Tools; on
+— Claude Code, the method, the app, the Gemini reviewer, and `omp`, which is what lets the app
+offer models other than Claude — shows what is already on the machine, lists everything it will
+download and where from, asks once, and then runs on its own for ten to twenty minutes. The one
+interruption comes right after that question: on a Mac that has never been used for programming it
+asks for your Mac password, once, for Apple's Command Line Tools; on
 Windows it shows one permission dialog, for Git. At the end it signs you in, in your browser:
 Claude first (that one is required), then the reviewer and GitHub if you want them — each on
 Enter, or later.
@@ -119,14 +122,14 @@ the one thing Windows asks permission for.
 <details>
 <summary>Options, and a double-click alternative for Windows</summary>
 
-To leave something out: `--terminal` (the method only, no app), `--no-reviewer`, `--no-github`.
-On macOS they go after `bash -s --`:
+To leave something out: `--terminal` (the method only, no app), `--no-reviewer`, `--no-github`,
+`--no-omp`. On macOS they go after `bash -s --`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
 ```
 
-On Windows the same three are `-Terminal`, `-NoReviewer`, `-NoGitHub`, on this form:
+On Windows the same four are `-Terminal`, `-NoReviewer`, `-NoGitHub`, `-NoOmp`, on this form:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Terminal
@@ -277,7 +280,7 @@ cd autosound-tcc && uv venv && uv pip install -e '.[dev]'
 .venv/bin/autosound-tcc
 ```
 
-There are 875 tests: `.venv/bin/python -m pytest`.
+Run the tests with `.venv/bin/python -m pytest`.
 
 Every dependency carries an upper version bound, and a test fails if one does not. An open-ended
 requirement means that whoever installs this in six months gets whatever exists on that day.
