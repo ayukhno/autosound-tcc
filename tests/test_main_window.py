@@ -2199,3 +2199,20 @@ def test_the_curve_window_is_reused_not_rebuilt():
 
     assert window._curve_dialog is first
     first.close()
+
+
+def test_every_title_asked_for_reaches_the_curve_window_not_the_first_two():
+    """The last pair-shaped slice on the path: the window held two pickers once, and `[:2]` here
+    outlived them. The model names as many measurements as it wants looked at (a whole side is
+    four), and the chip row is where a tuner takes one off again."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    three = ["w-L_01 (sw)", "m-L_01 (sw)", "tw-L_01 (sw)"]
+
+    window._open_curves(three)
+    assert window._curve_dialog._chosen() == three
+
+    window._open_curves(three[::-1])  # re-pointed, same window, still all of them
+    assert window._curve_dialog._chosen() == three[::-1]
+    window._curve_dialog.close()

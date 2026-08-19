@@ -58,7 +58,13 @@ _KEEP: list = []
 
 
 def _dialog(*args, **kwargs) -> CurveDialog:
-    """Build a dialog and keep it alive for the run — see `_KEEP`."""
+    """Build a dialog and keep it alive for the run — see `_KEEP`.
+
+    `_app()` first: a QWidget built before the QApplication aborts the process, and which test
+    happens to run first is decided by `-k`, not by this file (found by running the bank tests
+    alone, 2026-08-19).
+    """
+    _app()
     made = CurveDialog(*args, **kwargs)
     _KEEP.append(made)
     return made
@@ -3184,3 +3190,404 @@ def test_the_ledger_delays_are_a_different_quantity_and_are_left_alone():
     assert view._channel_delays[:2] == pytest.approx([1.266, 0.500]), "untouched by any of it"
     assert view.total_delay_ms(0) == pytest.approx(1.266 + 0.69)
     assert view.total_delay_ms(1) == pytest.approx(0.500)
+
+
+# ---- an all-pass per driver (CURVE-ANALYSIS-PLAN.md step 4, SCR-050) ---------------------------
+#
+# The filter is the skill's (`core/allpass.py` → `dsp_math`), so everything below needs the
+# submodule; what is tested HERE is what the view does with one — which driver it lands on, what
+# moves and what does not, what the legend and the reading say — not the filter's own physics,
+# which `test_allpass.py` and `test_curve_sum.py` pin.
+
+_needs_skill = pytest.mark.skipif(
+    not __import__("autosound_tcc.core.vendor_loader", fromlist=["x"]).is_available(),
+    reason="rew_tool submodule not checked out",
+)
+
+
+def _pick_apf(view: CurveView, order: int, f0: float, q: float = 0.71) -> None:
+    """Dial an all-pass the way the tuner does: the combo, then the boxes."""
+    view._apf_kind.setCurrentIndex(view._apf_kind.findData(order))
+    view._apf_f0.setValue(f0)
+    if order == 2:
+        view._apf_q.setValue(q)
+
+
+@_needs_skill
+def test_the_all_pass_row_edits_the_driver_the_radio_chose():
+    """Same editing model as the delay: the radio picks WHICH driver, and both rows edit that one —
+    so "which driver am I changing" has one answer, not two."""
+    from autosound_tcc.core.allpass import Allpass
+
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    assert view._apf_f0.isEnabled() is False and view._apf_q.isEnabled() is False, "nothing chosen"
+    view.set_delay_target(1)
+
+    _pick_apf(view, 2, 1000.0, 0.71)
+
+    assert view.allpass(1) == Allpass(2, 1000.0, 0.71)
+    assert view.allpass(0) is None, "the other driver is untouched"
+    assert view._apf_f0.isEnabled() and view._apf_q.isEnabled()
+    assert view._apf_target_label.text() == "m-L_01", "the row names whose filter this is"
+
+    view.set_delay_target(0)
+    assert view._apf_kind.currentData() == 0 and view._apf_q.isEnabled() is False, "driver 0: none"
+    view.set_delay_target(1)
+    assert view._apf_kind.currentData() == 2 and view._apf_f0.value() == pytest.approx(1000.0)
+
+
+@_needs_skill
+def test_a_first_order_all_pass_has_no_q_box_to_offer():
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+
+    _pick_apf(view, 1, 80.0)
+
+    assert view.allpass().kind == "APF1" and view.allpass().q is None
+    assert view._apf_f0.isEnabled() and view._apf_q.isEnabled() is False
+
+
+@_needs_skill
+def test_on_the_phase_plot_an_all_pass_rotates_the_curve_and_on_the_magnitude_it_does_not():
+    """Unit magnitude is what makes it an all-pass: −180° exactly at f0 on the phase, and not a
+    hair of movement on the frequency response."""
+    phase = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    phase.set_delay_target(1)
+    _pick_apf(phase, 2, 1000.0, 0.71)
+    x, y = phase._shifted(1, phase._traces[1])
+    # Against the trace's OWN curve (the fixture's y is not zero), wrapped the way the plot wraps.
+    turned = (np.asarray(y) - np.asarray(phase._traces[1].y, dtype=float) + 180.0) % 360.0 - 180.0
+    at_f0 = int(np.abs(np.asarray(x) - 1000.0).argmin())
+    assert abs(abs(float(turned[at_f0])) - 180.0) < 6.0, "half a turn at f0 (the grid is 1/24 oct)"
+    assert abs(float(turned[0])) < 6.0, "and almost nothing two decades below it"
+    _x0, y0 = phase._shifted(0, phase._traces[0])
+    assert list(y0) == pytest.approx(list(phase._traces[0].y)), "the other driver did not move"
+
+    magnitude = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    magnitude.set_delay_target(1)
+    _pick_apf(magnitude, 2, 1000.0, 0.71)
+    _x1, y1 = magnitude._shifted(1, magnitude._traces[1])
+    assert list(y1) == pytest.approx(list(magnitude._traces[1].y))
+
+
+@_needs_skill
+def test_on_the_impulse_the_drawn_trace_stays_as_captured_and_the_strips_sum_carries_the_all_pass():
+    """An all-pass smears an impulse, and re-filtering the time series is a round trip through the
+    FFT this window does not make. The strip is where the joint is read, and it carries it."""
+    view = _impulse_sum_view()
+    view.set_delay_target(1)
+    before = view._shifted(1, view._traces[1])
+
+    _pick_apf(view, 2, 1000.0, 0.71)
+    view.set_sum_shown(True)
+
+    x, y = view._shifted(1, view._traces[1])
+    assert list(x) == pytest.approx(list(before[0])) and list(y) == pytest.approx(list(before[1]))
+    result = view.sum_result()
+    assert result.contributions[1].allpass is not None
+    assert result.contributions[1].allpass.label() == "APF2 1000 Hz Q 0.71"
+    at_f0 = int(np.abs(np.asarray(result.freqs_hz) - 1000.0).argmin())
+    assert result.magnitude_db[at_f0] < 80.0, "two identical drivers, one turned half round: a null"
+
+
+@_needs_skill
+def test_the_sum_follows_the_all_pass_without_going_back_to_rew():
+    """The point of the row: the joint answers while the number is being typed. Two identical
+    drivers sum +6 dB; turn one of them −180° at 1 kHz and they cancel there and only there."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    view.set_sum_shown(True)
+    assert _at(view.sum_result(), 1000.0) == pytest.approx(96.02, abs=0.01)
+    view.set_delay_target(1)
+
+    _pick_apf(view, 2, 1000.0, 0.71)
+
+    assert _at(view.sum_result(), 1000.0) < 75.0, "half a turn at f0 is a cancellation"
+    assert _at(view.sum_result(), 20.0) == pytest.approx(96.02, abs=0.05), "and nothing far away"
+
+    view._apf_kind.setCurrentIndex(0)
+    assert _at(view.sum_result(), 1000.0) == pytest.approx(96.02, abs=0.01), "off again"
+
+
+@_needs_skill
+def test_the_reading_names_the_all_pass_as_a_proposal_in_the_ledgers_words():
+    """A rotation with no filter named is a picture nobody can re-enter. Its own clause, not folded
+    into the delay's: `ta_ms` and an EQ band are typed in two different places."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    assert "all-pass" not in view.reading()
+    view.set_delay_target(1)
+
+    _pick_apf(view, 2, 250.0, 0.71)
+    reading = view.reading()
+
+    assert "m-L_01 (sw): APF2 250 Hz Q 0.71" in reading
+    assert "proposed" in reading or "пропозиц" in reading
+    assert "w-L_01" not in reading.split("APF2")[0].split(":")[-1], "the other driver is not named"
+    assert view._send_btn.isEnabled(), "worth sending on its own, no marker placed"
+    assert "APF2 250 Hz Q 0.71" in view.statement()
+
+
+@_needs_skill
+def test_the_all_pass_and_the_delay_are_two_clauses_on_the_same_driver():
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    view.set_delay_target(1)
+    view.set_delay(0.25)
+    _pick_apf(view, 1, 80.0)
+
+    reading = view.reading()
+
+    assert i18n.t("curveDelayHead") in reading and i18n.t("curveApfHead") in reading
+    assert "+0.250" in reading and "APF1 80 Hz" in reading
+
+
+@_needs_skill
+def test_the_legend_names_the_rotation_with_the_driver():
+    """A curve that has been rotated and a legend that says only the name would be a plot nobody
+    can read back into a DSP setting."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    view.set_delay_target(1)
+    view.set_delay(0.25)
+    _pick_apf(view, 2, 250.0, 0.71)
+
+    labels = [label.text for _sample, label in view._legend.items]
+
+    assert any("m-L_01 (sw)" in t and "+0.250 ms" in t and "APF2 250 Hz Q 0.71" in t for t in labels)
+    assert any(t.strip() == "w-L_01 (sw)" for t in labels), "the untouched driver is just its name"
+
+
+@_needs_skill
+def test_a_new_selection_takes_every_all_pass_off():
+    """A new selection is a new question, exactly as for the delays. (The window's bank puts a
+    driver's own filter back the moment it recognises the title; the view keeps nothing.)"""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    view.set_delay_target(1)
+    _pick_apf(view, 2, 250.0, 0.71)
+
+    view.set_traces([_fr_trace("tw-L_01 (sw)"), _fr_trace("tw-R_01 (sw)")])
+
+    assert view.allpasses()[:2] == [None, None]
+    assert view._apf_kind.currentData() == 0 and view._apf_f0.isEnabled() is False
+
+
+@_needs_skill
+def test_the_all_pass_has_its_own_signal_and_does_not_pose_as_a_delay():
+    """The window banks the two side by side per measurement; a handler that could not tell which
+    one moved would have to re-bank both on every change."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    apf_fired, delay_fired = [], []
+    view.allpassChanged.connect(lambda: apf_fired.append(1))
+    view.delayChanged.connect(lambda: delay_fired.append(1))
+
+    _pick_apf(view, 1, 80.0)
+
+    assert apf_fired and not delay_fired
+    assert view.delays() == pytest.approx([0.0, 0.0]), "no delay was invented"
+
+
+def test_an_all_pass_the_skill_cannot_compute_is_refused_on_the_row_and_the_boxes_go_back(
+    monkeypatch,
+):
+    """A filter that cannot be computed must not be accepted as if it could, or the legend would
+    name a rotation the plot does not show. The row says why, and returns to none."""
+    from autosound_tcc.core.allpass import Allpass
+
+    def _no_skill(self, freqs):
+        raise RuntimeError("no skill on this machine")
+
+    monkeypatch.setattr(Allpass, "response", _no_skill)
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+
+    _pick_apf(view, 2, 250.0, 0.71)
+
+    assert view.allpass() is None
+    assert view._apf_kind.currentData() == 0
+    assert view._apf_note.isVisibleTo(view) and "no skill on this machine" in view._apf_note.text()
+    assert "all-pass" not in view.reading()
+
+
+@_needs_skill
+def test_the_all_pass_row_survives_a_language_switch():
+    """`retranslate` rewrites the label, the none item and the tips, and nothing else moves."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("m-L_01 (sw)"))
+    _pick_apf(view, 2, 250.0, 0.71)
+    was = i18n.current_language()
+    try:
+        i18n.set_language("uk" if was != "uk" else "en")
+        view.retranslate()
+        assert view._apf_label.text() == i18n.t("curveApfLabel")
+        assert view._apf_kind.itemText(0) == i18n.t("curveApfNone")
+        assert view.allpass().label() == "APF2 250 Hz Q 0.71", "the filter itself is not translated"
+        assert i18n.t("curveApfHead") in view.reading()
+    finally:
+        i18n.set_language(was)
+        view.retranslate()
+
+
+# ---- the all-pass in the bank, beside the delay -----------------------------------------------
+
+
+@_needs_skill
+def test_an_all_pass_is_banked_with_the_driver_and_comes_back_with_it():
+    """The workflow the Advisor described — load a group, look at the sum, isolate a driver with
+    its × — loses a filter on the first × unless the bank keeps it: a driver taken off the plot and
+    put back is a new selection to the view, and the view keeps nothing across a selection."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    dialog = _dialog(["w-L_01 (sw)", "m-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)), Trace("m-L_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay_target(1)
+
+    _pick_apf(dialog._view, 2, 250.0, 0.71)
+
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(2, 250.0, 0.71)}
+    assert delay_bank.load() == {}, "no delay was invented alongside it"
+
+    # m-L comes back against a different partner: the filter is on it before anybody touches it.
+    dialog._on_curves([Trace("m-L_01 (sw)", *_impulse(4.78)), Trace("tw-L_01 (sw)", *_impulse(4.30))])
+
+    assert dialog._view.allpass(0) == Allpass(2, 250.0, 0.71), "restored onto m-L, now trace 0"
+    assert dialog._view.allpass(1) is None
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(2, 250.0, 0.71)}, "restoring banked nothing new"
+
+
+@_needs_skill
+def test_moving_a_delay_does_not_wipe_the_all_pass_and_dialling_an_all_pass_keeps_the_delay():
+    """One entry, two fields, and every write goes through the same handler — which re-banks the
+    driver's whole current state rather than one field over the other."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    dialog = _dialog(["w-L_01 (sw)", "m-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)), Trace("m-L_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay_target(1)
+    _pick_apf(dialog._view, 1, 80.0)
+
+    dialog._view.set_delay(0.26)
+
+    assert delay_bank.load() == {"m-L_01 (sw)": 0.26}
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(1, 80.0)}, "the delay did not wipe it"
+
+    _pick_apf(dialog._view, 2, 250.0, 0.71)
+
+    assert delay_bank.load() == {"m-L_01 (sw)": 0.26}, "and the filter did not wipe the delay"
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(2, 250.0, 0.71)}
+
+
+@_needs_skill
+def test_the_bank_button_counts_a_driver_once_whatever_it_carries_and_the_tip_names_the_filter():
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("w-L_01 (sw)", 0.4, allpass=Allpass(2, 250.0, 0.71))
+    delay_bank.put("m-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0))
+    every = ["w-L_01 (sw)", "m-L_01 (sw)", "tw-L_01 (sw)"]
+    dialog = _dialog(every[:2], bridge=_FakeBridge(), available=every)
+    dialog._worker.wait(4000)
+
+    dialog._render_bank()
+
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2)
+    tip = _tip(dialog._bank_btn)
+    assert "w-L_01 (sw) +0.400 APF2 250 Hz Q 0.71" in tip
+    assert "m-L_01 (sw) APF1 80 Hz" in tip
+    assert dialog._bank_ask_btn.isEnabled() and dialog._bank_clear_btn.isEnabled()
+    assert "APF1 80 Hz" in dialog._choose_actions["m-L_01 (sw)"].text()
+    assert "+0.400 ms" in dialog._choose_actions["w-L_01 (sw)"].text()
+    assert "APF2 250 Hz Q 0.71" in dialog._choose_actions["w-L_01 (sw)"].text()
+    assert dialog._choose_actions["tw-L_01 (sw)"].text() == "tw-L_01 (sw)", "untouched stays plain"
+
+
+def test_the_whole_set_goes_out_with_the_all_pass_block_and_its_own_caveat():
+    """After the delays and before the zeros: part of the proposal, in the ledger's words, with
+    the caveat that is this block's own — simulated, never checked against a summation sweep."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    text = delay_bank.as_sentence(
+        {"w-L_01 (sw)": 0.4}, 96000, i18n.t,
+        allpasses={"m-L_01 (sw)": Allpass(2, 250.0, 0.71), "w-L_01 (sw)": Allpass(1, 80.0)},
+    )
+
+    assert i18n.t("curveBankAsk") in text, "the delay head, because there is a delay"
+    assert i18n.t("curveBankApf") in text
+    assert "  m-L_01 (sw): APF2 250 Hz Q 0.71" in text and "  w-L_01 (sw): APF1 80 Hz" in text
+    assert i18n.t("curveBankApfCaveat") in text
+    assert text.index("+0.400") < text.index("APF2"), "delays first, then the all-passes"
+    assert text.rstrip().endswith(i18n.t("curveBankNotForWriting"))
+
+    delays_only = delay_bank.as_sentence({"w-L_01 (sw)": 0.4}, 96000, i18n.t)
+    assert "APF" not in delays_only and i18n.t("curveBankApf") not in delays_only
+
+    apf_only = delay_bank.as_sentence({}, 96000, i18n.t, allpasses={"m-L_01 (sw)": Allpass(1, 80.0)})
+    assert apf_only.startswith(i18n.t("curveBankAskApfOnly")), "no delay head over an empty list"
+    assert i18n.t("curveBankAsk") not in apf_only and "m-L_01 (sw): APF1 80 Hz" in apf_only
+    assert i18n.t("curveBankNotForWriting") in apf_only
+
+
+@_needs_skill
+def test_clearing_the_delays_clears_the_all_pass_too():
+    """One set, one clear (user, 2026-08-12, on why the delays and the markers clear separately:
+    the delays are a set being built up over an afternoon — and the all-pass is part of it)."""
+    from autosound_tcc.core import delay_bank
+
+    dialog = _dialog(["w-L_01 (sw)", "m-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)), Trace("m-L_01 (sw)", *_impulse(4.78))])
+    dialog._view.set_delay_target(1)
+    _pick_apf(dialog._view, 2, 250.0, 0.71)
+    dialog._view.set_delay(0.26)
+    assert delay_bank.allpasses() and delay_bank.load()
+
+    dialog._on_clear_bank()
+
+    assert delay_bank.allpasses() == {} and delay_bank.load() == {}
+    assert dialog._view.allpasses()[:2] == [None, None], "off the plot as well as out of the store"
+    assert dialog._view._apf_kind.currentData() == 0
+
+
+def test_a_zero_delay_with_an_all_pass_is_a_proposal_and_not_a_reference():
+    """`references()` names drivers on screen with no shift — the reference on some passes, an
+    untouched driver on others. A driver carrying an all-pass is neither: it has a proposal."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("m-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0))
+    delay_bank.put("w-L_01 (sw)", 0.0)
+
+    assert delay_bank.references() == ["w-L_01 (sw)"]
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(1, 80.0)}
+    assert delay_bank.seen() == {"m-L_01 (sw)", "w-L_01 (sw)"}, "both were on screen"
+
+
+def test_taking_the_all_pass_off_leaves_the_delay_and_the_entry():
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("m-L_01 (sw)", 0.3, allpass=Allpass(1, 80.0))
+    delay_bank.put("m-L_01 (sw)", 0.3, allpass=None)
+
+    assert delay_bank.allpasses() == {} and delay_bank.load() == {"m-L_01 (sw)": 0.3}
+
+
+def test_an_entry_from_before_the_field_existed_reads_back_with_no_all_pass_and_survives_a_write():
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    project_settings.set_value(
+        config.tcc_dir(), delay_bank.KEY,
+        {"w-L_01 (sw)": 0.26, "m-L_01 (sw)": {"ms": 0.4, "at": 4.78}, "sw_01 (sw)": {"ms": 0.1, "apf": "junk"}},
+    )
+
+    assert delay_bank.allpasses() == {}
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.26, "m-L_01 (sw)": 0.4, "sw_01 (sw)": 0.1}
+    delay_bank.put("m-L_01 (sw)", 0.5)
+    assert delay_bank.load()["m-L_01 (sw)"] == 0.5 and delay_bank.allpasses() == {}
+    stored = project_settings.load(config.tcc_dir())[delay_bank.KEY]
+    assert "apf" not in stored["m-L_01 (sw)"], "the key is absent, not null, when there is none"
+
+
+def test_the_bank_refuses_an_all_pass_that_is_not_one():
+    from autosound_tcc.core import delay_bank
+
+    with pytest.raises(TypeError):
+        delay_bank.put("m-L_01 (sw)", 0.3, allpass={"type": "APF2", "f": 250.0, "q": 0.7})

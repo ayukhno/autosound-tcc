@@ -365,6 +365,31 @@ T: dict[Lang, dict[str, str]] = {
         "curveShift": "delay",
         "curveShiftTip": "Hold the chosen driver back — the radio picks which one. It starts on whichever arrives FIRST, the natural choice on a first pass; negative is allowed, because on a later pass you are correcting a channel that already carries a delay. What cannot go below zero is the channel's TOTAL, and the reading says so when the ledger is known. Steps by what this DSP lets you type. Nothing is applied: the reading goes out as a proposal.",
         "curveDelayHead": "delay, to align (proposed, not applied):",
+        # The all-pass row (CURVE-ANALYSIS-PLAN.md step 4). `APF1`/`APF2` are the ledger's own
+        # names for the band type and are not translated anywhere; what is said around them is.
+        "curveApfLabel": "all-pass:",
+        "curveApfNone": "—",
+        "curveApfTip": "An all-pass for the driver the radio has chosen — the same driver the delay \
+box edits. It changes NO level and rotates the phase around f0: APF1 turns −90° at f0 (0 → −180° \
+overall), APF2 turns −180° at f0 (0 → −360°), and Q says how much of that turn happens next to f0. \
+On the frequency response the curve does not move; on the phase it rotates; on either, the \
+predicted sum (Σ) shows what that does to the joint — which is the point. On the impulse the drawn \
+trace stays as captured (an all-pass smears an impulse); the strip's sum carries it. Nothing is \
+applied: it goes out as a proposal in the reading, in the ledger's own words (APF2 250 Hz Q 0.71). \
+And an all-pass does not fill a single-driver null — only the summation of two overlapping drivers \
+can be re-tuned by rotating phase, so read it against the sum, never against one curve. The maths \
+is the skill's own (dsp_math), never a second copy here.",
+        "curveApfKindTip": "Which order. APF1: f0 alone, −90° there — the gentler quarter turn. \
+APF2: f0 and Q, −180° there — what an APF2 slot in a PEQ bank takes. Two APF1 at one f0 are one \
+APF2 with Q 0.5.",
+        "curveApfF0Tip": "The frequency the rotation is centred on. Put it where the joint is — \
+the crossover frequency between the two drivers being summed.",
+        "curveApfQTip": "How much of the 360° happens next to f0 (APF2 only). 0.71 turns over \
+about an octave and a half either side of f0; a higher Q turns faster and holds still less well \
+under the drift a real car has — the skill's own search stops at 4.",
+        "curveApfHead": "all-pass, to rotate phase (proposed, not applied):",
+        "curveApfNoMaths": "no all-pass can be simulated: the skill's filter maths could not be \
+loaded ({error})",
         "unitMs": "ms",
         "unitSmp": "smp",
         # A delay set is only defined up to a common offset — see `curve_view.proposed_delays`.
@@ -417,6 +442,16 @@ implies, whether any of it looks like a measurement error rather than a tuning, 
 would check next. These are readings off the curves, not a target — aligning arrivals exactly \
 has not by itself fixed stage accuracy in this car, so treat them as evidence and say what you \
 would change and why. Nothing here is applied.",
+        # The all-pass half of the same set (`delay_bank.as_sentence`, `allpasses=`). Its own head
+        # when there are no delays in the set at all, and its own caveat: the effect was simulated
+        # on the sweeps in hand, never checked against a summation sweep.
+        "curveBankAskApfOnly": "All-pass filters I have dialled on the measured curves, for \
+ANALYSIS ONLY — do not write anything.",
+        "curveBankApf": "All-pass, dialled per driver while watching the predicted sum (proposed, \
+not applied; unit magnitude, phase only; APF1 = −90° at f0, APF2 = −180° at f0):",
+        "curveBankApfCaveat": "Simulated on the sweeps in hand by rotating the measured phase; NOT \
+verified by a summation sweep. Say whether the rotation fixes the joint or only moves the problem \
+(and drags the timing above f0 with it), and what capture would confirm it.",
         "curveNoMarkers": "Drag a marker onto the point you mean.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
@@ -890,6 +925,28 @@ Choose sweeps (sw) above to read this.",
         "curveShift": "затримка",
         "curveShiftTip": "Притримати обраний драйвер — радіокнопка обирає, який саме. Починає з того, що приходить ПЕРШИМ (природний вибір на першому проході); відʼємне дозволено, бо на наступних проходах ви правите канал, у якому затримка вже є. Нижче нуля не може йти СУМА на каналі — і прочитання це скаже, коли реєстр відомий. Крок — той, який дає ввести цей ДСП. Нічого не застосовується: прочитання йде як пропозиція.",
         "curveDelayHead": "затримки для вирівнювання (пропозиція, не застосовано):",
+        "curveApfLabel": "all-pass:",
+        "curveApfNone": "—",
+        "curveApfTip": "All-pass для драйвера, якого обрала радіокнопка — того самого, що править \
+поле затримки. Він НЕ змінює рівень і обертає фазу навколо f0: APF1 повертає на −90° на f0 (загалом \
+0 → −180°), APF2 — на −180° на f0 (0 → −360°), а Q каже, яка частка цього оберту припадає на \
+околицю f0. На АЧХ крива не рухається; на фазі — обертається; і там, і там прогнозована сума (Σ) \
+показує, що це робить зі стиком — у цьому й суть. На імпульсі намальована крива лишається як \
+виміряна (all-pass розмазує імпульс); суму зі зсувом несе смуга внизу. Нічого не застосовується: \
+воно йде як пропозиція в показанні, словами реєстру (APF2 250 Hz Q 0.71). І all-pass не заповнює \
+провал одного драйвера — поворотом фази перелаштовується лише сума двох драйверів, що \
+перекриваються, тож читай його по сумі, а не по одній кривій. Математика — власна скілова \
+(dsp_math), тут нема її другої копії.",
+        "curveApfKindTip": "Який порядок. APF1: лише f0, там −90° — мʼякша чверть оберту. APF2: f0 \
+і Q, там −180° — те, що приймає слот APF2 у банку PEQ. Два APF1 на одній f0 — це один APF2 з Q 0.5.",
+        "curveApfF0Tip": "Частота, навколо якої обертається фаза. Став туди, де стик — на частоту \
+кросовера між двома драйверами, що сумуються.",
+        "curveApfQTip": "Яка частка з 360° припадає на околицю f0 (лише APF2). 0.71 обертає \
+приблизно на півтори октави в обидва боки від f0; вищий Q обертає швидше й гірше тримається під \
+дрейфом, який є в реальному авто — власний пошук скіла зупиняється на 4.",
+        "curveApfHead": "all-pass для повороту фази (пропозиція, не застосовано):",
+        "curveApfNoMaths": "all-pass не змоделювати: не вдалося завантажити математику фільтрів \
+скіла ({error})",
         "unitMs": "мс",
         "unitSmp": "вибірок",
         "curveDelayRelative": "Відносно {name}, який лишається без затримки: вимірювались лише \
@@ -934,6 +991,13 @@ Choose sweeps (sw) above to read this.",
 далі. Це прочитання з кривих, а не ціль: точне збігання приходів саме по собі сцену в цій машині \
 не виправляло — тож сприймай їх як свідчення і скажи, що б ти змінив(ла) і чому. Нічого з цього \
 не застосовано.",
+        "curveBankAskApfOnly": "All-pass фільтри, які я виставив(ла) на виміряних кривих, ЛИШЕ НА \
+АНАЛІЗ — нікуди їх не записуй.",
+        "curveBankApf": "All-pass по драйверах, виставлені за прогнозованою сумою (пропозиція, не \
+застосовано; рівень не змінює, лише фазу; APF1 = −90° на f0, APF2 = −180° на f0):",
+        "curveBankApfCaveat": "Змодельовано на наявних свіпах поворотом виміряної фази; НЕ \
+перевірено заміром сумування. Скажи, чи цей поворот лагодить стик, чи лише переносить проблему (і \
+тягне за собою тайминг вище f0), і який замір це підтвердив би.",
         "curveNoMarkers": "Перетягни маркер на точку, яку маєш на увазі.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",

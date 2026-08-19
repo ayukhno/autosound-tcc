@@ -49,6 +49,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from autosound_tcc.core.allpass import Allpass
+
 
 class CurveSumError(ValueError):
     """A sum that must not be drawn, with the reason in words the window can show.
@@ -86,8 +88,11 @@ class SumInput:
     """One measured driver as REW hands it over, plus what the tuner is proposing to do to it.
 
     `phase_deg` is WRAPPED — `get_fr` returns it that way — and `None` for a capture that has none.
-    `delay_ms`, `gain_db` and `invert` are the PROPOSAL: applied to the measured curve here instead
-    of being typed into the DSP and re-measured, which is the whole point.
+    `delay_ms`, `gain_db`, `invert` and `allpass` are the PROPOSAL: applied to the measured curve
+    here instead of being typed into the DSP and re-measured, which is the whole point. The
+    all-pass is the one of the four that is not arithmetic on the numbers already in hand — it is
+    a filter, and the filter is the skill's (`core/allpass.py`, SCR-050): unit magnitude, so it
+    moves nothing on a magnitude plot and everything on the sum.
 
     `config_version` and `method` are what the caller parsed off the title (`_N` and `sw`/`rta`,
     `naming-and-structure.md` §3). Both optional, because a REW list also holds imports, room-sim
@@ -110,6 +115,7 @@ class SumInput:
     start_time_s: Optional[float] = None
     config_version: Optional[str] = None
     method: Optional[str] = None
+    allpass: Optional[Allpass] = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -159,6 +165,10 @@ class Contribution:
     start_time_s: Optional[float]
     #: The input's OWN measured span, before the grid was chosen. What the sum had to work with.
     measured_hz: tuple[float, float]
+    #: The all-pass this driver entered the sum through, or None. Carried so the sentence can name
+    #: it beside the delay it was dialled with — a rotation with no filter named is a picture
+    #: nobody can re-enter.
+    allpass: Optional[Allpass] = None
 
 
 @dataclass(frozen=True, eq=False)
@@ -222,6 +232,10 @@ class SumResult:
             parts = [f"{c.delay_ms:+.3f} ms", f"{c.gain_db:+.2f} dB"]
             if c.invert:
                 parts.append("POLARITY INVERTED")
+            if c.allpass is not None:
+                # In the ledger's own vocabulary (`APF2 250 Hz Q 0.71`), so what the model reads
+                # here is what it would propose there.
+                parts.append(c.allpass.label())
             lines.append(f"  {c.name}: " + ", ".join(parts))
 
         where_hz, depth_db = self.deepest_null()
@@ -320,9 +334,10 @@ def sum_responses(
     """Predict the acoustic sum of `inputs`, on `grid` or on the one `common_grid` picks.
 
     Per input, `H_i(f) = 10**((mag_i + gain_i)/20) * exp(1j*(phi_i − 2πf·delay_i))`, negated when
-    `invert`; the answer is `|Σ H_i|` back in dB. Raises `CurveSumError` — never returns a partial
-    curve — when the set cannot be summed at all: no phase, no shared frequencies, an empty
-    selection. A set that CAN be summed but is not one round is computed and labelled; see
+    `invert` and multiplied by the all-pass when one is proposed; the answer is `|Σ H_i|` back in
+    dB. Raises `CurveSumError` — never returns a partial curve — when the set cannot be summed at
+    all: no phase, no shared frequencies, an empty selection, an all-pass with no skill to compute
+    it. A set that CAN be summed but is not one round is computed and labelled; see
     `SumResult.summability`.
     """
     verdict = summability(inputs)
@@ -350,6 +365,22 @@ def sum_responses(
         if p.inp.invert:
             response = -response
             phase = phase + np.pi  # the reported curve only; −H and a 180° shift are one thing
+        if p.inp.allpass is not None:
+            # On the RESULT grid, not on the input's own and then resampled: the filter is a
+            # closed form and can be stated exactly wherever the sum is stated, while a resampled
+            # rotation would be one more interpolation between two samples of a curve that turns
+            # fast near f0. Its phase goes into the reported curve the same way the delay ramp
+            # did — continuous, so the slope a joint is read for survives — and the magnitude is
+            # untouched by construction, which is what makes it an all-pass.
+            try:
+                rotation = p.inp.allpass.response(freqs)
+            except Exception as exc:  # noqa: BLE001 — no skill, or one without the function
+                raise CurveSumError(
+                    f"{p.inp.name}: cannot apply {p.inp.allpass.label()} — the skill's filter "
+                    f"maths could not be loaded ({exc}). Sum without it, or install the skill."
+                ) from exc
+            response = response * rotation
+            phase = phase + np.unwrap(np.angle(rotation))
         contributions.append(
             Contribution(
                 name=p.inp.name,
@@ -361,6 +392,7 @@ def sum_responses(
                 gain_db=float(p.inp.gain_db),
                 start_time_s=p.inp.start_time_s,
                 measured_hz=(float(p.freqs[0]), float(p.freqs[-1])),
+                allpass=p.inp.allpass,
             )
         )
 

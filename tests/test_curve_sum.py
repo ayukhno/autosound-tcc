@@ -598,3 +598,125 @@ def test_a_pure_delay_survives_resampling_where_a_real_imaginary_interpolation_w
     original = np.power(10.0, 90.0 / 20.0) * np.exp(1j * np.deg2rad(continuous_deg))
     chord = np.interp(between, fine, original.real) + 1j * np.interp(between, fine, original.imag)
     assert np.min(20.0 * np.log10(np.abs(chord)) - 90.0) < -0.3
+
+
+# ---- an all-pass on one driver (CURVE-ANALYSIS-PLAN.md step 4, SCR-050) --------------------------
+#
+# The filter is the skill's (`core/allpass.py` reaches `dsp_math` through `vendor_loader`), so these
+# need the submodule. What they pin is what the SUM does with a rotation, in closed form: an APF2 is
+# −180° exactly at f0, an APF1 is −90° there, and neither moves a level anywhere.
+
+_needs_skill = pytest.mark.skipif(
+    not __import__("autosound_tcc.core.vendor_loader", fromlist=["x"]).is_available(),
+    reason="rew_tool submodule not checked out",
+)
+
+
+def _apf(order: int, f0: float, q=None):
+    from autosound_tcc.core.allpass import Allpass
+
+    return Allpass(order, f0, q)
+
+
+@_needs_skill
+def test_a_second_order_all_pass_at_f0_turns_one_of_two_identical_drivers_into_its_own_null():
+    """−180° exactly at f0, so the pair that summed +6 dB cancels there and nowhere else — the
+    picture a tuner rotates a joint by. Far from f0 the rotation is a few degrees and the +6 dB
+    survives to within a hundredth."""
+    grid = np.geomspace(20.0, 20000.0, 600)
+    pair = [_flat("w-L_01 (sw)", grid), _flat("m-L_01 (sw)", grid, allpass=_apf(2, 1000.0, 0.7))]
+
+    result = curve_sum.sum_responses(pair, grid=np.array([20.0, 1000.0, 20000.0]))
+
+    at_20, at_f0, at_20k = result.magnitude_db
+    assert at_f0 < -100.0, "a synthetic pair cancels exactly at f0"
+    assert at_20 == pytest.approx(90.0 + _PLUS_TWO, abs=0.02)
+    assert at_20k == pytest.approx(90.0 + _PLUS_TWO, abs=0.05)
+    where_hz, depth_db = result.deepest_null()
+    assert where_hz == pytest.approx(1000.0)
+    assert depth_db < -100.0
+
+
+@_needs_skill
+def test_a_first_order_all_pass_at_f0_is_a_quarter_turn_so_the_pair_lands_three_db_up():
+    """|1 + e^{−jπ/2}| = √2: +3.01 dB, and it is the reading that separates the two orders."""
+    grid = np.geomspace(20.0, 20000.0, 600)
+    pair = [_flat("w-L_01 (sw)", grid), _flat("m-L_01 (sw)", grid, allpass=_apf(1, 1000.0))]
+
+    result = curve_sum.sum_responses(pair, grid=np.array([1000.0]))
+
+    assert result.magnitude_db[0] == pytest.approx(90.0 + 20.0 * np.log10(np.sqrt(2.0)), abs=1e-6)
+
+
+@_needs_skill
+def test_an_all_pass_repairs_the_null_a_delay_left_which_is_what_it_is_for():
+    """Two identical drivers 0.5 ms apart cancel at 1 kHz (`test_a_pure_delay_produces_the_textbook
+    _comb`). An APF2 at 1 kHz on the delayed driver adds the other half turn and the pair is back
+    to +6 dB there — the joint fixed without touching the arrival. This is the whole reason the
+    method aligns joints with an all-pass rather than by shifting raw delay."""
+    grid = np.geomspace(20.0, 20000.0, 600)
+    delayed_only = [_flat("w-L_01 (sw)", grid), _flat("m-L_01 (sw)", grid, delay_ms=0.5)]
+    repaired = [
+        _flat("w-L_01 (sw)", grid),
+        _flat("m-L_01 (sw)", grid, delay_ms=0.5, allpass=_apf(2, 1000.0, 0.7)),
+    ]
+
+    before = curve_sum.sum_responses(delayed_only, grid=np.array([1000.0])).magnitude_db[0]
+    after = curve_sum.sum_responses(repaired, grid=np.array([1000.0])).magnitude_db[0]
+
+    assert before < -60.0, "the comb's first null"
+    assert after == pytest.approx(90.0 + _PLUS_TWO, abs=1e-6), "and the all-pass closes it"
+
+
+@_needs_skill
+def test_an_all_pass_changes_no_level_and_its_rotation_is_reported_continuous():
+    """Unit magnitude by construction: a lone driver with an all-pass sums to its own level
+    everywhere. Its reported phase is the filter's — −180° at f0, continuous, no wrap step — because
+    a joint's phase plot is read for its slope."""
+    grid = np.geomspace(20.0, 20000.0, 600)
+
+    result = curve_sum.sum_responses([_flat("m-L_01 (sw)", grid, allpass=_apf(2, 1000.0, 4.0))])
+
+    assert np.allclose(result.magnitude_db, 90.0, atol=1e-9)
+    (only,) = result.contributions
+    assert only.allpass is not None and only.allpass.label() == "APF2 1000 Hz Q 4.00"
+    nearest = int(np.abs(result.freqs_hz - 1000.0).argmin())
+    assert only.phase_deg[nearest] == pytest.approx(-180.0, abs=5.0)
+    assert np.max(np.abs(np.diff(only.phase_deg))) < 45.0, "even at Q 4 nothing wraps"
+    assert only.phase_deg[0] > -10.0 and only.phase_deg[-1] < -350.0
+
+
+@_needs_skill
+def test_the_all_pass_is_named_in_the_sentence_beside_the_delay_it_was_dialled_with():
+    """A rotation with no filter named is a picture nobody can re-enter. In the ledger's own
+    vocabulary, so what the model reads here is what it would propose there."""
+    grid = np.geomspace(20.0, 20000.0, 600)
+    pair = [
+        _flat("w-L_01 (sw)", grid, config_version="1", method="sw"),
+        _flat("m-L_01 (sw)", grid, delay_ms=0.25, allpass=_apf(2, 250.0, 0.71),
+              config_version="1", method="sw"),
+    ]
+
+    sentence = curve_sum.sum_responses(pair).as_sentence()
+
+    assert "m-L_01 (sw): +0.250 ms, +0.00 dB, APF2 250 Hz Q 0.71" in sentence
+    assert "w-L_01 (sw): +0.000 ms, +0.00 dB" in sentence
+    assert "APF" not in sentence.split("w-L_01 (sw):")[1].split("\n")[0]
+
+
+def test_an_all_pass_the_skill_cannot_compute_is_a_refusal_that_names_the_driver(monkeypatch):
+    """A sum that quietly left the all-pass out would be the sum of a different proposal."""
+    from autosound_tcc.core.allpass import Allpass
+
+    def _no_skill(self, freqs):
+        raise RuntimeError("no skill on this machine")
+
+    monkeypatch.setattr(Allpass, "response", _no_skill)
+    grid = np.geomspace(20.0, 20000.0, 600)
+    pair = [_flat("w-L_01 (sw)", grid), _flat("m-L_01 (sw)", grid, allpass=Allpass(2, 1000.0, 0.7))]
+
+    with pytest.raises(curve_sum.CurveSumError) as caught:
+        curve_sum.sum_responses(pair)
+
+    assert "m-L_01 (sw)" in str(caught.value) and "APF2 1000 Hz Q 0.70" in str(caught.value)
+    assert "no skill on this machine" in str(caught.value)

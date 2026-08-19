@@ -47,7 +47,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import allpass as allpass_mod
 from autosound_tcc.core import curve_sum
+from autosound_tcc.core.allpass import Allpass, AllpassError
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -132,6 +134,11 @@ _SUM_FLOOR_DB = 60.0
 #: Fallback delay step, in ms, when no profile has been read. What DSPs seen so far let you TYPE;
 #: the hardware resolves in whole samples, which is a different number — see `set_resolution`.
 _DEFAULT_STEP_MS = 0.01
+#: Where the all-pass's `f0` box opens. A number the tuner will type over, so only its ORDER OF
+#: MAGNITUDE matters: a woofer↔mid joint, the one an all-pass is most often dialled on. Kept from one
+#: driver to the next within a window rather than reset, because the joint being worked on is the
+#: same joint from either side of it.
+_DEFAULT_APF_F0_HZ = 250.0
 #: How far the Σ toggle sits from the corner of the plot AREA, in pixels. Inside the axes, over
 #: the data, at the end furthest from the legend — which is anchored to the top RIGHT, so the pill
 #: naming each driver and its delay is never covered.
@@ -535,6 +542,10 @@ class CurveView(QWidget):
     #: order to sum it — and the alternative was the dialog polling `sum_shown()` on a timer or
     #: reaching into the button.
     sumToggled = Signal(bool)
+    #: An all-pass was set on, changed on, or taken off a trace. Its own signal and not a second
+    #: meaning of `delayChanged`: the window banks the two side by side per measurement, and a
+    #: handler that could not tell which one moved would have to re-bank both on every change.
+    allpassChanged = Signal()
 
     def __init__(self, x_label: str = "ms", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -856,6 +867,85 @@ class CurveView(QWidget):
         self._action_row = row
         layout.addLayout(row)
 
+        # An all-pass for the driver the radio has chosen (CURVE-ANALYSIS-PLAN.md step 4, the
+        # fourth of the user's four asks of 2026-08-18). A row of its own under the delay's rather
+        # than three more controls squeezed into that one, which is full at two drivers and over
+        # at seven. Same editing model as the delay, deliberately: the radios pick WHICH driver,
+        # and both rows edit that one — so "which driver am I changing" has one answer, not two.
+        #
+        # What it is for: an all-pass changes no level and rotates the phase around `f0`, which is
+        # how the method aligns a crossover joint without moving the driver's every arrival
+        # (`phase_2_eq.md`). Until now the only way to see what one would do was to type it into
+        # the DSP, re-sweep, and look; here it is applied to the measured trace and the predicted
+        # sum answers while the number is being typed. The filter is the skill's own
+        # (`core/allpass.py` → `dsp_math`), never a copy here (SCR-050).
+        apf_row = QHBoxLayout()
+        apf_row.setContentsMargins(2, 0, 2, 0)
+        apf_row.setSpacing(6)
+        self._apf_label = QLabel(i18n.t("curveApfLabel"))
+        self._apf_label.setProperty("class", "phead-sub")
+        attach_tip(self._apf_label, tip_html(i18n.t("curveApfTip")))
+        apf_row.addWidget(self._apf_label)
+        # The driver being edited, named and in its own colour: this row sits a line away from the
+        # radio that chose it, and "which one is this changing" must not need a glance upward.
+        # `.curve-chip-name` because that is exactly what it is — a trace's name in the trace's
+        # colour, the way the selection row names one.
+        self._apf_target_label = QLabel("")
+        self._apf_target_label.setProperty("class", "curve-chip-name")
+        apf_row.addWidget(self._apf_target_label)
+        # Which order, where, and — second order only — how sharp. That is the whole filter.
+        self._apf_kind = QComboBox()
+        self._apf_kind.setProperty("class", "mini-select")
+        self._apf_kind.setFixedWidth(84)
+        self._apf_kind.addItem(i18n.t("curveApfNone"), 0)
+        self._apf_kind.addItem(allpass_mod.APF1, 1)
+        self._apf_kind.addItem(allpass_mod.APF2, 2)
+        attach_tip(self._apf_kind, tip_html(i18n.t("curveApfKindTip")))
+        self._apf_kind.currentIndexChanged.connect(self._on_apf_control)
+        apf_row.addWidget(self._apf_kind)
+        self._apf_f0_label = QLabel("f0")
+        self._apf_f0_label.setProperty("class", "phead-sub")
+        apf_row.addWidget(self._apf_f0_label)
+        self._apf_f0 = QDoubleSpinBox()
+        self._apf_f0.setProperty("class", "mini-select")
+        self._apf_f0.setDecimals(1)
+        self._apf_f0.setRange(*allpass_mod.F0_RANGE_HZ)
+        self._apf_f0.setSingleStep(1.0)
+        self._apf_f0.setAccelerated(True)
+        self._apf_f0.setSuffix(" Hz")
+        self._apf_f0.setValue(_DEFAULT_APF_F0_HZ)
+        self._apf_f0.setFixedWidth(104)
+        # C locale, like the delay box beside it: one window, one decimal separator.
+        self._apf_f0.setLocale(QLocale(QLocale.Language.C))
+        self._apf_f0.valueChanged.connect(self._on_apf_control)
+        attach_tip(self._apf_f0, tip_html(i18n.t("curveApfF0Tip")))
+        apf_row.addWidget(self._apf_f0)
+        self._apf_q_label = QLabel("Q")
+        self._apf_q_label.setProperty("class", "phead-sub")
+        apf_row.addWidget(self._apf_q_label)
+        self._apf_q = QDoubleSpinBox()
+        self._apf_q.setProperty("class", "mini-select")
+        self._apf_q.setDecimals(2)
+        self._apf_q.setRange(*allpass_mod.Q_RANGE)
+        self._apf_q.setSingleStep(0.05)
+        self._apf_q.setAccelerated(True)
+        self._apf_q.setValue(allpass_mod.DEFAULT_Q)
+        self._apf_q.setFixedWidth(72)
+        self._apf_q.setLocale(QLocale(QLocale.Language.C))
+        self._apf_q.valueChanged.connect(self._on_apf_control)
+        attach_tip(self._apf_q, tip_html(i18n.t("curveApfQTip")))
+        apf_row.addWidget(self._apf_q)
+        # Why a filter was NOT accepted, when the skill's maths could not be reached for it. Empty
+        # and hidden in the ordinary case; a row that grew a warning label for a case that needs
+        # a broken install would be a row saying nothing most of the time.
+        self._apf_note = QLabel("")
+        self._apf_note.setProperty("class", "phead-sub")
+        self._apf_note.setVisible(False)
+        apf_row.addWidget(self._apf_note)
+        apf_row.addStretch(1)
+        self._apf_row = apf_row
+        layout.addLayout(apf_row)
+
         self._detail_range: Optional[tuple[float, float]] = None
         self._traces: list[Trace] = []
         self._markers: list[pg.InfiniteLine] = []
@@ -868,6 +958,12 @@ class CurveView(QWidget):
         #: 2026-08-12), because it moved the amount to the other curve instead of leaving each
         #: driver its own. The radio now chooses WHICH DRIVER YOU ARE EDITING; both keep theirs.
         self._delays = [0.0, 0.0]
+        #: One all-pass per TRACE, or None — the same shape as `_delays` and for the same reason:
+        #: it is a proposal about one driver, and the radio says which one is being edited.
+        self._allpasses: list[Optional[Allpass]] = [None, None]
+        #: Whether the APF controls are being written FROM the model rather than by the tuner —
+        #: `_sync_apf_controls` sets three widgets, each of which would otherwise answer back.
+        self._syncing_apf = False
         #: What each channel is ALREADY set to on the DSP, when the caller knows. `None` means
         #: unknown, and unknown must never be rendered as zero: "this channel sits at 0.0" and
         #: "nobody told me" lead to opposite conclusions about a −0.15 ms proposal.
@@ -889,6 +985,8 @@ class CurveView(QWidget):
         # `_update_guides_button`, which nothing called until a theme switch or the first press.
         self._update_guides_button()
         self._update_link_button()
+        # ...and the all-pass boxes into theirs: nothing chosen, so f0 and Q are shut.
+        self._sync_apf_controls()
 
     def _place_sum_button(self, *_args) -> None:
         """Keep the Σ toggle in the plot AREA's top-left corner — inside the axes, not over them.
@@ -1042,6 +1140,16 @@ class CurveView(QWidget):
             if menu is not None and hasattr(menu, "setParent"):
                 try:
                     menu.setParent(self)
+                    # `setParent` resets a QMenu's window flags, so it stops being a popup and
+                    # becomes an ordinary child widget — 640×480, at (0, 0), and shown WITH its
+                    # parent unless it has been hidden explicitly. The main plot's one is buried
+                    # under the splitter, which is parented later; the strip's is parented last
+                    # of all, and when the strip is built before the window is shown (the sum
+                    # switched on while the window is hidden) it comes up as a black rectangle
+                    # over the plot (seen in an offscreen render, 2026-08-19). Hidden explicitly,
+                    # once, here — an empty menu with no window flags has nothing to show anyway.
+                    if hasattr(menu, "hide"):
+                        menu.hide()
                 except (RuntimeError, TypeError):  # noqa: PERF203 — one-time, at construction
                     pass
 
@@ -1318,27 +1426,155 @@ class CurveView(QWidget):
             blocked = box.blockSignals(True)
             box.setValue(self._shift_ms)
             box.blockSignals(blocked)
+        # The all-pass boxes follow the same radio: they show THIS driver's filter now.
+        self._sync_apf_controls()
         self._render_readout()
         self.delayChanged.emit()
 
     def delay_target(self) -> int:
         return self._shift_target
 
+    # ---- an all-pass per driver (CURVE-ANALYSIS-PLAN.md step 4) ------------
+
+    def set_allpass(self, ap: Optional[Allpass], index: Optional[int] = None) -> None:
+        """Put an all-pass on trace `index` (the chosen driver by default), or take it off.
+
+        Applied to the measured curve rather than to the DSP: on the phase plot the trace rotates
+        around `f0`, on the frequency response it does not move (unit magnitude — that is what
+        makes it an all-pass), and on either the predicted sum answers at once. On the impulse the
+        DRAWN trace stays as captured — an all-pass smears an impulse and re-filtering the time
+        series is a round trip through the FFT this window does not make — while the strip's sum
+        carries it, which is where the joint is read anyway.
+
+        Probed before it is kept: the filter is the skill's, and a filter that cannot be computed
+        must not be accepted as if it could, or the legend would name a rotation the plot does not
+        show. Raises `AllpassError` with the reason; the control handler shows it on the row.
+        """
+        at = self._shift_target if index is None else int(index)
+        if not (0 <= at < len(self._allpasses)):
+            return
+        if ap is not None:
+            try:
+                ap.response(np.array([ap.f0_hz]))
+            except Exception as exc:  # noqa: BLE001 — no skill, or one without the function
+                raise AllpassError(i18n.t("curveApfNoMaths").format(error=exc)) from exc
+        self._allpasses[at] = ap
+        if at == self._shift_target:
+            self._sync_apf_controls()
+        if self._traces:
+            self.set_traces(self._traces)
+        self._render_readout()
+        self.allpassChanged.emit()
+
+    def allpass(self, index: Optional[int] = None) -> Optional[Allpass]:
+        """The all-pass on trace `index` (the chosen driver by default), or None."""
+        at = self._shift_target if index is None else int(index)
+        return self._allpasses[at] if 0 <= at < len(self._allpasses) else None
+
+    def allpasses(self) -> list:
+        """Every driver's all-pass, in trace order — None where there is none."""
+        return list(self._allpasses)
+
+    def _on_apf_control(self, *_args) -> None:
+        """One of the three APF boxes changed under the tuner's hand: rebuild the filter from all
+        three and put it on the chosen driver. Ignored while `_sync_apf_controls` is the writer."""
+        if self._syncing_apf:
+            return
+        kind = self._apf_kind.currentData()
+        try:
+            if not kind:
+                self.set_allpass(None)
+            elif int(kind) == 1:
+                self.set_allpass(Allpass(1, self._apf_f0.value()))
+            else:
+                self.set_allpass(Allpass(2, self._apf_f0.value(), self._apf_q.value()))
+        except AllpassError as exc:
+            # The row says why, and goes back to "none" so the picture and the boxes agree.
+            self._apf_note.setText(str(exc))
+            self._apf_note.setVisible(True)
+            _restyle(self._apf_note, f"color: {current_theme().warn};")
+            self._syncing_apf = True
+            try:
+                self._apf_kind.setCurrentIndex(0)
+            finally:
+                self._syncing_apf = False
+            self._sync_apf_controls()
+            return
+        self._apf_note.setVisible(False)
+
+    def _sync_apf_controls(self) -> None:
+        """Make the three boxes and the name label say what the chosen driver carries.
+
+        The boxes are only ever written from here when the model changes under them — a new
+        target, a new selection, a value set in code — so a tuner mid-typing is never overwritten
+        by their own keystroke coming back through the model.
+        """
+        kind_box = getattr(self, "_apf_kind", None)
+        if kind_box is None:
+            return
+        ap = self.allpass()
+        self._syncing_apf = True
+        try:
+            kind_box.setCurrentIndex(max(0, kind_box.findData(0 if ap is None else ap.order)))
+            if ap is not None:
+                self._apf_f0.setValue(ap.f0_hz)
+                if ap.q is not None:
+                    self._apf_q.setValue(ap.q)
+            self._apf_f0.setEnabled(ap is not None)
+            self._apf_q.setEnabled(ap is not None and ap.order == 2)
+            self._apf_f0_label.setEnabled(ap is not None)
+            self._apf_q_label.setEnabled(ap is not None and ap.order == 2)
+        finally:
+            self._syncing_apf = False
+        # The driver's name, in its colour, so the row says whose filter this is.
+        label = self._apf_target_label
+        if self._shift_target < len(self._traces):
+            name = self._traces[self._shift_target].name.split(" ")[0]
+            label.setText(name)
+            label.setStyleSheet(
+                f"QLabel {{ color: {colour_of(trace_token(self._shift_target)).name()}; }}"
+            )
+            label.setVisible(True)
+        else:
+            label.setText("")
+            label.setVisible(False)
+
+    def _rotation_deg(self, index: int, freqs_hz) -> Optional[np.ndarray]:
+        """The all-pass on trace `index` as wrapped degrees on `freqs_hz`, or None when none.
+
+        Wrapped is fine here and only here: `_shifted` re-wraps the whole phase curve into ±180
+        after adding it, so a continuous rotation and a wrapped one draw the same picture.
+        """
+        ap = self._allpasses[index] if index < len(self._allpasses) else None
+        if ap is None:
+            return None
+        try:
+            return np.degrees(np.angle(ap.response(np.asarray(freqs_hz, dtype=float))))
+        except Exception:  # noqa: BLE001 — cannot happen after `set_allpass` probed it
+            return None
+
     def _shifted(self, index: int, trace: "Trace"):
-        """`(x, y)` for trace `index` with the current delay applied, in the plot's own units."""
+        """`(x, y)` for trace `index` with the current delay and all-pass applied, in the plot's
+        own units."""
         x = np.asarray(trace.x, dtype=float)
         y = np.asarray(trace.y, dtype=float)
         delay = self._delays[index] if index < len(self._delays) else 0.0
-        if not delay:
+        rotated = index < len(self._allpasses) and self._allpasses[index] is not None
+        if not delay and not rotated:
             return x, y
         if self._unit == "ms":
-            return x + delay, y
+            # The all-pass does not move the drawn impulse — see `set_allpass`.
+            return (x + delay) if delay else x, y
         if self._y_unit == "°":
-            # Degrees per hertz for this delay, then wrapped back into ±180 so the curve stays on
-            # the axis it is drawn on rather than walking off it.
+            # Degrees per hertz for this delay, plus the all-pass's own rotation at each hertz,
+            # then wrapped back into ±180 so the curve stays on the axis it is drawn on rather
+            # than walking off it.
             shifted = y - 360.0 * x * (delay / 1000.0)
+            rotation = self._rotation_deg(index, x)
+            if rotation is not None:
+                shifted = shifted + rotation
             return x, (shifted + 180.0) % 360.0 - 180.0
-        return x, y  # a magnitude response does not move when you delay it
+        return x, y  # a magnitude response moves for neither a delay nor an all-pass
 
     def _arrival_of(self, index: int):
         """Where trace `index` arrives as CAPTURED, by its largest peak. Only meaningful on an
@@ -1384,11 +1620,14 @@ class CurveView(QWidget):
         self._traces = list(traces)
         self._ensure_target_buttons(len(self._traces))
         if first_time:
-            # A new selection is a new question: every delay goes back to zero, the radio points at
-            # whichever of these arrives first, and the cross modes go back to comparing the first
-            # two — the pair chosen out of the last selection was about drivers that may not even
-            # be on screen now.
+            # A new selection is a new question: every delay goes back to zero and every all-pass
+            # comes off, the radio points at whichever of these arrives first, and the cross modes
+            # go back to comparing the first two — the pair chosen out of the last selection was
+            # about drivers that may not even be on screen now. (The window's bank puts a driver's
+            # own delay and all-pass back the moment it recognises the title; this view keeps
+            # nothing across a selection.)
             self._delays = [0.0] * max(len(self._traces), 2)
+            self._allpasses = [None] * max(len(self._traces), 2)
             self._channel_delays = [None] * max(len(self._traces), 2)
             self._cross_indices = (0, 1)
             self._shift_target = self._default_delay_target(self._traces)
@@ -1423,19 +1662,24 @@ class CurveView(QWidget):
             # Arrays, not Python lists: pyqtgraph converts a list element by element, and a list
             # comprehension over 262 144 floats had already been paid for upstream.
             x, y = self._shifted(index, trace)
-            label = trace.name
+            # The legend names the proposal with the driver: its delay, its all-pass, or both. A
+            # curve that has been rotated and a legend that says only the name would be a plot
+            # nobody can read back into a DSP setting.
             delay = self._delays[index] if index < len(self._delays) else 0.0
-            if delay:
-                label = f"{trace.name}  {delay:+.3f} ms"
+            ap = self._allpasses[index] if index < len(self._allpasses) else None
+            bits = ([f"{delay:+.3f} ms"] if delay else []) + ([ap.label()] if ap else [])
+            label = f"{trace.name}  " + "  ".join(bits) if bits else trace.name
             self._plot.plot(
                 x, y, pen=pg.mkPen(colour_of(trace_token(index)), width=1.0), name=label
             )
         for line in self._markers:
             self._plot.addItem(line)
         self._sync_cross_combos()
+        self._sync_apf_controls()
         self._render_crossings()
-        # Every delay change comes back through here (`set_delay` re-sets the same traces), which
-        # is what makes the sum follow the delays without another fetch from REW.
+        # Every delay or all-pass change comes back through here (`set_delay` and `set_allpass`
+        # re-set the same traces), which is what makes the sum follow both without another fetch
+        # from REW.
         self._render_sum()
         self._render_readout()
 
@@ -1506,10 +1750,11 @@ class CurveView(QWidget):
     def _sum_inputs(self) -> list[curve_sum.SumInput]:
         """Every plotted trace as the engine's own input, at the delay currently on screen.
 
-        The delay comes from `self._delays`, the same list `_shifted` draws with, so the curve and
-        the sum can never disagree about how far a driver has been held back. Gain and polarity are
-        fixed at "as measured": there is no control for either yet, and a silent normalisation
-        would make a sum of drivers at different calibrations look like a sum of one car.
+        The delay comes from `self._delays` and the all-pass from `self._allpasses`, the same lists
+        `_shifted` draws with, so the curve and the sum can never disagree about how far a driver
+        has been held back or how it has been rotated. Gain and polarity are fixed at "as
+        measured": there is no control for either yet, and a silent normalisation would make a sum
+        of drivers at different calibrations look like a sum of one car.
         """
         inputs: list[curve_sum.SumInput] = []
         for index, trace in enumerate(self._traces):
@@ -1532,6 +1777,7 @@ class CurveView(QWidget):
                     start_time_s=trace.start_time_s,
                     config_version=trace.config_version,
                     method=trace.method,
+                    allpass=self._allpasses[index] if index < len(self._allpasses) else None,
                 )
             )
         return inputs
@@ -2641,7 +2887,8 @@ class CurveView(QWidget):
         A sentence rather than a dict because this goes into the dialog, where the Arbiter can see
         and edit it before it is sent. Nothing is recorded behind their back.
         """
-        if not self._markers and not any(self._delays):
+        rotated = any(ap is not None for ap in self._allpasses[:len(self._traces)])
+        if not self._markers and not any(self._delays) and not rotated:
             return ""
         names = [t.name for t in self._traces] or [""]
         digits = 3 if self._unit == "ms" else 1
@@ -2709,6 +2956,18 @@ class CurveView(QWidget):
                 # set they have to reverse-engineer.
                 head += ". " + i18n.t("curveDelayRelative").format(name=reference)
             parts.append(head)
+        rotations = [
+            f"{trace.name}: {self._allpasses[index].label()}"
+            for index, trace in enumerate(self._traces)
+            if index < len(self._allpasses) and self._allpasses[index] is not None
+        ]
+        if rotations:
+            # Its own clause, not folded into the delay's: a delay and an all-pass are two
+            # different DSP settings on the same driver (`ta_ms` and an EQ band), and a reader
+            # entering them types them in two different places. Named in the ledger's vocabulary
+            # (`APF2 250 Hz Q 0.71`) so what is read here is what would be proposed there. Same
+            # caveat as the delay's, once: proposed, not applied.
+            parts.append(i18n.t("curveApfHead") + " " + "; ".join(rotations))
         if not parts:
             return ""
         # One line. It has a full-width row of its own now, which is room enough — the wrapping is
@@ -2860,6 +3119,14 @@ class CurveView(QWidget):
 
     def retranslate(self) -> None:
         self._shift_label.setText(i18n.t("curveShift"))
+        self._apf_label.setText(i18n.t("curveApfLabel"))
+        self._apf_kind.setItemText(0, i18n.t("curveApfNone"))
+        for widget, key in (
+            (self._apf_label, "curveApfTip"), (self._apf_kind, "curveApfKindTip"),
+            (self._apf_f0, "curveApfF0Tip"), (self._apf_q, "curveApfQTip"),
+        ):
+            if getattr(widget, "hover_tip", None) is not None:
+                widget.hover_tip.set_text(tip_html(i18n.t(key)))
         for combo in getattr(self, "_cross_combos", []):
             if getattr(combo, "hover_tip", None) is not None:
                 combo.hover_tip.set_text(i18n.t("curveCrossPairTip"))

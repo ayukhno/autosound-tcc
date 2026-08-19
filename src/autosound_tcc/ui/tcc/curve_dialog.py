@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import config, curve_groups, delay_bank
+from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.curve_view import (
@@ -539,6 +540,9 @@ class CurveDialog(QDialog):
         self._view = CurveView(x_label=str(KINDS[self._kind]["label_x"]))
         self._view.on_send(self._on_send)
         self._view.delayChanged.connect(self._bank_current_delay)
+        # The all-pass is banked beside the delay, by the same handler: it writes every driver's
+        # current state, and which of the two moved does not change what is written.
+        self._view.allpassChanged.connect(self._bank_current_delay)
         self._view.sumToggled.connect(self._on_sum_toggled)
         layout.addWidget(self._view, stretch=1)
 
@@ -1106,11 +1110,13 @@ class CurveDialog(QDialog):
             # nothing to move
             # from one entry to another — the radio only chooses which one you are typing into.
             # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
-            # checking the set is the only reason it is ever sent anywhere.
+            # checking the set is the only reason it is ever sent anywhere. And the driver's
+            # all-pass, which is the same kind of proposal and lives in the same entry.
             delay_bank.put(
                 trace.name, self._view.delay_ms(index),
                 arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
                 session=self._session(),
+                allpass=self._view.allpass(index),
             )
         self._sync_channel_delay()
         self._render_bank()
@@ -1125,9 +1131,23 @@ class CurveDialog(QDialog):
         rows, which is the same place by another name.
         """
         bank = delay_bank.load(session=self._session())
+        apfs = delay_bank.allpasses(session=self._session())
         head = i18n.t("curveBankLabel")
-        if bank:
-            shown = ", ".join(f"{title} {ms:+.3f}" for title, ms in sorted(bank.items()))
+        # A driver counts once whether it carries a delay, an all-pass, or both: the number on the
+        # button is how many drivers have a proposal on them, which is what decides whether the
+        # set is worth sending yet.
+        titles = sorted(set(bank) | set(apfs))
+        if titles:
+            shown = ", ".join(
+                " ".join(
+                    part for part in (
+                        title,
+                        f"{bank[title]:+.3f}" if title in bank else "",
+                        apfs[title].label() if title in apfs else "",
+                    ) if part
+                )
+                for title in titles
+            )
             series = self._session()
             if series:
                 # Named, because the same channel can carry a different correction in another
@@ -1135,14 +1155,18 @@ class CurveDialog(QDialog):
                 head = i18n.t("curveBankLabelIn").format(set=series)
         else:
             shown = i18n.t("curveBankEmpty")
-        self._bank_btn.setText(i18n.t("curveBankBtn").format(n=len(bank)))
+        self._bank_btn.setText(i18n.t("curveBankBtn").format(n=len(titles)))
         if getattr(self._bank_btn, "hover_tip", None) is not None:
             self._bank_btn.hover_tip.set_text(tip_html(shown, head=head))
-        self._bank_ask_btn.setEnabled(bool(bank))
-        self._bank_clear_btn.setEnabled(bool(bank))
+        self._bank_ask_btn.setEnabled(bool(titles))
+        self._bank_clear_btn.setEnabled(bool(titles))
         for title, action in getattr(self, "_choose_actions", {}).items():
-            ms = bank.get(title)
-            action.setText(f"{title}  ·  {ms:+.3f} ms" if ms else title)
+            bits = []
+            if bank.get(title):
+                bits.append(f"{bank[title]:+.3f} ms")
+            if title in apfs:
+                bits.append(apfs[title].label())
+            action.setText("  ·  ".join([title, *bits]))
 
     def _on_ask_about_bank(self) -> None:
         """The whole set, to be LOOKED AT — never written.
@@ -1159,6 +1183,7 @@ class CurveDialog(QDialog):
             at=delay_bank.arrivals(session=series),
             unplaced=self._unplaced(delay_bank.seen(session=series)),
             reference=delay_bank.references(session=series),
+            allpasses=delay_bank.allpasses(session=series),
         )
         if text:
             self.readingSent.emit(text)
@@ -1200,6 +1225,8 @@ class CurveDialog(QDialog):
             for index in range(len(self._view._traces)):
                 self._view.set_delay_target(index)
                 self._view.set_delay(0.0)
+                # The all-pass goes with the delay: one set, one clear.
+                self._view.set_allpass(None, index)
             self._view.set_delay_target(target)
         finally:
             self._restoring = False
@@ -1378,6 +1405,7 @@ class CurveDialog(QDialog):
         # to a driver different from meeting it for the first time — and over a whole side that is
         # most of what is on screen, not one of two curves.
         bank = delay_bank.load(session=self._session())
+        apfs = delay_bank.allpasses(session=self._session())
         # Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros
         # they pass through on the way would erase what they are restoring.
         self._restoring = True
@@ -1387,6 +1415,17 @@ class CurveDialog(QDialog):
                 if trace.name in bank:
                     self._view.set_delay_target(index)
                     self._view.set_delay(bank[trace.name])
+                if trace.name in apfs:
+                    # The filter comes back with the driver for the same reason the delay does —
+                    # and it is the one of the two that is lost on the first × otherwise (a
+                    # driver taken off the plot and put back is a new selection to the view).
+                    try:
+                        self._view.set_allpass(apfs[trace.name], index)
+                    except AllpassError:
+                        # No skill to compute it with. The entry stays banked until this driver
+                        # is next written from the plot; a machine without the skill cannot show
+                        # the filter, and it should not pretend to.
+                        pass
             self._view.set_delay_target(target)
         finally:
             self._restoring = False

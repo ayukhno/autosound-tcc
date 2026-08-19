@@ -1285,9 +1285,13 @@ class MainWindow(QMainWindow):
             return
         available = sorted(set(titles) | set(self._meas_panel.known_titles()))
         dialog = getattr(self, "_curve_dialog", None)
+        # Every title asked for, not the first two. This was the last pair-shaped slice on the
+        # path (the window used to hold two pickers); the model names as many measurements as it
+        # wants looked at, the panel's button offers a whole task, and the chip row is where the
+        # tuner takes one off again.
         if dialog is None:
             dialog = CurveDialog(
-                titles[:2], markers=markers or [], kind=kind, available=available, parent=self
+                titles, markers=markers or [], kind=kind, available=available, parent=self
             )
             # The reading lands in the composer rather than being sent: it is the Arbiter's
             # statement, and they see and edit it before it goes out. Nothing is recorded behind
@@ -1312,7 +1316,7 @@ class MainWindow(QMainWindow):
             # ONE window, re-pointed. Building a second is not merely wasteful: pyqtgraph's
             # PlotItem constructs parentless QMenus every time, and enough construct/destroy
             # cycles segfault the process from inside its own `__init__` (2026-08-12).
-            dialog.reset(titles[:2], markers=markers or [], kind=kind, available=available)
+            dialog.reset(titles, markers=markers or [], kind=kind, available=available)
         dialog.show()
         dialog.raise_()
 
