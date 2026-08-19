@@ -109,12 +109,15 @@ def test_tcc_is_compared_by_commit_not_by_version(monkeypatch):
     monkeypatch.setattr(install_report, "app_version", lambda: "0.1.1")
     monkeypatch.setattr(install_report, "install_source",
                         lambda: ("git+https://…", "a" * 40))
+    monkeypatch.setattr(updates, "_remote_version", lambda sha: "0.1.1")
     _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
 
     status = updates.check_tcc()
 
-    assert status.newer is True
-    assert status.installed == "0.1.1"
+    assert status.newer is True, "same version, different commit — the commit decides"
+    # Both sides name the same two things, so the row compares like with like.
+    assert status.installed == "0.1.1 · " + "a" * 7
+    assert status.latest == "0.1.1 · " + "b" * 7
 
     monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "b" * 40))
     assert updates.check_tcc().newer is False
@@ -185,3 +188,37 @@ def test_the_wait_defaults_to_our_own_process():
     import os
 
     assert str(os.getpid()) in updates.tcc_install_line()
+
+
+
+def test_the_remote_version_is_read_at_the_same_commit(monkeypatch):
+    """A version from `main` beside a commit that is not `main`'s head would be a sentence about
+    two different builds. The file is read AT the sha."""
+    seen = {}
+
+    class _Response:
+        def read(self, _n=None):
+            return b'[project]\nname = "autosound-tcc"\nversion = "9.9.9"\n'
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(url, timeout=None):
+        seen["url"] = url
+        return _Response()
+
+    monkeypatch.setattr(updates.urllib.request, "urlopen", fake_urlopen)
+
+    assert updates._remote_version("c" * 40) == "9.9.9"
+    assert ("c" * 40) in seen["url"]
+
+
+def test_an_unreadable_remote_version_leaves_the_commit_alone(monkeypatch):
+    def boom(url, timeout=None):
+        raise OSError("no network")
+
+    monkeypatch.setattr(updates.urllib.request, "urlopen", boom)
+
+    assert updates._remote_version("d" * 40) == ""
+    assert updates._named("", "d" * 40) == "d" * 7

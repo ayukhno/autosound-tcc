@@ -5,6 +5,30 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.6] — 2026-08-19 · the update row compares like with like
+
+### Fixed
+
+- **"TCC 0.1.4 — a newer one is out: 64c72c43eccd"** put a version number on one side and a commit
+  hash on the other, which is two different kinds of thing in one sentence (user's screenshot).
+  Both sides now name both: `0.1.4 · 489b1be` against `0.1.5 · 64c72c4`. The remote version is read
+  from `pyproject.toml` **at that commit**, not from the branch, so the number and the hash beside
+  it describe the same build. When it cannot be read the commit alone still says it.
+
+### Changed
+
+- **"Report a problem" moved to the dialog's bottom row**, visible from any tab, and composes the
+  report on the spot when the Installation tab was never opened.
+- **The diagnostics button is a gear in the app's accent orange**, not `⚕` — it is the button
+  somebody goes looking for when something is wrong.
+
+### Verified, not assumed
+
+- `uv tool install --upgrade` on a git URL **does** pick up new commits when the version number has
+  not changed — measured here by pushing a commit without a bump and watching the upgrade go
+  `0.1.5 (7900359) → 0.1.5 (64c72c4)`. So the installer's line is right as it stands, and the
+  update row is correct to compare commits rather than versions.
+
 ## [v0.1.5] — 2026-08-19 · one inbox for the beta
 
 ### Added

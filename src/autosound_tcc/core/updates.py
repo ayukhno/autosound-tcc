@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -182,24 +183,55 @@ def check_skill() -> Status:
                   _version_key(latest_version) > _version_key(installed))
 
 
+def _remote_version(sha: str) -> str:
+    """The version in `pyproject.toml` AT that commit, or "" — one anonymous read of a public file.
+
+    Pinned to the sha rather than to the branch so the number and the commit beside it describe
+    the same build. Without this the row compared a version against a commit hash — "0.1.4 — a
+    newer one is out: 64c72c43eccd" — which is two different kinds of thing in one sentence and
+    reads as nonsense (user's screenshot, 2026-08-19).
+    """
+    url = f"https://raw.githubusercontent.com/ayukhno/autosound-tcc/{sha}/pyproject.toml"
+    try:
+        with urllib.request.urlopen(url, timeout=_ASK_TIMEOUT) as response:
+            text = response.read(20000).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — offline, rate-limited, moved: the sha alone still says it
+        return ""
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+    return match.group(1) if match else ""
+
+
+def _named(version: str, sha: str) -> str:
+    """`0.1.5 · 64c72c4` — what a person compares, and what actually identifies the build."""
+    short = sha[:7]
+    if version and short:
+        return f"{version} · {short}"
+    return version or short
+
+
 def check_tcc() -> Status:
     """TCC: the commit this build came from against the head of the repository it came from.
 
     Compared by COMMIT, not by version. TCC installs from the default branch, so the version in
     the metadata only moves when a release is cut — a build three days of fixes behind still calls
-    itself 0.1.1. The commit is what actually differs, and `direct_url.json` records the one this
-    install was built from.
+    itself 0.1.1 (measured, not assumed: an upgrade here went 0.1.5 → 0.1.5 across two commits and
+    did carry the new code). The commit is what actually differs, and `direct_url.json` records the
+    one this install was built from. Both sides are then SHOWN as version and commit together, so
+    the row compares like with like.
     """
-    installed = install_report.app_version()
+    version = install_report.app_version()
     _url, commit = install_report.install_source()
     if not commit:
-        return Status("tcc", installed, "", False,
+        return Status("tcc", version, "", False,
                       "running from a source checkout — update it with git", updatable=False)
+    installed = _named(version, commit)
     ok, out = _git("ls-remote", TCC_REPO, "HEAD")
     head = out.split()[0] if ok and out.split() else ""
     if not head:
         return Status("tcc", installed, "", False, "could not reach GitHub")
-    return Status("tcc", installed, head[:12], head != commit)
+    if head == commit:
+        return Status("tcc", installed, installed, False)
+    return Status("tcc", installed, _named(_remote_version(head), head), True)
 
 
 def check_all() -> tuple[Status, Status]:
