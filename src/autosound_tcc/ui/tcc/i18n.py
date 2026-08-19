@@ -258,6 +258,14 @@ T: dict[Lang, dict[str, str]] = {
         "configureModelsBlurb": "omp reports every model it knows about. Tick the ones you have access to — those are what the generator picker offers. Claude runs through the Agent SDK and is always available.",
         "configureModelsFilter": "filter by name, provider or id",
         "configureModelsCount": "{n} models in omp's catalogue",
+        # The way to omp's own setup, from the screen whose list depends on it (user, 2026-08-19).
+        "configureModelsSetup": "Configure omp…",
+        "configureModelsSetupTip": "Open omp's own setup in a terminal — where accounts, API keys \
+and sign-ins are configured. That is what decides which models appear in the list above, so when \
+it is done and you come back here, the list is read again. TCC holds none of those credentials: \
+the terminal and the session in it are yours.",
+        "configureModelsSetupOpened": "omp's setup is open in a terminal. When it is done, come \
+back to this window — the list is read again.",
         "modelClipboardOnly": "clipboard only",
         "modelRecommended": "recommended pair",
         "modelGoneTitle": "That model is no longer offered",
@@ -834,6 +842,13 @@ Choose sweeps (sw) above to read this.",
         "configureModelsBlurb": "omp знає про всі ці моделі. Познач ті, до яких маєш доступ — саме вони будуть у виборі генератора. Claude іде через Agent SDK і доступний завжди.",
         "configureModelsFilter": "фільтр за назвою, провайдером або id",
         "configureModelsCount": "у каталозі omp: {n}",
+        "configureModelsSetup": "Налаштувати omp…",
+        "configureModelsSetupTip": "Відкрити власне налаштування omp у терміналі — там \
+налаштовуються акаунти, API-ключі та входи. Саме воно вирішує, які моделі з'являться у списку \
+вище, тож коли закінчиш і повернешся сюди, список перечитається. TCC жодних із цих облікових \
+даних не тримає: термінал і сесія в ньому — твої.",
+        "configureModelsSetupOpened": "Налаштування omp відкрито в терміналі. Коли закінчиш — \
+повернись у це вікно, список перечитається.",
         "modelClipboardOnly": "лише буфер",
         "modelRecommended": "рекомендована пара",
         "modelGoneTitle": "Цієї моделі більше не пропонують",

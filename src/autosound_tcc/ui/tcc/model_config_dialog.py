@@ -15,9 +15,10 @@ which is a fixed list this dialog has no say over.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -26,12 +27,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QVBoxLayout,
 )
 
-from autosound_tcc.core import model_choices
+from autosound_tcc.core import config, model_choices, terminal_launcher
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.copy_menu import enable_copy
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 
 class ModelConfigDialog(QDialog):
@@ -42,6 +45,9 @@ class ModelConfigDialog(QDialog):
         self.setWindowTitle(i18n.t("configureModelsTitle"))
         self.active: list[str] = list(active)
         self._error: Optional[str] = None
+        #: Whether omp's own configurator was opened from here. The catalogue is re-read once when
+        #: this window comes back to the front afterwards — see `changeEvent`.
+        self._setup_launched = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -71,12 +77,35 @@ class ModelConfigDialog(QDialog):
         enable_copy(self._status, value=self._status.text)
         layout.addWidget(self._status)
 
+        # omp's own configurator, opened in the user's terminal (user, 2026-08-19). It is where
+        # accounts and API keys are set up, and what is set up there is exactly what decides
+        # whether the list above has three models in it or three hundred — so the way to it
+        # belongs on this screen and nowhere else.
+        #
+        # A terminal rather than something in-app: `omp setup` is an interactive TUI that asks for
+        # keys and opens browser sign-ins. TCC holds no credentials and reads no stdout from it
+        # (`core/terminal_launcher`'s whole point), so the session belongs to the user, in their
+        # own terminal — Terminal.app on macOS, the shell on Windows.
+        #
+        # In a row with the button box rather than inside it: `QDialogButtonBox` places a button by
+        # ROLE and each platform has its own opinion about where a ResetRole lands. This one has to
+        # sit on the LEFT of Ok/Cancel, and a plain layout says so once instead of per platform.
+        self._setup_btn = QPushButton(i18n.t("configureModelsSetup"))
+        self._setup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._setup_btn.setAutoDefault(False)  # Enter belongs to Ok, not to a terminal launch
+        attach_tip(self._setup_btn, i18n.t("configureModelsSetupTip"))
+        self._setup_btn.clicked.connect(self._open_setup)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.addWidget(self._setup_btn)
+        bottom.addStretch(1)
+        bottom.addWidget(buttons)
+        layout.addLayout(bottom)
 
         self._populate()
 
@@ -113,6 +142,65 @@ class ModelConfigDialog(QDialog):
             self._list.addItem(item)
         self._status.setText(i18n.t("configureModelsCount").format(n=self._list.count()))
 
+    def _open_setup(self) -> None:
+        """Open `omp setup` in a terminal — omp's onboarding: providers, keys, sign-ins.
+
+        Errors land on the status line, which is the line that already carries "omp is not on
+        PATH" and can be copied. A button that does nothing visible is the one outcome a launcher
+        must not have (`terminal_launcher.launch` says the same in its own docstring).
+        """
+        try:
+            terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",))
+        except terminal_launcher.TerminalLaunchError as exc:
+            self._status.setText(str(exc))
+            return
+        self._setup_launched = True
+        self._status.setText(i18n.t("configureModelsSetupOpened"))
+
+    @staticmethod
+    def _launch_dir() -> Path:
+        """Where to open the terminal. The project folder when there is a real one, the home
+        folder otherwise: `omp setup` configures the machine, not the car, and a launcher that
+        refuses because a project has never been chosen would be refusing for the wrong reason."""
+        try:
+            here = config.project_dir()
+            if here.is_dir():
+                return here
+        except Exception:  # noqa: BLE001 — an unconfigured install is the ordinary case here
+            pass
+        return Path.home()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Re-read omp's catalogue when this window comes back from the configurator.
+
+        Once, and only after the button was actually pressed: the catalogue is a subprocess call,
+        and paying for it on every alt-tab would make this dialog feel broken. The point is that
+        somebody who has just authenticated a provider sees its models without closing and
+        re-opening the window.
+        """
+        super().changeEvent(event)
+        if (
+            event.type() == QEvent.Type.ActivationChange
+            and self.isActiveWindow()
+            and self._setup_launched
+        ):
+            self._setup_launched = False
+            self._reload()
+
+    def _reload(self) -> None:
+        """Read the catalogue again, keeping the ticks that are on screen right now."""
+        self.active = self._checked()
+        self._error = None
+        self._list.clear()
+        self._populate()
+
+    def _checked(self) -> list[str]:
+        return [
+            self._list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self._list.count())
+            if self._list.item(row).checkState() == Qt.CheckState.Checked
+        ]
+
     def _apply_filter(self, text: str) -> None:
         needle = text.strip().lower()
         for row in range(self._list.count()):
@@ -125,9 +213,5 @@ class ModelConfigDialog(QDialog):
             # writing an empty list the user never chose.
             self.accept()
             return
-        self.active = [
-            self._list.item(row).data(Qt.ItemDataRole.UserRole)
-            for row in range(self._list.count())
-            if self._list.item(row).checkState() == Qt.CheckState.Checked
-        ]
+        self.active = self._checked()
         self.accept()
