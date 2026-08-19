@@ -31,6 +31,14 @@ the centre and the rears are done last ("w-R немає, бо він був ну
 kept and the sentence says exactly that and no more. What TCC can state honestly is: this was on
 screen and carries no shift; this has never been opened. The inference is the model's.
 
+**Since 2026-08-18 the same entry carries the driver's all-pass too** (`core/allpass.py`, the fourth
+of the curve-window asks). It is the same kind of thing as the delay — a proposal about one driver,
+read off the curves while looking at the predicted sum, worth nothing on its own and everything as
+part of the set — and it has the same problem: a filter dialled on m-L while looking at w-L+m-L has
+to still be there when m-L comes back on screen against tw-L, or the workflow the Advisor described
+(load a group, look at the sum, isolate a driver with its ×) loses it on the first ×. Kept beside the
+delay rather than in a second store, so one clear clears the set and one sentence sends it.
+
 Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 """
 
@@ -40,16 +48,22 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.core import config, project_settings
+from autosound_tcc.core.allpass import Allpass
 
 KEY = "curve_delays"
 
+#: `put(allpass=_KEEP)`: leave whatever all-pass the entry already carries. The delay is banked on
+#: every change of every trace, and a call that only meant to move a delay must not wipe a filter.
+_KEEP = object()
+
 
 def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, dict]:
-    """`{title: {"ms": delay, "at": measured arrival or None}}`.
+    """`{title: {"ms": delay, "at": measured arrival or None, "set": series, "apf": Allpass|None}}`.
 
     Two shapes are read: a bare number (what the first version wrote) and the object. The arrival
     is what the delay is measured FROM — a delay with no origin is not checkable, and the whole
-    point of handing the set to a model is that it can check it.
+    point of handing the set to a model is that it can check it. The all-pass is read through
+    `Allpass.from_dict`, so what comes back is a valid filter or nothing — never a half of one.
     """
     raw = project_settings.load(tcc_dir or config.tcc_dir()).get(KEY)
     if not isinstance(raw, dict):
@@ -58,8 +72,9 @@ def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> d
     for title, value in raw.items():
         if isinstance(value, dict):
             ms, at, series = value.get("ms"), value.get("at"), value.get("set")
+            apf = Allpass.from_dict(value.get("apf"))
         else:
-            ms, at, series = value, None, None
+            ms, at, series, apf = value, None, None, None
         if session is not None and series is not None and str(series) != session:
             continue
         try:
@@ -70,7 +85,9 @@ def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> d
             at = float(at) if at is not None else None
         except (TypeError, ValueError):
             at = None
-        out[str(title)] = {"ms": ms, "at": at, "set": None if series is None else str(series)}
+        out[str(title)] = {
+            "ms": ms, "at": at, "set": None if series is None else str(series), "apf": apf,
+        }
     return out
 
 
@@ -87,14 +104,24 @@ def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[
 
 
 def references(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> list[str]:
-    """Drivers that have been on screen and carry no shift.
+    """Drivers that have been on screen and carry no shift — and no all-pass either.
 
     Named for what it is, not for what it might mean: this is the reference on some passes and an
-    untouched driver on others, and only the person tuning knows which.
+    untouched driver on others, and only the person tuning knows which. A driver at zero delay
+    that carries an all-pass is neither: it has a proposal, and `allpasses()` names it.
     """
     return sorted(
-        title for title, entry in _entries(tcc_dir, session).items() if not entry["ms"]
+        title for title, entry in _entries(tcc_dir, session).items()
+        if not entry["ms"] and entry["apf"] is None
     )
+
+
+def allpasses(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, Allpass]:
+    """`{measurement title: Allpass}` for the drivers that carry one."""
+    return {
+        title: entry["apf"] for title, entry in _entries(tcc_dir, session).items()
+        if entry["apf"] is not None
+    }
 
 
 def seen(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> set:
@@ -116,8 +143,13 @@ def put(
     tcc_dir: Optional[Path] = None,
     arrival_ms: Optional[float] = None,
     session: Optional[str] = None,
+    allpass=_KEEP,
 ) -> dict[str, float]:
-    """Bank one reading, zero included.
+    """Bank one reading, zero included — and the driver's all-pass, when the caller says.
+
+    `allpass` is an `Allpass` to set, `None` to take off, or left alone to keep whatever the entry
+    carries: the delay is banked on every change of every trace on screen, and a call that only
+    meant to move a delay must not wipe a filter that was dialled a minute ago.
 
     Negative is a real reading, not an error: on a later pass the channel already carries a delay
     and the correction takes time back off it (user, 2026-08-12). What may not go below zero is
@@ -135,13 +167,28 @@ def put(
     title = str(title)
     was = entries.get(title) or {}
     at = arrival_ms if arrival_ms is not None else was.get("at")
+    apf = was.get("apf") if allpass is _KEEP else allpass
+    if apf is not None and not isinstance(apf, Allpass):
+        raise TypeError(f"allpass must be an Allpass or None, got {apf!r}")
     entries[title] = {
         "ms": round(float(ms), 4),
         "at": None if at is None else round(float(at), 4),
         "set": session if session is not None else was.get("set"),
+        "apf": apf,
     }
-    project_settings.set_value(tcc_dir, KEY, entries or None)
+    project_settings.set_value(tcc_dir, KEY, _serialised(entries) or None)
     return {name: entry["ms"] for name, entry in entries.items() if entry["ms"]}
+
+
+def _serialised(entries: dict[str, dict]) -> dict[str, dict]:
+    """The store's own shape: the all-pass as the ledger's band object, or the key absent."""
+    out: dict[str, dict] = {}
+    for title, entry in entries.items():
+        row = {"ms": entry["ms"], "at": entry["at"], "set": entry["set"]}
+        if entry.get("apf") is not None:
+            row["apf"] = entry["apf"].as_dict()
+        out[title] = row
+    return out
 
 
 def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None:
@@ -158,7 +205,7 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
         title: entry for title, entry in _entries(tcc_dir).items()
         if entry["set"] is not None and entry["set"] != session
     }
-    project_settings.set_value(tcc_dir, KEY, keep or None)
+    project_settings.set_value(tcc_dir, KEY, _serialised(keep) or None)
 
 
 def as_sentence(
@@ -169,6 +216,7 @@ def as_sentence(
     at: Optional[dict] = None,
     unplaced: Optional[list] = None,
     reference: Optional[list] = None,
+    allpasses: Optional[dict] = None,
 ) -> str:
     """The whole set as something a model can read, and a person can check before it is sent.
 
@@ -180,12 +228,32 @@ def as_sentence(
     also states the resulting total, and a total below zero is called out on the line rather than
     left for the model to notice — a set that cannot be applied should not need a reader to spot
     it. Without it the lines are readings alone, which is honest about what TCC knows.
+
+    `allpasses` (`{title: Allpass}`) is the other half of the set: its own block after the delays,
+    because `ta_ms` and an EQ band are two settings typed in two places, and each one named in the
+    ledger's own words so it can be proposed verbatim. With its own caveat: simulated on the
+    sweeps in hand, never verified by a summation sweep — that is the model's job to ask for.
     """
-    if not bank and not reference:
+    allpasses = allpasses or {}
+    if not bank and not reference and not allpasses:
         return ""
     t = lang_t or (lambda key: key)
     at = at or {}
     lines, impossible, landings = [], False, []
+    # **The common part comes off before anything is proposed.** A delay set is only defined up to
+    # a constant: the curves measure the DIFFERENCE between arrivals, and where the tuner dropped
+    # them is not a measurement of anything. A set banked by dragging three drivers onto a common
+    # 14.8 ms read +10.690 / +10.670 / +10.000, which is meaningless as a delay and beyond what
+    # most processors accept (user, 2026-08-18: "затримки виходять значно більшими, ніж вони там
+    # є"). Relative, the same set is 0.000 / +0.670 / +0.690 — 0.69 ms is 23 cm of car. Every
+    # difference survives the shift, so the landings below still have exactly the same spread.
+    #
+    # Stored raw and normalised HERE, on the way out: the stored number is what the tuner dragged
+    # and what gets restored onto the plot when a driver comes back on screen. This is a
+    # proposal, and only a proposal has to be enterable.
+    offset = min(bank.values()) if len(bank) > 1 else 0.0
+    origin = min(bank.items(), key=lambda kv: (kv[1], kv[0]))[0] if offset else ""
+    bank = {title: ms - offset for title, ms in bank.items()}
     # By where each driver ENDS UP, not by how far it moves. The outlier is the whole point of
     # sending this, and sorted by delay it sat in the middle of the list (user's own set,
     # 2026-08-12: four drivers inside 37 µs and one a millisecond out).
@@ -209,8 +277,28 @@ def as_sentence(
                 line += "  << " + t("curveDelayBelowZero")
                 impossible = True
         lines.append(line)
-    head = [t("curveBankAsk"), t("curveBankConvention")]
+    if allpasses and not bank:
+        # An all-pass set with no delays in it is still a set; the delay head would announce a
+        # list that is not there.
+        head = [t("curveBankAskApfOnly")]
+    else:
+        head = [t("curveBankAsk"), t("curveBankConvention")]
+        if origin:
+            # Named, because a set of differences with no stated origin is a set the reader has
+            # to reverse-engineer — and the origin IS the alignment: "hold the others back until
+            # they meet this one".
+            head.append(t("curveDelayRelative").format(name=origin))
     tail = [t("curveBankNotForWriting")]
+    if allpasses:
+        # After the delays and before the zeros: it is part of the proposal, not a caveat about
+        # it. One line per driver in the ledger's words, then the one caveat that is this block's
+        # own — nothing here was checked against a summation sweep.
+        if lines:
+            lines.append("")
+        lines.append(t("curveBankApf"))
+        for title in sorted(allpasses):
+            lines.append(f"  {title}: {allpasses[title].label()}")
+        lines.append(t("curveBankApfCaveat"))
     if reference:
         # Stated, not interpreted. A zero here may be the reference the set was built on or a
         # driver not reached yet, and the panel cannot tell — claiming "reference" would put a

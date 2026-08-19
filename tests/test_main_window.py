@@ -13,7 +13,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QSplitter  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QSplitter, QWidget  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
 
@@ -1710,6 +1710,49 @@ def test_the_flaw_map_renders_with_its_verdict(tmp_path, monkeypatch):
     assert i18n.t("flawKind_cabin_null") in texts
 
 
+def test_a_flaw_row_says_on_hover_why_it_was_called_that_and_what_it_was_read_off(
+    tmp_path, monkeypatch
+):
+    """The row is a headline; the tip is the substance, and it used to be the reasoning and the
+    file names glued into one grey paragraph (user, 2026-08-18). Head, reason and captures are
+    three things and read as three."""
+    import json as _json
+    import re
+
+    from autosound_tcc.core import config
+
+    _app()
+    (tmp_path / "project.json").write_text(
+        _json.dumps({
+            "schema_version": 3,
+            "acoustics": {"flaws": [
+                {"f_hz": 152, "level_db": -12, "bw_oct": 0.17, "kind": "cabin_null",
+                 "action": "no_boost", "channels": ["w-L"],
+                 "why": "Interference, not a panel: the harmonics do not rise with it.",
+                 "evidence": ["w-L_01 (sw)", "w-L_01 (rta)"]},
+            ]},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    window = MainWindow()
+
+    rows = [w for w in window._audio_section.findChildren(QWidget)
+            if getattr(w, "hover_tip", None) is not None]
+    assert rows, "the flaw row carries a tip"
+    tip = rows[0].hover_tip.text()
+    plain = re.sub(r"<[^>]+>", " ", tip.replace("<br>", "\n"))
+    # The head names the flaw the way a person would say it: what, where, and the verdict.
+    assert "152 Hz" in plain and i18n.t("flawKind_cabin_null") in plain
+    assert "w-L" in plain and i18n.t("flawAction_no_boost") in plain
+    assert "harmonics do not rise" in plain, "the reasoning is there in full"
+    # ...and the captures are under a label of their own rather than trailing the sentence.
+    assert i18n.t("flawEvidenceHead") in plain
+    assert plain.index(i18n.t("flawEvidenceHead")) > plain.index("harmonics do not rise")
+    assert "font-size" in tip, "laid out to be read, not at the default tooltip size"
+
+
 def test_a_project_with_no_flaw_map_says_so_rather_than_showing_nothing(tmp_path, monkeypatch):
     from autosound_tcc.core import config
 
@@ -2156,3 +2199,84 @@ def test_the_curve_window_is_reused_not_rebuilt():
 
     assert window._curve_dialog is first
     first.close()
+
+
+def test_every_title_asked_for_reaches_the_curve_window_not_the_first_two():
+    """The last pair-shaped slice on the path: the window held two pickers once, and `[:2]` here
+    outlived them. The model names as many measurements as it wants looked at (a whole side is
+    four), and the chip row is where a tuner takes one off again."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    three = ["w-L_01 (sw)", "m-L_01 (sw)", "tw-L_01 (sw)"]
+
+    window._open_curves(three)
+    assert window._curve_dialog._chosen() == three
+
+    window._open_curves(three[::-1])  # re-pointed, same window, still all of them
+    assert window._curve_dialog._chosen() == three[::-1]
+    window._curve_dialog.close()
+
+
+def test_the_panels_curves_button_opens_on_one_curve_and_then_on_the_last_set():
+    """User, 2026-08-19: "при відкритті вікна показувати одну першу (перший раз для нового сету) чи
+    ті що були попереднього разу (в поточній сесії роботи), а НЕ ВСІ". A series is nine or eighteen
+    measurements, and plotting all of them is a picture of nothing — one REW call each, and then
+    a chip to remove for every driver before any question can be asked.
+
+    Everything else stays one tick away: `_open_curves` hands the window every title REW holds as
+    the choose menu's options, which is what makes opening narrow safe rather than limiting."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    series = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)", "m-R_01 (sw)"]
+
+    window._meas_panel.curvesRequested.emit(series)
+
+    dialog = window._curve_dialog
+    assert dialog._chosen() == ["w-L_01 (sw)"], "a series never opened: the first title, alone"
+    assert set(series) <= set(dialog._options), "and all of it is one tick away in the menu"
+
+    # What the tuner then chose is what the button reopens on.
+    dialog._set_selection(["m-L_01 (sw)", "m-R_01 (sw)"])
+    dialog.close()
+    window._meas_panel.curvesRequested.emit(series)
+
+    assert window._curve_dialog._chosen() == ["m-L_01 (sw)", "m-R_01 (sw)"]
+    window._curve_dialog.close()
+
+
+def test_a_remembered_title_rew_no_longer_holds_is_dropped_not_asked_for():
+    """A re-measured round renames its captures. A remembered set is filtered against what the
+    panel is offering NOW, or the window would open asking REW for a curve nobody has — and with
+    nothing left of the memory it falls back to the first title, the same as a fresh series."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    window._curve_last[window._curve_series_key()] = ["w-L_01 (sw)", "gone_01 (sw)"]
+    window._meas_panel.curvesRequested.emit(["w-L_01 (sw)", "w-R_01 (sw)"])
+
+    assert window._curve_dialog._chosen() == ["w-L_01 (sw)"], "the survivor, and only it"
+
+    window._curve_last[window._curve_series_key()] = ["gone_01 (sw)"]
+    window._meas_panel.curvesRequested.emit(["w-L_01 (sw)", "w-R_01 (sw)"])
+
+    assert window._curve_dialog._chosen() == ["w-L_01 (sw)"], "nothing left: the first title"
+    window._curve_dialog.close()
+
+
+def test_the_models_own_request_is_not_narrowed_by_what_was_looked_at_last():
+    """`show_curves` names the measurements it wants looked at, out loud, and gets exactly those.
+    The memory is about the PANEL's button, which offers a whole series and has to choose."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    window._curve_last[window._curve_series_key()] = ["w-L_01 (sw)"]
+
+    window._on_curves_requested({
+        "titles": ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"], "kind": "phase",
+    })
+
+    assert window._curve_dialog._chosen() == ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"]
+    window._curve_dialog.close()

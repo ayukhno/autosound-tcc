@@ -118,6 +118,10 @@ _VENDORED = {
     "naming.py": "autosound_tcc._vendor.naming",
     "dsp_profile.py": "autosound_tcc._vendor.dsp_profile",
     "project.py": "autosound_tcc._vendor.project",
+    # The filter maths (SCR-050): the curve window applies an all-pass to a measured trace and
+    # takes the filter from HERE, so the front-end and the method can never disagree about what
+    # `APF2 250 Hz Q 0.7` means. numpy at import, scipy only inside the crossover functions.
+    "dsp_math.py": "autosound_tcc._vendor.dsp_math",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
@@ -253,6 +257,15 @@ def load_naming() -> ModuleType:
 def load_dsp_profile() -> ModuleType:
     """The DSP capability-profile module (`dsp_profile.py`)."""
     return load("dsp_profile.py")
+
+
+def load_dsp_math() -> ModuleType:
+    """The skill's filter maths (`dsp_math.py`) — the all-pass responses, the RBJ biquads.
+
+    Imports numpy on load, which the GUI extra has (it arrives with pyqtgraph) and a light install
+    does not: called only from `core/allpass.py`, which is GUI-side for the same reason
+    `core/curve_sum.py` is."""
+    return load("dsp_math.py")
 
 
 def load_project() -> ModuleType:

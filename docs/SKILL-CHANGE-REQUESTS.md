@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-13: SCR-049** (the project backup nobody wrote down). SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-19: SCR-049** (the project backup nobody wrote down). SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1400,3 +1400,86 @@ What the ask covers:
    at install time and changed their mind — or who wants to do it by hand.
 
 Until this lands, the installer's line should not claim the skill "offers" anything.
+
+## SCR-050 — an all-pass the Arbiter dialled, as an input the method can check
+
+**Status**: **DONE** (2026-08-19 — skill `343c0f5` + `70234d2` on `feat/scr-050-apf`, TCC
+`ab494ac` + the pin bump on `feat/curve-sum`). Raised 2026-08-18 while designing TCC's curve
+analysis: summed response, N-way sum, per-driver APF.
+
+What landed, item by item — read the list below for the ask itself:
+
+- **4 → `dsp_math.apf1_response(freqs, f0)`**: −90° at `f0`, 0 → −180° overall, a pure 1/(π·f0)
+  delay far below `f0`; same convention as `apf2_response`, held by the selftest to
+  `apf1² ≡ apf2(Q 0.5)`.
+- **5 → `eq_complex` dispatches by kind** (`PK`, `LS`/`LSH`, `HS`/`HSH`, `APF1`, `APF2`) and
+  **raises on a kind it does not know**; `peq_response` refuses anything but a peak or a shelf.
+  `dsp_math.py` gained the selftest it never had (TCC runs it: twelve skill selftests now).
+- **2 → `analyze-joints --apf "ch,APF2,f0,Q"` / `"ch,APF1,f0"`**: a candidate to VERIFY. Under
+  each joint touching the channel, one line — the worst null as it stands → with the candidate
+  and nothing else changed (what TCC's sum showed) → with the candidate plus the best further
+  delay — under the same trust gate as the row (no pair → UNVERIFIED; gate tripped → nothing).
+- **1 → the package format** (`data-contract-template.md` §3) has an `Origin:` line: a
+  hand-dialled candidate enters the Critic's package as a candidate, in the ledger's own words,
+  never as something already checked; `phase_2_eq.md` says to run `--apf` before packaging.
+- **3 (scope)** held: `APF1`/`APF2` only; the Helix phase ANGLE is not accepted anywhere.
+
+TCC's side (`core/allpass.py`, the APF row in the curve window, the bank) takes the filter from
+`dsp_math` through `vendor_loader` and holds no copy — the reason items 4 and 5 were here.
+What is still open is not this SCR's: nothing consumes `--apf`'s output automatically (the
+Generator runs it and quotes the line), and the number never enters the ledger except through
+`apply.propose` like any other proposal (D-6).
+**Target**: skill — the review package / data contract, and `analyze-joints`' input side
+**TCC dependency**: TCC does the interactive part (APF applied to a measured trace, its effect on
+the predicted sum drawn live). This ask is only about what happens to that number afterwards.
+
+**What already exists, so that this ask stays narrow**: the maths (`dsp_math.apf2_response`,
+`apf_search`, `robust_worst_null`), the method (`phase_2_eq` §"align joints with APF rather than
+raw delay", `analyze-joints` emitting an APF column with a trust gate), and the storage — the
+ledger carries `phase_deg` per channel *and* `APF1`/`APF2` among the structured EQ types. Nothing
+below asks for new maths or a new field.
+
+**The gap**: every APF in the method today is one the SKILL computed. TCC is about to let the
+Arbiter dial one by hand while watching the predicted sum move — which is exactly how the Helix
+phase control is used in the car (`helix-phase-allpass.md`) — and there is nowhere for that number
+to go. A hand-dialled APF cannot enter the review package as a *proposal to be checked*, so the
+Critic never sees it, and the journal cannot say the Arbiter tried it.
+
+What the ask covers:
+
+1. **The review package accepts a candidate APF as an input.** Driver, order, `f0`, `Q` (or the
+   Helix phase angle), and what it does to the joint on the measurements already in hand. The
+   Critic's job on it is the one it is good at: does this rotation fix the joint, or does it move
+   the problem and drag the timing above the turn frequency with it.
+2. **`analyze-joints` (or its wrapper) takes an APF to VERIFY, not only one to propose.** Same
+   trust gate, same honest-by-construction rule: with no measured pair reproducing the complex
+   solos it stays UNVERIFIED rather than blessing a number the Arbiter liked the look of.
+3. **Scope, decided by the user 2026-08-18: `APF1` and `APF2` only — the Helix "Phase" control is
+   out.** The two are different hardware: a Helix Phase control is a 2nd-order all-pass whose
+   frequency the processor derives from that channel's crossover, so the user sets an ANGLE and
+   not an `f0`, and it exists on that vendor. `APF1`/`APF2` in an EQ slot is `f0` (+ `Q` for the
+   2nd order) typed in, and that form is portable across processors. TCC will offer only the
+   portable one; `phase_deg` stays a field the ledger records when a Helix user sets it by hand,
+   and nothing simulates it.
+
+4. **`apf1_response` does not exist in `dsp_math.py`.** There is `apf2_response` (and `apf_search`
+   on top of it), but nothing for the 1st order, which is half of what the user asked for and is
+   the simpler filter of the two: unit magnitude, phase running 0 → −180° through `f0`. One
+   function, and then `apf_search`'s sibling question ("would a 1st order do here?") becomes
+   askable.
+
+5. **`eq_complex` renders an all-pass band as a HIGH SHELF, silently.** Found while scoping this
+   (2026-08-18, not yet reported as a bug elsewhere): `EQ_TYPES` accepts `APF1`/`APF2` as
+   structured band types, and `eq_complex` loops every band through `peq_response`, whose `kind`
+   handling is `PK` → peaking, `LS` → low shelf, **everything else** → high shelf. There is no
+   guard. So a ledger that legitimately carries an APF band, passed to the simulator that renders
+   a channel's EQ (`xover_select.py` builds a realization's response this way), gets a curve that
+   is not the filter — no error, just a wrong answer. Whether it is reachable today depends on
+   whether any realization carries an APF band; it becomes reachable the moment this feature
+   exists. The fix is a real branch for `APF1`/`APF2` and an explicit refusal for an unknown kind.
+
+**Until this lands**, TCC's APF stays a simulation the Arbiter reads on screen and can paste into
+the dialogue by hand; nothing writes it to the ledger (D-6: the skill writes the project, TCC
+reads it). TCC must not grow its own all-pass maths either: two implementations of one filter is
+how the front-end and the method start disagreeing about what a proposal means. It uses the
+skill's, which is the reason items 4 and 5 are here rather than in TCC's own backlog.

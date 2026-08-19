@@ -43,6 +43,9 @@ SELFTESTS = (
     # file failed on the same commit — which is the second time the completeness check has caught
     # a module before a person did (2026-08-12).
     ("verify.py", ()),
+    # TWELVE. `dsp_math.py` had no selftest until the all-pass work (SCR-050, 2026-08-19); it pins
+    # the filter maths TCC's curve window now draws with to closed-form facts.
+    ("dsp_math.py", ()),
 )
 
 pytestmark = pytest.mark.skipif(

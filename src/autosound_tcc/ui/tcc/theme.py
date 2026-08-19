@@ -333,6 +333,137 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="zoom-btn"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .guides-btn — the ✕ beside the mode buttons that takes every guide off the picture at once.
+
+    Its own class rather than a `.zoom-btn` with an inline stylesheet, for two reasons that were
+    both watched happening (user, 2026-08-18, with the screenshot). A QSS `font-size` from THIS
+    sheet beats a QFont set in code, so the 1.35× font the widget was given never reached the
+    screen while `.zoom-btn {{ font-size: 12px }}` matched it — the "big X" that was asked for was
+    never big. And an inline sheet is only written when something calls the updater, which nothing
+    did at construction, so the button opened grey and identical to the zoom buttons beside it.
+
+    Red in both states, because the button says what it DOES; FILLED while the guides are hidden,
+    because that is a state the tuner has to be able to read from across a car seat. `:checked`
+    carries that here, so nothing has to write a colour by hand at all. */
+    QPushButton[class~="guides-btn"] {{
+        background: {t.panel3};
+        color: {t.warn};
+        border: 1px solid {t.warn};
+        border-radius: 5px;
+        padding: 0;
+        font-size: 17px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="guides-btn"]:hover {{
+        background: {t.mix('warn', 16, 'panel3')};
+    }}
+    QPushButton[class~="guides-btn"]:checked {{
+        background: {t.warn};
+        color: {t.ground};
+    }}
+    /* .link-btn — the "⇅" that ties the sum's strip to the plot's frequency scale.
+
+    An orange ring, always (user, 2026-08-18: "ободок помаранчевого кольору, щоб на неї звертали
+    увагу"). It is the only control in that row that changes the RELATIONSHIP between two plots
+    rather than the view of one, and a grey 1px `.zoom-btn` border said nothing about that.
+
+    `accent` and not `warn` or `yellow`, chosen rather than reached for: `accent` IS this palette's
+    orange (#e8973c dark, #c56f18 light) and carries no verdict; `warn` is red-leaning and means
+    "wrong", which a healthy, useful control must never borrow; `yellow` is the predicted sum's own
+    colour on every drawing surface in this window, and a button wearing it would claim to be the
+    sum rather than to frame it. 2px rather than 1 is the part that makes it announce itself.
+
+    The two states are told apart by the FILL, not by whether the ring is there: the ring is the
+    "look at me", so it has to be present linked and free alike. */
+    QPushButton[class~="link-btn"] {{
+        background: {t.panel3};
+        color: {t.muted};
+        border: 2px solid {t.accent};
+        border-radius: 5px;
+        padding: 0;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QPushButton[class~="link-btn"]:hover {{
+        background: {t.mix('accent', 14, 'panel3')};
+    }}
+    QPushButton[class~="link-btn"]:checked {{
+        background: {t.mix('accent', 26, 'panel3')};
+        color: {t.accent};
+    }}
+    /* .delay-radio — the curve window's "which driver is being delayed" radios, one per trace.
+
+    An unstyled radio indicator is drawn by the native style: a dark circle on this dark ground,
+    which is why a row of THREE read as one bright control and two smudges and the user counted two
+    (2026-08-18: "сорі, я не побачив що їх вже три"). The unselected state gets a ring in `muted`
+    — the same token the axis labels use, so it is legible in both palettes without being loud —
+    and the selected one keeps the accent FILL, so "here are your curves" and "this is the one you
+    are editing" stay two different statements.
+
+    The label is normal control type rather than the faint 11 px `.phead-sub` it wore; its COLOUR
+    is written per widget from the trace's own pen (`curve_view.set_traces`), which is why no
+    `color` is set here. */
+    QRadioButton[class~="delay-radio"] {{
+        font-size: 12px;
+        font-weight: 600;
+        spacing: 5px;
+        padding: 0 3px;
+        background: transparent;
+    }}
+    QRadioButton[class~="delay-radio"]::indicator {{
+        width: 11px;
+        height: 11px;
+        /* Under half the rendered 15px (11 + 2px border either side), or Qt treats the radius as
+        invalid and draws a square — the same rule `.edit-chip` records. */
+        border-radius: 7px;
+        border: 2px solid {t.muted};
+        background: {t.panel3};
+    }}
+    QRadioButton[class~="delay-radio"]::indicator:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QRadioButton[class~="delay-radio"]::indicator:checked {{
+        border: 2px solid {t.accent};
+        background: {t.accent};
+    }}
+    /* .curve-chip — one chosen measurement in the curve window's selection row, with the × that
+    takes it off the plot. The frame is shared; the BORDER and the name are coloured per chip, from
+    the pen its own trace is drawn with (`curve_view.trace_colour`), so the row reads as a legend of
+    the plot rather than as a list of strings. Neither colour is set here for that reason.
+
+    Same radius rule as `.edit-chip`: stay under half the rendered height or Qt treats the radius as
+    invalid and draws a square corner. */
+    QFrame[class~="curve-chip"] {{
+        background: {t.panel3};
+        border: 1px solid {t.border2};
+        border-radius: 9px;
+    }}
+    QLabel[class~="curve-chip-name"] {{
+        background: transparent;
+        font-size: 11.5px;
+        font-weight: 600;
+    }}
+    /* The × is a target, not a decoration: it is the one gesture that takes a driver out of the
+    predicted sum, so it gets a hit area of its own rather than a glyph squeezed against the name.
+    Disabled on the last chip left — a window plotting nothing has nothing to say. */
+    QPushButton[class~="curve-chip-x"] {{
+        background: transparent;
+        border: none;
+        color: {t.muted};
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0;
+        min-width: 16px;
+        max-width: 16px;
+        min-height: 16px;
+        max-height: 16px;
+    }}
+    QPushButton[class~="curve-chip-x"]:hover {{
+        color: {t.warn};
+    }}
+    QPushButton[class~="curve-chip-x"]:disabled {{
+        color: {t.faint};
+    }}
     /* .is-missing — the picker's current choice is not on offer on this machine. Red text, not a
     red background: the model is still SELECTED and still what the project asks for, which is a
     different statement from "this setting is wrong". */
@@ -372,6 +503,48 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         down to their first letter (the "E / U" language-picker bug) */
         padding: 5px 14px 5px 28px;
         min-height: 22px;
+    }}
+    /* .mini-select on a SPIN BOX — the curve window's delay field, which wears the same class as
+    the combos it stands between and rendered white with light text on it in the dark theme (user,
+    2026-08-18, with the picture). Every rule above is `QComboBox[...]`, so not one of them ever
+    reached a QDoubleSpinBox, and the palette does not cover for that: `apply_theme` sets Window,
+    Base and Text but never `Button`, and the macOS style paints a spin box's field from its own
+    native drawing rather than from the palette at all. A rule that matches is the only thing that
+    reaches it -- and because it lives in the application sheet, a live theme switch re-polishes
+    it along with everything else, which a per-widget stylesheet would not have done.
+    `QAbstractSpinBox` rather than `QDoubleSpinBox` so an integer one added later is not a second
+    white box nobody notices.
+
+    The up/down steppers are deliberately NOT given rules of their own. A rule on `::up-button`
+    makes QStyleSheetStyle take the sub-control over, and with no `image:` to draw there is then
+    no arrow at all -- rendered and looked at, both themes, 2026-08-18. Left alone, the base style
+    draws its own steppers over our frame and they read correctly in both. Those arrows are how
+    the delay is stepped by exactly what the DSP accepts (`CurveView.set_resolution`). */
+    QAbstractSpinBox[class~="mini-select"] {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 4px 4px 4px 9px;
+        font-size: 12px;
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
+    }}
+    QAbstractSpinBox[class~="mini-select"]:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QAbstractSpinBox[class~="mini-select"]:focus {{
+        border-color: {t.accent};
+    }}
+    /* The editable half is a QLineEdit child of the spin box, and it is drawn with its own
+    palette. Transparent so the box's one background shows through it rather than a second,
+    slightly different rectangle inside the frame. */
+    QAbstractSpinBox[class~="mini-select"] QLineEdit {{
+        background: transparent;
+        color: {t.text};
+        border: none;
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
     }}
 
     /* Fallback styling for native tooltips -- every widget in this app's own code now uses

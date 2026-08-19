@@ -62,6 +62,14 @@ gui = [
     # `_adopt_orphan_menus` reaches for `PlotItem.ctrlMenu`. Both are guarded, neither is public
     # API, and a minor bump deserves a look rather than a silent resolve.
     "pyqtgraph>=0.13,<0.14",
+    # Written down because `core/curve_sum.py`, `ui/tcc/curve_view.py` and `ui/tcc/curve_dialog.py`
+    # `import numpy` BY NAME. It arrived transitively through pyqtgraph and was declared nowhere,
+    # which is the same hole `mcp` and `uvicorn` were in before they became optional-extra
+    # casualties: a dependency we call into by name vanishes the day the package that happened to
+    # carry it drops it. In `gui` rather than the base, because the light half must stay light —
+    # `tests/test_packaging.py` blocks numpy along with Qt when it proves that, and that blocker is
+    # what stops the sum engine being wired into the MCP server by accident.
+    "numpy>=1.24,<3",
 ]
 # `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen. Bounded like the rest —
 # the test that enforces that caught this line first, which is the argument for having it.

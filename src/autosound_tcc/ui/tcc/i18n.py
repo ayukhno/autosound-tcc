@@ -97,6 +97,8 @@ T: dict[Lang, dict[str, str]] = {
         # about a feature — so each value gets a short label a reader can scan, not a raw key.
         "acousticsNone": "No flaw map yet. Phase 0 measures what this cabin does to the sound, and the rows land here — each with what may and may not be done about it.",
         "flawHypothesis": "not settled",
+        "flawEvidenceHead": "Read off:",
+        "flawNoWhy": "No reason was recorded with this entry -- only the measurement itself.",
         "flawAllChannels": "all channels",
         "flawAction_notch": "cut",
         "flawAction_leave": "leave",
@@ -363,8 +365,38 @@ T: dict[Lang, dict[str, str]] = {
         "curveShift": "delay",
         "curveShiftTip": "Hold the chosen driver back — the radio picks which one. It starts on whichever arrives FIRST, the natural choice on a first pass; negative is allowed, because on a later pass you are correcting a channel that already carries a delay. What cannot go below zero is the channel's TOTAL, and the reading says so when the ledger is known. Steps by what this DSP lets you type. Nothing is applied: the reading goes out as a proposal.",
         "curveDelayHead": "delay, to align (proposed, not applied):",
+        # The all-pass row (CURVE-ANALYSIS-PLAN.md step 4). `APF1`/`APF2` are the ledger's own
+        # names for the band type and are not translated anywhere; what is said around them is.
+        "curveApfLabel": "all-pass:",
+        "curveApfNone": "—",
+        "curveApfTip": "An all-pass for the driver the radio has chosen — the same driver the delay \
+box edits. It changes NO level and rotates the phase around f0: APF1 turns −90° at f0 (0 → −180° \
+overall), APF2 turns −180° at f0 (0 → −360°), and Q says how much of that turn happens next to f0. \
+On the frequency response the curve does not move; on the phase it rotates; on either, the \
+predicted sum (Σ) shows what that does to the joint — which is the point. On the impulse the drawn \
+trace stays as captured (an all-pass smears an impulse); the strip's sum carries it. Nothing is \
+applied: it goes out as a proposal in the reading, in the ledger's own words (APF2 250 Hz Q 0.71). \
+And an all-pass does not fill a single-driver null — only the summation of two overlapping drivers \
+can be re-tuned by rotating phase, so read it against the sum, never against one curve. The maths \
+is the skill's own (dsp_math), never a second copy here.",
+        "curveApfKindTip": "Which order. APF1: f0 alone, −90° there — the gentler quarter turn. \
+APF2: f0 and Q, −180° there — what an APF2 slot in a PEQ bank takes. Two APF1 at one f0 are one \
+APF2 with Q 0.5.",
+        "curveApfF0Tip": "The frequency the rotation is centred on. Put it where the joint is — \
+the crossover frequency between the two drivers being summed.",
+        "curveApfQTip": "How much of the 360° happens next to f0 (APF2 only). 0.71 turns over \
+about an octave and a half either side of f0; a higher Q turns faster and holds still less well \
+under the drift a real car has — the skill's own search stops at 4.",
+        "curveApfHead": "all-pass, to rotate phase (proposed, not applied):",
+        "curveApfNoMaths": "no all-pass can be simulated: the skill's filter maths could not be \
+loaded ({error})",
         "unitMs": "ms",
         "unitSmp": "smp",
+        # A delay set is only defined up to a common offset — see `curve_view.proposed_delays`.
+        # The set is stated FROM one driver, and this names it so nobody has to work out which of
+        # the numbers is the origin, or why one of them is zero.
+        "curveDelayRelative": "Relative to {name}, which takes none: only the differences between \
+these drivers were measured, so the set is stated from the one that needs the least.",
         "curveDelayLands": "arrival {was} → {now} ms",
         "curveDelayTotal": "channel → {total} ms",
         "curveDelayBelowZero": "⚠ below zero — the channel cannot go there",
@@ -372,6 +404,24 @@ T: dict[Lang, dict[str, str]] = {
 stands cannot be applied — say which reference to move instead.",
         "curveBankLabel": "delays read:",
         "curveBankLabelIn": "delays read in {set}:",
+        # The three buttons that took the place of the paragraphs under the plot (user,
+        # 2026-08-18). Each NAMES what is behind it and shows it on hover; the count is on the
+        # bank's own button because "how many drivers have I read" is the part worth seeing
+        # without hovering anything.
+        "curveBankBtn": "Delays read ({n})",
+        "curveSumNoteBtn": "Σ forecast",
+        "curveGuidesTip": "Take every guide off the picture: the markers, the levels, the cross \
+line and its dots. Nothing is lost — each one comes back exactly where it was, and the reading \
+stays the same sentence, because a marker you cannot see is still a number you took. While they \
+are hidden they cannot be dragged.",
+        "curveStripLinkTip": "Follow the plot's frequency scale. On the phase the strip and the \
+plot are the same frequencies, so one zoom moves both and what you see at 3 kHz above is at 3 kHz \
+below. Switch it off to zoom into a null on its own, and back on to line them up again. Not \
+offered on the impulse: that plot's axis is time.",
+        # Named after the thing it reports rather than after the act of reporting (user,
+        # 2026-08-19: "назвати кнопку і хінт «Маркери»"). It is the third "Markers" in this window
+        # — send, clear, and this one — and that is the point: one word for one group of controls.
+        "curveReadoutBtn": "Markers",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveClearLabel": "clear:",
         "curveClearDelay": "Delays",
@@ -395,17 +445,106 @@ implies, whether any of it looks like a measurement error rather than a tuning, 
 would check next. These are readings off the curves, not a target — aligning arrivals exactly \
 has not by itself fixed stage accuracy in this car, so treat them as evidence and say what you \
 would change and why. Nothing here is applied.",
+        # The all-pass half of the same set (`delay_bank.as_sentence`, `allpasses=`). Its own head
+        # when there are no delays in the set at all, and its own caveat: the effect was simulated
+        # on the sweeps in hand, never checked against a summation sweep.
+        "curveBankAskApfOnly": "All-pass filters I have dialled on the measured curves, for \
+ANALYSIS ONLY — do not write anything.",
+        "curveBankApf": "All-pass, dialled per driver while watching the predicted sum (proposed, \
+not applied; unit magnitude, phase only; APF1 = −90° at f0, APF2 = −180° at f0):",
+        "curveBankApfCaveat": "Simulated on the sweeps in hand by rotating the measured phase; NOT \
+verified by a summation sweep. Say whether the rotation fixes the joint or only moves the problem \
+(and drags the timing above f0 with it), and what capture would confirm it.",
         "curveNoMarkers": "Drag a marker onto the point you mean.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
+        # Two markers, always — they stopped being one-per-curve on 2026-08-19 (user: "число
+        # маркерів збільшується зі збільшенням числа кривих — а вони у нас постійні"). With no
+        # reading from the model to name them after, they are numbered: a bare digit on the plot,
+        # where the line is a hand's width from the label, and "marker N" in a sentence, where it
+        # is not.
+        "curveMarkerOne": "1",
+        "curveMarkerTwo": "2",
+        "curveMarkerN": "marker {n}",
         "curveTitle": "Where exactly?",
-        "curveNoSecond": "— second curve: none —",
         "curveAxes_v": "Markers read frequency (vertical)",
         "curveAxes_h": "Markers read level (horizontal)",
         "curveAxes_vh": "Markers read both, placed separately",
         "curveAxes_vhs": "One point on the curve gives both — the level follows the frequency",
         "curveAxes_vx": "One vertical line: read BOTH curves at that x, and how far apart they are",
         "curveAxes_hx": "One horizontal line: read where EACH curve reaches that level (the crossing nearest the middle of the view)",
+        # Vx and Hx answer "how far apart are THESE TWO", and that question has no N-curve form —
+        # fifteen pairwise gaps are not a reading. So with more than two curves plotted the tuner
+        # names the two; the per-curve markers keep answering for the rest.
+        "curveCrossPairTip": "Which two curves Vx and Hx compare. They read one gap between one \
+pair, so with more curves on screen you say which pair — the ordinary V/H/VH markers still read \
+every curve, one number each.",
+        # The predicted sum. The engine's own sentences (the summability verdict, the timing
+        # assumption) are English by design and are NOT here — these are the labels that frame
+        # them; see `core/curve_sum.TIMING_ASSUMPTION`.
+        "curveSumTip": "Σ — draw what these drivers do TOGETHER: the complex sum of the curves on \
+screen, dashed, in dB, with each driver's delay already applied. On the phase it goes over the \
+plot on the right-hand axis; on the impulse it gets a strip of its own underneath, because there \
+the plot's axis is time and the sum's is frequency. It is arithmetic on measurements you already \
+have, so a guess costs nothing and nothing is written anywhere. It only means something if every \
+measurement was captured against ONE shared timing reference; the Σ button under the plot carries \
+the verdict — what has been checked and what has not.",
+        "curveSumHead": "Predicted sum, dashed, in dB:",
+        # Signed, and worded for both signs on purpose: the same reading is −18 dB at a null and
+        # +6 dB for a pair that adds up everywhere, and "worst cancellation +6 dB" reads as a
+        # contradiction. `curve_sum.deepest_null` explains why +6.02 is the honest answer there.
+        "curveSumWorst": "Deepest point of the sum: {depth} dB against the loudest single driver \
+there, at {hz} Hz.",
+        "curveSumNone": "No sum drawn.",
+        # Reachable only when pyqtgraph refused to give this view a surface to draw on. Named
+        # rather than left as a dead toggle: the tuner is entitled to know the button is not
+        # broken, the plotting library is.
+        "curveSumNoPlot": "This view could not build the axis the sum is drawn on, so there is \
+nowhere to put it. Everything else in the window is unaffected.",
+        "curveSumTooFew": "One curve is not a sum: put a second measurement on screen.",
+        "curveSumNoData": "These curves carry no magnitude and phase to add up — they did not \
+come from a REW sweep.",
+        # The glossary's own groups, which are the sets a tune is argued about (user, 2026-08-18:
+        # "Ws, Ms, TWs, SW+Ws, L, R, ALL"). The type is on the row because `L` is a side and `Ws`
+        # is a pair, and a list of bare names does not say which.
+        # `fill:` and not `group:` — the group and version pair is a SHORTCUT that writes into the
+        # chips, not a second way of saying what is plotted (user, 2026-08-18: "хай 'Обрати' буде
+        # основним, а групи це допомога швидкого вибору"). A label that named it as a selector was
+        # half of why the window had two rows that seemed to disagree.
+        "curveGroupLabel": "fill:",
+        "curveGroupNone": "— no group —",
+        "curveGroupKind_pairs": "pair",
+        "curveGroupKind_joints": "joint",
+        "curveGroupKind_sides": "side",
+        "curveGroupKind_combos": "combo",
+        "curveGroupNoGlossary": "— no glossary in this project —",
+        "curveGroupTip": "Fill the selection with a whole group at once — the woofers, the mids, \
+sub+woofers, one side, everything. The names come from this car's glossary, and the sweeps chosen \
+are the ones at the config version beside it. Nothing is fetched that the group does not name: a \
+member REW has no sweep for is reported, not skipped. It FILLS and then lets go: take a chip off \
+afterwards and nothing re-fills, which is how you hear what one driver is doing to the joint.",
+        "curveGroupVersionTip": "The DSP config version (_N) the group's sweeps are taken at. It \
+starts on the version the curves already on screen share, or on the newest this car has for those \
+drivers, and you can move it.",
+        # Named, never skipped: `curve_sum` sees only what it was handed, so it cannot tell a sum
+        # of the woofers from a sum of one woofer. This sentence is the only place that can.
+        "curveGroupMissing": "{group} at _{version}: {names} — not in REW. What is drawn is the \
+sum of a different set.",
+        "curveGroupEmpty": "{group} at _{version}: REW holds no sweep of any member, so nothing \
+was changed.",
+        "curveChooseBtn": "Choose… ({n})",
+        "curveChooseTip": "Tick any measurements you like — the sum takes as many as you give it. \
+The menu stays open, so a whole side is one trip through the list. Everything ticked is a chip \
+above, in its curve's own colour; a group beside this fills the same chips in one go.",
+        # The chips: the ONE visible selection. Advisor (Gemini 3.1 Pro, 2026-08-18) — whoever
+        # commits a delay off a plotted sum has to be certain what fed it, so every contributing
+        # measurement is named on screen and every one can be taken off from where it is named.
+        "curveChipRemoveTip": "Take {title} off the plot. The rest stay where they are and the sum \
+is recomputed without it — which is how you hear what this one driver is doing to the joint.",
+        "curveChipOnlyTip": "The only curve on screen. Add another before taking this one off — a \
+window plotting nothing has nothing to say.",
+        "curveChipMissingTip": "REW gave no curve for {title}, so it is not on the plot even though \
+it is selected — and it is not in the sum either. It is shown faint for that reason.",
         "curveAt": "at",
         "curveZoomAll": "Show everything the capture holds",
         "curveZoomAllShort": "A",
@@ -418,6 +557,12 @@ would change and why. Nothing here is applied.",
         "curveKind_impulse": "impulse",
         "curveKind_fr": "frequency response",
         "curveKind_phase": "phase",
+        "curveRtaOnly": "Showing the frequency response: {titles} — an MMM capture, and REW has \
+neither an impulse nor a phase for one.",
+        "curveRtaTip": "An MMM capture: REW has no impulse and no phase for it. Switch to the \
+frequency response to put this one on the plot.",
+        "curveKindRtaTip": "Not for an MMM capture — REW has no impulse and no phase for one. \
+Choose sweeps (sw) above to read this.",
         "curveBtn": "Curves — put a marker where you mean",
         "curveNothing": "No measurements to plot yet — read them from REW first.",
         "curveLoading": "Reading the curves from REW…",
@@ -534,6 +679,8 @@ would change and why. Nothing here is applied.",
         "criticSaved": "Текст збережено у {path}",
         "acousticsNone": "Карти дефектів ще немає. Фаза 0 міряє, що ця машина робить зі звуком, і рядки з'являться тут — кожен із тим, що з ним можна й чого не можна.",
         "flawHypothesis": "не підтверджено",
+        "flawEvidenceHead": "Прочитано з:",
+        "flawNoWhy": "Причину із цим записом не зафіксували — тільки сам вимір.",
         "flawAllChannels": "усі канали",
         "flawAction_notch": "різати",
         "flawAction_leave": "лишити",
@@ -789,8 +936,32 @@ would change and why. Nothing here is applied.",
         "curveShift": "затримка",
         "curveShiftTip": "Притримати обраний драйвер — радіокнопка обирає, який саме. Починає з того, що приходить ПЕРШИМ (природний вибір на першому проході); відʼємне дозволено, бо на наступних проходах ви правите канал, у якому затримка вже є. Нижче нуля не може йти СУМА на каналі — і прочитання це скаже, коли реєстр відомий. Крок — той, який дає ввести цей ДСП. Нічого не застосовується: прочитання йде як пропозиція.",
         "curveDelayHead": "затримки для вирівнювання (пропозиція, не застосовано):",
+        "curveApfLabel": "all-pass:",
+        "curveApfNone": "—",
+        "curveApfTip": "All-pass для драйвера, якого обрала радіокнопка — того самого, що править \
+поле затримки. Він НЕ змінює рівень і обертає фазу навколо f0: APF1 повертає на −90° на f0 (загалом \
+0 → −180°), APF2 — на −180° на f0 (0 → −360°), а Q каже, яка частка цього оберту припадає на \
+околицю f0. На АЧХ крива не рухається; на фазі — обертається; і там, і там прогнозована сума (Σ) \
+показує, що це робить зі стиком — у цьому й суть. На імпульсі намальована крива лишається як \
+виміряна (all-pass розмазує імпульс); суму зі зсувом несе смуга внизу. Нічого не застосовується: \
+воно йде як пропозиція в показанні, словами реєстру (APF2 250 Hz Q 0.71). І all-pass не заповнює \
+провал одного драйвера — поворотом фази перелаштовується лише сума двох драйверів, що \
+перекриваються, тож читай його по сумі, а не по одній кривій. Математика — власна скілова \
+(dsp_math), тут нема її другої копії.",
+        "curveApfKindTip": "Який порядок. APF1: лише f0, там −90° — мʼякша чверть оберту. APF2: f0 \
+і Q, там −180° — те, що приймає слот APF2 у банку PEQ. Два APF1 на одній f0 — це один APF2 з Q 0.5.",
+        "curveApfF0Tip": "Частота, навколо якої обертається фаза. Став туди, де стик — на частоту \
+кросовера між двома драйверами, що сумуються.",
+        "curveApfQTip": "Яка частка з 360° припадає на околицю f0 (лише APF2). 0.71 обертає \
+приблизно на півтори октави в обидва боки від f0; вищий Q обертає швидше й гірше тримається під \
+дрейфом, який є в реальному авто — власний пошук скіла зупиняється на 4.",
+        "curveApfHead": "all-pass для повороту фази (пропозиція, не застосовано):",
+        "curveApfNoMaths": "all-pass не змоделювати: не вдалося завантажити математику фільтрів \
+скіла ({error})",
         "unitMs": "мс",
         "unitSmp": "вибірок",
+        "curveDelayRelative": "Відносно {name}, який лишається без затримки: вимірювались лише \
+різниці між цими драйверами, тож набір подано від того, кому треба найменше.",
         "curveDelayLands": "прихід {was} → {now} мс",
         "curveDelayTotal": "на каналі → {total} мс",
         "curveDelayBelowZero": "⚠ нижче нуля — канал так не може",
@@ -798,6 +969,17 @@ would change and why. Nothing here is applied.",
 вигляді не застосувати — скажи, яку опорну точку рухати натомість.",
         "curveBankLabel": "зчитані затримки:",
         "curveBankLabelIn": "зчитані затримки в {set}:",
+        "curveBankBtn": "Зчитані затримки ({n})",
+        "curveSumNoteBtn": "Σ прогноз",
+        "curveGuidesTip": "Прибрати з картинки всі напрямні: маркери, рівні, перехресну лінію та \
+її точки. Нічого не втрачається — кожна повертається туди, де була, а показання лишаються тим \
+самим реченням, бо невидимий маркер — це все одно знятий тобою показник. Поки сховані, їх не \
+потягнеш.",
+        "curveStripLinkTip": "Слідувати за шкалою частот графіка. На фазі смуга і графік — це ті \
+самі частоти, тож один зум рухає обидва, і що видно на 3 кГц угорі, те й на 3 кГц унизу. Вимкни, \
+щоб наблизити провал окремо, і ввімкни, щоб знову їх зіставити. На імпульсній не пропонується: \
+там вісь — час.",
+        "curveReadoutBtn": "Маркери",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveClearLabel": "очистити:",
         "curveClearDelay": "Затримки",
@@ -820,17 +1002,73 @@ would change and why. Nothing here is applied.",
 далі. Це прочитання з кривих, а не ціль: точне збігання приходів саме по собі сцену в цій машині \
 не виправляло — тож сприймай їх як свідчення і скажи, що б ти змінив(ла) і чому. Нічого з цього \
 не застосовано.",
+        "curveBankAskApfOnly": "All-pass фільтри, які я виставив(ла) на виміряних кривих, ЛИШЕ НА \
+АНАЛІЗ — нікуди їх не записуй.",
+        "curveBankApf": "All-pass по драйверах, виставлені за прогнозованою сумою (пропозиція, не \
+застосовано; рівень не змінює, лише фазу; APF1 = −90° на f0, APF2 = −180° на f0):",
+        "curveBankApfCaveat": "Змодельовано на наявних свіпах поворотом виміряної фази; НЕ \
+перевірено заміром сумування. Скажи, чи цей поворот лагодить стик, чи лише переносить проблему (і \
+тягне за собою тайминг вище f0), і який замір це підтвердив би.",
         "curveNoMarkers": "Перетягни маркер на точку, яку маєш на увазі.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",
+        "curveMarkerOne": "1",
+        "curveMarkerTwo": "2",
+        "curveMarkerN": "маркер {n}",
         "curveTitle": "Де саме?",
-        "curveNoSecond": "— друга крива: немає —",
         "curveAxes_v": "Маркери читають частоту (вертикальні)",
         "curveAxes_h": "Маркери читають рівень (горизонтальні)",
         "curveAxes_vh": "Маркери читають і те, і те, ставляться окремо",
         "curveAxes_vhs": "Одна точка на кривій дає обидві — рівень іде за частотою",
         "curveAxes_vx": "Одна вертикаль: читає ОБИДВІ криві на цьому x і різницю між ними",
         "curveAxes_hx": "Одна горизонталь: читає, де КОЖНА крива досягає цього рівня (перетин, найближчий до середини видимого)",
+        "curveCrossPairTip": "Які саме дві криві порівнюють Vx і Hx. Вони читають одну різницю \
+між однією парою, тож коли кривих більше — пару називаєш ти; звичайні маркери V/H/VH далі читають \
+кожну криву, по числу на кожну.",
+        "curveSumTip": "Σ — показати, що ці драйвери роблять РАЗОМ: комплексна сума кривих на \
+екрані, пунктиром, у дБ, із уже застосованими затримками кожного драйвера. На фазі вона лягає \
+поверх графіка по правій осі; на імпульсній отримує власну смугу під ним, бо там вісь графіка — \
+час, а суми — частота. Це арифметика над уже знятими замірами, тож припущення нічого не коштує і \
+нікуди нічого не пишеться. Вона щось означає лише тоді, коли всі заміри знято від ОДНОГО \
+спільного часового опору; кнопка Σ під графіком несе висновок — що перевірено, а що ні.",
+        "curveSumHead": "Передбачена сума, пунктир, у дБ:",
+        "curveSumWorst": "Найнижча точка суми: {depth} дБ відносно найгучнішого окремого драйвера \
+там, на {hz} Гц.",
+        "curveSumNone": "Суму не намальовано.",
+        "curveSumNoPlot": "Цьому вигляду не вдалось побудувати вісь, на якій малюється сума, тож \
+її нема куди покласти. На решту вікна це не впливає.",
+        "curveSumTooFew": "Одна крива — це не сума: постав на екран другий замір.",
+        "curveSumNoData": "Ці криві не несуть ні АЧХ, ні фази, щоб їх додати — вони не з \
+розгортки REW.",
+        "curveGroupLabel": "заповнити:",
+        "curveGroupNone": "— без групи —",
+        "curveGroupKind_pairs": "пара",
+        "curveGroupKind_joints": "стик",
+        "curveGroupKind_sides": "сторона",
+        "curveGroupKind_combos": "набір",
+        "curveGroupNoGlossary": "— у цьому проєкті нема глосарію —",
+        "curveGroupTip": "Заповнити вибір цілою групою — мідбаси, середні, саб+мідбаси, одну \
+сторону, все. Назви беруться з глосарію цієї машини, а свіпи — ті, що на версії конфігурації \
+поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не \
+мовчки пропускається. Група ЗАПОВНЮЄ і відпускає: прибереш потім один чіп — нічого не \
+підставляється назад, і саме так чути, що цей драйвер робить зі стиком.",
+        "curveGroupVersionTip": "Версія конфігурації ДСП (_N), на якій беруться свіпи групи. \
+Починає з версії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — \
+і її можна змінити.",
+        "curveGroupMissing": "{group} на _{version}: {names} — цього нема в REW. Намальовано суму \
+іншого набору.",
+        "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \
+не змінено.",
+        "curveChooseBtn": "Обрати… ({n})",
+        "curveChooseTip": "Познач будь-які заміри — сума приймає стільки, скільки даси. Меню не \
+закривається, тож ціла сторона — це один захід у список. Усе позначене стоїть чіпом вище, у \
+кольорі своєї кривої; група поруч заповнює ті самі чіпи одним рухом.",
+        "curveChipRemoveTip": "Прибрати {title} з графіка. Решта лишаються на місці, а сума \
+перераховується без нього — саме так чути, що цей драйвер робить зі стиком.",
+        "curveChipOnlyTip": "Єдина крива на екрані. Додай ще одну, перш ніж прибирати цю — вікно, \
+яке нічого не малює, нічого й не каже.",
+        "curveChipMissingTip": "REW не дав кривої для {title}, тож його нема на графіку, хоч він і \
+обраний — і в сумі його теж нема. Тому він блідий.",
         "curveAt": "на",
         "curveZoomAll": "Показати все, що є в замірі",
         "curveZoomAllShort": "A",
@@ -843,6 +1081,12 @@ would change and why. Nothing here is applied.",
         "curveKind_impulse": "імпульсна",
         "curveKind_fr": "АЧХ",
         "curveKind_phase": "фаза",
+        "curveRtaOnly": "Показано АЧХ: {titles} — замір MMM, а для нього REW не має ні \
+імпульсної, ні фази.",
+        "curveRtaTip": "Замір MMM: REW не має для нього ні імпульсної, ні фази. Щоб побачити \
+його на графіку, перейди на АЧХ.",
+        "curveKindRtaTip": "Не для заміру MMM — REW не має для нього ні імпульсної, ні фази. \
+Щоб це читати, обери вище заміри свіпом (sw).",
         "curveBtn": "Криві — постав маркер там, де маєш на увазі",
         "curveNothing": "Ще нема чого малювати — спершу прочитай заміри з REW.",
         "curveLoading": "Читаю криві з REW…",

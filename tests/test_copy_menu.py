@@ -161,4 +161,43 @@ def test_a_flaw_row_copies_its_verdict_and_the_reason_behind_it():
 
     assert items[i18n.t("copyValue")] == "250 Hz · -12 dB"
     assert i18n.t("flawAction_no_boost") in items[i18n.t("copyRow")]
-    assert items[i18n.t("copyHint")] == "interference, not min-phase\nw-R_1 (sw)"
+    # The hint pastes as it reads, and it now carries its own head and the label over the
+    # captures (2026-08-18): a reason quoted into a message or a ledger has to say WHAT it is a
+    # reason about, and "w-R_1 (sw)" on a line of its own is a file name to anyone who did not
+    # watch it being hovered.
+    hint = items[i18n.t("copyHint")]
+    assert hint.startswith("250 Hz · -12 dB")
+    assert i18n.t("flawKind_cabin_null") in hint and i18n.t("flawAction_no_boost") in hint
+    assert "interference, not min-phase" in hint
+    assert f"{i18n.t('flawEvidenceHead')}\nw-R_1 (sw)" in hint
+    assert "<" not in hint, "pasted as text, never as markup"
+
+
+def test_an_elided_label_grows_back_when_the_room_returns():
+    """It used to be a one-way ratchet, and a side panel's header showed it: QLabel computes its
+    size hint from the text it HOLDS, which this widget has already shortened, so the first elide
+    -- which runs before any layout has given the label a width -- pinned the hint at `min_width`
+    and a `Maximum` policy never asked for more. The header read "АУДІО АНАЛІЗ А…" with 60 px of
+    empty room beside it (user, 2026-08-18).
+    """
+    from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
+
+    _app()
+    host = QWidget()
+    layout = QHBoxLayout(host)
+    label = ElidedLabel("Аудіо аналіз авто", min_width=70, policy=QSizePolicy.Policy.Maximum)
+    layout.addWidget(label)
+    layout.addStretch(1)
+
+    host.resize(400, 40)
+    host.show()
+    _app().processEvents()
+    assert label.text() == "Аудіо аналіз авто", "room enough: the whole title"
+
+    host.resize(120, 40)
+    _app().processEvents()
+    assert label.text() != "Аудіо аналіз авто", "no room: it gives ground, as it promises"
+
+    host.resize(400, 40)
+    _app().processEvents()
+    assert label.text() == "Аудіо аналіз авто", "and it comes back -- the part that was broken"

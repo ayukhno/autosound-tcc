@@ -94,6 +94,11 @@ from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+# Imported from the curve view because that is where it was written and where it is used most.
+# It belongs beside `rounded_tooltip`, whose widget it formats for, and moving it there is a
+# separate change: `curve_view.py` is being edited in another thread of work right now, and a
+# helper's address is not worth a merge conflict.
+from autosound_tcc.ui.tcc.curve_view import tip_html
 from autosound_tcc.ui.tcc.sidebar_section import (
     CollapsibleGroup,
     SidebarSection,
@@ -524,6 +529,11 @@ class MainWindow(QMainWindow):
         self._contract_report: ContractReport | None = None
         self._contract_worker: _ContractWorker | None = None
         self._diag_dialog: DiagnosticsDialog | None = None
+        #: What the curve window was last plotting, per capture series — see
+        #: `_open_curves_from_panel`. In memory only, and deliberately: it is "what am I working on
+        #: right now", which is a fact about this sitting rather than about the project, and a
+        #: remembered set restored a week later would reopen an argument that has been settled.
+        self._curve_last: dict[str, list[str]] = {}
         self._preset_override: str | None = self._settings.value("ui/preset", None)
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
         # Which project folder is actually open matters the moment you run TCC against more than
@@ -1017,9 +1027,33 @@ class MainWindow(QMainWindow):
         line.setProperty("class", "cline2")
         outer.addWidget(line)
 
+        # The tip is the row's whole substance -- a headline says WHAT was measured, and only
+        # this says why it was called that and what it was read off. It used to be `why` and the
+        # evidence glued together with `<br>` at the tooltip's default size: two unrelated things
+        # in one grey paragraph, and the reader had to guess where the reasoning stopped and the
+        # file names began (user, 2026-08-18: "хінти перегляньте, щоб читались зрозуміло").
+        # Now it is laid out like the curve window's: a bold head naming the flaw the way a person
+        # would say it, the reasoning as its own paragraph, and the captures under a label of
+        # their own.
         why = flaw.why or ""
         evidence = ", ".join(flaw.evidence)
-        tip = attach_tip(widget, "<br>".join(x for x in (why, evidence) if x))
+        # NOT `head`: that name is the headline LABEL a few lines up, and shadowing it made
+        # `copy_menu.full_text(head)` read a string instead of a widget -- the copy menu lost its
+        # "copy value" entry and the row it offered began with a stray separator (caught by
+        # `test_copy_menu.py`, which the author of this line had not run).
+        tip_head = " · ".join(part for part in (
+            flaw.headline,
+            i18n.t(f"flawKind_{flaw.kind}"),
+            ", ".join(flaw.channels) or i18n.t("flawAllChannels"),
+            i18n.t(f"flawAction_{flaw.action}"),
+        ) if part)
+        body = "\n\n".join(part for part in (
+            why,
+            f"{i18n.t('flawEvidenceHead')}\n{evidence}" if evidence else "",
+        ) if part) or i18n.t("flawNoWhy")
+        # Doubt is the tip's own colour as well as the dot's: a hypothesis reads as a verdict when
+        # its text looks like every other row's.
+        tip = attach_tip(widget, tip_html(body, head=tip_head, warn=flaw.is_hypothesis))
         # The row that most needs copying: the whole point of the flaw map is that "do not EQ-boost
         # this null" outlives the session that found it, and the reason and the captures it was
         # read off are on hover. A verdict that can only be hovered cannot be quoted to anyone.
@@ -1239,13 +1273,68 @@ class MainWindow(QMainWindow):
             kind=str(request.get("kind") or "impulse"),
         )
 
+    def _open_curves_from_panel(self, titles: list) -> None:
+        """The measurement panel's own Curves button: open on ONE curve, or on the last set.
+
+        User, 2026-08-19: "при відкритті вікна показувати одну першу (перший раз для нового сету)
+        чи ті що були попереднього разу (в поточній сесії роботи), а НЕ ВСІ". The button offers
+        everything the series holds, and a series is nine or eighteen measurements — plotting all
+        of them is a picture of nothing, takes a REW call each, and then has to be undone chip by
+        chip before any actual question can be asked.
+
+        So: whatever was last looked at in THIS series, and the first title when this series has
+        not been opened yet. Everything else is still one tick away — `_open_curves` hands the
+        window every title REW holds as the choose menu's options, which is what makes opening
+        narrow safe rather than limiting.
+
+        Filtered against what the panel is offering NOW: a remembered title that the series no
+        longer holds (a re-measured round, a renamed capture) would be a window asking REW for a
+        curve nobody has.
+
+        The MODEL's own path does not come through here — `_on_curves_requested` names its titles
+        out loud and gets exactly those.
+        """
+        wanted = [str(t) for t in titles if str(t).strip()]
+        last = self._curve_last.get(self._curve_series_key())
+        # The whole offer goes through as `available` even though only part of it is plotted.
+        # `_open_curves` otherwise builds the options from the titles it is given plus what REW is
+        # known to hold — and the panel falls back to the EXPECTED names when nothing has been read
+        # yet (`_on_curves_clicked`), which are in neither list. Narrowing without this would take
+        # the rest of the round off the choose menu, which is the opposite of the ask.
+        self._open_curves(
+            [t for t in (last or []) if t in wanted] or wanted[:1], available=wanted
+        )
+
+    def _curve_series_key(self) -> str:
+        """Which capture series the "what was looked at last" memory is filed under.
+
+        The same key the curve window scopes its delay bank by (`viewing_session_id`): a title
+        belongs to a series, and a set remembered from one round is not the set to reopen after
+        the panel has been switched to another.
+        """
+        try:
+            return self._meas_panel.viewing_session_id() or ""
+        except Exception:  # noqa: BLE001 — a panel read must never keep the window from opening
+            return ""
+
+    def _remember_curve_selection(self, titles: list) -> None:
+        """Whatever the curve window is plotting now, against the series it was chosen in."""
+        self._curve_last[self._curve_series_key()] = [str(t) for t in titles if str(t).strip()]
+
     def _open_curves(
-        self, titles: list, markers: Optional[list] = None, kind: str = "impulse"
+        self, titles: list, markers: Optional[list] = None, kind: str = "impulse",
+        available: Optional[list] = None,
     ) -> None:
         """Open the curve window over `titles`, with the model's reading marked if there is one.
 
         Signature is the one an MCP tool will call: titles the model names, and where it read the
-        answer. Reached from the measurement panel's own button for now.
+        answer. Exactly what it is given, never a slice of it — the panel's own button decides how
+        much to open with before it calls here (`_open_curves_from_panel`).
+
+        `available` is what the window may OFFER, over and above what is plotted. Left out it is
+        the titles plus everything REW is known to hold, which is right for the model's own call;
+        the panel passes its whole round, because it is the one caller that deliberately plots less
+        than it was asked about.
         """
         from autosound_tcc.core import delay_bank
         from autosound_tcc.ui.tcc.curve_dialog import CurveDialog
@@ -1254,11 +1343,17 @@ class MainWindow(QMainWindow):
         if not titles:
             self._status_strip.notify(i18n.t("curveNothing"), level="warn")
             return
-        available = sorted(set(titles) | set(self._meas_panel.known_titles()))
+        available = sorted(
+            set(titles) | set(available or []) | set(self._meas_panel.known_titles())
+        )
         dialog = getattr(self, "_curve_dialog", None)
+        # Every title asked for, not the first two. This was the last pair-shaped slice on the
+        # path (the window used to hold two pickers); the model names as many measurements as it
+        # wants looked at, the panel's button offers a whole task, and the chip row is where the
+        # tuner takes one off again.
         if dialog is None:
             dialog = CurveDialog(
-                titles[:2], markers=markers or [], kind=kind, available=available, parent=self
+                titles, markers=markers or [], kind=kind, available=available, parent=self
             )
             # The reading lands in the composer rather than being sent: it is the Arbiter's
             # statement, and they see and edit it before it goes out. Nothing is recorded behind
@@ -1278,12 +1373,17 @@ class MainWindow(QMainWindow):
             # above: the Arbiter switches series in the panel while this window stays open.
             dialog.set_session_provider(self._meas_panel.viewing_session_id)
             self._meas_panel.sessionChanged.connect(lambda _id: dialog.session_switched())
+            # What is on screen, remembered per series, so the panel's button reopens on it
+            # rather than on the whole round (`_open_curves_from_panel`). Here rather than in the
+            # dialog because the dialog is re-pointed at other questions and outlives none of
+            # them; this window outlives all of them.
+            dialog.selectionChanged.connect(self._remember_curve_selection)
             self._curve_dialog = dialog
         else:
             # ONE window, re-pointed. Building a second is not merely wasteful: pyqtgraph's
             # PlotItem constructs parentless QMenus every time, and enough construct/destroy
             # cycles segfault the process from inside its own `__init__` (2026-08-12).
-            dialog.reset(titles[:2], markers=markers or [], kind=kind, available=available)
+            dialog.reset(titles, markers=markers or [], kind=kind, available=available)
         dialog.show()
         dialog.raise_()
 
@@ -1728,7 +1828,7 @@ class MainWindow(QMainWindow):
         # A step's measurement icon opens that capture series in the panel below (user request
         # 2026-07-28).
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
-        self._meas_panel.curvesRequested.connect(self._open_curves)
+        self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
 
         return container
 
