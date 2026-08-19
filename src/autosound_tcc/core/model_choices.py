@@ -146,6 +146,11 @@ class Choice:
     label: str
     provider: str = ""
     free: bool = False
+    #: Whether this machine can actually run it. False is for a route whose CLI is not installed:
+    #: the row is still shown, greyed and saying what is missing, because an option that is absent
+    #: reads as one that does not exist — which is how somebody concludes the app cannot do a
+    #: thing it can (user, 2026-08-19, looking for Codex in the picker and finding no trace of it).
+    available: bool = True
 
     @property
     def key(self) -> str:
@@ -412,11 +417,16 @@ def _fetch_agy_choices() -> list[Choice]:
 
 
 def codex_choices() -> list[Choice]:
-    """What the Codex CLI offers. Hardcoded — `codex models` refuses without a terminal."""
-    if not cli_available("codex"):
-        return []
+    """What the Codex CLI offers. Hardcoded — `codex models` refuses without a terminal.
+
+    Without the CLI the same rows come back marked unavailable rather than as an empty list. They
+    are the one route whose models this file knows without asking anything (`CODEX_MODELS`), so
+    they are the one route that can honestly say "this exists, and here is what it needs" instead
+    of vanishing. `agy` cannot: with its CLI gone there is no catalogue to name.
+    """
+    here = cli_available("codex")
     return [
-        Choice(harness="codex", model=model, label=model, provider="openai")
+        Choice(harness="codex", model=model, label=model, provider="openai", available=here)
         for model in CODEX_MODELS
     ]
 

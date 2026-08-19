@@ -2280,3 +2280,29 @@ def test_the_models_own_request_is_not_narrowed_by_what_was_looked_at_last():
 
     assert window._curve_dialog._chosen() == ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"]
     window._curve_dialog.close()
+
+
+def test_a_route_whose_cli_is_missing_is_greyed_and_says_what_it_needs():
+    """User, 2026-08-19: Codex was nowhere in the picker, so it read as something the app cannot
+    do — when what was missing was one CLI. The row is there now, disabled, naming what it wants;
+    and the field still counts it as missing, because a chosen route that cannot run has to say
+    so."""
+    from autosound_tcc.core import model_choices
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    combo = window._ai_critic_combo
+    here = model_choices.Choice(harness="sdk", model="claude-opus-5", label="Claude Opus 5")
+    gone = model_choices.Choice(
+        harness="codex", model="gpt-5.2-codex", label="gpt-5.2-codex", available=False
+    )
+
+    MainWindow._fill_combo(combo, [here, gone], here.key, critic=True)
+
+    rows = [combo.itemText(i) for i in range(combo.count())]
+    assert rows[0].startswith("SDK · Claude Opus 5")
+    assert "CODEX · gpt-5.2-codex" in rows[1]
+    assert i18n.t("modelInstallCli").format(cli="codex") in rows[1]
+    assert combo.model().item(0).isEnabled() is True
+    assert combo.model().item(1).isEnabled() is False, "not selectable, and looks it"

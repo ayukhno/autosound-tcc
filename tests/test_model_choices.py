@@ -499,3 +499,40 @@ def test_a_recommendation_that_matches_nothing_can_be_asked_about():
     assert mc.recommendation_available(
         [_c("sdk", "claude-opus-9", "Opus 9", "anthropic")], critic=False
     )
+
+
+# ---- a route this machine could have and does not (user, 2026-08-19) ---------------------------
+
+
+def test_codex_is_listed_even_without_the_cli_marked_unavailable(monkeypatch):
+    """Absence reads as "this does not exist". The user went looking for Codex in the picker, found
+    no trace of it anywhere, and concluded the app could not do it — when what was missing was one
+    CLI. So the rows stay, marked, and the picker greys them and says what they need."""
+    # `cli_available`, not `shutil.which`: conftest already pins it to False for the whole suite,
+    # so that no test reads whether this developer happens to have a CLI installed.
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+
+    rows = model_choices.codex_choices()
+
+    assert [c.model for c in rows] == list(model_choices.CODEX_MODELS)
+    assert all(c.available is False for c in rows)
+    assert all(c.route == "CODEX" for c in rows), "its own route, not omp's"
+
+
+def test_with_the_cli_there_the_same_rows_are_usable(monkeypatch):
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "codex")
+
+    rows = model_choices.codex_choices()
+
+    assert rows and all(c.available is True for c in rows)
+
+
+def test_an_unavailable_route_is_never_the_recommended_one(monkeypatch):
+    """A greyed row must not make a recommendation look satisfied — that check exists to be loud
+    when nothing matches."""
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+
+    assert not any(
+        model_choices.recommended(choice, critic=True)
+        for choice in model_choices.codex_choices()
+    )

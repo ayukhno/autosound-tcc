@@ -298,7 +298,12 @@ def _mark_missing(combo, entries, warn: bool = False) -> None:
     property: whoever wrote second used to erase the other's answer.
     """
     current = str(combo.currentData() or "")
-    missing = bool(current) and not any(choice.key == current for choice in entries)
+    # A route whose CLI is not installed counts as missing here, even though its row is now on the
+    # list (greyed, saying what it needs). The row exists so the option is discoverable; the field
+    # still has to say that what it currently holds cannot run.
+    missing = bool(current) and not any(
+        choice.key == current and choice.available for choice in entries
+    )
     classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
     combo.setProperty("class", classes)
     combo.style().unpolish(combo)
@@ -2710,7 +2715,11 @@ class MainWindow(QMainWindow):
             # is add a fact the row does not carry.
             if choice.free:
                 notes.append(i18n.t("modelFree"))
-            if critic and not model_choices.critic_reaches(choice):
+            if not choice.available:
+                # A route this machine could have and does not. Shown, greyed, saying what it
+                # needs — see `Choice.available`.
+                notes.append(i18n.t("modelInstallCli").format(cli=choice.harness))
+            elif critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
             if model_choices.unconfirmed(choice):
                 # Remembered from a previous launch, not confirmed by the CLI this time. Shown and
@@ -2728,6 +2737,12 @@ class MainWindow(QMainWindow):
             row = combo.count() - 1
             tip = f"{choice.route_note}\n{choice.model}"
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
+            if not choice.available:
+                # Not selectable, and greyed by the style rather than by a colour written here:
+                # a row nobody can pick has to look like one before it is clicked.
+                item = combo.model().item(row)
+                if item is not None:
+                    item.setEnabled(False)
             if model_choices.recommended(choice, critic=critic):
                 # Bold, and by CLASS — so a new Opus or a new Pro is marked the day it appears,
                 # with no release for it. The old literal match would simply have stopped bolding

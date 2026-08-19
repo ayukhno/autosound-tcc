@@ -267,6 +267,9 @@ the terminal and the session in it are yours.",
         "configureModelsSetupOpened": "omp's setup is open in a terminal. When it is done, come \
 back to this window — the list is read again.",
         "modelClipboardOnly": "clipboard only",
+        # A route whose CLI is not installed: shown greyed rather than left out, because an option
+        # that is absent reads as one that does not exist (user, 2026-08-19).
+        "modelInstallCli": "install the {cli} CLI",
         "modelRecommended": "recommended pair",
         "modelGoneTitle": "That model is no longer offered",
         "modelGone": "This project is set to {model}, which nothing on this machine can run any more — models retire. Pick what should run in its place; the mapping applies everywhere that name still appears, not just here.",
@@ -850,6 +853,7 @@ Choose sweeps (sw) above to read this.",
         "configureModelsSetupOpened": "Налаштування omp відкрито в терміналі. Коли закінчиш — \
 повернись у це вікно, список перечитається.",
         "modelClipboardOnly": "лише буфер",
+        "modelInstallCli": "постав {cli} CLI",
         "modelRecommended": "рекомендована пара",
         "modelGoneTitle": "Цієї моделі більше не пропонують",
         "modelGone": "У проєкті стоїть {model}, а на цій машині її вже нічим запустити — моделі виходять з обігу. Обери, що працюватиме замість неї; підміна діє скрізь, де ця назва ще трапляється, не лише тут.",
