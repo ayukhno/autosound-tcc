@@ -5,6 +5,16 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.8] — 2026-08-19 · no hashes in a sentence meant for a person
+
+### Fixed
+
+- **`TCC 0.1.7 · 0ef59ea — up to date`** put a commit hash in front of somebody who has no use for
+  one (user: "незрозумілі цифри та букви"). The hash exists to tell two builds of the same version
+  apart, which is a bug-report job — and it is already in the installation block below. The row now
+  carries version numbers only, and when the two numbers are the same it says *a newer build of the
+  same version is out* in words rather than showing the hashes that differ.
+
 ## [v0.1.7] — 2026-08-19 · in the reader's language, and legible
 
 ### Fixed

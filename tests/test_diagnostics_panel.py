@@ -512,3 +512,18 @@ def test_a_report_from_a_tab_that_was_never_opened_still_carries_the_versions(mo
 
     assert len(opened) == 1
     assert "Autosound+TCC" in opened[0] or "Autosound%20TCC" in opened[0]
+
+
+def test_a_newer_build_of_the_same_version_is_said_in_words(monkeypatch):
+    """TCC installs from a branch, so "newer" usually means the same number twice. Printing it as
+    "0.1.7 — a newer one is out: 0.1.7" would be nonsense, and a hash is not for reading."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("tcc", "0.1.7", "0.1.7", True))
+
+    label, button = dialog._update_rows["tcc"]
+    assert label.text() == i18n.t("updNewerBuild").format(what=i18n.t("updTccName"), here="0.1.7")
+    assert button.isEnabled()

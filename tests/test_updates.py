@@ -115,9 +115,10 @@ def test_tcc_is_compared_by_commit_not_by_version(monkeypatch):
     status = updates.check_tcc()
 
     assert status.newer is True, "same version, different commit — the commit decides"
-    # Both sides name the same two things, so the row compares like with like.
-    assert status.installed == "0.1.1 · " + "a" * 7
-    assert status.latest == "0.1.1 · " + "b" * 7
+    # ...and no hash reaches the row: it is bug-report material, and it is in the block below.
+    assert status.installed == "0.1.1"
+    assert status.latest == "0.1.1"
+    assert "a" * 7 not in status.installed + status.latest
 
     monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "b" * 40))
     assert updates.check_tcc().newer is False
@@ -214,11 +215,17 @@ def test_the_remote_version_is_read_at_the_same_commit(monkeypatch):
     assert ("c" * 40) in seen["url"]
 
 
-def test_an_unreadable_remote_version_leaves_the_commit_alone(monkeypatch):
+def test_an_unreadable_remote_version_falls_back_to_the_installed_number(monkeypatch):
+    """Offline mid-check: the row still says there is something newer, without inventing a number."""
     def boom(url, timeout=None):
         raise OSError("no network")
 
     monkeypatch.setattr(updates.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.7")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
+
+    status = updates.check_tcc()
 
     assert updates._remote_version("d" * 40) == ""
-    assert updates._named("", "d" * 40) == "d" * 7
+    assert status.newer is True and status.latest == "0.1.7"

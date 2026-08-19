@@ -457,9 +457,13 @@ class DiagnosticsDialog(QDialog):
         # Assigned every time, not only switched on: this row is re-rendered after an update and
         # on every re-check, and a button still live over "up to date" is an offer to do nothing.
         button.setEnabled(status.newer and status.updatable)
-        if status.newer:
+        if status.newer and status.latest and status.latest != here:
             label.setText(i18n.t("updAvailable").format(
                 what=title, here=here, there=status.latest))
+        elif status.newer:
+            # Same version number, different build — which is the normal case for TCC, because it
+            # installs from a branch and the number only moves when a release is cut.
+            label.setText(i18n.t("updNewerBuild").format(what=title, here=here))
         elif status.reason:
             label.setText(f"{title} {here} — {_reason(status.reason, status.detail)}")
         elif not status.latest:

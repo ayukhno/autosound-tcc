@@ -189,10 +189,8 @@ def check_skill() -> Status:
 def _remote_version(sha: str) -> str:
     """The version in `pyproject.toml` AT that commit, or "" — one anonymous read of a public file.
 
-    Pinned to the sha rather than to the branch so the number and the commit beside it describe
-    the same build. Without this the row compared a version against a commit hash — "0.1.4 — a
-    newer one is out: 64c72c43eccd" — which is two different kinds of thing in one sentence and
-    reads as nonsense (user's screenshot, 2026-08-19).
+    Pinned to the sha rather than to the branch, so the number describes the build being offered
+    and not whatever landed on `main` in the meantime.
     """
     url = f"https://raw.githubusercontent.com/ayukhno/autosound-tcc/{sha}/pyproject.toml"
     try:
@@ -202,14 +200,6 @@ def _remote_version(sha: str) -> str:
         return ""
     match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
     return match.group(1) if match else ""
-
-
-def _named(version: str, sha: str) -> str:
-    """`0.1.5 · 64c72c4` — what a person compares, and what actually identifies the build."""
-    short = sha[:7]
-    if version and short:
-        return f"{version} · {short}"
-    return version or short
 
 
 def check_tcc() -> Status:
@@ -226,14 +216,17 @@ def check_tcc() -> Status:
     _url, commit = install_report.install_source()
     if not commit:
         return Status("tcc", version, "", False, "source_checkout", updatable=False)
-    installed = _named(version, commit)
     ok, out = _git("ls-remote", TCC_REPO, "HEAD")
     head = out.split()[0] if ok and out.split() else ""
     if not head:
-        return Status("tcc", installed, "", False, "no_network")
+        return Status("tcc", version, "", False, "no_network")
     if head == commit:
-        return Status("tcc", installed, installed, False)
-    return Status("tcc", installed, _named(_remote_version(head), head), True)
+        return Status("tcc", version, version, False)
+    # A hash is not for the person reading this row — it is for a bug report, and it is already in
+    # the installation block below. What is left on screen is the two version numbers, and when
+    # they are the SAME number the row says so in words instead (user, 2026-08-19: "незрозумілі
+    # цифри та букви").
+    return Status("tcc", version, _remote_version(head) or version, True)
 
 
 def check_all() -> tuple[Status, Status]:
