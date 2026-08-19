@@ -153,6 +153,10 @@ _OVERLAY_MARGIN_PX = 6
 #: `rounded_tooltip`, which is shared with every other tip in the app.
 _TIP_WRAP_CHARS = 72
 _TIP_FONT_PX = 15
+#: What the readout prints where a trace never reaches the level being read. An em dash rather
+#: than a blank: a blank cell reads as a number somebody forgot to fill in, and "this curve never
+#: gets there" is an answer to the question that was asked.
+_NO_CROSSING = "—"
 #: How the plot and the sum's strip share the height. A THIRD to the strip by default — short,
 #: because the plot above is what is being worked in (the delay is dragged there) — but the
 #: boundary is a splitter handle the tuner drags (user, 2026-08-18: "треба щоб можна було кордон
@@ -233,6 +237,64 @@ def trace_colour(index: int) -> QColor:
     return colour_of(trace_token(index))
 
 
+def _wrapped(text: str) -> str:
+    """`text` escaped and broken into lines by hand — see `_TIP_WRAP_CHARS` for why by hand."""
+    lines: list[str] = []
+    for paragraph in str(text).split("\n"):
+        wrapped = textwrap.wrap(
+            paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
+        )
+        lines.extend(html.escape(part) for part in (wrapped or [""]))
+    return "<br>".join(lines)
+
+
+def _wrapped_html(text: str, colour: str = "") -> str:
+    """A paragraph inside a tip that is not all paragraph — the readout's own (`_readout_html`).
+
+    Its own block rather than a run of text, so a table above it and a sentence below it do not
+    end up on the same line: Qt's rich text lays `<table>` out inline otherwise.
+    """
+    style = f' style="color: {colour}"' if colour else ""
+    return f"<div{style}>{_wrapped(text)}</div>"
+
+
+def _fmt(value: float, digits: int) -> str:
+    """A number the way the reading prints one — and never "-0.0", which is a value that rounds to
+    nothing wearing a sign that says it does not. Two curves a hair apart at one marker produce it
+    on every second cell."""
+    text = f"{value:.{digits}f}"
+    return text[1:] if text.startswith("-") and float(text) == 0.0 else text
+
+
+def _cell(value: str, colour: str) -> str:
+    """One table cell, coloured. Right-aligned because these are numbers to be compared down a
+    column, and a ragged left edge is what makes two decimals look like a different order."""
+    return f'<td align="right" style="color: {colour}">{html.escape(str(value))}</td>'
+
+
+@dataclass(frozen=True)
+class _TableRow:
+    """One marker's line in the readout: what to call it, what colour it wears, its numbers."""
+
+    label: str
+    token: str
+    cells: list
+    delta: bool
+
+
+@dataclass(frozen=True)
+class _MarkerTable:
+    """One block of the reading. `head_unit` labels each row's first number (the marker's own
+    position — a frequency in the vertical block, a level in the horizontal one) and `cell_unit`
+    labels the rest, one per trace. Rendered twice, from here: as text for the model and as a
+    table for the tuner."""
+
+    traces: list
+    head_unit: str
+    cell_unit: str
+    rows: list
+
+
 def tip_html(text: str, head: str = "", warn: bool = False) -> str:
     """`text` as a hover tip: large, wrapped, with a bold head, warning-coloured when in doubt.
 
@@ -244,13 +306,7 @@ def tip_html(text: str, head: str = "", warn: bool = False) -> str:
     are built from the plain strings and are unchanged. This is drawing, only.
     """
     theme = current_theme()
-    lines: list[str] = []
-    for paragraph in str(text).split("\n"):
-        wrapped = textwrap.wrap(
-            paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
-        )
-        lines.extend(html.escape(part) for part in (wrapped or [""]))
-    body = "<br>".join(lines)
+    body = _wrapped(text)
     if head:
         body = f"<b>{html.escape(head)}</b><br>{body}"
     if warn:
@@ -610,6 +666,7 @@ class CurveView(QWidget):
         for axis in ("bottom", "left"):
             self._plot.getAxis(axis).setPen(pg.mkPen(_grid_colour()))
             self._plot.getAxis(axis).setTextPen(pg.mkPen(theme.muted))
+        self._thin_the_y_grid(self._plot)
         self._legend = self._plot.addLegend(offset=(-8, 8), labelTextColor=theme.text)
         # The plot goes in a SPLITTER rather than straight into the layout, so the boundary between
         # it and the sum's strip is a handle the tuner drags (user, 2026-08-18). Built here and not
@@ -686,13 +743,35 @@ class CurveView(QWidget):
         self._plot.getPlotItem().vb.sigResized.connect(self._place_sum_button)
         self._place_sum_button()
 
+        # ---- row A: which driver is being edited, and everything that has been read ----------
+        #
         # What used to be four lines of small grey text and a red sentence under the plot: two
         # compact buttons that NAME what stands behind them, with the whole text in a hover tip
         # (user, 2026-08-18: "займають місце і не читаються"). The verdict is about the CURVE and
         # the reading is about the MARKERS, so they stay two things, side by side, one row high.
+        #
+        # The DELAY RADIOS lead this row (user, 2026-08-19, with the screenshot: "перенеси
+        # «Показання», «Зчитані затримки», «Σ прогноз» вправо до «очистити:», а на їх місце
+        # радіокнопки драйверів"). They are the window's "which driver am I working on", so they
+        # belong at the start of a row rather than buried in the middle of the controls that read
+        # a view; and the three counters, which are all reports rather than actions, gather at the
+        # right beside the Clear pair that undoes them.
         notes = QHBoxLayout()
         notes.setContentsMargins(2, 0, 2, 0)
         notes.setSpacing(6)
+        # WHICH trace is held back. Radio buttons rather than a signed number: a DSP has no
+        # negative delay, so the question is which driver waits, and the two answers are the same
+        # alignment read from either end. One per trace, built as traces arrive — a whole side is
+        # four drivers and ALL is six, and a pair of radios would have made those unreachable.
+        self._target_buttons: list[QRadioButton] = []
+        #: Where in this row a new radio goes. Recorded rather than counted later: the window's own
+        #: note buttons are inserted into the same row (`add_note`), so the two insertion points
+        #: have to move together as radios appear.
+        self._radio_slot = notes.count()
+        self._ensure_target_buttons(2, notes)
+        # Everything past here is right-aligned: a note appearing on the left never moves the
+        # counters, and the counters never move the Clear buttons.
+        notes.addStretch(1)
         # The summability verdict and the timing assumption, verbatim from `curve_sum` — a drawn
         # sum ends an argument, so a sum that cannot be believed has to say so where the eye
         # already is (CURVE-ANALYSIS-PLAN.md, "The precondition"). It says it on the BUTTON, in
@@ -716,60 +795,39 @@ class CurveView(QWidget):
         attach_tip(self._readout_btn, "")
         notes.addWidget(self._readout_btn)
         #: Where the WINDOW's own note buttons go — see `add_note`. Recorded rather than counted
-        #: later, for the same reason `_radio_slot` is: the cross-pair combos are appended after
-        #: this point, so an inserted note has to land before them and not after.
+        #: later, for the same reason `_radio_slot` is: the Clear actions are appended after this
+        #: point, so an inserted note has to land before them and not after.
         self._notes_row = notes
         self._note_slot = notes.count()
-        # WHICH two curves the cross modes read. Only on screen when there is a choice to make —
-        # more than two traces and a cross mode selected — and in this row rather than beside the
-        # mode buttons because that row is already full at seven drivers, and because what these
-        # two combos configure is the READING, which is what this row is about.
-        self._cross_label = QLabel("×")
-        self._cross_label.setProperty("class", "phead-sub")
-        self._cross_combos: list[QComboBox] = []
-        for slot in (0, 1):
-            combo = QComboBox()
-            combo.setProperty("class", "mini-select")
-            combo.setFixedWidth(96)
-            combo.currentIndexChanged.connect(
-                lambda _index, at=slot: self._on_cross_combo(at)
-            )
-            attach_tip(combo, i18n.t("curveCrossPairTip"))
-            combo.setVisible(False)
-            if slot:
-                notes.addWidget(self._cross_label)
-            notes.addWidget(combo)
-            self._cross_combos.append(combo)
-        self._cross_label.setVisible(False)
-        notes.addStretch(1)
         layout.addLayout(notes)
 
-        row = QHBoxLayout()
-        row.setContentsMargins(2, 0, 2, 0)
-        row.setSpacing(6)
-        # The axis's own unit, at the left of the controls that read in it.
-        self._unit_label = QLabel("")
-        self._unit_label.setProperty("class", "phead-sub")
-        row.addWidget(self._unit_label)
-        row.addStretch(1)
-        # Zoom without a wheel (user, 2026-08-11 — a trackpad is not a scroll wheel, and this
-        # window is used in a car). "All" is everything the capture holds; "Detail" is the span
-        # the window opened on, which is the one worth coming back to after wandering.
-        # WHICH trace is held back, then by how much. Radio buttons rather than a signed number: a
-        # DSP has no negative delay, so the question is which driver waits, and the two answers are
-        # the same alignment read from either end. One per trace, built as traces arrive — a whole
-        # side is four drivers and ALL is six, and a pair of radios would have made those
-        # unreachable.
-        self._target_buttons: list[QRadioButton] = []
-        #: Where in this row a new radio goes. Recorded rather than counted later: the delay
-        #: group's own action is inserted into the same row (`add_delay_action`), so the two
-        #: insertion points have to move together as radios appear.
-        self._radio_slot = row.count()
-        self._ensure_target_buttons(2, row)
+        # ---- row B: the chosen driver's settings, all of them, on ONE line ------------------
+        #
+        # The delay and the all-pass were two rows because the delay's row also carried the mode
+        # buttons and the zoom; with the radios and the counters moved to row A there is width for
+        # both (user, 2026-08-19: "всі налаштування обраного драйвера в один рядок"). One line,
+        # one driver, and the row opens with the driver's NAME in its own colour so "which one am
+        # I changing" is answered where the change is typed rather than a glance away.
+        #
+        # What the all-pass is for: it changes no level and rotates the phase around `f0`, which is
+        # how the method aligns a crossover joint without moving the driver's every arrival
+        # (`phase_2_eq.md`). Until it was here the only way to see what one would do was to type it
+        # into the DSP, re-sweep, and look; now it is applied to the measured trace and the
+        # predicted sum answers while the number is being typed. The filter is the skill's own
+        # (`core/allpass.py` → `dsp_math`), never a copy here (SCR-050).
+        settings = QHBoxLayout()
+        settings.setContentsMargins(2, 0, 2, 0)
+        settings.setSpacing(6)
+        # The driver being edited, named and in its own colour. `.curve-chip-name` because that is
+        # exactly what it is — a trace's name in the trace's colour, the way the selection row
+        # names one.
+        self._apf_target_label = QLabel("")
+        self._apf_target_label.setProperty("class", "curve-chip-name")
+        settings.addWidget(self._apf_target_label)
 
         self._shift_label = QLabel(i18n.t("curveShift"))
         self._shift_label.setProperty("class", "phead-sub")
-        row.addWidget(self._shift_label)
+        settings.addWidget(self._shift_label)
         self._shift_box = QDoubleSpinBox()
         self._shift_box.setProperty("class", "mini-select")
         self._shift_box.setDecimals(3)
@@ -787,9 +845,78 @@ class CurveView(QWidget):
         self._shift_box.setLocale(QLocale(QLocale.Language.C))
         self._shift_box.valueChanged.connect(self.set_delay)
         attach_tip(self._shift_box, i18n.t("curveShiftTip"))
-        row.addWidget(self._shift_box)
-        #: Where the delay group's action goes — see `add_delay_action`.
-        self._delay_slot = row.count()
+        settings.addWidget(self._shift_box)
+        #: Where the delay group's action goes — see `add_delay_action`. In THIS row, beside the
+        #: box that produces it, which is what it was always for; the row it used to sit in is now
+        #: about the view rather than about the driver.
+        self._delay_slot = settings.count()
+
+        # Which order, where, and — second order only — how sharp. That is the whole filter.
+        self._apf_label = QLabel(i18n.t("curveApfLabel"))
+        self._apf_label.setProperty("class", "phead-sub")
+        attach_tip(self._apf_label, tip_html(i18n.t("curveApfTip")))
+        settings.addWidget(self._apf_label)
+        self._apf_kind = QComboBox()
+        self._apf_kind.setProperty("class", "mini-select")
+        self._apf_kind.setFixedWidth(84)
+        self._apf_kind.addItem(i18n.t("curveApfNone"), 0)
+        self._apf_kind.addItem(allpass_mod.APF1, 1)
+        self._apf_kind.addItem(allpass_mod.APF2, 2)
+        attach_tip(self._apf_kind, tip_html(i18n.t("curveApfKindTip")))
+        self._apf_kind.currentIndexChanged.connect(self._on_apf_control)
+        settings.addWidget(self._apf_kind)
+        self._apf_f0_label = QLabel("f0")
+        self._apf_f0_label.setProperty("class", "phead-sub")
+        settings.addWidget(self._apf_f0_label)
+        self._apf_f0 = QDoubleSpinBox()
+        self._apf_f0.setProperty("class", "mini-select")
+        self._apf_f0.setDecimals(1)
+        self._apf_f0.setRange(*allpass_mod.F0_RANGE_HZ)
+        self._apf_f0.setSingleStep(1.0)
+        self._apf_f0.setAccelerated(True)
+        self._apf_f0.setSuffix(" Hz")
+        self._apf_f0.setValue(_DEFAULT_APF_F0_HZ)
+        self._apf_f0.setFixedWidth(104)
+        # C locale, like the delay box beside it: one window, one decimal separator.
+        self._apf_f0.setLocale(QLocale(QLocale.Language.C))
+        self._apf_f0.valueChanged.connect(self._on_apf_control)
+        attach_tip(self._apf_f0, tip_html(i18n.t("curveApfF0Tip")))
+        settings.addWidget(self._apf_f0)
+        self._apf_q_label = QLabel("Q")
+        self._apf_q_label.setProperty("class", "phead-sub")
+        settings.addWidget(self._apf_q_label)
+        self._apf_q = QDoubleSpinBox()
+        self._apf_q.setProperty("class", "mini-select")
+        self._apf_q.setDecimals(2)
+        self._apf_q.setRange(*allpass_mod.Q_RANGE)
+        self._apf_q.setSingleStep(0.05)
+        self._apf_q.setAccelerated(True)
+        self._apf_q.setValue(allpass_mod.DEFAULT_Q)
+        self._apf_q.setFixedWidth(72)
+        self._apf_q.setLocale(QLocale(QLocale.Language.C))
+        self._apf_q.valueChanged.connect(self._on_apf_control)
+        attach_tip(self._apf_q, tip_html(i18n.t("curveApfQTip")))
+        settings.addWidget(self._apf_q)
+        # Why a filter was NOT accepted, when the skill's maths could not be reached for it. Empty
+        # and hidden in the ordinary case; a row that grew a warning label for a case that needs
+        # a broken install would be a row saying nothing most of the time.
+        self._apf_note = QLabel("")
+        self._apf_note.setProperty("class", "phead-sub")
+        self._apf_note.setVisible(False)
+        settings.addWidget(self._apf_note)
+        settings.addStretch(1)
+        self._settings_row = settings
+        layout.addLayout(settings)
+
+        # ---- row C: how the markers read, and what the view is showing ----------------------
+        row = QHBoxLayout()
+        row.setContentsMargins(2, 0, 2, 0)
+        row.setSpacing(6)
+        # The axis's own unit, at the left of the numbers that are read in it.
+        self._unit_label = QLabel("")
+        self._unit_label.setProperty("class", "phead-sub")
+        row.addWidget(self._unit_label)
+        row.addStretch(1)
 
         for mode in ("v", "h", "vh", "vhs", "vx", "hx"):
             button = QPushButton(_MODE_LABELS[mode])
@@ -803,11 +930,34 @@ class CurveView(QWidget):
             row.addWidget(button)
             self._axes_buttons.append((button, mode))
 
+        # WHICH two curves the cross modes read. Only on screen when there is a choice to make —
+        # more than two traces and a cross mode selected — and here, immediately after the mode
+        # buttons that switch those modes on (user, 2026-08-19: the settings of one thing on one
+        # line). They used to stand in the notes row, which is now three counters and a Clear pair
+        # and has nothing to do with how a marker reads.
+        self._cross_label = QLabel("×")
+        self._cross_label.setProperty("class", "phead-sub")
+        self._cross_combos: list[QComboBox] = []
+        for slot in (0, 1):
+            combo = QComboBox()
+            combo.setProperty("class", "mini-select")
+            combo.setFixedWidth(96)
+            combo.currentIndexChanged.connect(
+                lambda _index, at=slot: self._on_cross_combo(at)
+            )
+            attach_tip(combo, i18n.t("curveCrossPairTip"))
+            combo.setVisible(False)
+            if slot:
+                row.addWidget(self._cross_label)
+            row.addWidget(combo)
+            self._cross_combos.append(combo)
+        self._cross_label.setVisible(False)
+
         # Take every guide off the picture at once and put it back (user, 2026-08-18: "додай кнопку
         # сховати всі направляючі, типу '0' або 'Х'"). Beside the mode buttons because it is about
         # the same objects they place, and "×" rather than "0": a nought reads as a value, and this
         # is a crossing-out. The only other × in this window is the LABEL between the two cross-pair
-        # combos in the row above, which is not a button and does not act.
+        # combos beside it, which is not a button and does not act.
         # A big X, and red (user, 2026-08-18: "велика 'X' і кнопка червоного кольору"). Bigger
         # than the zoom buttons beside it and in the warning colour whatever its state, because it
         # is the one control here that takes something OFF the picture -- the others move a view,
@@ -867,85 +1017,6 @@ class CurveView(QWidget):
         self._action_row = row
         layout.addLayout(row)
 
-        # An all-pass for the driver the radio has chosen (CURVE-ANALYSIS-PLAN.md step 4, the
-        # fourth of the user's four asks of 2026-08-18). A row of its own under the delay's rather
-        # than three more controls squeezed into that one, which is full at two drivers and over
-        # at seven. Same editing model as the delay, deliberately: the radios pick WHICH driver,
-        # and both rows edit that one — so "which driver am I changing" has one answer, not two.
-        #
-        # What it is for: an all-pass changes no level and rotates the phase around `f0`, which is
-        # how the method aligns a crossover joint without moving the driver's every arrival
-        # (`phase_2_eq.md`). Until now the only way to see what one would do was to type it into
-        # the DSP, re-sweep, and look; here it is applied to the measured trace and the predicted
-        # sum answers while the number is being typed. The filter is the skill's own
-        # (`core/allpass.py` → `dsp_math`), never a copy here (SCR-050).
-        apf_row = QHBoxLayout()
-        apf_row.setContentsMargins(2, 0, 2, 0)
-        apf_row.setSpacing(6)
-        self._apf_label = QLabel(i18n.t("curveApfLabel"))
-        self._apf_label.setProperty("class", "phead-sub")
-        attach_tip(self._apf_label, tip_html(i18n.t("curveApfTip")))
-        apf_row.addWidget(self._apf_label)
-        # The driver being edited, named and in its own colour: this row sits a line away from the
-        # radio that chose it, and "which one is this changing" must not need a glance upward.
-        # `.curve-chip-name` because that is exactly what it is — a trace's name in the trace's
-        # colour, the way the selection row names one.
-        self._apf_target_label = QLabel("")
-        self._apf_target_label.setProperty("class", "curve-chip-name")
-        apf_row.addWidget(self._apf_target_label)
-        # Which order, where, and — second order only — how sharp. That is the whole filter.
-        self._apf_kind = QComboBox()
-        self._apf_kind.setProperty("class", "mini-select")
-        self._apf_kind.setFixedWidth(84)
-        self._apf_kind.addItem(i18n.t("curveApfNone"), 0)
-        self._apf_kind.addItem(allpass_mod.APF1, 1)
-        self._apf_kind.addItem(allpass_mod.APF2, 2)
-        attach_tip(self._apf_kind, tip_html(i18n.t("curveApfKindTip")))
-        self._apf_kind.currentIndexChanged.connect(self._on_apf_control)
-        apf_row.addWidget(self._apf_kind)
-        self._apf_f0_label = QLabel("f0")
-        self._apf_f0_label.setProperty("class", "phead-sub")
-        apf_row.addWidget(self._apf_f0_label)
-        self._apf_f0 = QDoubleSpinBox()
-        self._apf_f0.setProperty("class", "mini-select")
-        self._apf_f0.setDecimals(1)
-        self._apf_f0.setRange(*allpass_mod.F0_RANGE_HZ)
-        self._apf_f0.setSingleStep(1.0)
-        self._apf_f0.setAccelerated(True)
-        self._apf_f0.setSuffix(" Hz")
-        self._apf_f0.setValue(_DEFAULT_APF_F0_HZ)
-        self._apf_f0.setFixedWidth(104)
-        # C locale, like the delay box beside it: one window, one decimal separator.
-        self._apf_f0.setLocale(QLocale(QLocale.Language.C))
-        self._apf_f0.valueChanged.connect(self._on_apf_control)
-        attach_tip(self._apf_f0, tip_html(i18n.t("curveApfF0Tip")))
-        apf_row.addWidget(self._apf_f0)
-        self._apf_q_label = QLabel("Q")
-        self._apf_q_label.setProperty("class", "phead-sub")
-        apf_row.addWidget(self._apf_q_label)
-        self._apf_q = QDoubleSpinBox()
-        self._apf_q.setProperty("class", "mini-select")
-        self._apf_q.setDecimals(2)
-        self._apf_q.setRange(*allpass_mod.Q_RANGE)
-        self._apf_q.setSingleStep(0.05)
-        self._apf_q.setAccelerated(True)
-        self._apf_q.setValue(allpass_mod.DEFAULT_Q)
-        self._apf_q.setFixedWidth(72)
-        self._apf_q.setLocale(QLocale(QLocale.Language.C))
-        self._apf_q.valueChanged.connect(self._on_apf_control)
-        attach_tip(self._apf_q, tip_html(i18n.t("curveApfQTip")))
-        apf_row.addWidget(self._apf_q)
-        # Why a filter was NOT accepted, when the skill's maths could not be reached for it. Empty
-        # and hidden in the ordinary case; a row that grew a warning label for a case that needs
-        # a broken install would be a row saying nothing most of the time.
-        self._apf_note = QLabel("")
-        self._apf_note.setProperty("class", "phead-sub")
-        self._apf_note.setVisible(False)
-        apf_row.addWidget(self._apf_note)
-        apf_row.addStretch(1)
-        self._apf_row = apf_row
-        layout.addLayout(apf_row)
-
         self._detail_range: Optional[tuple[float, float]] = None
         self._traces: list[Trace] = []
         self._markers: list[pg.InfiniteLine] = []
@@ -988,6 +1059,27 @@ class CurveView(QWidget):
         # ...and the all-pass boxes into theirs: nothing chosen, so f0 and Q are shut.
         self._sync_apf_controls()
 
+    @staticmethod
+    def _thin_the_y_grid(plot: pg.PlotWidget) -> None:
+        """Two levels of horizontal grid line, not three (user, 2026-08-19: "сітка по вертикалі
+        дуже густа").
+
+        pyqtgraph's linear axis offers THREE tick levels by default: the major spacing, a tenth of
+        it, and — where there is room — a tenth of that. On a phase plot ranged ±180° that is a
+        line every 5°, which at this window's height is a hatch pattern with the curves inside it.
+        `maxTickLevel=1` keeps the majors and their one subdivision, which is the same two weights
+        the frequency axis draws (`LogHzAxis`) and the same two REW's own axis has.
+
+        The alphas are untouched: `_GRID_ALPHA` and `_GRID_MIX` are what made the grid VISIBLE
+        (2026-08-18, with REW's axis beside ours), and the complaint here is about how many lines
+        there are, not how bright they are. Only the LEFT axis — the bottom one is either the log
+        frequency axis, which decides its own levels, or time, which was never the dense one.
+        """
+        try:
+            plot.getAxis("left").setStyle(maxTickLevel=1)
+        except (AttributeError, TypeError):  # pragma: no cover — a pyqtgraph that moved this
+            pass
+
     def _place_sum_button(self, *_args) -> None:
         """Keep the Σ toggle in the plot AREA's top-left corner — inside the axes, not over them.
 
@@ -1016,21 +1108,24 @@ class CurveView(QWidget):
         button.raise_()
 
     def _sum_offered(self) -> bool:
-        """Whether the Σ toggle is on screen at all: the phase and the impulse, never the FR.
+        """Whether the Σ toggle is on screen at all. Every view, since 2026-08-19.
 
-        The user's own rule (2026-08-18) and it is about their workflow, not about the maths: the
-        frequency response is where MMM/RTA captures get compared, and an MMM capture carries no
-        phase, so on that view the answer to Σ is usually a refusal. A control that mostly refuses
-        is a control that teaches people to ignore it.
+        It was kept OFF the frequency response for a day, on the user's own rule (2026-08-18): the
+        FR is where MMM/RTA captures get compared, an MMM capture carries no phase, so there the
+        answer to Σ would usually be a refusal — and a control that mostly refuses teaches people
+        to ignore it.
 
-        The CAPABILITY is untouched — `set_sum_shown(True)` still computes and draws the sum of
-        two sweeps on a frequency response, and every test of the engine goes through that path.
-        Only the button is not offered there.
+        **The user reversed it on 2026-08-19 after using the window** ("десь ділась кнопка суми",
+        on the frequency response). The rule was written from the RTA case and the workflow turned
+        out to be the other one: the sweeps a joint is argued about are compared on the FR as much
+        as on the phase, the sum there needs no second scale — the plot is already in dB, over the
+        curves it was computed from — and hunting for a toggle that exists on two views out of
+        three is worse than a refusal that says why.
 
-        Asked in this widget's own vocabulary, which is units: the impulse's x is time, the
-        phase's y is degrees, and the frequency response is the one that answers in dB.
+        Nothing else changed: a selection that cannot be summed still refuses in words on the Σ
+        note button, which is where the reason belongs.
         """
-        return self._unit == "ms" or self._y_unit == "°"
+        return True
 
     def _ensure_sum_axis(self) -> bool:
         """Build the right-hand axis the first time a sum is actually drawn, and only then.
@@ -1160,8 +1255,12 @@ class CurveView(QWidget):
         selection arrives, and destroying a widget that a `toggled` connection is standing on is
         how this app has crashed before (a widget deleted from its own event handler is a SIGSEGV).
         Six spare hidden radios cost nothing; a torn-down one costs the window.
+
+        They live in the NOTES row now (user, 2026-08-19), which is why the slot that moves along
+        with them is the notes' one and not the delay group's: the delay's action is in the
+        settings row below, where nothing is ever inserted before it.
         """
-        row = row if row is not None else self._action_row
+        row = row if row is not None else self._notes_row
         while len(self._target_buttons) < count:
             index = len(self._target_buttons)
             button = QRadioButton(str(index + 1))
@@ -1179,17 +1278,20 @@ class CurveView(QWidget):
             row.insertWidget(self._radio_slot + index, button)
             self._target_buttons.append(button)
             # Everything to the right of the radios moved one place along, including the slot the
-            # delay group's action is inserted at.
-            if getattr(self, "_delay_slot", None) is not None:
-                self._delay_slot += 1
+            # window's own note buttons are inserted at. Guarded because the first two radios are
+            # made while this row is still being built and that slot does not exist yet.
+            if getattr(self, "_note_slot", None) is not None:
+                self._note_slot += 1
 
     def add_delay_action(self, button: QWidget) -> None:
         """Put the delay group's own action immediately after the delay controls.
 
         Not at the end of the row: an action belongs beside the controls that produce it, and
-        parked at the far end it reads as a second opinion about the markers.
+        parked at the far end it reads as a second opinion about the markers. Since 2026-08-19
+        that means the SETTINGS row — the delay box, this button, and the all-pass are one line
+        about one driver.
         """
-        self._action_row.insertWidget(self._delay_slot, button)
+        self._settings_row.insertWidget(self._delay_slot, button)
 
     def add_note(self, button: QWidget) -> None:
         """Put one of the WINDOW's own note buttons in this view's notes row, beside its two.
@@ -1205,11 +1307,11 @@ class CurveView(QWidget):
         self._note_slot += 1
 
     def add_note_action(self, button: QWidget) -> None:
-        """Put an action at the RIGHT-hand end of the notes row, past the stretch.
+        """Put an action at the RIGHT-hand end of the notes row, after the notes themselves.
 
-        The notes on the left say what is on screen; the actions on the right undo it. The stretch
-        between them is what keeps a long note from pushing a button off the row, and what makes
-        the clear buttons stay in the same place while a note appears and disappears with the sum.
+        The stretch in that row is now in front of BOTH — the radios have the left of it (user,
+        2026-08-19) — so this end of the row is a block: three counters and the two Clear buttons
+        that undo what they count, in that order, never moved by a note appearing with the sum.
         """
         self._notes_row.addWidget(button)
 
@@ -2046,6 +2148,9 @@ class CurveView(QWidget):
             # The left axis wears the sum's own colour, the same pairing of scale with curve the
             # right-hand axis uses on the frequency views.
             strip.getAxis("left").setTextPen(pg.mkPen(self._sum_colour()))
+            # ...and the same two levels of horizontal line as the plot above: a band 130 px tall
+            # is where a third level is least readable and most likely to be drawn.
+            self._thin_the_y_grid(strip)
             strip.showGrid(x=True, y=True, alpha=_GRID_ALPHA)
             self._adopt_orphan_menus(strip)
             # Hidden BEFORE it is put in the splitter. `QSplitter::insertWidget` shows what it is
@@ -2269,8 +2374,8 @@ class CurveView(QWidget):
     def _update_sum_button(self) -> None:
         """Show the Σ toggle where it applies, and say ON it whether the sum is on.
 
-        Not on the frequency response at all — see `_sum_offered`. On the impulse it is now a live
-        control rather than a marked-shut one: the strip it used to promise is under the plot.
+        Which is everywhere now — see `_sum_offered`, where the user's 2026-08-18 rule and its
+        2026-08-19 reversal are both written down.
 
         The checked state is coloured here rather than in the stylesheet, which has no `:checked`
         rule for `.zoom-btn`. A toggle floating over the data whose state cannot be read is worse
@@ -2380,8 +2485,11 @@ class CurveView(QWidget):
 
         By default the FIRST is the model's reading and the rest are the Arbiter's, coloured apart
         because a panel that shows two numbers in one colour lets them be confused for each other.
-        `tokens` overrides that: when the markers are one-per-curve rather than model-versus-you,
-        each takes its own curve's colour, and calling one of them "the model's" would be a lie.
+        `tokens` overrides that, and is how a caller says these are not model-versus-you.
+
+        What the window opens with is a PAIR, whatever is plotted (`curve_dialog._starting_markers`,
+        user 2026-08-19) — but nothing here counts them: a caller with a reason for five markers
+        gets five, and everything below reads `self._markers`.
         """
         for line in self._markers:
             self._plot.removeItem(line)
@@ -2390,11 +2498,9 @@ class CurveView(QWidget):
             i18n.t("curveMarkerModel") if i == 0 else i18n.t("curveMarkerYou")
             for i in range(len(positions))
         ]
+        self._marker_tokens = list(tokens)
         for index, position in enumerate(positions):
-            if index < len(tokens):
-                token = tokens[index]
-            else:
-                token = _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
+            token = self._marker_token(index)
             colour = colour_of(token)
             line = pg.InfiniteLine(
                 pos=self._to_view(float(position)), angle=90,
@@ -2416,7 +2522,6 @@ class CurveView(QWidget):
             line.sigPositionChanged.connect(self._on_marker_moved)
             self._plot.addItem(line)
             self._markers.append(line)
-        self._marker_tokens = list(tokens)
         self._rebuild_h_markers()
         self._render_readout()
 
@@ -2659,7 +2764,13 @@ class CurveView(QWidget):
         return [middle + band / 2.0 - step * index for index in range(len(levels))]
 
     def _rebuild_h_markers(self) -> None:
-        """One horizontal marker per vertical one, started on its own curve's value at that x.
+        """One horizontal marker per vertical one, started on a curve's value at that x.
+
+        Marker `i` starts on trace `i` while there is a trace `i` to start on, and on the LAST one
+        after that (`_y_at` clamps). The markers are a constant pair now and the traces are however
+        many were chosen, so the two lists stopped being the same length on 2026-08-19: over one
+        curve both lines start on it, over four the pair reads the first two, and either way the
+        line is on a curve rather than parked at zero.
 
         Where that would draw two lines nobody can tell apart, they are spread across the middle of
         the view instead — see `_h_marker_levels`, which owns that decision for both shapes below.
@@ -2692,9 +2803,7 @@ class CurveView(QWidget):
             [self._y_at(index, x) for index, x in enumerate(self.positions())]
         )
         for index, _x in enumerate(self.positions()):
-            token = self._marker_tokens[index] if index < len(self._marker_tokens) else (
-                _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
-            )
+            token = self._marker_token(index)
             line = pg.InfiniteLine(
                 pos=levels[index], angle=0,
                 movable=self._h_marker_movable(),
@@ -2844,10 +2953,16 @@ class CurveView(QWidget):
         return []
 
     def _crossing_near(self, index: int, level: float, centre: float) -> Optional[float]:
-        """The x where trace `index` crosses `level`, closest to `centre`. None if it never does."""
-        trace = self._traces[index]
-        xs = np.asarray(trace.x, dtype=float)
-        ys = np.asarray(trace.y, dtype=float) - level
+        """The x where trace `index` crosses `level`, closest to `centre`. None if it never does.
+
+        Off the DRAWN curve, for the same reason `_y_at` is: the level line crosses what is on
+        screen, and a driver that has been delayed or rotated is on screen where `_shifted` put it.
+        """
+        if not (0 <= index < len(self._traces)):
+            return None
+        xs, ys = self._shifted(index, self._traces[index])
+        xs = np.asarray(xs, dtype=float)
+        ys = np.asarray(ys, dtype=float) - level
         if xs.size < 2:
             return None
         sign_change = np.nonzero(np.diff(np.signbit(ys)))[0]
@@ -2862,14 +2977,26 @@ class CurveView(QWidget):
         return float(crossings[int(np.abs(crossings - centre).argmin())])
 
     def _y_at(self, index: int, x: float) -> float:
-        """The value of trace `index` at `x`, or 0 when there is no such trace."""
-        if index >= len(self._traces):
+        """The value of the DRAWN curve `index` at `x`, or 0 when there is nothing plotted.
+
+        Drawn, not captured: `_shifted` is what the plot is given, so a delayed impulse and a
+        rotated phase are read where the marker actually crosses them. Reading the raw measurement
+        instead meant that the moment a driver was held back, the level line placed "on its curve"
+        landed beside it and the reading stated a value the picture does not show.
+
+        The index is CLAMPED rather than refused. Markers are a constant pair now (user,
+        2026-08-19) and traces are however many the tuner chose, so marker 2 over a single curve
+        has no trace of its own — it reads the last one, which is the same curve the eye reads it
+        against.
+        """
+        if not self._traces:
             return 0.0
-        trace = self._traces[index]
-        xs = np.asarray(trace.x, dtype=float)
+        at = min(max(int(index), 0), len(self._traces) - 1)
+        xs, ys = self._shifted(at, self._traces[at])
+        xs = np.asarray(xs, dtype=float)
         if not xs.size:
             return 0.0
-        return float(np.asarray(trace.y, dtype=float)[int(np.abs(xs - x).argmin())])
+        return float(np.asarray(ys, dtype=float)[int(np.abs(xs - x).argmin())])
 
     # ---- what the Arbiter is saying --------------------------------------
 
@@ -2882,24 +3009,47 @@ class CurveView(QWidget):
         return [float(line.value()) for line in self._h_markers]
 
     def reading(self) -> str:
-        """The markers as a sentence a model can parse — names, positions, and the delta.
+        """The markers as a sentence a model can parse — what each one crosses, then the delta.
 
         A sentence rather than a dict because this goes into the dialog, where the Arbiter can see
         and edit it before it is sent. Nothing is recorded behind their back.
+
+        Per MARKER since 2026-08-19, and that is the shape the user asked for ("додати поточні
+        показники пересічення маркерів більш структуровано… щоб зразу бачити де що пересікається").
+        It used to be per AXIS — every marker's frequency in one clause, every level in another —
+        which reads as two lists the reader has to zip together, and stopped saying anything at all
+        about the curves once there were more than two of them. Now each marker names what it
+        crosses on every trace on screen, and the Δ block states the differences.
         """
         rotated = any(ap is not None for ap in self._allpasses[:len(self._traces)])
         if not self._markers and not any(self._delays) and not rotated:
             return ""
-        names = [t.name for t in self._traces] or [""]
+        names = [t.name for t in self._traces if t.name]
         digits = 3 if self._unit == "ms" else 1
         if self._markers and self._axes_mode in _CROSS_MODES:
             return self._cross_reading(digits)
-        lines = []
-        if self._markers and "v" in self._axes_mode:
-            lines.append(self._axis_reading(self.positions(), self._unit, digits))
-        if self._markers and "h" in self._axes_mode:
-            lines.append(self._axis_reading(self.levels(), self._y_unit or "", 1))
-        parts = [part for part in lines if part]
+        tables = self._marker_tables(digits)
+        parts = [text for text in (self._table_text(table) for table in tables) if text]
+        # The curves named ONCE at the head, and only where the clauses do not name them
+        # themselves — which is the impulse, where the reading is arrival times and nothing else.
+        # Everywhere else each clause already prints every trace, and a header would say each name
+        # twice for no reader's benefit.
+        head = "" if any(table.traces for table in tables) or not names else " / ".join(names)
+        parts.extend(self._proposal_clauses())
+        if not parts:
+            return ""
+        # One line. It has a full-width row of its own now, which is room enough — the wrapping is
+        # there for a narrow window, not as the normal shape (user, 2026-08-11).
+        body = "; ".join(parts)
+        return f"{head} — {body}" if head else body
+
+    def _proposal_clauses(self) -> list[str]:
+        """What this window is PROPOSING about the drivers: the delay set, then the all-passes.
+
+        Its own method because two readers want exactly these sentences and neither wants the
+        markers with them: `reading()` puts them after the marker clauses, and the readout tip puts
+        them under the table as prose (a proposal is a sentence, not a row of numbers).
+        """
         proposals = []
         # The set with its common part removed — see `proposed_delays`. Which drivers are IN the
         # set is still decided by the raw drag (a driver nobody moved is not a proposal); what is
@@ -2943,19 +3093,20 @@ class CurveView(QWidget):
                     # щоб загалом не йшло менш нуля").
                     clause += " " + i18n.t("curveDelayBelowZero")
             proposals.append(clause)
+        clauses = []
         if proposals:
             # The caveat once, at the head, not once per driver. It is a property of the whole
             # statement — the panel changes nothing; this goes to the composer, the Arbiter sends
             # it, and the delta is banked 🟡 like every other proposed change. Repeating it on
             # each driver was most of the sentence by the second one (user's screenshot).
-            head = i18n.t("curveDelayHead") + " " + "; ".join(proposals)
+            delays = i18n.t("curveDelayHead") + " " + "; ".join(proposals)
             if reference:
                 # One clause, and only where a set was actually normalised. Without it the reader
                 # has to work out for themselves which of the numbers is the origin and why one of
                 # them is zero — and that is the difference between a set they can enter and a
                 # set they have to reverse-engineer.
-                head += ". " + i18n.t("curveDelayRelative").format(name=reference)
-            parts.append(head)
+                delays += ". " + i18n.t("curveDelayRelative").format(name=reference)
+            clauses.append(delays)
         rotations = [
             f"{trace.name}: {self._allpasses[index].label()}"
             for index, trace in enumerate(self._traces)
@@ -2967,18 +3118,8 @@ class CurveView(QWidget):
             # entering them types them in two different places. Named in the ledger's vocabulary
             # (`APF2 250 Hz Q 0.71`) so what is read here is what would be proposed there. Same
             # caveat as the delay's, once: proposed, not applied.
-            parts.append(i18n.t("curveApfHead") + " " + "; ".join(rotations))
-        if not parts:
-            return ""
-        # One line. It has a full-width row of its own now, which is room enough — the wrapping is
-        # there for a narrow window, not as the normal shape (user, 2026-08-11).
-        body = "; ".join(parts)
-        # ...and the header is dropped when the markers are already named after their curves,
-        # which is the ordinary case: "tw-L / tw-R — tw-L: …, tw-R: …" says each name twice for
-        # no reader's benefit.
-        if not self._markers or list(names) == list(self._marker_names):
-            return body
-        return f"{' / '.join(names)} — {body}"
+            clauses.append(i18n.t("curveApfHead") + " " + "; ".join(rotations))
+        return clauses
 
     def statement(self) -> str:
         """Everything this panel is saying — the markers' reading, and the sum when it is shown.
@@ -3038,20 +3179,191 @@ class CurveView(QWidget):
                 body += f" (Δ {abs(values[1] - values[0]):.{digits}f} {self._unit})"
         return f"{i18n.t('curveAt')} {at} — {body}"
 
-    def _axis_reading(self, values: list[float], unit: str, digits: int) -> str:
-        if not values:
-            return ""
-        suffix = f" {unit}" if unit else ""
-        parts = [
-            f"{self._marker_names[i] if i < len(self._marker_names) else i}: "
-            f"{value:.{digits}f}{suffix}"
-            for i, value in enumerate(values)
-        ]
-        out = ", ".join(parts)
-        if len(values) >= 2:
-            out += f" (Δ {abs(values[1] - values[0]):.{digits}f}{suffix})"
-        return out
+    # ---- the reading as a TABLE (user, 2026-08-19) ------------------------
 
+    def _marker_label(self, index: int) -> str:
+        """What marker `index` is called in a SENTENCE.
+
+        On the plot a marker's label sits a hand's width from its own line, so a bare digit is
+        enough and that is what `curve_dialog` names them; in a sentence made of numbers a lone
+        "1" is not, so a digit prints as "marker 1". A name that is not a number — the model's
+        reading, the Arbiter's, or a title a caller passed — is printed as it is.
+        """
+        name = (
+            str(self._marker_names[index]) if index < len(self._marker_names) else str(index + 1)
+        )
+        return i18n.t("curveMarkerN").format(n=name) if name.strip().isdigit() else name
+
+    def _marker_token(self, index: int) -> str:
+        """The colour NAME marker `index` wears — the one rule, so the line, the level line and
+        the reading cannot disagree about which marker a number belongs to."""
+        if index < len(self._marker_tokens):
+            return self._marker_tokens[index]
+        return _MODEL_TOKEN if index == 0 else _ARBITER_TOKEN
+
+    def _marker_tables(self, digits: int) -> list["_MarkerTable"]:
+        """The reading, as blocks of numbers: the vertical markers, then the levels.
+
+        One structure, two renderings — `_table_text` for the model and `_table_html` for the
+        tuner's tip — so the sentence that leaves the window and the table on screen can never
+        state different numbers.
+        """
+        if not self._markers:
+            return []
+        tables = []
+        if "v" in self._axes_mode:
+            tables.append(self._v_table(digits))
+        # `vhs` gets no level block: there the level IS the curve's value where the vertical
+        # marker stands, so a second table would print the same reading again under another head.
+        if "h" in self._axes_mode and self._axes_mode != "vhs" and self._h_markers:
+            tables.append(self._h_table(digits))
+        return tables
+
+    def _v_table(self, digits: int) -> "_MarkerTable":
+        """Each vertical marker's position, and what every trace is doing there."""
+        positions = self.positions()
+        # Every trace on screen — except where the y axis has no unit at all, which is the
+        # impulse. There a sample value is not a reading anybody takes, and the arrival IS the
+        # question, so the block stays positions-only (and `reading()` then names the curves at
+        # the head instead).
+        traces = [t.name for t in self._traces] if self._y_unit else []
+        rows = []
+        for index, x in enumerate(positions):
+            rows.append(_TableRow(
+                self._marker_label(index), self._marker_token(index),
+                [_fmt(x, digits)] + [_fmt(self._y_at(at, x), 1) for at in range(len(traces))],
+                False,
+            ))
+        if len(positions) >= 2:
+            # Marker 2 minus marker 1, signed: which way the second one is off the first is half
+            # of what a Δ is read for, and the pair has a fixed order to be signed against
+            # (positions[0] is marker 1 / the model's reading, always).
+            rows.append(_TableRow("Δ", "", [_fmt(positions[1] - positions[0], digits)] + [
+                _fmt(self._y_at(at, positions[1]) - self._y_at(at, positions[0]), 1)
+                for at in range(len(traces))
+            ], True))
+        return _MarkerTable(traces, self._unit, self._y_unit, rows)
+
+    def _h_table(self, digits: int) -> "_MarkerTable":
+        """Each level, and where every trace reaches it.
+
+        Which crossing, when a curve reaches a level many times: the one nearest the vertical
+        marker of the same number in `vh` — the two halves of one reading, so they are read at the
+        same place — and nearest the middle of the view in `h`, where there is no vertical marker
+        to be near and the tuner is pointing with the zoom. Both through `_crossing_near`, which is
+        the same choice the `hx` mode makes and documents.
+        """
+        levels = self.levels()
+        positions = self.positions()
+        centre = 0.0
+        try:
+            (low, high), _ = self._plot.getViewBox().viewRange()
+            centre = self._from_view((low + high) / 2.0)
+        except (RuntimeError, TypeError, ValueError):  # torn down, or nothing plotted yet
+            pass
+        traces = [t.name for t in self._traces]
+        rows = []
+        for index, level in enumerate(levels):
+            near = (
+                positions[index]
+                if "v" in self._axes_mode and index < len(positions) else centre
+            )
+            cells = [_fmt(level, 1)]
+            for at in range(len(traces)):
+                x = self._crossing_near(at, level, near)
+                # A trace that never reaches this level says so. A blank cell reads as a number
+                # nobody filled in; "—" is an answer.
+                cells.append(_NO_CROSSING if x is None else _fmt(x, digits))
+            rows.append(_TableRow(self._marker_label(index), self._marker_token(index),
+                                  cells, False))
+        if len(levels) >= 2:
+            # The levels' own difference, and nothing per trace: two crossings of two different
+            # levels on one curve are not a Δ anybody asked for.
+            rows.append(_TableRow("Δ", "", [_fmt(levels[1] - levels[0], 1)], True))
+        return _MarkerTable(traces, self._y_unit, self._unit, rows)
+
+    @staticmethod
+    def _table_text(table: "_MarkerTable") -> str:
+        """One block as plain text: a clause per marker, then the Δ clause. This is what the model
+        reads, so nothing here is markup and nothing is a layout."""
+        clauses = []
+        for row in table.rows:
+            head = " ".join(part for part in (
+                row.label, "" if row.delta else i18n.t("curveAt"), row.cells[0], table.head_unit
+            ) if part)
+            body = ", ".join(
+                " ".join(bit for bit in (
+                    name, "Δ" if row.delta else "", value,
+                    # No unit after "this curve never gets there": a unit turns the answer back
+                    # into something that looks like a measurement.
+                    "" if value == _NO_CROSSING else table.cell_unit,
+                ) if bit)
+                for name, value in zip(table.traces, row.cells[1:])
+            )
+            clauses.append(f"{head}{'; ' if row.delta else ': '}{body}" if body else head)
+        return "; ".join(clauses)
+
+    @staticmethod
+    def _table_html(table: "_MarkerTable") -> str:
+        """The same block as a table, each marker's row in the MARKER's colour and each trace's
+        column in the TRACE's colour.
+
+        The user's ask, 2026-08-19, is two things at once: "щоб була чітка структура щоб зразу
+        бачити де що пересікається" — which is a table, not a sentence — "і колір показників
+        співпадав з кольором маркерів" — which is why the row label carries the marker's own
+        colour rather than being grey type beside a coloured line.
+
+        The values themselves stay in the ordinary text colour. They are the answer, and a number
+        printed in the colour of the line it was read off is a number competing with its own
+        label; the two colours in a cell's row and column already say which marker and which curve
+        it belongs to.
+        """
+        theme = current_theme()
+        head_cells = ["<td></td>", _cell(table.head_unit, theme.muted)]
+        for at, name in enumerate(table.traces):
+            unit = (
+                f'<br><span style="color: {theme.muted}">{html.escape(table.cell_unit)}</span>'
+                if table.cell_unit else ""
+            )
+            head_cells.append(
+                f'<td style="color: {colour_of(trace_token(at)).name()}">'
+                f"{html.escape(name)}{unit}</td>"
+            )
+        rows = ["<tr>" + "".join(head_cells) + "</tr>"]
+        for row in table.rows:
+            colour = colour_of(row.token).name() if row.token else theme.muted
+            cells = [f'<td style="color: {colour}"><b>{html.escape(row.label)}</b></td>']
+            cells.extend(_cell(value, theme.text) for value in row.cells)
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        return f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>'
+
+    def _readout_html(self, warn: bool) -> str:
+        """What stands behind the Markers button: the table, then the proposals as prose.
+
+        Two shapes on purpose. What the markers cross is a grid of numbers and belongs in a table;
+        a delay set and an all-pass are SENTENCES with a caveat in them ("proposed, not applied"),
+        and a caveat chopped into cells is a caveat nobody reads. The warning colour goes on that
+        prose, where the below-zero total actually is, and on the button — see `_render_readout`.
+        """
+        theme = current_theme()
+        digits = 3 if self._unit == "ms" else 1
+        blocks: list[str] = []
+        if self._markers and self._axes_mode in _CROSS_MODES:
+            # A cross mode has one line and one Δ — a sentence, not a grid. `_cross_reading` is
+            # that sentence, and it is what leaves the window too.
+            blocks.append(_wrapped_html(self._cross_reading(digits)))
+        else:
+            blocks.extend(self._table_html(table) for table in self._marker_tables(digits))
+        clauses = self._proposal_clauses()
+        if clauses:
+            blocks.append(_wrapped_html("; ".join(clauses), theme.warn if warn else ""))
+        if not any(block.strip() for block in blocks):
+            blocks = [_wrapped_html(i18n.t("curveNoMarkers"))]
+        head = f'<b>{html.escape(i18n.t("curveReadoutBtn"))}</b>'
+        return (
+            f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">'
+            f'{head}{"".join(blocks)}</div>'
+        )
 
     # ---- internals -------------------------------------------------------
 
@@ -3097,17 +3409,13 @@ class CurveView(QWidget):
                                   self._y_unit if "h" in self._axes_mode else "") if part
             )
             unit.setText(axes)
-        text = self.reading()
         totals = [self.total_delay_ms(i) for i in range(len(self._traces) or 1)]
         # The one reading in this panel that is not merely a number but a claim the hardware will
         # reject. It colours the BUTTON, not a word inside the sentence: a warning inside a
         # sentence made of numbers is read last, and this sentence is now behind a hover.
         impossible = any(total is not None and total < 0 for total in totals)
         if getattr(self._readout_btn, "hover_tip", None) is not None:
-            self._readout_btn.hover_tip.set_text(tip_html(
-                text or i18n.t("curveNoMarkers"),
-                head=i18n.t("curveReadoutBtn"), warn=impossible,
-            ))
+            self._readout_btn.hover_tip.set_text(self._readout_html(impossible))
         theme = current_theme()
         _restyle(
             self._readout_btn,

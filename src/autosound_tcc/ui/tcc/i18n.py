@@ -418,7 +418,10 @@ are hidden they cannot be dragged.",
 plot are the same frequencies, so one zoom moves both and what you see at 3 kHz above is at 3 kHz \
 below. Switch it off to zoom into a null on its own, and back on to line them up again. Not \
 offered on the impulse: that plot's axis is time.",
-        "curveReadoutBtn": "Reading →",
+        # Named after the thing it reports rather than after the act of reporting (user,
+        # 2026-08-19: "назвати кнопку і хінт «Маркери»"). It is the third "Markers" in this window
+        # — send, clear, and this one — and that is the point: one word for one group of controls.
+        "curveReadoutBtn": "Markers",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
         "curveClearLabel": "clear:",
         "curveClearDelay": "Delays",
@@ -455,6 +458,14 @@ verified by a summation sweep. Say whether the rotation fixes the joint or only 
         "curveNoMarkers": "Drag a marker onto the point you mean.",
         "curveMarkerModel": "model",
         "curveMarkerYou": "you",
+        # Two markers, always — they stopped being one-per-curve on 2026-08-19 (user: "число
+        # маркерів збільшується зі збільшенням числа кривих — а вони у нас постійні"). With no
+        # reading from the model to name them after, they are numbered: a bare digit on the plot,
+        # where the line is a hand's width from the label, and "marker N" in a sentence, where it
+        # is not.
+        "curveMarkerOne": "1",
+        "curveMarkerTwo": "2",
+        "curveMarkerN": "marker {n}",
         "curveTitle": "Where exactly?",
         "curveAxes_v": "Markers read frequency (vertical)",
         "curveAxes_h": "Markers read level (horizontal)",
@@ -968,7 +979,7 @@ Choose sweeps (sw) above to read this.",
 самі частоти, тож один зум рухає обидва, і що видно на 3 кГц угорі, те й на 3 кГц унизу. Вимкни, \
 щоб наблизити провал окремо, і ввімкни, щоб знову їх зіставити. На імпульсній не пропонується: \
 там вісь — час.",
-        "curveReadoutBtn": "Показання →",
+        "curveReadoutBtn": "Маркери",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
         "curveClearLabel": "очистити:",
         "curveClearDelay": "Затримки",
@@ -1001,6 +1012,9 @@ Choose sweeps (sw) above to read this.",
         "curveNoMarkers": "Перетягни маркер на точку, яку маєш на увазі.",
         "curveMarkerModel": "модель",
         "curveMarkerYou": "ти",
+        "curveMarkerOne": "1",
+        "curveMarkerTwo": "2",
+        "curveMarkerN": "маркер {n}",
         "curveTitle": "Де саме?",
         "curveAxes_v": "Маркери читають частоту (вертикальні)",
         "curveAxes_h": "Маркери читають рівень (горизонтальні)",

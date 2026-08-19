@@ -2216,3 +2216,67 @@ def test_every_title_asked_for_reaches_the_curve_window_not_the_first_two():
     window._open_curves(three[::-1])  # re-pointed, same window, still all of them
     assert window._curve_dialog._chosen() == three[::-1]
     window._curve_dialog.close()
+
+
+def test_the_panels_curves_button_opens_on_one_curve_and_then_on_the_last_set():
+    """User, 2026-08-19: "при відкритті вікна показувати одну першу (перший раз для нового сету) чи
+    ті що були попереднього разу (в поточній сесії роботи), а НЕ ВСІ". A series is nine or eighteen
+    measurements, and plotting all of them is a picture of nothing — one REW call each, and then
+    a chip to remove for every driver before any question can be asked.
+
+    Everything else stays one tick away: `_open_curves` hands the window every title REW holds as
+    the choose menu's options, which is what makes opening narrow safe rather than limiting."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    series = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)", "m-R_01 (sw)"]
+
+    window._meas_panel.curvesRequested.emit(series)
+
+    dialog = window._curve_dialog
+    assert dialog._chosen() == ["w-L_01 (sw)"], "a series never opened: the first title, alone"
+    assert set(series) <= set(dialog._options), "and all of it is one tick away in the menu"
+
+    # What the tuner then chose is what the button reopens on.
+    dialog._set_selection(["m-L_01 (sw)", "m-R_01 (sw)"])
+    dialog.close()
+    window._meas_panel.curvesRequested.emit(series)
+
+    assert window._curve_dialog._chosen() == ["m-L_01 (sw)", "m-R_01 (sw)"]
+    window._curve_dialog.close()
+
+
+def test_a_remembered_title_rew_no_longer_holds_is_dropped_not_asked_for():
+    """A re-measured round renames its captures. A remembered set is filtered against what the
+    panel is offering NOW, or the window would open asking REW for a curve nobody has — and with
+    nothing left of the memory it falls back to the first title, the same as a fresh series."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    window._curve_last[window._curve_series_key()] = ["w-L_01 (sw)", "gone_01 (sw)"]
+    window._meas_panel.curvesRequested.emit(["w-L_01 (sw)", "w-R_01 (sw)"])
+
+    assert window._curve_dialog._chosen() == ["w-L_01 (sw)"], "the survivor, and only it"
+
+    window._curve_last[window._curve_series_key()] = ["gone_01 (sw)"]
+    window._meas_panel.curvesRequested.emit(["w-L_01 (sw)", "w-R_01 (sw)"])
+
+    assert window._curve_dialog._chosen() == ["w-L_01 (sw)"], "nothing left: the first title"
+    window._curve_dialog.close()
+
+
+def test_the_models_own_request_is_not_narrowed_by_what_was_looked_at_last():
+    """`show_curves` names the measurements it wants looked at, out loud, and gets exactly those.
+    The memory is about the PANEL's button, which offers a whole series and has to choose."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    window._curve_last[window._curve_series_key()] = ["w-L_01 (sw)"]
+
+    window._on_curves_requested({
+        "titles": ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"], "kind": "phase",
+    })
+
+    assert window._curve_dialog._chosen() == ["m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)"]
+    window._curve_dialog.close()

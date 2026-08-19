@@ -114,6 +114,40 @@ that ends an argument. If it can be wrong without saying so, it will end argumen
   the Critic's package format has an `Origin:` line. What still does not happen automatically:
   TCC does not run `--apf` itself; the Generator does, and quotes the line.
 
+## Decisions taken 2026-08-19, second round (user, after using the APF build; six asks)
+
+- **The markers are a constant PAIR, whatever is plotted.** One-per-curve (the step-3 build) made
+  six dashed verticals over six curves and made a marker mean something it does not: a marker is a
+  place the tuner is POINTING AT, a curve is what it is pointed at. Model/you when the model gave a
+  reading; "1"/"2" otherwise, in the view's own two marker colours (muted / ok), never a curve's.
+  On the impulse they open on the first two traces' peaks; on the FR and the phase on the geometric
+  thirds of the band (200 Hz, 2 kHz) — max |y| of a response is a band edge, the one place nobody
+  points. The level line of marker *i* follows trace *min(i, n−1)*, read off the DRAWN curve.
+- **The reading is per marker, and the button and tip are called "Маркери"/"Markers".** Each
+  marker: its position, then every trace's value there (FR/phase), or each trace's crossing of its
+  level (h modes); positions only on the impulse; then a Δ block (signed, marker 2 − marker 1). The
+  tip is a TABLE: the row label in the marker's colour, the column head in the trace's colour, the
+  numbers in plain text; the delay and all-pass proposals follow as prose. The plain sentence that
+  leaves the window is built from the same structure. Cross modes keep their one-line reading.
+- **Three rows under the plot, by what they are about.** Row A: the driver radios (left) and,
+  right beside "очистити:", the three counters (Σ прогноз · Маркери · Зчитані затримки (n)). Row B:
+  the chosen driver's settings on one line — its name in its colour, затримка, "Затримки", all-pass
+  kind/f0/Q. Row C: the axis unit, the marker modes, the × pair combos, ✕, ⇅, A D − +, "Маркери".
+- **The top is ONE wrapping row**: set (`_N`) · mode · group · "Обрати… (n)" · the chips, in that
+  order; few chips fit on one line, more wrap to a second. The `_N` and group combos still come and
+  go with Σ (the 2026-08-18 rule stands); "заповнити:" went with the box they were in.
+- **Opening from the panel plots ONE curve or the last set, never the whole round.** The first
+  title for a series not opened yet, the last selection (kept in the main window, per series, for
+  this sitting) afterwards — intersected with what REW holds now. The model's `show_curves` still
+  gets exactly the titles it names. `available` stays the whole round, so narrowing the plot never
+  narrows the choose menu.
+- **The Y grid draws two tick levels, not three** (`maxTickLevel=1` on the left axes): the third,
+  a tenth of the minor, was a hatch pattern behind the curves.
+- **The Σ toggle is on every view, the FR included** — the user's own 2026-08-18 rule (never on
+  the FR, where MMM captures are compared) reversed after a day of use: the sweeps a joint is argued
+  about are compared on the FR as much as on the phase, and a toggle that exists on two views out
+  of three gets hunted for.
+
 ## What each step touches
 
 Kept explicit so two agents (or two sessions) do not land in the same file.

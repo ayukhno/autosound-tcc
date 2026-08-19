@@ -234,10 +234,14 @@ def test_rew_being_unreachable_is_a_message_not_a_crash():
     assert dialog._status.isVisibleTo(dialog)
 
 
-def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
+def test_without_a_model_reading_the_markers_start_on_the_first_two_peaks():
     """The Arbiter can open this themselves, with nothing to argue against yet. Two markers parked
     at zero say nothing; markers on the peaks are a crude reading of the arrivals, which makes the
-    delta meaningful before anything is touched — and an obvious guess invites correction."""
+    delta meaningful before anything is touched — and an obvious guess invites correction.
+
+    Numbered, not named after the curves: they are two PLACES the tuner is pointing at, and since
+    2026-08-19 there are two of them whatever is plotted (`test_two_markers_whatever_the_trace_
+    count`)."""
     _app()
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
@@ -247,7 +251,23 @@ def test_without_a_model_reading_the_markers_start_on_each_traces_own_peak():
 
     positions = dialog._view.positions()
     assert abs(positions[0] - 4.52) < 0.05 and abs(positions[1] - 4.78) < 0.05
-    assert dialog._view._marker_names == ["w-L_01 (sw)", "w-R_01 (sw)"]
+    assert dialog._view._marker_names == [i18n.t("curveMarkerOne"), i18n.t("curveMarkerTwo")]
+
+
+def test_on_a_frequency_view_the_pair_opens_inside_the_band_not_at_its_edges():
+    """Max |y| of a response or a phase curve is a band edge — 20 Hz or 20 kHz — which is the one
+    place nobody is pointing. So on the FR and the phase the pair opens at the geometric thirds of
+    the band the view opens on: 200 Hz and 2 kHz, where a car's joints live (2026-08-19)."""
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], kind="fr", bridge=_FrBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)")])
+
+    positions = dialog._view.positions()
+    assert positions[0] == pytest.approx(200.0, rel=0.01)
+    assert positions[1] == pytest.approx(2000.0, rel=0.01)
+    assert dialog._view._marker_names == [i18n.t("curveMarkerOne"), i18n.t("curveMarkerTwo")]
 
 
 def test_the_choose_menu_moves_the_argument_to_another_measurement():
@@ -1462,7 +1482,11 @@ def test_a_driver_left_at_zero_is_stated_never_interpreted():
 def test_the_window_has_two_verbs_and_each_appears_twice():
     """User, 2026-08-12: "кнопки називаються однаково і ті що відправляють і ті що в секції
     очистки". Each group of controls ends with the action it produces, named after the group, and
-    the Clear section below repeats the same two names. Nothing is called "this is my reading"."""
+    the Clear section repeats the same two names. Nothing is called "this is my reading".
+
+    "Markers" is on a THIRD button since 2026-08-19 — the readout, renamed at the user's word
+    ("назвати кнопку і хінт «Маркери»"). It is not a fourth verb: it reports what the markers say,
+    and it is named after them for the same reason the other two are named after their groups."""
     from PySide6.QtWidgets import QPushButton
 
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
@@ -1470,24 +1494,33 @@ def test_the_window_has_two_verbs_and_each_appears_twice():
 
     labels = [b.text() for b in dialog.findChildren(QPushButton)]
     assert labels.count(i18n.t("curveSendDelays")) == 2, "send delays, clear delays"
-    assert labels.count(i18n.t("curveSendMarkers")) == 2, "send markers, clear markers"
+    assert labels.count(i18n.t("curveSendMarkers")) == 3, "send, clear, and the readout"
+    assert dialog._view._readout_btn.text() == i18n.t("curveSendMarkers"), "the third one"
     assert "This is my reading" not in labels and "Ось моє прочитання" not in labels
 
 
+def _widgets(row) -> list:
+    """A row's widgets in order, stretches dropped — `itemAt(i).widget()` is None for a spacer."""
+    return [row.itemAt(i).widget() for i in range(row.count()) if row.itemAt(i).widget()]
+
+
 def test_each_action_sits_beside_the_controls_that_produce_it():
-    """Parked at the far end of the row, the delay action reads as a second opinion about the
-    markers."""
+    """Parked at the far end of a row, the delay action reads as a second opinion about the
+    markers. Since 2026-08-19 that means the SETTINGS row — the delay box, this button and the
+    all-pass are one line about one driver — while the markers' own action ends the row of
+    controls that place them."""
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
-    row = dialog._view._action_row
+    view = dialog._view
 
-    order = [row.itemAt(i).widget() for i in range(row.count())]
-    delays_at = order.index(dialog._bank_ask_btn)
-    box_at = order.index(dialog._view._shift_box)
-    markers_at = order.index(dialog._view._send_btn)
+    settings = _widgets(view._settings_row)
+    assert settings.index(view._shift_box) < settings.index(dialog._bank_ask_btn)
+    assert settings.index(dialog._bank_ask_btn) < settings.index(view._apf_kind), \
+        "the delay group ends before the all-pass begins"
 
-    assert box_at < delays_at < markers_at
-    assert markers_at == len(order) - 1, "the markers group ends the row"
+    actions = _widgets(view._action_row)
+    assert actions[-1] is view._send_btn, "the markers group ends the row"
+    assert dialog._bank_ask_btn not in actions, "and the delay action is not in it any more"
 
 
 # ---- the predicted sum (CURVE-ANALYSIS-PLAN.md step 2, user 2026-08-18) -----------------------
@@ -1821,10 +1854,13 @@ def test_the_sum_toggle_floats_in_the_plots_own_top_left_corner():
     ), "and it does not sit on the delay pill"
 
 
-def test_the_sum_toggle_is_offered_on_phase_and_impulse_and_not_on_the_magnitude():
-    """User, 2026-08-18: the FR view is where MMM/RTA captures are compared and those cannot be
-    summed at all, so the control there mostly refuses. The CAPABILITY stays — a sum of two sweeps
-    still draws on a frequency response; only the button is not on offer."""
+def test_the_sum_toggle_is_offered_on_every_kind_including_the_magnitude():
+    """It was kept off the frequency response for a day on the user's own rule (2026-08-18: that
+    is where MMM/RTA captures are compared, and those cannot be summed, so the control would mostly
+    refuse). **The user reversed it on 2026-08-19 after using the window** — "десь ділась кнопка
+    суми", on the FR — and the reversal is the point: the sweeps a joint is argued about are
+    compared there too, and hunting for a toggle that exists on two views out of three is worse
+    than a refusal that says why."""
     phase = _phase_view(_fr_trace("w-L_01 (sw)"))
     assert phase._sum_btn.isVisibleTo(phase) is True
 
@@ -1834,26 +1870,27 @@ def test_the_sum_toggle_is_offered_on_phase_and_impulse_and_not_on_the_magnitude
 
     fr = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
 
-    assert fr._sum_btn.isVisibleTo(fr) is False
+    assert fr._sum_btn.isVisibleTo(fr) is True, "and the magnitude offers it again"
     fr.set_sum_shown(True)
-    assert fr.sum_result() is not None, "and the sum itself is untouched there"
+    assert fr.sum_result() is not None, "with the same sum behind it as ever"
 
 
-def test_the_toggle_follows_the_kind_the_window_switches_to():
+def test_the_toggle_survives_the_kind_the_window_switches_to():
     """The kind changes under the same view — `_apply_kind` re-points units, it does not rebuild
-    the widget — so the toggle has to appear and disappear with it."""
+    the widget — and the toggle now has to be there on all three of them (user, 2026-08-19). It
+    used to come and go with the kind, which is exactly what the user could not find."""
     _app()
     every = ["w-L_01 (sw)", "w-R_01 (sw)"]
     dialog = _dialog(every, bridge=_FrBridge(), kind="fr", available=every)
     dialog._worker.wait(4000)
     dialog._worker.run()
 
-    assert dialog._view._sum_btn.isVisibleTo(dialog._view) is False
-
-    dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
-    dialog._worker.wait(4000)
-
     assert dialog._view._sum_btn.isVisibleTo(dialog._view) is True
+
+    for kind in ("phase", "impulse", "fr"):
+        dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData(kind))
+        dialog._worker.wait(4000)
+        assert dialog._view._sum_btn.isVisibleTo(dialog._view) is True, kind
 
 
 def test_the_predicted_sum_is_drawn_to_be_followed_across_the_plot():
@@ -1933,7 +1970,11 @@ def test_the_three_paragraphs_under_the_plot_are_buttons_with_the_text_in_the_ti
     # Each tip carries the whole of what its paragraph used to say, laid out to be read.
     assert view.sum_text().split("\n")[0] in _tip(view._sum_note_btn)
     assert "ASSUMED, NOT CHECKED" in _tip(view._sum_note_btn)
-    assert view.reading() in _tip(view._readout_btn)
+    # The readout's is a TABLE since 2026-08-19 rather than the sentence verbatim (the sentence is
+    # still what LEAVES the window — `reading()`), so it is checked by what is in it.
+    readout = _tip(view._readout_btn)
+    assert i18n.t("curveMarkerModel") in readout and "100.0" in readout
+    assert i18n.t("curveDelayHead") in readout, "and the proposal is under the table, in words"
     assert "w-L_01 (sw) +0.198" in _tip(dialog._bank_btn)
     for button in (view._sum_note_btn, view._readout_btn, dialog._bank_btn):
         assert "font-size: 15px" in button.hover_tip.text(), "large enough to read"
@@ -2174,7 +2215,7 @@ def test_the_checklist_takes_any_set_and_everything_downstream_follows_it():
 
     assert len(dialog._view._traces) == 6
     assert len(dialog._view.delays()) == 6
-    assert len(dialog._view._markers) == 6, "one marker per curve, however many there are"
+    assert len(dialog._view._markers) == 2, "the markers are a constant pair, whatever is plotted"
 
 
 def test_the_chips_and_the_checklist_are_one_selection():
@@ -2750,20 +2791,24 @@ def test_the_choose_menu_stays_open_across_a_tick():
 
 def test_the_group_shortcut_is_offered_only_while_the_sum_is_on():
     """User, 2026-08-18: "поки я не включив суму немає сенсу показувати ось ці групи". A group IS
-    "these drivers, added up", so with Σ off it answers a question nobody asked."""
+    "these drivers, added up", so with Σ off it answers a question nobody asked.
+
+    Per COMBO since 2026-08-19: the two of them are individual widgets in the flow row now, not a
+    box, so each hides itself and the chips close up around them."""
     dialog = _group_dialog()
     _fetch(dialog)
+    pair = (dialog._group_combo, dialog._version_combo)
 
     assert dialog._view.sum_shown() is False
-    assert dialog._group_box.isVisibleTo(dialog) is False
+    assert not any(combo.isVisibleTo(dialog) for combo in pair)
 
     dialog._view.set_sum_shown(True)
 
-    assert dialog._group_box.isVisibleTo(dialog) is True
+    assert all(combo.isVisibleTo(dialog) for combo in pair)
 
     dialog._view.set_sum_shown(False)
 
-    assert dialog._group_box.isVisibleTo(dialog) is False
+    assert not any(combo.isVisibleTo(dialog) for combo in pair)
     # ...and what is NOT hidden with it: the window must stay usable without a sum.
     assert dialog._choose_btn.isVisibleTo(dialog) is True
     assert dialog._kind_combo.isVisibleTo(dialog) is True
@@ -2913,7 +2958,10 @@ def test_a_level_that_would_start_off_screen_is_brought_into_the_picture():
 
 def test_the_notes_and_the_delay_bank_share_one_row():
     """User, with the screenshot of three stacked lines: "ось ці кнопки всі стануть в ряд в самому
-    низу, щоб не займати простір". They belonged to two widgets, which is why they were stacked."""
+    низу, щоб не займати простір". They belonged to two widgets, which is why they were stacked.
+
+    On 2026-08-19 that row also took the delay radios, at its left end and in front of the stretch
+    — see `test_the_bottom_rows_are_driver_then_settings_then_view`."""
     _app()
     from autosound_tcc.core import delay_bank
 
@@ -2923,9 +2971,8 @@ def test_the_notes_and_the_delay_bank_share_one_row():
     dialog._worker.wait(4000)
     dialog._worker.run()
     view = dialog._view
-    row = view._notes_row
 
-    order = [row.itemAt(i).widget() for i in range(row.count())]
+    order = _widgets(view._notes_row)
 
     for button in (view._sum_note_btn, view._readout_btn, dialog._bank_btn,
                    dialog._bank_clear_btn, dialog._markers_clear_btn):
@@ -2937,7 +2984,7 @@ def test_the_notes_and_the_delay_bank_share_one_row():
     # Nothing regressed on the way: the count, the tip and the warning colour are what these are.
     assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1)
     assert "w-L_01 (sw) +0.198" in _tip(dialog._bank_btn)
-    assert view.reading() in _tip(view._readout_btn)
+    assert i18n.t("curveDelayHead") in _tip(view._readout_btn)
 
 
 # ---- the x range stays the one the window stated (user, 2026-08-18: ticks to 500000k) ---------
@@ -3591,3 +3638,253 @@ def test_the_bank_refuses_an_all_pass_that_is_not_one():
 
     with pytest.raises(TypeError):
         delay_bank.put("m-L_01 (sw)", 0.3, allpass={"type": "APF2", "f": 250.0, "q": 0.7})
+
+
+# ---- the round of 2026-08-19: two markers, a structured reading, three rows -------------------
+#
+# Six asks in one sitting, with screenshots. What they have in common is that the window had grown
+# per-curve where the QUESTION is not per curve: a marker is a place the tuner points at, a reading
+# is a table of what the curves do there, and the controls are three lines about three different
+# things (which driver, its settings, the view).
+
+
+def test_two_markers_whatever_the_trace_count():
+    """User, 2026-08-19: "число маркерів збільшується зі збільшенням числа кривих — а вони у нас
+    постійні". One marker per curve made a whole side six dashed verticals over six curves, and it
+    made a marker mean something it does not — a marker is a PLACE, a curve is what it is pointed
+    at."""
+    _app()
+    for count in (1, 2, 4):
+        dialog = _dialog([f"d{i}_01 (sw)" for i in range(count)], bridge=_FakeBridge())
+        dialog._worker.wait(4000)
+
+        dialog._on_curves([Trace(f"d{i}_01 (sw)", *_impulse(4.0 + 0.3 * i)) for i in range(count)])
+
+        view = dialog._view
+        assert len(view._markers) == 2, f"{count} traces, still a pair"
+        assert view._marker_names == [i18n.t("curveMarkerOne"), i18n.t("curveMarkerTwo")]
+        positions = view.positions()
+        assert abs(positions[0] - 4.0) < 0.05, f"{count}: marker 1 on the first trace's peak"
+        # With one curve both land on it, exactly as the model's own pair stacks; with two or more
+        # the second marker takes the second trace's peak.
+        assert abs(positions[1] - (4.0 + 0.3 * min(1, count - 1))) < 0.05
+
+
+def test_the_markers_wear_their_own_colours_and_not_a_curves():
+    """They are not tied to a curve any more, so wearing one's colour would be the picture claiming
+    an ownership that is not there. The view's own two — muted for the first, ok for the second —
+    are what says "these are the two places you are pointing at"."""
+    from autosound_tcc.ui.tcc.curve_view import (
+        _ARBITER_TOKEN, _MODEL_TOKEN, colour_of, trace_token,
+    )
+
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    view = dialog._view
+    assert view._marker_tokens == [], "no tokens: the view's own marker colours"
+    pens = [line.pen.color().name() for line in view._markers]
+    assert pens == [colour_of(_MODEL_TOKEN).name(), colour_of(_ARBITER_TOKEN).name()]
+    assert pens[0] != pens[1], "and never the same two"
+    assert colour_of(trace_token(0)).name() not in pens, "nor a curve's"
+
+
+def test_a_reading_from_the_model_is_still_the_pair_it_always_was():
+    """The half that must not break: when the model HAS named a number, the two markers are its
+    reading and the Arbiter's, named and coloured apart, stacked so every millimetre of movement
+    is deliberate."""
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], markers=[4.6], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+
+    view = dialog._view
+    assert view.positions() == pytest.approx([4.6, 4.6])
+    assert view._marker_names == [i18n.t("curveMarkerModel"), i18n.t("curveMarkerYou")]
+
+
+def test_the_marker_reads_the_drawn_curve_not_the_captured_one():
+    """`_y_at` is what places a level line "on its curve" and what the reading states. Read off the
+    raw measurement, both went stale the moment a driver was held back: the line landed beside the
+    curve it was supposed to be on, and the sentence quoted a value the picture does not show."""
+    view = _view()
+    view.set_markers([4.52, 4.78])
+    at_peak = view._y_at(0, 4.52)
+
+    view.set_delay_target(0)
+    view.set_delay(1.0)
+
+    assert view._y_at(0, 5.52) == pytest.approx(at_peak, abs=1e-9), "the peak moved with the curve"
+    assert abs(view._y_at(0, 4.52)) < abs(at_peak), "and 4.52 is no longer where it arrives"
+
+
+def test_the_marker_reads_a_rotated_phase_where_it_crosses_it():
+    """The same rule on the phase, where a delay is a ramp: what the marker crosses is the DRAWN
+    curve, so a driver rotated by its delay reads rotated."""
+    view = _phase_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
+    before = view._y_at(1, 1000.0)
+    view.set_delay_target(1)
+
+    view.set_delay(0.5)
+
+    x, y = view._shifted(1, view._traces[1])
+    at = int(np.abs(np.asarray(x) - 1000.0).argmin())
+    assert view._y_at(1, 1000.0) == pytest.approx(float(np.asarray(y)[at]), abs=1e-9)
+    assert view._y_at(1, 1000.0) != pytest.approx(before), "half a millisecond is a rotation"
+
+
+def test_the_index_is_clamped_so_marker_two_over_one_curve_still_reads():
+    """Two markers and one trace is an ordinary picture now. Marker 2 has no curve of its own, so
+    it reads the last one — which is the same curve the eye reads it against."""
+    view = _view()
+    view.set_traces([Trace("w-L_01 (sw)", *_impulse(4.52))])
+
+    assert view._y_at(1, 4.52) == pytest.approx(view._y_at(0, 4.52))
+    assert view._y_at(9, 4.52) == pytest.approx(view._y_at(0, 4.52))
+
+
+def test_the_reading_states_every_trace_at_every_marker_then_the_deltas():
+    """User, 2026-08-19: "додати поточні показники пересічення маркерів більш структуровано… щоб
+    зразу бачити де що пересікається". Per MARKER, not per axis: it used to print every frequency
+    in one clause and every level in another, which is two lists the reader has to zip together —
+    and which said nothing at all about the curves once there were more than two of them."""
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("m-L_01 (sw)", level_db=84.0),
+                    _fr_trace("tw-L_01 (sw)", level_db=70.0))
+    view.set_markers([100.0, 1000.0], ["1", "2"], [])
+
+    reading = view.reading()
+
+    one, two, delta = reading.split("; ", 2)
+    assert one == "marker 1 at 100.0 Hz: w-L_01 (sw) 90.0 dB, m-L_01 (sw) 84.0 dB, " \
+                  "tw-L_01 (sw) 70.0 dB"
+    assert two.startswith("marker 2 at 1000.0 Hz:"), two
+    assert delta.startswith("Δ 900.0 Hz; w-L_01 (sw) Δ 0.0 dB"), delta
+    assert "tw-L_01 (sw) Δ 0.0 dB" in delta, "the Δ block covers every trace too"
+
+
+def test_the_impulse_reading_is_positions_and_nothing_else():
+    """A sample value is not a reading anybody takes off an impulse — the ARRIVAL is the question —
+    so that block stays positions-only, and the curves are named once at the head instead."""
+    view = _view()
+
+    view.set_markers([4.52, 4.78], ["1", "2"], [])
+
+    assert view.reading() == (
+        "w-L_01 (sw) / w-R_01 (sw) — marker 1 at 4.520 ms; marker 2 at 4.780 ms; Δ 0.260 ms"
+    )
+
+
+def test_the_level_block_says_where_each_curve_reaches_that_level():
+    """The mirror of the vertical block: a level per row, and where every trace gets there. The
+    crossing chosen is the one nearest the vertical marker of the same number (`vh`), which is what
+    makes the two halves of one reading read at the same place."""
+    # One driver falling 10 dB a decade (95 dB at 20 Hz, so it passes 90 at 63.2 Hz) and one flat
+    # at 70, which never reaches 90 at all.
+    freqs = [20.0 * (2 ** (i / 24.0)) for i in range(240)]
+    falling = Trace("w-L_01 (sw)", freqs, [95.0 - 10.0 * math.log10(f / 20.0) for f in freqs])
+    view = _fr_view(falling, _fr_trace("m-L_01 (sw)", level_db=70.0))
+    view.set_markers([100.0, 1000.0], ["1", "2"], [])
+
+    view.set_axes_mode("vh")
+    view._h_markers[0].setValue(90.0)
+    view._h_markers[1].setValue(70.0)
+
+    levels = view.reading().split("; ")[-3:]
+    assert levels[0].startswith("marker 1 at 90.0 dB: w-L_01 (sw) 63."), levels[0]
+    # A flat 70 dB curve never reaches 90: "—" is an answer, and a blank cell would read as a
+    # number somebody forgot to fill in. No unit after it either — a unit would turn it back into
+    # something that looks like a measurement.
+    assert levels[0].endswith("m-L_01 (sw) —"), levels[0]
+    assert levels[2] == "Δ -20.0 dB", "the levels' own difference, signed"
+
+
+def test_the_readout_tip_is_a_table_in_the_markers_and_the_curves_own_colours():
+    """The other half of the same ask: "колір показників співпадав з кольором маркерів". A row per
+    marker in the MARKER's colour, a column per trace in the TRACE's, and the values in ordinary
+    text — a number printed in the colour of the line it came off competes with its own label."""
+    from autosound_tcc.ui.tcc.curve_view import _ARBITER_TOKEN, _MODEL_TOKEN, colour_of, trace_token
+
+    view = _fr_view(_fr_trace("w-L_01 (sw)", level_db=90.0),
+                    _fr_trace("m-L_01 (sw)", level_db=84.0))
+    view.set_markers([100.0, 1000.0], ["1", "2"], [])
+
+    html_text = view._readout_btn.hover_tip.text()
+
+    assert "<table" in html_text, "a grid, not a sentence"
+    assert i18n.t("curveReadoutBtn") in html_text, "and it says what it is answering about"
+    for token in (_MODEL_TOKEN, _ARBITER_TOKEN):
+        assert colour_of(token).name() in html_text, "each marker's row in the marker's colour"
+    for index in (0, 1):
+        assert colour_of(trace_token(index)).name() in html_text, "each column in the curve's"
+    assert f"font-size: {15}px" in html_text, "large enough to read (user, 2026-08-18)"
+    assert current_theme().text in html_text, "and the values in the ordinary text colour"
+
+
+def test_the_bottom_rows_are_driver_then_settings_then_view():
+    """User, 2026-08-19, with the screenshot: the three counters and the Clear pair to the right,
+    the driver radios in their place, and all of the chosen driver's settings on ONE line."""
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    view = dialog._view
+
+    notes = _widgets(view._notes_row)
+    settings = _widgets(view._settings_row)
+    actions = _widgets(view._action_row)
+
+    # Row A: which driver, then everything that has been read of it.
+    assert notes[:2] == view._target_buttons[:2], "the radios lead the row"
+    assert notes.index(view._target_buttons[0]) < notes.index(view._sum_note_btn)
+    assert notes[-1] is dialog._markers_clear_btn, "and the Clear pair ends it"
+    # Row B: one line, one driver — named, delayed, filtered, and the action it produces.
+    assert settings[0] is view._apf_target_label, "the row opens with whose settings these are"
+    for control in (view._shift_box, dialog._bank_ask_btn, view._apf_kind,
+                    view._apf_f0, view._apf_q):
+        assert control in settings
+    assert not any(radio in settings for radio in view._target_buttons)
+    # Row C: how the markers read and what the view shows. Nothing about a driver on it.
+    for control in ([b for b, _m in view._axes_buttons] + [view._guides_btn, view._link_btn]
+                    + [b for b, _k in view._zoom_buttons] + view._cross_combos):
+        assert control in actions
+    assert view._shift_box not in actions and view._apf_kind not in actions
+
+
+def test_the_top_is_one_wrapping_row_in_the_order_the_user_asked_for():
+    """User, 2026-08-19: "порядок, починаючи з першого рядку: сети, режими, групи, «Обрати», далі
+    вибрані криві — коли їх мало, все в одну строчку, як стане більше перенесеться на дві"."""
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    dialog._view.set_sum_shown(True)
+
+    row = dialog._chip_row
+    order = [row.itemAt(i).widget() for i in range(row.count())]
+
+    assert order[:4] == [dialog._version_combo, dialog._kind_combo,
+                         dialog._group_combo, dialog._choose_btn]
+    assert [w.title() for w in order[4:4 + 2]] == dialog._chosen(), "then the chips, in plot order"
+    # ...and a bigger selection still lands after the four controls rather than among them.
+    _pick_group(dialog, "ALL")
+    _fetch(dialog)
+    grown = [row.itemAt(i).widget() for i in range(row.count())]
+    assert grown[:4] == order[:4]
+    assert [chip.title() for chip in _chips(dialog)] == dialog._chosen()
+
+
+def test_the_y_grid_has_two_levels_of_line_and_not_three():
+    """User, 2026-08-19: "сітка по вертикалі дуже густа". pyqtgraph's linear axis offers THREE tick
+    levels, and on a phase plot ranged ±180° the third is a line every 5° — a hatch pattern with
+    the curves inside it. Two, which is what the frequency axis and REW's own both draw."""
+    view = _impulse_sum_view()
+
+    assert view._plot.getAxis("left").style["maxTickLevel"] == 1
+
+    view.set_sum_shown(True)
+
+    assert view._strip is not None
+    assert view._strip.getAxis("left").style["maxTickLevel"] == 1, "the strip too — it is shorter"

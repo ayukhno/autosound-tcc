@@ -40,7 +40,6 @@ from autosound_tcc.ui.tcc.curve_view import (
     Trace,
     tip_html,
     trace_colour,
-    trace_token,
 )
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
@@ -449,6 +448,11 @@ class CurveDialog(QDialog):
     """
 
     readingSent = Signal(str)
+    #: What the window is plotting, whenever that changes. Carried out of the dialog because the
+    #: MAIN WINDOW is what remembers it: the panel's Curves button opens on what was looked at last
+    #: rather than on every title in the series (user, 2026-08-19), and a memory that lived in here
+    #: would be forgotten the moment the window is re-pointed at another question.
+    selectionChanged = Signal(list)
 
     def __init__(
         self,
@@ -528,7 +532,6 @@ class CurveDialog(QDialog):
         self._kind_combo.currentIndexChanged.connect(self._on_kind_changed)
         if self._options:
             layout.addWidget(self._build_chip_row())
-            layout.addLayout(self._build_controls_row())
         else:
             layout.addWidget(self._kind_combo)
 
@@ -604,26 +607,27 @@ class CurveDialog(QDialog):
     # ---- the ONE visible selection (CURVE-ANALYSIS-PLAN.md step 3, Advisor 2026-08-18) -----
 
     def _build_chip_row(self) -> QWidget:
-        """The selection, as chips. The whole top row, and nothing else on it.
+        """The whole top of the window: how a selection is made, then the selection itself.
 
-        It replaced two measurement pickers plus a `Choose… (n)` button, which between them gave
-        the window two rows that both claimed to say what was plotted and could disagree about it
-        ("щось у мене не виходить синхронізувати розуміння ось цих двох груп вибору"). The rule
-        that settled it is quoted in `_Chip`, where it decides the design.
+        ONE wrapping row, in the user's own order (2026-08-19): "сети, режими, групи, «Обрати»,
+        далі вибрані криві — коли їх мало, все в одну строчку, як стане більше перенесеться на
+        дві". Four controls and then the chips, left to right, and they wrap together when the
+        selection grows. It was two rows — chips above, controls below — and at two or three
+        chips that spent a whole row of a short window saying very little; more to the point the
+        two rows read as two separate things, when in fact one FILLS the other.
 
-        The pickers are GONE rather than kept as a fast path (user, 2026-08-18, after seeing this
-        row: "ти здорово придумав з групами, і тоді ось ці вибори не потрібні … весь вибір робимо
-        або групами, або галочками в меню Обрати"). Their reason is the Advisor's: a second way of
-        saying the same thing is what made the window confusing to start with. The one thing they
-        did that is still needed — refusing an MMM capture on the impulse and the phase — moved to
-        `_selectable`, which the choose menu is built from.
-
-        Chips ALONE up here, with every control on the row below: the chips are the answer and
-        that row is the question (user, 2026-08-18: "хай 'Обрати' буде основним, а групи це
-        допомога швидкого вибору").
+        The chips themselves replaced two measurement pickers (user, 2026-08-18: "ти здорово
+        придумав з групами, і тоді ось ці вибори не потрібні … весь вибір робимо або групами, або
+        галочками в меню Обрати"). The rule that settled it is quoted in `_Chip`, where it decides
+        the design. The one thing the pickers did that is still needed — refusing an MMM capture on
+        the impulse and the phase — moved to `_selectable`, which the choose menu is built from.
 
         A wrapping row (`_FlowLayout`) and not a squeezing one: seven chips must stay readable, and
         a name shortened to an ellipsis is not the evidence this row exists to be.
+
+        The four controls are added ONCE, here, and the chips are appended after them for the whole
+        life of the window (`_render_chips` only ever grows the tail), so the order the user asked
+        for cannot come apart later.
         """
         self._chip_holder = QWidget()
         # Without this the wrapping is computed and then ignored: a QWidgetItem only asks its
@@ -632,6 +636,13 @@ class CurveDialog(QDialog):
         policy.setHeightForWidth(True)
         self._chip_holder.setSizePolicy(policy)
         self._chip_row = _FlowLayout(self._chip_holder, spacing=6)
+        self._build_group_controls()
+        # The set, then what is drawn of it, then the group that fills it, then the checklist that
+        # can build any set at all. `Choose…` last of the four and first thing before the chips it
+        # writes: it is where ANY selection is made (user, 2026-08-18: "хай 'Обрати' буде
+        # основним, а групи це допомога швидкого вибору").
+        for widget in (self._version_combo, self._kind_combo, self._group_combo, self._choose_btn):
+            self._chip_row.addWidget(widget)
         self._render_chips()
         return self._chip_holder
 
@@ -643,6 +654,10 @@ class CurveDialog(QDialog):
         the × is clicked ON a chip, and destroying a widget from inside its own event handler is
         how this app has crashed before. A hidden chip takes no width in the flow, so the row is
         the same picture either way.
+
+        New chips go at the END of the flow, which is what keeps the four controls in front of them
+        for the life of the window (`_build_chip_row` put them there once, in the order the user
+        asked for).
         """
         if self._chip_row is None:
             return
@@ -710,28 +725,48 @@ class CurveDialog(QDialog):
 
     # ---- filling the selection from a group (CURVE-ANALYSIS-PLAN.md, step 3) -----
 
-    def _build_controls_row(self) -> QHBoxLayout:
-        """The row under the chips: how any selection is made, how one is filled fast, what is drawn.
+    def _build_group_controls(self) -> None:
+        """The three widgets the chip row opens with, beside the kind picker: version, group,
+        `Choose…`.
 
-        Order settled by the user (2026-08-18): "хай 'Обрати' буде основним, а групи це допомога
-        швидкого вибору (поміняти їх місцями і все ок)". So `Choose…` comes first and gets the
-        room — it is where ANY set can be made, one tick at a time — and the group + version pair
-        follows it as the shortcut it is, labelled `fill:` rather than named as a second selector.
+        Individual widgets and NOT a box any more (2026-08-19): they live in the flow layout with
+        the chips now, and a box inside a wrapping row is a block that cannot wrap — which is the
+        whole reason the flow exists. Hiding is per widget as a result; see `_on_sum_toggled`.
 
-        The kind picker is at the far end, past the stretch. It moved down from the top row (user:
-        "перенеси кнопку вибору режиму на рядок нижче") because it never chose measurements and
-        standing alone above the window it read as though it did. Past the stretch rather than
-        packed with the rest so that it does not slide sideways when the group pair comes and goes
-        with the Σ toggle — and `Choose…`, being first, never moves at all.
+        Version and group are two controls and not one, because they answer different questions and
+        the second is the one that goes wrong quietly: `Ws` says which drivers, `_02` says which
+        round of the car. A group resolved at the wrong version is a set of measurements taken
+        under a DSP configuration nobody is looking at, and `curve_sum` would happily add them up
+        and label it "two different cars" — a label nobody asked for.
+
+        The `fill:` label in front of them is gone with the box. It was there to say that these two
+        are a shortcut rather than a second selector; in a row that now READS as one gesture
+        (which set · what to draw · which group · which measurements · and here they are) it was a
+        word explaining a layout that no longer needs explaining.
         """
-        row = QHBoxLayout()
-        row.setSpacing(8)
+        self._version_combo = QComboBox()
+        self._version_combo.setProperty("class", "mini-select")
+        self._version_combo.setFixedWidth(96)
+        attach_tip(self._version_combo, tip_html(i18n.t("curveGroupVersionTip")))
+        self._version_combo.currentIndexChanged.connect(self._on_version_chosen)
+
+        self._group_combo = QComboBox()
+        self._group_combo.setProperty("class", "mini-select")
+        # A group's row is its name AND its kind ("SW+Ws · joint"), and in a flow layout a combo
+        # gets exactly the width it asks for — so it has to ask for enough to print one. The
+        # minimum keeps "— no group —" from collapsing to a caret; `AdjustToContents` lets the
+        # longest name have its room where a car's glossary has long ones.
+        self._group_combo.setMinimumWidth(150)
+        self._group_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        attach_tip(self._group_combo, tip_html(i18n.t("curveGroupTip")))
+        self._fill_group_combo()
+        self._group_combo.currentIndexChanged.connect(self._on_group_chosen)
 
         # Every measurement this kind can draw, ticked when it is in the selection. THE selector:
         # the count stays on it, unlike the version that stood over two pickers, because the chips
-        # directly above now list every name it is counting. The Advisor's objection was to a
-        # control "saying '(3)' while only listing two names" — a count under the full list is a
-        # summary, not a substitute.
+        # beside it now list every name it is counting. The Advisor's objection was to a control
+        # "saying '(3)' while only listing two names" — a count next to the full list is a summary,
+        # not a substitute.
         self._choose_btn = QPushButton("")
         # `.zoom-btn` and not `.mini-select`: every `.mini-select` rule is written `QComboBox[...]`
         # and would not reach a QPushButton at all (the delay spin box learned this the hard way,
@@ -744,52 +779,8 @@ class CurveDialog(QDialog):
         self._choose_menu = _StayOpenMenu(self)
         self._choose_actions: dict[str, QAction] = {}
         self._choose_btn.setMenu(self._choose_menu)
-        row.addWidget(self._choose_btn)
         self._fill_choose_menu()
-
-        row.addWidget(self._build_group_box())
-        row.addStretch(1)
-        row.addWidget(self._kind_combo)
-        return row
-
-    def _build_group_box(self) -> QWidget:
-        """The FILL tools: which group, at which config version. One widget, so it can be hidden.
-
-        Two controls and not one, because they answer different questions and the second is the
-        one that goes wrong quietly: `Ws` says which drivers, `_02` says which round of the car.
-        A group resolved at the wrong version is a set of measurements taken under a DSP
-        configuration nobody is looking at, and `curve_sum` would happily add them up and label it
-        "two different cars" — a label nobody asked for.
-
-        Its own QWidget rather than a bare layout because it comes and goes with the Σ toggle
-        (`_on_sum_toggled`), and a hidden widget takes its spacing with it while a layout full of
-        hidden widgets leaves a gap behind.
-        """
-        box = QWidget()
-        row = QHBoxLayout(box)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        label = QLabel(i18n.t("curveGroupLabel"))
-        label.setProperty("class", "phead-sub")
-        row.addWidget(label)
-
-        self._group_combo = QComboBox()
-        self._group_combo.setProperty("class", "mini-select")
-        attach_tip(self._group_combo, tip_html(i18n.t("curveGroupTip")))
-        self._fill_group_combo()
-        self._group_combo.currentIndexChanged.connect(self._on_group_chosen)
-        row.addWidget(self._group_combo, 2)
-
-        self._version_combo = QComboBox()
-        self._version_combo.setProperty("class", "mini-select")
-        self._version_combo.setFixedWidth(96)
-        attach_tip(self._version_combo, tip_html(i18n.t("curveGroupVersionTip")))
-        self._version_combo.currentIndexChanged.connect(self._on_version_chosen)
-        row.addWidget(self._version_combo)
-        row.addStretch(1)
         self._sync_version_combo()
-        self._group_box = box
-        return box
 
     def _on_sum_toggled(self, on: bool) -> None:
         """Offer the group and version pickers only while a sum is on screen.
@@ -798,19 +789,26 @@ class CurveDialog(QDialog):
         ці групи". Groups exist to build a sum — a group IS "these drivers, added up" — so with Σ
         off they are two combos answering a question nobody asked.
 
-        Hidden NARROWLY, and this is the part that had to be got right. The chips and "+ add ▾"
+        The two combos individually, since they stopped being a box (2026-08-19): a hidden widget
+        takes no room in the flow (`_FlowLayout._lay_out` skips it), so the row closes up around
+        them and the chips move left rather than a gap being left where a box used to be.
+
+        Hidden NARROWLY, and this is the part that had to be got right. The chips and `Choose…`
         never hide: they are the selection, the Advisor's rule is that the selection is always
         visible, and with the measurement pickers gone they are the only way to change what is
         drawn — a window that hid them with Σ off would be a window you cannot use without the sum.
-        The kind picker shares the row with the group combos and stays for the same reason, which
-        is also why the row keeps its height and the plot below does not jump when Σ is toggled.
+        The kind picker stays for the same reason: what is DRAWN is not a question about sums.
 
         Nothing is lost when the combos go away: every path that edits the chips has already let
         go of the group by then (`_clear_group`), and hiding a combo changes no selection.
         """
-        box = getattr(self, "_group_box", None)
-        if box is not None:
-            box.setVisible(bool(on))
+        for combo in (getattr(self, "_version_combo", None), getattr(self, "_group_combo", None)):
+            if combo is not None:
+                combo.setVisible(bool(on))
+        if self._chip_row is not None:
+            # The flow measures itself from the items it is holding, and two of them just changed
+            # width to nothing.
+            self._chip_row.invalidate()
 
     def _fill_group_combo(self) -> None:
         """Every group this car has, with its TYPE on the row.
@@ -1030,10 +1028,17 @@ class CurveDialog(QDialog):
         Guarded against re-entry because putting a control in step emits the same signal that
         arrives when the tuner moves it by hand.
         """
-        self._selection = [str(t) for t in titles if t]
+        chosen = [str(t) for t in titles if t]
+        self._selection = chosen
         # What is on the plot is about the PREVIOUS selection until the fetch answers, so it stops
         # being allowed to colour the chips the moment this changes (see `_chip_colours`).
         self._plotted = []
+        # Announced before the controls are put in step and before the fetch: what is being asked
+        # for is a fact the moment it is asked, and nothing downstream needs the curves. From the
+        # local list rather than by reading the field back — `_chosen()` is this window's one
+        # reader of `_selection`, and a second one is how the two halves of a selection start to
+        # drift apart.
+        self.selectionChanged.emit(list(chosen))
         if getattr(self, "_version_combo", None) is None:
             # No chip row means no group row either (both are built only when there is a list of
             # measurements to offer), and then there is nothing to keep in step.
@@ -1450,21 +1455,29 @@ class CurveDialog(QDialog):
         self._view.autoscale_y()
 
     def _starting_markers(self, traces: list):
-        """Where the markers begin, and what to call them.
+        """Where the two markers begin, and what to call them.
 
-        With a reading from the model, ON it — and a second marker on top of the first, because
+        **Two, always** (user, 2026-08-19: "число маркерів збільшується зі збільшенням числа кривих
+        — а вони у нас постійні"). They used to be one per curve, which made the picture unreadable
+        at a whole side — six dashed verticals over six curves — and, worse, made a marker mean
+        something it does not: a marker is a place the tuner is POINTING AT, and a curve is what it
+        is pointed at. Two of them ask the one question this window is for, "these two places, what
+        is happening at each and how far apart are they", and they ask it whether one curve is
+        plotted or seven.
+
+        With a reading from the model, ON it — and the second marker on top of the first, because
         dragging away from where the model read it IS the disagreement, so every millimetre of
         movement is deliberate.
 
-        Without one (the Arbiter opened this themselves), on each trace's own largest peak — every
-        trace, however many there are. For an impulse that is the arrival by the crudest possible
-        reading, which makes the delta meaningful before anything has been touched, and over a
-        whole side it is the picture the alignment is argued from: six arrivals, each one placed.
-        A starting point that is obviously a guess invites correction better than markers parked at
-        zero.
+        Without one (the Arbiter opened this themselves), on the peaks of the first two traces —
+        on an impulse that is the two arrivals by the crudest possible reading, which makes the
+        delta meaningful before anything is touched, and a starting point that is obviously a guess
+        invites correction better than markers parked at zero. With one curve on screen both land
+        on its peak, exactly as the model's pair stacks.
 
-        The model's own reading stays a PAIR (model versus you) whatever is plotted: that pair is
-        the disagreement the window exists to settle, and a third marker in it would have no owner.
+        No tokens: the markers are no longer tied to curves, so wearing a curve's colour would be
+        the picture claiming an ownership that is not there. The view's own two marker colours
+        (muted / ok) are what says "these are the two places you are pointing at".
         """
         if self._markers:
             positions = list(self._markers)
@@ -1472,11 +1485,19 @@ class CurveDialog(QDialog):
             if len(positions) == 1:
                 positions.append(positions[0])
             return positions[:2], names[:len(positions[:2])], []
-        usable = [t for t in traces if len(t.x)]
-        # One marker per curve, each in its curve's own colour: nobody has claimed a reading yet,
-        # so calling the first one "the model's" would be a lie the colour tells.
-        return ([_peak_x(t) for t in usable], [t.name for t in usable],
-                [trace_token(i) for i in range(len(usable))])
+        names = [i18n.t("curveMarkerOne"), i18n.t("curveMarkerTwo")]
+        if self._kind in ("fr", "phase"):
+            # On a frequency view "the peak" of a response is a band edge — max |y| of a phase
+            # curve is ±180° at 20 kHz, of a woofer's response it is 20 Hz — so the pair opened at
+            # the two ends of the axis, which is the one place nobody is pointing (seen in the
+            # renders, 2026-08-19). Instead: the geometric thirds of the band the view opens on,
+            # 200 Hz and 2 kHz, which is where a car's joints live and therefore where the first
+            # question usually is. A guess, like the impulse's peaks, and as obviously one.
+            low, high = _FR_BAND_HZ
+            ratio = high / low
+            return [low * ratio ** (1 / 3), low * ratio ** (2 / 3)], names, []
+        peaks = [_peak_x(t) for t in traces if len(t.x)] or [0.0]
+        return [peaks[0], peaks[min(1, len(peaks) - 1)]], names, []
 
     def reset(self, titles, markers=(), kind="impulse", available=()) -> None:
         """Re-point an existing window at a new question, instead of building another one.
@@ -1497,8 +1518,12 @@ class CurveDialog(QDialog):
         # Straight from the caller, and NOT through `_set_selection`: that one fetches, and the
         # rest of this method is still re-reading the project the new titles belong to. What is on
         # the plot belongs to the previous question, so it stops colouring the chips here.
-        self._selection = [str(t) for t in titles if t]
+        chosen = [str(t) for t in titles if t]
+        self._selection = chosen
         self._plotted = []
+        # A new question is a new selection, so it is announced like any other — the window that
+        # remembers what was last looked at must not be left holding the previous question's set.
+        self.selectionChanged.emit(list(chosen))
         # Re-read, all three: the window outlives the project, and switching projects switches
         # processors, switches the bank — and switches the car whose glossary names the groups.
         self._apply_delay_resolution()
