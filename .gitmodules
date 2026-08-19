@@ -1,4 +1,4 @@
 [submodule "vendor/autosound-tuning-skill"]
 	path = vendor/autosound-tuning-skill
 	url = https://github.com/ayukhno/autosound-tuning-skill.git
-	branch = feat/scr-050-apf
+	branch = main
