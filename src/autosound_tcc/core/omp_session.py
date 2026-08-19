@@ -49,7 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import config, model_choices, vendor_loader
+from autosound_tcc.core import child, config, model_choices, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -809,6 +809,9 @@ class OmpSession:
             # omp shells out to the skill, whose scripts are in a git submodule; without this its
             # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
             env=vendor_loader.child_env(),
+            # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
+            # the other half — no console window on Windows (see core/child.py).
+            **child.flags(),
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
         # Started before anything is awaited, so no frame is read anywhere else: whatever arrives

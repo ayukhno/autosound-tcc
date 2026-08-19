@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import install_report, self_check
+from autosound_tcc.core import app_log, install_report, self_check
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -276,6 +276,7 @@ class DiagnosticsDialog(QDialog):
         self._tabs = QTabWidget()
         self._tabs.addTab(scroll, i18n.t("diagTabProject"))
         self._tabs.addTab(self._build_install_tab(), i18n.t("diagTabInstall"))
+        self._tabs.addTab(self._build_log_tab(), i18n.t("diagTabLog"))
         self._tabs.currentChanged.connect(self._on_tab)
         outer.addWidget(self._tabs, stretch=1)
 
@@ -348,6 +349,54 @@ class DiagnosticsDialog(QDialog):
         self._install_timer.stop()
         self._render_install(probe.section if probe is not None else None)
 
+    def _build_log_tab(self) -> QWidget:
+        """The end of the log file, and one button to take it away with.
+
+        The third thing every report has needed after the versions and the reason: the log itself.
+        It lived at a path in a message nobody could click, on a machine nobody debugging it could
+        see (user, 2026-08-19). Read fresh every time the tab is opened — a log looked at once and
+        never re-read is a log that lies about the run you are in.
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+        self._log_where = QLabel("")
+        self._log_where.setProperty("class", "mn")
+        self._log_where.setWordWrap(True)
+        self._log_where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self._log_where)
+        self._log_text = QPlainTextEdit()
+        self._log_text.setReadOnly(True)
+        self._log_text.setProperty("class", "mn")
+        self._log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self._log_text, stretch=1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self._log_copy_btn = QPushButton(i18n.t("diagInstallCopy"))
+        self._log_copy_btn.setProperty("class", "reason-btn")
+        self._log_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._log_copy_btn.clicked.connect(self._copy_log)
+        row.addWidget(self._log_copy_btn)
+        layout.addLayout(row)
+        return page
+
+    def refresh_log(self) -> None:
+        """Re-read the tail, and say where it came from — the path is what a report needs next."""
+        path = app_log.log_path()
+        self._log_where.setText(str(path) if path else i18n.t("diagLogNone"))
+        self._log_text.setPlainText(app_log.tail())
+        # The end is where the answer is.
+        bar = self._log_text.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _copy_log(self) -> None:
+        """The tail AND the path: a log with no filename is a log nobody can ask about again."""
+        path = app_log.log_path()
+        head = f"{path}\n\n" if path else ""
+        QGuiApplication.clipboard().setText(head + self._log_text.toPlainText())
+        self._log_copy_btn.setText(i18n.t("diagInstallCopied"))
+
     def _on_tab(self, index: int) -> None:
         """Read the report the first time the tab is opened, and never on the way to the other one.
 
@@ -355,6 +404,10 @@ class DiagnosticsDialog(QDialog):
         """
         if index == 1 and not self._install_read:
             self.refresh_install()
+        elif index == 2:
+            # Every time, not once: the log grows while this window is open, and that is exactly
+            # when something is going wrong.
+            self.refresh_log()
 
     def refresh_install(self) -> None:
         """Everything that reads a file, now; everything that runs a program, on a thread.
@@ -435,7 +488,9 @@ class DiagnosticsDialog(QDialog):
         self._close_btn.setText(i18n.t("diagClose"))
         self._tabs.setTabText(0, i18n.t("diagTabProject"))
         self._tabs.setTabText(1, i18n.t("diagTabInstall"))
+        self._tabs.setTabText(2, i18n.t("diagTabLog"))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
+        self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
         self._render()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)

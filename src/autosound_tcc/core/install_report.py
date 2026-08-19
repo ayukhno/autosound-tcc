@@ -105,6 +105,24 @@ def _install_source() -> tuple[str, str]:
         return "", ""
 
 
+def app_version() -> str:
+    """TCC's own version, or "" when it cannot be told (a checkout that was never installed)."""
+    return _package_version("autosound-tcc")
+
+
+def skill_version() -> str:
+    """The method's version, from the plugin manifest at the skill repository's root, or "".
+
+    One file read. Public because the window puts both versions in its title bar — the first thing
+    on screen in any screenshot, which is where a version is worth most (user, 2026-08-19).
+    """
+    try:
+        path = vendor_loader.skill_dir().parents[1] / ".claude-plugin" / "plugin.json"
+        return str(json.loads(path.read_text(encoding="utf-8")).get("version") or "")
+    except Exception:  # noqa: BLE001 — a checkout without the manifest is still a skill
+        return ""
+
+
 def _skill() -> Section:
     """Where the method is, which version, and whether TCC can actually read it."""
     items: list[Item] = []
@@ -114,11 +132,7 @@ def _skill() -> Section:
         items.append(Item("found", "yes" if usable else "no", str(path)))
         # `plugin.json` sits at the REPOSITORY root, two levels above the skill folder itself.
         manifest = path.parents[1] / ".claude-plugin" / "plugin.json"
-        version = ""
-        try:
-            version = str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or "")
-        except Exception:  # noqa: BLE001 — a checkout without the manifest is still a skill
-            version = ""
+        version = skill_version()
         items.append(Item("version", version or "unknown", str(manifest) if version else ""))
         if not usable:
             older = vendor_loader.older_skill_found()

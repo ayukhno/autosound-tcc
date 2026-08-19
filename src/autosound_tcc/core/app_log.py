@@ -64,6 +64,31 @@ def log_path() -> Optional[Path]:
     return _log_path
 
 
+#: How much of the log the panel shows and a person pastes. A rotating file is bounded already;
+#: this is about what a reader can take in and what a chat message will carry — the end is where
+#: the answer is, and the beginning is last week.
+TAIL_LINES = 400
+
+
+def tail(lines: int = TAIL_LINES) -> str:
+    """The end of the log file, as text — or a sentence saying why there is none.
+
+    Never raises: it is read by a panel somebody opened BECAUSE something is wrong, and the one
+    thing it must not do there is fail in a way that needs its own log.
+    """
+    path = log_path()
+    if path is None:
+        return "no log file — this run is writing to the terminal only"
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"could not read {path}: {exc}"
+    if not text.strip():
+        return f"{path} is empty — nothing has been logged this run"
+    kept = text.splitlines()[-lines:]
+    return "\n".join(kept)
+
+
 def logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
 

@@ -277,9 +277,10 @@ def test_the_dialog_has_a_second_tab_with_what_is_installed():
     _app()
     dialog = DiagnosticsDialog()
 
-    assert dialog._tabs.count() == 2
+    assert dialog._tabs.count() == 3
     assert dialog._tabs.tabText(0) == i18n.t("diagTabProject")
     assert dialog._tabs.tabText(1) == i18n.t("diagTabInstall")
+    assert dialog._tabs.tabText(2) == i18n.t("diagTabLog")
 
 
 def test_the_report_is_read_only_when_the_tab_is_opened():
@@ -315,3 +316,37 @@ def test_the_window_hands_it_the_facts_only_the_window_knows():
     dialog.set_install_extra({"MCP": "not running: ValueError"})
 
     assert dialog._install_extra()["MCP"] == "not running: ValueError"
+
+
+def test_the_log_tab_shows_the_tail_and_where_it_came_from():
+    """The third thing every report has needed after the versions and the reason. Re-read on every
+    open: a log looked at once is a log that lies about the run you are in."""
+    from autosound_tcc.core import app_log
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._tabs.setCurrentIndex(2)
+
+    assert dialog._log_text.toPlainText() == app_log.tail()
+    path = app_log.log_path()
+    assert dialog._log_where.text() == (str(path) if path else i18n.t("diagLogNone"))
+
+
+def test_copying_the_log_takes_the_path_with_it(monkeypatch, tmp_path):
+    """A log with no filename is a log nobody can ask about again."""
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.core import app_log
+
+    log = tmp_path / "tcc.log"
+    log.write_text("first line\nsecond line\n", encoding="utf-8")
+    monkeypatch.setattr(app_log, "_log_path", log)
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(2)
+
+    dialog._copy_log()
+
+    copied = QGuiApplication.clipboard().text()
+    assert str(log) in copied and "second line" in copied

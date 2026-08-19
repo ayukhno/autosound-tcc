@@ -32,7 +32,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import config
+from autosound_tcc.core import child, config
 
 # A panel row is not worth a stall: a slow mount answers "say nothing".
 _GIT_TIMEOUT_S = 2.0
@@ -260,7 +260,7 @@ def _git(project: Path, *args: str) -> Optional[str]:
     try:
         done = subprocess.run(
             ["git", "-C", str(project), *args],
-            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S,
+            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S, **child.quiet(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

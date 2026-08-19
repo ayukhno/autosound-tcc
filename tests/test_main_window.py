@@ -2346,3 +2346,22 @@ def test_the_popup_width_follows_the_contents_it_is_opened_with():
     combo.hidePopup()
 
     assert combo.view().minimumWidth() > narrow
+
+
+def test_the_title_bar_carries_both_versions():
+    """The title bar is in every screenshot anybody sends, so it is the cheapest place a version
+    can live — and a bug is against a PAIR, the app and the method, so one alone leaves the other
+    to be guessed (user, 2026-08-19)."""
+    from autosound_tcc.core import install_report
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    title = window.windowTitle()
+
+    assert "Tuning Command Center" in title
+    if install_report.app_version():
+        assert f"TCC {install_report.app_version()}" in title
+    if install_report.skill_version():
+        assert f"skill {install_report.skill_version()}" in title

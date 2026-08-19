@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import (
+    install_report,
     app_log,
     claude_sdk,
     config,
@@ -544,7 +545,20 @@ class MainWindow(QMainWindow):
         # one (user request 2026-07-29) -- there's no in-app project switcher yet, only
         # AUTOSOUND_PROJECT_DIR/the QSettings-persisted choice, so the title is the only place
         # that's visible before digging into the DSP tree.
-        self.setWindowTitle(f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}")
+        # ...with both versions at the end. The title bar is in every screenshot anybody sends, so
+        # it is the cheapest place a version can live: no tab to open, nothing to ask for (user,
+        # 2026-08-19). Two numbers, because a bug is against a PAIR — the app and the method — and
+        # either one alone leaves the other to be guessed.
+        versions = " · ".join(
+            part for part in (
+                f"TCC {install_report.app_version()}" if install_report.app_version() else "",
+                f"skill {install_report.skill_version()}" if install_report.skill_version() else "",
+            ) if part
+        )
+        self.setWindowTitle(
+            f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}"
+            + (f"  ({versions})" if versions else "")
+        )
 
         root = QWidget()
         root.setObjectName("AppRoot")

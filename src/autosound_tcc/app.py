@@ -13,7 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from autosound_tcc.core import app_log, config, macos_identity
+from autosound_tcc.core import app_log, child, config, macos_identity
 
 #: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
 #: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
@@ -71,6 +71,9 @@ def main() -> int:
     # in the terminal TCC was launched from. On macOS a line arriving there while the window is a
     # full-screen space switches the user out of the app mid-tune (see core/app_log.py).
     app_log.setup()
+    # Before anything can start a child: on Windows the Agent SDK's own `claude` process would
+    # otherwise open a console window in front of the app at every session (see core/child.py).
+    child.hide_console_windows()
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
     try:

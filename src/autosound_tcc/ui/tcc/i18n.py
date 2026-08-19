@@ -88,6 +88,8 @@ T: dict[Lang, dict[str, str]] = {
         # debugging it can see (user, 2026-08-19).
         "diagTabProject": "Project",
         "diagTabInstall": "Installation",
+        "diagTabLog": "Log",
+        "diagLogNone": "no log file — this run writes to the terminal only",
         "diagInstallBlurb": "What is installed on this machine — versions, where each piece came \
 from, which command-line tools answer. Copy it into a message when you report something: it \
 answers the first five questions anybody would ask.",
@@ -700,6 +702,8 @@ Choose sweeps (sw) above to read this.",
         "diagCheckedAt": "перевірено {at} · {ms} мс",
         "diagTabProject": "Проєкт",
         "diagTabInstall": "Установка",
+        "diagTabLog": "Логи",
+        "diagLogNone": "лог-файла немає — цей запуск пише лише в термінал",
         "diagInstallBlurb": "Що встановлено на цій машині — версії, звідки взялася кожна частина, \
 які CLI відповідають. Скопіюй у повідомлення, коли про щось звітуєш: це відповідає на перші пʼять \
 питань, які тобі поставлять.",
