@@ -375,12 +375,11 @@ def test_an_installation_that_is_not_ours_says_so_and_stays_disabled():
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog._show_update(updates.Status("tcc", "0.1.1", "", False,
-                                       "running from a source checkout — update it with git",
+    dialog._show_update(updates.Status("tcc", "0.1.1", "", False, "source_checkout",
                                        updatable=False))
 
     label, button = dialog._update_rows["tcc"]
-    assert "source checkout" in label.text()
+    assert i18n.t("updWhy_source_checkout") in label.text(), "in the reader's language"
     assert not button.isEnabled()
 
 
@@ -401,7 +400,7 @@ def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
     _app()
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
-    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (True, "v3.0.7"))
+    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (True, "v3.0.7", ""))
 
     dialog._update_skill()
 
@@ -414,12 +413,13 @@ def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
     _app()
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
-    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (False, "fetch failed: no network"))
+    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (False, "git_failed", "no network"))
 
     dialog._update_skill()
 
     label, button = dialog._update_rows["skill"]
-    assert "no network" in label.text()
+    assert "no network" in label.text(), "git's own words survive; the framing is translated"
+    assert i18n.t("updWhy_git_failed") in label.text()
     assert button.isEnabled(), "a failure the person can retry must leave them the button"
 
 

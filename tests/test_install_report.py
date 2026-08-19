@@ -82,3 +82,26 @@ def test_a_skill_folder_in_no_repository_says_so_rather_than_guessing(tmp_path, 
 
     assert vendor_loader.skill_repo_root() is None
     assert install_report.skill_version() == ""
+
+
+def test_a_source_checkout_reports_the_version_in_its_own_tree(monkeypatch, tmp_path):
+    """A venv installed once and never again reported `TCC 0.0.1` from a tree at 0.1.6. For a
+    checkout the truth is the file being edited, not the metadata left behind by an old install."""
+    monkeypatch.setattr(install_report, "install_source", lambda: ("", ""))
+    monkeypatch.setattr(install_report, "_package_version", lambda name: "0.0.1")
+
+    version = install_report.app_version()
+
+    import tomllib
+    from pathlib import Path
+    here = tomllib.loads(
+        (Path(install_report.__file__).parents[3] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert version == here["project"]["version"] != "0.0.1"
+
+
+def test_an_installed_build_keeps_its_metadata_version(monkeypatch):
+    """Installed from git, the metadata IS the build — no reaching for a pyproject that is not there."""
+    monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "a" * 40))
+    monkeypatch.setattr(install_report, "_package_version", lambda name: "0.1.6")
+
+    assert install_report.app_version() == "0.1.6"

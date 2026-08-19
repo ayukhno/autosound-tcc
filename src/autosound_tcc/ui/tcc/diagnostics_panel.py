@@ -135,6 +135,19 @@ class _FileRow(QWidget):
             outer.addWidget(_note(i18n.t("diagMissing")))
 
 
+def _reason(key: str, detail: str = "") -> str:
+    """One of `core.updates`' reason KEYS, in the reader's language.
+
+    The translation lives here and not there on purpose: that module is Qt-free and language-free,
+    and a sentence composed inside it came out in English in a Ukrainian window. An unknown key
+    falls through as itself — a stray identifier on screen is ugly, and silence is worse.
+    """
+    text = i18n.t(f"updWhy_{key}")
+    if text == f"updWhy_{key}":  # no translation for this one
+        text = key
+    return f"{text}: {detail}" if detail else text
+
+
 def _note(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("class", "phead-sub")
@@ -447,8 +460,8 @@ class DiagnosticsDialog(QDialog):
         if status.newer:
             label.setText(i18n.t("updAvailable").format(
                 what=title, here=here, there=status.latest))
-        elif status.note:
-            label.setText(f"{title} {here} — {status.note}")
+        elif status.reason:
+            label.setText(f"{title} {here} — {_reason(status.reason, status.detail)}")
         elif not status.latest:
             label.setText(i18n.t("updUnknown"))
         else:
@@ -462,7 +475,7 @@ class DiagnosticsDialog(QDialog):
         # Blocking on purpose, and it is allowed to be: a shallow fetch of one tag is a second at
         # most, and the alternative -- a thread for a call this short -- is a window that can be
         # clicked twice before the first one lands.
-        ok, what = updates.apply_skill()
+        ok, what, detail = updates.apply_skill()
         if ok:
             label.setText(i18n.t("updSkillDone").format(version=what.lstrip("v")))
             # The report underneath must show the new version — but the row keeps what it just
@@ -470,7 +483,7 @@ class DiagnosticsDialog(QDialog):
             self._install_read = False
             self.refresh_install(check_updates=False)
         else:
-            label.setText(i18n.t("updFailed").format(why=what))
+            label.setText(i18n.t("updFailed").format(why=_reason(what, detail)))
             button.setEnabled(True)
 
     def _update_tcc(self) -> None:

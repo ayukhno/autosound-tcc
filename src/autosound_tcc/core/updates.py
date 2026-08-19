@@ -104,8 +104,12 @@ class Status:
     latest: str
     #: True only when both are known AND they differ in the direction that matters.
     newer: bool
-    #: Why, when the answer needs one: unreachable network, a developer's own checkout, a source run.
-    note: str = ""
+    #: WHY, as a key and never as a sentence: "source_checkout", "no_network", "on_branch"… This
+    #: module is Qt-free and language-free, and the panel that shows it is neither — a sentence
+    #: composed here came out in English inside a Ukrainian window (user's screenshot, 2026-08-19).
+    reason: str = ""
+    #: The part of the reason that is data rather than words: a branch name, a git error.
+    detail: str = ""
     #: False when this installation is not ours to touch (a checkout, a hand-made symlink).
     updatable: bool = True
 
@@ -144,7 +148,7 @@ def _skill_repo_dir() -> Optional[Path]:
         return None
 
 
-def _is_ours(repo: Path) -> tuple[bool, str]:
+def _is_ours(repo: Path) -> tuple[bool, tuple[str, str]]:
     """Whether this checkout is the installer's to move, and if not, why not.
 
     The installer parks its clone on a tag, detached, with nothing modified. A developer's clone
@@ -154,14 +158,14 @@ def _is_ours(repo: Path) -> tuple[bool, str]:
     """
     ok, _ = _git("rev-parse", "--git-dir", cwd=repo)
     if not ok:
-        return False, "not a git checkout"
+        return False, ("not_a_checkout", "")
     on_branch, branch = _git("symbolic-ref", "--quiet", "--short", "HEAD", cwd=repo)
     if on_branch:
-        return False, f"on branch {branch} — a working tree, not an installed release"
+        return False, ("on_branch", branch)
     dirty_ok, dirty = _git("status", "--porcelain", cwd=repo)
     if dirty_ok and dirty:
-        return False, "has uncommitted changes"
-    return True, ""
+        return False, ("dirty", "")
+    return True, ("", "")
 
 
 def check_skill() -> Status:
@@ -171,14 +175,13 @@ def check_skill() -> Status:
     latest = newest_tag()
     latest_version = latest.lstrip("v")
     if repo is None:
-        return Status("skill", installed, latest_version, False,
-                      "the method was not found on this machine", updatable=False)
-    ours, why = _is_ours(repo)
+        return Status("skill", installed, latest_version, False, "not_found", updatable=False)
+    ours, (why, detail) = _is_ours(repo)
     if not ours:
-        return Status("skill", installed, latest_version, False, why, updatable=False)
+        return Status("skill", installed, latest_version, False, why, detail, updatable=False)
     if not installed or not latest:
         return Status("skill", installed, latest_version, False,
-                      "" if installed else "no version in the manifest")
+                      "" if installed else "no_manifest")
     return Status("skill", installed, latest_version,
                   _version_key(latest_version) > _version_key(installed))
 
@@ -222,13 +225,12 @@ def check_tcc() -> Status:
     version = install_report.app_version()
     _url, commit = install_report.install_source()
     if not commit:
-        return Status("tcc", version, "", False,
-                      "running from a source checkout — update it with git", updatable=False)
+        return Status("tcc", version, "", False, "source_checkout", updatable=False)
     installed = _named(version, commit)
     ok, out = _git("ls-remote", TCC_REPO, "HEAD")
     head = out.split()[0] if ok and out.split() else ""
     if not head:
-        return Status("tcc", installed, "", False, "could not reach GitHub")
+        return Status("tcc", installed, "", False, "no_network")
     if head == commit:
         return Status("tcc", installed, installed, False)
     return Status("tcc", installed, _named(_remote_version(head), head), True)
@@ -239,7 +241,7 @@ def check_all() -> tuple[Status, Status]:
     return check_tcc(), check_skill()
 
 
-def apply_skill(tag: str = "") -> tuple[bool, str]:
+def apply_skill(tag: str = "") -> tuple[bool, str, str]:
     """Move the method's checkout onto `tag` (default: the newest release). `(ok, what happened)`.
 
     Exactly what the installer does, for exactly the same reason it does it that way: the clone is
@@ -248,18 +250,18 @@ def apply_skill(tag: str = "") -> tuple[bool, str]:
     """
     repo = _skill_repo_dir()
     if repo is None:
-        return False, "the method was not found on this machine"
-    ours, why = _is_ours(repo)
+        return False, "not_found", ""
+    ours, (why, detail) = _is_ours(repo)
     if not ours:
-        return False, f"left alone: {why}"
+        return False, why, detail
     target = tag or newest_tag()
     if not target:
-        return False, "could not ask GitHub which release is newest"
+        return False, "no_network", ""
     ok, out = _git("fetch", "--quiet", "--depth", "1", "origin", target, cwd=repo)
     if not ok:
-        return False, f"fetch failed: {out}"
+        return False, "git_failed", out
     ok, out = _git("-c", "advice.detachedHead=false", "checkout", "--quiet", "FETCH_HEAD",
                    cwd=repo)
     if not ok:
-        return False, f"checkout failed: {out}"
-    return True, target
+        return False, "git_failed", out
+    return True, target, ""

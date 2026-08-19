@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import threading
 import re
 import sys
 import weakref
@@ -63,6 +64,7 @@ from autosound_tcc.core import (
     process_writer,
     project_settings,
     terminal_launcher,
+    updates,
 )
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
@@ -549,16 +551,8 @@ class MainWindow(QMainWindow):
         # it is the cheapest place a version can live: no tab to open, nothing to ask for (user,
         # 2026-08-19). Two numbers, because a bug is against a PAIR — the app and the method — and
         # either one alone leaves the other to be guessed.
-        versions = " · ".join(
-            part for part in (
-                f"TCC {install_report.app_version()}" if install_report.app_version() else "",
-                f"skill {install_report.skill_version()}" if install_report.skill_version() else "",
-            ) if part
-        )
-        self.setWindowTitle(
-            f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}"
-            + (f"  ({versions})" if versions else "")
-        )
+        self._title_note = ""
+        self._set_title()
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -628,6 +622,9 @@ class MainWindow(QMainWindow):
         self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
             self._cli_catalogue.start()
+            # Ask once, on the same switch: whatever turns off the background work of a test run
+            # turns this off too, so no suite ever reaches GitHub for a title bar.
+            self._check_for_updates()
 
         # Quitting is not closing: Cmd-Q, a signal, or `QApplication.quit()` end the loop without
         # any window's `closeEvent` necessarily running, and whatever is still on a thread then is
@@ -2324,6 +2321,62 @@ class MainWindow(QMainWindow):
             self._mcp_error = f"{type(exc).__name__}: {exc}"
             app_log.logger().exception("the MCP server did not start: %s", exc)
             self._status_strip.notify(f"MCP: {exc}", level="warn")
+
+    def _set_title(self) -> None:
+        """The project, then both versions — and a word when something newer exists.
+
+        Two numbers, because a bug is against a PAIR, the app and the method, and either alone
+        leaves the other to be guessed. The update word is here rather than in a badge because
+        this is where the versions already are, and it is the line a person reads without being
+        asked to (user, 2026-08-19).
+        """
+        versions = " · ".join(
+            part for part in (
+                f"TCC {install_report.app_version()}" if install_report.app_version() else "",
+                f"skill {install_report.skill_version()}" if install_report.skill_version() else "",
+                self._title_note,
+            ) if part
+        )
+        self.setWindowTitle(
+            f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}"
+            + (f"  ({versions})" if versions else "")
+        )
+
+    def _check_for_updates(self) -> None:
+        """Ask GitHub once, in the background, and say so in the title if there is something newer.
+
+        A plain daemon thread and a timer, not a QThread: PySide's import hook makes Qt-owned
+        threads crawl through anything that imports, and a QThread destroyed while running is
+        `qFatal` (measured; see `core/install_report.py`). Nothing here touches Qt off the main
+        thread — the timer reads the result.
+
+        Silent when offline, and silent when up to date: the title is not a place to report that
+        nothing happened.
+        """
+        holder: dict = {}
+
+        def ask() -> None:
+            try:
+                holder["result"] = updates.check_all()
+            except Exception:  # noqa: BLE001 — a question nobody answered changes nothing on screen
+                holder["result"] = ()
+
+        threading.Thread(target=ask, name="tcc-title-updates", daemon=True).start()
+        tries = {"n": 0}
+        timer = QTimer(self)
+
+        def poll() -> None:
+            tries["n"] += 1
+            if "result" not in holder and tries["n"] < 120:
+                return
+            timer.stop()
+            if any(getattr(status, "newer", False) for status in holder.get("result", ())):
+                self._title_note = i18n.t("titleUpdate")
+                self._set_title()
+
+        timer.timeout.connect(poll)
+        timer.setInterval(500)
+        timer.start()
 
     def _install_facts(self) -> dict:
         """What the installation report cannot ask for itself: this window's own live state."""

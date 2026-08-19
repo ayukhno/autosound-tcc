@@ -2365,3 +2365,20 @@ def test_the_title_bar_carries_both_versions():
         assert f"TCC {install_report.app_version()}" in title
     if install_report.skill_version():
         assert f"skill {install_report.skill_version()}" in title
+
+
+def test_the_title_says_when_something_newer_exists(monkeypatch):
+    """The versions are already in the title, so that is where "there is a newer one" belongs —
+    it is the line a person reads without being asked to (user, 2026-08-19)."""
+    from autosound_tcc.core import updates
+
+    _app()
+    window = MainWindow()
+    before = window.windowTitle()
+    assert i18n.t("titleUpdate") not in before
+
+    window._title_note = i18n.t("titleUpdate")
+    window._set_title()
+
+    assert i18n.t("titleUpdate") in window.windowTitle()
+    assert str(config.project_dir()) in window.windowTitle(), "and the project stays first"

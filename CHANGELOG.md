@@ -5,6 +5,30 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.7] — 2026-08-19 · in the reader's language, and legible
+
+### Fixed
+
+- **The update rows explained themselves in English inside a Ukrainian window.** `core/updates.py`
+  is Qt-free and language-free, and it was composing sentences — so "running from a source
+  checkout" arrived untranslated. It now returns a reason KEY and its data (a branch name, git's
+  own words); the panel writes the sentence.
+- **A disabled default button kept its accent ring** — "Update TCC" sat greyed with a live-looking
+  orange outline over a row that said there was nothing to update. Qt holds both states at once and
+  the accent won by coming later in the sheet.
+- **A source checkout reported `TCC 0.0.1`** in its title bar from a tree at 0.1.6: the metadata in
+  the virtualenv is whatever was installed once, long ago. For a checkout the version now comes
+  from the checkout's own `pyproject.toml`; an installed build still reports its metadata, which
+  there IS the build.
+
+### Changed
+
+- **The title bar says when something newer exists** — asked once in the background at startup, and
+  silent both when offline and when up to date. The versions are already there; this is the line a
+  person reads without being asked to.
+- **The diagnostics gear is twice the size** of its neighbours. It is the button you hunt for when
+  something is wrong.
+
 ## [v0.1.6] — 2026-08-19 · the update row compares like with like
 
 ### Fixed

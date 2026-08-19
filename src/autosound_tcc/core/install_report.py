@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -109,8 +110,24 @@ def install_source() -> tuple[str, str]:
 
 
 def app_version() -> str:
-    """TCC's own version, or "" when it cannot be told (a checkout that was never installed)."""
-    return _package_version("autosound-tcc")
+    """TCC's own version, or "" when it cannot be told.
+
+    For an installed app that is the package metadata. For a SOURCE CHECKOUT it is the checkout's
+    own `pyproject.toml`, because the metadata there is whatever was installed into the virtualenv
+    once and never again: a tree at 0.1.6 reported `TCC 0.0.1` in its title bar (user, running
+    `python -m autosound_tcc.app`, 2026-08-19). The version a developer needs is the one in the
+    files they are editing.
+    """
+    version = _package_version("autosound-tcc")
+    _url, commit = install_source()
+    if commit:
+        return version  # installed from git: the metadata IS the build
+    try:
+        text = (Path(__file__).parents[3] / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return version
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+    return match.group(1) if match else version
 
 
 def _manifest() -> Optional[Path]:

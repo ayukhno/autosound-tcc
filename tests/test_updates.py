@@ -31,7 +31,7 @@ def _git_answers(monkeypatch, answers: dict):
 
 def test_a_newer_tag_is_an_update_and_the_same_tag_is_not(monkeypatch, tmp_path):
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
     monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.6")
     _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
 
@@ -46,7 +46,7 @@ def test_a_newer_tag_is_an_update_and_the_same_tag_is_not(monkeypatch, tmp_path)
 def test_ten_is_newer_than_nine(monkeypatch, tmp_path):
     """The one comparison a string gets wrong: "3.0.10" < "3.0.9" alphabetically."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
     monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.9")
     _git_answers(monkeypatch, {
         "ls-remote": (True, "a\trefs/tags/v3.0.9\nb\trefs/tags/v3.0.10"),
@@ -71,9 +71,9 @@ def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
     status = updates.check_skill()
 
     assert status.updatable is False
-    assert "branch main" in status.note
-    ok, why = updates.apply_skill()
-    assert ok is False and "left alone" in why
+    assert (status.reason, status.detail) == ("on_branch", "main"), "a key, not a sentence"
+    ok, why, detail = updates.apply_skill()
+    assert ok is False and why == "on_branch" and detail == "main"
 
 
 def test_uncommitted_changes_also_stop_it(monkeypatch, tmp_path):
@@ -84,18 +84,18 @@ def test_uncommitted_changes_also_stop_it(monkeypatch, tmp_path):
         "status": (True, " M skills/autosound-tuning/SKILL.md"),
     })
 
-    ok, why = updates.apply_skill()
+    ok, why, _detail = updates.apply_skill()
 
-    assert ok is False and "uncommitted" in why
+    assert ok is False and why == "dirty"
 
 
 def test_the_method_is_updated_the_way_the_installer_does_it(monkeypatch, tmp_path):
     """Fetch the tag BY NAME into a --depth 1 clone, then check out FETCH_HEAD."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ""))
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
     calls = _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
 
-    ok, what = updates.apply_skill()
+    ok, what, _detail = updates.apply_skill()
 
     assert ok is True and what == "v3.0.7"
     fetch = [c for c in calls if "fetch" in c][0]
@@ -131,7 +131,7 @@ def test_a_source_checkout_is_told_to_use_git(monkeypatch):
     status = updates.check_tcc()
 
     assert status.updatable is False
-    assert "git" in status.note
+    assert status.reason == "source_checkout"
 
 
 def test_an_unreachable_github_is_not_up_to_date(monkeypatch):
@@ -144,7 +144,7 @@ def test_an_unreachable_github_is_not_up_to_date(monkeypatch):
 
     assert status.newer is False
     assert status.latest == ""
-    assert "reach" in status.note
+    assert status.reason == "no_network"
 
 
 def test_the_probe_never_raises_when_git_is_missing(monkeypatch):

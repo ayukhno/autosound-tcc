@@ -305,10 +305,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
         border-color: {t.accent};
     }}
-    /* The one icon button that is looked FOR rather than come across: diagnostics. */
+    /* The one icon button that is looked FOR rather than come across: diagnostics. Twice the
+    glyph size of its neighbours (user, 2026-08-19) — it is the one you hunt for when something is
+    wrong, and ⚙ at 13px reads as a speck. */
     QPushButton[class~="diag-btn"] {{
         color: {t.accent};
         border-color: {t.accent_dim};
+        font-size: 26px;
+        padding: 0px 8px;
     }}
     QPushButton[class~="diag-btn"]:hover {{
         color: {t.accent};
@@ -1347,6 +1351,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: 1px solid {t.accent};
         background: {t.mix('accent', 20, 'panel3')};
         font-weight: 600;
+    }}
+    /* ...but a DISABLED default button is not an offer. Qt keeps both states at once, and the
+    accent ring outranked the grey by coming later — so "Update TCC" sat greyed with a live-looking
+    orange outline over a row that said there was nothing to update (user's screenshot). */
+    QPushButton:default:disabled, QDialogButtonBox QPushButton:default:disabled {{
+        border: 1px solid {t.border};
+        background: {t.panel2};
+        color: {t.faint};
+        font-weight: 400;
     }}
 
     /* ---- a standard message box, which is otherwise drawn by the platform ----
