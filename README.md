@@ -37,6 +37,7 @@ The method itself is documented in several languages:
 - [Your first project](#your-first-project)
 - [Updating and removing](#updating-and-removing)
 - [What's in here](#whats-in-here)
+- [Reporting a problem](#reporting-a-problem)
 - [License](#license)
 
 ## Who it is for
@@ -293,6 +294,15 @@ of a checkout, `~/.claude/skills/autosound-tuning`, and then skill folders under
 `~/.claude/plugins/`. It needs the 3.x line and says so plainly if what it finds is older: only
 3.x has `project.json` and the contract checker, and TCC reads both.
 </details>
+
+## Reporting a problem
+
+Anything that broke or was wrong: **[open an issue](https://github.com/ayukhno/autosound-tcc/issues/new/choose)**.
+The app fills in the half nobody can assemble by hand — open the diagnostics window, go to
+**Installation** and press **Report a problem**: the form opens with the versions, the paths and
+the tool list already in it. The **Log** tab beside it has its own Copy button for the field
+underneath. Problems with the tuning method itself belong
+[in the skill's repository](https://github.com/ayukhno/autosound-tuning-skill/issues/new/choose).
 
 ## License
 

@@ -79,10 +79,18 @@ class FeedbackDialog(QDialog):
         outer.addWidget(via)
         self._radio_github = QRadioButton(i18n.t("fbViaGithub"))
         self._radio_form = QRadioButton(i18n.t("fbViaForm"))
-        self._radio_form.setChecked(True)  # default: no account needed
+        self._radio_form.setChecked(True)  # default when there IS a form: no account needed
         self._radio_github.toggled.connect(self._sync_send_label)
         outer.addWidget(self._radio_form)
         outer.addWidget(self._radio_github)
+        if not form_url:
+            # No form configured — and this was the DEFAULT choice, so "Send" copied the text to
+            # the clipboard, opened nothing, and closed the dialog as though it had gone somewhere.
+            # A tester's report died there silently (found 2026-08-19, on the way into the beta).
+            # One destination left, so the question goes away with it.
+            via.hide()
+            self._radio_form.hide()
+            self._radio_github.setChecked(True)
 
         actions = QHBoxLayout()
         actions.addStretch(1)

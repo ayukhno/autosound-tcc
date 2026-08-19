@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The method itself (not the window)
+    url: https://github.com/ayukhno/autosound-tuning-skill/issues/new/choose
+    about: Crossovers, delays, EQ, what the AI proposed — the tuning method lives in its own repository.
+  - name: Discussion / question
+    url: https://github.com/ayukhno/autosound-tuning-skill/discussions
+    about: General questions about tuning or about using the app.

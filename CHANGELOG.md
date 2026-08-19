@@ -5,6 +5,25 @@ What changed in Autosound TCC, the desktop app for the
 from `main` by the method's own installer, so a version here marks a point worth referring back to
 rather than a thing anybody downloads separately.
 
+## [v0.1.5] — 2026-08-19 · one inbox for the beta
+
+### Added
+
+- **"Report a problem", beside Copy in the Installation tab.** It opens the repository's beta-report
+  form with the installation block already in its field — versions, where each piece came from,
+  which tools answer. That is the half of a bug report nobody can assemble by hand, and the half
+  that decides whether the report can be answered at all. The log is not sent this way (four
+  hundred lines do not fit in a URL): its tab has a Copy button and the form has a field waiting.
+- **A beta-report issue form** in both repositories, with a config that points each kind of problem
+  at the right one — the window here, the method there.
+
+### Fixed
+
+- **The feedback modal could swallow a report in silence.** Its default destination was the Google
+  Form, whose URL has been empty for some time: pressing Send copied the text to the clipboard,
+  opened nothing, and closed the dialog as though it had been sent. With no form configured there
+  is now one destination and no question — GitHub.
+
 ## [v0.1.4] — 2026-08-19 · the update waits for the app to close
 
 ### Fixed

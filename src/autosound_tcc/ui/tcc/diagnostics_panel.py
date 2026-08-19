@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import threading
 import time
+import urllib.parse
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -191,6 +192,10 @@ class _CheckRow(QWidget):
         self.fixed.emit(message)
 
 
+#: Where a beta report goes. The repository's own form, not a blank issue: a form has fields, and
+#: fields are what let a pile of reports be read by something other than a person one at a time.
+ISSUES_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
+
 #: How often, and for how long, the panel looks to see whether the tool probes have finished.
 _TOOLS_POLL_MS = 250
 _TOOLS_TRIES = 60
@@ -356,6 +361,11 @@ class DiagnosticsDialog(QDialog):
         layout.addWidget(self._install_text, stretch=1)
         row = QHBoxLayout()
         row.addStretch(1)
+        self._report_btn = QPushButton(i18n.t("diagReport"))
+        self._report_btn.setProperty("class", "reason-btn")
+        self._report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._report_btn.clicked.connect(self._open_issue)
+        row.addWidget(self._report_btn)
         self._copy_btn = QPushButton(i18n.t("diagInstallCopy"))
         self._copy_btn.setProperty("class", "reason-btn")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -602,6 +612,26 @@ class DiagnosticsDialog(QDialog):
     def set_install_extra(self, facts: dict) -> None:
         self._install_extra_facts = dict(facts or {})
 
+    def _open_issue(self) -> None:
+        """Open the beta-report form with the installation block already filled in.
+
+        The half of a bug report nobody can be asked to assemble by hand — versions, where each
+        piece came from, which tools answer — is the half that decides whether the report can be
+        answered at all. It goes into the form's own field through the URL, so what arrives is a
+        structured issue rather than a message in a chat (user, 2026-08-19: "дуже хочу обробляти
+        їх напівавтоматично").
+
+        The log is NOT sent this way: four hundred lines do not fit in a URL. Its own tab has a
+        Copy button, and the form has a field waiting for it.
+        """
+        report = self._install_text.toPlainText()
+        query = urllib.parse.urlencode({
+            "template": "beta-report.yml",
+            "labels": "beta",
+            "install": report,
+        })
+        QDesktopServices.openUrl(QUrl(f"{ISSUES_URL}?{query}"))
+
     def _copy_install(self) -> None:
         QGuiApplication.clipboard().setText(self._install_text.toPlainText())
         self._copy_btn.setText(i18n.t("diagInstallCopied"))
@@ -661,6 +691,7 @@ class DiagnosticsDialog(QDialog):
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
+        self._report_btn.setText(i18n.t("diagReport"))
         self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
         self._render()
 

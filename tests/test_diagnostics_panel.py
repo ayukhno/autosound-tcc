@@ -474,3 +474,23 @@ def test_re_check_from_another_tab_does_not_pay_for_the_probes():
     dialog._on_refresh()
 
     assert dialog._install_read is False, "but it is marked stale, so opening it re-reads"
+
+
+def test_reporting_a_problem_carries_the_installation_block_into_the_form(monkeypatch):
+    """The half of a report nobody can assemble by hand is the half that makes it answerable, so
+    the button puts it in the form's own field rather than asking for it."""
+    from PySide6.QtGui import QDesktopServices
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._install_text.setPlainText("[Autosound TCC]\n  version  0.1.4\n")
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+
+    dialog._open_issue()
+
+    assert len(opened) == 1
+    url = opened[0]
+    assert url.startswith("https://github.com/ayukhno/autosound-tcc/issues/new?")
+    assert "template=beta-report.yml" in url
+    assert "0.1.4" in url, "the installation block travels with the report"
