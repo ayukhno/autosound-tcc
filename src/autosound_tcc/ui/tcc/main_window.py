@@ -3144,6 +3144,21 @@ class MainWindow(QMainWindow):
             | QMessageBox.StandardButton.Cancel
         )
         box.setDefaultButton(QMessageBox.StandardButton.Save)
+        # Qt writes its own labels on standard buttons, in ITS language: "Save / Discard / Cancel"
+        # in English under a Ukrainian UI (user, 2026-08-19, with the screenshot). The three verbs
+        # are ours to name — and naming them is also the difference between "Discard" and a word
+        # that says what is lost.
+        for button, key in (
+            (QMessageBox.StandardButton.Save, "quitSaveSave"),
+            (QMessageBox.StandardButton.Discard, "quitSaveDiscard"),
+            (QMessageBox.StandardButton.Cancel, "quitSaveCancel"),
+        ):
+            widget = box.button(button)
+            if widget is not None:
+                widget.setText(i18n.t(key))
+        # Qt sized the buttons for the labels it wrote; ours are longer, and without this the new
+        # text is CLIPPED rather than the button grown (seen in a dark-theme render, 2026-08-19).
+        box.adjustSize()
         return box.exec()
 
     def _on_language_selected(self, lang: str) -> None:

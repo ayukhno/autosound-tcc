@@ -1266,6 +1266,79 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         height: 0;
     }}
 
+    /* ---- tabs: the header carries the outline, the body carries none ----
+
+    Asked for by the user (2026-08-19) when the diagnostics window grew a second tab: the tabs
+    themselves were flat text on a flat ground, and the only line on screen was a box drawn around
+    the CONTENT, which is the part that needs no frame. So: no pane border at all, and the selected
+    tab gets a BLUE outline and underline (`info`, the palette's blue, asked for by name: "може
+    синім, щоб і в темній темі було добре"). Blue rather than the accent for a reason worth
+    keeping: this window's accent-orange is the colour of a WARNING everywhere else in the app —
+    the guides button, the tinted picker, the below-zero total — and a selected tab is not a
+    warning. `info` is defined in both palettes, so it stays legible on white and on the dark
+    panel alike. */
+    QTabWidget::pane {{
+        border: none;
+        top: -1px;
+    }}
+    QTabBar::tab {{
+        background: {t.panel3};
+        color: {t.muted};
+        border: 1px solid {t.border2};
+        border-bottom: none;
+        border-top-left-radius: 6px;
+        border-top-right-radius: 6px;
+        padding: 6px 16px;
+        margin-right: 4px;
+        font-size: 13px;
+    }}
+    QTabBar::tab:hover {{
+        color: {t.text};
+        border-color: {t.info};
+    }}
+    QTabBar::tab:selected {{
+        background: {t.mix('info', 14, 'panel3')};
+        color: {t.text};
+        border: 1px solid {t.info};
+        border-bottom: 2px solid {t.info};
+        font-weight: 600;
+    }}
+
+    /* ---- a standard message box, which is otherwise drawn by the platform ----
+
+    Qt builds these buttons itself, and nothing in this sheet reached them: on Windows in the dark
+    theme they came out grey-on-grey and read as DISABLED — on the one dialog that asks whether to
+    save a session before quitting (user, 2026-08-19, with the screenshot). Styled with the same
+    tokens as the app's own buttons, and the default one carries the accent so the answer the
+    dialog expects is visible before it is read. */
+    QMessageBox {{
+        background: {t.panel};
+    }}
+    QMessageBox QLabel {{
+        color: {t.text};
+    }}
+    QMessageBox QPushButton {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 6px;
+        padding: 6px 18px;
+        font-size: 13px;
+        min-width: 84px;
+    }}
+    QMessageBox QPushButton:hover {{
+        border-color: {t.accent_dim};
+        background: {t.mix('accent', 10, 'panel3')};
+    }}
+    QMessageBox QPushButton:default {{
+        border: 1px solid {t.accent};
+        background: {t.mix('accent', 20, 'panel3')};
+        font-weight: 600;
+    }}
+    QMessageBox QPushButton:pressed {{
+        background: {t.mix('accent', 30, 'panel3')};
+    }}
+
     /* ---- feedback modal (.fb-*) ---- */
     QDialog {{
         background: {t.panel};

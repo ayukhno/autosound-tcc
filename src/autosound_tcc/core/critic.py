@@ -88,6 +88,31 @@ def _project_mirror(project_dir: Path) -> Path:
     return project_dir / "rew_analitic"
 
 
+def _find_for_script(project_dir: Path, name: str) -> Optional[Path]:
+    """The same places `autosound_ai.py` looks, in the same order.
+
+    It searched only `rew_analitic/` here, while the script itself accepts the project root and
+    `$AUTOSOUND_DIR` too — so TCC could refuse a project the script would have run in perfectly
+    well. Two implementations of one rule, and this is the half that says no (user, on a fresh
+    Windows install, 2026-08-19: the Critic short-circuited before it was ever called).
+
+    The last place is the SKILL's own `assets/`, because the data contract belongs to the method
+    and travels with it; nothing copies it into a project.
+    """
+    candidates = [_project_mirror(project_dir) / name, project_dir / name]
+    canon = os.environ.get("AUTOSOUND_DIR", "")
+    if canon:
+        candidates.append(Path(canon).expanduser() / name)
+    try:
+        candidates.append(vendor_loader.skill_dir() / "assets" / name)
+    except Exception:  # noqa: BLE001 — no skill is its own, louder problem, reported above
+        pass
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def preflight(project_dir: Optional[Path] = None) -> list[str]:
     """Reasons the Critic cannot run yet, as user-facing lines. Empty list = ready.
 
@@ -98,10 +123,9 @@ def preflight(project_dir: Optional[Path] = None) -> list[str]:
     problems: list[str] = []
     if not is_available():
         problems.append(f"reviewer script not found at {script_path()}")
-    mirror = _project_mirror(project_dir)
     for name in ("data-contract-template.md", "autosound_context.md"):
-        if not (mirror / name).is_file():
-            problems.append(f"{name} missing from {mirror}")
+        if _find_for_script(project_dir, name) is None:
+            problems.append(f"{name} not found in {project_dir} (nor in rew_analitic/)")
     return problems
 
 

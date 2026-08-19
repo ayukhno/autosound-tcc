@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import critic
+from autosound_tcc.core import critic, vendor_loader
 
 
 def _project(tmp_path: Path) -> Path:
@@ -90,14 +90,36 @@ def test_silence_is_an_error_not_a_critique(stubbed, tmp_path):
 
 
 def test_preflight_blocks_before_spawning_anything(tmp_path):
-    """A missing contract makes the script exit with a bare message -- catch it here instead."""
+    """A missing context makes the script exit with a bare message -- catch it here instead.
+
+    The CONTRACT is not in that list any more, and that is the fix: it belongs to the method and
+    ships in the skill's `assets/`, so nothing copies it into a project and requiring it there
+    made the reviewer permanently not-ready on every clean install (user, Windows, 2026-08-19).
+    """
     bare = tmp_path / "not-a-project"
     bare.mkdir()
 
     problems = critic.preflight(bare)
 
-    assert any("data-contract-template.md" in p for p in problems)
     assert any("autosound_context.md" in p for p in problems)
+    if vendor_loader.is_available():
+        assert not any("data-contract-template.md" in p for p in problems), "the skill has it"
+
+
+def test_the_contract_is_found_where_the_script_would_look(tmp_path):
+    """The same places `autosound_ai.py` searches, in the same order: the mirror, the project
+    root, `$AUTOSOUND_DIR`, then the skill. TCC checking only the first one is how it came to
+    refuse a project the script would have run in."""
+    project = tmp_path / "car"
+    (project / "rew_analitic").mkdir(parents=True)
+    (project / "autosound_context.md").write_text("the car", encoding="utf-8")
+
+    assert critic.preflight(project) == [] or not vendor_loader.is_available()
+
+    (project / "rew_analitic" / "data-contract-template.md").write_text("mine", encoding="utf-8")
+    found = critic._find_for_script(project, "data-contract-template.md")
+
+    assert found == project / "rew_analitic" / "data-contract-template.md", "a project copy wins"
 
 
 def test_a_project_that_has_not_started_is_not_ready_rather_than_broken(tmp_path):

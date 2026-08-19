@@ -372,6 +372,10 @@ Start TCC again; if it keeps happening, the reason is here and in the log:",
         "sessionHandoffSave": "Asking the model to write what it knows to the project files…",
         "sessionHandoffQuit": "Saving before closing — asking the model to write what it knows "
                               "to the project files…",
+        # Qt's own labels on these three are in Qt's language, not the app's — so they are ours.
+        "quitSaveSave": "Save the turn",
+        "quitSaveDiscard": "Don't save",
+        "quitSaveCancel": "Stay",
         "quitSaveTitle": "Save before closing?",
         "quitSaveBody": "A session is running.\n\nWhat it has learned this turn is not on disk "
                         "until it writes it — closing now loses that. Saving costs one turn.",
@@ -962,6 +966,9 @@ Choose sweeps (sw) above to read this.",
         "sessionHandoffSave": "Прошу модель записати те, що вона знає, у файли проєкту…",
         "sessionHandoffQuit": "Зберігаю перед закриттям — прошу модель записати те, що вона знає, "
                               "у файли проєкту…",
+        "quitSaveSave": "Зберегти хід",
+        "quitSaveDiscard": "Не зберігати",
+        "quitSaveCancel": "Лишитись",
         "quitSaveTitle": "Зберегти перед закриттям?",
         "quitSaveBody": "Сесія працює.\n\nТе, що вона дізналась цього ходу, не на диску, доки не "
                         "запише — закриття зараз це втратить. Збереження коштує один хід.",
