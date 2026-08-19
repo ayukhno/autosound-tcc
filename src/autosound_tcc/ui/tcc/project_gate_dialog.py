@@ -18,10 +18,11 @@ decided what counts as a project would be inventing a rule the method does not h
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -39,6 +40,41 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 
 ACTIVE_OMP_KEY = "ai/active_omp"
+
+
+#: How often, and for how long, the dialog looks to see whether the CLI catalogue has arrived.
+#: `agy models` fetches over the network; a second is generous for a local answer and short enough
+#: that somebody typing a folder path sees the list fill in while they type.
+_CATALOGUE_POLL_MS = 500
+_CATALOGUE_TRIES = 12
+
+
+def _warm_the_catalogue() -> None:
+    """Ask the installed CLIs what they can run, on a plain daemon thread.
+
+    The same call the main window makes at startup, made here too because this dialog comes FIRST
+    and on a fresh machine the cache both lists are built from is empty: `agy models` fetches over
+    the network, so nothing populates it until something asks. Without this the critic list on a
+    new install offers Claude and nothing else, while the very same list in the window behind it —
+    built seconds later, after the window's own refresh — has every Gemini tier in it (user, on a
+    fresh Windows install, 2026-08-19).
+
+    A `threading.Thread` and NOT a `QThread`, deliberately. A QThread owned by a dialog is
+    destroyed with it, and a running QThread destroyed is `qFatal` — this app has paid for that
+    lesson twice. This one touches no Qt object at all: it fills a module-level cache and writes it
+    to disk, so it is safe to outlive the dialog that started it, and the dialog reads the cache on
+    a timer of its own.
+    """
+    threading.Thread(
+        target=_refresh_quietly, name="tcc-gate-catalogue", daemon=True
+    ).start()
+
+
+def _refresh_quietly() -> None:
+    try:
+        model_choices.refresh_cli_catalogue()
+    except Exception:  # noqa: BLE001 — a picker that cannot be enriched is not a dead dialog
+        pass
 
 
 def _label(text: str) -> QLabel:
@@ -80,13 +116,22 @@ class ProjectGateDialog(QDialog):
 
         # The models are the project's other parameter, asked here so the first session does not
         # start on a default nobody picked.
-        active = [s for s in str(get_settings().value(ACTIVE_OMP_KEY, "")).split(",") if s]
-        self._choices = model_choices.choices(active)
+        # TWO lists, not one. The critic may be a CLI on this machine — `agy`, `codex` — which the
+        # generator may not: a Generator has to hold a session and talk to TCC's MCP server, a
+        # reviewer is a one-shot call the skill's own script makes. Both combos used to be built
+        # from the generator's list, so the reviewer this method is built around (a model from a
+        # DIFFERENT vendor) could not be chosen on the screen that asks for it — Claude reviewed
+        # by Claude was the only offer (user, on a fresh Windows install, 2026-08-19).
+        self._active_omp = [
+            s for s in str(get_settings().value(ACTIVE_OMP_KEY, "")).split(",") if s
+        ]
+        self._choices = model_choices.choices(self._active_omp)
+        self._critic_choices = model_choices.critic_choices(self._active_omp)
         layout.addWidget(_label(i18n.t("aiMain")))
-        self._generator = self._model_combo()
+        self._generator = self._model_combo(self._choices)
         layout.addWidget(self._generator)
         layout.addWidget(_label(i18n.t("aiCritic")))
-        self._critic = self._model_combo()
+        self._critic = self._model_combo(self._critic_choices)
         layout.addWidget(self._critic)
 
         note = QLabel(i18n.t("gateNote"))
@@ -102,13 +147,69 @@ class ProjectGateDialog(QDialog):
         layout.addWidget(self._buttons)
         self._sync_ok()
 
-    def _model_combo(self) -> QComboBox:
+        # ...and ask the CLIs what they can run, in the background — see `_warm_the_catalogue`.
+        # The timer belongs to this dialog, so it stops when the dialog goes; the thread does not,
+        # because it holds nothing of Qt's.
+        _warm_the_catalogue()
+        self._catalogue_tries = 0
+        self._catalogue_timer = QTimer(self)
+        self._catalogue_timer.setInterval(_CATALOGUE_POLL_MS)
+        self._catalogue_timer.timeout.connect(self._poll_catalogue)
+        self._catalogue_timer.start()
+
+    def _poll_catalogue(self) -> None:
+        """Re-fill the critic list when the CLI answer lands, keeping what is selected.
+
+        Only the critic list: the generator's routes (the SDK's own models, omp's marked ones) do
+        not come from a CLI catalogue, so nothing about them can have changed. Polling rather than
+        a signal because the thread that fetches is deliberately not a Qt object; it is a handful
+        of comparisons every half second, for six seconds, on a dialog that is waiting for a
+        person to type a path.
+        """
+        self._catalogue_tries += 1
+        if self._catalogue_tries >= _CATALOGUE_TRIES:
+            self._catalogue_timer.stop()
+        fresh = model_choices.critic_choices(self._active_omp)
+        if [c.key for c in fresh] == [c.key for c in self._critic_choices]:
+            return
+        self._critic_choices = fresh
+        self._fill_combo(self._critic, fresh)
+        self._sync_ok()
+
+    def _model_combo(self, entries) -> QComboBox:
         combo = QComboBox()
-        for choice in self._choices:
-            prefix = "SDK · " if choice.harness == "sdk" else ""
-            suffix = f"  ·  {i18n.t('modelFree')}" if choice.free else ""
-            combo.addItem(f"{prefix}{choice.label}{suffix}", choice.key)
+        self._fill_combo(combo, entries)
         return combo
+
+    @staticmethod
+    def _fill_combo(combo: QComboBox, entries) -> None:
+        """Every route prefixed, the same way the window behind this one prefixes them.
+
+        It used to write `"SDK · "` for the SDK and NOTHING for anything else, so an omp model —
+        somebody's metered broker — appeared as a bare name, reading as "the normal one". That is
+        the assumption `ROUTES` exists to prevent, and this screen is where the choice is actually
+        made.
+        """
+        keep = str(combo.currentData() or "")
+        combo.clear()
+        for choice in entries:
+            notes = []
+            if choice.free:
+                notes.append(i18n.t("modelFree"))
+            if not choice.available:
+                notes.append(i18n.t("modelInstallCli").format(cli=choice.harness))
+            suffix = f"  ·  {' · '.join(notes)}" if notes else ""
+            combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
+            row = combo.count() - 1
+            combo.setItemData(row, f"{choice.route_note}\n{choice.model}", Qt.ItemDataRole.ToolTipRole)
+            if not choice.available:
+                item = combo.model().item(row)
+                if item is not None:
+                    item.setEnabled(False)
+        if keep:
+            at = combo.findData(keep)
+            if at >= 0:
+                combo.setCurrentIndex(at)
 
     def _browse(self) -> None:
         start = self._folder_edit.text().strip() or str(Path.home())
@@ -120,7 +221,7 @@ class ProjectGateDialog(QDialog):
         # A folder that does not exist yet is fine to type -- it is created on accept, which is
         # what "create a new project" means here.
         self._buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(
-            bool(self._folder_edit.text().strip()) and bool(self._choices)
+            bool(self._folder_edit.text().strip()) and bool(self._choices)  # noqa: E501 — the critic list may legitimately be shorter
         )
 
     def _accept(self) -> None:

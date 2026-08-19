@@ -193,3 +193,56 @@ def test_standing_in_an_empty_folder_still_asks(tmp_path, monkeypatch):
     monkeypatch.setattr(project_gate_dialog, "ProjectGateDialog", _RefusedDialog)
 
     assert project_gate_dialog.ensure_project_chosen() is False, "should have asked, and been refused"
+
+
+def test_the_critic_list_is_the_critics_own_not_the_generators(monkeypatch):
+    """User, on a fresh Windows install, 2026-08-19: the gate offered Claude and nothing else as
+    critic, while agy was installed and logged in — because both combos were built from the
+    generator's list. A Generator has to hold a session and speak to TCC's MCP server; a reviewer
+    is a one-shot call the skill's own script makes, so the CLI routes belong to it."""
+    from autosound_tcc.core import model_choices
+
+    gemini = model_choices.Choice(
+        harness="agy", model="gemini-3.7-flash-high", label="Gemini 3.7 Flash (High)",
+        provider="google",
+    )
+    monkeypatch.setattr(model_choices, "agy_choices", lambda: [gemini])
+    monkeypatch.setattr(model_choices, "codex_choices", lambda: [])
+
+    dialog = ProjectGateDialog()
+
+    critic = [dialog._critic.itemText(i) for i in range(dialog._critic.count())]
+    generator = [dialog._generator.itemText(i) for i in range(dialog._generator.count())]
+    assert any("AGY · Gemini 3.7 Flash (High)" in row for row in critic)
+    assert not any("AGY" in row for row in generator), "not a generator route"
+
+
+def test_every_route_is_prefixed_on_this_screen_too(monkeypatch):
+    """It wrote "SDK · " for the SDK and nothing for anything else, so an omp model — somebody's
+    metered broker — appeared as a bare name, reading as "the normal one"."""
+    from autosound_tcc.core import model_choices
+
+    omp = model_choices.Choice(harness="omp", model="openai/gpt-5.5", label="GPT-5.5")
+    monkeypatch.setattr(model_choices, "choices", lambda active: [omp])
+    monkeypatch.setattr(model_choices, "critic_choices", lambda active: [omp])
+
+    dialog = ProjectGateDialog()
+
+    assert dialog._generator.itemText(0).startswith("OMP · GPT-5.5")
+
+
+def test_the_catalogue_warm_up_never_owns_a_qthread():
+    """A QThread owned by a dialog is destroyed with it, and a running QThread destroyed is
+    `qFatal` — this app has paid for that twice. The gate's warm-up holds nothing of Qt's, so it
+    can outlive the dialog that started it."""
+    import inspect
+
+    from autosound_tcc.ui.tcc import project_gate_dialog as gate
+
+    code = [
+        line for line in inspect.getsource(gate).splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    body = "\n".join(code).split('"""')  # drop docstrings: one of them EXPLAINS the QThread rule
+    assert not any("QThread" in part for part in body[::2]), "no QThread in the code itself"
+    assert "threading.Thread" in "\n".join(code) and "daemon=True" in "\n".join(code)
