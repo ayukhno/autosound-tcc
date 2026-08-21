@@ -1563,3 +1563,46 @@ What the ask covers:
 **Why the skill and not TCC**: TCC does not write project data, and truncating someone else's
 sentence at 60 characters is not a title — it is a sentence with the end cut off. The one who knows
 which six words are the handle is the one who wrote the paragraph.
+
+---
+
+## SCR-053 — a capture's identity belongs in its title, and the round should say which REW file
+
+**Status**: proposed (2026-08-21, from the Arbiter, after F-017 landed and could only filter)
+**Target**: skill — the capture flow and `naming-and-structure §3`, plus whatever opens a round
+**TCC dependency**: none to build. TCC already offers the rounds in the curve window (F-017) and
+already reads `expected` / `taken` off the round record; both start working properly the moment
+titles are unique.
+
+**The gap.** Two passes at one DSP config carry the SAME measurement titles, and every consumer —
+`rew_bridge.find_id`, the skill's parser, TCC's curve window — addresses a measurement BY TITLE.
+So "show me this driver from the other pass" cannot be expressed at all. F-017 could only narrow
+the list to what a round took; where two rounds hold the same title, both resolve to whichever
+measurement REW hands back.
+
+**Why not REW's own id.** The obvious fix is to record REW's measurement id at capture and address
+by that. REW's ordinal ids are explicitly unstable (`rew_bridge.find_id`: "never resolve via a
+cached index — REW reshuffles"), and a NEW `.mdat` starts numbering again, so ids from two files
+can collide inside one project. Some rounds do record `taken[...].verified.uuid`; whether that is
+stable across files is unverified, and the bridge has no call that takes one. Borrowing identity
+from a registry we do not own is the wrong direction (the Arbiter's point, and it is right).
+
+**The ask.**
+
+1. **A round marker in the title, written at capture time**: `w-L_02 (sw) #cap_002`. The title is
+   the one namespace both sides already address by, so uniqueness there costs no new plumbing —
+   lookup, parsing and the curve window all keep working as they are. Written when the capture is
+   taken, NOT by renaming afterwards: `rew_bridge.rename_measurement` is documented as unverified
+   against a live REW.
+2. **Syntactically distinct from the situational suffixes** already in use (`noXO`, `INV`, `+dB`),
+   so the parser never has to guess which kind of suffix it is looking at. `#` + the round id is
+   one way; the skill owns the grammar and should pick.
+3. **Backwards compatible on read**: a title with no marker belongs to whichever round claims it in
+   `expected` / `taken`, exactly as today. Nothing already captured has to be renamed.
+4. **The round records its REW file** — name and path of the project open when the round was
+   opened. Two things follow that are impossible now: "where did these come from" stays answerable
+   later, and a mismatch becomes detectable, so a panel can say "this round was captured in
+   another REW file" instead of showing an empty list (TCC prints a sentence for that today, and
+   it is a guess).
+
+**Why the skill and not TCC**: TCC does not write project data and does not name measurements.
