@@ -429,10 +429,32 @@ class DialogPanel(QWidget):
         # one pass ago. A long message ended up with only its top edge on screen; a short one was
         # fine, which is exactly the shape of "scrolled too early".
         self._stick_to_bottom = True
+        # Reading state (F-008). `_unread_anchor` is the first bubble added after the stick was
+        # dropped -- where "the new text" starts, and where the marker's first click lands.
+        # `_reading_bubble`/`_reading_offset` hold the place being read relative to the CONTENT:
+        # the same late height-settling that makes sticking need `rangeChanged` also reflows
+        # earlier bubbles under a reader, and a scrollbar that keeps its VALUE through that shows
+        # different lines under the same eyes.
+        self._unread_anchor: Optional[MessageBubble] = None
+        self._marker_at_start = False
+        self._reading_bubble: Optional[MessageBubble] = None
+        self._reading_offset = 0
         bar = self._scroll.verticalScrollBar()
         bar.rangeChanged.connect(self._on_scroll_range_changed)
         bar.valueChanged.connect(self._on_scroll_value_changed)
         outer.addWidget(self._scroll, stretch=1)
+
+        # "There is new text below" (F-008) -- shown while the Arbiter is scrolled up reading and
+        # something has arrived past the anchor. A row in the layout, not an overlay on the
+        # viewport: it cannot sit on top of a message, and going away is `setHidden`, never a
+        # deletion -- the teardown rules (qt_shutdown.py) make no exception for chrome.
+        self._new_below_btn = QPushButton("")
+        self._new_below_btn.setProperty("class", "new-below")
+        self._new_below_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_below_btn.setToolTip(i18n.t("newBelowTip"))
+        self._new_below_btn.clicked.connect(self._on_new_below_clicked)
+        self._new_below_btn.setHidden(True)
+        outer.addWidget(self._new_below_btn)
 
         # Tool calls live here, not in the transcript. Their whole value is "the thing is still
         # working" -- one line of that is worth as much as eight rows of it, and eight rows was
@@ -551,6 +573,8 @@ class DialogPanel(QWidget):
         self._refresh_placeholder()
         self._queue_now_btn.setText(i18n.t("queueSendNow"))
         self._show_queue_row()
+        self._new_below_btn.setToolTip(i18n.t("newBelowTip"))
+        self._show_new_below()  # a no-op unless it is up; then the count line follows the language
         self._send_btn.setText(i18n.t("send"))
         self._stop_btn.setText(i18n.t("stop"))
         self._not_visible_btn.setText("👁 " + i18n.t("notVisible"))
@@ -593,6 +617,15 @@ class DialogPanel(QWidget):
             bubble_row.addWidget(bubble)
             bubble_row.addStretch(1)
         self._chat_layout.insertLayout(self._chat_layout.count() - 1, bubble_row)
+        # getattr: the mock transcript is built before the flag exists -- it is initialised with
+        # the scroll area, after the DIALOG loop has already run.
+        if not getattr(self, "_stick_to_bottom", True):
+            # The Arbiter is reading history. The first bubble to land now is where "the new
+            # text" starts -- the marker's first click goes here, not to the very bottom.
+            if self._unread_anchor is None:
+                self._unread_anchor = bubble
+                self._marker_at_start = False
+            self._show_new_below()
 
     # ---- dialog-only font size ---------------------------------------------
 
@@ -627,15 +660,22 @@ class DialogPanel(QWidget):
         # own event handler -- see feedback_qt_qss_gotchas. Nothing to scroll is not an error.
         # A deferred call was not enough either: a bubble's height settles after its label wraps
         # and its `_fit` runs, which can be a second layout pass later, so `maximum()` was still
-        # short. Arm the scrollbar's own `rangeChanged` instead -- it fires exactly when the thing
-        # we are waiting for happens -- and disarm after one shot so scrolling back stays sticky.
-        self._stick_to_bottom = True
+        # short. The scrollbar's own `rangeChanged` covers that -- it fires exactly when the
+        # thing we are waiting for happens.
+        if not getattr(self, "_stick_to_bottom", True):
+            # The Arbiter scrolled up to read. This method used to arm the stick right here, on
+            # every new bubble -- overruling the scroll-up the user had just made, which was the
+            # F-008 bug: two places disagreeing about who decides. Arriving text does not decide;
+            # the marker under the transcript says "below" and the reader goes when they choose.
+            return
         QTimer.singleShot(0, self._scroll_now)
         self._scroll_now()
 
     def _on_scroll_range_changed(self, _min: int, _max: int) -> None:
         if getattr(self, "_stick_to_bottom", True):
             self._scroll_now()
+        else:
+            self._hold_reading_position()
 
     def _on_scroll_value_changed(self, value: int) -> None:
         """Scrolling up by hand means "I am reading something", and the panel stops chasing.
@@ -648,6 +688,11 @@ class DialogPanel(QWidget):
         except (AttributeError, RuntimeError):
             return
         self._stick_to_bottom = value >= bar.maximum() - 8
+        if self._stick_to_bottom:
+            # At the very bottom nothing below is unread, so the anchor has no job left.
+            self._clear_new_below()
+        else:
+            self._record_reading_position(value)
 
     def _scroll_now(self) -> None:
         try:
@@ -658,6 +703,88 @@ class DialogPanel(QWidget):
             # after teardown and hands back a wrapper whose C++ side is gone, so the failure lands
             # on setValue rather than on the attribute.
             return
+
+    def _follow_again(self) -> None:
+        """A user action said "back to the conversation": re-arm the chase and drop the anchor.
+
+        The stick is armed here and by `_on_scroll_value_changed` when the user scrolls back down
+        themselves -- both are the user's own hand. It is never armed by a message *arriving*;
+        that inversion is the whole of F-008.
+        """
+        self._stick_to_bottom = True
+        self._clear_new_below()
+        self._scroll_to_end()
+
+    def _record_reading_position(self, value: int) -> None:
+        """Note WHICH bubble is at the top of the viewport, and how far into it.
+
+        The scrollbar's absolute value is the wrong thing to remember: a bubble settles its
+        height a layout pass after it is added (the reason this panel listens to `rangeChanged`
+        at all), so bubbles above the reader reflow and the same value shows different lines.
+        "This bubble, this many pixels in" survives the reflow.
+        """
+        bubble = None
+        for candidate in self._bubbles:
+            if candidate.y() > value:
+                break
+            bubble = candidate
+        if bubble is None and self._bubbles:
+            bubble = self._bubbles[0]
+        self._reading_bubble = bubble
+        self._reading_offset = value - bubble.y() if bubble is not None else 0
+
+    def _hold_reading_position(self) -> None:
+        """Put the same text back under the reader's eyes after the content reflowed.
+
+        Runs on `rangeChanged` while un-stuck: a new bubble landing, or an earlier one settling
+        its height late. Qt keeps the scrollbar's VALUE across a range change, which is exactly
+        the wrong invariant here -- when height changes above the viewport, the text moves with
+        no jump to blame. Setting the value from the recorded bubble is what keeps it still.
+        """
+        if self._reading_bubble is None:
+            return
+        try:
+            bar = self._scroll.verticalScrollBar()
+            bar.setValue(self._reading_bubble.y() + self._reading_offset)
+        except (AttributeError, RuntimeError):
+            return
+
+    def _show_new_below(self) -> None:
+        """The marker: "there is new text below", counting the bubbles since the anchor."""
+        if self._unread_anchor is None:
+            return
+        try:
+            count = len(self._bubbles) - self._bubbles.index(self._unread_anchor)
+            self._new_below_btn.setText(i18n.t("newBelow").format(count=count))
+            self._new_below_btn.setHidden(False)
+        except (AttributeError, RuntimeError):
+            return
+
+    def _clear_new_below(self) -> None:
+        self._unread_anchor = None
+        self._marker_at_start = False
+        self._reading_bubble = None
+        try:
+            self._new_below_btn.setHidden(True)
+        except (AttributeError, RuntimeError):
+            return
+
+    def _on_new_below_clicked(self) -> None:
+        """First click: the start of what arrived while reading. Second: the very bottom.
+
+        "Start" is the anchor bubble's top edge, one row of spacing higher so the seam between
+        read and unread is on screen -- landing exactly on the edge reads as "was something cut
+        off above?".
+        """
+        if self._unread_anchor is None or self._marker_at_start:
+            self._follow_again()
+            return
+        try:
+            bar = self._scroll.verticalScrollBar()
+            bar.setValue(max(0, self._unread_anchor.y() - self._chat_layout.spacing()))
+        except (AttributeError, RuntimeError):
+            return
+        self._marker_at_start = True
 
     def set_composer_visible(self, visible: bool) -> None:
         """Hide the composer in `view` mode (TCC-TZ.md §8: "no AI at all") -- `_on_send` already
@@ -764,6 +891,10 @@ class DialogPanel(QWidget):
         # widget is a crash in whichever slot touches it next, not a visual glitch.
         self._live_bubble = None
         self._live_text = ""
+        self._clear_new_below()  # the anchor and the reading position point into the bubbles too
+        # An empty transcript has nobody reading it, so the chase re-arms: this is a clear, not a
+        # message arriving, and the first real bubble of the next session should be followed.
+        self._stick_to_bottom = True
         if self._question_widgets is not None:
             self._question_widgets.setParent(None)
             self._question_widgets.deleteLater()
@@ -817,6 +948,9 @@ class DialogPanel(QWidget):
             self._input.clear()
             self._answer_question(text)
             return
+        # Sending is a user action, and user actions are the only thing allowed to re-arm the
+        # chase (F-008): whoever just said something wants to see the answer land.
+        self._follow_again()
         if self._worker is None:
             # A live composer that swallows what you type is worse than a disabled one. Sending
             # the first message IS the explicit start, and the text becomes the opening prompt
@@ -1003,6 +1137,7 @@ class DialogPanel(QWidget):
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again
+        self._follow_again()  # answering is the user's own hand, same as sending (F-008)
         self._add_bubble("user", "Arbiter · you", _markdown(value))
         self._scroll_to_end()
         if self._worker is not None and hasattr(self._worker, "answer"):

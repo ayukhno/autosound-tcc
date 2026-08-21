@@ -1031,3 +1031,164 @@ def test_clearing_the_mock_never_touches_a_live_transcript(tmp_path):
     panel.clear_mock()
 
     assert panel._bubbles  # still there
+
+
+# ---- reading history (F-008) ------------------------------------------------
+
+
+def _settled():
+    """Let deferred scrolls and the second layout pass land -- bubble heights settle late."""
+    app = QApplication.instance()
+    for _ in range(5):
+        app.processEvents()
+
+
+def _reading(tmp_path, height=260):
+    """An attached panel with real geometry and enough transcript that there is history to
+    scroll into -- the reading tests measure positions, so a zero-range scrollbar proves
+    nothing."""
+    panel, worker, _ = _attached(tmp_path)
+    panel.resize(420, height)
+    panel.show()
+    for i in range(12):
+        panel._add_system_message(f"line {i}: the measurement was read and the delay recorded")
+    _settled()
+    assert panel._scroll.verticalScrollBar().maximum() > 0
+    return panel, worker
+
+
+def test_arriving_output_no_longer_rearms_the_chase(tmp_path):
+    """The F-008 bug itself: `_scroll_to_end` set `_stick_to_bottom = True` on every new bubble,
+    overruling the scroll-up the Arbiter had just made -- two places disagreeing about who
+    decides. Arriving text does not decide."""
+    panel, worker = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+
+    bar.setValue(0)  # scrolled up by hand: reading
+    assert panel._stick_to_bottom is False
+
+    worker.chunk.emit(TextDelta("a fresh answer lands below"))
+    _settled()
+
+    assert panel._stick_to_bottom is False
+    assert bar.value() < bar.maximum()  # no jump under the reader
+
+
+def test_the_reading_position_holds_while_output_arrives(tmp_path):
+    """The position is held relative to the CONTENT -- "this bubble, this many pixels in" --
+    because a new bubble wraps and settles its height a layout pass late, and an absolute
+    scrollbar value through that shows different lines under the same eyes."""
+    panel, worker = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+
+    bar.setValue(bar.maximum() // 2)  # reading the middle of history
+    _settled()
+    read = panel._reading_bubble
+    assert read is not None
+    offset = bar.value() - read.y()
+
+    worker.chunk.emit(TextDelta(
+        "a long answer that wraps into several lines once the label folds it at the "
+        "bubble cap and settles its height on the second layout pass " * 3))
+    _settled()
+
+    assert bar.value() - read.y() == offset  # the same line is under the eyes
+    assert panel._stick_to_bottom is False
+
+
+def test_a_reflow_above_the_reader_does_not_move_the_text(tmp_path):
+    """Point 4's real threat: when a bubble ABOVE the viewport grows taller, holding the
+    scrollbar's absolute value still moves the text, with no jump to blame. The bar must move
+    so the text does not -- both directions of that are asserted."""
+    panel, _ = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+
+    bar.setValue(bar.maximum() // 2)
+    _settled()
+    read = panel._reading_bubble
+    offset = bar.value() - read.y()
+    value_before = bar.value()
+
+    first = panel._bubbles[0]
+    assert first.y() + first.height() < value_before  # wholly above the viewport
+    first.set_html("grown: " + "wraps and wraps and wraps " * 20)
+    panel._fit(first)
+    _settled()
+
+    assert bar.value() != value_before          # the bar moved...
+    assert bar.value() - read.y() == offset     # ...so the text did not
+
+
+def test_the_marker_appears_on_arrival_and_goes_when_read(tmp_path):
+    """Scrolling up alone is not "new below" -- the marker means something arrived past the
+    anchor. Coming back to the bottom by hand reads it all, so the marker goes."""
+    panel, worker = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+
+    bar.setValue(0)
+    assert panel._new_below_btn.isHidden()
+
+    worker.chunk.emit(TextDelta("fresh"))
+    _settled()
+
+    assert not panel._new_below_btn.isHidden()
+    assert "1" in panel._new_below_btn.text()
+
+    bar.setValue(bar.maximum())  # scrolled back down by hand
+    _settled()
+
+    assert panel._new_below_btn.isHidden()
+    assert panel._unread_anchor is None
+    assert panel._stick_to_bottom is True
+
+
+def test_the_marker_first_click_lands_on_the_start_of_the_new_text(tmp_path):
+    """First click: where the new text starts -- the first bubble added after the stick was
+    dropped, not the latest one. Second click: the very bottom, and the chase is re-armed."""
+    panel, worker = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+    bar.setValue(0)
+
+    # Enough new text that its start is a real scroll position rather than already the bottom.
+    for i in range(6):
+        worker.chunk.emit(ToolCall(name="glob"))  # a boundary: the next delta is its own bubble
+        worker.chunk.emit(TextDelta(
+            f"answer {i}: long enough to wrap into a few lines inside the bubble " * 3))
+    _settled()
+
+    anchor = panel._unread_anchor
+    assert anchor is panel._bubbles[-6]
+    assert "6" in panel._new_below_btn.text()
+
+    panel._new_below_btn.click()
+    _settled()
+
+    assert bar.value() == anchor.y() - panel._chat_layout.spacing()
+    assert panel._stick_to_bottom is False  # the start of the new text, still reading
+
+    panel._new_below_btn.click()
+    _settled()
+
+    assert bar.value() == bar.maximum()
+    assert panel._stick_to_bottom is True
+    assert panel._new_below_btn.isHidden()
+
+
+def test_sending_a_message_rearms_the_chase(tmp_path):
+    """The stick is armed by the user's own actions only -- and sending is one: whoever just
+    said something wants to see the answer land."""
+    panel, worker = _reading(tmp_path)
+    bar = panel._scroll.verticalScrollBar()
+    bar.setValue(0)
+    worker.chunk.emit(TextDelta("meanwhile, below"))
+    _settled()
+    assert not panel._new_below_btn.isHidden()
+
+    panel._input.setText("done reading -- go on")
+    panel._on_send()
+    _settled()
+
+    assert panel._stick_to_bottom is True
+    assert bar.value() == bar.maximum()
+    assert panel._new_below_btn.isHidden()
+    assert panel._unread_anchor is None

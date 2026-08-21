@@ -1141,6 +1141,21 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-size: 11px;
         padding: 2px 12px 0 12px;
     }}
+    /* .new-below -- the "there is new text below" marker (F-008). A full-width row under the
+       transcript rather than a floating pill over it, so it can never cover a message; accented
+       because unlike `.activity` it is asking to be clicked, not just pulsing. */
+    QPushButton[class~="new-below"] {{
+        background: {t.mix("accent", 0.10, "panel")};
+        border: none;
+        border-top: 1px solid {t.accent_dim};
+        color: {t.accent};
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 12px;
+    }}
+    QPushButton[class~="new-below"]:hover {{
+        background: {t.mix("accent", 0.18, "panel")};
+    }}
     QPushButton[class~="edit-chip"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
