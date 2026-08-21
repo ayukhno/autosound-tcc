@@ -366,7 +366,14 @@ Start TCC again; if it keeps happening, the reason is here and in the log:",
         "coffeeBtn": "☕ Buy me a coffee",
         "supportGithub": "💜 GitHub Sponsors",
         "supportMonobank": "☕ Monobank jar",
-        "fbBig": "Give feedback",
+        # Not "Give feedback": that reads as an invitation to praise, and the things most
+        # worth hearing -- a bug, a thing that made no sense, an idea half-formed -- do
+        # not feel like feedback to the person holding them (user, 2026-08-21). Naming
+        # the destination instead of the genre asks nobody to categorise themselves
+        # before they have written the sentence.
+        "fbBig": "Message the developer",
+        "fbBigTip": "A bug, an idea, a question, "
+                    "\u201cthis makes no sense\u201d \u2014 all of it goes here. A screenshot can come with it.",
         "fbHead": "Feedback on the TCC prototype",
         "fbHint": "Tell us what you like / what to change. Use the B / I / list buttons — no "
                   "need to type markdown by hand.",
@@ -1008,7 +1015,8 @@ Choose sweeps (sw) above to read this.",
         "coffeeBtn": "☕ Пригостити кавою",
         "supportGithub": "💜 GitHub Sponsors",
         "supportMonobank": "☕ Банка на Monobank",
-        "fbBig": "Залишити відгук",
+        "fbBig": "Написати розробнику",
+        "fbBigTip": "Баг, ідея, питання, «тут незрозуміло» — усе сюди. Можна прикріпити скріншот.",
         "fbHead": "Відгук про прототип TCC",
         "fbHint": "Напишіть, що подобається / що змінити. Скористайтесь кнопками B / I / "
                   "список — набирати markdown руками не треба.",

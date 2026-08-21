@@ -981,6 +981,7 @@ class MainWindow(QMainWindow):
         feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
         feedback_btn.setProperty("class", "feedback-btn")
         feedback_btn.clicked.connect(self._open_feedback)
+        self._feedback_tip = attach_tip(feedback_btn, i18n.t("fbBigTip"))
         self._feedback_btn = feedback_btn
         layout.addWidget(feedback_btn)
         return footer
@@ -3489,6 +3490,7 @@ class MainWindow(QMainWindow):
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._refresh_critic_warning()
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
+        self._feedback_tip.set_text(i18n.t("fbBigTip"))
         self._coffee_btn.setText(i18n.t("coffeeBtn"))
         for i in range(self._preset_combo.count()):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
