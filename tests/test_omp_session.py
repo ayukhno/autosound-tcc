@@ -749,3 +749,60 @@ def test_auto_is_not_a_level_tcc_will_pass_to_a_metered_route(tmp_path):
     argv = OmpSession(project_dir=tmp_path, effort="auto")._argv()
 
     assert argv[argv.index("--thinking") + 1] == "xhigh"
+
+
+# ---- per-turn signal delivery (F-009) ---------------------------------------
+
+
+def _one_turn(session, text):
+    """Drive `_prompt` through one whole turn: the queue already holds its end."""
+
+    async def run():
+        session._events.put_nowait(TurnEnd())
+        return [event async for event in session._prompt(text)]
+
+    return asyncio.run(run())
+
+
+def test_a_prompt_carries_unacked_signals_into_the_turn(tmp_path):
+    """F-009's acceptance on the omp route: a turn in which the model calls no tcc tool at all
+    still learns what the Arbiter asked for. Same mechanism as `TuningSession.send` -- the two
+    front-ends must not differ on it."""
+    from autosound_tcc.core.signal_bus import CHANNEL_TOGGLE, SignalBus
+
+    session = _session(tmp_path)
+    session.bus = SignalBus(tmp_path)
+    signal = session.bus.push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+
+    _one_turn(session, "what next?")
+
+    message = session.sent[0]["message"]
+    assert message.endswith("what next?")
+    assert CHANNEL_TOGGLE in message and signal.id in message
+
+
+def test_a_quiet_queue_costs_the_prompt_nothing(tmp_path):
+    from autosound_tcc.core.signal_bus import SignalBus
+
+    session = _session(tmp_path)
+    session.bus = SignalBus(tmp_path)
+
+    _one_turn(session, "what next?")
+
+    assert session.sent[0]["message"] == "what next?"
+
+
+def test_signals_delivered_but_not_acked_survive_an_omp_turn(tmp_path):
+    """The end-of-turn restore on the omp route: read, not acked, so pending again -- the next
+    prompt's preamble raises it instead of it dying "delivered"."""
+    from autosound_tcc.core.signal_bus import NOT_VISIBLE, SignalBus
+
+    session = _session(tmp_path)
+    session.bus = SignalBus(tmp_path)
+    signal = session.bus.push(NOT_VISIBLE, note="band 3 missing")
+    session.bus.deliver()  # the model read it mid-turn and acked nothing
+
+    _one_turn(session, "ok")
+
+    # `wait` only sees *pending* signals, so returning here proves the restore.
+    assert [s.id for s in session.bus.wait(timeout=0.05)] == [signal.id]

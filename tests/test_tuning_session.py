@@ -479,3 +479,85 @@ def test_the_stdout_line_limit_is_raised_above_one_image(tmp_path):
 
     assert options.max_buffer_size is not None, "the 1 MiB default kills a session on one image"
     assert options.max_buffer_size >= 8 * 1024 * 1024
+
+
+# ---- per-turn signal delivery (F-009) --------------------------------------
+
+
+class _RecordingClient:
+    """Just enough of `ClaudeSDKClient` for `send()`: queries recorded, an empty response stream.
+
+    No SDK types are constructed, so what is under test is exactly TCC's side of the wire -- the
+    text that leaves for the model."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    async def query(self, text: str) -> None:
+        self.queries.append(text)
+
+    async def receive_response(self):
+        return
+        yield  # makes this an async generator that yields nothing
+
+
+def _live_session(tmp_path):
+    from autosound_tcc.core.signal_bus import SignalBus
+
+    session, _ = _session(tmp_path, allow=True)
+    session.bus = SignalBus(tmp_path)
+    session._client = _RecordingClient()
+    session._started = True
+    return session
+
+
+def _run_turn(session, text):
+    async def run():
+        return [event async for event in session.send(text)]
+
+    return asyncio.run(run())
+
+
+def test_send_carries_unacked_signals_into_the_turn(tmp_path):
+    """F-009's acceptance: a turn in which the model calls no tcc tool at all still learns what
+    the Arbiter asked for. The system prompt's "call get_pending_signals" is discipline; this is
+    the mechanism."""
+    from autosound_tcc.core.signal_bus import CHANNEL_TOGGLE
+
+    session = _live_session(tmp_path)
+    signal = session.bus.push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+
+    _run_turn(session, "what next?")
+
+    sent = session._client.queries[0]
+    assert sent.endswith("what next?")
+    assert CHANNEL_TOGGLE in sent and signal.id in sent
+
+
+def test_a_quiet_queue_costs_the_turn_nothing(tmp_path):
+    """The preamble is spent context on every turn it appears in, so it must be absent -- not
+    empty-but-present -- when nothing is open."""
+    session = _live_session(tmp_path)
+
+    _run_turn(session, "what next?")
+
+    assert session._client.queries == ["what next?"]
+
+
+def test_signals_delivered_but_not_acked_survive_the_turn(tmp_path):
+    """Peek + ack, end to end: the turn read the queue, acked nothing, and the signal is pending
+    again when the turn is over -- raised in the next turn's preamble instead of dying
+    "delivered"."""
+    from autosound_tcc.core.signal_bus import CHANNEL_TOGGLE
+
+    session = _live_session(tmp_path)
+    signal = session.bus.push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+    session.bus.deliver()  # the model read it mid-turn...
+
+    _run_turn(session, "ok")  # ...and the turn ended without an ack
+
+    # `wait` only sees *pending* signals, so returning here proves the restore.
+    assert [s.id for s in session.bus.wait(timeout=0.05)] == [signal.id]
+    session.bus.restore_delivered()
+    _run_turn(session, "still there?")
+    assert signal.id in session._client.queries[-1]

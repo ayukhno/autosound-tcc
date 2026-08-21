@@ -49,7 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import child, config, model_choices, vendor_loader
+from autosound_tcc.core import child, config, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -349,6 +349,10 @@ class OmpSession:
         self._ready = asyncio.Event()
         self._saw_ready = False
         self._ended = asyncio.Event()
+        # The UI's signal bus, for delivering un-acknowledged signals inside the turn itself.
+        # Same contract as `TuningSession.bus` (F-009): assigned by `AgentWorker` once it builds
+        # the session, None in headless runs -- delivery must not depend on which front-end runs.
+        self.bus: Optional[signal_bus.SignalBus] = None
 
     # ---- wire --------------------------------------------------------------
 
@@ -933,43 +937,55 @@ class OmpSession:
         self._round_ended_at = 0.0  # a round that ended before this prompt did not end this one
         self._retrying = False  # a storm belongs to the turn it happened in
         self._retry_reason = ""
-        self._send({"id": self._next_id(), "type": "prompt", "message": text})
+        # The F-009 injection point: every turn -- the opener included -- passes through here, so
+        # un-acknowledged signals reach the model even in a turn where it calls no tcc tool at
+        # all. Same mechanism as `TuningSession.send`; the two front-ends must not differ on it.
+        self._send({"id": self._next_id(), "type": "prompt",
+                    "message": signal_bus.with_pending_brief(self.bus, text)})
         self._last_frame_at = time.time()
         warned = False
-        while True:
-            quiet = TURN_QUIET_S if self._round_ended_at else SILENCE_WARN_S
-            try:
-                event = await asyncio.wait_for(self._events.get(), timeout=quiet)
-            except asyncio.TimeoutError:
-                if self._parked:
-                    # Silence with a question on screen is not silence: omp is blocked inside
-                    # `ask`, waiting for the Arbiter, and the panel is already saying so. Ending
-                    # the turn here would drop the answer on the floor, and warning about it would
-                    # blame the harness for waiting on us.
+        try:
+            while True:
+                quiet = TURN_QUIET_S if self._round_ended_at else SILENCE_WARN_S
+                try:
+                    event = await asyncio.wait_for(self._events.get(), timeout=quiet)
+                except asyncio.TimeoutError:
+                    if self._parked:
+                        # Silence with a question on screen is not silence: omp is blocked inside
+                        # `ask`, waiting for the Arbiter, and the panel is already saying so.
+                        # Ending the turn here would drop the answer on the floor, and warning
+                        # about it would blame the harness for waiting on us.
+                        continue
+                    if self._round_ended_at:
+                        # A round ended and nothing followed: the model has finished talking,
+                        # whether or not omp bothers to say `agent_end`.
+                        self._round_ended_at = 0.0
+                        yield TurnEnd()
+                        return
+                    # Not a cancellation: the turn may still be thinking. But "silent for two
+                    # minutes" is a fact the Arbiter can act on, and an animated line saying
+                    # "working" is not.
+                    if not warned:
+                        warned = True
+                        # Naming the tool is the whole value: "omp has said nothing" and "still
+                        # inside grep" call for different things from the Arbiter, and the second
+                        # one was true for 510 seconds while the first was all the window said.
+                        where = (f"Still inside `{self._running_tool}`."
+                                 if self._running_tool else "omp has said nothing.")
+                        yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {self._why(where)}")
                     continue
-                if self._round_ended_at:
-                    # A round ended and nothing followed: the model has finished talking, whether
-                    # or not omp bothers to say `agent_end`.
-                    self._round_ended_at = 0.0
-                    yield TurnEnd()
+                warned = False
+                if event is None:  # process ended mid-turn
                     return
-                # Not a cancellation: the turn may still be thinking. But "silent for two minutes"
-                # is a fact the Arbiter can act on, and an animated line saying "working" is not.
-                if not warned:
-                    warned = True
-                    # Naming the tool is the whole value: "omp has said nothing" and "still inside
-                    # grep" call for different things from the Arbiter, and the second one was
-                    # true for 510 seconds while the first was all the window said.
-                    where = (f"Still inside `{self._running_tool}`."
-                             if self._running_tool else "omp has said nothing.")
-                    yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {self._why(where)}")
-                continue
-            warned = False
-            if event is None:  # process ended mid-turn
-                return
-            yield event
-            if isinstance(event, TurnEnd):
-                return
+                yield event
+                if isinstance(event, TurnEnd):
+                    return
+        finally:
+            # The turn is over -- normally, or because omp died mid-turn, which is why this is a
+            # finally. Signals the turn read but never acked go back to pending here, so the next
+            # turn's preamble raises them again instead of them dying "delivered".
+            if self.bus is not None:
+                self.bus.restore_delivered()
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:
         if self._proc is None:

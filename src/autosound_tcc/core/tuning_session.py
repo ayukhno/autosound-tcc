@@ -24,7 +24,7 @@ import shlex
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import claude_sdk, config, model_choices, vendor_loader
+from autosound_tcc.core import claude_sdk, config, model_choices, signal_bus, vendor_loader
 
 #: See `core/claude_sdk.py`. Bound in `TuningSession.__init__`, not imported here: `main_window`
 #: imports this module on its first line, so an import at the top made the Claude SDK a
@@ -125,9 +125,10 @@ You are running inside the Tuning Command Center (TCC), the GUI the Arbiter is l
 
 - TCC exposes itself over MCP as the `tcc` server. Prefer `get_tcc_state` over asking the Arbiter
   to describe what is on their screen.
-- Call `get_pending_signals` at the start of a turn and before any proposal. A `not_visible`
-  signal means something you believe you changed did not reach the UI: re-check against disk
-  instead of restating the claim.
+- Call `get_pending_signals` at the start of a turn and before any proposal, and close every
+  signal with `ack_signals` once handled -- an un-acknowledged signal is raised again every
+  turn. A `not_visible` signal means something you believe you changed did not reach the UI:
+  re-check against disk instead of restating the claim.
 - Report phase and step through `report_phase` as soon as they change. TCC uses that to decide
   whether a later launch resumes this session or starts a new one.
 - You cannot write to the DSP from here, by design. Propose values; the Arbiter enters them.
@@ -248,6 +249,12 @@ class TuningSession:
         self._started = False
         # Whether the current bubble already got its text from the stream -- see `_translate`.
         self._streamed_this_turn = False
+        # The UI's signal bus, for delivering un-acknowledged signals inside the turn itself
+        # (F-009). Assigned by `AgentWorker` once it builds the session, not taken as a
+        # constructor argument: the factories are written where the harness is chosen, and a
+        # session must stay constructible without a bus -- the gate tests and headless runs have
+        # no UI to raise signals. None simply means nothing to inject.
+        self.bus: Optional[signal_bus.SignalBus] = None
 
     # ---- permission gate ---------------------------------------------------
 
@@ -357,14 +364,17 @@ class TuningSession:
             else "Start a tuning session for this project. Read state from disk, call "
             "get_tcc_state, then tell me where we are and what the next step is."
         )
-        await self._client.query(opener)
+        await self._client.query(signal_bus.with_pending_brief(self.bus, opener))
         async for message in self._drain():
             yield message
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:
         if not self._started or self._client is None:
             raise RuntimeError("call start() before send()")
-        await self._client.query(text)
+        # The F-009 injection point: every user turn passes through here, so un-acknowledged
+        # signals reach the model even in a turn where it calls no tcc tool at all. The system
+        # prompt's "call get_pending_signals" is discipline; this is the mechanism.
+        await self._client.query(signal_bus.with_pending_brief(self.bus, text))
         async for message in self._drain():
             yield message
 
@@ -380,13 +390,20 @@ class TuningSession:
 
     async def _drain(self) -> AsyncIterator[AgentEvent]:
         assert self._client is not None
-        async for message in self._client.receive_response():
-            if isinstance(message, ResultMessage):
-                self._remember_session(message)
-                yield TurnEnd(session_id=message.session_id)
-                return
-            for event in self._translate(message):
-                yield event
+        try:
+            async for message in self._client.receive_response():
+                if isinstance(message, ResultMessage):
+                    self._remember_session(message)
+                    yield TurnEnd(session_id=message.session_id)
+                    return
+                for event in self._translate(message):
+                    yield event
+        finally:
+            # The turn is over -- normally, or by interrupt or error, which is why this is a
+            # finally. Signals the turn read but never acked go back to pending here, so the next
+            # turn's preamble raises them again instead of them dying "delivered".
+            if self.bus is not None:
+                self.bus.restore_delivered()
 
     def _translate(self, message: Any) -> list[AgentEvent]:
         """One SDK message -> zero or more events. The only place SDK shapes are read.
