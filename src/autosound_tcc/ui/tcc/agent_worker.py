@@ -50,6 +50,12 @@ class AgentWorker(QThread):
         self._session: Optional[AgentSession] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
+        #: Signal bus to hand to the session, so un-acked user signals ride into every turn
+        #: (F-009). Set by `DialogPanel.attach_agent` before `start()` -- the panel is the one
+        #: place that holds both the worker and the bus, and routing it through the session
+        #: factories instead would grow every constructor an argument that only matters when a
+        #: UI is attached. None (the interview worker, tests) means no injection.
+        self.bus: Optional[Any] = None
 
     @property
     def session(self) -> Optional[AgentSession]:
@@ -154,6 +160,12 @@ class AgentWorker(QThread):
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.current_task()
         self._session = self._session_factory()
+        if self.bus is not None and hasattr(self._session, "bus"):
+            # The hand-off happens here because the session only exists here: `attach_agent`
+            # runs on the GUI thread before start(), the factory runs on this thread after it.
+            # A session without a `bus` attribute (the onboarding interview) has no per-turn
+            # injection to feed.
+            self._session.bus = self.bus
         try:
             start = (
                 self._session.start(self._opening_prompt)

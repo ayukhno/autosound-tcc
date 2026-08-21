@@ -709,6 +709,10 @@ class DialogPanel(QWidget):
         """
         self._worker = worker
         self._bus = bus
+        # The worker hands the bus on to the session it builds, so un-acked user signals ride
+        # into every outgoing turn (F-009) -- see `AgentWorker._main`. Set here because attaching
+        # is the moment the panel holds both parties, and it runs before `start()`.
+        worker.bus = bus
         self._model_label = model or i18n.t("generator")
         self._clear_bubbles()
         self._not_visible_btn.setHidden(False)

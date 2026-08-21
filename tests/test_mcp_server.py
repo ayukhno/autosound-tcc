@@ -88,6 +88,7 @@ def test_tool_surface_is_the_documented_set(tmp_path):
     assert names == {
         "get_tcc_state",
         "get_pending_signals",
+        "ack_signals",
         "wait_for_signal",
         "get_ledger",
         "get_capability_checklist",
@@ -199,7 +200,9 @@ def test_the_state_says_how_hard_this_session_was_asked_to_think(tmp_path):
     assert state["effort"] == "max"
 
 
-def test_get_pending_signals_drains_once(tmp_path):
+def test_get_pending_signals_keeps_a_signal_until_it_is_acked(tmp_path):
+    """F-009: this call used to drain, so a signal read by a turn that did nothing with it was
+    gone. Now reading is delivery, not handling -- the same open request comes back."""
     mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     bus.push(NOT_VISIBLE, note="band 3 missing")
 
@@ -208,7 +211,72 @@ def test_get_pending_signals_drains_once(tmp_path):
 
     assert first["count"] == 1
     assert first["signals"][0]["payload"]["note"] == "band 3 missing"
-    assert second["count"] == 0
+    assert "ack_signals" in first["_ack"]  # the way out rides with the delivery
+    assert second["count"] == 1  # un-acked, so still on the books
+
+
+def test_an_acked_signal_stays_closed(tmp_path):
+    mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    signal = bus.push(NOT_VISIBLE, note="band 3 missing")
+
+    result = json.loads(_text(asyncio.run(
+        mcp.call_tool("ack_signals", {"ids": [signal.id], "outcome": "applied"})
+    )))
+    after = json.loads(_text(asyncio.run(mcp.call_tool("get_pending_signals", {}))))
+
+    assert result["acked"] == [signal.id]
+    assert after == {"signals": [], "count": 0}  # and no ack reminder on an empty queue
+
+
+def test_a_refusal_without_a_reason_is_rejected(tmp_path):
+    """`refused` is an answer to the Arbiter, and "no" with no why is not one."""
+    mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    signal = bus.push(PARAM_EDIT_MODE, on=True)
+
+    result = json.loads(_text(asyncio.run(
+        mcp.call_tool("ack_signals", {"ids": [signal.id], "outcome": "refused"})
+    )))
+
+    assert "error" in result
+    assert bus.pending_count == 1  # nothing was closed
+
+
+def test_an_invented_outcome_is_rejected(tmp_path):
+    mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    signal = bus.push(PARAM_EDIT_MODE, on=True)
+
+    result = json.loads(_text(asyncio.run(
+        mcp.call_tool("ack_signals", {"ids": [signal.id], "outcome": "handled"})
+    )))
+
+    assert "error" in result
+    assert bus.pending_count == 1
+
+
+def test_an_unknown_id_comes_back_as_a_fact_not_an_error(tmp_path):
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    result = json.loads(_text(asyncio.run(
+        mcp.call_tool("ack_signals", {"ids": ["not-an-id"], "outcome": "applied"})
+    )))
+
+    assert result["acked"] == []
+    assert result["unknown_ids"] == ["not-an-id"]
+
+
+def test_get_tcc_state_is_loud_about_open_signals(tmp_path):
+    """F-009 point 5: `pending_signals: 4` is technically reported and practically invisible.
+    Open requests get a sentence -- and only when there are any, because the sentence is spent
+    context on every state read otherwise."""
+    mcp, bus, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    quiet = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+    bus.push(NOT_VISIBLE, note="x")
+    loud = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+
+    assert "_signals_waiting" not in quiet
+    assert "ack_signals" in loud["_signals_waiting"]
+    assert loud["pending_signals"] == 1
 
 
 def test_wait_for_signal_times_out_without_blocking_forever(tmp_path):

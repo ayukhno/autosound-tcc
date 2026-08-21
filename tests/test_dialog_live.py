@@ -197,7 +197,7 @@ def test_not_visible_button_raises_a_signal_for_the_agent(tmp_path):
 
     panel._not_visible_btn.click()
 
-    signals = bus.drain()
+    signals = bus.deliver()
     assert [s.kind for s in signals] == [signal_bus.NOT_VISIBLE]
     assert signals[0].payload["note"] == "EQ band 3"
 
@@ -208,7 +208,7 @@ def test_param_edit_mode_reaches_the_bus_so_both_front_ends_see_it(tmp_path):
     panel._start_editing("forgot")
     panel._finish_editing()
 
-    kinds = [(s.kind, s.payload["on"]) for s in bus.drain()]
+    kinds = [(s.kind, s.payload["on"]) for s in bus.deliver()]
     assert kinds == [(signal_bus.PARAM_EDIT_MODE, True), (signal_bus.PARAM_EDIT_MODE, False)]
 
 
@@ -344,6 +344,40 @@ def test_worker_streams_a_turn_and_closes_the_session(qtbot_timeout=5.0):
 
     assert received == ["opening"]
     assert session.closed
+
+
+def test_attaching_an_agent_gives_the_worker_the_bus(tmp_path):
+    """F-009: the bus has to reach the session so un-acked signals ride into every turn, and the
+    panel is the one place that holds both the worker and the bus."""
+    panel, worker, bus = _attached(tmp_path)
+
+    assert worker.bus is bus
+
+
+def test_the_worker_hands_the_bus_to_the_session_it_builds(tmp_path, qtbot_timeout=5.0):
+    """The other half of the F-009 wiring: the session only exists on the worker's own thread,
+    so the hand-off happens there -- attach before start, inject after construction."""
+    from PySide6.QtCore import QEventLoop, QTimer
+
+    class BusSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.bus = None  # the attribute both real sessions expose for injection
+
+    session = BusSession()
+    worker = AgentWorker(session_factory=lambda: session)
+    bus = SignalBus(tmp_path)
+    worker.bus = bus
+
+    loop = QEventLoop()
+    worker.closed.connect(loop.quit)
+    QTimer.singleShot(int(qtbot_timeout * 1000), loop.quit)
+    worker.turn_done.connect(lambda: worker.stop())
+    worker.start()
+    loop.exec()
+    worker.wait(3000)
+
+    assert session.bus is bus
 
 
 # ---- Critic rendering -------------------------------------------------------

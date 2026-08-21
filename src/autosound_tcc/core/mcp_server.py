@@ -28,6 +28,7 @@ carries an INTENT, or is a SIGNAL. Every tool below was checked against "does th
 |---|---|---|
 | `get_tcc_state`, `get_ledger`, `get_capability_checklist` | — | read |
 | `get_pending_signals`, `wait_for_signal` | `.tcc/` bus | TCC's own namespace; the payload is user intent |
+| `ack_signals` | `.tcc/` bus log | TCC's own namespace; the record of what the agent did with that intent |
 | `propose_change` | — | intent, put on screen for the Arbiter |
 | `copy_helix_eq` | clipboard | hand-off to a human, gated |
 | `write_rew_filters` | REW's model | an instrument, not project data; gated |
@@ -68,6 +69,7 @@ from autosound_tcc.core import (
     process_writer,
     profile_writer,
     project_settings,
+    signal_bus,
     vendor_loader,
 )
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -80,6 +82,15 @@ _TOKEN_HEADER = "x-tcc-token"
 # user can walk to the car and back, short enough that a forgotten dialog doesn't pin an MCP call
 # open forever.
 CONFIRM_TIMEOUT_S = 600.0
+
+# Rides along with every non-empty signal delivery (`get_pending_signals`, `wait_for_signal`).
+# In the payload, not only in the tools' docstrings, because a docstring is read once at tool
+# discovery and this has to be in front of the model at the moment it holds unhandled signals.
+_ACK_REMINDER = (
+    "Handle each signal, then close it: ack_signals(ids=[...], outcome=applied|refused|"
+    "superseded). `refused` needs a note saying why. Un-acked signals are raised again every "
+    "turn."
+)
 
 
 def _vendor_of(model: Optional[str]) -> str:
@@ -301,6 +312,7 @@ def build_server(
         """
         process_state, error = _load_process_state()
         ui = bridge.snapshot()
+        open_signals = bus.pending_count
         state = {
             "project_dir": str(project_dir),
             "ui": ui,
@@ -313,7 +325,7 @@ def build_server(
             "current_phase": (process_state or {}).get("active_phase"),
             "process_state_error": error,
             "sessions": registry.load().get("phases", {}),
-            "pending_signals": bus.pending_count,
+            "pending_signals": open_signals,
             # How hard this session was asked to think, so a record can say it. A journal entry
             # that names the model but not its effort does not describe what ran -- the same model
             # at `high` and at `max` is two different reviewers of its own work. Fixed for the
@@ -335,16 +347,29 @@ def build_server(
                 "they set themselves — ask only about what is missing or contradicts the disk."
             ),
         }
+        if open_signals:
+            # A bare number is how four `channel_toggle` signals sat unread for seven minutes
+            # (F-009): technically reported, practically invisible. Open requests get a sentence.
+            state["_signals_waiting"] = (
+                f"{open_signals} un-acknowledged user signal(s) are waiting. They are direct "
+                "requests from the Arbiter: call get_pending_signals, handle each, and close it "
+                "with ack_signals before anything else."
+            )
         return json.dumps(state, ensure_ascii=False, indent=2)
 
     @mcp.tool()
     async def get_pending_signals() -> str:
-        """Take every user signal raised in the UI since the last call, emptying the queue.
+        """Every user signal raised in the UI and not yet acknowledged. Reading is not handling.
 
         Signals are things the Arbiter did that you would otherwise not know about: switching on
         param-edit mode, flagging that something you claimed to have changed is not visible, or
         moving attention to another channel. Check this at the start of a turn and before any
         proposal; a `not_visible` signal means re-verify against disk, not restate your claim.
+
+        This call used to empty the queue, and a signal read by a turn that did nothing with it
+        was gone (F-009). Now a signal stays open until you close it with `ack_signals`, and an
+        open signal is raised again at the start of every following turn -- handling it and
+        acking it is also how you stop hearing about it.
 
         A `channel_toggle` signal (`{group, channel, on}`) is the Arbiter asking for a channel to
         be switched on or off in the tree. TCC does not write the ledger, so nothing has changed
@@ -353,8 +378,40 @@ def build_server(
         counterpart and its place in the glossary -- so treat it as a request to make that channel
         real, not as a single field edit.
         """
-        signals = [s.as_dict() for s in bus.drain()]
-        return json.dumps({"signals": signals, "count": len(signals)}, ensure_ascii=False, indent=2)
+        signals = [s.as_dict() for s in bus.deliver()]
+        payload: dict[str, Any] = {"signals": signals, "count": len(signals)}
+        if signals:
+            payload["_ack"] = _ACK_REMINDER
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    @mcp.tool()
+    async def ack_signals(ids: list[str], outcome: str, note: str = "") -> str:
+        """Close user signals: say what happened to what the Arbiter asked for.
+
+        `outcome` is one of `applied` (carried out -- recorded, proposed, executed), `refused`
+        (deliberately not done; `note` must say why, and the refusal belongs in your answer to
+        the Arbiter too), or `superseded` (a later signal or event made it moot -- name it in
+        `note`). One outcome per call: split a batch that ended differently into several calls.
+
+        This is the other half of the audit log: every raise in `.tcc/signals.jsonl` eventually
+        meets its `signal_acked` line, which is what makes "what did the Arbiter ask and what
+        came of it" answerable after a restart. Ids you invent or ack twice come back as
+        `unknown_ids` rather than as an error -- a second ack arriving late is not worth ending
+        a turn over.
+        """
+        if outcome not in signal_bus.ACK_OUTCOMES:
+            return json.dumps(
+                {"error": f"outcome must be one of {sorted(signal_bus.ACK_OUTCOMES)}"}
+            )
+        if outcome == signal_bus.ACK_REFUSED and not note.strip():
+            return json.dumps(
+                {"error": "a refusal needs a note saying why -- the Arbiter asked for this"}
+            )
+        acked, unknown = bus.ack(ids, outcome, note=note.strip())
+        result: dict[str, Any] = {"acked": acked, "outcome": outcome}
+        if unknown:
+            result["unknown_ids"] = unknown
+        return json.dumps(result, ensure_ascii=False, indent=2)
 
     async def _heartbeat(progress: float, total: float) -> None:
         """Keep a long park alive. A call that goes silent for the client's idle window is
@@ -374,7 +431,8 @@ def build_server(
 
         Use this when you have nothing to do until the human acts — after handing them a
         measurement task or a settings sheet to enter. Returns an empty list if nothing happens
-        before the timeout.
+        before the timeout. What comes back is delivered, not handled: close each signal with
+        `ack_signals`, exactly as with `get_pending_signals`.
         """
         deadline = min(max(timeout_seconds, 1.0), 3600.0)
         waited = 0.0
@@ -383,7 +441,11 @@ def build_server(
             signals = await asyncio.to_thread(bus.wait, min(slice_s, deadline - waited))
             if signals:
                 return json.dumps(
-                    {"signals": [s.as_dict() for s in signals], "count": len(signals)},
+                    {
+                        "signals": [s.as_dict() for s in signals],
+                        "count": len(signals),
+                        "_ack": _ACK_REMINDER,
+                    },
                     ensure_ascii=False,
                     indent=2,
                 )
