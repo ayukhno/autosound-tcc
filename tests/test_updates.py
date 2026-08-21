@@ -106,25 +106,52 @@ def test_the_method_is_updated_the_way_the_installer_does_it(monkeypatch, tmp_pa
     assert any("FETCH_HEAD" in c for c in calls)
 
 
-def test_tcc_is_compared_by_commit_not_by_version(monkeypatch):
-    """TCC installs from the default branch, so its version number stands still while the build
-    moves. The commit is the only thing that differs between a fresh install and a stale one."""
-    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.1")
+def test_tcc_is_compared_against_the_newest_release(monkeypatch):
+    """Both halves follow tags since F-024, so the row compares versions and means it.
+
+    It used to compare COMMITS, and that was right for what it described: TCC installed from the
+    default branch, so the version stood still while the build moved. A release is the unit being
+    offered now, so the number on screen is the thing that differs.
+    """
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.10")
     monkeypatch.setattr(install_report, "install_source",
                         lambda: ("git+https://…", "a" * 40))
-    monkeypatch.setattr(updates, "_remote_version", lambda sha: "0.1.1")
-    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.1.11")
 
     status = updates.check_tcc()
 
-    assert status.newer is True, "same version, different commit — the commit decides"
-    # ...and no hash reaches the row: it is bug-report material, and it is in the block below.
-    assert status.installed == "0.1.1"
-    assert status.latest == "0.1.1"
-    assert "a" * 7 not in status.installed + status.latest
+    assert status.newer is True
+    assert status.installed == "0.1.10" and status.latest == "0.1.11"
+    assert "a" * 7 not in status.installed + status.latest, "no hash reaches the row"
 
-    monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "b" * 40))
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.1.10")
     assert updates.check_tcc().newer is False
+
+
+def test_a_build_ahead_of_the_releases_is_not_told_to_update_backwards(monkeypatch):
+    """A developer running `main` is ahead of the newest tag on purpose. Offering them an
+    "update" to an older release would be telling them to throw work away."""
+    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.12")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.1.11")
+
+    status = updates.check_tcc()
+
+    assert status.newer is False
+    assert status.latest == "0.1.12", "and the row shows what is actually here"
+
+
+def test_the_update_command_pins_the_release_it_is_offering(monkeypatch):
+    """Without a ref `uv` installs the default branch — which is what "update" used to mean, and
+    is how a machine ended up with whatever had landed on `main` since (F-024). The ref-less form
+    survives as the OFFLINE fallback, where no tag can be looked up."""
+    pinned = updates.tcc_install_command("v0.1.11")
+    assert "@v0.1.11" in pinned and pinned.count("git+") == 1
+
+    assert updates.tcc_install_command("") == updates.TCC_INSTALL_COMMAND
+    assert "@v" not in updates.TCC_INSTALL_COMMAND
+
+    assert "@v0.1.11" in updates.tcc_install_line(pid=4242, tag="v0.1.11")
 
 
 def test_a_source_checkout_is_told_to_use_git(monkeypatch):
@@ -193,75 +220,17 @@ def test_the_wait_defaults_to_our_own_process():
 
     assert str(os.getpid()) in updates.tcc_install_line()
 
-
-
-def test_the_remote_version_is_read_at_the_same_commit(monkeypatch):
-    """A version from `main` beside a commit that is not `main`'s head would be a sentence about
-    two different builds. The file is read AT the sha."""
-    seen = {}
-
-    class _Response:
-        def read(self, _n=None):
-            return b'[project]\nname = "autosound-tcc"\nversion = "9.9.9"\n'
-        def __enter__(self):
-            return self
-        def __exit__(self, *a):
-            return False
-
-    def fake_urlopen(url, timeout=None):
-        seen["url"] = url
-        return _Response()
-
-    monkeypatch.setattr(updates.urllib.request, "urlopen", fake_urlopen)
-
-    assert updates._remote_version("c" * 40) == "9.9.9"
-    assert ("c" * 40) in seen["url"]
-
-
-def test_an_unreadable_remote_version_falls_back_to_the_installed_number(monkeypatch):
-    """Offline mid-check: the row still says there is something newer, without inventing a number."""
-    def boom(url, timeout=None):
-        raise OSError("no network")
-
-    monkeypatch.setattr(updates.urllib.request, "urlopen", boom)
+def test_a_repository_that_cannot_be_asked_for_tags_says_so(monkeypatch):
+    """Offline mid-check. The row must not invent a number, and must not claim to be current
+    either -- "could not ask" is its own answer."""
     monkeypatch.setattr(install_report, "app_version", lambda: "0.1.7")
     monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
-    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "")
 
     status = updates.check_tcc()
 
-    assert updates._remote_version("d" * 40) == ""
-    assert status.newer is True and status.latest == "0.1.7"
-
-
-def test_a_newer_build_carries_the_day_it_was_made(monkeypatch):
-    """A date is something a person can act on; a hash is not. Asked for only when there IS
-    something newer, so an up-to-date machine makes no API call at all."""
-    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.8")
-    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
-    monkeypatch.setattr(updates, "_remote_version", lambda sha: "0.1.8")
-    asked = []
-    monkeypatch.setattr(updates, "_remote_date", lambda sha: asked.append(sha) or "2026-08-19")
-    _git_answers(monkeypatch, {"ls-remote": (True, "b" * 40 + "\tHEAD")})
-
-    status = updates.check_tcc()
-
-    assert status.newer is True and status.detail == "2026-08-19"
-    assert asked == ["b" * 40]
-
-
-def test_an_up_to_date_machine_asks_the_api_nothing(monkeypatch):
-    monkeypatch.setattr(install_report, "app_version", lambda: "0.1.8")
-    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
-    def boom(sha):
-        raise AssertionError("no API call when there is nothing newer")
-    monkeypatch.setattr(updates, "_remote_date", boom)
-    _git_answers(monkeypatch, {"ls-remote": (True, "a" * 40 + "\tHEAD")})
-
-    assert updates.check_tcc().newer is False
-
-
-
+    assert status.newer is False and status.reason == "no_network"
+    assert status.latest == ""
 def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
     """The case the other guards let through: a submodule is detached and clean, exactly like a
     release checkout. Updating it would check a tag out inside somebody's working repository and

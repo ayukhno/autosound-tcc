@@ -1617,3 +1617,31 @@ from a registry we do not own is the wrong direction (the Arbiter's point, and i
    it is a guess).
 
 **Why the skill and not TCC**: TCC does not write project data and does not name measurements.
+
+---
+
+## SCR-054 — the installer puts TCC on the default branch, while TCC now updates by tag
+
+**Status**: proposed (2026-08-22, alongside F-024 on the TCC side)
+**Target**: skill — `install.sh` (line ~829) and `install.ps1`, wherever `autosound-tcc` is installed
+**TCC dependency**: done. `updates.newest_tcc_tag()` picks the newest `v*` tag, the update button
+pins it (`git+…@vX.Y.Z`), and the row compares the installed version against that release.
+
+**The gap.** The installer runs
+
+    uv tool install --python 3.12 --upgrade "autosound-tcc[gui,claude] @ git+${TCC_REPO}"
+
+with **no ref**, so a fresh install takes the default branch's HEAD — whatever landed on `main`
+last, finished or not. The method half has never worked that way: it asks for the newest `v3.*`
+tag on purpose. Until now TCC's update button matched the installer's behaviour, so at least the
+two agreed with each other; since F-024 they do not, and a fresh install can be NEWER than the
+release the app offers as an update.
+
+**The ask**: install TCC from its newest release tag, the same way the method is installed. The
+lookup is one `git ls-remote --tags --refs "$TCC_REPO" 'v*'` and the newest by numeric sort —
+`install.sh` already does exactly this for the skill, so it is the same code path with a different
+repository and glob.
+
+**Why it matters more than it looks**: "update" and "install" have to mean the same thing, or a
+tester's machine and a fresh machine run different code with the same version number on screen —
+and every bug report from either becomes a question about which one it was.

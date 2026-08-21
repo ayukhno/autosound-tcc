@@ -28,11 +28,9 @@ pays PySide6's source-reading import hook (see `core/install_report.py`).
 from __future__ import annotations
 
 import os
-import json
 import re
 import subprocess
 import sys
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -48,6 +46,14 @@ SKILL_REPO = "https://github.com/ayukhno/autosound-tuning-skill"
 #: `v3.*` and so do we.
 SKILL_TAG_GLOB = "v3.*"
 
+#: And so does TCC now (F-024, 2026-08-22). It used to install from the repository with no ref at
+#: all, which means the default branch's HEAD: pressing "update" took whatever had landed on
+#: `main` since, finished or not. The panel showed a version and looked like it was following
+#: releases, but that number came out of `pyproject.toml` at that commit — it looked like a tag
+#: and was not one. `v*` rather than a major-pinned glob because TCC's own line is still `v0.x`
+#: and a major bump should not silently stop updates; `_version_key` does the ordering.
+TCC_TAG_GLOB = "v*"
+
 #: A network round trip to GitHub, on a machine that may be tethered in a car park.
 _ASK_TIMEOUT = 12.0
 
@@ -59,7 +65,23 @@ TCC_INSTALL_COMMAND = (
 )
 
 
-def tcc_install_line(pid: Optional[int] = None) -> str:
+def tcc_install_command(tag: str = "") -> str:
+    """The install command, pinned to a release tag when one is known.
+
+    Without a tag it falls back to the ref-less form, which resolves to the default branch. That
+    is the OLD behaviour and it stays as the offline path on purpose: a machine that cannot reach
+    GitHub to list tags can still be told a command that works. What it must not be is the silent
+    default, which is what it was until F-024.
+    """
+    if not tag:
+        return TCC_INSTALL_COMMAND
+    return (
+        f'uv tool install --python 3.12 --upgrade '
+        f'"autosound-tcc[gui,claude] @ git+{TCC_REPO}@{tag}"'
+    )
+
+
+def tcc_install_line(pid: Optional[int] = None, tag: str = "") -> str:
     """The update command, with a wait for THIS process in front of it.
 
     Telling somebody to close the app first is not enough — it was tried, and the update ran
@@ -77,19 +99,20 @@ def tcc_install_line(pid: Optional[int] = None) -> str:
     """
     if pid is None:
         pid = os.getpid()
+    command = tcc_install_command(tag)
     if sys.platform.startswith("win"):
         # `&` in cmd is "then", regardless of what the previous command returned. Wait-Process
         # returns at once if the id is already gone, which is the case when TCC was closed first.
         return (
             f'echo Close TCC now - this window is waiting for it, then it will update. '
             f'& powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue" '
-            f'& {TCC_INSTALL_COMMAND} '
+            f'& {command} '
             f'& echo. & echo Done - start TCC again.'
         )
     return (
         f"echo 'Close TCC now — this window is waiting for it, then it will update.'; "
         f"while kill -0 {pid} 2>/dev/null; do sleep 1; done; "
-        f"{TCC_INSTALL_COMMAND}; "
+        f"{command}; "
         f"echo; echo 'Done — start TCC again.'"
     )
 
@@ -132,13 +155,23 @@ def _version_key(text: str) -> tuple:
     return tuple(int(part) for part in re.findall(r"\d+", text)) or (0,)
 
 
-def newest_tag() -> str:
-    """The newest `v3.*` tag in the method's repository, or "" if it cannot be asked."""
-    ok, out = _git("ls-remote", "--tags", "--refs", SKILL_REPO, SKILL_TAG_GLOB)
+def _newest_tag_in(repo: str, glob: str) -> str:
+    """The newest tag matching `glob` in `repo`, or "" if it cannot be asked."""
+    ok, out = _git("ls-remote", "--tags", "--refs", repo, glob)
     if not ok or not out:
         return ""
     tags = [line.rsplit("/", 1)[-1] for line in out.splitlines() if "/" in line]
     return max(tags, key=_version_key) if tags else ""
+
+
+def newest_tag() -> str:
+    """The newest `v3.*` tag in the method's repository, or "" if it cannot be asked."""
+    return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)
+
+
+def newest_tcc_tag() -> str:
+    """The newest release tag of TCC itself, or "" if it cannot be asked."""
+    return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB)
 
 
 def _skill_repo_dir() -> Optional[Path]:
@@ -175,8 +208,6 @@ def _is_ours(repo: Path) -> tuple[bool, tuple[str, str]]:
     if dirty_ok and dirty:
         return False, ("dirty", "")
     return True, ("", "")
-
-
 def check_skill() -> Status:
     """The method: the version installed here against the newest release tag."""
     installed = install_report.skill_version()
@@ -195,67 +226,37 @@ def check_skill() -> Status:
                   _version_key(latest_version) > _version_key(installed))
 
 
-def _remote_version(sha: str) -> str:
-    """The version in `pyproject.toml` AT that commit, or "" — one anonymous read of a public file.
-
-    Pinned to the sha rather than to the branch, so the number describes the build being offered
-    and not whatever landed on `main` in the meantime.
-    """
-    url = f"https://raw.githubusercontent.com/ayukhno/autosound-tcc/{sha}/pyproject.toml"
-    try:
-        with urllib.request.urlopen(url, timeout=_ASK_TIMEOUT) as response:
-            text = response.read(20000).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 — offline, rate-limited, moved: the sha alone still says it
-        return ""
-    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
-    return match.group(1) if match else ""
-
-
-def _remote_date(sha: str) -> str:
-    """The day that commit was made, as `2026-08-19`, or "".
-
-    What a person can actually use when the version number has not moved: "a newer build, from the
-    19th" says how far behind they are; `0ef59ea` says nothing to anyone but a maintainer (user,
-    2026-08-19: "нову версію треба бачити зрозумілу, а не код"). One anonymous API call, made only
-    when there IS something newer.
-    """
-    url = f"https://api.github.com/repos/ayukhno/autosound-tcc/commits/{sha}"
-    try:
-        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(request, timeout=_ASK_TIMEOUT) as response:
-            data = json.loads(response.read(200000).decode("utf-8", "replace"))
-    except Exception:  # noqa: BLE001 — rate-limited, offline, moved: the row simply says less
-        return ""
-    stamp = str(((data.get("commit") or {}).get("committer") or {}).get("date") or "")
-    return stamp[:10]
-
 
 def check_tcc() -> Status:
-    """TCC: the commit this build came from against the head of the repository it came from.
+    """TCC: the version installed against the newest RELEASE, the way the method half works.
 
-    Compared by COMMIT, not by version. TCC installs from the default branch, so the version in
-    the metadata only moves when a release is cut — a build three days of fixes behind still calls
-    itself 0.1.1 (measured, not assumed: an upgrade here went 0.1.5 → 0.1.5 across two commits and
-    did carry the new code). The commit is what actually differs, and `direct_url.json` records the
-    one this install was built from. Both sides are then SHOWN as version and commit together, so
-    the row compares like with like.
+    Compared by version, because since F-024 both halves follow tags. It used to be compared by
+    COMMIT, and that was right for what it described: TCC installed from the default branch, so
+    the metadata version only moved when a release was cut and a build three days of fixes behind
+    still called itself 0.1.1 (measured — an upgrade went 0.1.5 → 0.1.5 across two commits and did
+    carry the new code). The commit was the only thing that differed. Now a release IS the unit
+    being offered, so the number means what it says.
+
+    The commit is still what a bug report needs, and it is still in the installation block below;
+    what this row carries is two version numbers a person can compare.
+
+    A build NEWER than the newest tag is not an update — that is a developer running ahead of the
+    releases, and telling them to "update" backwards would be wrong. It reads as up to date.
     """
     version = install_report.app_version()
     _url, commit = install_report.install_source()
     if not commit:
         return Status("tcc", version, "", False, "source_checkout", updatable=False)
-    ok, out = _git("ls-remote", TCC_REPO, "HEAD")
-    head = out.split()[0] if ok and out.split() else ""
-    if not head:
+    tag = newest_tcc_tag()
+    if not tag:
         return Status("tcc", version, "", False, "no_network")
-    if head == commit:
+    latest = tag.lstrip("v")
+    if not version:
+        # No metadata to compare with: fall back to what is on offer, and let the person decide.
+        return Status("tcc", version, latest, True)
+    if _version_key(version) >= _version_key(latest):
         return Status("tcc", version, version, False)
-    # A hash is not for the person reading this row — it is for a bug report, and it is already in
-    # the installation block below. What is left on screen is the two version numbers, and when
-    # they are the SAME number the row says so in words instead (user, 2026-08-19: "незрозумілі
-    # цифри та букви").
-    return Status("tcc", version, _remote_version(head) or version, True,
-                  detail=_remote_date(head))
+    return Status("tcc", version, latest, True)
 
 
 def check_all() -> tuple[Status, Status]:

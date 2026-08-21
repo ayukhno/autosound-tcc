@@ -429,14 +429,17 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch):
 
     _app()
     dialog = DiagnosticsDialog()
-    dialog._show_update(updates.Status("tcc", "0.1.1", "abc123", True))
+    dialog._show_update(updates.Status("tcc", "0.1.1", "0.9.9", True))
     seen = []
     monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.9.9")
 
     dialog._update_tcc()
 
     assert len(seen) == 1
-    assert updates.TCC_INSTALL_COMMAND in seen[0]
+    # Pinned to the release the row offered, not to whatever `main` holds by then (F-024).
+    assert "autosound-tcc[gui,claude] @ git+" in seen[0]
+    assert "@v0.9.9" in seen[0]
     assert "--python 3.12" in seen[0]
     assert str(os.getpid()) in seen[0], "the window waits for THIS process before it replaces it"
     assert dialog._update_rows["tcc"][0].text() == i18n.t("updTccHanded")

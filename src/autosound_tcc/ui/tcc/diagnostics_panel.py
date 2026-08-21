@@ -507,7 +507,9 @@ class DiagnosticsDialog(QDialog):
         """
         label, _button = self._update_rows["tcc"]
         try:
-            terminal_launcher.run_line(updates.tcc_install_line())
+            # Pinned to the release the row is offering, not to whatever `main` holds by
+            # the time the terminal opens (F-024).
+            terminal_launcher.run_line(updates.tcc_install_line(tag=updates.newest_tcc_tag()))
         except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
             label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
             return
