@@ -49,6 +49,7 @@ T: dict[Lang, dict[str, str]] = {
         # printed a bare `_0` and the capture panel a bare `v6`, which read as two
         # different things and explained neither (user, 2026-08-21). A round (`cap_001`)
         # is a different axis and keeps its own name.
+        "curveRoundEmpty": "{round}: REW does not hold the measurements that round took — a different project is open, or they were deleted.",
         "seriesItem": "series {v}",
         "logError": "Something went wrong: {error} — the details are in {path}",
         "rewPort": "REW port",
@@ -711,6 +712,7 @@ Choose sweeps (sw) above to read this.",
         "noDataYet": "Даних поки нема",
         "openQuestions": "Відкрито",
         "openQuestionsTitle": "Відкриті питання",
+        "curveRoundEmpty": "{round}: замірів цього проходу в REW немає — відкрито інший проєкт, або їх видалили.",
         "seriesItem": "серія {v}",
         "logError": "Щось пішло не так: {error} — деталі в {path}",
         "rewPort": "Порт REW",

@@ -3905,3 +3905,49 @@ def test_the_y_grid_has_two_levels_of_line_and_not_three():
 
     assert view._strip is not None
     assert view._strip.getAxis("left").style["maxTickLevel"] == 1, "the strip too — it is shorter"
+
+
+def test_the_picker_offers_the_capture_rounds_and_narrows_to_what_one_took(tmp_path,
+                                                                           monkeypatch):
+    """User, 2026-08-21: "я не бачу два сета які є внизу, хоч і вибрано АЧХ, і вони є в обох
+    сетах".
+
+    A series is the DSP config the sweeps were taken under and comes out of REW's own titles; a
+    round is one pass at that config and lives in the journal (SCR-034). This window only ever
+    read the first, so the sets listed in the capture panel right below it could not be picked at
+    all. Choosing one narrows the rows to what that pass took.
+    """
+    from autosound_tcc.ui.tcc import curve_dialog as cd
+
+    rounds = [
+        {"id": "cap_002", "expected": ["w-L_02 (sw)"], "taken": {"w-L_02 (sw)": {}}},
+        {"id": "cap_001", "expected": ["w-L_02 (sw)", "w-R_02 (sw)"],
+         "taken": {"w-R_02 (sw)": {}}},
+        {"id": "cap_000", "expected": ["gone_09 (sw)"], "taken": {}},
+    ]
+    monkeypatch.setattr(cd.process_view, "capture_rounds", lambda *a, **k: rounds)
+
+    dialog = _group_dialog()
+    _fetch(dialog)
+    combo = dialog._version_combo
+    offered = [combo.itemData(i) for i in range(combo.count())]
+
+    assert "round:cap_001" in offered and "round:cap_002" in offered, "both sets are offered"
+    assert any(not str(d).startswith("round:") for d in offered), "and the series stay"
+
+    combo.setCurrentIndex(offered.index("round:cap_002"))
+    assert dialog._chosen_round() == "cap_002"
+    assert dialog._selectable() == ["w-L_02 (sw)"], "only what that pass took"
+
+    combo.setCurrentIndex(offered.index("round:cap_001"))
+    assert sorted(dialog._selectable()) == ["w-L_02 (sw)", "w-R_02 (sw)"]
+
+    # A round names a pass, not a config, and a group still resolves at a version -- taken from
+    # the titles the round itself holds.
+    assert dialog._chosen_version() == "02"
+
+    # A round whose measurements REW no longer holds is a real state and has to say so, rather
+    # than showing an empty list of things to pick.
+    combo.setCurrentIndex(offered.index("round:cap_000"))
+    assert dialog._selectable() == []
+    assert dialog._group_note, "and the window says where it looked"

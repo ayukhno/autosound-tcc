@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import config, curve_groups, delay_bank
+from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import i18n
@@ -862,6 +863,49 @@ class CurveDialog(QDialog):
             action.blockSignals(blocked)
         self._choose_btn.setText(i18n.t("curveChooseBtn").format(n=len(chosen)))
 
+    def _chosen_version(self) -> str:
+        """The config version the picker is standing on, whichever axis it was picked by.
+
+        A round names a pass, not a config -- so when one is chosen the version comes from the
+        titles that round took. The group still resolves at a VERSION, because that is what a
+        measurement title carries.
+        """
+        round_id = self._chosen_round()
+        if not round_id:
+            return str(self._version_combo.currentData() or "")
+        for title in self._round_titles(round_id):
+            version, _method = _title_facts(title)
+            if version:
+                return str(version)
+        return ""
+
+    def _rounds(self) -> list[dict]:
+        """Every capture round this project recorded, newest first. Empty when there is no
+        project or no journal -- this window opens over a bare REW session too."""
+        try:
+            return process_view.capture_rounds()
+        except Exception:  # noqa: BLE001 -- a missing journal is not an error in this window
+            return []
+
+    def _round_titles(self, round_id: str) -> list[str]:
+        """What a round took, in the order it asked for it. `expected` and `taken` both, because a
+        capture nobody asked for is still part of what happened -- the same rule the capture panel
+        follows (`measurement_view._session_for_round`)."""
+        for round_ in self._rounds():
+            if str(round_.get("id") or "") != round_id:
+                continue
+            titles = [str(x) for x in (round_.get("expected") or [])]
+            for title in (round_.get("taken") or {}):
+                if str(title) not in titles:
+                    titles.append(str(title))
+            return titles
+        return []
+
+    def _chosen_round(self) -> Optional[str]:
+        data = str(getattr(self, "_version_combo", None)
+                   and self._version_combo.currentData() or "")
+        return data[len("round:"):] if data.startswith("round:") else None
+
     def _selectable(self) -> list[str]:
         """What may be plotted on THIS kind.
 
@@ -873,7 +917,17 @@ class CurveDialog(QDialog):
         are long, one sweep and one MMM capture per channel. The KIND picker keeps its grey-out,
         because there the marked row is a choice somebody just asked for out loud.
         """
-        return [t for t in self._options if self._kind == "fr" or not _is_rta(t)]
+        rows = [t for t in self._options if self._kind == "fr" or not _is_rta(t)]
+        round_id = self._chosen_round()
+        if round_id:
+            # Narrowed to what that pass actually took. REW is addressed by TITLE and two passes
+            # at one config share theirs, so this is a filter and not a different fetch: what it
+            # buys is "show me the set this round is made of", which is the question that was
+            # being asked. Telling two identical titles apart needs REW's own measurement id and
+            # the bridge has no way to ask for one (`rew_bridge.find_id` resolves by name).
+            wanted = set(self._round_titles(round_id))
+            rows = [t for t in rows if t in wanted]
+        return rows
 
     def _sync_version_combo(self, select: Optional[str] = None) -> None:
         """Offer the config versions REW holds, standing on the one the question is about.
@@ -908,6 +962,16 @@ class CurveDialog(QDialog):
             combo.addItem(_row(version), version)
         if wanted is not None and combo.findData(wanted) < 0:
             combo.addItem(_row(wanted), wanted)
+        # And the ROUNDS, which are the other axis (SCR-034): a series is the DSP config the
+        # sweeps were taken under, a round is one pass at it, and two passes at one config carry
+        # the same titles. The capture panel below lists them and this window did not, so a set
+        # sitting right there could not be looked at (user, 2026-08-21: "я не бачу два сета які є
+        # внизу … і вони є в обох сетах"). Rounds come from the journal, which is why REW's titles
+        # alone could never have offered them.
+        for round_ in self._rounds():
+            round_id = str(round_.get("id") or "")
+            if round_id:
+                combo.addItem(round_id, f"round:{round_id}")
         at = combo.findData(wanted) if wanted is not None else -1
         combo.setCurrentIndex(at if at >= 0 else 0)
         combo.setEnabled(combo.count() > 0)
@@ -931,7 +995,21 @@ class CurveDialog(QDialog):
         self._apply_group()
 
     def _on_version_chosen(self, _index: int) -> None:
-        """A version is only a question when a group is chosen; on its own it changes nothing."""
+        """A version on its own changes nothing; a ROUND changes which rows exist.
+
+        Picking a pass is picking a set -- `_selectable` narrows to what that pass took -- so the
+        choose menu is rebuilt whatever else happens. Rebuilt here and not inside `_selectable`,
+        which is asked from several places and must stay a question rather than an action.
+        """
+        self._fill_choose_menu()
+        round_id = self._chosen_round()
+        if round_id and not self._selectable():
+            # The round is in the journal and its measurements are not in REW -- a different
+            # project is open, or they were deleted. An empty checklist with no sentence beside it
+            # is the shape of "the window is broken"; this is the shape of what is actually true.
+            self._group_note = i18n.t("curveRoundEmpty").format(round=round_id)
+            self._render_note()
+            return
         if self._group is not None:
             self._apply_group()
 
@@ -943,7 +1021,7 @@ class CurveDialog(QDialog):
         sentence is the only place in the whole path that can, which is why it is on screen rather
         than in a log.
         """
-        version = str(self._version_combo.currentData() or "")
+        version = self._chosen_version()
         if self._group is None or not version:
             return
         found = self._groups.resolve(self._group, version, self._options)
