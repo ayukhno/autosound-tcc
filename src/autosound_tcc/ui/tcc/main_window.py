@@ -1768,9 +1768,23 @@ class MainWindow(QMainWindow):
             self._project_section.body_layout().addWidget(
                 _kv_row(_tier_label(tier_id), _tier_count(total, off))
             )
-        for question in open_questions:
-            chip = self._placeholder_label(f"🟡 {i18n.t('openQuestions')}: {question}")
-            self._project_section.body_layout().addWidget(chip)
+        if open_questions:
+            # In a group of their own, with a count. They used to be loose chips appended straight
+            # under the channel-summary rows, so a paragraph about rear-fill routing read as an
+            # explanation of the "Virtual channels 8" line above it -- the Arbiter's own reading
+            # of the panel (2026-08-21: "а що оце після числа віртуальних каналів за інфа?").
+            # Folded by default: this is the intake's own to-do list, not the state of the car.
+            group = CollapsibleGroup(
+                "open_questions",
+                i18n.t("openQuestionsTitle"),
+                self._settings,
+                count=str(len(open_questions)),
+            )
+            for question in open_questions:
+                group.body_layout().addWidget(
+                    self._placeholder_label(f"🟡 {question}")
+                )
+            self._project_section.body_layout().addWidget(group)
 
     # ---- detail-pane wiring --------------------------------------------
 

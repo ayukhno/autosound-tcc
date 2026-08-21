@@ -250,11 +250,19 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     # Translated through i18n, not prettified out of the JSON key (F-006).
     assert project_kv["Virtual channels"] == "8 (1 off)"
 
+    # The open questions live in a collapsible group of their own, with a count on its header, so
+    # they stop reading as a footnote to the channel-summary row above them (F-005).
+    from autosound_tcc.ui.tcc.sidebar_section import CollapsibleGroup
+
+    group = next(g for g in window._project_section.findChildren(CollapsibleGroup)
+                 if g._id == "open_questions")
     chip_texts = [
-        w.text() for w in window._project_section.findChildren(QLabel)
+        w.text() for w in group.findChildren(QLabel)
         if w.property("class") == "phead-sub"
     ]
     assert any("mic.calibration_file" in t for t in chip_texts)
+    assert any(w.text() == "1" for w in group.findChildren(QLabel)
+               if w.property("class") == "cnt"), "the header counts them"
 
 
 def test_the_composer_is_the_way_in():

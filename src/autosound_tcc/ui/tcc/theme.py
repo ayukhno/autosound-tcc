@@ -397,6 +397,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="zoom-btn"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* `Choose…` is the one .zoom-btn carrying a menu, and an unstyled indicator is drawn by the
+    native style rather than by the box above it: on macOS that is a second little bezel sitting
+    on the button's right border, which reads as two controls overlapping (user, 2026-08-21, with
+    the screenshot). Pinned inside the padding box, the same fix .project-btn already carries. */
+    QPushButton[class~="zoom-btn"]::menu-indicator {{
+        subcontrol-origin: padding;
+        subcontrol-position: right center;
+        width: 10px;
+        right: 8px;
+    }}
     /* .guides-btn — the ✕ beside the mode buttons that takes every guide off the picture at once.
 
     Its own class rather than a `.zoom-btn` with an inline stylesheet, for two reasons that were

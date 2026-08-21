@@ -1521,3 +1521,45 @@ is that the Critic is a DIFFERENT vendor from the Generator. With omp on the mac
 setting away for any vendor; without this, every vendor except Google needs its own CLI or key
 before the rule can be followed, and the fallback — a package in the clipboard, pasted by hand —
 is the path people quietly stop taking.
+
+---
+
+## SCR-052 — `_open_questions` is a paragraph where the contract says a key
+
+**Status**: proposed (2026-08-21 — found during a live intake, the Arbiter asking what the block
+under the channel counts even was)
+**Target**: skill — whatever writes `project.json`'s `_open_questions` during intake
+(`references/core/project-intake.md`, `phase_-1_intake.md`, `rew_tool/project.py::open_questions`)
+**TCC dependency**: none to build; the TCC half landed on 2026-08-21 (F-005). The questions now sit
+in a collapsed group of their own with a count on its header, rather than as loose chips under the
+channel-summary rows. What TCC cannot fix from its side is the text.
+
+**The gap.** The contract reads as a KEY — TCC's own reader documents it as "unresolved intake
+facts (dotted paths)", and `SCR-001`-era entries are exactly that: `mic.calibration_file`,
+`amps.0.gain_db`. What a real session wrote is a paragraph:
+
+> Тил r-L/r-R на виходах I/J: CAR.md вимірювального репозиторію та виміри r_L_17/r_R_17 у REW
+> кажуть «є», §2 успадкованого autosound_context — «CH9/CH10 Unused». Записано як вільні; потрібне
+> рішення Арбітра (+ підсилювач тилу, якщо тил є).
+
+Every fact in it is real and none of it is readable in a 300px panel. It refers to `CAR.md`, to
+"§2", to a conversation the reader of the panel was not in — and five of those in a row is the
+whole section.
+
+This is the same lesson as the update reasons (2026-08-20: a reason is a key, not a sentence). A
+panel renders a list; a list needs a handle.
+
+What the ask covers:
+
+1. **Two fields, not one.** A short `title` that is the handle (`тил r-L/r-R: є чи нема`), and the
+   paragraph as `detail`. TCC shows the title and puts the detail on hover, which is the shape
+   every other fact in that panel already has.
+2. **The dotted path stays** where there is one (`amps.0.gain_db`): it is what makes the question
+   machine-checkable, and it is the difference between "the Arbiter must decide" and "this field
+   is empty".
+3. **Backwards compatible on read**: a plain string keeps working as its own title, so every
+   project written before this renders unchanged.
+
+**Why the skill and not TCC**: TCC does not write project data, and truncating someone else's
+sentence at 60 characters is not a title — it is a sentence with the end cut off. The one who knows
+which six words are the handle is the one who wrote the paragraph.

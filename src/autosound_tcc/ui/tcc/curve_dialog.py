@@ -633,7 +633,9 @@ class CurveDialog(QDialog):
         policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         policy.setHeightForWidth(True)
         self._chip_holder.setSizePolicy(policy)
-        self._chip_row = _FlowLayout(self._chip_holder, spacing=6)
+        # 8 and not 6: every item on this row is a bordered pill, and at 6 two borders sit
+        # close enough to read as one touching the other.
+        self._chip_row = _FlowLayout(self._chip_holder, spacing=8)
         self._build_group_controls()
         # The set, then what is drawn of it, then the group that fills it, then the checklist that
         # can build any set at all. `Choose…` last of the four and first thing before the chips it
