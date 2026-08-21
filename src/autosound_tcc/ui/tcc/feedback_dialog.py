@@ -80,7 +80,6 @@ class FeedbackDialog(QDialog):
         self._radio_github = QRadioButton(i18n.t("fbViaGithub"))
         self._radio_form = QRadioButton(i18n.t("fbViaForm"))
         self._radio_form.setChecked(True)  # default when there IS a form: no account needed
-        self._radio_github.toggled.connect(self._sync_send_label)
         outer.addWidget(self._radio_form)
         outer.addWidget(self._radio_github)
         if not form_url:
@@ -103,6 +102,13 @@ class FeedbackDialog(QDialog):
         self._send.clicked.connect(self._on_send)
         actions.addWidget(self._send)
         outer.addLayout(actions)
+        # Connected HERE, after the button exists. It used to be wired where the radio is built,
+        # and the "no form configured" branch a few lines above checks that radio on -- so
+        # `toggled` reached `_sync_send_label` before `self._send` had been created and the
+        # dialog died on `AttributeError` (user, 2026-08-21, with the log line). Every path that
+        # sets the radio before this point is now just a state change; the label is settled once,
+        # below, and kept in step from here on.
+        self._radio_github.toggled.connect(self._sync_send_label)
         self._sync_send_label()
 
     # ---- toolbar ----------------------------------------------------------
