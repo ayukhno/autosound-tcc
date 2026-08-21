@@ -67,6 +67,17 @@ def _isolated_project_dir(tmp_path, monkeypatch):
     project.mkdir()
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(project))
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "0")
+    # Setting the variable is not the same as the redirection working: a cached value, an
+    # override read earlier, a helper resolving the path its own way, and the tests are back on
+    # the developer's real car with nothing said. The fixture sets it, so the fixture checks it
+    # (2026-08-21, after a test glossary was found sitting in a live project).
+    from autosound_tcc.core import config
+
+    resolved = config.project_dir().resolve()
+    assert resolved == project.resolve(), (
+        f"AUTOSOUND_PROJECT_DIR was set to {project}, but config.project_dir() answers "
+        f"{resolved} -- the tests are not isolated from the real project"
+    )
     yield
 
 

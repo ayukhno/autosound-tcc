@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import pathlib
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -2058,12 +2059,33 @@ _IN_REW = [
 
 
 def _project_glossary(glossary: dict = None) -> None:
-    """Give the test's project a glossary. `config.project_dir()` is the conftest's tmp folder."""
+    """Give the test's project a glossary, and REFUSE to write anywhere but a temp folder.
+
+    `config.project_dir()` is the conftest's tmp folder while `_isolated_project_dir` is in
+    effect, and that fixture is autouse -- so under pytest this is safe. It is not safe when this
+    module is imported OUTSIDE pytest, which is a thing that happens: an offscreen probe that
+    reuses these helpers to build a dialog gets no fixtures, `AUTOSOUND_PROJECT_DIR` is unset, and
+    `project_dir()` falls back to the developer's REAL car. Then this line writes a seven-channel
+    test glossary over it, and `glossary.json` standing beside a full `project.json` shadows it --
+    which is exactly what happened on 2026-08-21 and took an expert reading the live project to
+    find, because nothing here complained.
+
+    The guard is the invariant rather than a promise: a test glossary goes into a temp directory
+    or it goes nowhere.
+    """
     import json
+    import tempfile
 
     from autosound_tcc.core import config
 
-    (config.project_dir() / "glossary.json").write_text(
+    target = config.project_dir().resolve()
+    if not str(target).startswith(str(pathlib.Path(tempfile.gettempdir()).resolve())):
+        raise RuntimeError(
+            f"refusing to write a test glossary into {target} -- that is not a temp directory. "
+            "Set AUTOSOUND_PROJECT_DIR to a scratch folder before importing these helpers "
+            "outside pytest."
+        )
+    (target / "glossary.json").write_text(
         json.dumps(glossary if glossary is not None else _GLOSSARY), encoding="utf-8"
     )
 
