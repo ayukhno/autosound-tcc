@@ -1250,3 +1250,33 @@ def test_tcc_starts_a_turn_for_a_signal_nobody_was_around_to_carry(tmp_path):
     app.processEvents()
     panel._input.setText("half a thought")
     assert panel.nudge_for_signals(2, "look again") is False, "the Arbiter is mid-sentence"
+
+
+def test_copying_a_message_gives_back_the_table_and_not_a_column_of_cells(tmp_path):
+    """User, 2026-08-21, with the paste: a Markdown table came off the clipboard one cell per
+    line, so the answer that made sense on screen made none anywhere else.
+
+    `_markdown` turns a pipe table into a real `<table>`, and Qt's HTML-to-text converter lays
+    that out cell by cell. The source is a readable plain-text table already, so copy hands back
+    what the model actually wrote.
+    """
+    app = QApplication.instance()
+    panel = DialogPanel()
+    written = (
+        "Результат\n\n"
+        "| пара | Δφ набіг | вердикт |\n"
+        "|------|----------|---------|\n"
+        "| Ws | 116° | у межах одного оберту |\n"
+        "| Ms | 3636° | MULTIPATH |\n"
+    )
+    panel.attach_agent(FakeWorker(), SignalBus(tmp_path))
+    panel._on_chunk(TextDelta(text=written))
+    panel._on_turn_done()
+    app.processEvents()
+
+    bubble = [b for b in panel._chat.findChildren(MessageBubble)
+              if "msg-gen" in str(b.property("class") or "")][-1]
+    copied = bubble.plain_text()
+
+    assert "| Ws | 116° | у межах одного оберту |" in copied, "the row survives as a row"
+    assert copied.count("\n") < written.count("\n") + 2, "and not one line per cell"

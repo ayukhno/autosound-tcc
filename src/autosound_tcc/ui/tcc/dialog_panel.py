@@ -188,7 +188,7 @@ class ComposerInput(QPlainTextEdit):
 
 
 class MessageBubble(QFrame):
-    def __init__(self, who: str, role: str, html: str) -> None:
+    def __init__(self, who: str, role: str, html: str, source: str = "") -> None:
         super().__init__()
         self.setProperty("class", f"msg msg-{who}")
         layout = QVBoxLayout(self)
@@ -207,6 +207,12 @@ class MessageBubble(QFrame):
         self._body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self._body)
         self._html = html
+        # What the message was BEFORE it was rendered, when the caller has it. Copying goes
+        # through this: a model answers with a Markdown table, `_markdown` turns it into a real
+        # `<table>`, and Qt's HTML-to-text converter then lays that table out one cell per line --
+        # which is what landed on the clipboard (user, 2026-08-21, with the paste). The source is
+        # already a readable plain-text table; nothing has to be recovered from the markup.
+        self._source = source
         # Width the bubble would want if its text sat on one line -- lets the panel size each
         # bubble to its content (dynamic, like the web) up to the max-width cap, instead of every
         # bubble being forced to the same width.
@@ -228,8 +234,12 @@ class MessageBubble(QFrame):
         `_plain` is a tag strip kept for width measurement, where the whole message on one line is
         the point. It is the wrong thing to put on a clipboard twice over: `&amp;` and `&nbsp;`
         survive it verbatim, and `<br>` between two paragraphs comes out as a missing space.
-        Qt's own converter answers both, and it is the same engine that rendered the bubble.
+        Qt's own converter answers both, and it is the same engine that rendered the bubble --
+        which is also why it is the fallback rather than the answer: it lays a table out one cell
+        per line. Where the caller kept the source, that is what gets copied.
         """
+        if self._source:
+            return self._source.strip()
         return QTextDocumentFragment.fromHtml(self._html).toPlainText().strip()
 
     @property
@@ -247,13 +257,14 @@ class MessageBubble(QFrame):
         role_width = self._who_label.fontMetrics().horizontalAdvance(self._role) + len(self._role)
         return max(self._body.fontMetrics().horizontalAdvance(self._plain), role_width) + 28
 
-    def set_html(self, html: str) -> None:
+    def set_html(self, html: str, source: str = "") -> None:
         """Replace the body text — used while a streamed answer is still growing."""
         self._body.setText(html)
         self._plain = re.sub(r"<[^>]+>", "", html)
-        # Copy reads this, and a streamed answer replaces its body on every delta: without this
-        # line the clipboard would hand back the first chunk of a finished message.
+        # Copy reads these, and a streamed answer replaces its body on every delta: without them
+        # the clipboard would hand back the first chunk of a finished message.
         self._html = html
+        self._source = source
 
     def apply_font_scale(self, scale: float) -> None:
         # A widget's own stylesheet wins over the app-wide one for the same selector, so this
@@ -607,9 +618,9 @@ class DialogPanel(QWidget):
         for bubble in self._bubbles:
             self._fit(bubble)
 
-    def _add_bubble(self, who: str, role: str, html: str) -> None:
+    def _add_bubble(self, who: str, role: str, html: str, source: str = "") -> None:
         bubble_row = QHBoxLayout()
-        bubble = MessageBubble(who, role, html)
+        bubble = MessageBubble(who, role, html, source)
         bubble.apply_font_scale(self._font_scale)
         self._bubbles.append(bubble)
         self._fit(bubble)
@@ -850,7 +861,7 @@ class DialogPanel(QWidget):
         said, self._opening_said = getattr(self, "_opening_said", None), None
         if said:
             # Put it back: the mock is what had to go, not the Arbiter's own first line.
-            self._add_bubble("user", "Arbiter · you", _markdown(said))
+            self._add_bubble("user", "Arbiter · you", _markdown(said), said)
         self._not_visible_btn.setHidden(False)
         self._refresh_placeholder()
         self.set_session_label(resumed=resumed, phase=phase)
@@ -964,7 +975,7 @@ class DialogPanel(QWidget):
             # A live composer that swallows what you type is worse than a disabled one. Sending
             # the first message IS the explicit start, and the text becomes the opening prompt
             # rather than being thrown away in favour of a canned one.
-            self._add_bubble("user", "Arbiter · you", _markdown(text))
+            self._add_bubble("user", "Arbiter · you", _markdown(text), text)
             # Held because `attach_agent` clears the transcript a moment from now -- it drops the
             # mock so demo numbers cannot be read as measurements, and it was taking this bubble
             # with it. The first thing the Arbiter said vanished from the record while being the
@@ -975,7 +986,7 @@ class DialogPanel(QWidget):
             self._set_busy(True)
             self.startRequested.emit(text)
             return
-        self._add_bubble("user", "Arbiter · you", _markdown(text))
+        self._add_bubble("user", "Arbiter · you", _markdown(text), text)
         self._input.clear()
         if self._busy:
             # Mid-turn. The harness takes one prompt at a time, so this waits for the boundary
@@ -1068,10 +1079,11 @@ class DialogPanel(QWidget):
             return
         self._live_text += text
         if self._live_bubble is None:
-            self._add_bubble("gen", f"Generator · {self._model_label}", _markdown(self._live_text))
+            self._add_bubble("gen", f"Generator · {self._model_label}",
+                             _markdown(self._live_text), self._live_text)
             self._live_bubble = self._bubbles[-1]
         else:
-            self._live_bubble.set_html(_markdown(self._live_text))
+            self._live_bubble.set_html(_markdown(self._live_text), self._live_text)
             self._fit(self._live_bubble)
         self._scroll_to_end()
 
@@ -1181,7 +1193,7 @@ class DialogPanel(QWidget):
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again
         self._follow_again()  # answering is the user's own hand, same as sending (F-008)
-        self._add_bubble("user", "Arbiter · you", _markdown(value))
+        self._add_bubble("user", "Arbiter · you", _markdown(value), value)
         self._scroll_to_end()
         if self._worker is not None and hasattr(self._worker, "answer"):
             self._worker.answer(question_id, value)
@@ -1323,7 +1335,9 @@ class DialogPanel(QWidget):
             # model output in as rich text: asterisks and hashes showed literally, every newline
             # collapsed, so a three-page structured critique arrived as one flat paragraph (user,
             # 2026-08-11) — and an unescaped `<` in it would have been markup, not text.
-            self._add_bubble("crit", f"Critic · {model}", _markdown(critique.get("text", "")) + note)
+            self._add_bubble("crit", f"Critic · {model}",
+                             _markdown(critique.get("text", "")) + note,
+                             str(critique.get("text", "")))
         elif mode == "clipboard":
             self._add_system_message(i18n.t("criticClipboard") + note)
         elif mode == "not_ready":
