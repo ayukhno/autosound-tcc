@@ -45,6 +45,11 @@ T: dict[Lang, dict[str, str]] = {
         "noDataYet": "No data yet",
         "openQuestions": "Open",
         "openQuestionsTitle": "Open questions",
+        # One spelling for the config series, wherever it is offered: the curve window
+        # printed a bare `_0` and the capture panel a bare `v6`, which read as two
+        # different things and explained neither (user, 2026-08-21). A round (`cap_001`)
+        # is a different axis and keeps its own name.
+        "seriesItem": "series {v}",
         "logError": "Something went wrong: {error} — the details are in {path}",
         "rewPort": "REW port",
         "rewOnlineTip": "REW: online",
@@ -589,9 +594,10 @@ sub+woofers, one side, everything. The names come from this car's glossary, and 
 are the ones at the config version beside it. Nothing is fetched that the group does not name: a \
 member REW has no sweep for is reported, not skipped. It FILLS and then lets go: take a chip off \
 afterwards and nothing re-fills, which is how you hear what one driver is doing to the joint.",
-        "curveGroupVersionTip": "The DSP config version (_N) the group's sweeps are taken at. It \
-starts on the version the curves already on screen share, or on the newest this car has for those \
-drivers, and you can move it.",
+        "curveGroupVersionTip": "Which capture series the group's sweeps are taken from — the DSP \
+config they were measured under, spelled `_N` in a REW title and named the same way in the capture \
+panel. It starts on the series the curves already on screen share, or on the newest this car has \
+for those drivers, and you can move it.",
         # Named, never skipped: `curve_sum` sees only what it was handed, so it cannot tell a sum
         # of the woofers from a sum of one woofer. This sentence is the only place that can.
         "curveGroupMissing": "{group} at _{version}: {names} — not in REW. What is drawn is the \
@@ -694,6 +700,7 @@ Choose sweeps (sw) above to read this.",
         "noDataYet": "Даних поки нема",
         "openQuestions": "Відкрито",
         "openQuestionsTitle": "Відкриті питання",
+        "seriesItem": "серія {v}",
         "logError": "Щось пішло не так: {error} — деталі в {path}",
         "rewPort": "Порт REW",
         "rewOnlineTip": "REW: онлайн",
@@ -1174,9 +1181,10 @@ Choose sweeps (sw) above to read this.",
 поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не \
 мовчки пропускається. Група ЗАПОВНЮЄ і відпускає: прибереш потім один чіп — нічого не \
 підставляється назад, і саме так чути, що цей драйвер робить зі стиком.",
-        "curveGroupVersionTip": "Версія конфігурації ДСП (_N), на якій беруться свіпи групи. \
-Починає з версії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — \
-і її можна змінити.",
+        "curveGroupVersionTip": "З якої серії замірів беруться свіпи групи — це конфігурація ДСП, \
+під якою їх зняли; у назві заміру в REW вона стоїть як `_N`, і так само зветься в панелі замірів. \
+Починає з серії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — і \
+її можна змінити.",
         "curveGroupMissing": "{group} на _{version}: {names} — цього нема в REW. Намальовано суму \
 іншого набору.",
         "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \

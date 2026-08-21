@@ -183,14 +183,16 @@ def build_session(
 
     # The round's own id when there is one: the ledger version names the config the measurements
     # were taken under and cannot tell two passes at the same config apart, which is exactly what
-    # "this session's task" means (SCR-034).
+    # "this session's task" means (SCR-034). The two are spelled differently on purpose -- "series
+    # 6" is the config, `cap_002` is the pass -- because a picker holding both used to offer `v6`
+    # beside `cap_001` and say which was which nowhere (user, 2026-08-21).
     round_id = str(round_.get("id") or "") if not round_.get("closed") else ""
     return MeasSession(
         id=round_id or f"v{version}",
         version={
-            "en": f"Capture series v{version} · phase {phase}"
+            "en": f"Series {version} · phase {phase}"
             + (f" · {round_id}" if round_id else ""),
-            "uk": f"Серія v{version} · фаза {phase}" + (f" · {round_id}" if round_id else ""),
+            "uk": f"Серія {version} · фаза {phase}" + (f" · {round_id}" if round_id else ""),
         },
         groups=tuple(groups),
     )
@@ -275,8 +277,8 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
     return MeasSession(
         id=rid or f"round·{ver}",
         version={
-            "en": f"Capture series v{ver} · phase {phase} · {rid}",
-            "uk": f"Серія v{ver} · фаза {phase} · {rid}",
+            "en": f"Series {ver} · phase {phase} · {rid}",
+            "uk": f"Серія {ver} · фаза {phase} · {rid}",
         },
         groups=groups,
         used_in_steps=process_view.steps_using(state, expected),

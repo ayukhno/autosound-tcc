@@ -215,7 +215,7 @@ class MeasSession(MeasTask):
 MEAS_SESSIONS: tuple[MeasSession, ...] = (
     MeasSession(
         id="v10",
-        version={"en": "Capture series v10", "uk": "Зняти серію v10"},
+        version={"en": "Series 10", "uk": "Зняти серію 10"},
         used_in_steps=("2.3",),
         groups=(
             MeasGroup(type="sw (LB)", items=(
@@ -239,7 +239,7 @@ MEAS_SESSIONS: tuple[MeasSession, ...] = (
     ),
     MeasSession(
         id="v9",
-        version={"en": "Capture series v9 · voicing pass", "uk": "Серія v9 · voicing прохід"},
+        version={"en": "Series 9 · voicing pass", "uk": "Серія 9 · voicing прохід"},
         used_in_steps=("2.2",),
         groups=(
             MeasGroup(type="sw (LB)", items=(
@@ -263,7 +263,7 @@ MEAS_SESSIONS: tuple[MeasSession, ...] = (
     ),
     MeasSession(
         id="v8",
-        version={"en": "Capture series v8 · per-driver EQ pass", "uk": "Серія v8 · per-driver EQ прохід"},
+        version={"en": "Series 8 · per-driver EQ pass", "uk": "Серія 8 · per-driver EQ прохід"},
         used_in_steps=("2.1",),
         groups=(
             MeasGroup(type="sw (LB)", items=(

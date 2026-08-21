@@ -11,6 +11,7 @@ against the expected channel list (replacing the mock grid entirely) is still se
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -262,6 +263,21 @@ def _step_label(step_id: str) -> str:
     return step_id
 
 
+_SERIES_ID = re.compile(r"^v(\d+)$")
+
+
+def _session_label(session_id: str) -> str:
+    """`v6` reads as a version of something and explains nothing; `series 6` says which axis it
+    is on. A round id (`cap_001`) is the OTHER axis -- two passes at one config -- and keeps the
+    name the journal gave it, which is what makes the two tellable apart in one list.
+
+    User, 2026-08-21: "ось цей v6 (а до цього було v4 і ще щось) не дуже розумію і інтуітивно не
+    зрозуміло що означає". The curve window spells the same number the same way now.
+    """
+    found = _SERIES_ID.match(session_id)
+    return i18n.t("seriesItem").format(v=found.group(1)) if found else session_id
+
+
 class MeasurementPanel(QWidget):
     """The card's own yellow-tinted border is applied by the caller (main_window.py) — this widget is just the content that goes inside it."""
 
@@ -333,7 +349,7 @@ class MeasurementPanel(QWidget):
         self._session_combo.setProperty("class", "mini-select")
         for session in self._sessions:
             marker = " ●" if session.id == self._sessions[0].id else ""
-            self._session_combo.addItem(session.id + marker, session.id)
+            self._session_combo.addItem(_session_label(session.id) + marker, session.id)
         self._session_combo.currentIndexChanged.connect(
             lambda _idx: self.show_session(self._session_combo.currentData())
         )
@@ -500,7 +516,8 @@ class MeasurementPanel(QWidget):
         self._session_combo.clear()
         for session in self._sessions:
             marker = " ●" if session.id == self._sessions[0].id else ""
-            self._session_combo.addItem(session.id + marker, session.id)
+            self._session_combo.addItem(_session_label(session.id) + marker, session.id)
+        self._fit_session_combo()
         self._session_combo.blockSignals(False)
         self.show_session(self._viewing_id)
 

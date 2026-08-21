@@ -752,7 +752,10 @@ class CurveDialog(QDialog):
         """
         self._version_combo = mini_combo()
         self._version_combo.setProperty("class", "mini-select")
-        self._version_combo.setFixedWidth(96)
+        # Not a fixed 96px any more: the rows say "series 0" now rather than a bare `_0`, and a
+        # box that cannot grow would elide the word that makes the number mean something.
+        self._version_combo.setMinimumWidth(110)
+        self._version_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         attach_tip(self._version_combo, tip_html(i18n.t("curveGroupVersionTip")))
         self._version_combo.currentIndexChanged.connect(self._on_version_chosen)
 
@@ -894,10 +897,17 @@ class CurveDialog(QDialog):
         )
         blocked = combo.blockSignals(True)
         combo.clear()
+        # "series 2" and not "_02". The suffix is how REW spells it in a title and how this
+        # window used to spell it in a combo 96px wide, where it read as nothing at all -- the
+        # Arbiter asked what it even was, next to a capture panel calling the same axis `v6`
+        # (2026-08-21). One phrasing, both windows; the number is still the config's.
+        def _row(version: str) -> str:
+            return i18n.t("seriesItem").format(v=str(version).lstrip("_").lstrip("0") or "0")
+
         for version in reversed(versions):  # newest first: it is the usual answer
-            combo.addItem(f"_{version}", version)
+            combo.addItem(_row(version), version)
         if wanted is not None and combo.findData(wanted) < 0:
-            combo.addItem(f"_{wanted}", wanted)
+            combo.addItem(_row(wanted), wanted)
         at = combo.findData(wanted) if wanted is not None else -1
         combo.setCurrentIndex(at if at >= 0 else 0)
         combo.setEnabled(combo.count() > 0)

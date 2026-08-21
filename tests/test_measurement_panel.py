@@ -364,11 +364,16 @@ def test_capture_order_key_is_per_preset_and_method():
 
 
 def test_session_dropdown_lists_all_sessions_live_one_marked():
+    """The series is spelled in words (F-010): `v6` reads as a version of something, and the same
+    axis was printed `_0` in the curve window. A round id (`cap_001`) is a different axis and
+    keeps the journal's own name, which is what tells the two apart in one list."""
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     items = [panel._session_combo.itemText(i) for i in range(panel._session_combo.count())]
-    assert items == ["v10 ●", "v9", "v8"]
+    assert items == ["series 10 ●", "series 9", "series 8"]
+    assert [panel._session_combo.itemData(i) for i in range(panel._session_combo.count())] == \
+        ["v10", "v9", "v8"], "the id is what the panel is keyed on and it did not change"
 
 
 def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live_actions():
@@ -384,7 +389,7 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
-    assert panel._version.text() == "Capture series v10"
+    assert panel._version.text() == "Series 10"
     assert panel._version.isVisibleTo(panel)
     assert panel._read_btn.isEnabled()
 
@@ -396,7 +401,7 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     assert panel._session_combo.currentData() == "v9"  # combo follows programmatic switches too
 
     panel.show_session("v10")
-    assert panel._version.text() == "Capture series v10"
+    assert panel._version.text() == "Series 10"
     assert panel._version.isVisibleTo(panel)
     assert panel._read_btn.isEnabled()
 
