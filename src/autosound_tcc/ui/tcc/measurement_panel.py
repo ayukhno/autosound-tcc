@@ -18,6 +18,8 @@ from typing import Callable, Optional
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QStyle,
+    QStyleOptionComboBox,
     QComboBox,
     QDialog,
     QGridLayout,
@@ -541,7 +543,15 @@ class MeasurementPanel(QWidget):
              for i in range(self._session_combo.count())),
             default=0,
         )
-        self._session_combo.setMinimumWidth(widest + 22 + 9 + 2)
+        # The chrome was a constant of 33 and `серія 6` still came back clipped on a real macOS
+        # build (user, 2026-08-21, second run). Ask the style what its own frame costs instead of
+        # trusting the stylesheet's numbers to be the whole story, and keep a floor under it.
+        style_option = QStyleOptionComboBox()
+        style_option.initFrom(self._session_combo)
+        chrome = self._session_combo.style().sizeFromContents(
+            QStyle.ContentsType.CT_ComboBox, style_option, QSize(0, 0), self._session_combo
+        ).width()
+        self._session_combo.setMinimumWidth(widest + max(chrome, 33) + 4)
 
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
@@ -562,10 +572,11 @@ class MeasurementPanel(QWidget):
         self.sessionChanged.emit(session_id)
         is_live = session_id == self._sessions[0].id
         if is_live:
-            self._version.setText(i18n.tx(session.version))
-            # The banner elides ("Phase 1 · no capt…") long before this text runs out, and the
-            # part it drops is the part that says what is going on.
-            self._version_tip.set_text(i18n.tx(session.version))
+            # No banner here either, since 2026-08-21's second run: kept for the live round on
+            # the argument that its text is the panel's title, it turned out to elide to
+            # "Фаза −1 ·" -- a title with the title cut off -- while taking the width the picker
+            # needed. Both halves now live on the picker's hint, which never elides.
+            self._session_tip.set_text(i18n.tx(session.version))
         else:
             # No banner for a past round (user, 2026-08-21: "кнопка «Використа» не потрібна — це
             # може бути хінт на поле"). "Used in step 3" is a fact about the round the picker is
@@ -577,7 +588,7 @@ class MeasurementPanel(QWidget):
                 "<br>".join([i18n.t("measUsedInStep").format(steps=steps)]
                             + [_step_label(s) for s in session.used_in_steps])
             )
-        self._version.setVisible(is_live)
+        self._version.setVisible(False)
         self._assign_names_btn.setEnabled(is_live)
         self._read_btn.setEnabled(is_live)
         idx = self._session_combo.findData(session_id)

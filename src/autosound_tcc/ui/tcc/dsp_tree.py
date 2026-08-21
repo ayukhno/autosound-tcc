@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -486,11 +486,18 @@ class DspTreeWidget(QScrollArea):
     def sizeHint(self):  # noqa: N802 (Qt override)
         """As tall as its rows. A QScrollArea normally asks for a viewport-sized box and scrolls
         what does not fit; this one is inside the column's scroll, so what does not fit here has
-        to become height the column can scroll to."""
-        return self._body.sizeHint()
+        to become height the column can scroll to.
+
+        Asked of the LAYOUT and not of `self._body`: a widget's size hint is cached and a rebuild
+        answers with the previous view's until Qt gets round to recomputing it. `set_view` calls
+        `updateGeometry` the moment it finishes adding rows, and at that moment the cached answer
+        was 18px for a tree that needed 791 (measured, 2026-08-21). The layout computes from the
+        items it is holding, which is the question actually being asked.
+        """
+        return self._layout.sizeHint()
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
-        return self._body.sizeHint()
+        return self._layout.sizeHint()
 
     def set_view(self, view: ProjectView) -> None:
         # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so
@@ -515,3 +522,18 @@ class DspTreeWidget(QScrollArea):
             section.tableRequested.connect(self.tableRequested.emit)
             section.toggleRequested.connect(self.toggleRequested.emit)
             self._layout.insertWidget(self._layout.count() - 1, section)
+        # The new size has to be ANNOUNCED. This widget is as tall as its rows (it does not
+        # scroll -- the column does), so a rebuild that adds rows changes the height the column's
+        # layout has to give it; without this the layout keeps the height it computed for the
+        # previous view and the extra rows are simply cut off, with free space below them. Seen
+        # the moment a reload grew the tree: 219px held against a 791px hint, the last row sliced
+        # in half (user, 2026-08-21 second run -- and reloads got more frequent that same day
+        # when the flaw map started refreshing on them).
+        # Twice, and the second one is the one that works. A widget added to a layout is not
+        # shown until Qt gets to it, and a layout does not count hidden items -- so asked right
+        # here the hint is 18px of margins over a tree of thirty rows (measured). The deferred
+        # call runs after that pass, when the rows exist as far as the layout is concerned. The
+        # immediate one stays for the case where the tree is built before the window is shown,
+        # which is every startup.
+        self.updateGeometry()
+        QTimer.singleShot(0, self.updateGeometry)

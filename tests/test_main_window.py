@@ -13,6 +13,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLabel,
@@ -264,9 +265,15 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
                  if g._id == "open_questions")
     chip_texts = [
         w.text() for w in group.findChildren(QLabel)
-        if w.property("class") == "phead-sub"
+        if "open-q" in str(w.property("class") or "")
     ]
     assert any("mic.calibration_file" in t for t in chip_texts)
+    # Accented and copyable: these are the only rows in the panel asking for something, and the
+    # answer to one usually gets pasted somewhere else (F-018).
+    asking = next(w for w in group.findChildren(QLabel)
+                  if "open-q" in str(w.property("class") or ""))
+    assert asking.hasSelectedText() is False and asking.textInteractionFlags() != \
+        Qt.TextInteractionFlag.NoTextInteraction
     assert any(w.text() == "1" for w in group.findChildren(QLabel)
                if w.property("class") == "cnt"), "the header counts them"
 
@@ -1207,9 +1214,37 @@ def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_pa
     column = next(area for area in window.findChildren(QScrollArea)
                   if area is not tree and area.isAncestorOf(tree))
 
-    assert tree.height() == tree._body.sizeHint().height(), "the tree is as tall as its rows"
+    def content_bottom() -> int:
+        return max((c.geometry().bottom() for c in tree._body.children() if c.isWidgetType()),
+                   default=0)
+
+    assert tree.height() >= content_bottom(), "the tree is as tall as its rows"
     assert tree.verticalScrollBar().maximum() == 0, "and has nothing of its own to scroll"
     assert column.verticalScrollBar().maximum() > 0, "the column is what scrolls"
+
+    # And it stays that way across a RELOAD, which is where this first broke: a widget added to
+    # a layout is not shown until Qt gets to it, a layout does not count hidden items, so the
+    # height announced on the spot was 18px of margins over a tree of thirty rows -- the last row
+    # sliced in half with free space under it (user, 2026-08-21).
+    (preset / "v_001.json").write_text(json.dumps({
+        "preset": "P", "sample_rate": 48000,
+        "channels": {f"ch_{i}": {"slot": chr(65 + i), "hp": {"f": 80}, "lp": {"f": 4000}}
+                     for i in range(30)},
+    }))
+    window._safe_load_project()
+    for _ in range(6):
+        app.processEvents()
+    assert tree.height() >= content_bottom(), "a reload that grows the tree grows the widget"
+
+    (preset / "v_001.json").write_text(json.dumps({
+        "preset": "P", "sample_rate": 48000,
+        "channels": {"ch_0": {"slot": "A", "hp": {"f": 80}, "lp": {"f": 4000}}},
+    }))
+    window._safe_load_project()
+    for _ in range(6):
+        app.processEvents()
+    assert tree.height() >= content_bottom()
+    assert tree.height() < 400, "and one that shrinks it gives the room back"
     window.close()
 
 

@@ -1036,6 +1036,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-family: "SF Mono", Menlo, monospace;
         font-size: 10.5px;
     }}
+    /* .open-q -- the intake's unanswered questions. Every other `.phead-sub` is a quiet aside
+    and these are the one kind that wants something from the reader, so they carry the accent
+    rather than the muted grey they used to share with placeholder text (user, 2026-08-21). */
+    QLabel[class~="open-q"] {{ color: {t.accent}; }}
     QLabel[class~="mn-bad"] {{ color: {t.warn}; }}
     QLabel[class~="mn-wait"] {{ color: {t.muted}; }}
     QLabel[class~="mn-done"] {{ color: {t.text}; }}

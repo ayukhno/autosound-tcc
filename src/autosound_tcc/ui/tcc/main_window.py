@@ -1804,9 +1804,19 @@ class MainWindow(QMainWindow):
                 count=str(len(open_questions)),
             )
             for question in open_questions:
-                group.body_layout().addWidget(
-                    self._placeholder_label(f"🟡 {question}")
+                chip = self._placeholder_label(f"🟡 {question}")
+                # Not the muted grey every other placeholder wears: these are the only rows in
+                # the panel that are asking for something (user, 2026-08-21). And selectable +
+                # copyable, because the answer to one is usually pasted somewhere else -- a
+                # question you cannot copy is one you retype by hand.
+                chip.setProperty("class", "phead-sub open-q")
+                chip.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                copy_menu.enable_copy(
+                    chip,
+                    value=lambda c=chip: c.selectedText() or c.text().lstrip("🟡 "),
+                    row=lambda c=chip: c.text().lstrip("🟡 "),
                 )
+                group.body_layout().addWidget(chip)
             self._project_section.body_layout().addWidget(group)
 
     # ---- detail-pane wiring --------------------------------------------

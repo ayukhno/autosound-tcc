@@ -377,32 +377,28 @@ def test_session_dropdown_lists_all_sessions_live_one_marked():
 
 
 def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live_actions():
-    """User request 2026-07-28: the banner titles the live session, and browsing history says
-    which plan step that round was used for; live-only actions (Read/assign-names) disable since
-    they always target the live session, not what's shown.
+    """User request 2026-07-28: what the round is for, and live-only actions (Read/assign-names)
+    disabled when browsing history, since they always target the live session.
 
-    Since 2026-08-21 the history half of that is a HINT on the picker rather than a banner beside
-    it: as a widget it ate the width the picker needed to print `cap_002`, while eliding to
-    "Використа" itself (user, with the screenshot). The banner stays for the live round, whose
-    text is the panel's title.
+    Since 2026-08-21 that text is a HINT on the picker rather than a banner beside it: as a widget
+    it ate the width the picker needed and elided the very words it existed for -- "Використа"
+    for a past round, "Фаза −1 ·" for the live one. A hint never elides.
     """
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
-    assert panel._version.text() == "Series 10"
-    assert panel._version.isVisibleTo(panel)
+    assert not panel._version.isVisibleTo(panel), "no banner, live or past"
+    assert "Series 10" in panel._session_tip.text()
     assert panel._read_btn.isEnabled()
 
     panel.show_session("v9")
-    assert not panel._version.isVisibleTo(panel), "no banner for a past round"
     assert "Used in step 2.2" in panel._session_tip.text()
     assert not panel._read_btn.isEnabled()
     assert not panel._assign_names_btn.isEnabled()
     assert panel._session_combo.currentData() == "v9"  # combo follows programmatic switches too
 
     panel.show_session("v10")
-    assert panel._version.text() == "Series 10"
-    assert panel._version.isVisibleTo(panel)
+    assert "Series 10" in panel._session_tip.text()
     assert panel._read_btn.isEnabled()
 
 
