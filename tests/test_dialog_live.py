@@ -29,7 +29,7 @@ from autosound_tcc.core.mcp_server import ConfirmRequest  # noqa: E402
 from autosound_tcc.core.signal_bus import SignalBus  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker  # noqa: E402
-from autosound_tcc.ui.tcc.dialog_panel import DialogPanel  # noqa: E402
+from autosound_tcc.ui.tcc.dialog_panel import DialogPanel, MessageBubble  # noqa: E402
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge  # noqa: E402
 
 
@@ -1192,3 +1192,61 @@ def test_sending_a_message_rearms_the_chase(tmp_path):
     assert bar.value() == bar.maximum()
     assert panel._new_below_btn.isHidden()
     assert panel._unread_anchor is None
+
+
+def test_the_first_thing_the_arbiter_says_survives_the_session_starting(tmp_path):
+    """User, 2026-08-21: "після Привіт робота пішла (але сам Привіт пропав)".
+
+    The bubble was added and then swept away: `attach_agent` clears the transcript so demo
+    numbers cannot be read as measurements, and it was taking the Arbiter's own first line with
+    it — the line that started the session.
+    """
+    app = QApplication.instance()
+    panel = DialogPanel()
+    panel._input.setText("Привіт")
+    started: list[str] = []
+    panel.startRequested.connect(started.append)
+    panel._on_send()
+    app.processEvents()
+
+    assert started == ["Привіт"]
+
+    panel.attach_agent(FakeWorker(), SignalBus(tmp_path))
+    app.processEvents()
+
+    said = [b.plain_text() for b in panel._chat.findChildren(MessageBubble)
+            if "msg-user" in str(b.property("class") or "")]
+    assert said == ["Привіт"], "the line that started the session is still in the record"
+
+
+def test_tcc_starts_a_turn_for_a_signal_nobody_was_around_to_carry(tmp_path):
+    """F-020. Delivery rides into the next turn, and a click used to have to wait for the Arbiter
+    to say something unrelated before one existed (user, 2026-08-21).
+
+    Refused while a turn is running, with no session, and while the composer holds unsent text —
+    someone mid-sentence owns the next turn, not a machine.
+    """
+    app = QApplication.instance()
+    panel = DialogPanel()
+    worker = FakeWorker()
+
+    assert panel.nudge_for_signals(1, "look") is False, "no session, no turn"
+
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    app.processEvents()
+    assert panel.nudge_for_signals(2, "look") is False, "the opening turn is running"
+
+    panel._on_turn_done()
+    app.processEvents()
+    sent_before = list(worker.sent)
+
+    assert panel.nudge_for_signals(2, "look") is True
+    assert worker.sent == [*sent_before, "look"]
+    assert panel._busy is True
+
+    assert panel.nudge_for_signals(2, "look again") is False, "a turn is already running"
+
+    panel._on_turn_done()
+    app.processEvents()
+    panel._input.setText("half a thought")
+    assert panel.nudge_for_signals(2, "look again") is False, "the Arbiter is mid-sentence"

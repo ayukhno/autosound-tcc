@@ -303,6 +303,8 @@ class DialogPanel(QWidget):
         # never switched off, so a thought that arrives while the model is working is not lost to
         # a disabled widget -- see `_on_send`.
         self._queued: list[str] = []
+        # The first thing typed into a fresh panel, held across `attach_agent`'s clear.
+        self._opening_said: Optional[str] = None
         # Set once the Arbiter has answered "save" to the quit question: the session gets its
         # last turn and nothing may start another one. See `hold_queue_for_quit`.
         self._quitting = False
@@ -845,6 +847,10 @@ class DialogPanel(QWidget):
         worker.bus = bus
         self._model_label = model or i18n.t("generator")
         self._clear_bubbles()
+        said, self._opening_said = getattr(self, "_opening_said", None), None
+        if said:
+            # Put it back: the mock is what had to go, not the Arbiter's own first line.
+            self._add_bubble("user", "Arbiter · you", _markdown(said))
         self._not_visible_btn.setHidden(False)
         self._refresh_placeholder()
         self.set_session_label(resumed=resumed, phase=phase)
@@ -959,6 +965,12 @@ class DialogPanel(QWidget):
             # the first message IS the explicit start, and the text becomes the opening prompt
             # rather than being thrown away in favour of a canned one.
             self._add_bubble("user", "Arbiter · you", _markdown(text))
+            # Held because `attach_agent` clears the transcript a moment from now -- it drops the
+            # mock so demo numbers cannot be read as measurements, and it was taking this bubble
+            # with it. The first thing the Arbiter said vanished from the record while being the
+            # very thing that started the session (user, 2026-08-21: "після Привіт робота пішла
+            # (але сам Привіт пропав)").
+            self._opening_said = text
             self._input.clear()
             self._set_busy(True)
             self.startRequested.emit(text)
@@ -977,6 +989,34 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
         self._set_busy(True)
         self._worker.send(text)
+
+    def has_agent(self) -> bool:
+        """Is a session actually attached? The MCP server is up long before one is, so asking it
+        answers a different question -- see `main_window._on_channel_toggle`."""
+        return self._worker is not None
+
+    def nudge_for_signals(self, count: int, text: str) -> bool:
+        """Start a turn because the Arbiter used the UI and nobody is talking. Returns whether.
+
+        F-009 delivers un-acknowledged signals by riding them into the next turn, and that only
+        helps when a next turn exists: the Arbiter switched a channel, said nothing, and the model
+        answered when they finally typed something unrelated (user, 2026-08-21 -- "команда на
+        переключення не спрацьовує поки не відправиш щось від Арбітра"). A click is a request; it
+        should not need a chaperone.
+
+        Refused while a turn is running (the signals ride into it anyway), with no session, or
+        while there is text in the composer -- someone mid-sentence is about to send their own
+        turn, and stealing the boundary from them would put their words behind a machine's.
+
+        Announced as a system line rather than pretending the Arbiter typed it: TCC started this
+        turn, and the transcript should say who did what.
+        """
+        if self._worker is None or self._busy or self._input.text().strip():
+            return False
+        self._add_system_message(i18n.t("signalNudge").format(count=count))
+        self._set_busy(True)
+        self._worker.send(text)
+        return True
 
     def _on_stop(self) -> None:
         """Interrupt the running turn. The worker owns the session, so ask it, don't reach in.

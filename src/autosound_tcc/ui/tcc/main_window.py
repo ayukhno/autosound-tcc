@@ -563,6 +563,15 @@ class MainWindow(QMainWindow):
         self._pending_timer = QTimer(self)
         self._pending_timer.setInterval(1000)
         self._pending_timer.timeout.connect(self._tick_pending_toggles)
+        # F-020. Delivery rides into the next turn, and until this there had to BE a next turn:
+        # a click was answered whenever the Arbiter happened to say something else. Polled rather
+        # than pushed from the bus, because `push()` is called on the GUI thread but `ack()` is
+        # not, and a timer here asks the question where the answer can be acted on.
+        self._nudged_signal_ids: set[str] = set()
+        self._nudge_timer = QTimer(self)
+        self._nudge_timer.setInterval(2000)
+        self._nudge_timer.timeout.connect(self._nudge_for_open_signals)
+        self._nudge_timer.start()
         self._rew_online: bool | None = None  # None = not checked yet -- read before _build_left()
         # Diagnostics (TCC-TZ.md §8). Set up before _build_header(), which adds the button that
         # opens the dialog, and before _load_project(), which re-runs the check.
@@ -2148,6 +2157,13 @@ class MainWindow(QMainWindow):
         if server is None:
             self._dialog._add_system_message(i18n.t("noSessionForSignal"))
             return
+        # The server outlives any session -- it is up before the first message and after the last
+        # -- so "the server is here" is not "somebody is listening". Saying "the model will record
+        # this" with no session running promises something that cannot happen until one starts,
+        # which read as the AI being broken (user, 2026-08-21: "враження, що ШІ не запускається").
+        # The request is NOT dropped: the bus keeps it and the first turn of the next session
+        # carries it, which is exactly what happened when they typed "Привіт".
+        listening = self._dialog.has_agent()
         key = (group_id, channel)
         waiting = self._pending_toggles.get(key)
         if waiting is not None and waiting["on"] == on and server.bus.is_open(waiting["id"]):
@@ -2166,7 +2182,7 @@ class MainWindow(QMainWindow):
         self._paint_pending_toggle(group_id, channel)
         self._pending_timer.start()
         self._dialog._add_system_message(
-            i18n.t("chanToggleSent").format(
+            i18n.t("chanToggleSent" if listening else "chanToggleQueued").format(
                 channel=channel, state=i18n.t("chanOn" if on else "chanOff")
             )
         )
@@ -2218,6 +2234,34 @@ class MainWindow(QMainWindow):
             self._rebuild_system_params()
         if not self._pending_toggles:
             self._pending_timer.stop()
+
+    def _nudge_for_open_signals(self) -> None:
+        """Give an un-answered signal a turn of its own, once.
+
+        ONCE per signal, tracked by id: if the model reads the queue and does nothing about it,
+        starting another turn would be a loop that spends the Arbiter's money to repeat itself.
+        A signal that has been offered a turn and ignored stays open -- the row still says it is
+        waiting, `get_tcc_state` still says the count out loud, and every later turn still carries
+        it. What it does not get is a second turn of its own.
+
+        The ids are dropped once the bus has closed them, so a channel switched off and on again
+        later is a new request and gets its own turn.
+        """
+        server = self._mcp_server
+        if server is None:
+            return
+        open_ids = {sid for sid in self._nudged_signal_ids if server.bus.is_open(sid)}
+        self._nudged_signal_ids = open_ids
+        count = server.bus.pending_count
+        if not count:
+            return
+        brief = server.bus.unacked_brief()
+        fresh = [line for line in brief.splitlines() if "id " in line]
+        ids = {line.rsplit("id ", 1)[-1].rstrip(")") for line in fresh}
+        if ids <= open_ids:
+            return  # nothing here that has not already been handed a turn
+        if self._dialog.nudge_for_signals(count, i18n.t("signalNudgePrompt")):
+            self._nudged_signal_ids = open_ids | ids
 
     def _notify_missing_records(self, state: dict) -> None:
         """Say when a decision the method leans on exists only in the conversation.
