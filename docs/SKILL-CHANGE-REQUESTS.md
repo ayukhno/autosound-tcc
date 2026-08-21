@@ -1622,7 +1622,10 @@ from a registry we do not own is the wrong direction (the Arbiter's point, and i
 
 ## SCR-054 — the installer puts TCC on the default branch, while TCC now updates by tag
 
-**Status**: proposed (2026-08-22, alongside F-024 on the TCC side)
+**Status**: proposed (2026-08-22, alongside F-024 on the TCC side) — **and largely folded into
+SCR-055**, which proposes moving the installer to TCC entirely. If that move happens, this ask
+is done as part of it. Kept separate because it is the cheap fix that stands on its own if the
+move is declined or deferred: one glob, one sort, ten minutes.
 **Target**: skill — `install.sh` (line ~829) and `install.ps1`, wherever `autosound-tcc` is installed
 **TCC dependency**: done. `updates.newest_tcc_tag()` picks the newest `v*` tag, the update button
 pins it (`git+…@vX.Y.Z`), and the row compares the installed version against that release.
@@ -1645,3 +1648,73 @@ repository and glob.
 **Why it matters more than it looks**: "update" and "install" have to mean the same thing, or a
 tester's machine and a fresh machine run different code with the same version number on screen —
 and every bug report from either becomes a question about which one it was.
+
+---
+
+## SCR-055 — the installer belongs to TCC: a request to agree the move, not to make it
+
+**Status**: proposed (2026-08-22, by the Arbiter — "інсталятор це наш проект"). **Nothing has been
+moved.** This asks the method's side to agree the boundary and the migration, before either repo
+touches a file.
+
+### What is being proposed
+
+`install.sh` and `install.ps1` move from the method's repository to TCC's, under `packaging/`.
+
+### Why — the dependency currently points the wrong way
+
+The stated invariant between the two repositories is: **the method works without TCC; TCC always
+needs the method.** The installer breaks it. Measured on today's `main`:
+
+- `install.sh` is **1224 lines**, `install.ps1` is **1070**;
+- `autosound-tcc` appears **50 times** in `install.sh`;
+- it knows TCC's repository URL, its `[gui,claude]` extras, and that it needs Python 3.12.
+
+So the method's repository carries knowledge of TCC. It is also not a method installer by scope: it
+installs Claude Code, the method, numpy/scipy/matplotlib, optionally Gemini/`gh`/omp, **and** the
+desktop app. It is a PRODUCT installer that happens to live where it was first written.
+
+Moving it to TCC removes the inversion rather than creating one: TCC depending on the method is the
+relationship that already exists.
+
+A supporting detail, not an argument on its own: TCC has carried empty `packaging/macos` and
+`packaging/windows` directories (`.gitkeep` only) since its very first commit.
+
+### The condition the method's side should hold us to
+
+**The method must keep its own way to be installed alone, with no mention of TCC.** Even three
+lines in its README (clone, then symlink into `~/.claude/skills/autosound-tuning`) is enough.
+Without that, "the method works without TCC" stays true at runtime and becomes false at
+installation — which is worse, because nobody notices until someone wants only the method.
+
+### The migration risk that has to be handled in the same move
+
+The installer is fetched by URL, and that URL is published in **both** READMEs:
+
+    curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash
+
+TCC's own README carries it three times (install, `--terminal`, `--uninstall`). Deleting the file
+breaks every existing instruction, including ones already in people's notes. Proposed sequence:
+
+1. the file moves to TCC; the TCC URL becomes canonical;
+2. the method's repository keeps a **thin stub** at the old path for one or two releases: it
+   downloads and runs the new one, and prints one line saying the installer moved;
+3. both READMEs, and TCC's own diagnostics text, point at the new URL;
+4. the stub is deleted a release later.
+
+### What TCC's side will do once this is agreed
+
+- carry both installers into `packaging/`, preserving history;
+- **pin the TCC half to a release tag** — which is SCR-054, and stops being a separate ask;
+- rewrite the URLs in TCC's README and in the app;
+- hand the method's side a ready-made stub plus the exact list of lines to remove there, so that
+  repository's change is one small commit rather than a two-thousand-line migration.
+
+### Open questions for the method's side
+
+1. **Both installers, or `install.sh` first?** Windows was written later and tested in the
+   Parallels VMs; moving both at once means one migration, moving one means two.
+2. **How long does the stub live?** One release, or two?
+3. **Does the method want a minimal installer of its own**, or are README instructions enough?
+4. **Is there anything in the installer that serves the method alone** and should stay behind —
+   `--skill-ref` handling, the uninstall path, the Claude Code bootstrap?
