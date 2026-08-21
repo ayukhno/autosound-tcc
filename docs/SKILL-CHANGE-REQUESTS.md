@@ -1568,7 +1568,18 @@ which six words are the handle is the one who wrote the paragraph.
 
 ## SCR-053 — a capture's identity belongs in its title, and the round should say which REW file
 
-**Status**: proposed (2026-08-21, from the Arbiter, after F-017 landed and could only filter)
+**Status**: WITHDRAWN the same evening (2026-08-21). The Arbiter's objection stands and is
+the right one: TCC needs per-round identity, the skill lives perfectly well without it, and a
+shared grammar should not grow a field for one consumer. It also turned out not to be needed —
+`rew-api-quirks.md` says a measurement can be addressed by title **or by the stable `uuid`**,
+so TCC can hold the mapping in its own store and resolve by uuid, changing no titles and
+asking the skill for nothing. Kept as the record of why the title route was dropped: the
+skill's parser does not tolerate a suffix at all — measured, `w-L_02 (sw) #cap_002` comes back
+as `code="w-L_02 (sw) #cap"`, method `None`, silently wrong, and even `INV` / `noXO` parse as
+`None`. Any renaming by TCC would have corrupted the skill's own reading of the same strings.
+The TCC-side plan is F-023 in `docs/TODO.md`.
+
+**Original ask, for the record** (2026-08-21, after F-017 landed and could only filter)
 **Target**: skill — the capture flow and `naming-and-structure §3`, plus whatever opens a round
 **TCC dependency**: none to build. TCC already offers the rounds in the curve window (F-017) and
 already reads `expected` / `taken` off the round record; both start working properly the moment
