@@ -245,11 +245,13 @@ class DetailPane(QFrame):
     def open_table(self, group: ProfileGroup, select_row_id: Optional[str] = None) -> None:
         self._group, self._row, self._mode = group, None, "table"
         self._pair_btn.setVisible(False)
-        self._title.setText(f"{group.label} · {len(group.rows)}")
+        # `rows_visible()` and not `rows`: an off channel is not part of the rig being tuned, and
+        # counting it here said "· 8" over six rows (user, 2026-08-21).
+        self._title.setText(f"{group.label} · {len(group.rows_visible())}")
         table = self._build_table(group)
         self._scroll.setWidget(table)
         if select_row_id is not None:
-            for r, row in enumerate(group.rows_ordered()):
+            for r, row in enumerate(group.rows_visible()):
                 if row.id == select_row_id:
                     table.selectRow(r)
                     break
@@ -307,8 +309,8 @@ class DetailPane(QFrame):
     def _on_tab_eq(self) -> None:
         if self._row is not None:
             self.open_eq(self._group, self._row)
-        elif self._group is not None and self._group.rows:
-            self.open_eq(self._group, self._group.rows_ordered()[0])
+        elif self._group is not None and self._group.rows_visible():
+            self.open_eq(self._group, self._group.rows_visible()[0])
 
     def _on_pair_toggle(self) -> None:
         self._pair_mode = not self._pair_mode
@@ -320,7 +322,8 @@ class DetailPane(QFrame):
     def _build_table(self, group: ProfileGroup) -> QTableWidget:
         columns = [f for f in group.fields if f in _FIELD_COLUMNS]
         headers = ["ID", i18n.t("colChan")] + [_FIELD_COLUMNS[f] for f in columns]
-        table = QTableWidget(len(group.rows), len(headers))
+        rows = group.rows_visible()
+        table = QTableWidget(len(rows), len(headers))
         table.setProperty("class", "ptable")
         table.setHorizontalHeaderLabels(headers)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -335,7 +338,7 @@ class DetailPane(QFrame):
         apply_caps(header, spacing_px=0.7)  # QSS text-transform/letter-spacing don't apply to th
 
         t = current_theme()
-        for r, row in enumerate(group.rows_ordered()):
+        for r, row in enumerate(rows):
             id_item = QTableWidgetItem(row.slot or row.id)
             id_item.setForeground(QColor(t.accent))
             id_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
@@ -348,7 +351,7 @@ class DetailPane(QFrame):
             table.setRowHeight(r, 26)
 
         def _activate(r: int, _c: int) -> None:
-            row_obj = group.rows_ordered()[r]
+            row_obj = rows[r]
             self.tableRowActivated.emit(group.id, row_obj.id)
             # cellClicked fires from inside QTableWidget's own mouseReleaseEvent; open_eq()
             # replaces this table's widget in self._scroll (QScrollArea.setWidget deletes the

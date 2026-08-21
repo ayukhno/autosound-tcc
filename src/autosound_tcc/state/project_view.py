@@ -130,10 +130,19 @@ def dsp_from_profile(project_dir_: Optional[Path] = None) -> Optional[str]:
     return name or None
 
 
-def load_channel_summary(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
-    """`(label, value)` rows for the project-scoped channel-tier summary (SCR-016), e.g.
-    `("Virtual channels", "8 (1 off)")`. Not re-derived from the ledger client-side — the skill
-    already counts this at intake and writes it here."""
+def load_channel_summary(
+    project_dir_: Optional[Path] = None,
+) -> tuple[tuple[str, int, int], ...]:
+    """`(tier_id, total, off)` for the project-scoped channel-tier summary (SCR-016), e.g.
+    `("virtual_channels", 8, 1)`. Not re-derived from the ledger client-side — the skill already
+    counts this at intake and writes it here.
+
+    The tier ID and not a label: this used to title each row by prettifying the JSON key
+    (`virtual_channels` → `Virtual channels`) and to spell the count `8 (1 off)`, so a Ukrainian
+    panel read "Virtual channels 8 (1 off)" among its Ukrainian rows (user, 2026-08-21). A key can
+    be translated where an English sentence built here cannot, so the words belong to the renderer
+    — the same store-facts/derive-views split the ledger follows.
+    """
     summary = _load(project_dir_).get("channel_summary") or {}
     if not isinstance(summary, dict):
         return ()
@@ -142,12 +151,10 @@ def load_channel_summary(project_dir_: Optional[Path] = None) -> tuple[tuple[str
         if not isinstance(counts, dict):
             continue
         total = counts.get("total")
-        if total is None:
+        if not isinstance(total, int):
             continue
-        off = counts.get("off") or 0
-        label = str(tier_id).replace("_", " ").capitalize()
-        value = f"{total}" + (f" ({off} off)" if off else "")
-        rows.append((label, value))
+        off = counts.get("off")
+        rows.append((str(tier_id), total, off if isinstance(off, int) else 0))
     return tuple(rows)
 
 

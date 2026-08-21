@@ -224,6 +224,23 @@ def _vline() -> QFrame:
     return line
 
 
+def _tier_label(tier_id: str) -> str:
+    """A channel tier's name for a Project-params row, in the panel's own language.
+
+    `i18n.t` answers with the key itself when it has never heard of one, which for a tier the
+    skill invents would print `chanSum_rear_fill` at a person. An unknown tier falls back to the
+    id read as words -- the same thing the summary did for every tier before it was translated.
+    """
+    key = f"chanSum_{tier_id}"
+    label = i18n.t(key)
+    return tier_id.replace("_", " ").capitalize() if label == key else label
+
+
+def _tier_count(total: int, off: int) -> str:
+    """`8` when every channel is in play, `8 (1 off)` when one is not. No `(0 off)` noise."""
+    return i18n.t("chanSumOff").format(total=total, off=off) if off else str(total)
+
+
 def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
     (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
@@ -1108,7 +1125,7 @@ class MainWindow(QMainWindow):
             rows = group.rows_ordered()
             if not rows:
                 continue
-            live = sum(1 for row in rows if not (row.hidden or row.off))
+            live = len(group.rows_visible())
             section = CollapsibleGroup(
                 f"sys/{group.id}",
                 # The tree's own naming, so the two panels call a tier the same thing and neither
@@ -1182,7 +1199,7 @@ class MainWindow(QMainWindow):
             choice = model_choices.find(entries, key)
             return choice.label if choice else key.split(":", 1)[-1]
 
-        gate = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        gate = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
         return [
             (i18n.t("cfgLanguage"), i18n.t("langNameUk") if i18n.current_language() == "uk"
@@ -1196,7 +1213,7 @@ class MainWindow(QMainWindow):
                                         else "cfgThemeLight")),
             (i18n.t("cfgGate"), i18n.t({omp_session.GATE_WRITES: "gateWrites",
                                         omp_session.GATE_FOREIGN: "gateForeign",
-                                        omp_session.GATE_AUTO: "gateAuto"}.get(gate, "gateWrites"))),
+                                        omp_session.GATE_AUTO: "gateAuto"}.get(gate, "gateAuto"))),
         ]
 
     def _set_rew_online(self, online: bool) -> None:
@@ -1590,6 +1607,11 @@ class MainWindow(QMainWindow):
         # were also a load behind ever after, which nobody could see because the two agreed.
         self._view = view
         self._rebuild_system_params()
+        # The flaw map comes out of the same `project.json` as everything else on this path, and
+        # was the one panel a reload did not touch: built at startup, refreshed on a language
+        # switch, and never again -- so a flaw the skill recorded mid-session only appeared after
+        # a restart (user, 2026-08-21). Its own docstring already claimed this call existed.
+        self._rebuild_acoustics()
         self._tree.set_view(view)
         self._set_project_params(view)
         self._refresh_open_detail()
@@ -1733,8 +1755,10 @@ class MainWindow(QMainWindow):
             self._project_section.body_layout().addWidget(_kv_row(label, value))
         summary_rows = project_view.load_channel_summary() if view else ()
         open_questions = project_view.load_open_questions() if view else ()
-        for label, value in summary_rows:
-            self._project_section.body_layout().addWidget(_kv_row(label, value))
+        for tier_id, total, off in summary_rows:
+            self._project_section.body_layout().addWidget(
+                _kv_row(_tier_label(tier_id), _tier_count(total, off))
+            )
         for question in open_questions:
             chip = self._placeholder_label(f"🟡 {i18n.t('openQuestions')}: {question}")
             self._project_section.body_layout().addWidget(chip)
@@ -2671,7 +2695,7 @@ class MainWindow(QMainWindow):
                 bridge=self._bridge,
                 model=choice.model,
                 resume=resumed,
-                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
+                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT,
                 always_allowed=self._always_allowed(),
                 effort=effort,
             )
@@ -2682,7 +2706,7 @@ class MainWindow(QMainWindow):
                 mcp_token=server.token,
                 bridge=self._bridge,
                 model=choice.model,
-                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES,
+                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT,
                 always_allowed=self._always_allowed(),
                 effort=effort,
             )
@@ -2752,7 +2776,7 @@ class MainWindow(QMainWindow):
         # Plain attributes on both adapters, read at the moment a permission is judged, so
         # assigning them is the whole of "apply now" -- no restart, no queue, no thread hop.
         if hasattr(session, "gate"):
-            session.gate = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+            session.gate = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
         if hasattr(session, "always_allowed"):
             session.always_allowed = self._always_allowed()
 
@@ -2997,7 +3021,7 @@ class MainWindow(QMainWindow):
         self._set_project_params(getattr(self, "_view", None))
 
     def _refresh_project_button(self) -> None:
-        current = self._project_setting(_GATE_KEY) or omp_session.GATE_WRITES
+        current = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
         for mode, action in getattr(self, "_gate_actions", {}).items():
             action.setChecked(mode == current)
         chosen = config.chosen_project_dir()

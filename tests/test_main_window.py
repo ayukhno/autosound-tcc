@@ -247,6 +247,7 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     assert system_kv["Mic"] == "UMIK-1"
 
     project_kv = _kv_texts(window._project_section)
+    # Translated through i18n, not prettified out of the JSON key (F-006).
     assert project_kv["Virtual channels"] == "8 (1 off)"
 
     chip_texts = [
@@ -1151,22 +1152,29 @@ def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):
     assert i18n.tx(steps["delays"].tag) in ("unproven", "без доказу")
 
 
-def test_the_gate_mode_is_a_project_setting_and_defaults_to_asking(monkeypatch):
-    """"Every write" first: narrowing it is a choice someone makes after it gets in the way, not
-    a default they never saw."""
+def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypatch):
+    """`auto` first (user, 2026-08-21). "Every write" was the default on the argument that a
+    strict gate teaches; what it taught was clicking through, and the writes that reach the car
+    confirm inside TCC's own tools whatever this is set to. Narrowing it is now the choice
+    someone makes deliberately.
+
+    The default is asserted through `GATE_DEFAULT` and not by naming a mode, because the point of
+    the constant is that six call sites cannot drift apart again."""
     from autosound_tcc.core import omp_session, project_settings
 
     _catalogue(monkeypatch, [])
     _app()
     window = MainWindow()
 
-    assert window._gate_actions[omp_session.GATE_WRITES].isChecked()
+    assert omp_session.GATE_DEFAULT == omp_session.GATE_AUTO
+    assert window._gate_actions[omp_session.GATE_DEFAULT].isChecked()
+    assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
 
     window._set_gate_mode(omp_session.GATE_FOREIGN)
 
     assert project_settings.get(config.tcc_dir(), "gate") == omp_session.GATE_FOREIGN
     assert window._gate_actions[omp_session.GATE_FOREIGN].isChecked()
-    assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
+    assert not window._gate_actions[omp_session.GATE_AUTO].isChecked()
 
 
 def test_the_effort_picker_offers_three_levels_and_none_of_them_is_cheap(monkeypatch):

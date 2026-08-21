@@ -546,7 +546,6 @@ class CurveDialog(QDialog):
         # The all-pass is banked beside the delay, by the same handler: it writes every driver's
         # current state, and which of the two moved does not change what is written.
         self._view.allpassChanged.connect(self._bank_current_delay)
-        self._view.sumToggled.connect(self._on_sum_toggled)
         layout.addWidget(self._view, stretch=1)
 
         # Everything read so far, and one button that hands the whole set to the model. A delay is
@@ -601,7 +600,6 @@ class CurveDialog(QDialog):
         self._titles = list(titles)
         self._apply_delay_resolution()
         self._render_bank()
-        self._on_sum_toggled(self._view.sum_shown())
         self._settle_kind(kind)
 
     # ---- the ONE visible selection (CURVE-ANALYSIS-PLAN.md step 3, Advisor 2026-08-18) -----
@@ -729,9 +727,15 @@ class CurveDialog(QDialog):
         """The three widgets the chip row opens with, beside the kind picker: version, group,
         `Choose…`.
 
-        Individual widgets and NOT a box any more (2026-08-19): they live in the flow layout with
-        the chips now, and a box inside a wrapping row is a block that cannot wrap — which is the
-        whole reason the flow exists. Hiding is per widget as a result; see `_on_sum_toggled`.
+            Individual widgets and NOT a box any more (2026-08-19): they live in the flow layout
+        with the chips now, and a box inside a wrapping row is a block that cannot wrap — which is
+        the whole reason the flow exists.
+
+        All four are always visible. Version and group used to hide with Σ (2026-08-18: "поки я не
+        включив суму немає сенсу показувати ось ці групи"), and that reading is withdrawn (user,
+        2026-08-21): both combos are a quick way to say WHAT IS DRAWN, and the groups among them
+        are ready-made combinations rather than a question about sums. Σ draws the sum and decides
+        nothing else on this row.
 
         Version and group are two controls and not one, because they answer different questions and
         the second is the one that goes wrong quietly: `Ws` says which drivers, `_02` says which
@@ -781,34 +785,6 @@ class CurveDialog(QDialog):
         self._choose_btn.setMenu(self._choose_menu)
         self._fill_choose_menu()
         self._sync_version_combo()
-
-    def _on_sum_toggled(self, on: bool) -> None:
-        """Offer the group and version pickers only while a sum is on screen.
-
-        User, 2026-08-18, with the screenshot: "поки я не включив суму немає сенсу показувати ось
-        ці групи". Groups exist to build a sum — a group IS "these drivers, added up" — so with Σ
-        off they are two combos answering a question nobody asked.
-
-        The two combos individually, since they stopped being a box (2026-08-19): a hidden widget
-        takes no room in the flow (`_FlowLayout._lay_out` skips it), so the row closes up around
-        them and the chips move left rather than a gap being left where a box used to be.
-
-        Hidden NARROWLY, and this is the part that had to be got right. The chips and `Choose…`
-        never hide: they are the selection, the Advisor's rule is that the selection is always
-        visible, and with the measurement pickers gone they are the only way to change what is
-        drawn — a window that hid them with Σ off would be a window you cannot use without the sum.
-        The kind picker stays for the same reason: what is DRAWN is not a question about sums.
-
-        Nothing is lost when the combos go away: every path that edits the chips has already let
-        go of the group by then (`_clear_group`), and hiding a combo changes no selection.
-        """
-        for combo in (getattr(self, "_version_combo", None), getattr(self, "_group_combo", None)):
-            if combo is not None:
-                combo.setVisible(bool(on))
-        if self._chip_row is not None:
-            # The flow measures itself from the items it is holding, and two of them just changed
-            # width to nothing.
-            self._chip_row.invalidate()
 
     def _fill_group_combo(self) -> None:
         """Every group this car has, with its TYPE on the row.

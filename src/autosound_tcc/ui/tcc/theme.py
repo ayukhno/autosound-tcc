@@ -78,6 +78,13 @@ PALETTE_DARK: dict[str, str] = {
     "accent": "#e8973c", "accent_dim": "#b3712c",
     "ok": "#4bbf87", "inv": "#e8973c", "off": "#6a7686", "warn": "#e05c5c",
     "info": "#5aa9e6", "yellow": "#e8c34a",
+    # The Arbiter's own blue, and its own token on purpose. It was `accent`, and an
+    # orange message bubble reads as an alarm rather than as "you said this" (user,
+    # 2026-08-21). Not `info` either: that already colours the Critic's bubble, the
+    # system bubble and Send, so borrowing it would leave three of the four voices in
+    # the conversation the same colour. A periwinkle, far enough from the azure to be
+    # told apart at the width of a border.
+    "arbiter": "#8f9bf5",
 }
 
 PALETTE_LIGHT: dict[str, str] = {
@@ -87,6 +94,7 @@ PALETTE_LIGHT: dict[str, str] = {
     "accent": "#c56f18", "accent_dim": "#a95f14",
     "ok": "#1f9c63", "inv": "#c56f18", "off": "#8492a0", "warn": "#c0392b",
     "info": "#2f7fc4", "yellow": "#c99a12",
+    "arbiter": "#4453c4",
 }
 
 
@@ -1035,8 +1043,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: 1px solid {t.mix('info', 30, 'border')};
     }}
     QFrame[class~="msg-user"] {{
-        background: {t.mix('accent', 16, 'panel2')};
-        border: 1px solid {t.mix('accent', 30, 'border')};
+        background: {t.mix('arbiter', 16, 'panel2')};
+        border: 1px solid {t.mix('arbiter', 30, 'border')};
     }}
     QFrame[class~="msg-sys"] {{
         background: {t.mix('info', 10, 'panel2')};
@@ -1049,7 +1057,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.muted};
     }}
     QLabel[class~="msg-who-crit"] {{ color: {t.info}; }}
-    QLabel[class~="msg-who-user"] {{ color: {t.accent}; }}
+    QLabel[class~="msg-who-user"] {{ color: {t.arbiter}; }}
     QLabel[class~="msg-who-sys"] {{ color: {t.info}; }}
     QLabel[class~="msg-body"] {{
         font-size: 13px;

@@ -411,7 +411,7 @@ class TreeGroupSection(QWidget):
         # 2026-08-06 -- "in the main place, only what we work with"). Every channel, in use or not,
         # with its ON/OFF, lives in System params instead, where looking at the whole rig is the
         # point rather than a distraction.
-        visible_rows = [row for row in group.rows_ordered() if not row.hidden]
+        visible_rows = group.rows_visible()
         count_text = (
             f"{len(visible_rows)}/{group.max_count}" if group.max_count else f"{len(visible_rows)}"
         )

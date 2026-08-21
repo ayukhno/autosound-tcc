@@ -221,6 +221,13 @@ GATE_FOREIGN = "foreign"
 # gate that fires on `ls` is a gate that gets clicked through, which protects nothing.
 GATE_AUTO = "auto"
 
+# What a project starts on. `auto`, not `writes` (user, 2026-08-21): the reason the strictest
+# setting was the default -- "start with every write and narrow it if it gets in the way" -- is an
+# argument for a gate that TEACHES, and what it taught was clicking through. TCC's own tools still
+# confirm inside themselves, so what this default hands over is the shell-and-file traffic and
+# nothing that reaches the DSP.
+GATE_DEFAULT = GATE_AUTO
+
 # Paths the skill legitimately owns inside a project.
 _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
                 "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")

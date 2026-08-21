@@ -43,9 +43,11 @@ def test_channel_summary_renders_total_and_off(tmp_path):
             "channels": {"total": 12, "off": 0},
         }
     })
-    rows = dict(project_view.load_channel_summary(tmp_path))
-    assert rows["Virtual channels"] == "8 (1 off)"
-    assert rows["Channels"] == "12"  # off=0 -> no "(0 off)" noise
+    # Tier ids and counts, not sentences: the words are the panel's to translate (F-006).
+    rows = {tier: (total, off) for tier, total, off in
+            project_view.load_channel_summary(tmp_path)}
+    assert rows["virtual_channels"] == (8, 1)
+    assert rows["channels"] == (12, 0)
 
 
 def test_open_questions_passthrough(tmp_path):

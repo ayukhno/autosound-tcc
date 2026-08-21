@@ -357,6 +357,21 @@ class ProfileGroup:
         """
         return sorted(self.rows, key=lambda r: (slot_key(r.slot), r.order or 0, r.name))
 
+    def rows_visible(self) -> list[GroupRow]:
+        """`rows_ordered()` without the channels nobody is using. The ONE rule, for every panel.
+
+        It lived in the DSP tree alone, so the params table drew the same group by a different
+        rule and listed `off-virt-F` and `off-virt-H` among the working channels (user,
+        2026-08-21). Two renderers disagreeing about what a group contains is worse than either
+        answer, so the rule is a fact about the group and not about a widget.
+
+        `hidden` is a slot with no driver assigned (SCR-003) and `off` is a channel switched off:
+        both are "this is not part of the rig you are tuning". `mute` is deliberately NOT among
+        them -- a muted channel is muted *because* someone is working on it right now, and a panel
+        that hid it would hide the thing being worked on.
+        """
+        return [row for row in self.rows_ordered() if not row.hidden and not row.off]
+
 
 @dataclass(frozen=True)
 class ProjectView:

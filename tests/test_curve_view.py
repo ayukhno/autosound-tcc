@@ -2812,34 +2812,28 @@ def test_the_choose_menu_stays_open_across_a_tick():
     menu.close()
 
 
-def test_the_group_shortcut_is_offered_only_while_the_sum_is_on():
-    """User, 2026-08-18: "поки я не включив суму немає сенсу показувати ось ці групи". A group IS
-    "these drivers, added up", so with Σ off it answers a question nobody asked.
+def test_every_picker_on_the_chip_row_stays_visible_through_the_sum():
+    """User, 2026-08-21: "вибір груп показуй завжди … логіка проста — швидкий вибір, а групи це
+    розумні комбінації".
 
-    Per COMBO since 2026-08-19: the two of them are individual widgets in the flow row now, not a
-    box, so each hides itself and the chips close up around them."""
+    This reverses 2026-08-18 ("поки я не включив суму немає сенсу показувати ось ці групи"), and
+    the reversal is the point of the test: version and group say WHAT IS DRAWN, which is not a
+    question about sums, so Σ must not decide whether they are on screen. Σ draws the sum.
+    """
     dialog = _group_dialog()
     _fetch(dialog)
-    pair = (dialog._group_combo, dialog._version_combo)
+    row = (dialog._group_combo, dialog._version_combo,
+           dialog._choose_btn, dialog._kind_combo)
 
     assert dialog._view.sum_shown() is False
-    assert not any(combo.isVisibleTo(dialog) for combo in pair)
+    assert all(widget.isVisibleTo(dialog) for widget in row)
 
     dialog._view.set_sum_shown(True)
-
-    assert all(combo.isVisibleTo(dialog) for combo in pair)
+    assert all(widget.isVisibleTo(dialog) for widget in row)
 
     dialog._view.set_sum_shown(False)
-
-    assert not any(combo.isVisibleTo(dialog) for combo in pair)
-    # ...and what is NOT hidden with it: the window must stay usable without a sum.
-    assert dialog._choose_btn.isVisibleTo(dialog) is True
-    assert dialog._kind_combo.isVisibleTo(dialog) is True
+    assert all(widget.isVisibleTo(dialog) for widget in row)
     assert all(chip.isVisibleTo(dialog) for chip in _chips(dialog))
-
-
-# ---- the ✕, the link ring, and what puts the guides back (user, 2026-08-18) -------------------
-
 
 def test_the_guides_button_is_red_and_big_from_the_moment_the_window_opens():
     """It opened grey: its look was an inline stylesheet written only by `_update_guides_button`,
