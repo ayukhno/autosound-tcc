@@ -303,6 +303,9 @@ class DialogPanel(QWidget):
         # never switched off, so a thought that arrives while the model is working is not lost to
         # a disabled widget -- see `_on_send`.
         self._queued: list[str] = []
+        # Set once the Arbiter has answered "save" to the quit question: the session gets its
+        # last turn and nothing may start another one. See `hold_queue_for_quit`.
+        self._quitting = False
         self._busy = False
         # Whatever is actually answering. The mock transcript's Claude label was still on live
         # bubbles produced by a Gemini model, which is a caption that contradicts the footer.
@@ -1194,6 +1197,26 @@ class DialogPanel(QWidget):
         self._queue_label.setText(i18n.t("queueWaiting").format(count=len(self._queued)))
         self._queue_row.setHidden(not self._queued)
 
+    def hold_queue_for_quit(self) -> None:
+        """The session is winding down: no queued message may start another turn.
+
+        Called when the Arbiter answers "save" to the quit question. That answer buys one last
+        turn -- the model writes down where the project stands -- and the window waits for it.
+        Anything typed while that ran used to QUEUE and then be dispatched the instant the turn
+        ended (`_flush_queued`), so a fresh turn began exactly as the window was closing. That is
+        how a worker came to be mid-turn during teardown on 2026-08-21, which is the state
+        `qt_shutdown` cannot destroy Qt around.
+
+        The words are not dropped: they go back into the composer, where they are still there
+        when TCC is opened again.
+        """
+        self._quitting = True
+        if self._queued:
+            self._input.setText("\n\n".join(self._queued))
+            self._queued = []
+            self._show_queue_row()
+            self._add_system_message(i18n.t("messageNotSent"))
+
     def _flush_queued(self) -> None:
         """Send what was typed mid-turn, now that the turn boundary is here.
 
@@ -1201,6 +1224,9 @@ class DialogPanel(QWidget):
         harness already busy with the first and queue again behind it, which is the same wait with
         more steps.
         """
+        if getattr(self, "_quitting", False):
+            self.hold_queue_for_quit()  # idempotent, and hands the text back if any arrived late
+            return
         if not self._queued or self._worker is None:
             return
         text, self._queued = "\n\n".join(self._queued), []

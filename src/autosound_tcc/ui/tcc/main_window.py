@@ -2640,6 +2640,15 @@ class MainWindow(QMainWindow):
             "quit": "sessionHandoffQuit",
         }.get(mode, "sessionHandoff")))
         self._session_btn.setEnabled(False)
+        if mode == "quit":
+            # The window is already on its way out and only waits for this turn -- for up to
+            # `_HANDOFF_TIMEOUT_MS`, which is three minutes of a window that looks frozen. Say so
+            # where a wait is normally reported, and stop the composer's queue from dispatching
+            # into a session being wound down: a message typed here used to be sent the instant
+            # the handoff turn ended, starting a fresh turn as the window closed (user,
+            # 2026-08-21, whose "як справи?" is what left a worker mid-turn during teardown).
+            self._status_strip.notify(i18n.t("quitSaving"), level="info")
+            self._dialog.hold_queue_for_quit()
         worker.turn_done.connect(self._finish_handoff)
         worker.failed.connect(self._finish_handoff)
         # An agent that never finishes the turn must not strand the restart -- the point of the

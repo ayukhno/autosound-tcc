@@ -38,6 +38,7 @@ dismantling itself.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterable
 
 from PySide6.QtCore import QThread
@@ -49,7 +50,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 _THREAD_WAIT_MS = 3000
 
 
-def quiesce_widgets(widgets: Iterable[QWidget]) -> None:
+def quiesce_widgets(widgets: Iterable[QWidget]) -> list[QThread]:
     """Bring these widgets' background threads to a stop, so nothing is running when Qt goes.
 
     Qt calls `qFatal` on a QThread object destroyed while its thread still runs, which aborts the
@@ -63,7 +64,14 @@ def quiesce_widgets(widgets: Iterable[QWidget]) -> None:
 
     Nothing here destroys anything. Defensive throughout, because a teardown that raises would
     turn a clean exit into a traceback and a green test session into an error.
+
+    Returns the threads that were STILL RUNNING when the wait ran out. That answer used to be
+    thrown away, and `destroy_application` deleted the QApplication regardless -- which is not
+    bad luck but a guarantee: Qt calls `qFatal` on a QThread destroyed while its thread runs, so
+    an agent worker busy with a model turn (5s of grace against a turn that takes minutes) ended
+    the process with `abort()` and a macOS crash report, every time (user, 2026-08-21 19:00).
     """
+    stubborn: list[QThread] = []
     for widget in widgets:
         try:
             family = [widget, *widget.findChildren(QWidget)]
@@ -85,12 +93,27 @@ def quiesce_widgets(widgets: Iterable[QWidget]) -> None:
                 thread.requestInterruption()
                 thread.quit()
                 thread.wait(_THREAD_WAIT_MS)
+                if thread.isRunning():
+                    stubborn.append(thread)
             except Exception:  # noqa: BLE001 -- same reason as above
                 pass
+    return stubborn
 
 
 def destroy_application() -> bool:
-    """Destroy the QApplication now, and report whether there was one to destroy.
+    """Destroy the QApplication now. Answers whether Qt is safe to leave behind.
+
+    `True` means there is nothing left that can fault on the way out -- either the application
+    was destroyed here, or there was none to destroy. `False` means it DECLINED: a background
+    thread outlived the wait, and destroying the application would run `~QThread` against a
+    running thread, which is `qFatal` and `abort()` rather than an error anyone can catch. The
+    caller has to leave the process without letting PySide's own `atexit` handler try the same
+    thing (see `app.main`).
+
+    Refusing is the third option nobody had taken: the wait is bounded because "a teardown that
+    hangs is worse than the crash it prevents" -- true, and it left only two outcomes, both of
+    them bad. Leaving without tidying is worse than a clean exit and much better than handing
+    someone a crash report for work they had already saved.
 
     `shiboken6.delete` runs the C++ destructor immediately rather than posting an event, which is
     what makes this a single step: `~QApplication` walks the remaining top-level widgets itself,
@@ -102,8 +125,15 @@ def destroy_application() -> bool:
     """
     app = QApplication.instance()
     if app is None:
+        return True
+    still_running = quiesce_widgets(list(app.topLevelWidgets()))
+    if still_running:
+        names = ", ".join(t.objectName() or type(t).__name__ for t in still_running)
+        # Not silent: an exit that skipped its own teardown is a fact about the run, and the
+        # thread that would not stop is the one worth naming when it happens twice.
+        print(f"autosound-tcc: leaving without destroying Qt -- still running: {names}",
+              file=sys.stderr)
         return False
-    quiesce_widgets(list(app.topLevelWidgets()))
     try:
         import shiboken6
 

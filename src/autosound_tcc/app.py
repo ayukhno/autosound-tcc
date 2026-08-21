@@ -9,6 +9,7 @@ Windows.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -134,7 +135,17 @@ def main() -> int:
     # TCC could meet, as "Python quit unexpectedly", after their work was already saved. Same
     # destructor, run early enough that PySide can still find the Python half of what it touches;
     # see ui/tcc/qt_shutdown.py for the stack and for the six teardowns that made it worse.
-    qt_shutdown.destroy_application()  # the window goes with it: `~QApplication` owns that walk
+    if not qt_shutdown.destroy_application():
+        # It declined: a background thread outlived the wait, and destroying Qt around it is
+        # `qFatal` -- the abort a person met on 2026-08-21 after answering "save" to the quit
+        # question. Leaving through `os._exit` is the point of this branch: it skips PySide's own
+        # `atexit` handler, which would otherwise reach the same `~QThread` from inside
+        # `Py_FinalizeEx` and abort there instead. Flushed by hand first, because `_exit` does
+        # not run the buffers down for us and the log of a rough exit is worth keeping.
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
     del window  # by now a wrapper around nothing; dropped so no dead reference outlives `main()`
     return code
 

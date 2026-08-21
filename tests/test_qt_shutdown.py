@@ -87,3 +87,45 @@ def test_a_widget_whose_c_half_is_gone_is_skipped():
     widget = QWidget()
     shiboken6.delete(widget)
     qt_shutdown.quiesce_widgets([widget])  # no exception is the assertion
+
+
+def test_a_thread_that_will_not_stop_is_reported_rather_than_ignored():
+    """The answer this used to throw away, which is why the abort was a guarantee, not bad luck.
+
+    User, 2026-08-21 19:00: answered "save" to the quit question, the dialog hung, the app went
+    down with SIGABRT. The stack was `Shiboken.delete(app)` → `destructionVisitor` → `~QThread` →
+    `qFatal` with the AgentWorker still in its asyncio loop. Qt aborts on a QThread destroyed
+    while its thread runs, and an agent busy with a model turn does not stop inside a five-second
+    wait -- so the caller has to be told, and `destroy_application` has to decline.
+
+    `_THREAD_WAIT_MS` is monkeypatched down: the point is what the function REPORTS about a
+    thread that outlives the wait, not how long anyone is willing to sit here.
+    """
+    stop = False
+
+    class _Stubborn(QThread):
+        def run(self) -> None:  # noqa: D102 - QThread override
+            while not stop:
+                self.msleep(1)
+
+    _app()
+    holder = QWidget()
+    thread = _Stubborn(holder)
+    thread.setObjectName("StubbornWorker")
+    thread.start()
+    while not thread.isRunning():
+        thread.msleep(1)
+
+    original = qt_shutdown._THREAD_WAIT_MS
+    qt_shutdown._THREAD_WAIT_MS = 20
+    try:
+        left = qt_shutdown.quiesce_widgets([holder])
+    finally:
+        qt_shutdown._THREAD_WAIT_MS = original
+
+    assert [t.objectName() for t in left] == ["StubbornWorker"]
+
+    stop = True
+    thread.wait(4000)
+    assert not thread.isRunning()
+    assert qt_shutdown.quiesce_widgets([holder]) == [], "a stopped thread is not stubborn"
