@@ -13,7 +13,13 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel, QSplitter, QWidget  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QLabel,
+    QPushButton,
+    QSplitter,
+    QWidget,
+)
 
 from autosound_tcc.core import config  # noqa: E402
 
@@ -1471,8 +1477,16 @@ def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypat
     pushed: list[tuple] = []
 
     class Bus:
+        open_ids: set = set()
+
         def push(self, kind, **payload):
             pushed.append((kind, payload))
+            signal = signal_bus.Signal(kind=kind, payload=payload)
+            self.open_ids.add(signal.id)
+            return signal
+
+        def is_open(self, signal_id):
+            return signal_id in self.open_ids
 
     class Server:
         bus = Bus()
@@ -1481,12 +1495,69 @@ def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypat
             """A stand-in for the real server has to answer what the real one is asked. Since
             2026-08-12 that includes `stop()`, called from `stop_workers()` on the way out."""
 
-    window._mcp_server = Server()
+    server = Server()
+    window._mcp_server = server
 
     window._on_channel_toggle("virtual", "VRR", True)
 
     assert pushed == [(signal_bus.CHANNEL_TOGGLE,
                        {"group": "virtual", "channel": "VRR", "on": True})]
+
+    # The row is now waiting on an answer, and asking again while it waits must not raise a
+    # second signal -- four of them piled up that way (F-009 point 4, 2026-08-21).
+    assert ("virtual", "VRR") in window._pending_toggles
+    window._on_channel_toggle("virtual", "VRR", True)
+    assert len(pushed) == 1, "the same request twice is one request"
+
+    # The opposite request IS a new one: the Arbiter changed their mind, and the model has to
+    # hear the thing they now want.
+    window._on_channel_toggle("virtual", "VRR", False)
+    assert len(pushed) == 2
+    assert window._pending_toggles[("virtual", "VRR")]["on"] is False
+
+    # Closed on the bus -- acknowledged, however it was answered -- and the wait is over.
+    server.bus.open_ids.clear()
+    window._tick_pending_toggles()
+    assert window._pending_toggles == {}
+    assert not window._pending_timer.isActive()
+
+
+def test_a_waiting_channel_row_says_it_is_waiting_and_then_says_it_is_late(tmp_path, monkeypatch):
+    """Between the click and the model's answer the row used to look untouched, which reads as
+    "nothing happened" -- and the Arbiter clicked again (2026-08-21). A minute of silence is a
+    different fact from four seconds of it, so the button says which."""
+    import time as _time
+
+    from autosound_tcc.core import signal_bus
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+
+    class Bus:
+        def push(self, kind, **payload):
+            return signal_bus.Signal(kind=kind, payload=payload)
+
+        def is_open(self, signal_id):
+            return True
+
+    class Server:
+        bus = Bus()
+
+        def stop(self, timeout: float = 5.0) -> None:
+            pass
+
+    window._mcp_server = Server()
+    button = QPushButton()
+    window._toggle_buttons[("virtual", "VRR")] = button
+
+    window._on_channel_toggle("virtual", "VRR", True)
+    assert "…" in button.text() or button.text() != ""
+    assert "chan-toggle-wait" in button.property("class")
+
+    window._pending_toggles[("virtual", "VRR")]["at"] = _time.time() - mw._TOGGLE_LATE_S - 1
+    window._tick_pending_toggles()
+    assert "chan-toggle-late" in button.property("class"), "silence past a minute is flagged"
 
 
 def test_a_toggle_with_no_session_says_so_instead_of_vanishing(tmp_path):

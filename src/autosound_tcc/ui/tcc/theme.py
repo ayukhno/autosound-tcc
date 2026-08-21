@@ -1248,6 +1248,19 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: transparent;
         color: {t.faint};
     }}
+    /* Between the click and the model's answer. Neither `-on` nor `-off`: the button no longer
+    offers an action, it reports a request nobody has answered yet, so it reads as a state and not
+    as something to press. `-late` is the same state past a minute, which is a different fact. */
+    QPushButton[class~="chan-toggle-wait"] {{
+        background: {t.mix("info", 0.12, "panel")};
+        border-color: {t.mix("info", 0.45, "border")};
+        color: {t.info};
+    }}
+    QPushButton[class~="chan-toggle-late"] {{
+        background: {t.mix("warn", 0.14, "panel")};
+        border-color: {t.warn};
+        color: {t.warn};
+    }}
     QPushButton[class~="chan-toggle"]:hover {{
         border-color: {t.accent};
         color: {t.accent};

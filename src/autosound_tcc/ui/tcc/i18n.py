@@ -258,6 +258,10 @@ answers the first five questions anybody would ask.",
         # reads as "this channel is on" and gets pressed by someone who wanted exactly that.
         "chanTurnOn": "TURN ON",
         "chanTurnOff": "TURN OFF",
+        "chanToggleWaiting": "asked · {secs}s",
+        "chanToggleLate": "⚠ no answer · {secs}s",
+        "chanToggleWaitTip": "TCC asked the model to record this; the ledger is the skill's to write. The row changes when the model answers. Asking again while this stands only refreshes the wait, it does not send a second request.",
+        "chanToggleAlreadyAsked": "{channel} — already asked, still waiting on the model. Not sent twice.",
         "chanToggleTip": "Ask the model to switch this channel on or off. TCC does not write the "
                          "ledger — the request goes to the session, which records the change.",
         "chanToggleSent": "Asked to turn <b>{channel}</b> {state}. The model records it in the "
@@ -902,6 +906,10 @@ Choose sweeps (sw) above to read this.",
         "chanOff": "ВИМК",
         "chanTurnOn": "УВІМКНУТИ",
         "chanTurnOff": "ВИМКНУТИ",
+        "chanToggleWaiting": "запит · {secs}с",
+        "chanToggleLate": "⚠ без відповіді · {secs}с",
+        "chanToggleWaitTip": "TCC попросив модель це записати; леджер пише скіл, не TCC. Рядок зміниться, коли модель відповість. Повторний клік лише оновлює очікування, другого запиту не надсилає.",
+        "chanToggleAlreadyAsked": "{channel} — уже запитано, чекаю на модель. Вдруге не надсилав.",
         "chanToggleTip": "Попросити модель увімкнути або вимкнути канал. TCC не пише леджер — "
                          "запит іде в сесію, і зміну записує вона.",
         "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в "

@@ -15,6 +15,7 @@ import os
 import threading
 import re
 import sys
+import time
 import weakref
 from pathlib import Path
 
@@ -144,6 +145,10 @@ _HANDOFF_PROMPT = (
 # An agent that never finishes must not strand the restart: the handoff saves what can be saved,
 # it does not make the swap conditional on saving it.
 _HANDOFF_TIMEOUT_MS = 180_000
+# When a channel request stops being "just asked" and starts being a fact worth flagging. The
+# model answers a signal within a turn; a minute of silence means the turn is long, the queue was
+# missed, or nobody is listening -- all three are things the Arbiter should see rather than guess.
+_TOGGLE_LATE_S = 60
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
 # TODO(user): paste the published Google Form viewform URL here (the one built last session — see
 # memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
@@ -547,6 +552,17 @@ class MainWindow(QMainWindow):
         self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
+        # What the Arbiter asked of a channel and has not been answered about yet: the wait
+        # `_on_channel_toggle` writes onto the row, keyed by (group, channel). Here, at the top,
+        # because the first `_rebuild_system_params()` runs while the window is still being built
+        # and every switch row asks whether it is waiting. It lives on the window and not on the
+        # button because the buttons are rebuilt whenever the project reloads and the request
+        # outlives them. The timer only runs while something is waiting.
+        self._pending_toggles: dict[tuple[str, str], dict] = {}
+        self._toggle_buttons: dict[tuple[str, str], QPushButton] = {}
+        self._pending_timer = QTimer(self)
+        self._pending_timer.setInterval(1000)
+        self._pending_timer.timeout.connect(self._tick_pending_toggles)
         self._rew_online: bool | None = None  # None = not checked yet -- read before _build_left()
         # Diagnostics (TCC-TZ.md §8). Set up before _build_header(), which adds the button that
         # opens the dialog, and before _load_project(), which re-runs the check.
@@ -1121,6 +1137,7 @@ class MainWindow(QMainWindow):
         view = getattr(self, "_view", None)
         if view is None:
             return
+        self._toggle_buttons = {}
         for group in view.groups:
             rows = group.rows_ordered()
             if not rows:
@@ -1161,6 +1178,12 @@ class MainWindow(QMainWindow):
             lambda _c=False, g=group_id, n=row.name, o=on: self._ask_channel_toggle(g, n, not o)
         )
         layout.addWidget(button)
+        # Kept so the waiting state can be written onto the button a second at a time rather than
+        # by rebuilding this whole section every tick -- which would fold the groups the Arbiter
+        # had opened. Rebuilt with the rows, so a stale widget is never held.
+        self._toggle_buttons[(group_id, row.name)] = button
+        if (group_id, row.name) in self._pending_toggles:
+            self._paint_pending_toggle(group_id, row.name)
         return widget
 
     def _ask_channel_toggle(self, group_id: str, channel: str, on: bool) -> None:
@@ -1981,6 +2004,7 @@ class MainWindow(QMainWindow):
         self._process_watcher.fileChanged.connect(self._refresh_process)
         self._refresh_process()
 
+
         # The plan was the only thing watched, so the left column kept saying "no data yet" beside
         # a `project.json` the session had just written -- it only caught up on the next launch.
         # Reported after a completed phase -1: the car, the amps and the open questions were all
@@ -2103,17 +2127,87 @@ class MainWindow(QMainWindow):
         and the tree follows once the change is recorded. The alternative, writing it here, would
         be TCC's first edit to project data and a second author for the one file whose whole value
         is having one.
+
+        Which is exactly why the row has to SAY that. Between the click and the model's answer the
+        row used to look untouched, so the honest reading of it was "nothing happened" -- and the
+        Arbiter clicked again, and four `channel_toggle` signals sat in the queue for seven
+        minutes (2026-08-21, F-009 point 4). Asking the same thing twice now refreshes the wait
+        instead of raising a second signal.
         """
         server = self._mcp_server
         if server is None:
             self._dialog._add_system_message(i18n.t("noSessionForSignal"))
             return
-        server.bus.push(signal_bus.CHANNEL_TOGGLE, group=group_id, channel=channel, on=on)
+        key = (group_id, channel)
+        waiting = self._pending_toggles.get(key)
+        if waiting is not None and waiting["on"] == on and server.bus.is_open(waiting["id"]):
+            # The same request, still open. A second signal would only make the model do the same
+            # work twice and would say nothing new.
+            waiting["at"] = time.time()
+            self._paint_pending_toggle(group_id, channel)
+            self._dialog._add_system_message(i18n.t("chanToggleAlreadyAsked").format(
+                channel=channel
+            ))
+            return
+        signal = server.bus.push(
+            signal_bus.CHANNEL_TOGGLE, group=group_id, channel=channel, on=on
+        )
+        self._pending_toggles[key] = {"on": on, "at": time.time(), "id": signal.id}
+        self._paint_pending_toggle(group_id, channel)
+        self._pending_timer.start()
         self._dialog._add_system_message(
             i18n.t("chanToggleSent").format(
                 channel=channel, state=i18n.t("chanOn" if on else "chanOff")
             )
         )
+
+    def _paint_pending_toggle(self, group_id: str, channel: str) -> None:
+        """Write the wait onto the one button it belongs to, counting.
+
+        A count and not a spinner: "asked 4s ago" and "asked 2 minutes ago" are different facts
+        about the same screen, and only one of them means something is wrong.
+        """
+        entry = self._pending_toggles.get((group_id, channel))
+        button = self._toggle_buttons.get((group_id, channel))
+        if entry is None or button is None:
+            return
+        waited = int(time.time() - entry["at"])
+        late = waited >= _TOGGLE_LATE_S
+        try:
+            button.setText(i18n.t("chanToggleLate" if late else "chanToggleWaiting").format(
+                secs=waited
+            ))
+            button.setProperty("class", "chan-toggle chan-toggle-" + ("late" if late else "wait"))
+            button.setToolTip(i18n.t("chanToggleWaitTip"))
+            button.style().unpolish(button)
+            button.style().polish(button)
+        except RuntimeError:
+            # Its C++ half went with a rebuild between the tick and here; the next rebuild will
+            # register the replacement.
+            self._toggle_buttons.pop((group_id, channel), None)
+
+    def _tick_pending_toggles(self) -> None:
+        """Once a second: age the waits, and drop the ones the model has closed.
+
+        Closed means acknowledged on the bus -- applied, refused or superseded (F-009's `ack`).
+        TCC deliberately does not decide that for itself: it did not make the change and cannot
+        know it happened until the party that writes the ledger says so.
+        """
+        server = self._mcp_server
+        finished = [
+            key for key, entry in self._pending_toggles.items()
+            if server is None or not server.bus.is_open(entry["id"])
+        ]
+        for key in finished:
+            self._pending_toggles.pop(key, None)
+        for group_id, channel in list(self._pending_toggles):
+            self._paint_pending_toggle(group_id, channel)
+        if finished:
+            # Back to whatever the ledger now says -- which is a different question from "the
+            # request closed", and the only honest answer to it is a re-read.
+            self._rebuild_system_params()
+        if not self._pending_toggles:
+            self._pending_timer.stop()
 
     def _notify_missing_records(self, state: dict) -> None:
         """Say when a decision the method leans on exists only in the conversation.

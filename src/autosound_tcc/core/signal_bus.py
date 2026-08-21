@@ -210,6 +210,19 @@ class SignalBus:
         with self._cond:
             return len(self._pending) + len(self._delivered)
 
+    def is_open(self, signal_id: str) -> bool:
+        """Is this signal still waiting for an outcome? Pending or delivered both count.
+
+        The UI asks: a channel row that says "asked, waiting" has to stop saying it when the
+        model closes the request, and `ack()` is called on the MCP server's thread where no
+        widget can be touched. Polling one id is what keeps that crossing to a question with a
+        yes-or-no answer.
+        """
+        with self._cond:
+            if signal_id in self._delivered:
+                return True
+            return any(s.id == signal_id for s in self._pending)
+
     def unacked_brief(self) -> str:
         """The per-turn preamble: every open signal, or "" when there is nothing to say.
 
