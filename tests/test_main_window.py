@@ -1152,6 +1152,53 @@ def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):
     assert i18n.tx(steps["delays"].tag) in ("unproven", "без доказу")
 
 
+def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_path, monkeypatch):
+    """User, 2026-08-21: "скрол в лівому вікні - зажимає останню DSP секцію, а хотілось би просто
+    скролити".
+
+    The tree is a QScrollArea inside the column's QScrollArea. It used to be handed `stretch=1`,
+    which meant it got whatever height was left in the viewport and scrolled the rest privately --
+    so the DSP section showed two rows at the bottom of the panel and ate the wheel that was meant
+    to move the column. Now the tree is as tall as its rows and the column scrolls.
+    """
+    import json
+
+    from PySide6.QtWidgets import QScrollArea
+
+    channels = {f"ch_{i}": {"slot": chr(65 + i), "hp": {"f": 80}, "lp": {"f": 4000}}
+                for i in range(11)}
+    (tmp_path / "dsp_profile.json").write_text(json.dumps({"dsp_profile": {
+        "name": "M6V4", "vendor": "Musway",
+        "groups": [{"id": "physical_outputs", "label": "Output channels",
+                    "fields": ["hp", "lp"]}]}}))
+    (tmp_path / "project.json").write_text(json.dumps({"dsp": {"vendor": "X", "model": "Y"}}))
+    preset = tmp_path / "P"
+    preset.mkdir()
+    (preset / "v_001.json").write_text(
+        json.dumps({"preset": "P", "sample_rate": 48000, "channels": channels})
+    )
+    (preset / "HEAD").write_text("v_001")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
+
+    app = _app()
+    _catalogue(monkeypatch, [])
+    window = MainWindow()
+    window.resize(1400, 700)
+    window.show()
+    for _ in range(4):
+        app.processEvents()
+
+    tree = window._tree
+    column = next(area for area in window.findChildren(QScrollArea)
+                  if area is not tree and area.isAncestorOf(tree))
+
+    assert tree.height() == tree._body.sizeHint().height(), "the tree is as tall as its rows"
+    assert tree.verticalScrollBar().maximum() == 0, "and has nothing of its own to scroll"
+    assert column.verticalScrollBar().maximum() > 0, "the column is what scrolls"
+    window.close()
+
+
 def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypatch):
     """`auto` first (user, 2026-08-21). "Every write" was the default on the argument that a
     strict gate teaches; what it taught was clicking through, and the writes that reach the car

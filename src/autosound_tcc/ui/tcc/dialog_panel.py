@@ -144,6 +144,13 @@ class ComposerInput(QPlainTextEdit):
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.setTabChangesFocus(True)
         self.document().contentsChanged.connect(self._fit_height)
+        # AND the layout's own signal, which is the one that catches a paste. `contentsChanged`
+        # fires the moment the text lands, before the document has been wrapped: text with real
+        # newlines already has its block count by then and grew correctly, while one long pasted
+        # paragraph still measured as a single line and the field stayed one line tall (user,
+        # 2026-08-21 -- reproduced offscreen at 6 wrapped lines against an unchanged 29px). The
+        # wrap is computed a layout pass later, and this is the signal that says so.
+        self.document().documentLayout().documentSizeChanged.connect(self._on_document_resized)
         self._fit_height()
 
     # `QLineEdit`'s vocabulary, so call sites read the same as before.
@@ -153,10 +160,23 @@ class ComposerInput(QPlainTextEdit):
     def setText(self, value: str) -> None:  # noqa: N802 (Qt naming)
         self.setPlainText(value)
 
+    def _on_document_resized(self, _size) -> None:
+        self._fit_height()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # A narrower box wraps the same text into more lines. Without this the field kept the
+        # height it was given at the width it no longer has.
+        super().resizeEvent(event)
+        self._fit_height()
+
     def _fit_height(self) -> None:
         line = self.fontMetrics().lineSpacing()
         lines = min(max(int(self.document().size().height()), 1), self._MAX_LINES)
-        self.setFixedHeight(int(line * lines + 14))
+        height = int(line * lines + 14)
+        # Only when it actually changes: `setFixedHeight` resizes the widget, `resizeEvent` calls
+        # back here, and a call that always sets would be that loop running forever.
+        if height != self.height():
+            self.setFixedHeight(height)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)

@@ -1499,7 +1499,11 @@ class MainWindow(QMainWindow):
         self._dsp_section = SidebarSection(
             "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False
         )
-        layout.addWidget(self._dsp_section, stretch=1)
+        # No stretch. It was here so the tree would fill the panel instead of sitting at its
+        # content height with a gap under it (user, 2026-07-28) -- and what it actually did was
+        # hand the tree the leftover viewport and let it scroll inside the column's own scroll.
+        # The gap is answered by the trailing stretch below, which costs the tree nothing.
+        layout.addWidget(self._dsp_section)
 
         self._left_status = QLabel("")
         self._left_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1533,7 +1537,12 @@ class MainWindow(QMainWindow):
         self._tree.channelClicked.connect(self._on_channel_clicked)
         self._tree.eqRequested.connect(self._on_eq_requested)
         self._tree.toggleRequested.connect(self._on_channel_toggle)
-        self._dsp_section.body_layout().addWidget(self._tree, stretch=1)
+        self._dsp_section.body_layout().addWidget(self._tree)
+        # The empty room lives at the bottom of the column, under the last section, rather than
+        # inside whichever section was asked to soak it up. That is what makes the whole column
+        # one scroll: every section is exactly as tall as its contents, and what does not fit
+        # becomes scroll rather than a private scrollbar two levels down.
+        layout.addStretch(1)
 
         return panel
 

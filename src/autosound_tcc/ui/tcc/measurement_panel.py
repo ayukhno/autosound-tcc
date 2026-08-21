@@ -344,6 +344,12 @@ class MeasurementPanel(QWidget):
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self._session_combo.setMinimumContentsLength(11)
+        # And a floor measured off the rows themselves, because that length is counted in `x`
+        # widths and a round id is not made of `x`: eleven of them come to less than `cap_002 ●`,
+        # so the closed box went back to "cap_00…" — a picker whose entries cannot be told apart,
+        # for the second time (user, 2026-08-11 and again 2026-08-21).
+        self._session_tip = attach_tip(self._session_combo)
+        self._fit_session_combo()
         head_row.addWidget(self._session_combo)
         self._version = QLabel("")
         self._version.setProperty("class", "meas-head")
@@ -504,6 +510,22 @@ class MeasurementPanel(QWidget):
         current one's (user, 2026-08-12)."""
         return self._viewing_id
 
+    def _fit_session_combo(self) -> None:
+        """Never let the picker be narrower than the longest id it is holding.
+
+        `minimumContentsLength` is Qt's own way to say this and it is counted in the width of an
+        `x`, which underestimates `cap_002 ●` — digits, an underscore and the live-round dot are
+        all wider. Measured off the rows instead, plus the chrome the stylesheet spends: 22 px of
+        right padding reserving the arrow, 9 px on the left, and the 1 px border either side.
+        """
+        metrics = self._session_combo.fontMetrics()
+        widest = max(
+            (metrics.horizontalAdvance(self._session_combo.itemText(i))
+             for i in range(self._session_combo.count())),
+            default=0,
+        )
+        self._session_combo.setMinimumWidth(widest + 22 + 9 + 2)
+
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
         (Read/Scan/assign-names enabled) and the title banner shows what to capture; any other is
@@ -528,9 +550,17 @@ class MeasurementPanel(QWidget):
             # part it drops is the part that says what is going on.
             self._version_tip.set_text(i18n.tx(session.version))
         else:
+            # No banner for a past round (user, 2026-08-21: "кнопка «Використа» не потрібна — це
+            # може бути хінт на поле"). "Used in step 3" is a fact about the round the picker is
+            # already naming, and as a widget it was taking the width the picker needed to print
+            # `cap_002` — while eliding to "Використа" itself. It survives as the picker's hint,
+            # where the fuller per-step wording already lived.
             steps = ", ".join(session.used_in_steps) or "—"
-            self._version.setText(i18n.t("measUsedInStep").format(steps=steps))
-            self._version_tip.set_text("<br>".join(_step_label(s) for s in session.used_in_steps))
+            self._session_tip.set_text(
+                "<br>".join([i18n.t("measUsedInStep").format(steps=steps)]
+                            + [_step_label(s) for s in session.used_in_steps])
+            )
+        self._version.setVisible(is_live)
         self._assign_names_btn.setEnabled(is_live)
         self._read_btn.setEnabled(is_live)
         idx = self._session_combo.findData(session_id)

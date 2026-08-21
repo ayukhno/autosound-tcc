@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -466,6 +467,14 @@ class DspTreeWidget(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # It does not scroll. The left panel is one scroll from top to bottom (`main_window`
+        # `_build_left`), and a scrolling tree inside a scrolling column is a wheel that stops
+        # working halfway down: the tree took whatever height was left in the viewport, showed two
+        # rows of it, and swallowed the wheel that was meant to move the column (user, 2026-08-21,
+        # with the screenshot). It keeps being a QScrollArea only because it holds the body widget
+        # every rebuild replaces -- what it gives up is the scrolling.
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self._settings = get_settings()
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
@@ -473,6 +482,15 @@ class DspTreeWidget(QScrollArea):
         self._layout.setSpacing(2)
         self._layout.addStretch(1)
         self.setWidget(self._body)
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        """As tall as its rows. A QScrollArea normally asks for a viewport-sized box and scrolls
+        what does not fit; this one is inside the column's scroll, so what does not fit here has
+        to become height the column can scroll to."""
+        return self._body.sizeHint()
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        return self._body.sizeHint()
 
     def set_view(self, view: ProjectView) -> None:
         # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so

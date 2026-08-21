@@ -371,25 +371,45 @@ def test_session_dropdown_lists_all_sessions_live_one_marked():
     assert items == ["v10 ●", "v9", "v8"]
 
 
-def test_picking_a_past_session_shows_its_step_and_disables_live_actions():
-    """User request 2026-07-28: the title banner shows the task description for the live
-    session, but the plan step(s) it was used for when browsing history; live-only actions
-    (Read/assign-names) disable since they always target the live session, not what's shown."""
+def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live_actions():
+    """User request 2026-07-28: the banner titles the live session, and browsing history says
+    which plan step that round was used for; live-only actions (Read/assign-names) disable since
+    they always target the live session, not what's shown.
+
+    Since 2026-08-21 the history half of that is a HINT on the picker rather than a banner beside
+    it: as a widget it ate the width the picker needed to print `cap_002`, while eliding to
+    "Використа" itself (user, with the screenshot). The banner stays for the live round, whose
+    text is the panel's title.
+    """
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     assert panel._version.text() == "Capture series v10"
+    assert panel._version.isVisibleTo(panel)
     assert panel._read_btn.isEnabled()
 
     panel.show_session("v9")
-    assert panel._version.text() == "Used in step 2.2"
+    assert not panel._version.isVisibleTo(panel), "no banner for a past round"
+    assert "Used in step 2.2" in panel._session_tip.text()
     assert not panel._read_btn.isEnabled()
     assert not panel._assign_names_btn.isEnabled()
     assert panel._session_combo.currentData() == "v9"  # combo follows programmatic switches too
 
     panel.show_session("v10")
     assert panel._version.text() == "Capture series v10"
+    assert panel._version.isVisibleTo(panel)
     assert panel._read_btn.isEnabled()
+
+
+def test_the_session_picker_is_never_narrower_than_the_id_it_shows():
+    """`minimumContentsLength` is counted in `x` widths and a round id is not made of `x`."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    combo = panel._session_combo
+    widest = max(combo.fontMetrics().horizontalAdvance(combo.itemText(i))
+                 for i in range(combo.count()))
+    assert combo.minimumWidth() > widest
 
 
 def test_picking_session_via_combo_switches_the_grid():

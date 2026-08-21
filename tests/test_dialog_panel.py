@@ -6,6 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QMimeData  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel, MessageBubble  # noqa: E402
@@ -127,3 +128,44 @@ def test_a_long_message_keeps_the_panel_pinned_to_the_bottom():
 
     panel._on_scroll_value_changed(bar.maximum())  # back at the bottom
     assert panel._stick_to_bottom is True
+
+
+def test_the_composer_grows_for_a_pasted_paragraph_not_only_for_newlines():
+    """User, 2026-08-21: "коли в діалог вставляю текст на декілька строк - висота поля не
+    збільшується".
+
+    The growth was written and worked for text carrying real newlines, which is why it looked
+    present: `contentsChanged` fires with the block count already final. A pasted paragraph is ONE
+    block that wraps, and the wrap is computed a layout pass later — the field measured itself
+    before that and stayed one line tall. Both shapes are asserted here, and the shrink back with
+    them: a field that only ever grows is the same bug facing the other way.
+    """
+    app = _app()
+    panel = DialogPanel()
+    panel.resize(420, 700)
+    panel.show()
+    app.processEvents()
+    field = panel._input
+    one_line = field.height()
+
+    def paste(text: str) -> int:
+        data = QMimeData()
+        data.setText(text)
+        field.insertFromMimeData(data)
+        for _ in range(3):  # the wrap lands on a later pass; that is the whole point
+            app.processEvents()
+        return field.height()
+
+    wrapped = paste("слово " * 60)
+    assert wrapped > one_line, "a pasted paragraph wraps, so the field has to grow with it"
+
+    field.clear()
+    app.processEvents()
+    assert field.height() == one_line, "and shrinks back when the text goes"
+
+    assert paste("\n".join(f"line {i}" for i in range(5))) > one_line
+
+    field.clear()
+    tall = paste("\n".join(f"line {i}" for i in range(40)))
+    assert tall <= paste("\n".join(f"line {i}" for i in range(200))), \
+        "past the cap the field stops growing and scrolls instead of eating the transcript"
