@@ -1622,10 +1622,19 @@ from a registry we do not own is the wrong direction (the Arbiter's point, and i
 
 ## SCR-054 — the installer puts TCC on the default branch, while TCC now updates by tag
 
-**Status**: proposed (2026-08-22, alongside F-024 on the TCC side) — **and largely folded into
-SCR-055**, which proposes moving the installer to TCC entirely. If that move happens, this ask
-is done as part of it. Kept separate because it is the cheap fix that stands on its own if the
-move is declined or deferred: one glob, one sort, ten minutes.
+**Status**: **WRITTEN AND PUSHED** (2026-08-22) — branch `fix/scr-054-pin-tcc-tag` in the
+method's repository, commit `e401bd3`, waiting to be merged there. Not on `main`: that checkout
+had an unpushed commit of the method's own at the time, and a surprise commit on somebody's
+working branch is a worse gift than a branch they can read.
+
+It was written by TCC's side rather than asked for, because the boundary question above it was
+answered the other way (see SCR-055, withdrawn): the installer is the METHOD's, and this is a
+five-line correction inside it, not a request about who owns what. A change request that costs
+more to negotiate than to make is not a change request.
+
+`install.sh` has `bash -n` clean, `--help` checked, and the tag query verified against the live
+repository. `install.ps1` is the mirror and has NOT been run — no PowerShell on the Arbiter's Mac
+— so it needs the Parallels pass before anyone trusts it.
 **Target**: skill — `install.sh` (line ~829) and `install.ps1`, wherever `autosound-tcc` is installed
 **TCC dependency**: done. `updates.newest_tcc_tag()` picks the newest `v*` tag, the update button
 pins it (`git+…@vX.Y.Z`), and the row compares the installed version against that release.
@@ -1653,9 +1662,34 @@ and every bug report from either becomes a question about which one it was.
 
 ## SCR-055 — the installer belongs to TCC: a request to agree the move, not to make it
 
-**Status**: proposed (2026-08-22, by the Arbiter — "інсталятор це наш проект"). **Nothing has been
-moved.** This asks the method's side to agree the boundary and the migration, before either repo
-touches a file.
+**Status**: **WITHDRAWN** (2026-08-22, by the Arbiter, the day after it was written). Nothing was
+moved and nothing should be. The request is kept in full below, unedited, because the reasoning
+that produced it was measured and still reads as convincing — which is exactly why the correction
+belongs beside it rather than instead of it.
+
+**Why it was wrong.** It asked "which repository does this code belong to" and answered with a
+dependency arrow. The question that decides it is a different one: **what is the entry point?**
+The entry point is the METHOD — the four READMEs, the marketplace listing, the stars, the page
+people arrive at. The installer belongs at the entry point, and an installer that installs a
+product is entitled to know that product's front-end. `--terminal` keeps the invariant honest:
+the method still installs alone, in its own repository, with no app.
+
+**The number in the argument was also wrong, and worse, it was mine.** "42 of the last 91 commits
+in the method's repository touched the installer" was offered as "half of the method's history is
+not the method". Classified by what they actually change: **27 are purely the method's own
+environment** (REW, agy, gh, PATH, uv, Claude Code, the skill's Python dependencies), most of the
+rest are whole-installer work that touches TCC's lines in passing, and **three** are purely TCC
+packaging. The churn was never TCC leaking into the method's repository.
+
+**What survives the withdrawal.** One thing in that repository is not "the installer knowing about
+TCC" but the installer BUILDING TCC: `scripts/make-macos-app.sh` opens the installed app's
+package, takes its icon out, builds the `.app` and registers it with Launch Services — and it is
+found by guessing a path, which already failed on a clean M1 (2026-08-13). That is packaging, not
+knowledge, and it comes home to TCC as `autosound-tcc --install-desktop` (F-026). The installer
+then calls one command instead of carrying a builder for somebody else's application.
+
+**Also settled by the same answer**: the published URL never moves. Not a stub, not a migration —
+`raw.githubusercontent.com/…-skill/main/install.sh` stays the address, permanently.
 
 ### What is being proposed
 
