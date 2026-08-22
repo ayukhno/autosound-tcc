@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-19: SCR-049** (the project backup nobody wrote down) **and SCR-051** (the reviewer cannot go through omp). SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-22**, newest first: **SCR-056** (the installer builds our bundle — call `--install-desktop` instead; unblocked by TCC v0.1.13), **SCR-054** (a fresh install takes `main` while the app updates by tag — already written and pushed as `fix/scr-054-pin-tcc-tag`, waiting to be merged), **SCR-052** (`_open_questions` is a paragraph where the contract says a key), **SCR-051** (the reviewer cannot go through omp) and **SCR-049** (the project backup nobody wrote down). Withdrawn: SCR-053, SCR-055 — the reasoning is kept on each. SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
