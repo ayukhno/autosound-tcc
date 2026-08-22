@@ -6,6 +6,52 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.14] — 2026-08-22 · the method's crossover maths, and a gate that was green because it was blind
+
+No new surface: this release is the method underneath the app being corrected, and the test that
+should have caught it being made able to see.
+
+### Changed
+
+- **The vendored method moves to v3.0.16**, which fixes a real defect in its crossover maths. Below
+  about 250 Hz, a steep BW or BE filter was drawn from a transfer function that had lost its own
+  answer to floating point: BW42 at 80 Hz came out at −33.11 dB where the family defines −3.010,
+  BE36 at 40 Hz at +10.15. Verified here by loading the old and the new module side by side rather
+  than taken on report; worst error across the hardware grid, 30.10 dB.
+  **What this does and does not mean for what you saw in TCC.** The app never draws a crossover
+  curve itself — it asks the method only for all-pass responses (`apf1`/`apf2`) — so no window here
+  was showing those numbers. What the defect reached is the method's own recommendations: a
+  crossover chosen for a steep low joint was fitted against a curve that did not describe the
+  hardware, and delays or polarities settled on such a joint are worth re-deriving. **LR is
+  untouched at any order** — 0.0000 dB, because that path designs a half-order Butterworth and
+  squares it, so it never reaches the conditioning cliff. A rig on LR crossovers, which is what
+  this one uses, has nothing to re-derive.
+
+### Fixed
+
+- **The gate that runs the method's own selftests was blind to half of them.** It kept a
+  hand-written list of twelve modules with a completeness test beside it — and that test matched
+  the quoted string `"selftest"`, which finds the modules taking the command positionally and none
+  of the thirteen taking `--selftest`. Eleven of the method's modules had never been run here while
+  a green test said the list was complete, and one of them was `xover_select` — the module that
+  picks the crossovers the release above got wrong. The list is discovered now, by the same rule
+  the method's own runner applies: 12 modules become 25, plus the installer-consistency check. The
+  completeness test is a canary holding the two properties that actually broke — discovery reaches
+  the subpackages, and it sees both command styles — because either failure otherwise looks exactly
+  like success.
+
+### Also
+
+- A fresh install now takes TCC by release tag and lets the app build its own bundle: the method
+  merged both requests (SCR-054, SCR-056) the evening v0.1.13 shipped and released them as v3.0.16,
+  and its installer is served from `main`, so it took effect immediately. The "Known" note under
+  v0.1.13 carries the same correction.
+- Two cautions that come with that, both the method's to close and neither an emergency: the
+  Windows half of those installer changes has not been run yet (there is no PowerShell on the
+  machine they were written on — a Parallels pass is planned), and there is no fallback for an
+  installed TCC older than v0.1.13, which has no `--install-desktop` to call. Such an install keeps
+  working; it just gets no new shortcut.
+
 ## [v0.1.13] — 2026-08-22 · the app can install itself, and the left column scrolls straight
 
 ### Added

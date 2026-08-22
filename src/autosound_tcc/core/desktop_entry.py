@@ -221,6 +221,10 @@ def _install_macos(apps_dir: Path, launcher: Path) -> Result:
     link_on_desktop(bundle, result)
 
     if not has_icon:
+        # The phrase "no icon" is READ by the method's installer -- `install.sh` matches
+        # `*"no icon"*` and `install.ps1` matches `-match "no icon"` to add "(with the generic
+        # icon)" to their own output (SCR-056, v3.0.16). Reword the rest of the line freely; keep
+        # those two words, or their note silently stops appearing with no error on either side.
         result.say("note: no icon in this package — the bundle gets the generic one.")
     result.say(
         "Unsigned, which is fine for the machine that built it. Copied to another Mac it shows a "
@@ -288,6 +292,8 @@ def _install_windows(launcher: Path) -> Result:
         result.say(f"Built: {target}")
     result.say(f"They run: {launcher}")
     if not ico.is_file():
+        # "no icon" again -- see the note on the macOS branch above; the Windows installer
+        # matches the same two words.
         result.say("note: no icon in this package — the shortcuts get the generic one.")
     return result
 
