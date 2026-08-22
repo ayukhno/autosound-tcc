@@ -1,9 +1,61 @@
 # Changelog
 
 What changed in Autosound TCC, the desktop app for the
-[autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app is installed
-from `main` by the method's own installer, so a version here marks a point worth referring back to
-rather than a thing anybody downloads separately.
+[autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
+button follows the tags below, so a version here is what somebody actually receives when they press
+it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
+differ, and the newer of them is the fresh install.
+
+## [v0.1.11] — 2026-08-21 · the field-fix round
+
+Two intakes in one evening of real use, twenty-two items, none of them found by a test. The app
+now delivers what the Arbiter clicks, survives being quit mid-turn, and reads as one column
+instead of four boxes fighting for height.
+
+### Fixed
+
+- **A click in the app could sit unread for seven minutes.** Signals reached the model only when it
+  happened to ask for them, and asking EMPTIED the queue — read and not acted on meant gone.
+  Delivery is peek + ack: every turn carries the open queue, each answered signal records what
+  became of it (`applied` / `refused` / `superseded`) in `.tcc/signals.jsonl`, and a click made
+  while nobody is talking now starts its own turn rather than waiting for something unrelated to be
+  said. The channel row shows "waiting…" with a counter; a second click on the same target state
+  refreshes that instead of queueing a duplicate.
+- **Quitting while the model was working aborted the app.** Answering "save" left the window hanging
+  on a turn that had three minutes to finish, and the teardown then destroyed Qt around a running
+  worker — a guaranteed `qFatal`, not bad luck. An exit that cannot tidy up now leaves without
+  tidying up: better an unswept process than a crash report handed to somebody whose work was
+  already saved.
+- **Arriving text decided where the reader was looking.** The transcript no longer jumps while
+  history is being read; a "↓ New below · N" row appears instead, and clicking it goes to where the
+  new messages start.
+- A request typed before the session started went nowhere and the first message vanished with it.
+- A command did not take effect until the Arbiter happened to write something else.
+- The left column now scrolls as one canvas — the DSP section used to be squeezed into whatever
+  height was left and scrolled inside itself.
+- The round picker was clipped by a banner that never fit; the banner is gone for the live session
+  too, and the field's width is measured from the style rather than guessed.
+- The composer grows when multi-line text is pasted into it.
+- The parameter table listed disabled channels, and `Channels` / `Virtual channels` were left in
+  English.
+- The Arbiter's colour read as an alarm; the open questions were drawn as muted grey and could not
+  be copied. Both now say what they are.
+- A copied message keeps its table.
+- Automatic flaws appeared only after a restart; the tree came back clipped after a reload
+  (a regression from the scroll fix, kept as a test).
+
+### Added
+
+- The curve window lists capture rounds and filters by them, so a set visible in the capture panel
+  is selectable on the plot. Picking ONE of two identically named captures is still not possible —
+  that is the next step, and it stays inside TCC.
+- Every number that means a version now says which axis it belongs to — series/config, or pass.
+
+### Guarded
+
+- A test helper wrote a glossary into the real project directory when imported outside pytest. It
+  now refuses to write anywhere but a temporary folder, and the fixture that substitutes the
+  project directory checks that the substitution actually took.
 
 ## [v0.1.10] — 2026-08-19 · up to date is the answer, when it is
 
