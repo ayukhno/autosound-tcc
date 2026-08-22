@@ -1752,3 +1752,54 @@ breaks every existing instruction, including ones already in people's notes. Pro
 3. **Does the method want a minimal installer of its own**, or are README instructions enough?
 4. **Is there anything in the installer that serves the method alone** and should stay behind —
    `--skill-ref` handling, the uninstall path, the Claude Code bootstrap?
+
+---
+
+## SCR-056 — the installer builds our bundle; TCC now has the command, so call it
+
+**Status**: proposed (2026-08-22) — unblocked by TCC **v0.1.13**, which is the release that
+carries the command. Filed only now for that reason: an ask that names a command no installed
+version has is an ask that breaks the installer for anyone who runs it before the release lands.
+
+**Target**: skill — `install.sh` (the macOS bundle block, ~line 840-895, and the `builder` path
+resolution above it), `install.ps1` (the shortcut block, ~line 751-778), and
+`scripts/make-macos-app.sh` (138 lines, which this retires).
+
+**TCC dependency**: done and released. `autosound-tcc --install-desktop` (`core/desktop_entry.py`,
+tests in `tests/test_desktop_entry.py`) builds `~/Applications/Autosound TCC.app` with the icon
+from our own package, aliases it on the Desktop, registers it with Launch Services — and on
+Windows writes `Autosound TCC.lnk` to the Desktop and the Start Menu. Both point at the INSTALLED
+launcher, so `uv tool upgrade` moves the shortcut's target with it. Exit code says whether it
+worked; `--install-desktop` prints what it did, one line per step.
+
+**The gap.** Today the installer does not just know about TCC — it BUILDS TCC.
+`scripts/make-macos-app.sh` opens our installed package, takes the icon out of it, writes the
+`Info.plist`, and registers the bundle. It is found by guessing a path (`$SKILL_SRC/scripts/…`
+with a fallback to `dirname $0`, which under `curl | bash` is whatever directory the person was
+standing in) — and it has already failed to find itself once, on a clean M1 (2026-08-13), leaving
+`no app builder at $builder` and no double-clickable app. The Windows half reaches inside our
+package a different way: it runs our interpreter and reads `autosound_tcc.app.APP_ICO` by name
+(`install.ps1:757`). That is a private attribute of ours holding somebody else's installer
+together — rename it and the icon silently disappears, with no error on either side.
+
+**The ask**: replace both blocks with one call.
+
+    autosound-tcc --install-desktop
+
+macOS: instead of resolving `$builder` and running `make-macos-app.sh`, run the command and read
+its exit code. The Desktop alias, the icon and the Launch Services registration all come with it.
+Windows: instead of the COM shortcut block and the `APP_ICO` lookup, the same command.
+`scripts/make-macos-app.sh` can then be deleted, or kept one release as a fallback for anyone
+whose installed TCC predates v0.1.13 (`--install-desktop` exits non-zero on an older build because
+the flag does not exist — so a fallback is a plain `||`).
+
+**Why it matters**: it is the packaging of one application living in another application's
+repository, wired together by a guessed path and a private attribute name. Neither repository can
+change its own internals safely while that holds. After this, the installer knows one command and
+one exit code, and what the bundle looks like is ours to change.
+
+**Pairs with SCR-054**, which is already written and pushed as `fix/scr-054-pin-tcc-tag`
+(`e401bd3`) in the method's repository and still unmerged — it makes a fresh install take TCC's
+newest `v*` tag instead of `main`. The two touch the same two files and the same install path;
+landing them together is one pass instead of two. With both in, a fresh install and the app's
+own update button finally mean the same thing: **v0.1.13**, bundle built by the app itself.
