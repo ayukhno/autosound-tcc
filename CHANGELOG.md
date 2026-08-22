@@ -6,6 +6,36 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.15] — 2026-08-22 · two things Windows saw that no test could
+
+Both found by running the method's installer test in a Windows VM — one by the plan's own opening
+command, one by watching the screen.
+
+### Fixed
+
+- **A console window blinked in front of the app.** Three times in one session on Windows 11:
+  before the main window, again after it, and once more on opening the version panel. Every
+  `subprocess` call in this app already asked for no window; the ones that cannot are the
+  GRANDCHILDREN — the agent CLI runs the method's own `python3` and `git`, and a console program
+  started by a console-less parent is given a console of its own. So "no console window" is the
+  process's default now rather than a keyword each call site has to remember, and the one caller
+  whose purpose IS a visible window — the terminal launcher — asks for it out loud.
+- **`--version` started the app instead of printing a version.** There was no such flag, and the
+  parser that lets Qt take its own flags off the same line swallowed it in silence, so asking the
+  app its version launched it, MCP server and all. It prints and exits now, before the toolkit is
+  even imported. An installer asks this before deciding whether to replace us, and a bound port is
+  a bad answer.
+
+### Changed
+
+- The vendored method moves to **v3.0.17**, and two of its contracts changed under us. Flaw-map
+  rows are no longer guaranteed a frequency: a new class of finding is a property of TIME
+  (`energy_lag`, `ringing`, `decay_asymmetry`) and carries `t_ms` instead of a level — those rows
+  were being dropped silently, so the panel drew a map with a class missing and said nothing. And
+  the REW cross-check is now the verdict of the open capture round rather than of the ledger's
+  head, with two new keys: the round it is about, and duplicate measurement titles — which the
+  diagnostics line now puts first, because this app addresses a measurement by its title.
+
 ## [v0.1.14] — 2026-08-22 · the method's crossover maths, and a gate that was green because it was blind
 
 No new surface: this release is the method underneath the app being corrected, and the test that

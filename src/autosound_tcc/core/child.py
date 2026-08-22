@@ -22,8 +22,10 @@ the person can see and type in.
 from __future__ import annotations
 
 import functools
+import inspect
 import subprocess
 import sys
+from typing import Optional
 
 
 def _no_window() -> int:
@@ -53,6 +55,19 @@ def flags() -> dict:
     return {"creationflags": flag} if flag else {}
 
 
+def wants_a_console() -> dict:
+    """The opposite of `quiet()`: for the one caller whose whole purpose IS a visible window.
+
+    `hide_console_windows()` makes "no window" the DEFAULT for every child, so the terminal
+    launcher has to say out loud that it wants one -- otherwise the blanket default would take
+    away the window it exists to open. On anything but Windows this is empty, as always.
+    """
+    flag = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
+    if sys.platform.startswith("win") and flag is not None:
+        return {"creationflags": int(flag)}
+    return {}
+
+
 def hide_console_windows() -> None:
     """Stop console windows appearing for children this process does not spawn itself.
 
@@ -67,9 +82,17 @@ def hide_console_windows() -> None:
     replaced — the one the SDK calls (`anyio.open_process`) and the one `anyio.run_process` calls
     (its defining module) — and the wrapper marks itself, so calling this twice does nothing.
 
-    Nothing here touches `subprocess`: `core/terminal_launcher` opens a terminal on purpose, and a
-    blanket patch would take that window away too.
+    `subprocess` is patched too, and the terminal launcher opts OUT of it by asking for a console
+    explicitly (`wants_a_console()`). That is the way round it has to be: every call site here
+    already passes `quiet()`, and the flashes a user still sees on Windows come from the ones that
+    CANNOT -- a grandchild. The agent CLI runs the method's own `python3` and `git`, and a console
+    program started by a console-less parent gets a console of its own. A default that has to be
+    remembered at each call site is a default that will be forgotten; this one is the process's.
+    (User, Windows 11, 2026-08-22: a terminal window blinked before the main window, again after
+    it, and once more on opening the version panel -- with every call site in this repo already
+    passing `quiet()`.)
     """
+    hide_subprocess_console_windows()
     flag = _no_window()
     if not flag:
         return
@@ -90,3 +113,47 @@ def hide_console_windows() -> None:
     open_process._autosound_quiet = True  # type: ignore[attr-defined]
     _subprocesses.open_process = open_process
     anyio.open_process = open_process
+
+
+def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
+    """The same for `subprocess`, as a process-wide default rather than a per-call kwarg.
+
+    Idempotent, and it never overrides a caller: a `creationflags` that was passed -- including
+    `wants_a_console()`'s -- wins. Called from `hide_console_windows()`, so there is one entry
+    point to remember.
+
+    The flag is read at CALL time, not at patch time, and that is the whole safety of this
+    function: the wrapper installs on every platform and does nothing wherever
+    `CREATE_NO_WINDOW` does not exist. Capturing it at patch time cost 74 test failures in one
+    run -- `test_child.py` fakes Windows to check the SDK path, and a wrapper holding a captured
+    Windows flag then poisoned every later subprocess on macOS with "creationflags is only
+    supported on Windows platforms". A global patch that a test can arm and not disarm is the
+    wrong shape regardless of who calls it.
+
+    `target` exists for the test, so it can check the behaviour without patching the real class at
+    all.
+    """
+    cls = target or subprocess.Popen
+    original = cls.__init__
+    if getattr(original, "_autosound_quiet", False):
+        return
+
+    # Where `creationflags` sits if somebody passes it positionally -- asked of the signature
+    # rather than counted by hand, because that count is a Python-version detail (14 including
+    # `self` on 3.13) and being wrong about it would silently override a caller who said what
+    # they wanted.
+    try:
+        names = list(inspect.signature(original).parameters)
+        positional = names.index("creationflags") - 1  # `self` is not in `args` below
+    except (ValueError, TypeError):  # pragma: no cover -- a signature we do not recognise
+        positional = 13
+
+    @functools.wraps(original)
+    def __init__(self, *args, **kwargs):  # noqa: N807 (patching a dunder on purpose)
+        flag = _no_window()
+        if flag and not kwargs.get("creationflags") and len(args) <= positional:
+            kwargs["creationflags"] = flag
+        return original(self, *args, **kwargs)
+
+    __init__._autosound_quiet = True  # type: ignore[attr-defined]
+    cls.__init__ = __init__  # type: ignore[method-assign]

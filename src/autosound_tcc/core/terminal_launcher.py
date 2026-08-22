@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from autosound_tcc.core import child
+
 # Agent CLIs we know how to launch, in the order we'd suggest them. The value is the executable
 # name to look for on PATH; `agy` is Antigravity's Gemini CLI, which the tuning skill's own critic
 # wrappers already prefer over `gemini` when present.
@@ -127,10 +129,16 @@ def run_line(line: str) -> None:
         return
     if sys.platform.startswith("win"):
         # `/k` keeps the window after the command ends — the whole point here.
+        # `wants_a_console()`, out loud: TCC makes "no console window" the default for every
+        # child it starts (`core/child.hide_console_windows`), and this is the one call whose
+        # entire purpose is a window somebody types in. Saying so beats being an exception
+        # somebody has to remember.
         if shutil.which("wt"):
-            subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True)
+            subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True, **child.wants_a_console())
             return
-        subprocess.Popen(f'start "" cmd /k {line}', shell=True, close_fds=True)
+        subprocess.Popen(
+            f'start "" cmd /k {line}', shell=True, close_fds=True, **child.wants_a_console()
+        )
         return
     for argv, wants_shell_string in (
         (["x-terminal-emulator", "-e"], True),

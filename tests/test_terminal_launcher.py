@@ -198,3 +198,44 @@ def test_windows_model_alone_still_switches_to_cmd_k(recorded, monkeypatch, tmp_
 
     assert recorded[0][3:5] == ["cmd", "/k"]
     assert recorded[0][-1] == '"claude" --model "opus"'
+
+
+def test_no_console_is_the_processes_default_and_the_terminal_opts_out(monkeypatch):
+    """A default that has to be remembered at each call site is a default that gets forgotten.
+
+    Every `subprocess` call in this repo already passed `child.quiet()`, and a user on Windows 11
+    still saw a console window blink three times in one session (2026-08-22): before the main
+    window, after it, and on opening the version panel. The ones that cannot pass it are the
+    GRANDCHILDREN — the agent CLI runs the method's `python3` and `git`, and a console program
+    started by a console-less parent gets a console of its own. So the flag became the process's
+    default, and the one caller that WANTS a window says so.
+
+    Patched onto a stand-in class, never onto the real `subprocess.Popen`: doing that leaked past
+    the test and killed 74 later ones (see the note in `child.hide_subprocess_console_windows`).
+    """
+    from autosound_tcc.core import child
+
+    monkeypatch.setattr(child, "_no_window", lambda: 0x08000000)  # CREATE_NO_WINDOW
+
+    class FakePopen:
+        def __init__(self, argv, creationflags=None, **kwargs):
+            self.argv = argv
+            self.creationflags = creationflags
+
+    child.hide_subprocess_console_windows(FakePopen)
+
+    assert FakePopen(["anything"]).creationflags == 0x08000000, "a plain call gets the flag"
+    asked = FakePopen(["anything"], creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+    assert asked.creationflags == 0x00000010, "a caller that said what it wants is left alone"
+
+    # Twice does nothing: the wrapper marks itself, so a second call cannot double-wrap.
+    first = FakePopen.__init__
+    child.hide_subprocess_console_windows(FakePopen)
+    assert FakePopen.__init__ is first
+
+
+def test_wants_a_console_is_empty_off_windows(monkeypatch):
+    from autosound_tcc.core import child
+
+    monkeypatch.setattr(child.sys, "platform", "darwin")
+    assert child.wants_a_console() == {}
