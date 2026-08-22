@@ -560,3 +560,41 @@ def test_the_reason_is_shown_when_there_IS_something_it_cannot_install():
                                        updatable=False))
 
     assert i18n.t("updWhy_submodule") in dialog._update_rows["skill"][0].text()
+
+
+def test_the_rew_line_reads_the_v3017_shape(monkeypatch):
+    """Skill v3.0.17 re-cut the REW cross-check: the count is now the verdict of the OPEN CAPTURE
+    ROUND rather than of the ledger's HEAD (a baseline used to report `0/16 MISSING` forever, and a
+    real hole would have been invisible in that noise), and two keys arrived with it.
+
+    `round` — because "16 of 18" says nothing without naming which round asked.
+
+    `duplicate_titles` — the one that matters most here, and the reason it is put in front: TCC
+    addresses a measurement by its TITLE (`rew_bridge.find_id`), so two measurements sharing a
+    title make every answer about that title a coin toss. A checker that finds them and a panel
+    that does not show them is the finding arriving nowhere.
+    """
+    from autosound_tcc.ui.tcc.diagnostics_panel import _rew_line
+
+    counted = _report(cross_checks={"rew": {
+        "reachable": True, "round": "cap_003", "phase": 2, "version": "v_004",
+        "expected": ["w-L", "w-R", "m-L"], "found": ["w-L", "w-R"], "missing": ["m-L"],
+        "complete": False,
+    }})
+    line = _rew_line(counted)
+    assert "round cap_003" in line, "the count has to say which round asked for it"
+    assert "2/3 captured" in line and "missing ['m-L']" in line
+
+    nothing_open = _report(cross_checks={"rew": {
+        "reachable": True,
+        "note": "no capture round open -- nothing is expected of REW right now",
+    }})
+    assert "no capture round open" in _rew_line(nothing_open)
+
+    dups = _report(cross_checks={"rew": {
+        "reachable": True, "duplicate_titles": {"w-L_02": 2},
+        "note": "no capture round open -- nothing is expected of REW right now",
+    }})
+    shown = _rew_line(dups)
+    assert shown.startswith("REW: DUPLICATE TITLES"), shown
+    assert "w-L_02 ×2" in shown

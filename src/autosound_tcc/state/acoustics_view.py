@@ -34,14 +34,26 @@ _ACTION_TONE = {
 }
 
 
+#: The kinds that are a property of TIME rather than of frequency (skill v3.0.17,
+#: `project.py TIME_DOMAIN_KINDS`): they carry `t_ms` instead of `level_db`, and `f_hz` is optional
+#: because a lag can be broadband. Our own copy of the tuple, deliberately paired with a shape test
+#: below rather than trusted alone -- a row that carries `t_ms` and no `level_db` is treated as
+#: time-domain even when its kind is one the method added after this line was written. A map class
+#: silently dropped is exactly the failure this file's `except` clause makes invisible.
+_TIME_DOMAIN_KINDS = ("energy_lag", "ringing", "decay_asymmetry")
+
+
 @dataclass(frozen=True)
 class Flaw:
     """One measured acoustic feature, and the verdict on what may be done about it."""
 
-    f_hz: float
-    level_db: float
     kind: str
     action: str
+    #: A frequency feature has `f_hz` and `level_db`; a time-domain one has `t_ms` and may have
+    #: neither. Optional here rather than required, since v3.0.17.
+    f_hz: Optional[float] = None
+    level_db: Optional[float] = None
+    t_ms: Optional[float] = None
     channels: tuple[str, ...] = ()
     q: Optional[float] = None
     bw_oct: Optional[float] = None
@@ -74,12 +86,30 @@ class Flaw:
         return ""
 
     @property
+    def is_time_domain(self) -> bool:
+        """By SHAPE first, kind second: a row carrying a time and no level is a time-domain row
+        whatever it calls itself, which keeps a kind added later from vanishing off the panel."""
+        return self.t_ms is not None or self.kind in _TIME_DOMAIN_KINDS
+
+    @property
     def headline(self) -> str:
-        """`188 Hz · Q5 · +5.5 dB` — frequency, width, and the feature's own height or depth."""
-        parts = [f"{self.f_hz:g} Hz"]
+        """`188 Hz · Q5 · +5.5 dB` for a frequency feature.
+
+        A time-domain row has no dB and may have no frequency at all — a broadband energy lag is
+        the whole point of the class — so it reads `energy lag · +3.2 ms`, with the band in front
+        when the method did confine it to one.
+        """
+        parts = []
+        if self.is_time_domain:
+            parts.append(self.kind.replace("_", " ") or "timing")
+        if self.f_hz is not None:
+            parts.append(f"{self.f_hz:g} Hz")
         if self.width:
             parts.append(self.width)
-        parts.append(f"{self.level_db:+g} dB")
+        if self.level_db is not None:
+            parts.append(f"{self.level_db:+g} dB")
+        if self.t_ms is not None:
+            parts.append(f"{self.t_ms:+g} ms")
         return " · ".join(parts)
 
 
@@ -100,11 +130,19 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
         if not isinstance(row, dict):
             continue
         try:
+            kind = str(row.get("kind", ""))
+            timed = row.get("t_ms") is not None or kind in _TIME_DOMAIN_KINDS
             out.append(
                 Flaw(
-                    f_hz=float(row["f_hz"]),
-                    level_db=float(row["level_db"]),
-                    kind=str(row.get("kind", "")),
+                    # A frequency row still has to bring both numbers; a time-domain one has to
+                    # bring `t_ms` and nothing else is required of it.
+                    f_hz=float(row["f_hz"]) if not timed else _optional_float(row.get("f_hz")),
+                    level_db=(
+                        _optional_float(row.get("level_db")) if timed
+                        else float(row["level_db"])
+                    ),
+                    t_ms=float(row["t_ms"]) if timed else None,
+                    kind=kind,
                     action=str(row.get("action", "")),
                     status=str(row.get("status") or "confirmed"),
                     channels=tuple(str(c) for c in row.get("channels") or ()),
@@ -118,4 +156,12 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
             # A row TCC cannot read is the skill's to fix; dropping it beats refusing to draw the
             # rest of a map that is otherwise fine.
             continue
-    return tuple(sorted(out, key=lambda flaw: flaw.f_hz))
+    # Frequency first, lowest to highest, as before. The rows with no frequency at all cannot
+    # join that order, so they follow it, in time order among themselves.
+    return tuple(
+        sorted(out, key=lambda flaw: (flaw.f_hz is None, flaw.f_hz or 0.0, flaw.t_ms or 0.0))
+    )
+
+
+def _optional_float(value) -> Optional[float]:
+    return None if value is None else float(value)

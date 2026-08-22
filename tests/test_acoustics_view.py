@@ -113,3 +113,51 @@ def test_a_map_written_before_the_field_existed_still_reads_as_fact(tmp_path):
 
     assert flaw.status == "confirmed" and not flaw.is_hypothesis
     assert flaw.tone == "bad", "a confirmed no_boost keeps the verdict colour"
+
+
+def test_a_time_domain_flaw_is_kept_and_reads_as_time(tmp_path, monkeypatch):
+    """Skill v3.0.17 added a class of finding that is a property of TIME, not of frequency:
+    `energy_lag`, `ringing`, `decay_asymmetry` carry `t_ms` instead of `level_db`, and `f_hz` is
+    optional because a lag can be broadband.
+
+    This file used to require both numbers on every row — and its `except` clause turned that into
+    the quiet kind of failure: the row was dropped and the panel drew a map with a whole class
+    missing, saying nothing. Asserted here because nothing else would notice.
+    """
+    import json
+
+    from autosound_tcc.state import acoustics_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"acoustics": {"flaws": [
+        {"f_hz": 188, "level_db": 5.5, "kind": "modal_peak", "action": "notch", "q": 5},
+        {"t_ms": 3.2, "kind": "energy_lag", "action": "delay", "channels": ["w-L"]},
+        {"f_hz": 63, "t_ms": -1.8, "kind": "ringing", "action": "geometry"},
+    ]}}))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    flaws = acoustics_view.load_flaws(tmp_path)
+    assert len(flaws) == 3, "a time-domain row must not be dropped"
+
+    by_kind = {flaw.kind: flaw for flaw in flaws}
+    assert by_kind["modal_peak"].headline == "188 Hz · Q5 · +5.5 dB", "unchanged for a frequency row"
+    assert by_kind["energy_lag"].headline == "energy lag · +3.2 ms"
+    assert by_kind["ringing"].headline == "ringing · 63 Hz · -1.8 ms"
+    # Frequency order first; the row that has no frequency cannot join it, so it comes last.
+    assert [flaw.kind for flaw in flaws] == ["ringing", "modal_peak", "energy_lag"]
+
+
+def test_a_time_domain_kind_the_method_adds_later_still_shows(tmp_path, monkeypatch):
+    """By SHAPE, not only by name: a row carrying `t_ms` and no `level_db` is a time row whatever
+    it is called. Our copy of the method's kind list is one more copy of a rule that lives there —
+    this is what keeps it from costing a whole class of finding when it falls behind."""
+    import json
+
+    from autosound_tcc.state import acoustics_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"acoustics": {"flaws": [
+        {"t_ms": 4.0, "kind": "group_delay_step", "action": "crossover"},
+    ]}}))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    flaws = acoustics_view.load_flaws(tmp_path)
+    assert [flaw.headline for flaw in flaws] == ["group delay step · +4 ms"]

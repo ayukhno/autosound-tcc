@@ -817,11 +817,37 @@ def _rew_line(report: ContractReport) -> str:
     """The REW leg of the cross-checks, in the checker's own terms.
 
     It is best-effort by design there (REW not running is reported, never an error), so this
-    renders whichever of the three shapes came back: a note, a capture count, or nothing said.
+    renders whichever shape came back: a note, a capture count, or nothing said.
+
+    Since skill v3.0.17 the count is the verdict of the OPEN CAPTURE ROUND rather than of the
+    ledger's HEAD -- on a baseline it used to read `0/16 MISSING` forever, and a real hole would
+    have been invisible inside that noise. Two keys came with it: `round`, said here because "16
+    of 18" means nothing without knowing which round asked, and `duplicate_titles`, which is put
+    FIRST because it is the one finding that makes the rest untrustworthy: TCC addresses a
+    measurement by its title (`rew_bridge.find_id`), so two measurements sharing one title mean
+    every answer about that title is a coin toss.
     """
     rew = report.rew()
     if not rew:
         return "REW: —"
+    dups = rew.get("duplicate_titles") or {}
+    prefix = ""
+    if dups:
+        named = ", ".join(f"{title} ×{n}" for title, n in sorted(dups.items()))
+        prefix = f"REW: DUPLICATE TITLES — {named}. "
+    if rew.get("note"):
+        return f"{prefix}REW: {rew['note']}" if prefix else f"REW: {rew['note']}"
+    if "expected" in rew:
+        found, expected = len(rew.get("found") or []), len(rew.get("expected") or [])
+        where = f"round {rew['round']}, " if rew.get("round") else ""
+        line = (
+            f"REW ({where}phase {rew.get('phase')}, v{rew.get('version')}): "
+            f"{found}/{expected} captured"
+        )
+        if not rew.get("complete"):
+            line = f"{line} — missing {rew.get('missing')}"
+        return f"{prefix}{line}" if prefix else line
+    return f"{prefix}REW: —" if prefix else "REW: —"
     if rew.get("note"):
         return f"REW: {rew['note']}"
     if "expected" in rew:
