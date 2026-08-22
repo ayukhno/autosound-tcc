@@ -63,6 +63,11 @@ def _parse(argv: list[str]) -> argparse.Namespace:
         help="Ask which project to open even though one is remembered.",
     )
     parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the installed version and exit.",
+    )
+    parser.add_argument(
         "--install-desktop",
         action="store_true",
         help="Build the macOS app bundle (or the Windows shortcuts) for this install, and exit.",
@@ -85,6 +90,18 @@ def main() -> int:
     # on the Dock once the extras arrive. This used to be a shell script in the method's
     # repository that the installer had to find by guessing a path (F-026).
     args = _parse(sys.argv)
+    # Before anything else can start: asking a program its version must not RUN the program. It
+    # used to -- there was no such flag, and `parse_known_args` (which exists so Qt can take its
+    # own flags off the same line) swallowed it silently, so `autosound-tcc --version` launched the
+    # whole app, MCP server and all. Found on a Windows VM whose build was too old to have an
+    # update panel, by the one command the test plan uses to say what is installed there
+    # (2026-08-22). A version query is also what an installer wants before it decides to replace
+    # us, and a server bound to a port is a bad answer to it.
+    if args.version:
+        from autosound_tcc.core import install_report
+
+        print(install_report.app_version() or "unknown")
+        return 0
     if args.install_desktop:
         from autosound_tcc.core import desktop_entry
 

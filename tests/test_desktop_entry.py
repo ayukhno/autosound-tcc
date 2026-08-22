@@ -184,3 +184,33 @@ def test_the_cli_carries_the_flag():
 @pytest.mark.parametrize("name", ["autosound-tcc", "autosound-tcc-gui"])
 def test_both_console_scripts_are_known(name):
     assert name in desktop_entry.LAUNCHER_NAMES
+
+
+
+def test_version_flag_prints_and_does_not_start_the_app(capsys, monkeypatch):
+    """`--version` must ANSWER, not run.
+
+    There was no such flag, and `parse_known_args` — which exists so Qt can take its own flags off
+    the same line — swallowed it without a word, so the app started: window, MCP server, the lot.
+    A Windows VM too old to have an update panel showed it, through the one command the method's
+    test plan uses to ask what is installed there (2026-08-22).
+
+    The Qt import is asserted absent rather than merely unused: it is the step that would make this
+    slow, and on a light install it is the step that fails.
+    """
+    import sys
+
+    from autosound_tcc import app as app_module
+    from autosound_tcc.core import app_log, child, install_report
+
+    monkeypatch.setattr(install_report, "app_version", lambda: "9.9.9")
+    monkeypatch.setattr(app_log, "setup", lambda *a, **k: None)
+    monkeypatch.setattr(child, "hide_console_windows", lambda *a, **k: None)
+    monkeypatch.setattr(sys, "argv", ["autosound-tcc", "--version"])
+
+    # The guard that makes the second half of the name true: if `main` walked past the version
+    # branch it would import the window from here, and `None` in `sys.modules` raises on import.
+    monkeypatch.setitem(sys.modules, "autosound_tcc.ui.tcc.main_window", None)
+
+    assert app_module.main() == 0
+    assert capsys.readouterr().out.strip() == "9.9.9"
