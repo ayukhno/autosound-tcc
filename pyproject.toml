@@ -78,7 +78,9 @@ gui = [
 # newest once. `packaging` is here because a test calls it BY NAME (the bounds-vs-installed check)
 # — it arrives with pytest anyway, and a dependency we import and do not declare is exactly the
 # hole this file exists to close.
-dev = ["pytest>=7,<10", "packaging>=24,<27", "autosound-tcc[gui,claude]"]
+# `scipy` because the vendored skill's dsp_math self-test designs crossovers since v3.0.12 and
+# imports it BY NAME; the suite runs those self-tests, so the dependency is written down here.
+dev = ["pytest>=7,<10", "packaging>=24,<27", "scipy>=1.11,<2", "autosound-tcc[gui,claude]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"
