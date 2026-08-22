@@ -6,6 +6,32 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.12] — 2026-08-22 · the update button follows releases
+
+The first release that behaves the way this file now describes: what the app offers you is a
+release, not whatever happened to be on `main` an hour ago.
+
+### Fixed
+
+- **"Update" meant "take whatever is on `main`".** Both the button and the installer asked for the
+  repository with no ref, and the version in the panel was read from `pyproject.toml` AT THAT
+  COMMIT — so it looked like a release and was not one. Anyone pressing update got unfinished work
+  with no way to tell from the row. The button now pins the tag it offers (`git+…@vX.Y.Z`) and the
+  check compares the installed version against the newest `v*` tag. A build ahead of the releases
+  reads as up to date rather than being told to update backwards — somebody working on `main` is
+  ahead on purpose.
+- A test helper wrote a glossary into the REAL project directory when imported outside pytest —
+  which is how seven test channels landed in a live project twice on 2026-08-21. The helper now
+  refuses to write anywhere but a temporary folder and says why, and the fixture that substitutes
+  the project directory asserts the substitution actually took. Setting a variable is not the same
+  as the redirection working.
+
+### Known
+
+- A FRESH install still takes `main`, because the installer lives in the method's repository and
+  has not moved with this. Until it does, a new install can be newer than the release this button
+  offers. Named here rather than left to be discovered.
+
 ## [v0.1.11] — 2026-08-21 · the field-fix round
 
 Two intakes in one evening of real use, twenty-two items, none of them found by a test. The app
@@ -50,12 +76,6 @@ instead of four boxes fighting for height.
   is selectable on the plot. Picking ONE of two identically named captures is still not possible —
   that is the next step, and it stays inside TCC.
 - Every number that means a version now says which axis it belongs to — series/config, or pass.
-
-### Guarded
-
-- A test helper wrote a glossary into the real project directory when imported outside pytest. It
-  now refuses to write anywhere but a temporary folder, and the fixture that substitutes the
-  project directory checks that the substitution actually took.
 
 ## [v0.1.10] — 2026-08-19 · up to date is the answer, when it is
 
