@@ -62,6 +62,11 @@ def _parse(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Ask which project to open even though one is remembered.",
     )
+    parser.add_argument(
+        "--install-desktop",
+        action="store_true",
+        help="Build the macOS app bundle (or the Windows shortcuts) for this install, and exit.",
+    )
     known, _ = parser.parse_known_args(argv[1:])  # Qt takes its own flags off the same line
     return known
 
@@ -75,6 +80,18 @@ def main() -> int:
     # Before anything can start a child: on Windows the Agent SDK's own `claude` process would
     # otherwise open a console window in front of the app at every session (see core/child.py).
     child.hide_console_windows()
+    # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
+    # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app
+    # on the Dock once the extras arrive. This used to be a shell script in the method's
+    # repository that the installer had to find by guessing a path (F-026).
+    args = _parse(sys.argv)
+    if args.install_desktop:
+        from autosound_tcc.core import desktop_entry
+
+        result = desktop_entry.install_desktop()
+        for line in result.lines:
+            print(line, file=sys.stdout if result.ok else sys.stderr)
+        return 0 if result.ok else 1
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
     try:
@@ -87,7 +104,6 @@ def main() -> int:
     except ImportError as exc:
         print(_NO_GUI.format(error=exc), file=sys.stderr)
         return 2
-    args = _parse(sys.argv)
     if args.project_dir is not None:
         # Into the environment rather than a private variable: `AUTOSOUND_PROJECT_DIR` is the
         # skill's own (SCR-011), so every subprocess TCC starts -- the reviewer, the recorder, an
