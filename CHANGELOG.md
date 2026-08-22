@@ -6,6 +6,44 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.13] — 2026-08-22 · the app can install itself, and the left column scrolls straight
+
+### Added
+
+- **`autosound-tcc --install-desktop`.** The app now builds its own double-clickable entry point:
+  an `Autosound TCC.app` in `~/Applications` with an alias on the Desktop, or — on Windows — the
+  two `Autosound TCC.lnk` shortcuts, Desktop and Start Menu. Both point at the INSTALLED launcher,
+  so `uv tool upgrade` moves the shortcut with it. This existed before, in the method's installer,
+  as a 138-line script that opened our package to build our bundle — and once, on a clean M1, did
+  not find itself. The installer can now call one command instead of carrying a builder for
+  somebody else's app; until it does, the old script stays as the fallback.
+
+### Fixed
+
+- **The left column scrolled past the end of itself.** At the bottom of the panel the rows looked
+  sliced and the space under them scrolled into nothing — 196px of it, measured. The DSP tree was
+  a scroll area with its scrolling turned off, sitting inside the column's scroll, and a widget
+  like that answers its parent with a size hint instead of the height it draws — and never says
+  when it changes. So folding a group did not reach the column either: 66px of room handed to a
+  tree that needed 886. The tree is a plain widget now; the column scrolls exactly its rows, and
+  folding a group gives the room back.
+- A channel's second line (`HP 100 LR4 · LP OFF · +0.0dB`) is elided rather than wrapped, so a
+  narrow panel keeps one line per channel instead of rows that double in height.
+
+### Changed
+
+- The vendored method moves to **v3.0.12** — `align_delay_polarity`'s near-tie rule now spans both
+  polarities (an exact draw settles by convention rather than float noise), and the pin stands on a
+  release tag again rather than between two. Note for anyone comparing: `v3.0.12` was force-moved
+  on 2026-08-22, so the same number means different code before and after.
+
+### Known
+
+- A FRESH install still takes `main` rather than this tag, and still builds the bundle with the
+  method's own script — both halves live in the installer, which is in the method's repository.
+  Both requests are filed (SCR-054 for the tag, SCR-056 for the builder); this release is the
+  precondition the second one was waiting for.
+
 ## [v0.1.12] — 2026-08-22 · the update button follows releases
 
 The first release that behaves the way this file now describes: what the app offers you is a
