@@ -82,18 +82,18 @@ def _default_collapsed(group_id: str) -> bool:
 def _sub_line(text: str) -> ElidedLabel:
     """A channel row's second line -- one line, elided, never wrapped.
 
-    It used to be a word-wrapping QLabel, and a wrapping label reports a height it does not have:
-    Qt guesses a width for the hint, decides the text needs two lines and asks for 28px, while at
-    the width it is actually given it draws one line of 14. The column above it is one long
-    QScrollArea, and a scroll area sizes its content from those hints -- so every row donated 14px
-    of height that nothing was ever drawn in. Fourteen rows made 196px of scroll that ran past the
-    end of the tree into empty panel (user, 2026-08-22, with the screenshot; measured offscreen:
-    tree content 690px inside a 886px claim).
+    A row is one channel; making it two lines tall as soon as the panel narrows turns a list you
+    read at a glance into a list you scroll. Elided says the same thing in the room there is, and
+    the row's rounded hover tip already holds the fuller facts -- which is why this asks for no
+    native tooltip of its own.
 
-    Wrapping was not buying anything either: the layout hands a squeezed row its MINIMUM height,
-    which is one line, so a sub-line too long for the panel was clipped rather than wrapped. Elided
-    says the same thing honestly, and the row's rounded hover tip already holds the full facts --
-    which is why this asks for no native tooltip of its own.
+    It also stops the label lying about its height, which mattered once and could again: a
+    word-wrapped QLabel measures its HINT at a width Qt guesses, so this line asked for two lines
+    (28px) where it draws one (14px). That is normally harmless -- Qt asks `heightForWidth` along
+    the layout chain instead -- but any widget in the chain WITHOUT a layout of its own answers
+    with the hint, and this tree used to be exactly that (a QScrollArea, F-002/F-021). Fourteen
+    rows of it made 196px of scroll running past the end of the content (user, 2026-08-22, with
+    the screenshot; measured offscreen: 814px of content inside a 1010px claim).
     """
     label = ElidedLabel(text, native_tooltip=False)
     label.setProperty("class", "cline2")
