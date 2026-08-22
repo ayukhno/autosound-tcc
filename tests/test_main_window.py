@@ -1177,14 +1177,16 @@ def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_pa
     """User, 2026-08-21: "скрол в лівому вікні - зажимає останню DSP секцію, а хотілось би просто
     скролити".
 
-    The tree is a QScrollArea inside the column's QScrollArea. It used to be handed `stretch=1`,
-    which meant it got whatever height was left in the viewport and scrolled the rest privately --
-    so the DSP section showed two rows at the bottom of the panel and ate the wheel that was meant
-    to move the column. Now the tree is as tall as its rows and the column scrolls.
+    The tree used to be a QScrollArea inside the column's QScrollArea, handed `stretch=1`: it got
+    whatever height was left in the viewport and scrolled the rest privately -- so the DSP section
+    showed two rows at the bottom of the panel and ate the wheel that was meant to move the column.
+    Now the tree is a plain widget, as tall as its rows, and the column scrolls.
     """
     import json
 
     from PySide6.QtWidgets import QScrollArea
+
+    from autosound_tcc.ui.tcc.dsp_tree import TreeGroupSection
 
     channels = {f"ch_{i}": {"slot": chr(65 + i), "hp": {"f": 80}, "lp": {"f": 4000}}
                 for i in range(11)}
@@ -1207,43 +1209,75 @@ def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_pa
     window = MainWindow()
     window.resize(1400, 700)
     window.show()
-    for _ in range(4):
-        app.processEvents()
+
+    def settle() -> None:
+        for _ in range(6):
+            app.processEvents()
+            app.sendPostedEvents()
+
+    settle()
 
     tree = window._tree
-    column = next(area for area in window.findChildren(QScrollArea)
-                  if area is not tree and area.isAncestorOf(tree))
+    column = next(area for area in window.findChildren(QScrollArea) if area.isAncestorOf(tree))
 
-    def content_bottom() -> int:
-        return max((c.geometry().bottom() for c in tree._body.children() if c.isWidgetType()),
-                   default=0)
+    def content_bottom(widget) -> int:
+        """One past the lowest pixel anything visible is drawn at, in `widget`'s coordinates."""
+        return max((c.geometry().bottom() + 1 for c in widget.children()
+                    if c.isWidgetType() and not c.isHidden()), default=0)
 
-    assert tree.height() >= content_bottom(), "the tree is as tall as its rows"
-    assert tree.verticalScrollBar().maximum() == 0, "and has nothing of its own to scroll"
+    assert not isinstance(tree, QScrollArea), "the tree has no scrolling of its own to steal"
+    assert tree.height() >= content_bottom(tree), "the tree is as tall as its rows"
     assert column.verticalScrollBar().maximum() > 0, "the column is what scrolls"
 
-    # And it stays that way across a RELOAD, which is where this first broke: a widget added to
-    # a layout is not shown until Qt gets to it, a layout does not count hidden items, so the
-    # height announced on the spot was 18px of margins over a tree of thirty rows -- the last row
-    # sliced in half with free space under it (user, 2026-08-21).
+    # And it scrolls the content, not a claim about it. A word-wrapping QLabel asks for the height
+    # of two lines and draws one, so every channel row donated 14px that nothing was drawn in:
+    # 196px of scroll running past the end of the tree into empty panel (user, 2026-08-22, with
+    # the screenshot). What the column scrolls has to END where the drawing ends.
+    inner = column.widget()
+
+    def scrolls_exactly_its_content() -> bool:
+        """The scrolled widget ends where the drawing ends -- or fills the viewport when the
+        column has more room than content, which is the trailing stretch doing its job."""
+        return inner.height() == max(column.viewport().height(), content_bottom(inner))
+
+    assert scrolls_exactly_its_content(), "no scrollable emptiness under the last row"
+
+    # Folding a group has to reach the column too. The tree announced its height by hand after a
+    # rebuild, and a fold is not a rebuild -- so the column kept the height it had computed before:
+    # 66px of tree given the room for 886, rows sliced off with free space under them (same
+    # report). A widget whose own layout holds the rows says so by itself.
+    group = tree.findChildren(TreeGroupSection)[0]
+    tall = tree.height()
+    group._on_header_clicked(None)
+    settle()
+    folded = tree.height()
+    assert folded < tall, "folding a group gives its rows' room back"
+    assert scrolls_exactly_its_content()
+    group._on_header_clicked(None)
+    settle()
+    assert tree.height() == tall, "and unfolding takes it again"
+    assert scrolls_exactly_its_content()
+
+    # It stays that way across a RELOAD, which is where this first broke: a widget added to a
+    # layout is not shown until Qt gets to it, a layout does not count hidden items, so the height
+    # announced on the spot was 18px of margins over a tree of thirty rows -- the last row sliced
+    # in half with free space under it (user, 2026-08-21).
     (preset / "v_001.json").write_text(json.dumps({
         "preset": "P", "sample_rate": 48000,
         "channels": {f"ch_{i}": {"slot": chr(65 + i), "hp": {"f": 80}, "lp": {"f": 4000}}
                      for i in range(30)},
     }))
     window._safe_load_project()
-    for _ in range(6):
-        app.processEvents()
-    assert tree.height() >= content_bottom(), "a reload that grows the tree grows the widget"
+    settle()
+    assert tree.height() >= content_bottom(tree), "a reload that grows the tree grows the widget"
 
     (preset / "v_001.json").write_text(json.dumps({
         "preset": "P", "sample_rate": 48000,
         "channels": {"ch_0": {"slot": "A", "hp": {"f": 80}, "lp": {"f": 4000}}},
     }))
     window._safe_load_project()
-    for _ in range(6):
-        app.processEvents()
-    assert tree.height() >= content_bottom()
+    settle()
+    assert tree.height() >= content_bottom(tree)
     assert tree.height() < 400, "and one that shrinks it gives the room back"
     window.close()
 

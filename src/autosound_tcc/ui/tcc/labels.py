@@ -28,10 +28,17 @@ class ElidedLabel(QLabel):
         text: str = "",
         min_width: int = 24,
         policy: QSizePolicy.Policy = QSizePolicy.Policy.Ignored,
+        native_tooltip: bool = True,
     ) -> None:
         super().__init__(text)
         self._full = text
         self._min_width = min_width
+        # `native_tooltip=False` for a label that sits INSIDE something which already explains
+        # itself -- a DSP-tree channel row carries a rounded hover tip holding the same facts in
+        # a fuller form, and a second, square, native tip on one of its lines is the same hint
+        # twice in two shapes. The rule below (skip when the label itself has a rounded tip) does
+        # not catch that case: the tip is on the parent, not on the label.
+        self._native_tooltip = native_tooltip
         self.setMinimumWidth(min_width)
         # `Ignored` for a key: it takes whatever the row has left, however little. `Maximum` for a
         # value: it asks for its natural width and gets it whenever the panel is wide enough, and
@@ -87,7 +94,7 @@ class ElidedLabel(QLabel):
         # Not when the widget already has one of the app's own rounded tips (`rounded_tooltip.
         # attach` leaves it as `hover_tip`): those are not Qt tooltips, so setting a native one
         # here would put TWO hints on the same widget, in two different shapes.
-        if getattr(self, "hover_tip", None) is None:
+        if self._native_tooltip and getattr(self, "hover_tip", None) is None:
             self.setToolTip(self._full if shown != self._full else "")
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)

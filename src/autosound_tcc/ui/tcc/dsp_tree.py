@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -78,6 +77,27 @@ def _default_collapsed(group_id: str) -> bool:
     everything else. Mirrors the prototype's params:true/virtual:true/output:false defaults
     without hardcoding a Helix-specific group name."""
     return group_id != "physical_outputs"
+
+
+def _sub_line(text: str) -> ElidedLabel:
+    """A channel row's second line -- one line, elided, never wrapped.
+
+    It used to be a word-wrapping QLabel, and a wrapping label reports a height it does not have:
+    Qt guesses a width for the hint, decides the text needs two lines and asks for 28px, while at
+    the width it is actually given it draws one line of 14. The column above it is one long
+    QScrollArea, and a scroll area sizes its content from those hints -- so every row donated 14px
+    of height that nothing was ever drawn in. Fourteen rows made 196px of scroll that ran past the
+    end of the tree into empty panel (user, 2026-08-22, with the screenshot; measured offscreen:
+    tree content 690px inside a 886px claim).
+
+    Wrapping was not buying anything either: the layout hands a squeezed row its MINIMUM height,
+    which is one line, so a sub-line too long for the panel was clipped rather than wrapped. Elided
+    says the same thing honestly, and the row's rounded hover tip already holds the full facts --
+    which is why this asks for no native tooltip of its own.
+    """
+    label = ElidedLabel(text, native_tooltip=False)
+    label.setProperty("class", "cline2")
+    return label
 
 
 class _Pill(QLabel):
@@ -176,9 +196,7 @@ class ChannelRow(QWidget):
             lp = CrossoverLeg.from_raw(raw.get("lp")).label
             gain = raw.get("gain_db")
             gain_s = f"{gain:+.1f}dB" if isinstance(gain, (int, float)) else "—"
-            line2 = QLabel(f"HP {hp} · LP {lp} · {gain_s}")
-            line2.setProperty("class", "cline2")
-            line2.setWordWrap(True)
+            line2 = _sub_line(f"HP {hp} · LP {lp} · {gain_s}")
             layout.addWidget(line2)
         else:
             # Virtual channels have no crossover, but their gain (and delay) matter in the main
@@ -188,9 +206,7 @@ class ChannelRow(QWidget):
             parts = [f"Gain {gain:+.1f}dB" if isinstance(gain, (int, float)) else "Gain —"]
             if isinstance(delay, (int, float)):
                 parts.append(f"Delay {delay:g}ms")
-            line2 = QLabel(" · ".join(parts))
-            line2.setProperty("class", "cline2")
-            line2.setWordWrap(True)
+            line2 = _sub_line(" · ".join(parts))
             layout.addWidget(line2)
 
         # rounded_tooltip.attach(), not setToolTip() -- native QToolTip's window frame stays
@@ -453,7 +469,7 @@ class TreeGroupSection(QWidget):
         self._twist.setText("▸" if collapsed else "▾")
 
 
-class DspTreeWidget(QScrollArea):
+class DspTreeWidget(QWidget):
     """The whole left-panel tree: one `TreeGroupSection` per profile-declared group, in profile
     order. Rebuild via `set_view()` whenever the project/preset changes."""
 
@@ -464,40 +480,25 @@ class DspTreeWidget(QScrollArea):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWidgetResizable(True)
-        self.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # It does not scroll. The left panel is one scroll from top to bottom (`main_window`
-        # `_build_left`), and a scrolling tree inside a scrolling column is a wheel that stops
-        # working halfway down: the tree took whatever height was left in the viewport, showed two
-        # rows of it, and swallowed the wheel that was meant to move the column (user, 2026-08-21,
-        # with the screenshot). It keeps being a QScrollArea only because it holds the body widget
-        # every rebuild replaces -- what it gives up is the scrolling.
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # A plain widget holding its rows in its own layout -- deliberately not a QScrollArea.
+        # The left panel is one scroll from top to bottom (`main_window._build_left`), and a
+        # scrolling tree inside that scroll is a wheel that stops working halfway down (F-002,
+        # user 2026-08-21). That was first answered by keeping the QScrollArea and taking its
+        # scrolling away: scrollbars off, `sizeHint` overridden to the content height, and
+        # `updateGeometry` called by hand after every rebuild. It fixed the wheel and left the
+        # other half: a QScrollArea does not tell its parent layout when the widget inside it
+        # changes size, so folding or unfolding a group -- which no rebuild goes through -- left
+        # the column holding the height it had computed before. Measured offscreen: 66px given to
+        # a tree asking for 886, rows sliced off mid-row with free space underneath and the
+        # column's own scrollbar at range 0 (user, 2026-08-22, with the screenshot).
+        # A widget whose own layout holds the rows announces its height change by itself, which
+        # is what those hand-written calls were imitating one rebuild at a time.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self._settings = get_settings()
-        self._body = QWidget()
-        self._layout = QVBoxLayout(self._body)
+        self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 6, 0, 12)
         self._layout.setSpacing(2)
         self._layout.addStretch(1)
-        self.setWidget(self._body)
-
-    def sizeHint(self):  # noqa: N802 (Qt override)
-        """As tall as its rows. A QScrollArea normally asks for a viewport-sized box and scrolls
-        what does not fit; this one is inside the column's scroll, so what does not fit here has
-        to become height the column can scroll to.
-
-        Asked of the LAYOUT and not of `self._body`: a widget's size hint is cached and a rebuild
-        answers with the previous view's until Qt gets round to recomputing it. `set_view` calls
-        `updateGeometry` the moment it finishes adding rows, and at that moment the cached answer
-        was 18px for a tree that needed 791 (measured, 2026-08-21). The layout computes from the
-        items it is holding, which is the question actually being asked.
-        """
-        return self._layout.sizeHint()
-
-    def minimumSizeHint(self):  # noqa: N802 (Qt override)
-        return self._layout.sizeHint()
 
     def set_view(self, view: ProjectView) -> None:
         # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so
@@ -522,18 +523,3 @@ class DspTreeWidget(QScrollArea):
             section.tableRequested.connect(self.tableRequested.emit)
             section.toggleRequested.connect(self.toggleRequested.emit)
             self._layout.insertWidget(self._layout.count() - 1, section)
-        # The new size has to be ANNOUNCED. This widget is as tall as its rows (it does not
-        # scroll -- the column does), so a rebuild that adds rows changes the height the column's
-        # layout has to give it; without this the layout keeps the height it computed for the
-        # previous view and the extra rows are simply cut off, with free space below them. Seen
-        # the moment a reload grew the tree: 219px held against a 791px hint, the last row sliced
-        # in half (user, 2026-08-21 second run -- and reloads got more frequent that same day
-        # when the flaw map started refreshing on them).
-        # Twice, and the second one is the one that works. A widget added to a layout is not
-        # shown until Qt gets to it, and a layout does not count hidden items -- so asked right
-        # here the hint is 18px of margins over a tree of thirty rows (measured). The deferred
-        # call runs after that pass, when the rows exist as far as the layout is concerned. The
-        # immediate one stays for the case where the tree is built before the window is shown,
-        # which is every startup.
-        self.updateGeometry()
-        QTimer.singleShot(0, self.updateGeometry)
