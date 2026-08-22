@@ -8,7 +8,7 @@ Status values: `proposed` (not yet actioned) · `accepted` (skill maintainers/se
 · `done` (landed in the submodule and the pin bumped) · `superseded` / `rejected` (the ask stopped
 being the right one — the reason is on the entry).
 
-**Open as of 2026-08-22**, newest first: **SCR-056** (the installer builds our bundle — call `--install-desktop` instead; unblocked by TCC v0.1.13), **SCR-054** (a fresh install takes `main` while the app updates by tag — already written and pushed as `fix/scr-054-pin-tcc-tag`, waiting to be merged), **SCR-052** (`_open_questions` is a paragraph where the contract says a key), **SCR-051** (the reviewer cannot go through omp) and **SCR-049** (the project backup nobody wrote down). Withdrawn: SCR-053, SCR-055 — the reasoning is kept on each. SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
+**Open as of 2026-08-22**, newest first: **SCR-052** (`_open_questions` is a paragraph where the contract says a key), **SCR-051** (the reviewer cannot go through omp) and **SCR-049** (the project backup nobody wrote down). Landed the same day they were filed: **SCR-054** and **SCR-056**, both in the method's `5216b92` — a fresh install now takes TCC's newest tag and lets the app build its own bundle. Withdrawn: SCR-053, SCR-055 — the reasoning is kept on each. SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
 | SCR | ask | where it bites |
 |-----|-----|----------------|
@@ -1622,10 +1622,21 @@ from a registry we do not own is the wrong direction (the Arbiter's point, and i
 
 ## SCR-054 — the installer puts TCC on the default branch, while TCC now updates by tag
 
-**Status**: **WRITTEN AND PUSHED** (2026-08-22) — branch `fix/scr-054-pin-tcc-tag` in the
-method's repository, commit `e401bd3`, waiting to be merged there. Not on `main`: that checkout
-had an unpushed commit of the method's own at the time, and a surprise commit on somebody's
-working branch is a worse gift than a branch they can read.
+**Status**: **DONE** (2026-08-22, same evening) — merged into the method's `main` as part of
+`5216b92`. Verified by content, not by name: `install.sh:853` and `install.ps1:756` both build
+`autosound-tcc[gui,claude] @ git+$TCC_REPO@$TCC_REF`, with `--tcc-ref` / `-TccRef` as the opt-out
+and a warned fallback to the branch when there are no tags or no network.
+
+**It is already live**, tag or no tag: the published installer is served from `main`
+(`raw.githubusercontent.com/…/main/install.sh` — the address SCR-055 settled as permanent), so a
+fresh install today takes TCC's newest release tag rather than our default branch.
+
+Written first as branch `fix/scr-054-pin-tcc-tag` (`e401bd3`), which no longer exists — the skill
+session rebased it onto a `main` it had fallen 13 commits behind, where it conflicted with the new
+`SKILL_TAG_GLOB`. **Lesson, the second one today about identifiers**: `ls-remote` saying the
+branch and the commit are gone means "merged under a different SHA" at least as often as it means
+"not merged". Look for the CONTENT — the same evening's other trap was a tag force-moved under an
+unchanged number.
 
 It was written by TCC's side rather than asked for, because the boundary question above it was
 answered the other way (see SCR-055, withdrawn): the installer is the METHOD's, and this is a
@@ -1757,9 +1768,15 @@ breaks every existing instruction, including ones already in people's notes. Pro
 
 ## SCR-056 — the installer builds our bundle; TCC now has the command, so call it
 
-**Status**: proposed (2026-08-22) — unblocked by TCC **v0.1.13**, which is the release that
-carries the command. Filed only now for that reason: an ask that names a command no installed
-version has is an ask that breaks the installer for anyone who runs it before the release lands.
+**Status**: **DONE** (2026-08-22, the evening it was filed) — merged into the method's `main` as
+part of `5216b92`, together with SCR-054. Verified by content: `install.sh:885` and
+`install.ps1:788` call `autosound-tcc --install-desktop` and read its output; nothing in either
+installer references `scripts/make-macos-app.sh` any more (the file is still in their tree,
+unreferenced). Live immediately, for the same reason as SCR-054 — the installer is served from
+`main`.
+
+Filed only after TCC v0.1.13 carried the command: an ask that names a command no installed version
+has is an ask that breaks the installer for anyone who runs it before the release lands.
 
 **Target**: skill — `install.sh` (the macOS bundle block, ~line 840-895, and the `builder` path
 resolution above it), `install.ps1` (the shortcut block, ~line 751-778), and

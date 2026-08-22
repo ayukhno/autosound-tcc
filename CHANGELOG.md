@@ -43,6 +43,10 @@ differ, and the newer of them is the fresh install.
   method's own script — both halves live in the installer, which is in the method's repository.
   Both requests are filed (SCR-054 for the tag, SCR-056 for the builder); this release is the
   precondition the second one was waiting for.
+  **Resolved the same evening** (added 2026-08-22, after this release): the method merged both
+  (`5216b92`), and because its installer is served from `main` it took effect immediately — a
+  fresh install now asks for TCC's newest tag and calls `--install-desktop`. Left above as it was
+  written rather than edited away: it was true when this shipped, and what closed it is the point.
 
 ## [v0.1.12] — 2026-08-22 · the update button follows releases
 
