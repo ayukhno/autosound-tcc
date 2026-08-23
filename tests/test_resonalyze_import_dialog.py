@@ -30,6 +30,7 @@ import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.core import config, vendor_loader  # noqa: E402
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc import resonalyze_import_dialog as rid  # noqa: E402
 
 
@@ -202,3 +203,58 @@ def test_the_rows_can_be_taken_to_the_gate_but_not_written_from_here(tmp_path, s
     assert not hasattr(dialog, "_write_btn")
     for leg in dialog.result["legs"]:
         assert leg["row"]["status"] == "proposed"
+
+
+def test_a_project_with_no_processor_gets_no_verdict_and_no_rows(tmp_path, session):
+    """The question this answers is the user's: can the import be done BEFORE the car is set up?
+
+    It runs -- and answers nothing. `blocked` is only ever about values the DSP refused, so with
+    no `dsp_profile.json` it is false, and read naively that is a pass. Measured on a bare folder
+    with the real session: 7 legs, 42 unknown, 0 checked, `blocked: false`. So the dialog must say
+    "nothing was checked" in its own words and must not offer the rows.
+    """
+    bare = tmp_path / "bare"
+    bare.mkdir()
+
+    dialog = _open(bare, session)
+
+    assert dialog.result["summary"]["blocked"] is False
+    assert dialog.result["summary"]["ok"] == 0
+    assert not dialog._copy_btn.isEnabled(), "nothing checked is not a pass"
+    assert dialog._verdict.text() == i18n.t("riUnchecked").format(
+        legs=dialog.result["summary"]["legs"]
+    )
+    assert dialog._verdict.property("class") == "kv-warn"
+
+
+def test_a_project_with_no_channels_says_so_instead_of_offering_empty_pickers(tmp_path, session):
+    """A row of pickers with nothing in them reads as "choose" when there is nothing to choose."""
+    project = _project(tmp_path / "proj")
+    (project / "project.json").write_text(
+        json.dumps({"schema_version": 3, "project_rev": 1, "channels": []}), encoding="utf-8"
+    )
+
+    dialog = _open(project, session)
+
+    assert dialog._channel_codes() == []
+    assert not dialog._binders
+    labels = [dialog._bind_form.itemAt(i).widget().text()
+              for i in range(dialog._bind_form.count())]
+    assert i18n.t("riNoChannels") in labels
+
+
+def test_clean_values_under_an_unknown_channel_are_still_not_bankable(tmp_path, session):
+    """A profile without a project: every value checked, every leg unbound. The values may be
+    perfect and there is still no name to file the row under."""
+    profile_only = tmp_path / "profile-only"
+    profile_only.mkdir()
+    shutil.copy2(
+        Path(config.bundled_profiles_dir()) / "helix-dsp-ultra-s.json",
+        profile_only / "dsp_profile.json",
+    )
+
+    dialog = _open(profile_only, session)
+
+    assert dialog.result["summary"]["unbound"] == dialog.result["summary"]["legs"]
+    assert not dialog._copy_btn.isEnabled()
+

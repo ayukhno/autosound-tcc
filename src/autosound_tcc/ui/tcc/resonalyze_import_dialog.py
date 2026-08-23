@@ -329,6 +329,11 @@ class ResonalyzeImportDialog(QDialog):
         if not unbound:
             return
         codes = self._channel_codes()
+        if not codes:
+            # Nothing to offer: this project has not named its channels yet. Saying so beats a row
+            # of empty pickers, which reads as "choose" when there is nothing to choose from.
+            self._bind_form.addRow(QLabel(i18n.t("riNoChannels")))
+            return
         for leg in unbound:
             hint = leg.get("channel_hint") or leg.get("display_name") or ""
             combo = QComboBox()
@@ -351,14 +356,34 @@ class ResonalyzeImportDialog(QDialog):
         return [str(row.get("code")) for row in rows if isinstance(row, dict) and row.get("code")]
 
     def _say_verdict(self) -> None:
+        """Four answers, and the order matters more than any one of them.
+
+        `blocked` is only ever about values the DSP REFUSED, so on a project with no
+        `dsp_profile.json` it is false -- nothing was checked, so nothing could be refused. Read
+        naively that is a pass, and this dialog would have offered the rows for banking on a
+        project that had never said what processor it has (measured on a bare folder: 7 legs, 42
+        unknown, 0 checked, `blocked: false`). A verdict that promises more than it checked is
+        the same failure as a silent rounding, so "nothing was checked" gets said in its own
+        words.
+
+        Unbound legs are their own answer too: a row whose channel is unknown cannot be banked
+        under any name, however clean its values are.
+        """
         summary = (self.result or {}).get("summary") or {}
         blocked, unbound = summary.get("blocked"), summary.get("unbound") or 0
         refused = summary.get("unsupported") or 0
-        self._copy_btn.setEnabled(bool(self.result) and not blocked)
+        legs = summary.get("legs") or 0
+        checked = summary.get("ok") or 0
+        # Bankable means bound AND refused nothing. Not "not blocked": that is only half of it.
+        self._copy_btn.setEnabled(bool(self.result) and not blocked and not unbound)
         if blocked:
             self._say(i18n.t("riBlocked").format(refused=refused, unbound=unbound), warn=True)
+        elif not checked:
+            self._say(i18n.t("riUnchecked").format(legs=legs), warn=True)
+        elif unbound:
+            self._say(i18n.t("riUnboundVerdict").format(unbound=unbound, legs=legs), warn=True)
         else:
-            self._say(i18n.t("riClear").format(legs=summary.get("legs") or 0), warn=False)
+            self._say(i18n.t("riClear").format(legs=legs), warn=False)
 
     def _say(self, text: str, *, warn: bool) -> None:
         self._verdict.setText(text)
