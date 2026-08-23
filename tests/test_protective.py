@@ -69,7 +69,7 @@ def test_nobody_said_is_refused_rather_than_treated_as_clean():
     with pytest.raises(Exception) as caught:
         protective.de_embed(freqs, np.zeros(2), np.zeros(2), None)
 
-    assert "never written down" in str(caught.value)
+    assert "LOOKS corrected" in str(caught.value)
     assert not isinstance(caught.value, protective.ProtectiveUnavailable), (
         "a missing RECORD is not a missing INSTALL — the caller has to tell them apart"
     )
@@ -98,3 +98,94 @@ def test_the_capped_region_is_reported_because_the_phase_there_is_not_the_driver
     assert corrected.capped_bins > 0
     assert corrected.capped_below_hz is not None
     assert corrected.magnitude_db[0] <= 40.0 + 1e-6, "the cap is what stops it inventing signal"
+
+
+def test_the_round_decides_whether_the_plot_opens_corrected():
+    """Readable, not inferred. A round carries the phase it belongs to and the ledger version it
+    was taken against, so "is this a driver read or a verification" is a fact rather than a guess
+    at a measurement title."""
+    assert protective.default_corrected({"phase": "0"}) is True
+    assert protective.default_corrected({"phase": "1"}) is True
+    assert protective.default_corrected({"phase": "-1"}) is True, "intake reads are reads too"
+    assert protective.default_corrected({"phase": "3"}) is False, (
+        "verifying a tune that is supposed to have those filters in it"
+    )
+    # Nobody said. Not a default in either direction -- the caller asks.
+    assert protective.default_corrected({"phase": ""}) is None
+    assert protective.default_corrected(None) is None
+    assert protective.default_corrected({}) is None
+
+
+def test_no_round_reads_as_no_answer_rather_than_as_a_clean_chain(tmp_path):
+    """`protective_record()` is None with no round open, and the method's docstring is explicit
+    that a caller must not read that as "there was no protection". A project with no process at
+    all lands in the same place."""
+    assert protective.record_for(tmp_path) is None
+    assert protective.default_corrected(protective.record_for(tmp_path)) is None
+
+
+def _round(tmp_path):
+    """A project with an open capture round, the way the dialog expects to find one."""
+    from autosound_tcc.core import vendor_loader
+
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    proc = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    proc.start_capture("v_001", ["m-L_0 (sw)"])
+    return tmp_path
+
+
+def test_the_dialog_opens_on_what_the_round_already_says(tmp_path):
+    """Re-opening it is a review, not a blank form — and the three answers stay three."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, STATE_OFF, STATE_UNSET
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
+
+    project = _round(tmp_path)
+    process_writer.set_protective(project, "m-L", {"hp": {"f": 100, "type": "LR", "slope": 24}})
+    process_writer.set_protective(project, "w-L", "OFF")
+
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L", "w-L", "tw-L"])
+
+    by_code = {row.code: row for row in dialog._rows}
+    assert by_code["m-L"].state.currentData() == STATE_FILTER
+    assert by_code["m-L"].answer() == {"hp": {"f": 100.0, "type": "LR", "slope": 24}}
+    assert by_code["w-L"].state.currentData() == STATE_OFF
+    assert by_code["w-L"].answer() == "OFF"
+    # Nobody said, and closing the dialog must not turn that into OFF.
+    assert by_code["tw-L"].state.currentData() == STATE_UNSET
+    assert by_code["tw-L"].answer() is None
+
+
+def test_the_gate_refuses_a_half_given_leg_and_the_dialog_shows_its_words(tmp_path):
+    """The dialog collects and does not validate: a leg with a frequency and no type goes to the
+    writer as typed, and the refusal is what the person reads. A UI that quietly fixes what a gate
+    would have refused trains people to trust the UI over the gate."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, ProtectiveDialog
+
+    project = _round(tmp_path)
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L"])
+    row = dialog._rows[0]
+    row.state.setCurrentIndex(row.state.findData(STATE_FILTER))
+    row.hp_f.setText("100")  # no type, no slope
+
+    dialog._on_save()
+
+    assert dialog.result() != dialog.DialogCode.Accepted
+    assert dialog._problem.isVisibleTo(dialog)
+    said = dialog._problem.text()
+    assert "m-L" in said and "f type slope" in said, said
+    assert "Traceback" not in said, "the gate's sentence, not the CLI's wrapper"
+

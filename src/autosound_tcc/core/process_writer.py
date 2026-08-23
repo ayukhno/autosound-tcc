@@ -210,6 +210,38 @@ def record_reviewer(
     return _run(project_dir, args)
 
 
+def set_protective(project_dir: Path, channel: str, legs) -> str:
+    """Declare what was in the signal path for one channel of the OPEN capture round.
+
+    `legs` is `"OFF"` -- an ANSWER, meaning this channel was swept with nothing in the chain -- or
+    `{"hp": {...}, "lp": {...}}` in the ledger's crossover vocabulary. Leaving a channel out
+    entirely is a THIRD thing: nobody said, and it is recorded by not calling this at all. The
+    de-embed refuses that case rather than treating it as clean, which is the whole point of the
+    feature.
+
+    Nothing is validated here. The skill refuses a leg missing `f`/`type`/`slope` at write time,
+    and that refusal comes back verbatim through `ProcessWriterError` for the dialog to show: a UI
+    that quietly fixes what a gate would have refused trains people to trust the UI over the gate.
+    """
+    args = ["capture-protective", str(channel)]
+    if legs == "OFF":
+        args.append("OFF")
+    else:
+        for kind in ("hp", "lp"):
+            leg = (legs or {}).get(kind)
+            if leg in (None, "OFF"):
+                continue
+            # Only what was actually given. Padding a half-filled leg with empty strings made the
+            # CLI's own parser fail on `int("")` -- a ValueError where the gate has a sentence
+            # ready ("--hp needs three values: f type slope ... a leg missing any of them cannot
+            # be taken back out later"). Sending three values when two were typed hides the
+            # refusal that was written for exactly this.
+            values = [leg.get("f"), leg.get("type"), leg.get("slope")]
+            args.append(f"--{kind}")
+            args += [str(value) for value in values if value not in (None, "")]
+    return _run(project_dir, args)
+
+
 def set_target(project_dir: Path, preset: str, curve: str) -> str:
     """Point a preset at its active target curve."""
     return _run(project_dir, ["target", preset, curve])

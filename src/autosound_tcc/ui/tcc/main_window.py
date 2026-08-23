@@ -92,6 +92,7 @@ from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
+from autosound_tcc.ui.tcc import protective_dialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
@@ -1948,6 +1949,22 @@ class MainWindow(QMainWindow):
                 new_window._status_strip.notify(str(exc), level="warn")
         self.close()
 
+    def _open_protective(self) -> None:
+        """Enter what was in the signal path while this capture round was measured.
+
+        A button rather than a checkbox, and the record rather than a flag: the fact that a round
+        was captured with protection is DERIVED from what was entered, so there is no tick that
+        can drift from the filters it claims to describe (the user's own correction, 2026-08-23).
+        """
+        dialog = protective_dialog.open_for(config.project_dir(), getattr(self, "_view", None), self)
+        if dialog is None:
+            self._status_strip.notify(i18n.t("protNoChannels"), level="warn")
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.written:
+            self._status_strip.notify(
+                i18n.t("protWritten").format(channels=", ".join(dialog.written))
+            )
+
     def _open_resonalyze_import(self) -> None:
         """Read-only on purpose. The dialog converts and checks; banking the rows is the tuning
         gate's job (`state/apply.py`), which validates against HEAD and produces the settings
@@ -2187,6 +2204,7 @@ class MainWindow(QMainWindow):
         # 2026-07-28).
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
         self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
+        self._meas_panel.protectiveRequested.connect(self._open_protective)
 
         return container
 

@@ -30,6 +30,7 @@ behaviour.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from autosound_tcc.core import vendor_loader
@@ -101,6 +102,51 @@ def reason() -> str:
             "git+https://github.com/ayukhno/autosound-tcc'"
         )
     return "" if hasattr(module, "de_embed") else "this skill's protective module has no de_embed"
+
+
+def record_for(project_dir=None) -> Optional[dict]:
+    """The open capture round's protective record, read through the skill's own module.
+
+    A READ, so it happens in-process, like every other process read here -- writes are the ones
+    that go out through the CLI so there is one implementation of "record a move" in the world.
+
+    `None` has two causes and the caller must not flatten them into one: no round is open, or the
+    skill is not installed. Neither means "there was no protection", and the window says so rather
+    than defaulting to clean.
+    """
+    from autosound_tcc.core import config, vendor_loader as loader
+
+    project = Path(project_dir or config.project_dir())
+    try:
+        process = loader.load_process()
+    except Exception:  # noqa: BLE001 — no skill: nothing knows what was in the chain
+        return None
+    try:
+        return process.Process(str(project / "process")).protective_record()
+    except Exception:  # noqa: BLE001 — no process yet, or a version without the record
+        return None
+
+
+def default_corrected(record: Optional[dict]) -> Optional[bool]:
+    """Should the plot open corrected, as the ROUND itself decides?
+
+    The rule is the method's, and it is readable rather than inferred: a round carries the `phase`
+    it belongs to and the ledger `version` it was taken against.
+
+    * phase 0 or 1 -- reading a driver's own behaviour, which is what de-embedding exists for --
+      corrected;
+    * a round at any later phase -- verifying a tune that is supposed to have those filters in it
+      -- as measured. Removing a filter that is part of the design measures something nobody
+      configured;
+    * no round, no record: `None`, and the caller must ask rather than default. "Nobody said" is
+      not "there was nothing".
+    """
+    if not record:
+        return None
+    phase = str(record.get("phase") or "").strip()
+    if phase in ("0", "-1", "1"):
+        return True
+    return False if phase else None
 
 
 def legs_of(record: Optional[dict], channel: str):

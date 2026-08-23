@@ -289,6 +289,9 @@ class MeasurementPanel(QWidget):
     # REW's own list of titles changed (a scan, or a read that named one). The window rebuilds the
     # checklist off this and runs the capture check; the panel itself decides nothing about them.
     titlesChanged = Signal()
+    #: The header's "Protection" button. The panel does not own the dialog: it has neither the
+    #: project's channel list nor the writer, and both live where the window already keeps them.
+    protectiveRequested = Signal()
     #: The grid switched to another capture series. The curve window listens: its delay bank is
     #: scoped by series, and a window left open while the panel moves would keep showing the
     #: corrections of a series nobody is looking at any more (user, 2026-08-12).
@@ -394,6 +397,17 @@ class MeasurementPanel(QWidget):
         self._curves_tip = attach_tip(self._curves_btn, i18n.t("curveBtn"))
         self._curves_btn.clicked.connect(self._on_curves_clicked)
         head_row.addWidget(self._curves_btn)
+
+        # What was in the signal path while this round was measured. It lives here because it is a
+        # fact about the CAPTURE -- one protective set covers the sweeps of one pass -- and this
+        # header is where the round is. A word rather than a glyph: there is no icon for "what was
+        # in the chain", and inventing one would be a picture nobody can read.
+        self._protective_btn = QPushButton(i18n.t("protBtn"))
+        self._protective_btn.setProperty("class", "meas-icon-btn")
+        self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
+        self._protective_btn.clicked.connect(self.protectiveRequested.emit)
+        head_row.addWidget(self._protective_btn)
 
         self._read_btn = QPushButton()
         self._read_btn.setIcon(QIcon(str(_ICONS_DIR / "download.svg")))
