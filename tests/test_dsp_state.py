@@ -506,3 +506,52 @@ def test_a_twenty_output_rig_orders_in_slot_order():
                          rows=rows, max_count=20)
 
     assert [r.slot for r in group.rows_ordered()] == [str(n) for n in range(1, 21)]
+
+
+def test_the_rig_can_be_drawn_before_the_first_ledger_snapshot():
+    """A project can be fully described and not yet tuned -- which is what a project seeded from
+    another car IS, an hour before the first measurement ("after copying the car I do not see the
+    processor's data", user, 2026-08-23).
+
+    Nothing is invented: `from_dict` already fills a tier from `project.json`'s channel identity
+    for any channel the ledger has no row for, which is how spare slots appear. An EMPTY ledger
+    asks for identity alone.
+    """
+    from autosound_tcc.state.dsp_state import rig_view
+
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "virtual_channels", "label": "Virtual", "fields": ["gain_db"]},
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db", "hp", "lp"]},
+    ]}}
+    channels = {
+        "w-L": {"code": "w-L", "slot": "C", "tier": "channels", "role": "woofer"},
+        "sw": {"code": "sw", "slot": "K", "tier": "channels", "role": "sub"},
+        "VFL": {"code": "VFL", "slot": "A", "tier": "virtual_channels", "role": "virtual"},
+        "off-out-A": {"code": "off-out-A", "slot": "A", "tier": "channels", "hidden": True},
+    }
+
+    view = ProjectView.from_dict({}, profile, channels=channels)
+
+    outputs = next(g for g in view.groups if g.id == "physical_outputs")
+    virtual = next(g for g in view.groups if g.id == "virtual_channels")
+    assert [r.name for r in outputs.rows_visible()] == ["w-L", "sw"], "by slot, spares excluded"
+    assert [r.name for r in virtual.rows_visible()] == ["VFL"]
+    # Identity only: there is no tuning state to show, and none is invented.
+    assert all(not r.params(outputs.known_fields) for r in outputs.rows_visible())
+
+
+def test_a_channel_that_names_no_tier_is_left_out_rather_than_guessed():
+    """The window must not become a second guesser. Today `project.json` writes `tier` on the
+    SPARE slots only -- for a working channel the ledger is what says which tier it is in -- so a
+    ledger-less rig comes out empty rather than sorted by role, and the panel keeps its note."""
+    from autosound_tcc.state.dsp_state import rig_view  # noqa: F401  (import shape check)
+
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]},
+    ]}}
+    channels = {"w-L": {"code": "w-L", "slot": "C", "role": "woofer"}}  # no tier
+
+    view = ProjectView.from_dict({}, profile, channels=channels)
+
+    assert view.groups[0].rows == ()
+

@@ -491,6 +491,26 @@ def load_hardware_controls(project_dir_: Optional[Any] = None) -> dict:
     return controls if isinstance(controls, dict) else {}
 
 
+def rig_view(profile: dict) -> ProjectView:
+    """The rig with no tuning in it: every channel this project names, in its tier, no values.
+
+    A project can be fully described and not yet tuned -- which is exactly what a project seeded
+    from another one IS, an hour before the first measurement. Until now that state drew an empty
+    panel with a note, because the tree was built from the LEDGER and a ledger is written during
+    tuning ("after copying the car I do not see the processor's data" -- user, 2026-08-23).
+
+    Nothing new is invented here: `project.json`'s `channels[]` is per-channel IDENTITY (SCR-001)
+    and `from_dict` already fills a tier from it for any channel the ledger has no row for -- that
+    is how spare slots appear. Handing it an empty ledger asks for identity ALONE, which is the
+    honest picture: this is the rig, and the values arrive with the first snapshot.
+    """
+    return ProjectView.from_dict(
+        {}, profile,
+        hardware_controls=load_hardware_controls(),
+        channels=project_view.load_channels(),
+    )
+
+
 def load_project_view(root: str, preset: str, profile: dict, version: Optional[str] = None) -> ProjectView:
     """Read a ledger snapshot from disk via the vendored `PresetHistory` and shape it per `profile`.
 

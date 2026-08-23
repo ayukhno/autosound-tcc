@@ -80,7 +80,7 @@ from autosound_tcc.state import (
     proposal_view,
 )
 from autosound_tcc.core import signal_bus
-from autosound_tcc.state.dsp_state import ProjectView, load_project_view
+from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_view
 from autosound_tcc.ui.tcc import copy_menu, i18n
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
@@ -1776,11 +1776,45 @@ class MainWindow(QMainWindow):
         self._preset_combo.blockSignals(False)
 
         if preset is None:
+            # No ledger yet -- which is not the same as nothing to show. A project that has been
+            # described (or seeded from another car) already names every channel and its tier, so
+            # the rig can be drawn now and the VALUES arrive with the first snapshot. Before this
+            # the panel was empty with a note, and somebody who had just copied a car reasonably
+            # read that as "the copy did not work".
             prof = profile.get("dsp_profile", profile)
-            self._show_left_status(
-                f"{prof.get('vendor', '?')} {prof.get('name', '?')}\n\n"
-                + i18n.t("leftNoLedger")
-            )
+            rig = rig_view(profile)
+            # VISIBLE rows, not rows: today `project.json` names a `tier` only on the SPARE slots
+            # (SCR-042 -- "which tier it is spare OF"), because for a working channel the LEDGER
+            # is what says which tier it is in. So on a project with no ledger this currently
+            # yields the spares alone, all `hidden`, and a tree of nothing is worse than the note.
+            # Deliberately NOT inferred from `role`: guessing a channel into a tier is precisely
+            # what the method refuses to do, and a second guesser in the window is how the two
+            # halves start disagreeing. The day `tier` is written for every channel, this branch
+            # lights up on its own.
+            if not any(group.rows_visible() for group in rig.groups):
+                self._show_left_status(
+                    f"{prof.get('vendor', '?')} {prof.get('name', '?')}\n\n"
+                    + i18n.t("leftNoLedger")
+                )
+                return
+            self._has_project = True
+            self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
+            # The note STAYS, above the tree: rows with no values are honest only while something
+            # says why they have none.
+            self._left_status.setText(i18n.t("leftNoLedger"))
+            self._left_status.setVisible(True)
+            self._create_project_btn.setVisible(False)
+            self._tree.setVisible(True)
+            self._view = rig
+            self._rebuild_system_params()
+            self._rebuild_acoustics()
+            self._tree.set_view(rig)
+            self._set_project_params(rig)
+            self._refresh_open_detail()
+            self._slot_label.setText("")
+            self._save_label.setText("")
+            self._target_label.setText("")
+            self._refresh_process()
             return
         try:
             view = load_project_view(str(root), preset, profile)
