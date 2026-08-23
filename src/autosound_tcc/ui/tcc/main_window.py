@@ -1950,7 +1950,12 @@ class MainWindow(QMainWindow):
         gate's job (`state/apply.py`), which validates against HEAD and produces the settings
         sheet somebody enters by hand -- a window that wrote ledger state past it would be a
         second way in."""
-        ResonalyzeImportDialog(config.project_dir(), self).exec()
+        dialog = ResonalyzeImportDialog(config.project_dir(), self)
+        # Into the composer, never straight to the model: what leaves that window is the Arbiter's
+        # own statement, and they read it before it goes -- the same path the curve window's
+        # reading takes (`curve_dialog.readingSent`).
+        dialog.rowsSent.connect(self._dialog.put_in_composer)
+        dialog.exec()
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()

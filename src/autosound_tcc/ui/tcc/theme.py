@@ -1110,6 +1110,26 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 700;
         min-height: 32px;
     }}
+    /* .composer-send-ok — `.composer-send` in the app's own green. One place uses it: the import
+    window's "send this to be banked", which is available only when the whole plan checked out
+    against the processor. The colour IS the verdict -- grey while anything is refused or unbound,
+    green the moment there is something worth handing over (user, 2026-08-23). */
+    QPushButton[class~="composer-send-ok"] {{
+        background: {t.ok};
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        padding: 0 16px;
+        font-weight: 700;
+        min-height: 32px;
+    }}
+    QPushButton[class~="composer-send-ok"]:hover {{
+        background: {t.mix("ok", 85, "panel")};
+    }}
+    QPushButton[class~="composer-send-ok"]:disabled {{
+        background: {t.panel3};
+        color: {t.faint};
+    }}
     /* .action-2nd — the same shape as `.composer-send`, without the claim to being THE action.
     Two solid blue buttons side by side is two primaries, which is none: the curve window's "this
     is my reading" is the act, and "analyse the set" is a second thing you may also do. */

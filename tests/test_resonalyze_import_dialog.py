@@ -273,3 +273,47 @@ def test_the_window_says_whose_format_this_is_and_links_to_it(tmp_path):
     assert credit.openExternalLinks(), "it has to open in a browser, not do nothing"
     assert "DIMOSUS" in credit.text()
 
+
+def test_the_send_button_hands_the_rows_to_the_composer_and_says_what_to_do(tmp_path, session,
+                                                                            monkeypatch):
+    """"The button could send the message to the AI itself, the way the curve analysis does"
+    (user, 2026-08-23). It goes to the COMPOSER, not to the model: what leaves this window is the
+    Arbiter's own statement and they read it before it is sent — the same path
+    `curve_dialog.readingSent` takes.
+
+    The sentence is not decoration either: a project with no ledger needs a FIRST snapshot, one
+    with a ledger needs a proposal, and the model cannot tell which from the rows alone.
+    """
+    project = _project(tmp_path / "proj")
+    dialog = _open(project, session)
+    sent = []
+    dialog.rowsSent.connect(sent.append)
+
+    # The fixture is blocked, so the act is not offered at all.
+    assert not dialog._send_btn.isEnabled()
+
+    # Bind the stray leg and pretend nothing was refused: now it is bankable.
+    dialog.result["summary"].update({"blocked": False, "unsupported": 0, "unbound": 0})
+    dialog._say_verdict()
+    assert dialog._send_btn.isEnabled()
+
+    dialog._send_rows()
+
+    assert len(sent) == 1
+    text = sent[0]
+    assert i18n.t("riSendFirst").split("{")[0] in text, "no ledger here: the FIRST-snapshot wording"
+    assert "FULL" in text
+    body = text.split("\n\n", 1)[1]
+    rows = json.loads(body)
+    assert rows, "the rows travel with the sentence, not separately"
+    assert all(isinstance(row, dict) and row.get("status") == "proposed" for row in rows.values())
+
+
+def test_the_send_button_is_the_green_one_and_only_when_it_can_be_pressed(tmp_path, session):
+    """The colour IS the verdict: grey while anything is refused or unbound."""
+    dialog = _open(_project(tmp_path / "proj"), session)
+
+    assert dialog._send_btn.property("class") == "composer-send-ok"
+    assert not dialog._send_btn.isEnabled(), "the fixture is blocked"
+    assert dialog._copy_btn.property("class") == "action-2nd", "one primary, not two"
+

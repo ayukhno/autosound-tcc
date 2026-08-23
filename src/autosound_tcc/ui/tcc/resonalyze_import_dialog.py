@@ -41,7 +41,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
@@ -142,7 +142,11 @@ def render_html(result: dict) -> str:
             f'<span style="color:{t.warn};">{_esc(leg.get("channel_hint") or "?")} — '
             f'{_esc(i18n.t("riUnbound"))}</span>'
         )
-        where = f'pair {leg.get("pair")} {leg.get("side")}'
+        side = leg.get("side")
+        where = i18n.t("riPair").format(
+            pair=leg.get("pair"),
+            side=i18n.t("riSideRight" if side == "right" else "riSideLeft"),
+        )
         out.append(f'<p><b>{head}</b> <span style="color:{t.faint};">{_esc(where)}</span><br>'
                    f'<span style="color:{t.muted};">{_esc(leg.get("display_name"))}</span><br>'
                    f'{_esc(_row_line(leg.get("row") or {}))}')
@@ -187,6 +191,12 @@ class ResonalyzeImportDialog(QDialog):
     with neither still converts -- every verdict simply comes back "not checked", which is the
     honest answer and not a silent pass.
     """
+
+    #: The rows, written up as a sentence for the Arbiter to read before it goes out. The window
+    #: does not talk to the model itself: it hands the text to the composer, exactly as the curve
+    #: window hands over its reading (`curve_dialog.readingSent`). Same reason too -- what leaves
+    #: this window is a STATEMENT the person is making, so they see it first.
+    rowsSent = Signal(str)
 
     def __init__(self, project_dir: Optional[Path] = None, parent=None) -> None:
         super().__init__(parent)
@@ -244,8 +254,18 @@ class ResonalyzeImportDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch(1)
+        # The act, and it looks like one: green while it is available, because "the plan checks
+        # out and can go in" is the one moment in this window worth a colour (user, 2026-08-23).
+        self._send_btn = QPushButton(i18n.t("riSendRows"))
+        self._send_btn.setProperty("class", "composer-send-ok")
+        self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._send_btn.setEnabled(False)
+        self._send_btn.clicked.connect(self._send_rows)
+        actions.addWidget(self._send_btn)
+        # Kept beside it for the path that does not go through the window at all: the same rows,
+        # on the clipboard, for a terminal session or another tool.
         self._copy_btn = QPushButton(i18n.t("riCopyRows"))
-        self._copy_btn.setProperty("class", "reason-btn")
+        self._copy_btn.setProperty("class", "action-2nd")
         self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._copy_btn.setEnabled(False)
         self._copy_btn.clicked.connect(self._copy_rows)
@@ -305,6 +325,7 @@ class ResonalyzeImportDialog(QDialog):
             self._report.setHtml("")
             self._say(f"{i18n.t('riFailed')} {type(exc).__name__}: {exc}", warn=True)
             self._copy_btn.setEnabled(False)
+            self._send_btn.setEnabled(False)
             return
         self._report.setHtml(render_html(self.result))
         if rebuild:
@@ -392,7 +413,9 @@ class ResonalyzeImportDialog(QDialog):
         legs = summary.get("legs") or 0
         checked = summary.get("ok") or 0
         # Bankable means bound AND refused nothing. Not "not blocked": that is only half of it.
-        self._copy_btn.setEnabled(bool(self.result) and not blocked and not unbound)
+        bankable = bool(self.result) and not blocked and not unbound
+        self._copy_btn.setEnabled(bankable)
+        self._send_btn.setEnabled(bankable)
         if blocked:
             self._say(i18n.t("riBlocked").format(refused=refused, unbound=unbound), warn=True)
         elif not checked:
@@ -408,6 +431,46 @@ class ResonalyzeImportDialog(QDialog):
         self._verdict.style().unpolish(self._verdict)
         self._verdict.style().polish(self._verdict)
 
+    def _rows(self) -> dict:
+        """The ledger rows, keyed by the channel they belong to."""
+        return {
+            leg.get("channel") or leg.get("channel_hint"): leg.get("row")
+            for leg in (self.result or {}).get("legs", [])
+        }
+
+    def _preset(self) -> str:
+        """Which preset this belongs to: the project's own if it has one, else the method's
+        default name for a first one."""
+        try:
+            presets = config.available_presets()
+        except Exception:  # noqa: BLE001
+            presets = []
+        return presets[0] if presets else "FULL"
+
+    def _send_rows(self) -> None:
+        """Write it up for the Arbiter and hand it to the composer, then get out of the way.
+
+        NOT a write, and not a message sent behind their back: it lands in the composer where they
+        read it, edit it and press Send -- the same path the curve window's reading takes. The
+        banking itself stays where it belongs, behind the method's gate, which is the only thing
+        that produces the settings sheet somebody enters by hand.
+        """
+        summary = (self.result or {}).get("summary") or {}
+        source = ((self.result or {}).get("source") or {}).get("path") or ""
+        first = not config.available_presets()
+        template = "riSendFirst" if first else "riSendPropose"
+        text = i18n.t(template).format(
+            file=Path(str(source)).name,
+            preset=self._preset(),
+            ok=summary.get("ok") or 0,
+            unknown=summary.get("unknown") or 0,
+            legs=summary.get("legs") or 0,
+        )
+        self.rowsSent.emit(
+            f"{text}\n\n{json.dumps(self._rows(), indent=2, ensure_ascii=False)}"
+        )
+        self.accept()
+
     def _copy_rows(self) -> None:
         """The rows, as JSON, for the terminal to bank through the gate.
 
@@ -415,9 +478,7 @@ class ResonalyzeImportDialog(QDialog):
         snapshot and produces the settings sheet somebody enters by hand -- and a window that
         wrote ledger state behind that gate would be inventing a second way in.
         """
-        rows = {
-            leg.get("channel") or leg.get("channel_hint"): leg.get("row")
-            for leg in (self.result or {}).get("legs", [])
-        }
-        QGuiApplication.clipboard().setText(json.dumps(rows, indent=2, ensure_ascii=False))
+        QGuiApplication.clipboard().setText(
+            json.dumps(self._rows(), indent=2, ensure_ascii=False)
+        )
         self._say(i18n.t("riCopied"), warn=False)

@@ -220,22 +220,22 @@ answers the first five questions anybody would ask.",
         "riNoProfile": "No dsp_profile.json in this project — nothing was checked against a real "
                        "processor. Every value below is reported, none is verified.",
         "riScene": "Stereo scene",
-        "riSceneNote": "What Resonalyze's Auto balance aims for. It is already inside the per-leg "
-                       "gains and delays below — do not enter it a second time.",
+        "riSceneNote": "What Resonalyze's Auto balance aims for. It is already inside the "
+                       "per-channel gains and delays below — do not enter it a second time.",
         "riUnbound": "no channel of this project matches",
         "riDormant": "in the file, but NOT live (the crossover kind decides)",
         "riDropped": "dropped: transparent, contributes nothing",
         "riNotChecked": "Not checked, because this DSP profile does not state the limit",
         "riBindNone": "— leave unbound —",
         "riBlocked": "This processor cannot be given the plan as it stands: {refused} value(s) "
-                     "refused, {unbound} leg(s) unbound. Nothing is rounded to fit, and nothing "
+                     "refused, {unbound} channel(s) unbound. Nothing is rounded to fit, and nothing "
                      "is written.",
-        "riClear": "No stated limit of this DSP refuses any of the {legs} legs. That answers for "
+        "riClear": "No stated limit of this DSP refuses any of the {legs} channels. That answers for "
                    "the HARDWARE — a PC-Tool mode (Fine EQ) can be narrower, and the switch is at "
-                   "the screen. To bring it into the project: press “Copy rows (JSON)”, then ask "
-                   "the Generator in the AI dialog to bank them — as the FIRST ledger snapshot "
-                   "if this project has none yet, or as a proposed change if it does. The gate "
-                   "validates them and writes the settings sheet you enter in PC-Tool by hand.",
+                   "the screen. To bring it into the project, press “Send to be banked”: the rows and "
+                   "the request land in the AI dialog’s composer, where you read them and send "
+                   "them. The gate validates them, writes the snapshot and produces the settings "
+                   "sheet you enter in PC-Tool by hand.",
         "riCopyRows": "Copy rows (JSON)",
         "riCopied": "The rows are on the clipboard.",
         "riFailed": "This file could not be read:",
@@ -268,13 +268,19 @@ answers the first five questions anybody would ask.",
         "menuCopyCarTip": "Start a project from one that already exists: the car, the equipment and the installation — make, drivers per channel, amps, mic, the DSP and its profile, the naming glossary. What was MEASURED in the other project stays there unless you ask for it. You adjust what differs instead of describing your own car again.",
         "menuModelsTip": "Which models this project may use — the generator, the critic and how hard they are asked to think. Everything except Claude runs through OMP, so what you mark here is what OMP is allowed to reach for.",
         "menuButton": "☰ Menu",
-        "riUnchecked": "Nothing was checked. This project does not say which processor it has, so all {legs} legs are reported and none is verified — set the car up first (Menu ▸ Project), or open this on a project that has a dsp_profile.json.",
-        "riUnboundVerdict": "{unbound} of {legs} legs match no channel in this project. Their values are fine; a row with no channel cannot be banked under any name. Bind them below, or set the car's channels up first.",
+        "riUnchecked": "Nothing was checked. This project does not say which processor it has, so all {legs} channels are reported and none is verified — set the car up first (Menu ▸ Project), or open this on a project that has a dsp_profile.json.",
+        "riUnboundVerdict": "{unbound} of the file's {legs} channels match no channel in this project. Their values are fine; a row with no channel cannot be banked under any name. Bind them below, or set the car's channels up first.",
         "riNoChannels": "This project has no channels yet — there is nothing to bind these to. Set the car up first: Menu ▸ Project ▸ New project / Copy the car.",
         "npCopy": "Copy",
         "npSeedTargetTaken": "The folder “{folder}” already has a project in it. Copying never writes over facts somebody has confirmed — pick an empty folder, or a new one.",
         "leftRigOnly": "This is the rig as the project describes it — every channel in its tier, no values yet. The values arrive with the first ledger snapshot, during tuning.",
         "riProjectLink": "Resonalyze by DIMOSUS — github.com/DIMOSUS/Resonalyze",
+        "riSendRows": "Send to be banked",
+        "riSendFirst": "Import from a Resonalyze project — {file}. Checked against this project's DSP profile: {ok} values enterable, none refused, {unknown} unverifiable. This project has no ledger yet, so bank it as the FIRST snapshot of preset {preset}, through the gate. The rows follow, keyed by channel:",
+        "riSendPropose": "Import from a Resonalyze project — {file}. Checked against this project's DSP profile: {ok} values enterable, none refused, {unknown} unverifiable. Propose it as a change to preset {preset} through the gate, and show me the settings sheet. The rows follow, keyed by channel:",
+        "riPair": "pair {pair} {side}",
+        "riSideLeft": "left",
+        "riSideRight": "right",
         "npCreate": "Create",
         "npCancel": "Cancel",
         "projectNewTip": "Folder + DSP + who runs the onboarding. It can also START FROM AN EXISTING PROJECT: the car, the drivers, the glossary and the DSP profile come over, and you adjust instead of describing your own car again.",
@@ -965,21 +971,20 @@ Choose sweeps (sw) above to read this.",
                        "але нічого не перевірено.",
         "riScene": "Стереосцена",
         "riSceneNote": "Це те, до чого ЦІЛИТЬСЯ Auto balance у Resonalyze. Результат уже всередині "
-                       "гейнів і затримок кожної ноги нижче — не вводьте його вдруге.",
+                       "гейнів і затримок кожного каналу нижче — не вводьте його вдруге.",
         "riUnbound": "жоден канал цього проєкту не збігся",
         "riDormant": "є у файлі, але НЕ діє (вирішує тип кросовера)",
         "riDropped": "відкинуто: прозора смуга, нічого не додає",
         "riNotChecked": "Не перевірено, бо профіль цього DSP не називає межі",
         "riBindNone": "— лишити непривʼязаною —",
         "riBlocked": "Цей процесор не прийме план у такому вигляді: відмовлено значень — {refused}, "
-                     "непривʼязаних ніг — {unbound}. Нічого не округлюється під залізо і нічого не "
+                     "непривʼязаних каналів — {unbound}. Нічого не округлюється під залізо і нічого не "
                      "записується.",
-        "riClear": "Жодна заявлена межа цього DSP не відмовляє жодній з {legs} ніг. Це відповідь "
+        "riClear": "Жодна заявлена межа цього DSP не відмовляє жодному з {legs} каналів. Це відповідь "
                    "про ЗАЛІЗО — режим PC-Tool (Fine EQ) може бути вужчим, і перемикається він на "
-                   "екрані. Щоб занести це в проєкт: натисніть «Скопіювати рядки (JSON)» і "
-                   "попросіть Генератора в діалозі ШІ завести їх — ПЕРШИМ знімком леджера, якщо "
-                   "в проєкті його ще нема, або зміною-пропозицією, якщо вже є. Гейт перевірить "
-                   "їх і випише лист налаштувань, який ви вводите в PC-Tool руками.",
+                   "екрані. Щоб занести це в проєкт — «Відправити на запис»: рядки разом із проханням "
+                   "лягають у поле діалогу з ШІ, ви їх читаєте й надсилаєте. Гейт перевірить їх, "
+                   "запише знімок і випише лист налаштувань, який ви вводите в PC-Tool руками.",
         "riCopyRows": "Скопіювати рядки (JSON)",
         "riCopied": "Рядки в буфері обміну.",
         "riFailed": "Цей файл не вдалося прочитати:",
@@ -1012,13 +1017,19 @@ Choose sweeps (sw) above to read this.",
         "menuCopyCarTip": "Почати проєкт із наявного: авто, обладнання та установка — марка, драйвери по каналах, підсилювачі, мікрофон, DSP та його профіль, глосарій назв. Те, що ВИМІРЯНО в тому проєкті, лишається там, поки ви не попросите. Ви правите те, що відрізняється, замість описувати свою машину заново.",
         "menuModelsTip": "Які моделі можна цьому проєкту — генератор, критик і скільки їм думати. Усе, крім Claude, іде через OMP, тож позначене тут — це те, до чого OMP дозволено тягнутись.",
         "menuButton": "☰ Меню",
-        "riUnchecked": "Нічого не перевірено. Цей проєкт не каже, який у нього процесор, тож усі {legs} ніг показані, але жодна не звірена — спершу заведіть авто (Меню ▸ Проєкт) або відкрийте це на проєкті, де є dsp_profile.json.",
-        "riUnboundVerdict": "{unbound} з {legs} ніг не збіглися з жодним каналом цього проєкту. Значення в них нормальні; рядок без каналу нема під яким імʼям заносити. Привʼяжіть їх нижче або спершу заведіть канали авто.",
+        "riUnchecked": "Нічого не перевірено. Цей проєкт не каже, який у нього процесор, тож усі {legs} каналів показані, але жоден не звірений — спершу заведіть авто (Меню ▸ Проєкт) або відкрийте це на проєкті, де є dsp_profile.json.",
+        "riUnboundVerdict": "{unbound} з {legs} каналів файлу не збіглися з жодним каналом цього проєкту. Значення в них нормальні; рядок без каналу нема під яким імʼям заносити. Привʼяжіть їх нижче або спершу заведіть канали авто.",
         "riNoChannels": "У цьому проєкті ще нема каналів — прив’язувати нема до чого. Спершу заведіть авто: Меню ▸ Проєкт ▸ Новий проєкт / Скопіювати авто.",
         "npCopy": "Скопіювати",
         "npSeedTargetTaken": "У теці «{folder}» вже є проєкт. Копіювання не пише поверх фактів, які хтось підтвердив, — виберіть порожню або нову теку.",
         "leftRigOnly": "Тут показано склад системи, як його описує проєкт — усі канали у своїх ярусах, поки без значень. Значення прийдуть із першим знімком леджера, вже під час тюнінгу.",
         "riProjectLink": "Resonalyze від DIMOSUS — github.com/DIMOSUS/Resonalyze",
+        "riSendRows": "Відправити на запис",
+        "riSendFirst": "Імпорт з проєкту Resonalyze — {file}. Звірено з профілем DSP цього проєкту: {ok} значень заходять, жодного відмовленого, {unknown} не перевірених. Леджера в проєкті ще нема, тож заведи це ПЕРШИМ знімком пресету {preset}, через гейт. Нижче рядки, по каналах:",
+        "riSendPropose": "Імпорт з проєкту Resonalyze — {file}. Звірено з профілем DSP цього проєкту: {ok} значень заходять, жодного відмовленого, {unknown} не перевірених. Запропонуй це як зміну пресету {preset} через гейт і покажи лист налаштувань. Нижче рядки, по каналах:",
+        "riPair": "пара {pair}, {side}",
+        "riSideLeft": "ліва",
+        "riSideRight": "права",
         "npCreate": "Створити",
         "npCancel": "Скасувати",
         "projectNewTip": "Тека + DSP + хто веде onboarding. Може ПОЧАТИСЬ І З НАЯВНОГО ПРОЄКТУ: машина, драйвери, глосарій і профіль DSP переїжджають, і ви правите замість того, щоб описувати свою машину заново.",
