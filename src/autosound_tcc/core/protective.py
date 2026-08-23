@@ -1,0 +1,150 @@
+"""What was in the signal path while measuring, and taking it back out of the curve.
+
+A driver is usually swept behind a protective high-pass so the sweep does not throw a mid or a
+tweeter past its excursion limit. That filter is IN the recording, and nothing downstream can tell
+by looking: a protective `LR4 @100` and a designed `LR4 @100` are the same filter. It is a PHASE
+problem rather than a level one — the method measured the same junction at **−49°** with the
+protection in the chain and **+3°** with it removed, which is the difference between "fix this" and
+"leave it alone".
+
+**The maths is the method's** (`rew_tool/protective.py`) and stays there, like every other number
+in this app: this module finds it, hands it a curve, and passes back what came out. What lives here
+is the two things a window needs and a library cannot answer:
+
+* **whether the correction can run at all** on this installation (`available()`), because a toggle
+  that produces an exception is worse than one that is not offered;
+* **turning a measurement into what the maths takes and back**: REW gives magnitude in dB and phase
+  in degrees, the correction works on a complex response.
+
+**`None` is not `"OFF"`, and this module never lets them collapse.** A channel with no record is an
+unanswered question and `de_embed` REFUSES it -- a correction over an unknown chain produces data
+that looks corrected. A channel recorded as `"OFF"` is a measured fact that nothing was in the
+chain, and comes back unchanged. Both of those are the method's rules; what this module adds is
+making sure the window can tell the two apart when it decides what to draw and what to say.
+
+⚠️ **Not for verifying a finished tune.** There the filter is supposed to be in the chain, and
+removing it measures something nobody configured. De-embedding belongs to reading a driver's own
+behaviour.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from autosound_tcc.core import vendor_loader
+
+_MODULE = "protective.py"
+
+
+class ProtectiveUnavailable(RuntimeError):
+    """The correction cannot run here — no skill, no module, or no scipy."""
+
+
+@dataclass(frozen=True)
+class Corrected:
+    """A de-embedded curve and everything about it a plot has to say out loud.
+
+    `capped_below_hz` / `capped_above_hz` bound the region where the correction was deliberately
+    NOT completed: below a protective corner the filter's response goes to zero, so dividing by it
+    would lift the noise floor with the signal. The method caps the boost at 40 dB and says where;
+    inside that region the phase is not the driver's and must not be read as if it were. A plot
+    that draws it without marking it is the same trap as a clipboard with no format name.
+    """
+
+    magnitude_db: Any
+    phase_deg: Any
+    applied: tuple[str, ...] = ()
+    capped_below_hz: Optional[float] = None
+    capped_above_hz: Optional[float] = None
+    capped_bins: int = 0
+    note: str = ""
+
+    @property
+    def changed(self) -> bool:
+        """Did anything actually come out of the chain? `"OFF"` records answer honestly: no."""
+        return bool(self.applied)
+
+
+def _module():
+    try:
+        return vendor_loader.load(_MODULE)
+    except Exception as exc:  # noqa: BLE001 — no skill, or a skill that predates the module
+        raise ProtectiveUnavailable(str(exc)) from exc
+
+
+def available() -> bool:
+    """Can this installation take a protective filter out of a curve?
+
+    Two ways it cannot, and they need different sentences from a UI, which is why `reason()`
+    exists beside this: the method's module may be missing (an old pin), or scipy may be — the
+    protective response is a crossover, and `dsp_math.xo_response` is the method's one scipy
+    caller. The skill's own `requirements.txt` asks for scipy, but the installer puts it in the
+    system python while `uv tool install` gives TCC its own environment.
+    """
+    return reason() == ""
+
+
+def reason() -> str:
+    """Why the correction cannot run, or "" when it can. Phrased for a person, not a log."""
+    try:
+        module = _module()
+    except ProtectiveUnavailable as exc:
+        return f"the method's protective module is not in this checkout: {exc}"
+    try:
+        import numpy  # noqa: F401
+        from scipy import signal  # noqa: F401
+    except ImportError:
+        return (
+            "taking a protective filter out of a curve needs scipy, and this installation does "
+            "not have it: uv tool install --upgrade 'autosound-tcc[gui] @ "
+            "git+https://github.com/ayukhno/autosound-tcc'"
+        )
+    return "" if hasattr(module, "de_embed") else "this skill's protective module has no de_embed"
+
+
+def legs_of(record: Optional[dict], channel: str):
+    """The `{hp, lp}` in force for one channel, or None when NOBODY SAID.
+
+    Straight through to the method, including the distinction the whole feature turns on: None is
+    an unanswered question, `{"hp": "OFF", "lp": "OFF"}` is a recorded fact that the chain was
+    clean.
+    """
+    return _module().legs_of(record, channel)
+
+
+def matters_at(legs, freq_hz: float) -> bool:
+    """Would the protective chain still be rotating phase at this frequency?"""
+    return bool(_module().matters_at(legs, freq_hz))
+
+
+def de_embed(freqs_hz, magnitude_db, phase_deg, legs) -> Corrected:
+    """Take the protective chain out of a measured magnitude/phase pair.
+
+    Raises `ProtectiveUnavailable` when the maths is not installed and lets the method's own
+    `ProtectiveError` through when the record is missing — the caller must tell those apart: the
+    first is this machine, the second is this project's record, and only one of them is fixed by
+    installing something.
+    """
+    import numpy as np
+
+    module = _module()
+    problem = reason()
+    if problem:
+        raise ProtectiveUnavailable(problem)
+    freqs = np.asarray(freqs_hz, dtype=float)
+    mag = np.asarray(magnitude_db, dtype=float)
+    phase = np.asarray(phase_deg, dtype=float)
+    # REW states a response as dB and degrees; the correction works on the complex response, and
+    # this is the only place in TCC that converts between them.
+    measured = 10.0 ** (mag / 20.0) * np.exp(1j * np.deg2rad(phase))
+    corrected, info = module.de_embed(freqs, measured, legs)
+    return Corrected(
+        magnitude_db=20.0 * np.log10(np.maximum(np.abs(corrected), 1e-300)),
+        phase_deg=np.rad2deg(np.angle(corrected)),
+        applied=tuple(info.get("applied") or ()),
+        capped_below_hz=info.get("capped_below_hz"),
+        capped_above_hz=info.get("capped_above_hz"),
+        capped_bins=int(info.get("capped_bins") or 0),
+        note=str(info.get("note") or ""),
+    )

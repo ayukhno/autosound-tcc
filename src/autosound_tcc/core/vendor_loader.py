@@ -161,6 +161,11 @@ _VENDORED = {
     # asks for it and treats "not in this skill yet" as a state rather than an error, so the
     # window offers the copy the day the module lands and stays quiet until then.
     "eq_export.py": "autosound_tcc._vendor.eq_export",
+    # Protective filters: what was in the signal path while measuring, and taking it back out of
+    # the curve (2026-08-23). numpy at import, and scipy the moment it builds the filter -- the
+    # protective response IS a crossover, and `dsp_math.xo_response` is the method's one scipy
+    # caller. `core/protective.py` asks before offering the correction anywhere.
+    "protective.py": "autosound_tcc._vendor.protective",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check

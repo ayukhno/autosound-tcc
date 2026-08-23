@@ -70,6 +70,14 @@ gui = [
     # `tests/test_packaging.py` blocks numpy along with Qt when it proves that, and that blocker is
     # what stops the sum engine being wired into the MCP server by accident.
     "numpy>=1.24,<3",
+    # Crossover design, and only that: `dsp_math.xo_response` is the method's one scipy caller,
+    # and TCC reaches it when it takes a protective filter back out of a measured curve
+    # (`core/protective.py`). The skill's own `requirements.txt` asks for scipy too, but the
+    # installer puts those in the SYSTEM python while `uv tool install` gives TCC its own
+    # environment -- so "the method installed it" does not mean this process can import it.
+    # In `gui` rather than the base for the usual reason (the light half stays light), and the
+    # weight is noise beside what is already here: tens of megabytes against PySide6's 691.
+    "scipy>=1.10,<2",
 ]
 # `dev` carries `gui` on purpose: the suite is mostly Qt, run offscreen. Bounded like the rest —
 # the test that enforces that caught this line first, which is the argument for having it.
