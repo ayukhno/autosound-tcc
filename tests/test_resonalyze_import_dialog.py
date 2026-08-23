@@ -258,3 +258,18 @@ def test_clean_values_under_an_unknown_channel_are_still_not_bankable(tmp_path, 
     assert dialog.result["summary"]["unbound"] == dialog.result["summary"]["legs"]
     assert not dialog._copy_btn.isEnabled()
 
+
+def test_the_window_says_whose_format_this_is_and_links_to_it(tmp_path):
+    """A person meeting this window has a file from somebody else's program and no obvious way to
+    find out what that program is (user, 2026-08-23)."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    dialog = rid.ResonalyzeImportDialog(_project(tmp_path / "proj"))
+
+    links = [w for w in dialog.findChildren(QLabel) if rid.RESONALYZE_URL in w.text()]
+    assert links, "the credit line is missing"
+    credit = links[0]
+    assert credit.openExternalLinks(), "it has to open in a browser, not do nothing"
+    assert "DIMOSUS" in credit.text()
+

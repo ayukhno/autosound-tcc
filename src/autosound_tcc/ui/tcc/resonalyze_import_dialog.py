@@ -62,6 +62,11 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.theme import current_theme
 
 
+#: Whose file this is. Resonalyze is DIMOSUS's, and this window reads its virtual-crossover
+#: sessions; the link is the shortest honest answer to "what made this file".
+RESONALYZE_URL = "https://github.com/DIMOSUS/Resonalyze"
+
+
 def _esc(text: object) -> str:
     return (
         str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -220,6 +225,18 @@ class ResonalyzeImportDialog(QDialog):
         self._bind_form.setContentsMargins(0, 0, 0, 0)
         self._bind_box.setVisible(False)
         layout.addWidget(self._bind_box)
+
+        # Whose format this is, and where it comes from (user, 2026-08-23). A person meeting this
+        # window has a file from somebody else's program and no obvious way to find out what that
+        # program is; the answer costs one line and one click.
+        credit = QLabel(
+            f'<a style="color:{current_theme().info}; text-decoration:none;" '
+            f'href="{RESONALYZE_URL}">{i18n.t("riProjectLink")}</a>'
+        )
+        credit.setOpenExternalLinks(True)
+        credit.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        credit.setProperty("class", "kv-lbl")
+        layout.addWidget(credit)
 
         self._verdict = QLabel("")
         self._verdict.setWordWrap(True)
