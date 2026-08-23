@@ -205,35 +205,37 @@ class DetailPane(QFrame):
         self._tab_eq = _DTab("EQ")
         self._tab_eq.clicked.connect(self._on_tab_eq)
         head_layout.addWidget(self._tab_eq)
-        # One parameter, every channel, both tiers. They sit beside "Table" and "EQ" because they
-        # are the same kind of thing -- a way of looking at the rig -- and the question they
-        # answer is a comparison ("are these delays sane next to each other?"), which the
-        # per-group table cannot show while it is one group at a time.
-        self._param_tabs: dict[str, _DTab] = {}
-        for field, label in _PARAM_TABS.items():
-            tab = _DTab(label())
-            tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
-            head_layout.addWidget(tab)
-            self._param_tabs[field] = tab
-
         self._pair_btn = _DTab("⇄ L + R")
         self._pair_btn.clicked.connect(self._on_pair_toggle)
         self._pair_btn.setVisible(False)
         head_layout.addWidget(self._pair_btn)
-        # The bank of the channel on screen, in the format its processor takes. Hidden unless
-        # the method can actually produce one for this DSP -- a copy button that yields nothing,
-        # or something nobody can identify, is worse than no button (user, 2026-08-23).
-        self._eq_copy = _DTab(i18n.t("copyEqBank"))
-        self._eq_copy.clicked.connect(self._on_copy_eq_bank)
-        self._eq_copy.setVisible(False)
-        head_layout.addWidget(self._eq_copy)
-
         self._eq_help = QLabel("?")
         self._eq_help.setProperty("class", "eq-help")
         self._eq_help.setCursor(Qt.CursorShape.WhatsThisCursor)
         self._eq_help.setVisible(False)
         self._eq_help_tip = attach_tip(self._eq_help)
         head_layout.addWidget(self._eq_help)
+
+        # The bank of the channel on screen, in the format its processor takes -- named after the
+        # channel, because in the single-channel view that is what "copy EQ" means. Hidden unless
+        # the method can produce one for this DSP: a copy button that yields nothing, or
+        # something nobody can identify, is worse than no button (user, 2026-08-23).
+        self._eq_copy = _DTab(i18n.t("copyEqBank"))
+        self._eq_copy.clicked.connect(self._on_copy_eq_bank)
+        self._eq_copy.setVisible(False)
+        head_layout.addWidget(self._eq_copy)
+
+        # At the END of the left cluster, after the buttons that belong to what is on screen
+        # (user, 2026-08-23: "the new buttons at the end of the left set, not in the middle").
+        # One parameter, every channel, both tiers -- the same kind of thing as "Table" and "EQ",
+        # a way of looking at the rig, but a wider one: the question they answer is a comparison,
+        # which a per-group table cannot show while it is one group at a time.
+        self._param_tabs: dict[str, _DTab] = {}
+        for field, label in _PARAM_TABS.items():
+            tab = _DTab(label())
+            tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
+            head_layout.addWidget(tab)
+            self._param_tabs[field] = tab
         self._title = QLabel("")
         self._title.setProperty("class", "phead-sub")
         head_layout.addWidget(self._title)
@@ -263,7 +265,6 @@ class DetailPane(QFrame):
         window.
         """
         self._tab_table.setText(i18n.t("tabTable"))
-        self._eq_copy.setText(i18n.t("copyEqBank"))
         for field, tab in getattr(self, "_param_tabs", {}).items():
             tab.setText(_PARAM_TABS[field]())
         self._close_btn.setText(i18n.t("close"))
@@ -389,6 +390,10 @@ class DetailPane(QFrame):
         self._sync_param_tabs()
         self._pair_btn.set_on(self._pair_mode)
         self._eq_help.setVisible(self._mode == "eq")
+        if self._mode == "eq" and self._row is not None:
+            self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}')
+        else:
+            self._eq_copy.setText(i18n.t("copyEqBank"))
         self._eq_copy.setVisible(
             self._mode == "eq"
             and self._row is not None
@@ -477,16 +482,41 @@ class DetailPane(QFrame):
         table.cellClicked.connect(_activate)
         return table
 
-    def _build_param_table(self, field: str, groups: list) -> QTableWidget:
-        """`ID · channel · value`, with a tier heading before each block.
+    def _build_param_table(self, field: str, groups: list) -> QWidget:
+        """One column per tier, side by side -- virtual channels next to the outputs.
 
-        A heading ROW rather than a tier column: the comparison is inside a tier most of the time
-        and across tiers once in a while, and a repeated word in every line is noise in both
-        cases. Spanning the width makes it read as a divider rather than as data.
+        Stacked, the two tiers were a scroll: eight outputs below six virtual channels, with the
+        heading of the second block off screen by the time you reached it (user, 2026-08-23:
+        "make it two columns, virtual beside output"). Side by side they fit, and the comparison
+        that the whole view exists for -- how these numbers sit against each other -- is one
+        glance instead of two.
         """
-        blocks = [(g, g.rows_visible()) for g in groups]
-        total = sum(len(rows) + 1 for _g, rows in blocks)
-        table = QTableWidget(total, 3)
+        holder = QWidget()
+        columns = QHBoxLayout(holder)
+        columns.setContentsMargins(0, 0, 0, 0)
+        columns.setSpacing(12)
+        for group in groups:
+            columns.addWidget(self._param_column(field, group), stretch=1)
+        return holder
+
+    def _param_column(self, field: str, group: ProfileGroup) -> QWidget:
+        """One tier: its name, then `ID · channel · value` for every channel in it."""
+        block = QWidget()
+        layout = QVBoxLayout(block)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # The tier's name in the panel's language. `group.label` is the PROFILE's word for it
+        # ("Output channels"), which is English in a file written once, and reads as a foreign
+        # line among Ukrainian rows -- the same fix the project-params rows got.
+        said = i18n.t(f"chanSum_{group.id}")
+        title = QLabel(said if said != f"chanSum_{group.id}" else group.label)
+        title.setProperty("class", "kv-lbl")
+        title.setContentsMargins(8, 6, 8, 2)
+        layout.addWidget(title)
+
+        rows = group.rows_visible()
+        table = QTableWidget(len(rows), 3)
         table.setProperty("class", "ptable")
         table.setHorizontalHeaderLabels(["ID", i18n.t("colChan"), _FIELD_COLUMNS[field]])
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -499,47 +529,27 @@ class DetailPane(QFrame):
         apply_caps(header, spacing_px=0.7)
 
         t = current_theme()
-        where: dict[int, tuple] = {}
-        r = 0
-        for group, rows in blocks:
-            # The tier's name in the panel's language. `group.label` is the PROFILE's word for it
-            # ("Output channels"), which is English in a file written once, and reads as a foreign
-            # line among Ukrainian rows -- the same thing the project-params rows were fixed for.
-            said = i18n.t(f"chanSum_{group.id}")
-            head_item = QTableWidgetItem(said if said != f"chanSum_{group.id}" else group.label)
-            head_item.setForeground(QColor(t.muted))
-            head_item.setFlags(Qt.ItemFlag.NoItemFlags)
-            table.setItem(r, 0, head_item)
-            table.setSpan(r, 0, 1, 3)
-            table.setRowHeight(r, 24)
-            r += 1
-            for row in rows:
-                id_item = QTableWidgetItem(row.slot or row.id)
-                id_item.setForeground(QColor(t.accent))
-                id_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-                table.setItem(r, 0, id_item)
-                name_item = QTableWidgetItem(row.name)
-                name_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
-                )
-                table.setItem(r, 1, name_item)
-                table.setItem(r, 2, self._styled_cell(field, row, t))
-                table.setRowHeight(r, 26)
-                where[r] = (group, row)
-                r += 1
+        for r, row in enumerate(rows):
+            id_item = QTableWidgetItem(row.slot or row.id)
+            id_item.setForeground(QColor(t.accent))
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            table.setItem(r, 0, id_item)
+            name_item = QTableWidgetItem(row.name)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            table.setItem(r, 1, name_item)
+            table.setItem(r, 2, self._styled_cell(field, row, t))
+            table.setRowHeight(r, 26)
 
         def _activate(clicked: int, _c: int) -> None:
-            found = where.get(clicked)
-            if found is None:  # a tier heading: not a channel
-                return
-            group, row_obj = found
+            row_obj = rows[clicked]
             self.tableRowActivated.emit(group.id, row_obj.id)
             # Deferred for the same reason as the group table's: this runs inside the table's own
             # mouse handler, and opening the EQ replaces (and destroys) the widget under it.
             QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
 
         table.cellClicked.connect(_activate)
-        return table
+        layout.addWidget(table)
+        return block
 
     def _styled_cell(self, field: str, row: GroupRow, t) -> QTableWidgetItem:
         """A value cell with prototype-style alignment + colour: numbers right-aligned, gain
@@ -554,10 +564,17 @@ class DetailPane(QFrame):
             item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
         color = None
-        if field == "gain_db":
-            v = row.raw.get("gain_db")
-            if isinstance(v, (int, float)):
-                color = t.ok if v >= 0 else t.accent
+        if field in ("gain_db", "ta_ms", "phase_deg"):
+            # Zero is not a setting, it is the absence of one, and it was reading as a boost:
+            # a column of green `+0.0` next to the two channels that actually carry gain (user,
+            # 2026-08-23: "colours — nought in grey"). Only a real value gets a colour, and gain
+            # keeps its sign meaning: up is the app's green, down is its accent.
+            v = row.raw.get(field)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                if not v:
+                    color = t.faint
+                elif field == "gain_db":
+                    color = t.ok if v > 0 else t.accent
         elif field == "polarity":
             color = t.inv if row.raw.get("polarity") == "INV" else t.muted
         elif field == "eq":

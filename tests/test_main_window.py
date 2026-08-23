@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLabel,
@@ -2773,4 +2774,72 @@ def test_both_channel_tiers_are_counted_the_same_way():
     for said in (_tier_count(12, 2), _tier_count(8, 0)):
         assert said.startswith(("12", "8")) and said.endswith(")")
     assert "0" not in _tier_count(8, 0).split("(", 1)[1], "no (0 off) anywhere"
+
+
+def test_a_quit_save_counts_out_loud_instead_of_looking_frozen(monkeypatch):
+    """"The command was sent and I cannot tell whether it is running, hung, or already done"
+    (user, 2026-08-23). A three-minute wait behind a static line looks exactly like a hang."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    # As the real path does: `closeEvent` sets this before handing off, and it is what stops the
+    # close that follows the turn from asking the save question all over again.
+    window._quitting = True
+
+    window._hand_off(worker, "quit")
+
+    assert window._quit_tick is not None and window._quit_tick.isActive()
+    window._tick_quit_saving()
+    said = window._status_strip.text()
+    assert said.startswith(i18n.t("quitSavingElapsed").split("{")[0])
+
+    worker.turn_done.emit()
+    assert getattr(window, "_quit_tick", None) is None, "the count stops when the turn lands"
+
+
+def test_closing_again_mid_save_asks_before_throwing_the_turn_away(monkeypatch):
+    """He pressed close a second time precisely because nothing said what was happening, and the
+    app shut down mid-turn without a word: `_quitting` was set, so the save question was skipped
+    and the second close went straight through. Abandoning the wait stays allowed; abandoning it
+    SILENTLY does not."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._quitting = True
+    window._hand_off(worker, "quit")
+    assert window._handoff_timer is not None, "the precondition: a save in flight"
+
+    asked = []
+
+    class _Event(QCloseEvent):
+        """A real QCloseEvent: `super().closeEvent(event)` hands it to Qt, which type-checks."""
+
+        def __init__(self):
+            super().__init__()
+            self.ignored = False
+
+        def ignore(self):
+            self.ignored = True
+            super().ignore()
+
+    # "Keep waiting" leaves everything running.
+    monkeypatch.setattr(MainWindow, "_ask_abandon_save", lambda self: asked.append("wait") or False)
+    event = _Event()
+    window.closeEvent(event)
+    assert event.ignored and window._handoff_timer is not None
+    assert asked == ["wait"]
+
+    # "Close without saving" goes through, and stops the wait it is abandoning.
+    monkeypatch.setattr(MainWindow, "_ask_abandon_save", lambda self: asked.append("close") or True)
+    monkeypatch.setattr(MainWindow, "stop_workers", lambda self: None)
+    event = _Event()
+    window.closeEvent(event)
+    assert not event.ignored
+    assert window._handoff_timer is None and getattr(window, "_quit_tick", None) is None
 

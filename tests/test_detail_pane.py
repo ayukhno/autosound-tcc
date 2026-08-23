@@ -161,11 +161,18 @@ def _rig_view():
     return ProjectView.from_dict(ledger, profile, channels=identities)
 
 
-def test_one_parameter_across_both_tiers_in_one_table():
+def _param_columns(pane):
+    """The per-tier tables of the parameter view, left to right."""
+    from PySide6.QtWidgets import QTableWidget
+
+    return pane._scroll.widget().findChildren(QTableWidget)
+
+
+def test_one_parameter_across_both_tiers_side_by_side():
     """"Three buttons — Gain, Delay, Phase — that show the table for every channel, and it works
-    for the physical ones as well as the virtual" (user, 2026-08-23). The per-group table answers
-    what a tier is set to; this answers how the rig compares, which is the actual question about
-    a delay."""
+    for the physical ones as well as the virtual" (user, 2026-08-23), and then: "two columns,
+    virtual beside output". Stacked, the second tier's heading was off screen by the time you
+    reached it; the comparison the view exists for should be one glance."""
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
 
     _app()
@@ -174,15 +181,13 @@ def test_one_parameter_across_both_tiers_in_one_table():
 
     pane.open_param("ta_ms")
 
-    table = pane._scroll.widget()
-    assert table.columnCount() == 3
-    read = [[table.item(r, c).text() if table.item(r, c) else "" for c in range(3)]
-            for r in range(table.rowCount())]
-    # A heading per tier, then its channels, in the view's order.
-    assert read[0][0] and read[0][1] == "", "the first row is a tier heading"
-    names = [row[1] for row in read if row[1]]
-    assert names == ["VFL", "w-L", "sw"], names
-    assert [row[2] for row in read if row[1] == "w-L"] == ["5.22"]
+    tables = _param_columns(pane)
+    assert len(tables) == 2, "one column per tier"
+    read = [[[t.item(r, c).text() if t.item(r, c) else "" for c in range(3)]
+             for r in range(t.rowCount())] for t in tables]
+    assert [row[1] for row in read[0]] == ["VFL"]
+    assert [row[1] for row in read[1]] == ["w-L", "sw"]
+    assert [row[2] for row in read[1] if row[1] == "w-L"] == ["5.22"]
 
 
 def test_a_control_no_tier_declares_is_not_offered():
@@ -208,7 +213,7 @@ def test_a_control_no_tier_declares_is_not_offered():
     assert pane._mode != "param"
 
 
-def test_a_tier_heading_is_not_a_channel_to_click():
+def test_a_click_in_either_column_opens_that_column_s_channel():
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
 
     _app()
@@ -218,12 +223,31 @@ def test_a_tier_heading_is_not_a_channel_to_click():
 
     activated = []
     pane.tableRowActivated.connect(lambda gid, rid: activated.append((gid, rid)))
-    table = pane._scroll.widget()
-    table.cellClicked.emit(0, 0)  # the heading row
-    assert activated == []
+    virtual, outputs = _param_columns(pane)
+    virtual.cellClicked.emit(0, 1)
+    outputs.cellClicked.emit(1, 1)
 
-    table.cellClicked.emit(1, 1)  # the first real channel
-    assert activated == [("virtual_channels", "VFL")]
+    assert activated == [("virtual_channels", "VFL"), ("physical_outputs", "sw")]
+
+
+def test_a_nought_is_not_a_boost():
+    """A column of green `+0.0` next to the two channels that actually carry gain read as if
+    every channel had been lifted (user, 2026-08-23: "colours — nought in grey")."""
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view())
+    pane.open_param("gain_db")
+
+    t = current_theme()
+    outputs = _param_columns(pane)[1]
+    by_name = {outputs.item(r, 1).text(): outputs.item(r, 2) for r in range(outputs.rowCount())}
+    assert by_name["sw"].foreground().color() == QColor(t.faint), "0.0 dB is nothing set"
+    assert by_name["w-L"].foreground().color() == QColor(t.accent), "-1.0 dB still reads as a cut"
 
 
 def test_the_eq_copy_is_offered_only_when_a_format_exists(monkeypatch):

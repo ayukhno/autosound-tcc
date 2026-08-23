@@ -3069,6 +3069,14 @@ class MainWindow(QMainWindow):
             # the handoff turn ended, starting a fresh turn as the window closed (user,
             # 2026-08-21, whose "як справи?" is what left a worker mid-turn during teardown).
             self._status_strip.notify(i18n.t("quitSaving"), level="info")
+            # A three-minute wait behind a static line looks exactly like a hang, and that is
+            # what it looked like: "the command was sent and I cannot tell whether it is running,
+            # hung, or already done" (user, 2026-08-23). So the line counts, once a second, and
+            # names the ceiling it is counting towards.
+            self._quit_started = time.monotonic()
+            self._quit_tick = QTimer(self)
+            self._quit_tick.timeout.connect(self._tick_quit_saving)
+            self._quit_tick.start(1000)
             self._dialog.hold_queue_for_quit()
         worker.turn_done.connect(self._finish_handoff)
         worker.failed.connect(self._finish_handoff)
@@ -3080,11 +3088,28 @@ class MainWindow(QMainWindow):
         self._handoff_timer.start(_HANDOFF_TIMEOUT_MS)
         worker.send(_HANDOFF_PROMPT)
 
+    def _tick_quit_saving(self) -> None:
+        """Count the wait out loud, so a slow turn is visibly slow rather than indistinguishable
+        from a frozen window."""
+        elapsed = int(time.monotonic() - getattr(self, "_quit_started", time.monotonic()))
+        self._status_strip.notify(
+            i18n.t("quitSavingElapsed").format(
+                sec=elapsed, max=_HANDOFF_TIMEOUT_MS // 60_000
+            ),
+            level="info",
+        )
+
+    def _stop_quit_tick(self) -> None:
+        tick, self._quit_tick = getattr(self, "_quit_tick", None), None
+        if tick is not None:
+            tick.stop()
+
     def _finish_handoff(self, *_args) -> None:
         timer, self._handoff_timer = getattr(self, "_handoff_timer", None), None
         if timer is None:
             return  # already finished: whichever of turn_done/failed/timeout lost the race
         timer.stop()
+        self._stop_quit_tick()
         mode = getattr(self, "_handoff_mode", "restart")
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
@@ -3680,6 +3705,19 @@ class MainWindow(QMainWindow):
         # mid-thought without a word (user, 2026-08-07): whatever it had not yet put on disk was
         # gone, and nothing said so. Asking rather than saving on its own is deliberate — the save
         # costs a model turn, and a quit that silently blocks on one reads as a hang.
+        # A second close WHILE the save is running used to go straight through: `_quitting` is
+        # set, so the question below was skipped, and the app shut down mid-turn without a word
+        # (user, 2026-08-23 -- he pressed it precisely because he could not tell whether anything
+        # was happening). Waiting is still allowed to be abandoned; it is not allowed to be
+        # abandoned silently.
+        if getattr(self, "_handoff_timer", None) is not None and getattr(self, "_quitting", False):
+            if not self._ask_abandon_save():
+                event.ignore()
+                return
+            self._stop_quit_tick()
+            self._handoff_timer.stop()
+            self._handoff_timer = None
+
         worker = getattr(self, "_agent_worker", None)
         if worker is not None and not getattr(self, "_quitting", False):
             answer = self._ask_save_before_quit()
@@ -3706,6 +3744,23 @@ class MainWindow(QMainWindow):
             # stop sentinel, and Qt destroying a still-running QThread is undefined behaviour.
             worker.shutdown()
         super().closeEvent(event)  # the MCP server went down with `stop_workers()` above
+
+    def _ask_abandon_save(self) -> bool:
+        """True if the person wants to close NOW, losing whatever the model has not written yet.
+
+        Default is to keep waiting: the save is already running and finishing it costs seconds,
+        while abandoning it costs whatever that turn was about to put on disk.
+        """
+        elapsed = int(time.monotonic() - getattr(self, "_quit_started", time.monotonic()))
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(i18n.t("quitAbandonTitle"))
+        box.setText(i18n.t("quitAbandonBody").format(sec=elapsed))
+        close_btn = box.addButton(i18n.t("quitAbandonClose"), QMessageBox.ButtonRole.DestructiveRole)
+        wait_btn = box.addButton(i18n.t("quitAbandonWait"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(wait_btn)
+        box.exec()
+        return box.clickedButton() is close_btn
 
     def _ask_save_before_quit(self):
         """Save, discard, or stay. Discard is not the default — losing a turn's worth of tuning is
