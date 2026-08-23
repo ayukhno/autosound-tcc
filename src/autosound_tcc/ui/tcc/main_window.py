@@ -712,6 +712,14 @@ class MainWindow(QMainWindow):
         self._open_project_action = menu.addAction(i18n.t("projectOpen"))
         self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
         self._open_project_action.triggered.connect(self._choose_project_folder)
+        # The other half of "which project", and it was missing: the dialog behind this is the
+        # ONLY path to the DSP-profile interview and, since 2026-08-23, to seeding a project from
+        # an existing one -- and its button in the left column has been hidden since "which
+        # project" moved into this menu, so nothing in the window reached it (found by the user
+        # asking where the new features were, which is the honest way to find a missing door).
+        self._new_project_action = menu.addAction(i18n.t("projectNew"))
+        self._new_project_action.setToolTip(i18n.t("projectNewTip"))
+        self._new_project_action.triggered.connect(self._open_new_project_dialog)
         menu.addSeparator()
         self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
         self._save_state_action.setToolTip(i18n.t("projectSaveStateTip"))

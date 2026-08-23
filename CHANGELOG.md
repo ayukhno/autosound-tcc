@@ -6,6 +6,33 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.17] — 2026-08-23 · the new-project dialog had no door
+
+### Fixed
+
+- **"New project…" is back in the ⌂ menu.** The dialog behind it is the only path to the
+  DSP-profile interview and, since v0.1.16, to seeding a project from an existing one — and its
+  button in the left column had been hidden ever since "which project" moved into that menu,
+  which never gained the matching item. So half of v0.1.16 shipped with no way to reach it. Found
+  by the user asking where the new features were, which is the honest way to find a missing door.
+
+### Changed
+
+- The bundled **Helix profile carries the union of the PC-Tool modes**, not either one of them:
+  the EQ frequency step is 0.01 Hz and the Q range 0.5–50, a pair that appears on no single
+  screen. The user's rule — record the full range everywhere, because it can be entered by hand.
+  Which way to be wrong is the point: a profile that passes a Q of 30 sends a tuner to switch
+  mode at the PC-Tool screen, and they learn something; a profile that refuses what the hardware
+  accepts means a valid tune is never tried and nobody finds out why. The import window says so
+  now — legs are not "accepted by this DSP", they are "refused by no stated limit", which answers
+  for the hardware and not for the mode you are in.
+- **A DSP tier whose controls nobody has enumerated** (`groups[].fields: null`, new in the
+  method's schema) no longer crashes the project view, and is not silently read as a tier with no
+  controls: the params table says "controls not enumerated yet" where a channel with nothing set
+  says "—". The two are a different sentence, and the method's own to-do list is derived from
+  exactly these tokens.
+- Vendored method pinned to the tag **v3.0.18**.
+
 ## [v0.1.16] — 2026-08-23 · a project can start from another one, and a plan can arrive from outside
 
 Two features that answer the same complaint from opposite sides — a project that begins as a

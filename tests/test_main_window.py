@@ -2585,3 +2585,23 @@ def test_the_title_says_when_something_newer_exists(monkeypatch):
 
     assert i18n.t("titleUpdate") in window.windowTitle()
     assert str(config.project_dir()) in window.windowTitle(), "and the project stays first"
+
+
+def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
+    """The dialog behind it is the only path to the DSP-profile interview and to seeding a project
+    from an existing one -- and its button in the left column has been hidden ever since "which
+    project" moved into this menu, which had no "new project" item. So the feature shipped with no
+    door: found by the user asking where it was."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    labels = [action.text() for action in window._project_btn.menu().actions()]
+    assert i18n.t("projectNew") in labels
+    assert window._new_project_action.toolTip()
+
+    opened = []
+    monkeypatch.setattr(window, "_open_new_project_dialog", lambda: opened.append(True))
+    window._new_project_action.trigger()
+    assert opened == [True]
+
