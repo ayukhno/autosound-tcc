@@ -89,7 +89,11 @@ class NewProjectDialog(QDialog):
     it and reacting to its `profile_saved` signal, since that's where the "restart pointed at the
     new project" logic belongs."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, seed_first: bool = False) -> None:
+        """`seed_first` opens straight on "copy from an existing project": the main menu offers
+        that as its own act ("Copy the car…"), because starting from a car somebody has already
+        described is a different intent from starting a project from nothing -- not a second
+        button for the same one."""
         super().__init__(parent)
         self.setModal(True)
         self.setWindowTitle(i18n.t("npTitle"))
@@ -236,6 +240,10 @@ class NewProjectDialog(QDialog):
         actions.addWidget(self._create_btn)
         layout.addLayout(actions)
 
+        if seed_first:
+            index = self._seed_combo.findData("copy")
+            if index >= 0:
+                self._seed_combo.setCurrentIndex(index)
         self._on_seed_mode(self._seed_combo.currentIndex())
         self._on_profile_selected(self._profile_combo.currentIndex())
         self._on_run_via_selected(self._run_via_combo.currentIndex())

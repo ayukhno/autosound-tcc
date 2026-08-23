@@ -936,7 +936,7 @@ def test_the_project_menu_names_the_open_folder(monkeypatch):
     _app()
     window = MainWindow()
 
-    assert config.chosen_project_dir().name in window._project_btn.text()
+    assert config.chosen_project_dir().name in window._project_label.text()
 
 
 def test_saving_and_starting_over_need_a_running_session(monkeypatch):
@@ -1003,7 +1003,7 @@ def test_the_menu_explains_what_the_labels_cannot(monkeypatch):
 
     window._show_action_tip(window._fresh_session_action)
     assert rounded_tooltip.RoundedTooltip.instance().isVisible()
-    assert window._project_btn.menu().property("class") == "support-menu"
+    assert window._menu_btn.menu().property("class") == "support-menu"
 
 
 def test_choosing_a_different_folder_relaunches_rather_than_pretending(monkeypatch, tmp_path):
@@ -2596,12 +2596,13 @@ def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
     window = MainWindow()
     _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
 
-    labels = [action.text() for action in window._project_btn.menu().actions()]
+    labels = [action.text() for action in window._menu_btn.menu().actions()]
     assert i18n.t("projectNew") in labels
     assert window._new_project_action.toolTip()
 
     opened = []
-    monkeypatch.setattr(window, "_open_new_project_dialog", lambda: opened.append(True))
+    monkeypatch.setattr(window, "_open_new_project_dialog",
+                        lambda *a, **k: opened.append(True))
     window._new_project_action.trigger()
     assert opened == [True]
 
@@ -2638,7 +2639,7 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     window = MainWindow()
     _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
 
-    actions = window._project_btn.menu().actions()
+    actions = window._menu_btn.menu().actions()
     labels = [a.text() for a in actions]
     for key in ("menuProject", "menuSession", "menuView", "menuTools", "menuHelp"):
         assert i18n.t(key).upper() in labels, key
@@ -2647,9 +2648,9 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     assert all(not a.isEnabled() for a in headings), "a heading is not a thing you can press"
 
     # Every act the chrome no longer carries has a home here.
-    for key in ("projectOpen", "projectNew", "riImport", "menuReload", "menuStartSession",
-                "menuTerminal", "menuModels", "menuTheme", "menuDiagnostics", "menuTargetTool",
-                "supportGithub", "supportMonobank"):
+    for key in ("projectOpen", "projectNew", "menuCopyCar", "riImport", "menuReload",
+                "menuStartSession", "menuTerminal", "menuModels", "menuTheme",
+                "menuDiagnostics", "menuTargetTool", "supportGithub", "supportMonobank"):
         assert any(i18n.t(key) in label for label in labels), key
     assert any(a.menu() and a.text() == i18n.t("gateMode") for a in actions)
     assert any(a.menu() and a.text() == i18n.t("menuLanguage") for a in actions)
@@ -2664,13 +2665,53 @@ def test_the_main_menu_follows_a_language_switch():
     _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
     try:
         window._on_language_selected("uk")
-        labels = [a.text() for a in window._project_btn.menu().actions()]
+        labels = [a.text() for a in window._menu_btn.menu().actions()]
         assert i18n.t("projectNew") in labels and "Новий проєкт…" in labels
 
-        lang_menu = next(a.menu() for a in window._project_btn.menu().actions()
+        lang_menu = next(a.menu() for a in window._menu_btn.menu().actions()
                          if a.menu() and a.text() == i18n.t("menuLanguage"))
         checked = [a.text() for a in lang_menu.actions() if a.isChecked()]
         assert checked == [i18n.t("langNameUk")]
     finally:
         window._on_language_selected("en")
+
+
+def test_copy_the_car_opens_the_dialog_already_copying(monkeypatch):
+    """Its own act, not a second button for "new project": starting from a car somebody has
+    already described is a different intent from starting from nothing, and the menu says so in
+    the words the user chose."""
+    from autosound_tcc.ui.tcc import new_project_dialog as npd
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    dialog = npd.NewProjectDialog(seed_first=True)
+    assert dialog._seed_combo.currentData() == "copy"
+    assert dialog._seed_edit.isVisible() or dialog._seed_edit.isVisibleTo(dialog)
+
+    plain = npd.NewProjectDialog()
+    assert plain._seed_combo.currentData() is None, "the plain path still starts from nothing"
+
+    seeds = []
+    monkeypatch.setattr(window, "_open_new_project_dialog", lambda seed=False: seeds.append(seed))
+    window._copy_car_action.trigger()
+    window._new_project_action.trigger()
+    assert seeds == [True, False]
+
+
+def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
+    """Both, on purpose (user, 2026-08-23). Saying thank you and reporting a bug are the two
+    things somebody does on impulse, and an impulse does not open a menu -- but the menu is where
+    a person LOOKS for a thing they have not pressed before."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    assert window._coffee_btn.text() == i18n.t("coffeeBtn")
+    assert i18n.t("fbBig") in window._feedback_btn.text()
+
+    labels = [a.text() for a in window._menu_btn.menu().actions()]
+    assert any(i18n.t("fbBig") in label for label in labels)
+    assert i18n.t("supportGithub") in labels and i18n.t("supportMonobank") in labels
 

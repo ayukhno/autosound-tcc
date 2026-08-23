@@ -6,6 +6,30 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.20] — 2026-08-23 · a button that says Menu, and a name that is just a name
+
+All four from the user, on the v0.1.19 menu.
+
+### Changed
+
+- **The header is two things now: `☰ Menu` and the project's name.** They used to be one control
+  — a dropdown whose label was the project — which made the menu look like a project picker and
+  the name look like something to press. The name is plain text with the full path on hover.
+- **"Thanks" and "Write to the developer" are back in the footer**, and stay in the menu as well.
+  Moving them out was my reasoning and the buttons are his: saying thank you and reporting a bug
+  are the two things somebody does on impulse, and an impulse does not open a menu.
+- **"Copy the car…" is its own line** in the menu's project section, opening the new-project
+  dialog with the copying already chosen — starting from a car somebody has already described is
+  a different intent from starting from nothing. Its hint says what actually travels: the car,
+  the equipment and the installation — make, drivers per channel, amps, mic, the DSP and its
+  profile, the naming glossary — and that what was MEASURED in the other project stays there
+  unless you ask for it.
+- **"Configure models" says OMP**, because that is what the list is: everything except Claude
+  runs through OMP, so what you mark there is what OMP may reach for.
+- **"Open project folder" has a hint somebody can act on.** The old one said "an empty folder is
+  a valid new project — the intake fills it. Switching folders needs TCC opened again", which
+  packed two unrelated facts around a word ("intake") that means nothing outside this repository.
+
 ## [v0.1.19] — 2026-08-23 · the ⌂ button is the main menu now
 
 ### Changed

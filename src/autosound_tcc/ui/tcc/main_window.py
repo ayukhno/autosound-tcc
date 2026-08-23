@@ -693,17 +693,35 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(14)
 
-        # Leftmost, and since 2026-08-23 it is the application's MAIN MENU rather than a
-        # project switcher: "let us make this the main menu and gather everything there
-        # logically" (user). It carries the whole window's vocabulary in five sections, so a
-        # person looking for a thing has ONE place to look instead of a header, a footer, a
-        # left-column button and two popups.
-        self._project_btn = QToolButton()
-        self._project_btn.setProperty("class", "reason-btn project-btn")
-        self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        # Leftmost, and since 2026-08-23 it is the application's MAIN MENU: "let us make this
+        # the main menu and gather everything there logically" (user). It carries the whole
+        # window's vocabulary in five sections, so a person looking for a thing has ONE place to
+        # look instead of a header, a footer, a left-column button and two popups.
+        #
+        # A button that says MENU, and the project name beside it as plain text (user, same day).
+        # The two had been one control -- a dropdown whose label was the project -- which made the
+        # menu look like a project picker and the project name look like a thing to press. Now the
+        # button says what it opens, and the name says what you are working on.
+        self._menu_btn = QToolButton()
+        self._menu_btn.setText(i18n.t("menuButton"))
+        self._menu_btn.setProperty("class", "reason-btn project-btn")
+        self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._build_main_menu()
-        layout.addWidget(self._project_btn)
+        layout.addWidget(self._menu_btn)
+
+        # Elided rather than wrapped or truncated: project folders are dated and long
+        # (`passat-block-a-v7-2026-08-20`), and the header is not allowed to grow to fit one.
+        # The full path is on the tooltip.
+        # `Maximum`, not the default `Ignored`: this label is a VALUE (the docstring's own word)
+        # -- it asks for its natural width and only gives ground when the header would otherwise
+        # widen. With `Ignored` it took whatever was left, which at this size was almost nothing,
+        # and the name sat on top of the preset label beside it.
+        self._project_label = ElidedLabel(
+            "", min_width=120, policy=QSizePolicy.Policy.Maximum
+        )
+        self._project_label.setProperty("class", "kv-val")
+        layout.addWidget(self._project_label)
         self._refresh_project_button()
 
         self._preset_field_lbl = QLabel(i18n.t("preset"))
@@ -859,7 +877,7 @@ class MainWindow(QMainWindow):
         help. Frequently-used items keep their own buttons in the chrome as well -- a menu that
         is the only way to reach a thing you press ten times an hour is not a kindness.
         """
-        menu = self._tip_menu(self._project_btn)
+        menu = self._tip_menu(self._menu_btn)
 
         self._menu_section(menu, "menuProject")
         self._open_project_action = menu.addAction(i18n.t("projectOpen"))
@@ -867,13 +885,27 @@ class MainWindow(QMainWindow):
         self._open_project_action.triggered.connect(self._choose_project_folder)
         self._new_project_action = menu.addAction(i18n.t("projectNew"))
         self._new_project_action.setToolTip(i18n.t("projectNewTip"))
-        self._new_project_action.triggered.connect(self._open_new_project_dialog)
+        # Through a lambda, not straight: `triggered` carries the action's `checked` flag, which
+        # would land in `seed` and make "new project" mean "copy the car" the day somebody makes
+        # this action checkable.
+        self._new_project_action.triggered.connect(
+            lambda _checked=False: self._open_new_project_dialog()
+        )
         # The import lived as a button above the DSP tree, where it was invisible until a ledger
         # existed -- which is the opposite of the state it is for. It belongs with "which
         # project": it is how a project acquires a plan somebody else made.
         self._import_action = menu.addAction(i18n.t("riImport"))
         self._import_action.setToolTip(i18n.t("riImportTip"))
         self._import_action.triggered.connect(self._open_resonalyze_import)
+        # Its own line, because it is a different intent from "new project", not a different
+        # button for it: this one starts from a car that is already described (user, 2026-08-23 --
+        # "call it 'copy the car' and say in the hint that it is the car, the equipment and the
+        # installation"). It opens the same dialog with the copying already chosen.
+        self._copy_car_action = menu.addAction(i18n.t("menuCopyCar"))
+        self._copy_car_action.setToolTip(i18n.t("menuCopyCarTip"))
+        self._copy_car_action.triggered.connect(
+            lambda _checked=False: self._open_new_project_dialog(seed=True)
+        )
         self._reload_action = menu.addAction(i18n.t("menuReload"))
         self._reload_action.setToolTip(i18n.t("refreshProjectTip"))
         self._reload_action.triggered.connect(self._reload_from_disk)
@@ -892,6 +924,7 @@ class MainWindow(QMainWindow):
         self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
         self._fresh_session_action.triggered.connect(self._start_fresh_session)
         self._models_action = menu.addAction(i18n.t("menuModels"))
+        self._models_action.setToolTip(i18n.t("menuModelsTip"))
         self._models_action.triggered.connect(self._open_model_config)
         gate_menu = self._tip_menu(menu)
         gate_menu.setTitle(i18n.t("gateMode"))
@@ -945,15 +978,14 @@ class MainWindow(QMainWindow):
         mono_action = menu.addAction(i18n.t("supportMonobank"))
         mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
 
-        previous = self._project_btn.menu()
-        self._project_btn.setMenu(menu)
+        previous = self._menu_btn.menu()
+        self._menu_btn.setMenu(menu)
         if previous is not None:
             # Deferred, never here: this can run from inside a language action's own handler, and
             # destroying the menu that emitted it is the crash shape this app has paid for twice.
             previous.deleteLater()
-        # Check marks, enabled state and the button's own text, all of which the freshly
-        # built actions do not have yet.
-        self._refresh_project_button()
+        # The check marks and enabled states the freshly built actions do not have yet.
+        self._sync_menu_state()
 
     def _build_footer(self) -> QFrame:
         footer = _panel()
@@ -1082,10 +1114,24 @@ class MainWindow(QMainWindow):
 
         layout.addStretch(1)
 
-        # The coffee and feedback buttons used to sit here. They are in the main menu's
-        # "help" section now: two links and a form are exactly what a menu is for, and the footer
-        # is where the session's live state belongs (user, 2026-08-23 -- gather it all in one
-        # place).
+        # Back in the footer by name (user, 2026-08-23), and ALSO in the main menu's help
+        # section. They were moved out on the reasoning that two links and a form are what a menu
+        # is for; the reasoning was mine and the button is his. Saying thank you and reporting a
+        # bug are the two things a person does on impulse, and an impulse does not open a menu.
+        coffee_btn = QPushButton(i18n.t("coffeeBtn"))
+        coffee_btn.setProperty("class", "coffee-btn")
+        coffee_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        coffee_btn.clicked.connect(self._open_support_menu)
+        self._coffee_btn = coffee_btn
+        layout.addWidget(coffee_btn)
+
+        self._feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
+        self._feedback_btn.setProperty("class", "feedback-btn")
+        self._feedback_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._feedback_btn.clicked.connect(self._open_feedback)
+        self._feedback_tip = attach_tip(self._feedback_btn, i18n.t("fbBigTip"))
+        layout.addWidget(self._feedback_btn)
+
         return footer
 
     # ---- left / center / right --------------------------------------------
@@ -1657,7 +1703,9 @@ class MainWindow(QMainWindow):
         self._create_project_btn = QPushButton(i18n.t("createProject"))
         self._create_project_btn.setProperty("class", "reason-btn")
         self._create_project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._create_project_btn.clicked.connect(self._open_new_project_dialog)
+        self._create_project_btn.clicked.connect(
+            lambda _checked=False: self._open_new_project_dialog()
+        )
         self._create_project_btn.setVisible(False)
         self._dsp_section.body_layout().addWidget(
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
@@ -1766,14 +1814,14 @@ class MainWindow(QMainWindow):
         self._version_label.setText(view.version or "")
         self._show_banked_delta(view.version, preset)
 
-    def _open_new_project_dialog(self) -> None:
+    def _open_new_project_dialog(self, seed: bool = False) -> None:
         """Folder + vendor/model + (in-app Claude OR a detected terminal CLI). Either path hands
         off to a fresh `MainWindow` pointed at the new folder rather than trying to hot-reload
         this window's subsystems (MCP server, process watcher, DSP tree) live -- every one of them
         already loads fresh from `config.project_dir()` in `__init__`, so a brand new window is a
         full, correct "restart pointed at the new project" with no new teardown code needed beyond
         the `closeEvent` this window already has."""
-        dialog = NewProjectDialog(self)
+        dialog = NewProjectDialog(self, seed_first=seed)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -1854,6 +1902,24 @@ class MainWindow(QMainWindow):
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
+
+    def _open_support_menu(self) -> None:
+        """The coffee button's own popup, opening UPWARD from the footer (user, 2026-07-28).
+
+        The same two channels as the method's README -- GitHub Sponsors for people with an
+        account, the Monobank jar as the no-account one-tap fallback. They are in the main menu
+        too; this is the impulse path, and it costs one click instead of three.
+        """
+        menu = self._tip_menu(self)
+        github_action = menu.addAction(i18n.t("supportGithub"))
+        github_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
+        )
+        mono_action = menu.addAction(i18n.t("supportMonobank"))
+        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
+        top_left = self._coffee_btn.mapToGlobal(QPoint(0, 0))
+        menu.adjustSize()
+        menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
 
     def _open_target_curve_tool(self, _event=None) -> None:
         QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={i18n.current_language()}"))
@@ -3316,15 +3382,26 @@ class MainWindow(QMainWindow):
         # the config rows do not depend on the DSP view, and the project facts are re-read anyway.
         self._set_project_params(getattr(self, "_view", None))
 
-    def _refresh_project_button(self) -> None:
+    def _sync_menu_state(self) -> None:
+        """The menu's own state: which gate is ticked, and what a session-less window cannot do.
+
+        Split out of `_refresh_project_button` because `_build_main_menu` needs exactly this and
+        nothing else -- it runs while the header is still being assembled, before the project
+        label it would otherwise touch exists.
+        """
         current = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
         for mode, action in getattr(self, "_gate_actions", {}).items():
             action.setChecked(mode == current)
-        chosen = config.chosen_project_dir()
-        self._project_btn.setText(f"⌂ {chosen.name}" if chosen else i18n.t("projectNone"))
         running = getattr(self, "_agent_worker", None) is not None
         self._save_state_action.setEnabled(running)
         self._fresh_session_action.setEnabled(running)
+
+    def _refresh_project_button(self) -> None:
+        """The name of the project in the header, plus the menu state that goes with it."""
+        self._sync_menu_state()
+        chosen = config.chosen_project_dir()
+        self._project_label.setText(f"⌂ {chosen.name}" if chosen else i18n.t("projectNone"))
+        self._project_label.setToolTip(str(chosen) if chosen else "")
 
     def _choose_project_folder(self) -> None:
         """Pick the folder this window works on. An empty one is a valid new project.
@@ -3587,7 +3664,11 @@ class MainWindow(QMainWindow):
         # main menu is rebuilt rather than re-set. It is also what makes the language check marks
         # follow the choice that was just made.
         self._build_main_menu()
+        self._menu_btn.setText(i18n.t("menuButton"))
         self._theme_btn.setText("◐ " + i18n.t("theme"))
+        self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
+        self._feedback_tip.set_text(i18n.t("fbBigTip"))
+        self._coffee_btn.setText(i18n.t("coffeeBtn"))
         self._project_section.set_title(i18n.t("projectParams"))
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()
