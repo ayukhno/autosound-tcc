@@ -2982,10 +2982,23 @@ class MainWindow(QMainWindow):
         other reader looks -- the footer, the snapshot the session publishes, and the next window
         to open this folder.
         """
-        chosen = dialog.onboarding_ai_model if dialog.open_terminal_cli else dialog.in_app_model
-        if not chosen:
+        if dialog.open_terminal_cli is not None:
+            # A terminal was handed its own `--model`, in the CLI's own vocabulary. That name is
+            # not a key in this registry and must not be written as one.
             return
-        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, chosen)
+        wanted = dialog.in_app_model
+        if not wanted:
+            return
+        # The dialog names a MODEL (`claude-opus-5`); a project setting holds a CHOICE key, which
+        # says the harness too (`sdk:claude-opus-5`). Writing the bare id stored something the
+        # registry cannot resolve, and the window met it as a retired model: "claude-opus-5 is set
+        # in this project and there is nothing on this machine to run it with" (user, 2026-08-23,
+        # on the first copy that carried a model at all).
+        entries = model_choices.choices(self._active_omp())
+        match = next((c for c in entries if c.key == wanted or c.key.endswith(f":{wanted}")), None)
+        if match is None:
+            return
+        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, match.key)
         self._reload_model_choices()
 
     def _start_tuning_session(self, opening: Optional[str] = None) -> None:

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 
+from types import SimpleNamespace
+
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -2714,4 +2716,48 @@ def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
     labels = [a.text() for a in window._menu_btn.menu().actions()]
     assert any(i18n.t("fbBig") in label for label in labels)
     assert i18n.t("supportGithub") in labels and i18n.t("supportMonobank") in labels
+
+
+def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):
+    """The dialog names a MODEL (`claude-opus-5`); a project setting holds a CHOICE key, which
+    also says the harness (`sdk:claude-opus-5`). Writing the bare id stored something nothing
+    could resolve, and the window met it as a RETIRED model — "there is nothing on this machine to
+    run it with" — on the first copy that carried a model at all (user, 2026-08-23)."""
+    from autosound_tcc.core import model_choices, project_settings
+    from autosound_tcc.ui.tcc.mock_data import AI_MODEL_IDS
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    written = {}
+    monkeypatch.setattr(main_window.project_settings, "set_value",
+                        lambda _dir, key, value: written.__setitem__(key, value))
+
+    dialog = SimpleNamespace(open_terminal_cli=None, onboarding_ai_model=None,
+                             in_app_model=AI_MODEL_IDS["Claude Opus 5"])
+    window._adopt_choices_from_new_project(dialog)
+
+    stored = written.get("generator")
+    assert stored == "sdk:claude-opus-5", stored
+    assert model_choices.resolve(model_choices.choices([]), stored).ok
+
+
+def test_a_terminal_model_name_is_not_written_as_a_registry_key(monkeypatch):
+    """A CLI was handed its own `--model`, in that CLI's vocabulary. It is not a key here."""
+    from autosound_tcc.core import project_settings
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    written = {}
+    monkeypatch.setattr(main_window.project_settings, "set_value",
+                        lambda _dir, key, value: written.__setitem__(key, value))
+
+    dialog = SimpleNamespace(open_terminal_cli="claude", onboarding_ai_model="opus",
+                             in_app_model=None)
+    window._adopt_choices_from_new_project(dialog)
+
+    assert written == {}
 
