@@ -2761,3 +2761,16 @@ def test_a_terminal_model_name_is_not_written_as_a_registry_key(monkeypatch):
 
     assert written == {}
 
+
+def test_both_channel_tiers_are_counted_the_same_way():
+    """Two tiers listed one under the other read as two different formats when only one of them
+    carries a parenthetical: "12 (2 off)" over a bare "8" (user, 2026-08-23). `(0 off)` is still
+    not printed -- the tier says it in words instead, and the shape stays one shape."""
+    from autosound_tcc.ui.tcc.main_window import _tier_count
+
+    assert _tier_count(12, 2) == i18n.t("chanSumOff").format(total=12, off=2)
+    assert _tier_count(8, 0) == i18n.t("chanSumAllOn").format(total=8, off=0)
+    for said in (_tier_count(12, 2), _tier_count(8, 0)):
+        assert said.startswith(("12", "8")) and said.endswith(")")
+    assert "0" not in _tier_count(8, 0).split("(", 1)[1], "no (0 off) anywhere"
+

@@ -243,8 +243,16 @@ def _tier_label(tier_id: str) -> str:
 
 
 def _tier_count(total: int, off: int) -> str:
-    """`8` when every channel is in play, `8 (1 off)` when one is not. No `(0 off)` noise."""
-    return i18n.t("chanSumOff").format(total=total, off=off) if off else str(total)
+    """One shape for every tier: `12 (2 off)` and `8 (all on)`.
+
+    It used to drop the parenthetical when nothing was off, on the reasoning that `(0 off)` is
+    noise. True on its own, and wrong beside another row: two tiers listed together read as two
+    different formats rather than as the same fact twice ("why is the format different here?" --
+    user, 2026-08-23). `(0 off)` is still not printed; the tier says it plainly instead.
+    """
+    return (i18n.t("chanSumOff") if off else i18n.t("chanSumAllOn")).format(
+        total=total, off=off
+    )
 
 
 def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
