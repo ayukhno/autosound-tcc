@@ -620,8 +620,21 @@ def critic_reaches(choice: Choice) -> bool:
     is "does this machine have that vendor's key or CLI". Clipboard mode stays a designed fallback
     rather than a failure; the point is that the Arbiter learns which it will be before picking,
     not after waiting.
+
+    **`vendor_of`, not `critic_vendor`** — and that difference is the whole of a bug the user met
+    on 2026-08-23. `critic_vendor` falls back to google for a name it does not recognise, which is
+    right for "which transport would the script try" and wrong here: with `agy` on PATH,
+    `omp:kimi-code/kimi-k2.5` reported **reachable**, so `call_critic` was told to go ahead. It
+    handed a Kimi model to the Gemini CLI, which cannot run it, and the failure surfaced as two
+    silent clipboard packages and a reviewer that was never called.
+
+    A vendor we cannot NAME is a vendor we cannot promise a transport for. False is the honest
+    answer, and it makes the clipboard a choice made in advance rather than a surprise.
     """
-    keys, binaries = _CRITIC_TRANSPORTS.get(critic_vendor(choice), ((), ()))
+    vendor = vendor_of(choice)
+    if not vendor:
+        return False
+    keys, binaries = _CRITIC_TRANSPORTS.get(vendor, ((), ()))
     if any(os.environ.get(name) for name in keys):
         return True
     return any(shutil.which(binary) for binary in binaries)

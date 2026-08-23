@@ -536,3 +536,31 @@ def test_an_unavailable_route_is_never_the_recommended_one(monkeypatch):
         model_choices.recommended(choice, critic=True)
         for choice in model_choices.codex_choices()
     )
+
+
+def test_a_vendor_we_cannot_name_is_not_a_vendor_we_can_reach():
+    """`critic_vendor` falls back to google for an unrecognised name, which is right for "which
+    transport would the script try" and wrong for "can we promise one". With `agy` on PATH,
+    `omp:kimi-code/kimi-k2.5` reported REACHABLE, so `call_critic` went ahead, handed a Kimi model
+    to the Gemini CLI, and the failure surfaced as two silent clipboard packages (user,
+    2026-08-23)."""
+    from autosound_tcc.core import model_choices
+
+    kimi = model_choices.Choice(harness="omp", model="kimi-code/kimi-k2.5",
+                                label="OMP · Kimi K2.5", provider="")
+
+    assert model_choices.vendor_of(kimi) == "", "nothing in the name says whose model it is"
+    assert model_choices.critic_vendor(kimi) == "google", "the transport guess is unchanged"
+    assert model_choices.critic_reaches(kimi) is False, "but the promise is not made"
+
+
+def test_a_named_vendor_still_reaches_when_its_cli_is_there(monkeypatch):
+    from autosound_tcc.core import model_choices
+
+    gemini = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
+                                  label="Gemini", provider="")
+    monkeypatch.setattr(model_choices.shutil, "which", lambda name: "/usr/bin/agy"
+                        if name == "agy" else None)
+
+    assert model_choices.critic_reaches(gemini) is True
+

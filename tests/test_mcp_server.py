@@ -974,3 +974,30 @@ def test_the_server_starts_in_a_process_with_no_stdout(monkeypatch, tmp_path):
         assert port
     finally:
         server.stop(timeout=2.0)
+
+
+def test_a_clipboard_fallback_says_why_it_was_always_going_to_be_one(tmp_path, monkeypatch):
+    """The tool answered `mode: clipboard` with an empty `detail`, twice in a row, and the model
+    reported "the critic returned clipboard, no review" with nothing to act on (user,
+    2026-08-23). A designed fallback that cannot explain itself is indistinguishable from a
+    fault — and TCC knows the reason without asking the script."""
+    from autosound_tcc.core import config, mcp_server, project_settings
+
+    project = tmp_path / "proj"
+    (project / ".tcc").mkdir(parents=True)
+
+    # Nothing chosen at all.
+    assert "no reviewer is configured" in mcp_server.clipboard_reason(project)
+
+    # A model from a vendor no transport here knows.
+    project_settings.set_value(config.tcc_dir(project), "critic", "omp:kimi-code/kimi-k2.5")
+    said = mcp_server.clipboard_reason(project)
+    assert "kimi-code/kimi-k2.5" in said
+    assert "Google, Anthropic or OpenAI" in said, said
+
+    # A vendor with a transport, once that transport is actually present, has nothing to explain.
+    monkeypatch.setattr(mcp_server.model_choices.shutil, "which",
+                        lambda name: "/usr/bin/agy" if name == "agy" else None)
+    project_settings.set_value(config.tcc_dir(project), "critic", "agy:gemini-3.1-pro-high")
+    assert mcp_server.clipboard_reason(project) == ""
+

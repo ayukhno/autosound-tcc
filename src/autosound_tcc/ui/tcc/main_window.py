@@ -2919,6 +2919,19 @@ class MainWindow(QMainWindow):
             tips.append(i18n.t("selfReviewerDiffDetail").format(wanted=actual[0], answered=actual[1]))
         generator = self._generator_choice()
         chosen = resolved.choice
+        # Fourth, and the one that would have saved him two silent clipboard packages: a reviewer
+        # this machine has no transport for. The picker offers every model the Arbiter marked,
+        # including vendors the reviewer SCRIPT cannot call at all -- and until now the first
+        # sign of that was a package where a critique should have been (2026-08-23).
+        for_reach = chosen or model_choices.Choice(
+            harness=key.partition(":")[0] or "omp",
+            model=key.partition(":")[2] or key, label=key, provider="",
+        )
+        if key and not model_choices.critic_reaches(for_reach):
+            notes.append(i18n.t("criticClipboardOnly"))
+            vendor = model_choices.vendor_of(for_reach)
+            tips.append(i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
+                        .format(model=for_reach.model, vendor=vendor))
         if chosen is not None and generator is not None:
             # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
             # does not recognise, which would make any two unknown models look like a matched pair.

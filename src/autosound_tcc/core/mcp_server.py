@@ -171,6 +171,37 @@ def configured_critic_model(project_dir: Path) -> str:
     return resolved.key.partition(":")[2] or resolved.key
 
 
+def clipboard_reason(project_dir: Path) -> str:
+    """Why a reviewer call would come back as a package rather than as a critique.
+
+    TCC knows this without asking the script, and until now it did not say: the tool answered
+    `mode: clipboard` with an empty `detail`, twice in a row, and the model reported it as "the
+    critic returned clipboard, no review" with nothing to act on (user, 2026-08-23). A designed
+    fallback that cannot explain itself is indistinguishable from a fault.
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    if not key:
+        return "no reviewer is configured in TCC's footer, so there is nothing to call"
+    harness, _, model = key.partition(":")
+    resolved = model_choices.resolve(model_choices.critic_choices([]), key)
+    choice = resolved.choice or model_choices.Choice(
+        harness=harness or "omp", model=model or key, label=key, provider=""
+    )
+    if model_choices.critic_reaches(choice):
+        return ""  # it can be reached; whatever happened is the script's to explain
+    vendor = model_choices.vendor_of(choice)
+    if not vendor:
+        return (
+            f"the reviewer script calls Google, Anthropic or OpenAI models; {choice.model!r} is "
+            f"none of those, so no transport here can run it. Pick a reviewer from one of those "
+            f"vendors in TCC's footer, or keep this one and review by hand from the package"
+        )
+    return (
+        f"{choice.model!r} is a {vendor} model and this machine has neither that vendor's API key "
+        f"nor its CLI, so the package is the only way through"
+    )
+
+
 @dataclass(frozen=True)
 class ConfirmRequest:
     """A mutation waiting on the Arbiter's button. This *is* the 🟡→🟢 attest step."""
@@ -859,12 +890,17 @@ def build_server(
                 "review": result.review,
             }
         )
+        detail = result.detail
+        if result.mode == critic.MODE_CLIPBOARD:
+            # The script says WHAT happened; this says why it was always going to.
+            why = clipboard_reason(project_dir)
+            detail = f"{detail}\n{why}".strip() if detail else why
         return json.dumps(
             {
                 "mode": result.mode,
                 "critique": result.text,
                 "model": result.model,
-                "detail": result.detail,
+                "detail": detail,
                 "seconds": round(result.duration_s, 1),
             },
             ensure_ascii=False,
