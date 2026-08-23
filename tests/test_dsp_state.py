@@ -129,6 +129,34 @@ def test_no_virtual_tier_when_profile_does_not_declare_one():
     assert usb_params == ["Gain: +0.0 dB"]  # no eq/ta_ms present -> not shown, not an error
 
 
+def test_a_tier_nobody_enumerated_is_not_a_tier_with_no_controls():
+    """The method made `groups[].fields` null-until-confirmed on 2026-08-23, and the two states
+    must not collapse: absence of the whole GROUP says the DSP has no such tier, `fields: null`
+    says the tier exists and its controls are an open question. It matters beyond rendering --
+    the method's `missing_facts` derives its checklist FROM these tokens, so a profile forced to
+    name a field in order to validate deletes the questions about the ones it left out.
+
+    Before this, `tuple(g.get("fields", ()))` raised TypeError on the null and took the whole
+    project view down with it -- on the first genuinely new DSP somebody onboards, which is the
+    worst possible moment.
+    """
+    ledger = {"preset": "x", "sample_rate": 96000, "channels": {"a": {"gain_db": 0}}}
+    unknown = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": None}]}}
+    absent = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output"}]}}
+    empty = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": []}]}}
+
+    for profile in (unknown, absent):
+        group = ProjectView.from_dict(ledger, profile).groups[0]
+        assert group.fields is None and group.fields_unknown
+        assert group.known_fields == ()  # safe to iterate, and says nothing it does not know
+
+    stated = ProjectView.from_dict(ledger, empty).groups[0]
+    assert stated.fields == () and not stated.fields_unknown
+
+
 def test_rows_are_ordered_by_the_hardware_slot_whatever_order_says():
     """The slot is the channel's ID badge and the order the processor's own software shows. A real
     rig came out `G, H, E, F, C, D, B, I, J, K` once `project.json` started carrying `order` — the

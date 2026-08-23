@@ -320,7 +320,7 @@ class DetailPane(QFrame):
     # ---- table view -------------------------------------------------------
 
     def _build_table(self, group: ProfileGroup) -> QTableWidget:
-        columns = [f for f in group.fields if f in _FIELD_COLUMNS]
+        columns = [f for f in group.known_fields if f in _FIELD_COLUMNS]
         headers = ["ID", i18n.t("colChan")] + [_FIELD_COLUMNS[f] for f in columns]
         rows = group.rows_visible()
         table = QTableWidget(len(rows), len(headers))

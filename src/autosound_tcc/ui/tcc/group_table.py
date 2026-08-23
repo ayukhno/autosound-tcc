@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.state.dsp_state import ProfileGroup
+from autosound_tcc.ui.tcc import i18n
 
 _COLUMNS = ["ID", "Channel", "Params"]
 
@@ -41,8 +42,15 @@ class GroupTable(QTableWidget):
         rows = group.rows_ordered()
         self.setRowCount(len(rows))
         for row_idx, row in enumerate(rows):
-            params = row.params(group.fields)
-            values = [row.id, row.name, "  ·  ".join(params) if params else "—"]
+            params = row.params(group.known_fields)
+            # "—" is "this channel has nothing set"; a tier whose controls nobody has
+            # enumerated is a different sentence, and saying it here is the only place a person
+            # meets that state at all.
+            if params:
+                said = "  ·  ".join(params)
+            else:
+                said = i18n.t("groupFieldsUnknown") if group.fields_unknown else "—"
+            values = [row.id, row.name, said]
             for col, text in enumerate(values):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(

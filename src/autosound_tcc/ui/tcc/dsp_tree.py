@@ -141,7 +141,7 @@ class ChannelRow(QWidget):
         layout.setContentsMargins(20, 4, 8, 5)
         layout.setSpacing(1)
 
-        is_output = "hp" in group.fields or "lp" in group.fields
+        is_output = "hp" in group.known_fields or "lp" in group.known_fields
         line1 = QHBoxLayout()
         line1.setSpacing(6)
         if row.slot:
@@ -215,7 +215,7 @@ class ChannelRow(QWidget):
         # "copy hint" has to read the tip itself. The hint is where the driver and Fs live -- the
         # facts the row has no room to show.
         self._tip = rounded_tooltip.attach(self, self._tooltip_html(row, raw, is_output))
-        summary = " · ".join(row.params(group.fields))
+        summary = " · ".join(row.params(group.known_fields))
         copy_menu.enable_copy(
             self,
             value=row.name,

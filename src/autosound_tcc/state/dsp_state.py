@@ -333,6 +333,16 @@ def slot_key(slot: Optional[str]) -> tuple:
     return (0, parts)
 
 
+def _fields_of(group: dict) -> Optional[tuple[str, ...]]:
+    """`null` and absent both mean "not enumerated"; a list means enumerated, even an empty one.
+
+    Reading them as the same thing is what the schema change of 2026-08-23 exists to prevent --
+    see `ProfileGroup.fields`.
+    """
+    declared = group.get("fields")
+    return None if declared is None else tuple(declared)
+
+
 @dataclass(frozen=True)
 class ProfileGroup:
     """One DSP-profile-declared tier (e.g. virtual_channels, physical_outputs, inputs),
@@ -340,9 +350,26 @@ class ProfileGroup:
 
     id: str
     label: str
-    fields: tuple[str, ...]
+    #: The controls this tier declares -- or None when NOBODY HAS ENUMERATED THEM YET, which the
+    #: method's schema made a real state on 2026-08-23. It is not the same as an empty list and
+    #: must not collapse into one: absence of a whole GROUP says the DSP has no such tier, while
+    #: `fields: null` says the tier exists and its controls are an open question. The method's
+    #: `missing_facts` derives its checklist FROM these tokens, so a profile forced to name some
+    #: field in order to validate does not merely assert controls nobody confirmed -- it DELETES
+    #: the questions about the ones left out.
+    fields: Optional[tuple[str, ...]]
     rows: tuple[GroupRow, ...] = ()
     max_count: Optional[int] = None
+
+    @property
+    def known_fields(self) -> tuple[str, ...]:
+        """What to iterate. Empty for a tier nobody has enumerated -- ask `fields_unknown` to tell
+        that apart from a tier with genuinely nothing to show."""
+        return self.fields or ()
+
+    @property
+    def fields_unknown(self) -> bool:
+        return self.fields is None
 
     def rows_ordered(self) -> list[GroupRow]:
         """By the hardware slot, ascending. Always (user, 2026-08-07).
@@ -429,7 +456,7 @@ class ProjectView:
                 seen.add(key)
             rows = tuple(rows)
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
-                                        fields=tuple(g.get("fields", ())), rows=rows,
+                                        fields=_fields_of(g), rows=rows,
                                         max_count=g.get("max_count")))
         features = tuple(
             (str(k), str(v)) for k, v in raw.get("features", []) if k is not None
