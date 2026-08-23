@@ -295,6 +295,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QMenu[class~="support-menu"]::item:selected {{
         background: {t.mix('info', 20)};
     }}
+    /* The main menu's section headings are DISABLED items -- `QMenu::addSection` draws its text
+    nowhere once a stylesheet is in play (measured: five headings, none visible). They are muted
+    like any disabled item, and it is the UPPER CASE and the rule above them that make them read
+    as headings; a smaller font here would have been better still, but it cannot be: an action
+    disabled because it is unavailable right now ("save what the model knows", with no session
+    running) hits the same selector, and a heading and an unavailable item must not look alike. */
+    QMenu[class~="support-menu"]::item:disabled {{
+        color: {t.faint};
+    }}
+    QMenu[class~="support-menu"]::separator {{
+        height: 1px;
+        background: {t.border};
+        margin: 4px 8px 0 8px;
+    }}
 
     /* .icon-btn — a single-glyph header button that stands ON ITS OWN. `.zoomgroup-btn` is
     deliberately transparent and borderless because it sits INSIDE the zoom group's frame, which

@@ -693,54 +693,16 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(14)
 
-        # Leftmost, because it is the one control that is about *which project* rather than about
-        # what is in it. Three actions, in the order they matter: pick the folder, put what the
-        # model knows on disk, start over with an empty context.
+        # Leftmost, and since 2026-08-23 it is the application's MAIN MENU rather than a
+        # project switcher: "let us make this the main menu and gather everything there
+        # logically" (user). It carries the whole window's vocabulary in five sections, so a
+        # person looking for a thing has ONE place to look instead of a header, a footer, a
+        # left-column button and two popups.
         self._project_btn = QToolButton()
         self._project_btn.setProperty("class", "reason-btn project-btn")
         self._project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._project_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(self._project_btn)
-        # Same rounded popup the rest of the app uses -- an unstyled QMenu is square-cornered,
-        # which is the thing `rounded_tooltip` exists to stop (user report 2026-07-28).
-        menu.setProperty("class", "support-menu")
-        # NOT `setToolTipsVisible`: that shows the platform tooltip, whose window frame stays
-        # square on macOS regardless of QSS -- the exact limitation `rounded_tooltip` was written
-        # for. The menu drives the shared rounded popup itself as the highlight moves.
-        menu.hovered.connect(self._show_action_tip)
-        menu.aboutToHide.connect(rounded_tooltip.RoundedTooltip.instance().hide_tip)
-        self._open_project_action = menu.addAction(i18n.t("projectOpen"))
-        self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
-        self._open_project_action.triggered.connect(self._choose_project_folder)
-        # The other half of "which project", and it was missing: the dialog behind this is the
-        # ONLY path to the DSP-profile interview and, since 2026-08-23, to seeding a project from
-        # an existing one -- and its button in the left column has been hidden since "which
-        # project" moved into this menu, so nothing in the window reached it (found by the user
-        # asking where the new features were, which is the honest way to find a missing door).
-        self._new_project_action = menu.addAction(i18n.t("projectNew"))
-        self._new_project_action.setToolTip(i18n.t("projectNewTip"))
-        self._new_project_action.triggered.connect(self._open_new_project_dialog)
-        menu.addSeparator()
-        self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
-        self._save_state_action.setToolTip(i18n.t("projectSaveStateTip"))
-        self._save_state_action.triggered.connect(self._save_project_state)
-        self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
-        self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
-        self._fresh_session_action.triggered.connect(self._start_fresh_session)
-        menu.addSeparator()
-        gate_menu = menu.addMenu(i18n.t("gateMode"))
-        gate_menu.setToolTipsVisible(True)
-        self._gate_actions = {}
-        for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
-                            (omp_session.GATE_FOREIGN, "gateForeign"),
-                            (omp_session.GATE_AUTO, "gateAuto")):
-            action = gate_menu.addAction(i18n.t(label))
-            action.setCheckable(True)
-            action.setToolTip(i18n.t("gateAutoTip" if mode == omp_session.GATE_AUTO
-                                     else "gateModeTip"))
-            action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
-            self._gate_actions[mode] = action
-        self._project_btn.setMenu(menu)
+        self._build_main_menu()
         layout.addWidget(self._project_btn)
         self._refresh_project_button()
 
@@ -853,6 +815,145 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._theme_btn)
 
         return header
+
+    # ---- the main menu ------------------------------------------------------
+
+    def _tip_menu(self, parent) -> QMenu:
+        """A menu styled and tipped like the rest of the app.
+
+        `setToolTipsVisible` is deliberately NOT used: the platform tooltip's window frame stays
+        square on macOS whatever the QSS says, which is the exact limitation `rounded_tooltip`
+        exists for. The menu drives the shared rounded popup as the highlight moves instead.
+        """
+        menu = QMenu(parent)
+        menu.setProperty("class", "support-menu")
+        menu.hovered.connect(self._show_action_tip)
+        menu.aboutToHide.connect(rounded_tooltip.RoundedTooltip.instance().hide_tip)
+        return menu
+
+    def _menu_section(self, menu: QMenu, key: str) -> None:
+        """A visible section heading.
+
+        NOT `QMenu.addSection`, which is the obvious call and draws nothing here: with a custom
+        stylesheet Qt renders a section as a plain separator and drops its text on the floor
+        (grabbed the menu and looked -- five headings, none of them visible). A disabled action
+        is text a style cannot swallow, and it is unclickable, which is what a heading is.
+        """
+        if not menu.isEmpty():
+            menu.addSeparator()
+        # Upper case in the text, because QSS has no `text-transform` -- and the caps are how
+        # every other label in this window says "this names what is under it" (`apply_caps`).
+        heading = menu.addAction(i18n.t(key).upper())
+        heading.setEnabled(False)
+
+    def _build_main_menu(self) -> None:
+        """Everything the window can do, in one menu, in five sections.
+
+        Rebuilt rather than retranslated: a menu's labels are set once at construction, so before
+        this the items kept the language they were born in while the rest of the window switched
+        around them. `_retranslate` calls this again, which is also what keeps the language
+        check marks honest.
+
+        The order is the order of a working day, not an alphabet: which project · what the
+        session is doing · how the window looks · the tools beside the work · where to ask for
+        help. Frequently-used items keep their own buttons in the chrome as well -- a menu that
+        is the only way to reach a thing you press ten times an hour is not a kindness.
+        """
+        menu = self._tip_menu(self._project_btn)
+
+        self._menu_section(menu, "menuProject")
+        self._open_project_action = menu.addAction(i18n.t("projectOpen"))
+        self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
+        self._open_project_action.triggered.connect(self._choose_project_folder)
+        self._new_project_action = menu.addAction(i18n.t("projectNew"))
+        self._new_project_action.setToolTip(i18n.t("projectNewTip"))
+        self._new_project_action.triggered.connect(self._open_new_project_dialog)
+        # The import lived as a button above the DSP tree, where it was invisible until a ledger
+        # existed -- which is the opposite of the state it is for. It belongs with "which
+        # project": it is how a project acquires a plan somebody else made.
+        self._import_action = menu.addAction(i18n.t("riImport"))
+        self._import_action.setToolTip(i18n.t("riImportTip"))
+        self._import_action.triggered.connect(self._open_resonalyze_import)
+        self._reload_action = menu.addAction(i18n.t("menuReload"))
+        self._reload_action.setToolTip(i18n.t("refreshProjectTip"))
+        self._reload_action.triggered.connect(self._reload_from_disk)
+
+        self._menu_section(menu, "menuSession")
+        # Menu wording, not the buttons': "▶ Session in TCC" and "⧉ Terminal" are labels for
+        # things you can SEE, sized to a footer. A menu line has room to say what it does.
+        self._session_action = menu.addAction(i18n.t("menuStartSession"))
+        self._session_action.triggered.connect(self._start_tuning_session)
+        self._terminal_action = menu.addAction(i18n.t("menuTerminal"))
+        self._terminal_action.triggered.connect(self._open_terminal)
+        self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
+        self._save_state_action.setToolTip(i18n.t("projectSaveStateTip"))
+        self._save_state_action.triggered.connect(self._save_project_state)
+        self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
+        self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
+        self._fresh_session_action.triggered.connect(self._start_fresh_session)
+        self._models_action = menu.addAction(i18n.t("menuModels"))
+        self._models_action.triggered.connect(self._open_model_config)
+        gate_menu = self._tip_menu(menu)
+        gate_menu.setTitle(i18n.t("gateMode"))
+        menu.addMenu(gate_menu)
+        self._gate_actions = {}
+        for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
+                            (omp_session.GATE_FOREIGN, "gateForeign"),
+                            (omp_session.GATE_AUTO, "gateAuto")):
+            action = gate_menu.addAction(i18n.t(label))
+            action.setCheckable(True)
+            action.setToolTip(i18n.t("gateAutoTip" if mode == omp_session.GATE_AUTO
+                                     else "gateModeTip"))
+            action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
+            self._gate_actions[mode] = action
+
+        self._menu_section(menu, "menuView")
+        theme_action = menu.addAction("◐ " + i18n.t("menuTheme"))
+        theme_action.triggered.connect(self._toggle_theme)
+        lang_menu = self._tip_menu(menu)
+        lang_menu.setTitle(i18n.t("menuLanguage"))
+        menu.addMenu(lang_menu)
+        for code, label in (("en", i18n.t("langNameEn")), ("uk", i18n.t("langNameUk"))):
+            action = lang_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(i18n.current_language() == code)
+            action.triggered.connect(lambda _c=False, l=code: self._on_language_selected(l))
+        zoom_in_action = menu.addAction(i18n.t("menuZoomIn"))
+        zoom_in_action.triggered.connect(self._zoom_in)
+        zoom_out_action = menu.addAction(i18n.t("menuZoomOut"))
+        zoom_out_action.triggered.connect(self._zoom_out)
+
+        self._menu_section(menu, "menuTools")
+        diag_action = menu.addAction(i18n.t("menuDiagnostics"))
+        diag_action.setToolTip(i18n.t("diagBtnTip"))
+        diag_action.triggered.connect(self._open_diagnostics)
+        target_action = menu.addAction(i18n.t("menuTargetTool"))
+        target_action.setToolTip(i18n.t("targetToolTip"))
+        target_action.triggered.connect(self._open_target_curve_tool)
+
+        self._menu_section(menu, "menuHelp")
+        feedback_action = menu.addAction("💬 " + i18n.t("fbBig"))
+        feedback_action.setToolTip(i18n.t("fbBigTip"))
+        feedback_action.triggered.connect(self._open_feedback)
+        # The same two channels, and the same wording, as the method's own README -- GitHub
+        # Sponsors for people with an account, the Monobank jar as the one-tap fallback. Not a
+        # choice TCC makes on the user's behalf.
+        github_action = menu.addAction(i18n.t("supportGithub"))
+        github_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
+        )
+        mono_action = menu.addAction(i18n.t("supportMonobank"))
+        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
+
+        previous = self._project_btn.menu()
+        self._project_btn.setMenu(menu)
+        if previous is not None:
+            # Deferred, never here: this can run from inside a language action's own handler, and
+            # destroying the menu that emitted it is the crash shape this app has paid for twice.
+            previous.deleteLater()
+        # Check marks, enabled state and the button's own text, all of which the freshly
+        # built actions do not have yet.
+        self._refresh_project_button()
 
     def _build_footer(self) -> QFrame:
         footer = _panel()
@@ -981,18 +1082,10 @@ class MainWindow(QMainWindow):
 
         layout.addStretch(1)
 
-        coffee_btn = QPushButton(i18n.t("coffeeBtn"))
-        coffee_btn.setProperty("class", "coffee-btn")
-        coffee_btn.clicked.connect(self._open_support_menu)
-        self._coffee_btn = coffee_btn
-        layout.addWidget(coffee_btn)
-
-        feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
-        feedback_btn.setProperty("class", "feedback-btn")
-        feedback_btn.clicked.connect(self._open_feedback)
-        self._feedback_tip = attach_tip(feedback_btn, i18n.t("fbBigTip"))
-        self._feedback_btn = feedback_btn
-        layout.addWidget(feedback_btn)
+        # The coffee and feedback buttons used to sit here. They are in the main menu's
+        # "help" section now: two links and a form are exactly what a menu is for, and the footer
+        # is where the session's live state belongs (user, 2026-08-23 -- gather it all in one
+        # place).
         return footer
 
     # ---- left / center / right --------------------------------------------
@@ -1570,22 +1663,6 @@ class MainWindow(QMainWindow):
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # A plan can arrive from outside -- somebody tunes in Resonalyze's virtual crossover and
-        # sends the session file. It lives beside the tree because what it imports IS the tree:
-        # per-channel crossovers, gains, delays, polarity, PEQ (user, via the cockpit, 2026-08-23).
-        self._import_btn = QPushButton(i18n.t("riImport"))
-        self._import_btn.setProperty("class", "reason-btn")
-        self._import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._import_btn.clicked.connect(self._open_resonalyze_import)
-        # Visible whether or not a DSP view loaded, and that is the whole point: the moment this
-        # is MOST useful is a project seeded an hour ago that has no ledger yet and a plan from
-        # somebody else in hand. Gating it on the tree hid it exactly there (found by grabbing
-        # the window on a freshly seeded project and seeing no button). The dialog needs only
-        # `project.json` and `dsp_profile.json`, and says plainly when it has neither.
-        self._dsp_section.body_layout().addWidget(
-            self._import_btn, alignment=Qt.AlignmentFlag.AlignCenter
-        )
-
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -1780,23 +1857,6 @@ class MainWindow(QMainWindow):
 
     def _open_target_curve_tool(self, _event=None) -> None:
         QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={i18n.current_language()}"))
-
-    def _open_support_menu(self) -> None:
-        """Two-item menu opening upward from the footer (user request 2026-07-28): GitHub
-        Sponsors for people with a GitHub account, the Monobank jar as the no-account/one-tap
-        fallback -- same two channels + wording as the skill's own README, not a choice TCC makes
-        for the user."""
-        menu = QMenu(self)
-        menu.setProperty("class", "support-menu")
-        github_action = menu.addAction(i18n.t("supportGithub"))
-        github_action.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
-        )
-        mono_action = menu.addAction(i18n.t("supportMonobank"))
-        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
-        top_left = self._coffee_btn.mapToGlobal(QPoint(0, 0))
-        menu.adjustSize()
-        menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
 
     def _on_preset_index(self, _index: int) -> None:
         preset = self._preset_combo.currentData()
@@ -3523,6 +3583,10 @@ class MainWindow(QMainWindow):
         retranslate" step the plan calls for, done by direct re-assignment rather than a full
         observer registry, since the widget count is still small enough for that to be simple
         and correct."""
+        # The menu's items keep the language they were BORN in -- a label is set once -- so the
+        # main menu is rebuilt rather than re-set. It is also what makes the language check marks
+        # follow the choice that was just made.
+        self._build_main_menu()
         self._theme_btn.setText("◐ " + i18n.t("theme"))
         self._project_section.set_title(i18n.t("projectParams"))
         self._system_section.set_title(i18n.t("systemParams"))
@@ -3544,9 +3608,6 @@ class MainWindow(QMainWindow):
         self._ai_main_lbl.setText(i18n.t("aiMain"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._refresh_critic_warning()
-        self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
-        self._feedback_tip.set_text(i18n.t("fbBigTip"))
-        self._coffee_btn.setText(i18n.t("coffeeBtn"))
         for i in range(self._preset_combo.count()):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()

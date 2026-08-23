@@ -2608,9 +2608,10 @@ def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
 
 def test_the_resonalyze_import_is_reachable_before_there_is_a_ledger():
     """A project seeded an hour ago has facts, a profile and no ledger at all -- and a plan from
-    somebody else in hand is exactly why. Gating this button on the DSP tree hid it in the one
-    state it exists for; the dialog itself needs only `project.json` and `dsp_profile.json` and
-    says plainly when it has neither."""
+    somebody else in hand is exactly why. As a button above the DSP tree it followed the tree's
+    visibility, so it was hidden in the one state it exists for; in the main menu it is reachable
+    whatever the project holds, and the dialog says plainly when there is no profile to check
+    against."""
     _app()
     window = MainWindow()
     _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
@@ -2618,6 +2619,58 @@ def test_the_resonalyze_import_is_reachable_before_there_is_a_ledger():
     window._show_left_status("no profile here yet")
 
     assert not window._tree.isVisible(), "the precondition: no DSP view"
-    assert window._import_btn.isVisibleTo(window._dsp_section)
-    assert window._import_btn.text() == i18n.t("riImport")
+    assert window._import_action.isEnabled()
+    assert window._import_action.text() == i18n.t("riImport")
+
+
+
+
+def test_the_main_menu_gathers_the_whole_window_in_sections():
+    """"Let us make this the main menu and gather everything there logically" (user, 2026-08-23).
+    Before it, the same window's vocabulary was spread over a header, a footer, a hidden button in
+    the left column and two popups -- so a person looking for a thing had four places to look and
+    no way to know which.
+
+    The sections are DISABLED actions, which is also why they are asserted here: `addSection`
+    draws no text under a stylesheet, and the failure is invisible rather than loud.
+    """
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    actions = window._project_btn.menu().actions()
+    labels = [a.text() for a in actions]
+    for key in ("menuProject", "menuSession", "menuView", "menuTools", "menuHelp"):
+        assert i18n.t(key).upper() in labels, key
+    headings = [a for a in actions if a.text() in {i18n.t(k).upper() for k in
+                ("menuProject", "menuSession", "menuView", "menuTools", "menuHelp")}]
+    assert all(not a.isEnabled() for a in headings), "a heading is not a thing you can press"
+
+    # Every act the chrome no longer carries has a home here.
+    for key in ("projectOpen", "projectNew", "riImport", "menuReload", "menuStartSession",
+                "menuTerminal", "menuModels", "menuTheme", "menuDiagnostics", "menuTargetTool",
+                "supportGithub", "supportMonobank"):
+        assert any(i18n.t(key) in label for label in labels), key
+    assert any(a.menu() and a.text() == i18n.t("gateMode") for a in actions)
+    assert any(a.menu() and a.text() == i18n.t("menuLanguage") for a in actions)
+
+
+def test_the_main_menu_follows_a_language_switch():
+    """A menu item's label is set once, at construction -- so before this the menu kept the
+    language it was born in while the window changed around it. It is rebuilt now, which is also
+    what makes the language check marks show the choice that was just made."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    try:
+        window._on_language_selected("uk")
+        labels = [a.text() for a in window._project_btn.menu().actions()]
+        assert i18n.t("projectNew") in labels and "Новий проєкт…" in labels
+
+        lang_menu = next(a.menu() for a in window._project_btn.menu().actions()
+                         if a.menu() and a.text() == i18n.t("menuLanguage"))
+        checked = [a.text() for a in lang_menu.actions() if a.isChecked()]
+        assert checked == [i18n.t("langNameUk")]
+    finally:
+        window._on_language_selected("en")
 

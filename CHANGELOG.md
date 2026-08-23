@@ -6,6 +6,28 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.19] — 2026-08-23 · the ⌂ button is the main menu now
+
+### Changed
+
+- **Everything the window can do is in one menu, in five sections.** "Let us make this the main
+  menu and gather everything there logically" — until now the same vocabulary was spread over a
+  header, a footer, a button in the left column and two popups, so somebody looking for a thing
+  had four places to look and no way to know which. The menu now carries: **Project** (open, new,
+  import from Resonalyze, re-read from disk) · **Session and models** (start a session, terminal,
+  save what the model knows, fresh session, configure models, what to ask about) · **Appearance**
+  (theme, language, text size) · **Tools** (diagnostics and updates, target-curve tool) · **Help
+  and support** (write to the developer, GitHub Sponsors, the Monobank jar).
+
+  Three controls left the chrome for it, and none of them was a thing you press ten times an
+  hour: the Resonalyze import button above the DSP tree, and the coffee and feedback buttons in
+  the footer. Everything you do press often — refresh, diagnostics, zoom, theme, language, preset,
+  models, session, terminal — keeps its own button as well.
+
+- The menu is **rebuilt when the language changes**, which it never was: a menu item's label is
+  set once at construction, so it used to keep the language it was born in while the rest of the
+  window switched around it. That also makes the language check marks show the choice just made.
+
 ## [v0.1.18] — 2026-08-23 · the second door, in the state that needs it most
 
 ### Fixed
