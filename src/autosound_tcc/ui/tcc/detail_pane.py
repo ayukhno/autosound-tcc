@@ -409,6 +409,13 @@ class DetailPane(QFrame):
     def _sync_tabs(self) -> None:
         self._tab_table.set_on(self._mode == "table")
         self._tab_eq.set_on(self._mode == "eq")
+        # The tab says WHOSE bank is on screen. With one channel showing, nothing else on the
+        # left of the header did: the only name was on the copy button, and the title that
+        # carries it sits greyed at the far end of the row (user, 2026-08-23). In pair mode it
+        # stays plain -- each heading names its own channel there.
+        single = (self._mode == "eq" and self._row is not None
+                  and not (self._pair_mode and self._pair_btn.isVisible()))
+        self._tab_eq.setText(f"EQ {self._row.name}" if single else "EQ")
         self._sync_param_tabs()
         self._pair_btn.set_on(self._pair_mode)
         self._eq_help.setVisible(self._mode == "eq")
@@ -416,9 +423,12 @@ class DetailPane(QFrame):
             self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}')
         else:
             self._eq_copy.setText(i18n.t("copyEqBank"))
+        # Gone in pair mode: with two channels on screen it would name one of them, and each
+        # heading carries its own copy instead.
         self._eq_copy.setVisible(
             self._mode == "eq"
             and self._row is not None
+            and not (self._pair_mode and self._pair_btn.isVisible())
             and bool(self._row.raw.get("eq"))
             and eq_export.available()
         )
@@ -434,27 +444,30 @@ class DetailPane(QFrame):
             self.open_eq(self._group, self._group.rows_visible()[0])
 
     def _on_copy_eq_bank(self) -> None:
-        """The whole bank of this channel, ready to paste into the DSP's own software.
+        """The header's copy: the channel this view was opened on."""
+        if self._row is not None and self._group is not None:
+            self._copy_bank_of(self._group, self._row)
+
+    def _copy_bank_of(self, group: ProfileGroup, row: GroupRow) -> None:
+        """One channel's whole bank, ready to paste into the DSP's own software.
 
         The window formats nothing: it asks the method, puts what came back on the clipboard, and
         says WHICH format that was -- plus anything the format could not carry, because a band
         quietly dropped on the way to a processor is the kind of loss nobody notices until the
         tune sounds wrong.
         """
-        if self._row is None:
-            return
-        raw = self._row.raw
+        raw = row.raw
         bank = eq_export.format_bank(
             raw.get("eq"),
             crossovers={"hp": raw.get("hp"), "lp": raw.get("lp")},
-            group_id=self._group.id if self._group is not None else "physical_outputs",
-            channel=self._row.name,
+            group_id=group.id,
+            channel=row.name,
         )
         if bank is None:
             self.bankCopied.emit(i18n.t("copyEqNoFormat"))
             return
         QGuiApplication.clipboard().setText(bank.text)
-        self.bankCopied.emit(_bank_sentence(self._row.name, bank))
+        self.bankCopied.emit(_bank_sentence(row.name, bank))
 
     def _on_pair_toggle(self) -> None:
         self._pair_mode = not self._pair_mode
@@ -698,12 +711,29 @@ class DetailPane(QFrame):
                 legend_layout.addStretch(1)
                 layout.addWidget(legend)
             else:
-                layout.addWidget(QLabel("no shared frequencies"))
+                # The key existed and the string was hardcoded past it: an English line among
+                # Ukrainian ones, in the view that compares two channels.
+                layout.addWidget(QLabel(i18n.t("noShared")))
 
             for label, r in (("L", l_row), ("R", r_row)):
+                # The heading carries its own copy: with two channels on screen, one button in
+                # the header says "copy EQ" and means only one of them (user, 2026-08-23). Beside
+                # the name there is no ambiguity about whose bank it is.
+                heading = QWidget()
+                heading_row = QHBoxLayout(heading)
+                heading_row.setContentsMargins(0, 0, 0, 0)
+                heading_row.setSpacing(8)
                 row_label = QLabel(f"{label} · {r.name} ({len(r.eq_bands())})")
                 row_label.setProperty("class", "eq-rowlab")
-                layout.addWidget(row_label)
+                heading_row.addWidget(row_label)
+                if eq_export.available() and r.raw.get("eq"):
+                    copy_btn = _DTab(i18n.t("copyEqBank"))
+                    copy_btn.clicked.connect(
+                        lambda _checked=False, target=r: self._copy_bank_of(group, target)
+                    )
+                    heading_row.addWidget(copy_btn)
+                heading_row.addStretch(1)
+                layout.addWidget(heading)
                 layout.addWidget(_band_flow(r.eq_bands(), match_map, gain_mismatch))
         else:
             layout.addWidget(_band_flow(row.eq_bands()))

@@ -382,3 +382,70 @@ def test_right_clicking_a_value_copies_it_with_no_menu_and_a_receipt():
     outputs.customContextMenuRequested.emit(QPoint(-10, -10))
     assert QGuiApplication.clipboard().text() == "5.22"
 
+
+def _pair_view():
+    """A group with an L/R pair, each carrying its own bands."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+
+    return ProfileGroup(
+        id="physical_outputs", label="Output", fields=("eq",),
+        rows=(
+            GroupRow(id="m-L", name="m-L", slot="E",
+                     raw={"eq": [{"type": "PK", "f": 2551, "gain_db": -14.1, "q": 1.5}]}),
+            GroupRow(id="m-R", name="m-R", slot="F",
+                     raw={"eq": [{"type": "PK", "f": 215, "gain_db": -12.1, "q": 2.1}]}),
+        ),
+    )
+
+
+def test_with_both_channels_on_screen_each_heading_carries_its_own_copy(monkeypatch):
+    """"When the EQ of both channels is shown, remove the top button and add one after each
+    channel's name" (user, 2026-08-23). One button over two banks names one of them."""
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.core import eq_export
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane, _DTab
+
+    _app()
+    monkeypatch.setattr(eq_export, "available", lambda: True)
+    copied = []
+    monkeypatch.setattr(
+        eq_export, "format_bank",
+        lambda rows, **kw: copied.append(kw["channel"]) or eq_export.Bank(
+            text=f"BANK {kw['channel']}", format_name="Audiotec-Fischer", written=1),
+    )
+    pane = DetailPane()
+    group = _pair_view()
+    pane.open_eq(group, group.rows[0])
+    assert pane._eq_copy.isVisibleTo(pane), "single channel: the header carries it"
+
+    pane._on_pair_toggle()
+
+    assert not pane._eq_copy.isVisibleTo(pane), "two channels: the header would name one of them"
+    per_heading = [b for b in pane._scroll.widget().findChildren(_DTab)]
+    assert len(per_heading) == 2
+    per_heading[1].clicked.emit()
+    assert QGuiApplication.clipboard().text() == "BANK m-R"
+    assert copied[-1] == "m-R"
+
+
+def test_the_eq_tab_says_whose_bank_is_on_screen(monkeypatch):
+    """In the single view nothing on the left of the header named the channel: the only name was
+    on the copy button, and the title that carries it sits greyed at the far end of the row."""
+    from autosound_tcc.core import eq_export
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    monkeypatch.setattr(eq_export, "available", lambda: False)
+    pane = DetailPane()
+    group = _pair_view()
+
+    pane.open_eq(group, group.rows[0])
+    assert pane._tab_eq.text() == "EQ m-L"
+
+    pane._on_pair_toggle()
+    assert pane._tab_eq.text() == "EQ", "in pair mode each heading names its own"
+
+    pane.open_table(group)
+    assert pane._tab_eq.text() == "EQ", "and it is a plain tab when it is a way IN"
+
