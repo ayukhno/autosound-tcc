@@ -891,12 +891,6 @@ class MainWindow(QMainWindow):
         self._new_project_action.triggered.connect(
             lambda _checked=False: self._open_new_project_dialog()
         )
-        # The import lived as a button above the DSP tree, where it was invisible until a ledger
-        # existed -- which is the opposite of the state it is for. It belongs with "which
-        # project": it is how a project acquires a plan somebody else made.
-        self._import_action = menu.addAction(i18n.t("riImport"))
-        self._import_action.setToolTip(i18n.t("riImportTip"))
-        self._import_action.triggered.connect(self._open_resonalyze_import)
         # Its own line, because it is a different intent from "new project", not a different
         # button for it: this one starts from a car that is already described (user, 2026-08-23 --
         # "call it 'copy the car' and say in the hint that it is the car, the equipment and the
@@ -960,6 +954,14 @@ class MainWindow(QMainWindow):
         diag_action = menu.addAction(i18n.t("menuDiagnostics"))
         diag_action.setToolTip(i18n.t("diagBtnTip"))
         diag_action.triggered.connect(self._open_diagnostics)
+        # In TOOLS, not in project (user, 2026-08-23): "it does not import a session, it takes
+        # the settings -- crossovers, delays, EQ". He is right, and the old placement said
+        # otherwise. Nothing about a project changes here: a file is read, every value is checked
+        # against the processor, and the answer is a report. That is a tool, beside diagnostics
+        # and the target-curve tool -- and it has nothing to do with the AI session either.
+        self._import_action = menu.addAction(i18n.t("riImport"))
+        self._import_action.setToolTip(i18n.t("riImportTip"))
+        self._import_action.triggered.connect(self._open_resonalyze_import)
         target_action = menu.addAction(i18n.t("menuTargetTool"))
         target_action.setToolTip(i18n.t("targetToolTip"))
         target_action.triggered.connect(self._open_target_curve_tool)
