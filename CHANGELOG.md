@@ -6,6 +6,66 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.21] — 2026-08-23 · an evening of his corrections, and two features that arrived with the method
+
+Twenty-three commits, every one of them work he drove in the session window, and most of them
+answers to something he read on screen and said was wrong.
+
+### Added
+
+- **Protective filters, recorded per channel.** A driver swept behind a protective high-pass
+  carries that filter's phase far past its corner, and nothing downstream can tell: a protective
+  `LR4 @100` and a designed `LR4 @100` are the same filter. The method measured one junction at
+  −49° with the protection in the chain and +3° with it out. A **button**, not a checkbox — you
+  enter what was in the signal path and "this round was captured with protection" is derived from
+  that, so no tick can drift from the filters it claims to describe. Three answers per channel:
+  filters · "no protection" (an ANSWER) · not recorded (a QUESTION, and the correction refuses it
+  rather than treating it as clean). The dialog collects and does not validate: the method's gate
+  refuses a half-given filter and its words are what you read.
+- **Copy a channel's EQ bank in the format its processor takes** — in the EQ header, named after
+  the channel, and on the right-click of any channel in the tree. The formats live in the method;
+  this app formats nothing. The clipboard message says which format it was, how many bands of the
+  bank were written (a fixed-size bank is a FORM — its empty rows overwrite whatever those slots
+  held), and what the format could not carry, with the reason.
+- **Gain · Delay · Phase tabs**: one control, every channel, both tiers, in two columns side by
+  side. The per-tier table answers what a tier is set to; the question somebody has about a delay
+  is how they compare across the rig.
+- **Right-click a value to copy it** — no menu, with a tip saying what was copied. A crossover
+  copies its frequency alone, because the filter type is a dropdown in the DSP's software and does
+  not paste. No leading `+` on a gain, no degree sign on a phase, no units anywhere.
+- **The rig draws before the first ledger snapshot**: a project that has been described (or copied
+  from another car) shows every channel in its tier, with the values arriving when tuning starts.
+
+### Changed
+
+- **The Resonalyze import moved to Tools and says what it takes** — settings, not a session. Its
+  green **"Send to be banked"** writes the rows and the request into the AI dialog's composer,
+  where you read them before they go: a first ledger snapshot when the project has none, a
+  proposal when it does. The window still writes nothing itself.
+- The import's verdict grew the state it was missing: **`blocked` is only ever about values the
+  DSP refused**, so on a project with no profile it was false — and the window read that as the
+  clear path. Four verdicts now, and the rows are offered only when they are bound AND unrefused.
+- **The `☰ Menu` button**, the project name beside it as plain text, and the menu itself rebuilt
+  on a language switch (it used to keep the language it was born in).
+- **"Copy the car…"** is its own act in the menu, with a hint saying what travels.
+
+### Fixed
+
+- **The reviewer that was never called.** `call_critic` returned a clipboard package twice with
+  nothing to act on, while the same package run by hand came back with a full review. The
+  reachability check fell back to Google for a vendor it could not name, so a Kimi model reported
+  **reachable** and was handed to the Gemini CLI. Fixed at the promise, the explanation and a
+  footer note before the call.
+- **A model picked in the new-project dialog was dropped** when copying a car skipped the
+  interview — and when it was carried, it was written in the wrong vocabulary, so the window met
+  its own setting as a retired model.
+- **A renamed channel drew twice** in the rig: a channel answers to several names and the
+  de-duplication was per name.
+- **A quit that looked like a hang**: the wait counts out loud now, and closing again mid-save
+  asks before throwing the turn away instead of going silently through.
+- The `?` in the EQ view no longer explains itself with a note from a design conversation
+  ("MUSWAY's edge over Helix"), and the alias check no longer paints a red dot over a name repair.
+
 ## [v0.1.20] — 2026-08-23 · a button that says Menu, and a name that is just a name
 
 All four from the user, on the v0.1.19 menu.
