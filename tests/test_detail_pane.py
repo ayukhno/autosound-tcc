@@ -352,3 +352,33 @@ def test_a_left_out_crossover_is_shown_as_a_filter_not_as_a_dict():
     assert said.startswith("HP 350 LR36 —")
     assert "family" not in said and "{" not in said
 
+
+def test_right_clicking_a_value_copies_it_with_no_menu_and_a_receipt():
+    """"Right-click copies the one value, no question, with a hint saying what was copied"
+    (user, 2026-08-23). A one-item menu is a question with one answer; and a copy with no feedback
+    leaves you pressing again to be sure, which is how the number you wanted gets replaced by the
+    one under it."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view())
+    pane.open_param("ta_ms")
+    outputs = _param_columns(pane)[1]
+
+    QGuiApplication.clipboard().setText("untouched")
+    cell = outputs.visualItemRect(outputs.item(0, 2)).center()
+    outputs.customContextMenuRequested.emit(cell)
+
+    assert QGuiApplication.clipboard().text() == "5.22"
+    assert RoundedTooltip.instance().text() == i18n.t("copiedValue").format(value="5.22")
+
+    # An empty cell is not a copy, and does not clear what is already on the clipboard.
+    outputs.customContextMenuRequested.emit(QPoint(-10, -10))
+    assert QGuiApplication.clipboard().text() == "5.22"
+

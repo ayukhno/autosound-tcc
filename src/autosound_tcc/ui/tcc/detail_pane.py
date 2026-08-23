@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -505,6 +505,7 @@ class DetailPane(QFrame):
             QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
 
         table.cellClicked.connect(_activate)
+        self._copy_on_right_click(table)
         return table
 
     def _build_param_table(self, field: str, groups: list) -> QWidget:
@@ -573,8 +574,35 @@ class DetailPane(QFrame):
             QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
 
         table.cellClicked.connect(_activate)
+        self._copy_on_right_click(table)
         layout.addWidget(table)
         return block
+
+    def _copy_on_right_click(self, table: QTableWidget) -> None:
+        """Right-click a cell and its value is on the clipboard, with a tip saying which.
+
+        No menu: "copy the value" was the only item a table cell could offer, and a one-item menu
+        is a question with one answer (user, 2026-08-23). The tip is the receipt -- a copy with no
+        feedback leaves you pressing again to be sure, which is how the number you wanted gets
+        replaced by the one under it.
+        """
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        def _copy(pos) -> None:
+            item = table.itemAt(pos)
+            text = item.text().strip() if item is not None else ""
+            if not text:
+                return
+            copy_menu.copy_text(text)
+            said = i18n.t("copiedValue").format(value=text)
+            tip = rounded_tooltip.RoundedTooltip.instance()
+            tip.show_at(table.viewport().mapToGlobal(pos) + QPoint(14, 14), said)
+            # Hidden on a timer, and only if it is still OUR tip: another one may have taken the
+            # singleton over in the meantime, and hiding somebody else's would be a flicker
+            # nobody could explain.
+            QTimer.singleShot(1500, lambda: tip.hide_tip() if tip.text() == said else None)
+
+        table.customContextMenuRequested.connect(_copy)
 
     def _styled_cell(self, field: str, row: GroupRow, t) -> QTableWidgetItem:
         """A value cell with prototype-style alignment + colour: numbers right-aligned, gain
