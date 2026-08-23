@@ -2605,3 +2605,19 @@ def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
     window._new_project_action.trigger()
     assert opened == [True]
 
+
+def test_the_resonalyze_import_is_reachable_before_there_is_a_ledger():
+    """A project seeded an hour ago has facts, a profile and no ledger at all -- and a plan from
+    somebody else in hand is exactly why. Gating this button on the DSP tree hid it in the one
+    state it exists for; the dialog itself needs only `project.json` and `dsp_profile.json` and
+    says plainly when it has neither."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    window._show_left_status("no profile here yet")
+
+    assert not window._tree.isVisible(), "the precondition: no DSP view"
+    assert window._import_btn.isVisibleTo(window._dsp_section)
+    assert window._import_btn.text() == i18n.t("riImport")
+

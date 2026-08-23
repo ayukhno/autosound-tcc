@@ -6,6 +6,20 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.18] — 2026-08-23 · the second door, in the state that needs it most
+
+### Fixed
+
+- **"Import from Resonalyze…" is visible before there is a ledger.** It sat in the DSP section and
+  appeared only when the DSP tree did — that is, only for a project with a banked ledger. But the
+  moment this button exists FOR is a project seeded an hour ago, with facts and a profile and no
+  tuning yet, and somebody else's plan in hand. It was hidden in exactly that state. The dialog
+  needs only `project.json` and `dsp_profile.json`, and says plainly when it has neither, so the
+  button no longer waits for a tree.
+
+  Same class as v0.1.17's missing menu item, found the same way: by opening the window on a
+  freshly seeded project and looking for the button instead of assuming it was there.
+
 ## [v0.1.17] — 2026-08-23 · the new-project dialog had no door
 
 ### Fixed

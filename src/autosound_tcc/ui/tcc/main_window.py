@@ -1577,7 +1577,11 @@ class MainWindow(QMainWindow):
         self._import_btn.setProperty("class", "reason-btn")
         self._import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._import_btn.clicked.connect(self._open_resonalyze_import)
-        self._import_btn.setVisible(False)
+        # Visible whether or not a DSP view loaded, and that is the whole point: the moment this
+        # is MOST useful is a project seeded an hour ago that has no ledger yet and a plan from
+        # somebody else in hand. Gating it on the tree hid it exactly there (found by grabbing
+        # the window on a freshly seeded project and seeing no button). The dialog needs only
+        # `project.json` and `dsp_profile.json`, and says plainly when it has neither.
         self._dsp_section.body_layout().addWidget(
             self._import_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
@@ -1663,7 +1667,6 @@ class MainWindow(QMainWindow):
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
         self._tree.setVisible(True)
-        self._import_btn.setVisible(True)
         # BEFORE the rebuild, not after: System params renders its channel switches off `_view`
         # (`_add_channel_switches`), so rebuilding first read the previous load's view -- absent on
         # the first one. That is why the channel sections were missing at startup and appeared
@@ -1818,7 +1821,6 @@ class MainWindow(QMainWindow):
         """
         self._has_project = False
         self._tree.setVisible(False)
-        self._import_btn.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(False)
