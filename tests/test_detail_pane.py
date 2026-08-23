@@ -293,11 +293,14 @@ def test_copying_a_bank_says_which_format_it_was_and_what_was_left_out(monkeypat
                                                      "gain_db": -3.0, "q": 2.0}]}),))
     row = group.rows[0]
     monkeypatch.setattr(eq_export, "available", lambda: True)
-    monkeypatch.setattr(
-        eq_export, "format_bank",
-        lambda rows: eq_export.Bank(text="BANK-TEXT", format_name="Audiotec-Fischer",
-                                    left_out=("APF2 4386 Hz",)),
-    )
+    asked = {}
+
+    def _fake(rows, **kw):
+        asked.update(kw)
+        return eq_export.Bank(text="BANK-TEXT", format_name="Audiotec-Fischer", written=8,
+                              bank_size=30, left_out=("AP2 4386 Hz — this bank is EQ only",))
+
+    monkeypatch.setattr(eq_export, "format_bank", _fake)
     said = []
     pane.bankCopied.connect(said.append)
     pane.open_eq(group, row)
@@ -306,12 +309,46 @@ def test_copying_a_bank_says_which_format_it_was_and_what_was_left_out(monkeypat
 
     assert QGuiApplication.clipboard().text() == "BANK-TEXT"
     assert len(said) == 1
-    assert "Audiotec-Fischer" in said[0] and "APF2 4386 Hz" in said[0]
+    assert "Audiotec-Fischer" in said[0] and "AP2 4386 Hz" in said[0]
+    # The count and the bank size travel together: pasting a fixed-size bank writes its empty rows
+    # over whatever those slots held, and "copied" does not say that.
+    assert "8" in said[0] and "30" in said[0]
+    # The tier and the channel's own crossovers go with the request -- whether a crossover belongs
+    # in the block is the method's call, per tier, from the profile.
+    assert asked["group_id"] == "physical_outputs"
+    assert asked["channel"] == "w-L"
+    assert set(asked["crossovers"]) == {"hp", "lp"}
 
     # And when there is no format, nothing plausible is put on the clipboard instead.
-    monkeypatch.setattr(eq_export, "format_bank", lambda rows: None)
+    monkeypatch.setattr(eq_export, "format_bank", lambda rows, **kw: None)
     QGuiApplication.clipboard().setText("untouched")
     pane._on_copy_eq_bank()
     assert QGuiApplication.clipboard().text() == "untouched"
     assert said[-1] == i18n.t("copyEqNoFormat")
+
+
+def test_a_channel_with_nothing_to_export_is_not_offered_a_copy(tmp_path, monkeypatch):
+    """`{"hp": None, "lp": None}` is what a virtual channel hands over, and a dict of empty legs
+    is truthy — which would have produced a bank of thirty empty rows for a channel that has
+    nothing in it, offered from the menu as if it did."""
+    from autosound_tcc.core import eq_export
+
+    monkeypatch.setattr(eq_export, "_profile", lambda: {"dsp_profile": {"vendor": "X"}})
+    assert eq_export.format_bank([], crossovers={"hp": None, "lp": None}) is None
+    assert eq_export.format_bank(None, crossovers=None) is None
+
+
+def test_a_left_out_crossover_is_shown_as_a_filter_not_as_a_dict():
+    """The method reports a refused crossover as the ledger structure it would not carry, which is
+    right for it to hand over and wrong to show a person: the status line read
+    `{'hp': {'f': 350.0, 'family': 'LinkwitzRiley', …}} — the Audiotec-Fischer bank is EQ only`."""
+    from autosound_tcc.core import eq_export
+
+    said = eq_export._said({
+        "item": {"hp": {"f": 350.0, "type": "LR", "slope": 36, "family": "LinkwitzRiley"}},
+        "why": "this bank is EQ only",
+    })
+
+    assert said.startswith("HP 350 LR36 —")
+    assert "family" not in said and "{" not in said
 

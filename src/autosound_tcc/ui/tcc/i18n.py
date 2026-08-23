@@ -294,6 +294,9 @@ answers the first five questions anybody would ask.",
         "quitAbandonBody": "The model has been writing the project down for {sec} s. Close now and whatever it has not written yet is lost — the conversation goes with the window.",
         "quitAbandonClose": "Close without saving",
         "quitAbandonWait": "Keep waiting",
+        "copyEqCount": "{written} of {size} bands — the rest are written empty and overwrite whatever those slots hold.",
+        "copyEqWritten": "{written} band(s).",
+        "copyEqCrossovers": "Crossover legs included: {n}.",
         "npCreate": "Create",
         "npCancel": "Cancel",
         "projectNewTip": "Folder + DSP + who runs the onboarding. It can also START FROM AN EXISTING PROJECT: the car, the drivers, the glossary and the DSP profile come over, and you adjust instead of describing your own car again.",
@@ -333,9 +336,10 @@ answers the first five questions anybody would ask.",
         "outTitle": "OUTPUT — physical drivers",
         "virtTitle": "VIRTUAL — input voicing",
         "colChan": "Channel",
-        "eqHint": "Only <b>active bands</b> (all parameters at once — MUSWAY's edge over "
-                  "Helix). APF is a band type, not a column. Bypass is read-only (for now). "
-                  "Empty of 30 are hidden.",
+        "eqHint": "Only the bands <b>in use</b>, with every parameter of each shown at once. "
+                  "An all-pass (APF) is a band TYPE here, not a separate column. Bypass is "
+                  "shown but cannot be changed from this window yet. The bank's unused bands "
+                  "are hidden.",
         "shared": "shared frequencies:",
         "noShared": "no shared frequencies",
         "band": "band",
@@ -1056,6 +1060,9 @@ Choose sweeps (sw) above to read this.",
         "quitAbandonBody": "Модель записує стан проєкту вже {sec} с. Закрити зараз — і те, що вона ще не записала, буде втрачено: розмова піде разом із вікном.",
         "quitAbandonClose": "Закрити без збереження",
         "quitAbandonWait": "Почекати",
+        "copyEqCount": "{written} смуг із {size} — решта пишуться порожніми й перезапишуть те, що зараз у тих слотах.",
+        "copyEqWritten": "Смуг: {written}.",
+        "copyEqCrossovers": "Разом із кросовером: {n}.",
         "npCreate": "Створити",
         "npCancel": "Скасувати",
         "projectNewTip": "Тека + DSP + хто веде onboarding. Може ПОЧАТИСЬ І З НАЯВНОГО ПРОЄКТУ: машина, драйвери, глосарій і профіль DSP переїжджають, і ви правите замість того, щоб описувати свою машину заново.",
@@ -1095,9 +1102,9 @@ Choose sweeps (sw) above to read this.",
         "outTitle": "OUTPUT — фізичні драйвери",
         "virtTitle": "VIRTUAL — вхідний voicing",
         "colChan": "Канал",
-        "eqHint": "Тільки <b>задіяні банди</b> (усі параметри одразу — перевага MUSWAY над "
-                  "Helix). APF — це тип банда, не окрема колонка. Bypass — read-only (поки). "
-                  "Порожні з 30 сховані.",
+        "eqHint": "Лише <b>задіяні смуги</b>, і в кожної одразу всі параметри. Олл-пас (APF) "
+                  "тут — це ТИП смуги, а не окрема колонка. Bypass показано, але змінити його "
+                  "з цього вікна поки не можна. Невикористані смуги банку сховані.",
         "shared": "спільні частоти:",
         "noShared": "спільних частот нема",
         "band": "банд",

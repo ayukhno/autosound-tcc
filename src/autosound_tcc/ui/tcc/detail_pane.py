@@ -57,6 +57,28 @@ _PARAM_TABS: dict[str, "object"] = {
 _MATCH_PALETTE = ["#5aa9e6", "#4bbf87", "#e8973c", "#c98fe0", "#e8c34a", "#e05c5c"]
 
 
+def _bank_sentence(channel: str, bank) -> str:
+    """What was copied, in what, and what did not make it — in that order.
+
+    The count and the bank size travel together because a fixed-size bank is a FORM: pasting it
+    writes its empty rows over whatever those slots held. "8 bands of 30" says that; "copied" does
+    not. And a band left out is said with the method's own reason, because "it did not fit" and
+    "this format has no room for an all-pass" send a person to different places.
+    """
+    said = i18n.t("copyEqDone").format(channel=channel, format=bank.format_name)
+    if bank.bank_size:
+        said = f"{said} {i18n.t('copyEqCount').format(written=bank.written, size=bank.bank_size)}"
+    elif bank.written:
+        said = f"{said} {i18n.t('copyEqWritten').format(written=bank.written)}"
+    if bank.crossovers:
+        said = f"{said} {i18n.t('copyEqCrossovers').format(n=bank.crossovers)}"
+    for note in bank.notes:
+        said = f"{said} {note}"
+    if bank.left_out:
+        said = f"{said} {i18n.t('copyEqLeftOut').format(what='; '.join(bank.left_out))}"
+    return said
+
+
 def _sibling_name(name: str) -> Optional[str]:
     """Best-effort L<->R sibling lookup across the naming conventions seen in real ledgers:
     "L"/"R" as a standalone word (`Front L Full`, the prototype's own convention) OR as a bare
@@ -421,15 +443,18 @@ class DetailPane(QFrame):
         """
         if self._row is None:
             return
-        bank = eq_export.format_bank(self._row.raw.get("eq"))
+        raw = self._row.raw
+        bank = eq_export.format_bank(
+            raw.get("eq"),
+            crossovers={"hp": raw.get("hp"), "lp": raw.get("lp")},
+            group_id=self._group.id if self._group is not None else "physical_outputs",
+            channel=self._row.name,
+        )
         if bank is None:
             self.bankCopied.emit(i18n.t("copyEqNoFormat"))
             return
         QGuiApplication.clipboard().setText(bank.text)
-        said = i18n.t("copyEqDone").format(channel=self._row.name, format=bank.format_name)
-        if bank.left_out:
-            said = f"{said} {i18n.t('copyEqLeftOut').format(what=', '.join(bank.left_out))}"
-        self.bankCopied.emit(said)
+        self.bankCopied.emit(_bank_sentence(self._row.name, bank))
 
     def _on_pair_toggle(self) -> None:
         self._pair_mode = not self._pair_mode

@@ -125,13 +125,21 @@ class _EqChip(QLabel):
         self.clicked.emit()
 
 
-def _eq_bank_text(row) -> str:
+def _eq_bank_text(row, group_id: str) -> str:
     """This channel's bank as text, or "" when there is no format to write it in.
 
     Empty is a real answer here rather than a failure: `copy_menu` drops an item that resolves to
     nothing, which is exactly the behaviour wanted when the method has no exporter for this DSP.
+
+    The tier travels with the row because whether a crossover belongs in the block is read from
+    the profile for THAT tier -- a virtual channel has none, and the method is what knows it.
     """
-    bank = eq_export.format_bank(row.raw.get("eq"))
+    bank = eq_export.format_bank(
+        row.raw.get("eq"),
+        crossovers={"hp": row.raw.get("hp"), "lp": row.raw.get("lp")},
+        group_id=group_id,
+        channel=row.name,
+    )
     return bank.text if bank else ""
 
 
