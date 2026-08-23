@@ -93,6 +93,7 @@ from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
+from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
@@ -1561,6 +1562,18 @@ class MainWindow(QMainWindow):
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
+        # A plan can arrive from outside -- somebody tunes in Resonalyze's virtual crossover and
+        # sends the session file. It lives beside the tree because what it imports IS the tree:
+        # per-channel crossovers, gains, delays, polarity, PEQ (user, via the cockpit, 2026-08-23).
+        self._import_btn = QPushButton(i18n.t("riImport"))
+        self._import_btn.setProperty("class", "reason-btn")
+        self._import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._import_btn.clicked.connect(self._open_resonalyze_import)
+        self._import_btn.setVisible(False)
+        self._dsp_section.body_layout().addWidget(
+            self._import_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -1642,6 +1655,7 @@ class MainWindow(QMainWindow):
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
         self._tree.setVisible(True)
+        self._import_btn.setVisible(True)
         # BEFORE the rebuild, not after: System params renders its channel switches off `_view`
         # (`_add_channel_switches`), so rebuilding first read the previous load's view -- absent on
         # the first one. That is why the channel sections were missing at startup and appeared
@@ -1691,24 +1705,42 @@ class MainWindow(QMainWindow):
             interview.show()
             return
 
-        if dialog.open_terminal_cli is not None and dialog.project_dir is not None:
-            # config.set_project_dir() (already called by NewProjectDialog._on_create) only
-            # updates QSettings -- if THIS process was itself launched with AUTOSOUND_PROJECT_DIR
-            # set, that env var still wins over QSettings for any MainWindow built in the same
-            # process, so the "fresh window" below would silently reopen the OLD project without
-            # this override.
-            _force_project_dir_env(dialog.project_dir)
-            # The new window's own _start_mcp_server() runs synchronously in __init__, before
-            # .show() -- .mcp.json already exists for the new project by the time the terminal
-            # opens, so there's no ordering race to wait out here.
-            new_window = MainWindow()
-            new_window.show()
+        if dialog.project_dir is None:
+            return
+
+        # config.set_project_dir() (already called by NewProjectDialog._on_create) only
+        # updates QSettings -- if THIS process was itself launched with AUTOSOUND_PROJECT_DIR
+        # set, that env var still wins over QSettings for any MainWindow built in the same
+        # process, so the "fresh window" below would silently reopen the OLD project without
+        # this override.
+        _force_project_dir_env(dialog.project_dir)
+        # The new window's own _start_mcp_server() runs synchronously in __init__, before
+        # .show() -- .mcp.json already exists for the new project by the time the terminal
+        # opens, so there's no ordering race to wait out here.
+        new_window = MainWindow()
+        new_window.show()
+        # Reached with NO interview and no terminal when the project was seeded from another one
+        # and came with its DSP profile: there is nothing left to onboard, so the new window IS
+        # the answer. It says what it inherited rather than opening silently on somebody else's
+        # facts.
+        if dialog.seeded is not None and dialog.seeded_from is not None:
+            new_window._status_strip.notify(
+                i18n.t("npSeedDone").format(
+                    source=dialog.seeded_from.name, files=", ".join(dialog.seeded.written)
+                )
+            )
+        if dialog.open_terminal_cli is not None:
             language_name = i18n.t("langNameUk" if i18n.current_language() == "uk" else "langNameEn")
             hint = i18n.t("npOnboardingHint").format(
                 vendor=dialog.onboarding_vendor,
                 model=dialog.onboarding_model,
                 language=language_name,
             )
+            if dialog.seeded is not None and dialog.seeded_from is not None:
+                # The CLI must be told the folder is not empty. Without this it opens on a
+                # project full of inherited facts and starts the intake from "what car is it",
+                # which is the cost the seeding exists to remove.
+                hint = f"{hint} {i18n.t('npSeedHint').format(source=dialog.seeded_from.name)}"
             try:
                 terminal_launcher.launch(
                     dialog.project_dir,
@@ -1718,7 +1750,14 @@ class MainWindow(QMainWindow):
                 )
             except terminal_launcher.TerminalLaunchError as exc:
                 new_window._status_strip.notify(str(exc), level="warn")
-            self.close()
+        self.close()
+
+    def _open_resonalyze_import(self) -> None:
+        """Read-only on purpose. The dialog converts and checks; banking the rows is the tuning
+        gate's job (`state/apply.py`), which validates against HEAD and produces the settings
+        sheet somebody enters by hand -- a window that wrote ledger state past it would be a
+        second way in."""
+        ResonalyzeImportDialog(config.project_dir(), self).exec()
 
     def _open_feedback(self) -> None:
         FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
@@ -1766,6 +1805,7 @@ class MainWindow(QMainWindow):
         """
         self._has_project = False
         self._tree.setVisible(False)
+        self._import_btn.setVisible(False)
         self._left_status.setText(message)
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(False)

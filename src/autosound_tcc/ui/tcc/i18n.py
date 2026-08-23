@@ -196,6 +196,46 @@ answers the first five questions anybody would ask.",
                             "Please conduct the interview in {language}.",
         "langNameEn": "English",
         "langNameUk": "Ukrainian",
+        "npSeed": "System parameters",
+        "npSeedNone": "Ask during onboarding (from scratch)",
+        "npSeedFrom": "Copy from an existing project…",
+        "npSeedPlaceholder": "Folder of a project that has a project.json",
+        "npSeedFindings": "…and what was measured there (acoustic flaws, open questions)",
+        "npSeedNotAProject": "No readable project.json here — nothing to copy.",
+        "npSeedSummary": "{car} · {dsp} · {channels} channels",
+        "npSeedNote": "**Inherited from `{source}` ({when}).** The system profile was copied from "
+                      "that project, not written here — check it against this build before relying "
+                      "on it.",
+        "npSeedFailed": "Nothing was copied: {problem}",
+        "npSeedDone": "System parameters copied from '{source}': {files}. They were inherited, not "
+                      "measured here — check them against this build.",
+        "npSeedHint": "The system parameters were copied from the project '{source}' into this "
+                      "folder: read project.json and dsp_profile.json FIRST and go through them "
+                      "with the person, correcting what differs. Do not ask for the car to be "
+                      "described from scratch.",
+        "riTitle": "Import a Resonalyze session",
+        "riFilePlaceholder": "A Resonalyze virtual-DSP session (.json)",
+        "riAgainst": "Checked against",
+        "riNoProfile": "No dsp_profile.json in this project — nothing was checked against a real "
+                       "processor. Every value below is reported, none is verified.",
+        "riScene": "Stereo scene",
+        "riSceneNote": "What Resonalyze's Auto balance aims for. It is already inside the per-leg "
+                       "gains and delays below — do not enter it a second time.",
+        "riUnbound": "no channel of this project matches",
+        "riDormant": "in the file, but NOT live (the crossover kind decides)",
+        "riDropped": "dropped: transparent, contributes nothing",
+        "riNotChecked": "Not checked, because this DSP profile does not state the limit",
+        "riBindNone": "— leave unbound —",
+        "riBlocked": "This processor cannot be given the plan as it stands: {refused} value(s) "
+                     "refused, {unbound} leg(s) unbound. Nothing is rounded to fit, and nothing "
+                     "is written.",
+        "riClear": "All {legs} legs check out against this DSP. Banking them is the tuning gate's "
+                   "job: copy the rows and propose them from the terminal.",
+        "riCopyRows": "Copy rows (JSON)",
+        "riCopied": "The rows are on the clipboard.",
+        "riFailed": "This file could not be read:",
+        "riClose": "Close",
+        "riImport": "Import from Resonalyze…",
         "npCreate": "Create",
         "npCancel": "Cancel",
         "projectOpenTip": "An empty folder is a valid new project — the intake fills it. Switching folders needs TCC opened again.",
@@ -860,6 +900,45 @@ Choose sweeps (sw) above to read this.",
                             "model={model}. Веди інтерв'ю {language}.",
         "langNameEn": "англійською",
         "langNameUk": "українською",
+        "npSeed": "Системні параметри",
+        "npSeedNone": "Спитати в інтерв'ю (з нуля)",
+        "npSeedFrom": "Скопіювати з наявного проєкту…",
+        "npSeedPlaceholder": "Тека проєкту, у якій є project.json",
+        "npSeedFindings": "…і те, що там виміряно (акустичні вади, відкриті питання)",
+        "npSeedNotAProject": "Тут нема читабельного project.json — копіювати нема чого.",
+        "npSeedSummary": "{car} · {dsp} · каналів: {channels}",
+        "npSeedNote": "**Успадковано з `{source}` ({when}).** Профіль системи скопійовано з того "
+                      "проєкту, а не написано тут — звірте його з цією збіркою, перш ніж на нього "
+                      "спиратись.",
+        "npSeedFailed": "Нічого не скопійовано: {problem}",
+        "npSeedDone": "Системні параметри скопійовано з «{source}»: {files}. Вони успадковані, а не "
+                      "виміряні тут — звірте їх із цією збіркою.",
+        "npSeedHint": "Системні параметри скопійовано в цю теку з проєкту «{source}»: СПОЧАТКУ "
+                      "прочитай project.json і dsp_profile.json і пройди їх разом із людиною, "
+                      "виправляючи те, що відрізняється. Не проси описувати машину з нуля.",
+        "riTitle": "Імпорт сесії Resonalyze",
+        "riFilePlaceholder": "Сесія віртуального DSP Resonalyze (.json)",
+        "riAgainst": "Звірено з",
+        "riNoProfile": "У проєкті нема dsp_profile.json — ні з чим звіряти. Усе нижче показано, "
+                       "але нічого не перевірено.",
+        "riScene": "Стереосцена",
+        "riSceneNote": "Це те, до чого ЦІЛИТЬСЯ Auto balance у Resonalyze. Результат уже всередині "
+                       "гейнів і затримок кожної ноги нижче — не вводьте його вдруге.",
+        "riUnbound": "жоден канал цього проєкту не збігся",
+        "riDormant": "є у файлі, але НЕ діє (вирішує тип кросовера)",
+        "riDropped": "відкинуто: прозора смуга, нічого не додає",
+        "riNotChecked": "Не перевірено, бо профіль цього DSP не називає межі",
+        "riBindNone": "— лишити непривʼязаною —",
+        "riBlocked": "Цей процесор не прийме план у такому вигляді: відмовлено значень — {refused}, "
+                     "непривʼязаних ніг — {unbound}. Нічого не округлюється під залізо і нічого не "
+                     "записується.",
+        "riClear": "Усі ноги ({legs}) проходять по цьому DSP. Занести їх — робота тюнінгового "
+                   "гейта: скопіюйте рядки й запропонуйте їх з термінала.",
+        "riCopyRows": "Скопіювати рядки (JSON)",
+        "riCopied": "Рядки в буфері обміну.",
+        "riFailed": "Цей файл не вдалося прочитати:",
+        "riClose": "Закрити",
+        "riImport": "Імпорт з Resonalyze…",
         "npCreate": "Створити",
         "npCancel": "Скасувати",
         "projectOpenTip": "Порожня тека — валідний новий проєкт, інтейк її наповнить. Зміна теки потребує перезапуску TCC.",

@@ -147,6 +147,11 @@ _VENDORED = {
     # takes the filter from HERE, so the front-end and the method can never disagree about what
     # `APF2 250 Hz Q 0.7` means. numpy at import, scipy only inside the crossover functions.
     "dsp_math.py": "autosound_tcc._vendor.dsp_math",
+    # The Resonalyze virtual-crossover converter (2026-08-23): a session JSON becomes ledger rows
+    # plus a per-field verdict against the DSP's declared capabilities. Imported rather than shelled
+    # out to -- unlike `contract.py` it is a library with a thin CLI on top, and the window needs
+    # the structured result, not its rendering.
+    "resonalyze_vc.py": "autosound_tcc._vendor.resonalyze_vc",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
@@ -291,6 +296,22 @@ def load_dsp_math() -> ModuleType:
     does not: called only from `core/allpass.py`, which is GUI-side for the same reason
     `core/curve_sum.py` is."""
     return load("dsp_math.py")
+
+
+def load_resonalyze_vc() -> ModuleType:
+    """The Resonalyze virtual-DSP-session converter (`resonalyze_vc.py`).
+
+    It owns the conversion AND the "your DSP cannot enter this" verdict, per leg and per field --
+    TCC renders that answer and refuses on it, and deliberately re-derives none of it: two
+    implementations of one capability check is how the two halves start disagreeing about what a
+    processor can do.
+
+    Note for anyone debugging an import: this module puts `rew_tool/` on `sys.path` itself, at
+    import time, so that its own `import project` / `import dsp_profile` resolve. That is the
+    thing this loader exists to avoid doing globally -- harmless here because nothing in TCC ever
+    imports a bare top-level `project`/`state`, but worth knowing before it surprises somebody.
+    """
+    return load("resonalyze_vc.py")
 
 
 def load_project() -> ModuleType:
