@@ -449,11 +449,21 @@ class ProjectView:
             # letters repeat across tiers, so a channel that does not name its tier is left out
             # rather than guessed into one (SCR-042).
             seen = {row.id for row in rows}
+            # A channel answers to SEVERAL names -- its id, its current code, every name it went
+            # by (SCR-039) -- and `load_channels` keys the map by all of them so a ledger row
+            # under any of them resolves. The loop below walks that map, so a renamed channel came
+            # past two or three times and got a ROW EACH: the rig drew `w-L, w-L, m-L, m-L, …`,
+            # fourteen outputs where the car has eight. Deduplicate by the code, which is the one
+            # name a channel has exactly one of, and build the row under the code rather than
+            # under whichever alias came first alphabetically.
+            seen_codes = {str(identities.get(row.id, {}).get("code") or row.id) for row in rows}
             for key, entry in sorted(identities.items()):
-                if key in seen or entry.get("tier") != tier_key:
+                code = str(entry.get("code") or key)
+                if key in seen or code in seen_codes or entry.get("tier") != tier_key:
                     continue
-                rows.append(_build_row(key, {}, entry, hw_controls))
-                seen.add(key)
+                rows.append(_build_row(code, {}, entry, hw_controls))
+                seen.add(code)
+                seen_codes.add(code)
             rows = tuple(rows)
             groups.append(ProfileGroup(id=gid, label=g.get("label", gid),
                                         fields=_fields_of(g), rows=rows,

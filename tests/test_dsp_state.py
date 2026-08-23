@@ -555,3 +555,25 @@ def test_a_channel_that_names_no_tier_is_left_out_rather_than_guessed():
 
     assert view.groups[0].rows == ()
 
+
+def test_a_renamed_channel_is_one_row_in_the_rig_not_three():
+    """`load_channels` keys a channel by EVERY name a ledger row might use -- its id, its current
+    code, and each name it went by (SCR-039) -- so the identity fallback walked past the same
+    channel two or three times and added a row each time.
+
+    Invisible until the rig could be drawn without a ledger, because before that the fallback only
+    ever ran for spare slots, and a spare has never been renamed. The Passat's real file drew
+    fourteen outputs for a car with eight: `c, w-L, w-L, w-R, w-R, m-L, m-L, …`.
+    """
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]},
+    ]}}
+    renamed = {"code": "w-L", "id": "m-L", "previous_names": ["m-L"], "slot": "C",
+               "tier": "channels", "role": "woofer"}
+    identities = {"w-L": renamed, "m-L": renamed}  # what load_channels() really returns
+
+    view = ProjectView.from_dict({}, profile, channels=identities)
+
+    rows = view.groups[0].rows
+    assert [r.name for r in rows] == ["w-L"], "one channel, under the name it goes by now"
+
