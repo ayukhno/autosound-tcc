@@ -229,8 +229,10 @@ answers the first five questions anybody would ask.",
         "riBlocked": "This processor cannot be given the plan as it stands: {refused} value(s) "
                      "refused, {unbound} leg(s) unbound. Nothing is rounded to fit, and nothing "
                      "is written.",
-        "riClear": "All {legs} legs check out against this DSP. Banking them is the tuning gate's "
-                   "job: copy the rows and propose them from the terminal.",
+        "riClear": "No stated limit of this DSP refuses any of the {legs} legs. That answers for "
+                   "the HARDWARE — a PC-Tool mode (Fine EQ) can be narrower, and the switch is at "
+                   "the screen. Banking the rows is the tuning gate's job: copy them and propose "
+                   "from the terminal.",
         "riCopyRows": "Copy rows (JSON)",
         "riCopied": "The rows are on the clipboard.",
         "riFailed": "This file could not be read:",
@@ -938,8 +940,10 @@ Choose sweeps (sw) above to read this.",
         "riBlocked": "Цей процесор не прийме план у такому вигляді: відмовлено значень — {refused}, "
                      "непривʼязаних ніг — {unbound}. Нічого не округлюється під залізо і нічого не "
                      "записується.",
-        "riClear": "Усі ноги ({legs}) проходять по цьому DSP. Занести їх — робота тюнінгового "
-                   "гейта: скопіюйте рядки й запропонуйте їх з термінала.",
+        "riClear": "Жодна заявлена межа цього DSP не відмовляє жодній з {legs} ніг. Це відповідь "
+                   "про ЗАЛІЗО — режим PC-Tool (Fine EQ) може бути вужчим, і перемикається він на "
+                   "екрані. Занести рядки — робота тюнінгового гейта: скопіюйте їх і запропонуйте "
+                   "з термінала.",
         "riCopyRows": "Скопіювати рядки (JSON)",
         "riCopied": "Рядки в буфері обміну.",
         "riFailed": "Цей файл не вдалося прочитати:",

@@ -7,7 +7,7 @@
       "user, confirmed directly from the PC-Tool software UI, 2026-07-10 (filter grid, gain/freq/Q resolution)",
       "user, confirmed real channel model + feature toggles during TCC concept design, 2026-07-25",
       "user, confirmed in PC-Tool: delay ceiling 20.82 ms on BOTH tiers and they SUM, 2026-07-15",
-      "user, confirmed in PC-Tool: EQ Q 0.5-50 (Fine EQ 0.5-15) and a 1 Hz frequency step, 2026-08-22",
+      "user, confirmed in PC-Tool: EQ Q 0.5-50 (Fine EQ 0.5-15), frequency step 0.01 Hz (Fine EQ 1 Hz), 2026-08-22/23",
       "user, confirmed in PC-Tool: channel gain -30..+5 dB, the same on both tiers, 2026-08-23",
       "user, confirmed in PC-Tool: EQ 10-40000 Hz, crossover corner 20-20480 Hz on every channel, 2026-08-23",
       "the method's own file is the authority on all of the above: autosound-tuning/knowledge/dsp/helix-dsp-ultra-s.md -- what is here is the machine-readable half the gates read, and it is synced FROM there, never the other way"
@@ -47,10 +47,11 @@
     ],
 
     "parametric_eq": {
-      "freq_step_hz": 1.0,
+      "freq_step_hz": 0.01,
       "freq_range_hz": [10.0, 40000.0],
       "q_range": [0.5, 50.0],
-      "q_note": "0.5-50 is what the HARDWARE takes; Fine EQ mode offers 0.5-15. The wider pair is here because this block answers 'can the DSP be given this value'. What the METHOD should use is narrower still and is not a hardware question -- see the spatial-validity Q ceiling in the method's diagnostic reference.",
+      "mode_note": "THE UNION OF THE PC-TOOL MODES, not any one of them (user's rule, 2026-08-23: take the full range everywhere, because it can be entered by hand). Fine EQ pairs a 1 Hz step with Q 0.5-15; the other mode pairs a 0.01 Hz step with Q 0.5-50; the hardware takes 0.01 and 50, and that pair exists in no single screen. So this block answers 'is this enterable on the HARDWARE', and a value it passes may still need a mode switch at the PC-Tool screen. That direction is recoverable; the other one is not -- refusing a setting the hardware accepts means a valid tune is never tried and nobody learns why.",
+      "q_note": "What the METHOD should use is narrower still than what the hardware takes, and that is not a hardware question -- see the spatial-validity Q ceiling in the method's diagnostic reference.",
       "q_step": 0.1,
       "gain_range_db": [-30.0, 12.0],
       "gain_step_db": 0.1,
