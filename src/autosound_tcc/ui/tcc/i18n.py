@@ -213,7 +213,7 @@ answers the first five questions anybody would ask.",
                       "folder: read project.json and dsp_profile.json FIRST and go through them "
                       "with the person, correcting what differs. Do not ask for the car to be "
                       "described from scratch.",
-        "riTitle": "Import a Resonalyze session",
+        "riTitle": "Import from a Resonalyze project",
         "riFilePlaceholder": "A Resonalyze virtual-DSP session (.json)",
         "riAgainst": "Checked against",
         "riNoProfile": "No dsp_profile.json in this project — nothing was checked against a real "
@@ -237,7 +237,7 @@ answers the first five questions anybody would ask.",
         "riCopied": "The rows are on the clipboard.",
         "riFailed": "This file could not be read:",
         "riClose": "Close",
-        "riImport": "Settings from a Resonalyze session…",
+        "riImport": "Import from a Resonalyze project…",
         "npSeedNoInterview": "Its dsp_profile.json comes too, so the capability interview is "
                              "skipped — there is nothing left to ask about a processor already "
                              "described. Choose a different DSP above and it runs as usual.",
@@ -947,7 +947,7 @@ Choose sweeps (sw) above to read this.",
         "npSeedHint": "Системні параметри скопійовано в цю теку з проєкту «{source}»: СПОЧАТКУ "
                       "прочитай project.json і dsp_profile.json і пройди їх разом із людиною, "
                       "виправляючи те, що відрізняється. Не проси описувати машину з нуля.",
-        "riTitle": "Імпорт сесії Resonalyze",
+        "riTitle": "Імпорт з проєкту Resonalyze",
         "riFilePlaceholder": "Сесія віртуального DSP Resonalyze (.json)",
         "riAgainst": "Звірено з",
         "riNoProfile": "У проєкті нема dsp_profile.json — ні з чим звіряти. Усе нижче показано, "
@@ -971,7 +971,7 @@ Choose sweeps (sw) above to read this.",
         "riCopied": "Рядки в буфері обміну.",
         "riFailed": "Цей файл не вдалося прочитати:",
         "riClose": "Закрити",
-        "riImport": "Налаштування з сесії Resonalyze…",
+        "riImport": "Імпорт з проєкту Resonalyze…",
         "npSeedNoInterview": "Разом із ним прийде dsp_profile.json, тож інтерв'ю про можливості "
                              "не буде — питати нема про що, процесор уже описаний. Виберіть інший "
                              "DSP вище — і воно піде як завжди.",
