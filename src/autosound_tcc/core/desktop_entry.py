@@ -266,6 +266,108 @@ def _shortcut_script(targets: list[Path], launcher: Path, icon: Path | None) -> 
     )
 
 
+def _stamp_script(targets: list[Path], app_id: str) -> str:
+    """PowerShell that writes `System.AppUserModel.ID` into each `.lnk`.
+
+    **Why a second pass at all.** A pinned shortcut and the running window are one taskbar button
+    only when they claim the same application. The window claims one now (`core/windows_identity`);
+    a shortcut claims whatever Windows derives from its target path, which is the uv trampoline —
+    so pinning the Desktop icon and then clicking it produced TWO buttons under two different
+    icons (user, Parallels VM, 2026-08-23, with the screenshot to prove it).
+
+    **Why not in the `WScript.Shell` pass above.** That COM object exposes four properties and this
+    is not one of them: the id lives in the shortcut's property store, reachable only through
+    `IPropertyStore`, which means declaring the two COM interfaces by hand. `Add-Type` compiles
+    that against the .NET Framework every Windows PowerShell already ships, so it still costs the
+    install nothing — no `pywin32`, no compiled dependency.
+
+    Kept a SEPARATE PowerShell run on purpose: the shortcuts are saved by the time this runs, so a
+    machine where `Add-Type` cannot compile loses the grouping and keeps its shortcuts.
+    """
+    paths = ", ".join(f'"{p}"' for p in targets)
+    # A single-quoted here-string: PowerShell expands nothing inside it, and C# is full of the
+    # characters it would otherwise try to expand.
+    return (
+        "$ErrorActionPreference = 'Stop'\n"
+        "$source = @'\n" + _STAMP_CS + "\n'@\n"
+        "Add-Type -TypeDefinition $source\n"
+        f'foreach ($lnk in @({paths})) {{ [AutosoundTcc.Shortcut]::Stamp($lnk, "{app_id}") }}\n'
+    )
+
+
+#: The two COM interfaces a shortcut's property store needs, declared by hand because there is no
+#: type library to import from. `[PreserveSig]` on every method is deliberate: without it the
+#: runtime rewrites each signature into "throw on a bad HRESULT and return the out-parameter",
+#: which does not match what is declared here and silently corrupts the vtable call.
+_STAMP_CS = """using System;
+using System.Runtime.InteropServices;
+
+namespace AutosoundTcc {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PropertyKey {
+    public Guid fmtid; public uint pid;
+    public PropertyKey(Guid g, uint p) { fmtid = g; pid = p; }
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PropVariant {
+    public ushort vt; public ushort r1; public ushort r2; public ushort r3;
+    public IntPtr p; public IntPtr p2;
+  }
+
+  [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"),
+   InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IPropertyStore {
+    [PreserveSig] int GetCount(out uint count);
+    [PreserveSig] int GetAt(uint index, out PropertyKey key);
+    [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+    [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+    [PreserveSig] int Commit();
+  }
+
+  [ComImport, Guid("0000010b-0000-0000-C000-000000000046"),
+   InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IPersistFile {
+    [PreserveSig] int GetClassID(out Guid id);
+    [PreserveSig] int IsDirty();
+    [PreserveSig] int Load([MarshalAs(UnmanagedType.LPWStr)] string file, uint mode);
+    [PreserveSig] int Save([MarshalAs(UnmanagedType.LPWStr)] string file,
+                           [MarshalAs(UnmanagedType.Bool)] bool remember);
+    [PreserveSig] int SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string file);
+    [PreserveSig] int GetCurFile(out IntPtr file);
+  }
+
+  [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+  public class ShellLink { }
+
+  public static class Shortcut {
+    // PKEY_AppUserModel_ID, and 5 is its property id -- the pair is the shortcut's answer to
+    // "which application am I", the same string the process claims at startup.
+    static readonly Guid AppUserModel = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+
+    public static void Stamp(string lnk, string id) {
+      var link = new ShellLink();
+      var file = (IPersistFile)link;
+      Marshal.ThrowExceptionForHR(file.Load(lnk, 2));  // STGM_READWRITE
+      var store = (IPropertyStore)link;
+      var key = new PropertyKey(AppUserModel, 5);
+      var value = new PropVariant();
+      value.vt = 31;  // VT_LPWSTR
+      value.p = Marshal.StringToCoTaskMemUni(id);
+      try {
+        Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref value));
+        Marshal.ThrowExceptionForHR(store.Commit());
+        // TRUE: the shortcut keeps the file it was loaded from as its own, which is what makes
+        // this a re-save of that .lnk rather than a copy written somewhere else.
+        Marshal.ThrowExceptionForHR(file.Save(lnk, true));
+      } finally {
+        Marshal.FreeCoTaskMem(value.p);
+      }
+    }
+  }
+}"""
+
+
 def _windows_targets() -> list[Path]:
     desktop = Path.home() / "Desktop"
     programs = Path(
@@ -297,6 +399,7 @@ def _install_windows(launcher: Path) -> Result:
     for target in targets:
         result.say(f"Built: {target}")
     result.say(f"They run: {launcher}")
+    _stamp_windows(targets, result)
     if not ico.is_file():
         # "no icon" again -- see the note on the macOS branch above; the Windows installer
         # matches the same two words.
@@ -304,6 +407,30 @@ def _install_windows(launcher: Path) -> Result:
             "note: no icon in this package — the shortcuts get the generic one."
         )
     return result
+
+
+def _stamp_windows(targets: list[Path], result: Result) -> None:
+    """Give the shortcuts the same application identity the running window claims.
+
+    Best effort, and it says so either way: without this a pinned shortcut and the window it
+    started are two taskbar buttons under two icons, WITH it they are one -- but a machine where
+    `Add-Type` cannot compile still has working shortcuts, so this never turns an install into a
+    failure. See `_stamp_script` for what is being written and why it needs COM.
+    """
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+         _stamp_script(targets, BUNDLE_ID)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        result.say(f"They are: {BUNDLE_ID}  (pinned and running are one taskbar button)")
+    else:
+        result.say(
+            "note: the shortcuts could not be given the app id — pinning one will show a second "
+            f"taskbar button when it runs. {(proc.stderr or '').strip()[:160]}"
+        )
 
 
 # ── the entry point ───────────────────────────────────────────────────────────────────────────

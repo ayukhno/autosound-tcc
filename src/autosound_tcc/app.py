@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from autosound_tcc.core import app_log, child, config, macos_identity
+from autosound_tcc.core import app_log, child, config, macos_identity, windows_identity
 
 #: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
 #: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
@@ -137,6 +137,11 @@ def main() -> int:
     # Without this the Dock tile says "python3.12" and the menu bar says "python" — macOS asks the
     # bundle that owns the running executable, which is Apple's own Python.app, not ours.
     macos_identity.rename(APP_DISPLAY_NAME)
+    # BEFORE the QApplication for the same reason, on the other operating system: Windows
+    # resolves which application a window belongs to when the window is created, and a process
+    # that never said otherwise belongs to the executable hosting it -- `pythonw.exe`, whose
+    # icon the taskbar then draws beside our window (user's Parallels VM, 2026-08-23).
+    windows_identity.claim()
     # Reuse whatever QApplication exists rather than constructing a second one: Qt allows exactly
     # one per process and raises otherwise, which is how running the window tests before this
     # module's own turned a green suite red depending on file order alone.
@@ -150,8 +155,11 @@ def main() -> int:
     # show, and it only exists for people who installed through the installer — a `uv tool
     # install` and `autosound-tcc` from a terminal has no bundle at all, and used to run under
     # the generic Python rocket. Same artwork either way, from inside the package.
-    if APP_ICON.is_file():
-        app.setWindowIcon(QIcon(str(APP_ICON)))
+    # The `.ico` first on Windows, and only there: it carries seven sizes down to 16x16, drawn
+    # for those sizes, while the `.png` is one 1024-pixel image Qt would shrink to a title bar.
+    icon = APP_ICO if os.name == "nt" and APP_ICO.is_file() else APP_ICON
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
     app_log.install_qt_handler()  # Qt's own warnings, into the same file
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build

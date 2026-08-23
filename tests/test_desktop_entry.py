@@ -12,6 +12,7 @@ from __future__ import annotations
 import plistlib
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -142,6 +143,40 @@ def test_windows_shortcut_script_uses_the_packaged_icon(tmp_path):
         [tmp_path / "Autosound TCC.lnk"], Path("C:/bin/x.exe"), Path("C:/pkg/app-icon.ico")
     )
     assert 'IconLocation = "C:/pkg/app-icon.ico,0"' in script
+
+
+def test_the_shortcuts_are_stamped_with_the_same_id_the_window_claims(tmp_path):
+    """Pinning the Desktop icon and clicking it gave two taskbar buttons under two icons (user,
+    2026-08-23). One button needs both halves to name the SAME application: the process claims it
+    at startup (`core/windows_identity`), the shortcut carries it in its property store."""
+    from autosound_tcc.core import windows_identity
+
+    targets = [tmp_path / "Desktop" / "Autosound TCC.lnk", tmp_path / "Menu" / "Autosound TCC.lnk"]
+    script = desktop_entry._stamp_script(targets, desktop_entry.BUNDLE_ID)
+
+    for target in targets:
+        assert str(target) in script
+    assert f'"{desktop_entry.BUNDLE_ID}"' in script
+    assert windows_identity.APP_USER_MODEL_ID == desktop_entry.BUNDLE_ID
+    # PKEY_AppUserModel_ID and VT_LPWSTR: the property being written, and as what. A wrong
+    # property id writes somewhere harmless and the taskbar goes on splitting the button.
+    assert "9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3" in script
+    assert "vt = 31" in script
+
+
+def test_a_machine_that_cannot_stamp_still_keeps_its_shortcuts(monkeypatch, tmp_path):
+    """The shortcuts are already saved when this runs. A PowerShell that cannot compile the COM
+    declarations costs the grouping, and must not cost the install."""
+    monkeypatch.setattr(
+        desktop_entry.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="Add-Type: no compiler"),
+    )
+    result = desktop_entry.Result(True)
+    desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result)
+
+    assert result.ok
+    assert any("second taskbar button" in line for line in result.lines)
 
 
 def test_nothing_installed_is_a_sentence_not_a_traceback(monkeypatch):
