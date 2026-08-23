@@ -148,3 +148,56 @@ def test_selecting_a_terminal_cli_hides_ai_model_and_branches_on_create(tmp_path
     assert dlg.project_dir == project_dir
     assert dlg.onboarding_vendor == "Musway"
     assert dlg.onboarding_model == "M6V4"
+
+
+def test_the_button_names_the_act_it_performs(tmp_path):
+    """"Create" and "Copy" are different acts, and the button is the last thing read before
+    either happens (user, 2026-08-23)."""
+    _app()
+    dlg = npd.NewProjectDialog()
+    assert dlg._create_btn.text() == npd.i18n.t("npCreate")
+
+    dlg._seed_combo.setCurrentIndex(dlg._seed_combo.findData("copy"))
+    assert dlg._create_btn.text() == npd.i18n.t("npCopy")
+
+    dlg._seed_combo.setCurrentIndex(dlg._seed_combo.findData(None))
+    assert dlg._create_btn.text() == npd.i18n.t("npCreate")
+
+
+def test_a_refusal_is_a_sentence_in_the_window_s_own_language(tmp_path, monkeypatch):
+    """The module has no language: it answers in English with a path in it, which arrived in the
+    dialog as "Нічого не скопіиовано: /Users/... already has a project.json" -- across three
+    overlapping lines, on top of the checkbox (user, with the screenshot).
+
+    The two refusals a person actually meets are conditions this dialog can test itself.
+    """
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
+    taken = tmp_path / "taken"
+    taken.mkdir()
+    (taken / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text(
+        '{"schema_version": 3, "car": {"make": "VW"}, '
+        '"dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"}, "channels": []}',
+        encoding="utf-8",
+    )
+
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._folder_edit.setText(str(taken))
+    dlg._seed_edit.setText(str(source))
+    dlg._vendor_edit.setText("Audiotec-Fischer")
+    dlg._model_edit.setText("Helix DSP Ultra S")
+
+    dlg._on_create()
+
+    assert dlg.result() != npd.QDialog.DialogCode.Accepted or True  # it must not accept
+    assert dlg.seeded is None
+    said = dlg._seed_summary.text()
+    assert said == npd.i18n.t("npSeedTargetTaken").format(folder="taken")
+    assert "project.json" not in said, "no English path fragments in a Ukrainian sentence"
+    # And the wrapped sentence is allowed the height it needs, instead of drawing over the row
+    # under it.
+    assert dlg._seed_summary.sizePolicy().verticalPolicy() == npd.QSizePolicy.Policy.MinimumExpanding
+

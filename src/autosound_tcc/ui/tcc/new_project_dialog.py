@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
 )
 
@@ -158,6 +159,12 @@ class NewProjectDialog(QDialog):
         self._seed_summary = QLabel("")
         self._seed_summary.setWordWrap(True)
         self._seed_summary.setProperty("class", "kv-lbl")
+        # A wrapped QLabel keeps the height of ONE line unless it is told its height depends on
+        # its width, and the sentence then draws straight over the checkbox under it (user, with
+        # the screenshot -- a refusal message unreadable across three overlapping lines).
+        self._seed_summary.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding
+        )
         layout.addWidget(self._seed_summary)
 
         # Off by default: these were measured or decided in the OTHER project, and their evidence
@@ -171,6 +178,9 @@ class NewProjectDialog(QDialog):
         self._seed_no_interview = QLabel(i18n.t("npSeedNoInterview"))
         self._seed_no_interview.setWordWrap(True)
         self._seed_no_interview.setProperty("class", "kv-lbl")
+        self._seed_no_interview.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding
+        )
         self._seed_no_interview.setVisible(False)
         layout.addWidget(self._seed_no_interview)
 
@@ -252,6 +262,7 @@ class NewProjectDialog(QDialog):
         """"From scratch" hides the whole section rather than greying it: an empty path field and
         an unchecked box under a picker set to "no" are three ways of saying the same nothing."""
         copying = self._seed_combo.currentData() == "copy"
+        self._sync_create_enabled()  # the button names the act this mode performs
         for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
                        self._seed_findings):
             widget.setVisible(copying)
@@ -293,6 +304,9 @@ class NewProjectDialog(QDialog):
 
     def _set_seed_note(self, text: str, *, warn: bool) -> None:
         self._seed_summary.setText(text)
+        # The dialog has to grow with the sentence; the layout only re-asks when told.
+        self._seed_summary.updateGeometry()
+        self.adjustSize()
         self._seed_summary.setProperty("class", "kv-warn" if warn else "kv-lbl")
         self._seed_summary.style().unpolish(self._seed_summary)
         self._seed_summary.style().polish(self._seed_summary)
@@ -349,7 +363,27 @@ class NewProjectDialog(QDialog):
             widget.setVisible(is_new)
         self._sync_create_enabled()
 
+    def _why_refused(self, source: Path, target: Path, report) -> str:
+        """The refusal in the language the window is in.
+
+        Two of them are ordinary and predictable -- the folder is already a project, or the source
+        is not one -- and both are conditions this dialog can test itself rather than recognise
+        from a sentence. Anything else falls through with the module's own words, which is better
+        than a friendly guess about what went wrong.
+        """
+        if (target / "project.json").is_file():
+            return i18n.t("npSeedTargetTaken").format(folder=target.name)
+        seeder = _seeder()
+        if seeder is None or seeder.describe(source) is None:
+            return i18n.t("npSeedNotAProject")
+        return i18n.t("npSeedFailed").format(problem=report.problem or "")
+
     def _sync_create_enabled(self) -> None:
+        # "Create" and "Copy" are different acts and the button is the last thing read before
+        # either happens (user, 2026-08-23).
+        self._create_btn.setText(
+            i18n.t("npCopy") if self._seed_combo.currentData() == "copy" else i18n.t("npCreate")
+        )
         self._create_btn.setEnabled(
             bool(self._folder_edit.text().strip())
             and bool(self._vendor_edit.text().strip())
@@ -395,9 +429,10 @@ class NewProjectDialog(QDialog):
                 note=i18n.t("npSeedNote"),
             )
             if not report.ok:
-                self._set_seed_note(
-                    i18n.t("npSeedFailed").format(problem=report.problem or ""), warn=True
-                )
+                # The module answers in English, with a path in it, because it is a library and
+                # has no language. The two refusals a person actually meets get said HERE, in
+                # theirs, and the raw sentence is kept only for the ones nobody predicted.
+                self._set_seed_note(self._why_refused(source, project_dir, report), warn=True)
                 return
             self.seeded, self.seeded_from = report, source
 
