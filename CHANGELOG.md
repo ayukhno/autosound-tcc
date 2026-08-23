@@ -6,6 +6,80 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.16] — 2026-08-23 · a project can start from another one, and a plan can arrive from outside
+
+Two features that answer the same complaint from opposite sides — a project that begins as a
+blank interrogation — plus the Windows icon fix from the same morning.
+
+### Added
+
+- **Seed a new project from an existing one.** Pick a folder that already has a `project.json`
+  and the installation comes over: the car, the source, the DSP, the amps, the mic, the hardware
+  controls, every channel with its driver, the naming glossary, the presets, `dsp_profile.json`,
+  and both prose files marked at the top as inherited. "Each next project demands a full
+  description — and that should not have to be done" — and it is worst when the tune arrives from
+  outside, since whoever wrote that plan has none of your system parameters and never will.
+
+  What does not travel is the point: the measured findings (`acoustics.flaws`, `_open_questions`)
+  are offered and OFF, because their evidence names measurements that exist only in the project
+  they came from; `project_rev` restarts at 1; of `paths` only `measurements_repo` follows,
+  because it addresses the car rather than the tune. It is an allowlist, so a project's `state/`,
+  `process/`, `journal/` and ledger snapshots are not excluded by a rule somebody has to maintain
+  — they are never reached.
+
+  Seeding from the same DSP skips the capability interview: there is nothing left to ask about a
+  processor already described in the folder. Pick a different DSP and the profile stays behind
+  while everything else still travels. The status line says what was inherited, and how many
+  facts in the inherited profile nobody has confirmed yet.
+
+- **Import a Resonalyze virtual-DSP session.** Somebody tunes in Resonalyze's virtual crossover,
+  sends the session file, and this reads it into the ledger's own vocabulary — per channel:
+  crossovers, gain, delay, polarity, PEQ — then checks every value against what your processor
+  can actually be given.
+
+  It refuses rather than rounds. The sample this was built on asks for **LR48 on four legs**; a
+  Helix DSP Ultra S offers LR at 12/24/36, so those eight edges are shown refused at the value
+  that was asked for. A tune that looks imported and is not the one that was sent would be the
+  worst possible outcome.
+
+  Three more things it shows rather than smooths over: a limit your DSP profile does not state is
+  "not checked", never a pass, rolled up once at the bottom; a dormant crossover edge (the file
+  keeps values on the edge the crossover kind does not use) is greyed and labelled, so nobody
+  reads a subsonic filter that was never set; and the stereo scene offset is context, not a value
+  to enter — it is already inside each leg's own gain and delay. Legs that match a channel bind
+  themselves; the ones that do not get a picker rather than a guess.
+
+  No write path. Banking rows is the method's gate, which validates against the ledger head and
+  produces the settings sheet somebody enters by hand; the window offers the rows on the
+  clipboard, and only when nothing is blocked.
+
+### Fixed
+
+- **The taskbar drew Python's icon beside our window on Windows**, and a pinned shortcut plus a
+  running window made two buttons — one of which did not start the app. The window's own icon was
+  right all along; what was Python's was the process's identity. A uv trampoline starts the
+  interpreter as a child, so the process that owns the window is `pythonw.exe`, and Windows takes
+  the application from it. The app now claims an explicit AppUserModelID before the window
+  exists, and the same id is stamped into each `.lnk`, which is what makes a pinned shortcut and
+  the running window one button. On Windows the window icon is now the `.ico` with its seven
+  drawn sizes rather than a 1024-pixel `.png` squeezed into a title bar.
+
+  Testing this after an update needs one extra step: an already-pinned shortcut is a separate copy
+  Windows keeps outside `--install-desktop`'s reach, so unpin it, start from the Desktop icon, and
+  pin it again.
+
+### Changed
+
+- The bundled **Helix DSP Ultra S profile** states four limits it never did: the channel-gain
+  range (−30…+5 dB, and deliberately not the EQ band's −30…+12 — they are different controls),
+  the 20.82 ms delay ceiling, the EQ frequency range and the crossover corner range. On a real
+  session that moves 53 checks from "not checked" to checked, and refuses nothing that was
+  passing. The channel-gain STEP stays an open question, because nobody has verified it and a
+  guessed hardware limit is enforced code.
+- The vendored method moves to **v3.0.17+**: it now carries the Resonalyze converter and the
+  project seeding, both with their own CLIs, so everything this release adds through the window
+  is available in a terminal too.
+
 ## [v0.1.15] — 2026-08-22 · two things Windows saw that no test could
 
 Both found by running the method's installer test in a Windows VM — one by the plan's own opening
