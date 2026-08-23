@@ -5,7 +5,12 @@
     "sources": [
       "raw/papers/HELIX_DSP-ULTRA-S_11-04-2024.pdf (hardware I/O + electrical specs, page 16 'Technische Daten')",
       "user, confirmed directly from the PC-Tool software UI, 2026-07-10 (filter grid, gain/freq/Q resolution)",
-      "user, confirmed real channel model + feature toggles during TCC concept design, 2026-07-25"
+      "user, confirmed real channel model + feature toggles during TCC concept design, 2026-07-25",
+      "user, confirmed in PC-Tool: delay ceiling 20.82 ms on BOTH tiers and they SUM, 2026-07-15",
+      "user, confirmed in PC-Tool: EQ Q 0.5-50 (Fine EQ 0.5-15) and a 1 Hz frequency step, 2026-08-22",
+      "user, confirmed in PC-Tool: channel gain -30..+5 dB, the same on both tiers, 2026-08-23",
+      "user, confirmed in PC-Tool: EQ 10-40000 Hz, crossover corner 20-20480 Hz on every channel, 2026-08-23",
+      "the method's own file is the authority on all of the above: autosound-tuning/knowledge/dsp/helix-dsp-ultra-s.md -- what is here is the machine-readable half the gates read, and it is synced FROM there, never the other way"
     ],
     "sample_rate_hz": 96000,
 
@@ -34,19 +39,28 @@
             "SELF_DEFINED": { "q_range": [0.5, 2.0] }
           },
           "corner_freq_step_hz": 1.0,
-          "corner_freq_range_hz": null
+          "corner_freq_range_hz": [20.0, 20480.0],
+          "corner_freq_note": "20-20480 Hz on EVERY channel, the sub included (user, PC-Tool, 2026-08-23). The sub channel's UI OFFERS 20-300, and higher can still be entered by hand -- so 300 is advisory, not a bound, and must not be written as one: refusing a legitimate sub crossover above 300 Hz is the same class of error as silently rounding LR48 to LR36, inverted."
         },
         "eq": { "bands_per_channel": 30, "band_types": ["PK", "LSH", "HSH", "APF1", "APF2"] }
       }
     ],
 
     "parametric_eq": {
-      "freq_step_hz": 0.01,
-      "freq_range_hz": null,
-      "q_range": [0.5, 15.0],
+      "freq_step_hz": 1.0,
+      "freq_range_hz": [10.0, 40000.0],
+      "q_range": [0.5, 50.0],
+      "q_note": "0.5-50 is what the HARDWARE takes; Fine EQ mode offers 0.5-15. The wider pair is here because this block answers 'can the DSP be given this value'. What the METHOD should use is narrower still and is not a hardware question -- see the spatial-validity Q ceiling in the method's diagnostic reference.",
       "q_step": 0.1,
       "gain_range_db": [-30.0, 12.0],
-      "gain_step_db": 0.1
+      "gain_step_db": 0.1,
+      "gain_note": "the EQ BAND's gain. The channel trim is `channel_gain` below and the two must never stand in for each other."
+    },
+
+    "channel_gain": {
+      "range_db": [-30.0, 5.0],
+      "scope": ["per driver output", "per virtual channel"],
+      "note": "the same range on both tiers (user, PC-Tool, 2026-08-23). Deliberately NOT the EQ band's -30..+12: they are different controls and the asymmetry is the proof."
     },
 
     "phase_control": {
@@ -60,7 +74,12 @@
       "note": "double-inversion possible (driver stage + virtual channel stage); net effect cancels if both are inverted"
     },
 
-    "delay": { "step_ms": 0.01, "scope": ["per driver output", "per virtual channel"] },
+    "delay": {
+      "step_ms": 0.01,
+      "max_ms": 20.82,
+      "scope": ["per driver output", "per virtual channel"],
+      "note": "the ceiling is per tier AND the two tiers SUM -- enter a delay in one layer only, keep the other at 0 (user, PC-Tool, 2026-07-15)."
+    },
 
     "features": [
       { "key": "RealCenter" },
@@ -75,7 +94,7 @@
     "_open_questions": [
       "Chebyshev ripple parameter: is it user-settable, and what range?",
       "DSP compute budget: with up to 60 bands stacked (30 virtual-channel + 30 output) plus crossover + phase + delay, is there a practical ceiling before the 2x295MHz DSP saturates?",
-      "corner_freq_range_hz and parametric_eq.freq_range_hz lower/upper bounds"
+      "channel_gain step_db: the range is user-verified, the step is not -- so a gain is checked against the range and reported as 'step not declared' rather than passed"
     ]
   }
 }
