@@ -5,7 +5,8 @@ the three inputs it already needs (the same ones `dsp_profile_interview.py`'s CL
 
 Since 2026-08-23 it can also START FROM AN EXISTING PROJECT instead of from nothing: pick a folder
 that already has a `project.json` and the car, the drivers, the glossary and the prose come over
-(`core/project_seed.py`), leaving the person to adjust rather than to describe their own car again.
+(the method's `rew_tool/project_seed.py`, reached through `vendor_loader`), leaving the person
+to adjust rather than to describe their own car again.
 Two consequences show up here rather than in that module:
 
 * picking a source fills the DSP vendor/model from it, because those two strings are matched
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, project_seed, terminal_launcher
+from autosound_tcc.core import config, terminal_launcher, vendor_loader
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
 from autosound_tcc.ui.tcc.profile_interview_dialog import ProfileInterviewDialog
@@ -43,6 +44,19 @@ def _field_label(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("class", "kv-lbl")
     return label
+
+
+def _seeder():
+    """The method's seeding module, or None on an install that has no skill checked out.
+
+    None is a real state, not a bug: `_bundled_profiles` below reads the packaged profiles
+    directly for the same reason -- this dialog is the first screen a fresh install meets, and it
+    has to open and say something useful even when the submodule is missing.
+    """
+    try:
+        return vendor_loader.load_project_seed()
+    except Exception:  # noqa: BLE001 — no skill: the seeding option simply cannot be offered
+        return None
 
 
 def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
@@ -89,7 +103,9 @@ class NewProjectDialog(QDialog):
         self.onboarding_model: str = ""
         self.onboarding_ai_model: Optional[str] = None
         #: What was copied in, for the caller to report. None when the project starts empty.
-        self.seeded: Optional[project_seed.Seeded] = None
+        #: Typed loosely on purpose: the class is the method's (`rew_tool/project_seed.py`),
+        #: reached through `vendor_loader`, so there is no import here to annotate it with.
+        self.seeded = None
         self.seeded_from: Optional[Path] = None
 
         layout = QVBoxLayout(self)
@@ -141,7 +157,7 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self._seed_summary)
 
         # Off by default: these were measured or decided in the OTHER project, and their evidence
-        # names measurements that exist only there (see core/project_seed.py).
+        # names measurements that exist only there (see the method's `project_seed.py`).
         self._seed_findings = QCheckBox(i18n.t("npSeedFindings"))
         layout.addWidget(self._seed_findings)
 
@@ -249,7 +265,8 @@ class NewProjectDialog(QDialog):
         moment it is typed -- so it is answered here rather than as a failure after Create.
         """
         source = self._seed_source()
-        summary = project_seed.describe(source) if source is not None else None
+        seeder = _seeder()
+        summary = seeder.describe(source) if (source is not None and seeder) else None
         if source is None:
             self._set_seed_note("", warn=False)
             self._seed_no_interview.setVisible(False)
@@ -280,7 +297,8 @@ class NewProjectDialog(QDialog):
         when it is not, fall to "Add new" with the fields filled, which is the same state a person
         reaches by typing them correctly.
         """
-        pair = project_seed.dsp_of(source)
+        seeder = _seeder()
+        pair = seeder.dsp_of(source) if seeder else None
         self._seed_no_interview.setVisible(pair is not None)
         if pair is None:
             return
@@ -355,13 +373,17 @@ class NewProjectDialog(QDialog):
         # and TCC pointed where it was, rather than parked on a half-made project.
         source = self._seed_source()
         if source is not None:
-            report = project_seed.seed(
+            seeder = _seeder()
+            if seeder is None:
+                self._set_seed_note(i18n.t("npSeedNoSkill"), warn=True)
+                return
+            report = seeder.seed(
                 source,
                 project_dir,
                 include_findings=self._seed_findings.isChecked(),
                 # The profile travels only when it is the same DSP. Pick a different one and its
                 # capabilities are a question for the interview, not a file to inherit.
-                copy_profile=project_seed.dsp_of(source) == (vendor, model),
+                copy_profile=seeder.dsp_of(source) == (vendor, model),
                 note=i18n.t("npSeedNote"),
             )
             if not report.ok:
@@ -378,7 +400,9 @@ class NewProjectDialog(QDialog):
         # the capability checklist would be asking after a file already in the folder. Everything
         # else about the new project is unchanged, including the terminal path below -- a person
         # who asked for a CLI still gets one, told what came over rather than what to ask.
-        interview_needed = self.seeded is None or project_seed.PROFILE_FILE not in self.seeded.written
+        interview_needed = (
+            self.seeded is None or _seeder().PROFILE_FILE not in self.seeded.written
+        )
 
         cli = self._run_via_combo.currentData()
         if cli is None:

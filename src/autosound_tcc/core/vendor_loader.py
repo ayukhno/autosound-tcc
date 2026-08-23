@@ -152,6 +152,10 @@ _VENDORED = {
     # out to -- unlike `contract.py` it is a library with a thin CLI on top, and the window needs
     # the structured result, not its rendering.
     "resonalyze_vc.py": "autosound_tcc._vendor.resonalyze_vc",
+    # Starting a project from an existing one (2026-08-23). It lives there and not here because
+    # `project-schema.md` and `project.py` are the method's: the writer of `project.json` belongs
+    # with the contract it writes, or the copy outside the schema drifts without anyone noticing.
+    "project_seed.py": "autosound_tcc._vendor.project_seed",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
@@ -312,6 +316,19 @@ def load_resonalyze_vc() -> ModuleType:
     imports a bare top-level `project`/`state`, but worth knowing before it surprises somebody.
     """
     return load("resonalyze_vc.py")
+
+
+def load_project_seed() -> ModuleType:
+    """Seeding a new project from an existing one (`project_seed.py`).
+
+    TCC had this module for half a day and handed it over rather than keeping a copy: the
+    classification of what travels -- the installation yes, the findings only on request, the
+    other project's own write counter never -- is a statement about the project schema, and the
+    schema is the method's. The window keeps the part that is genuinely its own: the folder
+    picker, the translated marker the prose files get, and skipping the DSP interview when the
+    profile came over.
+    """
+    return load("project_seed.py")
 
 
 def load_project() -> ModuleType:

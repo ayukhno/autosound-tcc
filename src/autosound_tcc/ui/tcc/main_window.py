@@ -1724,11 +1724,16 @@ class MainWindow(QMainWindow):
         # the answer. It says what it inherited rather than opening silently on somebody else's
         # facts.
         if dialog.seeded is not None and dialog.seeded_from is not None:
-            new_window._status_strip.notify(
-                i18n.t("npSeedDone").format(
-                    source=dialog.seeded_from.name, files=", ".join(dialog.seeded.written)
-                )
+            said = i18n.t("npSeedDone").format(
+                source=dialog.seeded_from.name, files=", ".join(dialog.seeded.written)
             )
+            # A profile can be inherited AND incomplete. Saying how many of its facts are still
+            # unconfirmed is the difference between a `null` that looks settled and one that is
+            # a to-do -- the same three-valued honesty the import window renders.
+            still_open = getattr(dialog.seeded, "profile_open", 0)
+            if still_open:
+                said = f"{said} {i18n.t('npSeedOpen').format(open=still_open)}"
+            new_window._status_strip.notify(said)
         if dialog.open_terminal_cli is not None:
             language_name = i18n.t("langNameUk" if i18n.current_language() == "uk" else "langNameEn")
             hint = i18n.t("npOnboardingHint").format(
