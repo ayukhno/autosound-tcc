@@ -603,7 +603,10 @@ class DetailPane(QFrame):
 
         def _copy(pos) -> None:
             item = table.itemAt(pos)
-            text = item.text().strip() if item is not None else ""
+            if item is None:
+                return
+            # The cell's own pasteable value when it has one, its text otherwise (an ID, a name).
+            text = (item.data(Qt.ItemDataRole.UserRole) or item.text() or "").strip()
             if not text:
                 return
             copy_menu.copy_text(text)
@@ -622,6 +625,9 @@ class DetailPane(QFrame):
         green/orange by sign, INV highlighted, the EQ count an accent link. Mirrors the web
         `.ptable` cell classes (`.gpos/.gneg/.tinv/.eqcell`)."""
         item = QTableWidgetItem(self._cell_text(field, row))
+        # The pasteable form rides along with the cell, so the copy does not have to work out
+        # afterwards what kind of number it is looking at.
+        item.setData(Qt.ItemDataRole.UserRole, self._copy_value(field, row))
         if field in ("hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"):
             item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         elif field in ("polarity", "mute", "off", "eq_bypass"):
@@ -652,6 +658,24 @@ class DetailPane(QFrame):
         if color:
             item.setForeground(QColor(color))
         return item
+
+    @staticmethod
+    def _copy_value(field: str, row: GroupRow) -> str:
+        """What a right-click puts on the clipboard: what you would TYPE, not what you read.
+
+        A crossover cell reads `350 LR6` and only the 350 can be pasted -- the type is a dropdown
+        in the DSP's software, not a number field (user, 2026-08-23). The same rule settles the
+        rest: no leading `+` on a gain, no degree sign on a phase, no unit anywhere. The screen
+        keeps the reading; the clipboard carries the value.
+        """
+        raw = row.raw
+        if field in ("hp", "lp"):
+            leg = CrossoverLeg.from_raw(raw.get(field))
+            return f"{leg.freq_hz:g}" if leg.enabled and leg.freq_hz is not None else ""
+        if field in ("gain_db", "ta_ms", "phase_deg"):
+            v = raw.get(field)
+            return f"{v:g}" if isinstance(v, (int, float)) and not isinstance(v, bool) else ""
+        return ""
 
     @staticmethod
     def _cell_text(field: str, row: GroupRow) -> str:

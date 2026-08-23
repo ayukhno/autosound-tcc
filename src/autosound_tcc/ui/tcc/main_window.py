@@ -712,7 +712,7 @@ class MainWindow(QMainWindow):
         # button says what it opens, and the name says what you are working on.
         self._menu_btn = QToolButton()
         self._menu_btn.setText(i18n.t("menuButton"))
-        self._menu_btn.setProperty("class", "reason-btn project-btn")
+        self._menu_btn.setProperty("class", "reason-btn menu-btn")
         self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._build_main_menu()

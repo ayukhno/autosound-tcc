@@ -72,10 +72,18 @@ def _alias_check() -> Check:
         return Check("aliases", OK, _t("selfAliasNoneTitle"), _t("selfAliasNoneDetail"))
 
     known = model_choices.choices([]) + model_choices.critic_choices([])
-    lines, collapsing = [], []
+    lines, collapsing, spelling = [], [], []
     for from_key, entry in sorted(aliases.items()):
         to_key = str((entry or {}).get("to") or "")
         lines.append(f"{from_key} → {to_key}" + (f"  ({entry.get('why')})" if entry.get("why") else ""))
+        if _harness_only(from_key, to_key):
+            # `claude-opus-5 → sdk:claude-opus-5`: one model, written twice. Reading that as a
+            # vendor collapse is what the check used to do -- a bare key has no harness, so the
+            # fallback Choice below gave it an empty provider, which differs from every real one.
+            # It painted the app's own red dot over a correction (user, 2026-08-23: "what is
+            # that, and is it worth removing?").
+            spelling.append(from_key)
+            continue
         source = model_choices.find(known, from_key) or model_choices.Choice(
             harness=from_key.partition(":")[0], model=from_key.partition(":")[2], label=from_key,
             provider="",
@@ -87,6 +95,8 @@ def _alias_check() -> Check:
     detail = "\n".join(lines)
     if collapsing:
         detail += "\n\n" + _t("selfAliasCrossVendor").format(keys=", ".join(collapsing))
+    if spelling:
+        detail += "\n\n" + _t("selfAliasSameModel").format(keys=", ".join(spelling))
     return Check(
         "aliases",
         BAD if collapsing else WARN,
@@ -95,6 +105,25 @@ def _alias_check() -> Check:
         fix_label=_t("selfAliasFix"),
         fix=_clear_all_aliases,
     )
+
+
+def _harness_only(from_key: str, to_key: str) -> bool:
+    """Do these two keys name the same MODEL, differing only in the harness that runs it?
+
+    `claude-opus-5` and `sdk:claude-opus-5` are one model said two ways -- the second says which
+    harness starts it. An alias between them substitutes nothing; it repairs a name that was
+    written without its prefix. Worth listing, because an indirection is a fact about the record,
+    and not worth the sentence about cross-vendor review, which is about a different thing
+    entirely.
+
+    Not called `_same_model`: there is one of those already, further down, comparing a picker key
+    against a name a reviewer script recorded, loosely, on letters and digits. Two functions of
+    that name in one module is a bug waiting for whoever adds the third caller.
+    """
+    def model(key: str) -> str:
+        return key.split(":", 1)[1] if ":" in key else key
+
+    return bool(from_key) and bool(to_key) and model(from_key) == model(to_key)
 
 
 def _clear_all_aliases() -> str:

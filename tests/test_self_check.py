@@ -158,3 +158,34 @@ def test_the_no_alias_row_no_longer_claims_more_than_it_knows():
 
     assert "runs what it says" not in i18n.t("selfAliasNoneTitle")
     assert "reviewer script" in i18n.t("selfAliasNoneDetail")
+
+
+def test_a_harness_prefix_is_not_a_vendor_collapse():
+    """`claude-opus-5 → sdk:claude-opus-5` is one model written twice: the second says which
+    harness starts it. The check read it as a substitution onto another vendor and painted the
+    app's own red dot over a name repair — a bare key has no harness, so the fallback Choice got
+    an empty provider, which differs from every real one (user, 2026-08-23: "what is that, and is
+    it worth removing?").
+    """
+    model_overrides.set_alias("claude-opus-5", "sdk:claude-opus-5", "written without its prefix")
+
+    aliases = _find(self_check.run(), "aliases")
+
+    assert aliases.status == self_check.WARN, "worth listing, not worth an alarm"
+    assert "claude-opus-5 → sdk:claude-opus-5" in aliases.detail
+    assert i18n_text("selfAliasSameModel") in aliases.detail
+    assert i18n_text("selfAliasCrossVendor") not in aliases.detail
+    assert aliases.fixable, "and still removable, because an indirection is worth being rid of"
+
+
+def i18n_text(key: str) -> str:
+    """The fixed half of a template, for asserting WHICH sentence was chosen.
+
+    Everything after the last placeholder, because these two both OPEN with `{keys}` -- taking
+    what comes before it returns the empty string, and an empty string is in every detail there
+    has ever been.
+    """
+    from autosound_tcc.ui.tcc import i18n
+
+    return i18n.t(key).rsplit("}", 1)[-1].strip()
+

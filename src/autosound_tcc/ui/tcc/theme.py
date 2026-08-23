@@ -414,7 +414,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* `Choose…` is the one .zoom-btn carrying a menu, and an unstyled indicator is drawn by the
     native style rather than by the box above it: on macOS that is a second little bezel sitting
     on the button's right border, which reads as two controls overlapping (user, 2026-08-21, with
-    the screenshot). Pinned inside the padding box, the same fix .project-btn already carries. */
+    the screenshot). Pinned inside the padding box, the same fix .menu-btn already carries. */
     QPushButton[class~="zoom-btn"]::menu-indicator {{
         subcontrol-origin: padding;
         subcontrol-position: right center;
@@ -1237,34 +1237,40 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 4px 12px;
         font-size: 11.5px;
     }}
-    /* .project-btn — the header's project picker. It is a **QToolButton** with an instant popup,
+    /* .menu-btn — the header's main-menu button. It is a **QToolButton** with an instant popup,
     which is the whole reason the first attempt at this did nothing: the rules said QPushButton and
     matched no widget, so macOS kept drawing its native pale pill with pale text on a dark header,
-    unreadable. Both types are named now, every state is covered, theme tokens only. */
-    QToolButton[class~="project-btn"], QPushButton[class~="project-btn"] {{
+    unreadable. Both types are named now, every state is covered, theme tokens only.
+
+    Centred, and with no drop-down arrow. It was left-aligned with an arrow pinned to the right
+    edge, which was right while the button carried the PROJECT NAME -- a long, elidable string
+    that had to start at a fixed place. Since the name moved out to its own label, the same rules
+    left "☰ Menu" hugging the left with a hole before the arrow (user, 2026-08-23: "the balance of
+    the label on the button is off"). The hamburger already says it opens something. */
+    QToolButton[class~="menu-btn"], QPushButton[class~="menu-btn"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};
         border-radius: 8px;
         color: {t.text};
-        padding: 4px 12px;
+        padding: 4px 14px;
         font-size: 11.5px;
-        text-align: left;
+        text-align: center;
     }}
-    QToolButton[class~="project-btn"]:hover, QPushButton[class~="project-btn"]:hover {{
+    QToolButton[class~="menu-btn"]:hover, QPushButton[class~="menu-btn"]:hover {{
         border-color: {t.accent};
         color: {t.accent};
     }}
-    QToolButton[class~="project-btn"]:pressed, QToolButton[class~="project-btn"]:checked,
-    QPushButton[class~="project-btn"]:pressed, QPushButton[class~="project-btn"]:checked {{
+    QToolButton[class~="menu-btn"]:pressed, QToolButton[class~="menu-btn"]:checked,
+    QPushButton[class~="menu-btn"]:pressed, QPushButton[class~="menu-btn"]:checked {{
         background: {t.mix("accent", 0.14, "panel")};
         border-color: {t.accent};
         color: {t.text};
     }}
-    QToolButton[class~="project-btn"]::menu-indicator,
-    QPushButton[class~="project-btn"]::menu-indicator {{
-        subcontrol-origin: padding;
-        subcontrol-position: right center;
-        width: 10px;
+    /* No arrow: with the label centred, a chevron pinned to the right edge is the imbalance. */
+    QToolButton[class~="menu-btn"]::menu-indicator,
+    QPushButton[class~="menu-btn"]::menu-indicator {{
+        width: 0px;
+        image: none;
     }}
     /* .chan-toggle — the per-channel switch. It reads as the ACTION it performs, so the colour
     previews the result rather than reporting the present state: `-on` (accented) is offered on a

@@ -449,3 +449,50 @@ def test_the_eq_tab_says_whose_bank_is_on_screen(monkeypatch):
     pane.open_table(group)
     assert pane._tab_eq.text() == "EQ", "and it is a plain tab when it is a way IN"
 
+
+def test_a_copied_value_is_what_you_would_type():
+    """"Copying a crossover should not carry the type — only the frequency, because the type does
+    not paste" (user, 2026-08-23). It is a dropdown in the DSP's software, not a number field. The
+    same rule settles the rest: no leading `+`, no degree sign, no units."""
+    from autosound_tcc.state.dsp_state import GroupRow
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    row = GroupRow(id="m-L", name="m-L", slot="E", raw={
+        "hp": {"f": 350.0, "type": "LR", "slope": 36},
+        "lp": None,
+        "gain_db": -1.0,
+        "ta_ms": 6.3,
+        "phase_deg": 180,
+    })
+
+    assert DetailPane._cell_text("hp", row).startswith("350 "), "the screen still reads the type"
+    assert DetailPane._copy_value("hp", row) == "350"
+    assert DetailPane._copy_value("lp", row) == "", "a disabled leg has no value to paste"
+    assert DetailPane._copy_value("gain_db", row) == "-1"
+    assert DetailPane._copy_value("ta_ms", row) == "6.3"
+    assert DetailPane._copy_value("phase_deg", row) == "180"
+    assert "°" not in DetailPane._copy_value("phase_deg", row)
+
+
+def test_the_crossover_cell_copies_its_frequency_alone():
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    group = ProfileGroup(
+        id="physical_outputs", label="Output", fields=("hp", "lp", "gain_db"),
+        rows=(GroupRow(id="m-L", name="m-L", slot="E",
+                       raw={"hp": {"f": 350.0, "type": "LR", "slope": 36}, "gain_db": 0.0}),),
+    )
+    pane = DetailPane()
+    pane.open_table(group)
+    table = pane._scroll.widget()
+
+    QGuiApplication.clipboard().setText("untouched")
+    hp_cell = table.visualItemRect(table.item(0, 2)).center()
+    table.customContextMenuRequested.emit(hp_cell)
+
+    assert QGuiApplication.clipboard().text() == "350"
+
