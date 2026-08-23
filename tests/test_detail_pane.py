@@ -140,3 +140,154 @@ def test_every_panel_survives_a_tier_whose_controls_nobody_enumerated():
     table.set_group(stated)
     assert table.item(0, 2).text() == "—", "a channel with nothing set is not an unasked question"
 
+
+def _rig_view():
+    """A view with both tiers: virtual channels have no crossover, outputs have everything."""
+    from autosound_tcc.state.dsp_state import ProjectView
+
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "virtual_channels", "label": "Virtual channels",
+         "fields": ["gain_db", "ta_ms", "phase_deg", "eq"]},
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"]},
+    ]}}
+    ledger = {"preset": "FULL", "sample_rate": 96000,
+              "channels": {"w-L": {"gain_db": -1.0, "ta_ms": 5.22},
+                           "sw": {"gain_db": 0.0, "ta_ms": 0.0}},
+              "virtual_channels": {"VFL": {"gain_db": 0.0, "ta_ms": 0.0}}}
+    identities = {"w-L": {"code": "w-L", "slot": "C", "tier": "channels"},
+                  "sw": {"code": "sw", "slot": "K", "tier": "channels"},
+                  "VFL": {"code": "VFL", "slot": "A", "tier": "virtual_channels"}}
+    return ProjectView.from_dict(ledger, profile, channels=identities)
+
+
+def test_one_parameter_across_both_tiers_in_one_table():
+    """"Three buttons — Gain, Delay, Phase — that show the table for every channel, and it works
+    for the physical ones as well as the virtual" (user, 2026-08-23). The per-group table answers
+    what a tier is set to; this answers how the rig compares, which is the actual question about
+    a delay."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view())
+
+    pane.open_param("ta_ms")
+
+    table = pane._scroll.widget()
+    assert table.columnCount() == 3
+    read = [[table.item(r, c).text() if table.item(r, c) else "" for c in range(3)]
+            for r in range(table.rowCount())]
+    # A heading per tier, then its channels, in the view's order.
+    assert read[0][0] and read[0][1] == "", "the first row is a tier heading"
+    names = [row[1] for row in read if row[1]]
+    assert names == ["VFL", "w-L", "sw"], names
+    assert [row[2] for row in read if row[1] == "w-L"] == ["5.22"]
+
+
+def test_a_control_no_tier_declares_is_not_offered():
+    """A processor without phase does not get a Phase tab over an empty table."""
+    from autosound_tcc.state.dsp_state import ProjectView
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]},
+    ]}}
+    view = ProjectView.from_dict(
+        {"channels": {"w-L": {"gain_db": 0.0}}}, profile,
+        channels={"w-L": {"code": "w-L", "slot": "C", "tier": "channels"}},
+    )
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(view)
+
+    assert pane._param_tabs["gain_db"].isVisibleTo(pane)
+    assert not pane._param_tabs["phase_deg"].isVisibleTo(pane)
+    pane.open_param("phase_deg")  # must not raise, and must not open anything
+    assert pane._mode != "param"
+
+
+def test_a_tier_heading_is_not_a_channel_to_click():
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view())
+    pane.open_param("gain_db")
+
+    activated = []
+    pane.tableRowActivated.connect(lambda gid, rid: activated.append((gid, rid)))
+    table = pane._scroll.widget()
+    table.cellClicked.emit(0, 0)  # the heading row
+    assert activated == []
+
+    table.cellClicked.emit(1, 1)  # the first real channel
+    assert activated == [("virtual_channels", "VFL")]
+
+
+def test_the_eq_copy_is_offered_only_when_a_format_exists(monkeypatch):
+    """A button that copies nothing -- or something nobody can identify -- is worse than no
+    button. The formats live in the method (user: "це повинно бути в скілі"), so when this
+    installation has no exporter, the copy is not offered at all."""
+    from autosound_tcc.core import eq_export
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    group = ProfileGroup(id="physical_outputs", label="Output", fields=("eq",),
+                         rows=(GroupRow(id="w-L", name="w-L", slot="C",
+                                        raw={"eq": [{"type": "PK", "f": 100,
+                                                     "gain_db": -3.0, "q": 2.0}]}),))
+    row = group.rows[0]
+
+    monkeypatch.setattr(eq_export, "available", lambda: False)
+    pane.open_eq(group, row)
+    assert not pane._eq_copy.isVisibleTo(pane)
+
+    monkeypatch.setattr(eq_export, "available", lambda: True)
+    pane.open_eq(group, row)
+    assert pane._eq_copy.isVisibleTo(pane)
+
+
+def test_copying_a_bank_says_which_format_it_was_and_what_was_left_out(monkeypatch):
+    """A band quietly dropped on the way to a processor is the kind of loss nobody notices until
+    the tune sounds wrong, and a clipboard whose format cannot be named is a trap."""
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.core import eq_export
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    group = ProfileGroup(id="physical_outputs", label="Output", fields=("eq",),
+                         rows=(GroupRow(id="w-L", name="w-L", slot="C",
+                                        raw={"eq": [{"type": "PK", "f": 100,
+                                                     "gain_db": -3.0, "q": 2.0}]}),))
+    row = group.rows[0]
+    monkeypatch.setattr(eq_export, "available", lambda: True)
+    monkeypatch.setattr(
+        eq_export, "format_bank",
+        lambda rows: eq_export.Bank(text="BANK-TEXT", format_name="Audiotec-Fischer",
+                                    left_out=("APF2 4386 Hz",)),
+    )
+    said = []
+    pane.bankCopied.connect(said.append)
+    pane.open_eq(group, row)
+
+    pane._on_copy_eq_bank()
+
+    assert QGuiApplication.clipboard().text() == "BANK-TEXT"
+    assert len(said) == 1
+    assert "Audiotec-Fischer" in said[0] and "APF2 4386 Hz" in said[0]
+
+    # And when there is no format, nothing plausible is put on the clipboard instead.
+    monkeypatch.setattr(eq_export, "format_bank", lambda rows: None)
+    QGuiApplication.clipboard().setText("untouched")
+    pane._on_copy_eq_bank()
+    assert QGuiApplication.clipboard().text() == "untouched"
+    assert said[-1] == i18n.t("copyEqNoFormat")
+

@@ -16,7 +16,7 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -42,6 +43,15 @@ _FIELD_COLUMNS: dict[str, str] = {
     "hp": "HPF", "lp": "LPF", "gain_db": "Gain dB", "ta_ms": "Delay ms",
     "polarity": "Pol", "phase_deg": "Phase", "mute": "Mute", "off": "Off",
     "eq_bypass": "EQ Byp", "eq": "EQ",
+}
+
+#: The controls worth looking at across the whole rig at once, and what each tab is called.
+#: Values are callables so the label is read in the CURRENT language every time, not frozen at
+#: import; the fields themselves are the ledger's own names.
+_PARAM_TABS: dict[str, "object"] = {
+    "gain_db": lambda: i18n.t("tabGain"),
+    "ta_ms": lambda: i18n.t("tabDelay"),
+    "phase_deg": lambda: i18n.t("tabPhase"),
 }
 
 _MATCH_PALETTE = ["#5aa9e6", "#4bbf87", "#e8973c", "#c98fe0", "#e8c34a", "#e05c5c"]
@@ -160,17 +170,24 @@ class DetailPane(QFrame):
     EQ view. Hidden by default (`.detail` starts at max-height 0 in the prototype)."""
 
     closed = Signal()
-    tableRowActivated = Signal(str, str)  # group_id, row_id -> caller opens EQ for it
+    tableRowActivated = Signal(str, str)
+    #: What was copied and in what format, for the window's status line.
+    bankCopied = Signal(str)  # group_id, row_id -> caller opens EQ for it
     eqRequested = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
         self.setProperty("class", "panel")
         self.setVisible(False)
-        self._mode: Optional[str] = None  # "table" | "eq"
+        self._mode: Optional[str] = None  # "table" | "eq" | "param"
         self._group: Optional[ProfileGroup] = None
         self._row: Optional[GroupRow] = None
         self._pair_mode = False
+        #: The whole project view, for the one-parameter tabs: gain, delay and phase are asked
+        #: about ACROSS the rig ("show the table for all channels, physical and virtual" -- user,
+        #: 2026-08-23), and a single group cannot answer that.
+        self._view = None
+        self._param: Optional[str] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -188,10 +205,29 @@ class DetailPane(QFrame):
         self._tab_eq = _DTab("EQ")
         self._tab_eq.clicked.connect(self._on_tab_eq)
         head_layout.addWidget(self._tab_eq)
+        # One parameter, every channel, both tiers. They sit beside "Table" and "EQ" because they
+        # are the same kind of thing -- a way of looking at the rig -- and the question they
+        # answer is a comparison ("are these delays sane next to each other?"), which the
+        # per-group table cannot show while it is one group at a time.
+        self._param_tabs: dict[str, _DTab] = {}
+        for field, label in _PARAM_TABS.items():
+            tab = _DTab(label())
+            tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
+            head_layout.addWidget(tab)
+            self._param_tabs[field] = tab
+
         self._pair_btn = _DTab("⇄ L + R")
         self._pair_btn.clicked.connect(self._on_pair_toggle)
         self._pair_btn.setVisible(False)
         head_layout.addWidget(self._pair_btn)
+        # The bank of the channel on screen, in the format its processor takes. Hidden unless
+        # the method can actually produce one for this DSP -- a copy button that yields nothing,
+        # or something nobody can identify, is worse than no button (user, 2026-08-23).
+        self._eq_copy = _DTab(i18n.t("copyEqBank"))
+        self._eq_copy.clicked.connect(self._on_copy_eq_bank)
+        self._eq_copy.setVisible(False)
+        head_layout.addWidget(self._eq_copy)
+
         self._eq_help = QLabel("?")
         self._eq_help.setProperty("class", "eq-help")
         self._eq_help.setCursor(Qt.CursorShape.WhatsThisCursor)
@@ -227,6 +263,9 @@ class DetailPane(QFrame):
         window.
         """
         self._tab_table.setText(i18n.t("tabTable"))
+        self._eq_copy.setText(i18n.t("copyEqBank"))
+        for field, tab in getattr(self, "_param_tabs", {}).items():
+            tab.setText(_PARAM_TABS[field]())
         self._close_btn.setText(i18n.t("close"))
         if self._group is not None:
             self.refresh_with(self._group)
@@ -258,6 +297,50 @@ class DetailPane(QFrame):
         self._sync_tabs()
         self.setVisible(True)
 
+    def set_view(self, view) -> None:
+        """The project view behind the panel, refreshed on every load.
+
+        Held rather than passed per call because the parameter tabs are pressed from inside this
+        widget, long after whoever opened it has gone; and re-rendered from here so a preset
+        switch does not leave a table of the previous preset's delays on screen.
+        """
+        self._view = view
+        self._sync_param_tabs()
+        if self._mode == "param" and self._param:
+            self.open_param(self._param)
+
+    def _param_groups(self, field: str) -> list:
+        """Every tier that declares this control and has channels to show, in the view's order."""
+        groups = getattr(self._view, "groups", ()) or ()
+        return [g for g in groups if field in g.known_fields and g.rows_visible()]
+
+    def _sync_param_tabs(self) -> None:
+        """A control no tier declares is not offered -- a processor without phase does not get a
+        Phase tab that opens an empty table."""
+        for field, tab in self._param_tabs.items():
+            tab.setVisible(bool(self._param_groups(field)))
+            tab.set_on(self._mode == "param" and self._param == field)
+
+    def open_param(self, field: str) -> None:
+        """One control, every channel, both tiers, in one table.
+
+        The per-group table answers "what is this tier set to"; this answers "how do these compare
+        across the rig", which is the question somebody actually has about a gain or a delay --
+        and it is the one shape the panel could not make before, because it only ever held one
+        group at a time.
+        """
+        groups = self._param_groups(field)
+        if not groups:
+            return
+        self._mode, self._param, self._row = "param", field, None
+        self._pair_btn.setVisible(False)
+        # The tab's own word, not the column header's: the header is the DSP's vocabulary
+        # ("Delay ms", as PC-Tool spells it) and the title is the window's.
+        self._title.setText(i18n.t("paramAllChannels").format(param=_PARAM_TABS[field]()))
+        self._scroll.setWidget(self._build_param_table(field, groups))
+        self._sync_tabs()
+        self.setVisible(True)
+
     def open_eq(self, group: ProfileGroup, row: GroupRow) -> None:
         self._group, self._row, self._mode = group, row, "eq"
         sib_name = _sibling_name(row.name)
@@ -285,6 +368,10 @@ class DetailPane(QFrame):
         Checks `self._group` rather than `self.isVisible()` -- the latter also depends on every
         ancestor being shown, which is false in headless tests (and would make this a silent
         no-op there) even though the pane's own open/closed state is unambiguous."""
+        if self._mode == "param" and self._param:
+            # Its rows come from the whole view, which `set_view` has already replaced.
+            self.open_param(self._param)
+            return
         if self._group is None:
             return
         if self._mode == "eq" and self._row is not None:
@@ -299,8 +386,15 @@ class DetailPane(QFrame):
     def _sync_tabs(self) -> None:
         self._tab_table.set_on(self._mode == "table")
         self._tab_eq.set_on(self._mode == "eq")
+        self._sync_param_tabs()
         self._pair_btn.set_on(self._pair_mode)
         self._eq_help.setVisible(self._mode == "eq")
+        self._eq_copy.setVisible(
+            self._mode == "eq"
+            and self._row is not None
+            and bool(self._row.raw.get("eq"))
+            and eq_export.available()
+        )
 
     def _on_tab_table(self) -> None:
         if self._group is not None:
@@ -311,6 +405,26 @@ class DetailPane(QFrame):
             self.open_eq(self._group, self._row)
         elif self._group is not None and self._group.rows_visible():
             self.open_eq(self._group, self._group.rows_visible()[0])
+
+    def _on_copy_eq_bank(self) -> None:
+        """The whole bank of this channel, ready to paste into the DSP's own software.
+
+        The window formats nothing: it asks the method, puts what came back on the clipboard, and
+        says WHICH format that was -- plus anything the format could not carry, because a band
+        quietly dropped on the way to a processor is the kind of loss nobody notices until the
+        tune sounds wrong.
+        """
+        if self._row is None:
+            return
+        bank = eq_export.format_bank(self._row.raw.get("eq"))
+        if bank is None:
+            self.bankCopied.emit(i18n.t("copyEqNoFormat"))
+            return
+        QGuiApplication.clipboard().setText(bank.text)
+        said = i18n.t("copyEqDone").format(channel=self._row.name, format=bank.format_name)
+        if bank.left_out:
+            said = f"{said} {i18n.t('copyEqLeftOut').format(what=', '.join(bank.left_out))}"
+        self.bankCopied.emit(said)
 
     def _on_pair_toggle(self) -> None:
         self._pair_mode = not self._pair_mode
@@ -358,6 +472,70 @@ class DetailPane(QFrame):
             # old widget synchronously), which would destroy `table` while it is still executing
             # its own C++ event handler -- a use-after-free that crashes with SIGSEGV. Deferring
             # to the next event-loop tick lets mouseReleaseEvent return first.
+            QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
+
+        table.cellClicked.connect(_activate)
+        return table
+
+    def _build_param_table(self, field: str, groups: list) -> QTableWidget:
+        """`ID · channel · value`, with a tier heading before each block.
+
+        A heading ROW rather than a tier column: the comparison is inside a tier most of the time
+        and across tiers once in a while, and a repeated word in every line is noise in both
+        cases. Spanning the width makes it read as a divider rather than as data.
+        """
+        blocks = [(g, g.rows_visible()) for g in groups]
+        total = sum(len(rows) + 1 for _g, rows in blocks)
+        table = QTableWidget(total, 3)
+        table.setProperty("class", "ptable")
+        table.setHorizontalHeaderLabels(["ID", i18n.t("colChan"), _FIELD_COLUMNS[field]])
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        apply_caps(header, spacing_px=0.7)
+
+        t = current_theme()
+        where: dict[int, tuple] = {}
+        r = 0
+        for group, rows in blocks:
+            # The tier's name in the panel's language. `group.label` is the PROFILE's word for it
+            # ("Output channels"), which is English in a file written once, and reads as a foreign
+            # line among Ukrainian rows -- the same thing the project-params rows were fixed for.
+            said = i18n.t(f"chanSum_{group.id}")
+            head_item = QTableWidgetItem(said if said != f"chanSum_{group.id}" else group.label)
+            head_item.setForeground(QColor(t.muted))
+            head_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            table.setItem(r, 0, head_item)
+            table.setSpan(r, 0, 1, 3)
+            table.setRowHeight(r, 24)
+            r += 1
+            for row in rows:
+                id_item = QTableWidgetItem(row.slot or row.id)
+                id_item.setForeground(QColor(t.accent))
+                id_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+                table.setItem(r, 0, id_item)
+                name_item = QTableWidgetItem(row.name)
+                name_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                )
+                table.setItem(r, 1, name_item)
+                table.setItem(r, 2, self._styled_cell(field, row, t))
+                table.setRowHeight(r, 26)
+                where[r] = (group, row)
+                r += 1
+
+        def _activate(clicked: int, _c: int) -> None:
+            found = where.get(clicked)
+            if found is None:  # a tier heading: not a channel
+                return
+            group, row_obj = found
+            self.tableRowActivated.emit(group.id, row_obj.id)
+            # Deferred for the same reason as the group table's: this runs inside the table's own
+            # mouse handler, and opening the EQ replaces (and destroys) the widget under it.
             QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
 
         table.cellClicked.connect(_activate)

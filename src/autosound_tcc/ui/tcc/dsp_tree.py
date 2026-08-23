@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
@@ -122,6 +123,16 @@ class _EqChip(QLabel):
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         event.accept()
         self.clicked.emit()
+
+
+def _eq_bank_text(row) -> str:
+    """This channel's bank as text, or "" when there is no format to write it in.
+
+    Empty is a real answer here rather than a failure: `copy_menu` drops an item that resolves to
+    nothing, which is exactly the behaviour wanted when the method has no exporter for this DSP.
+    """
+    bank = eq_export.format_bank(row.raw.get("eq"))
+    return bank.text if bank else ""
 
 
 class ChannelRow(QWidget):

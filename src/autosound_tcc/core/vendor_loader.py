@@ -156,6 +156,11 @@ _VENDORED = {
     # `project-schema.md` and `project.py` are the method's: the writer of `project.json` belongs
     # with the contract it writes, or the copy outside the schema drifts without anyone noticing.
     "project_seed.py": "autosound_tcc._vendor.project_seed",
+    # One channel's EQ bank in the format its processor takes (2026-08-23, the user's call that
+    # the formats belong to the method). Registered before it exists there: `core/eq_export.py`
+    # asks for it and treats "not in this skill yet" as a state rather than an error, so the
+    # window offers the copy the day the module lands and stays quiet until then.
+    "eq_export.py": "autosound_tcc._vendor.eq_export",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check

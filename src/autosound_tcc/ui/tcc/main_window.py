@@ -1820,6 +1820,8 @@ class MainWindow(QMainWindow):
             self._rebuild_system_params()
             self._rebuild_acoustics()
             self._tree.set_view(rig)
+            # The panel's one-parameter tabs read the whole view, not one group.
+            self._detail.set_view(rig)
             self._set_project_params(rig)
             self._refresh_open_detail()
             self._slot_label.setText("")
@@ -1852,6 +1854,7 @@ class MainWindow(QMainWindow):
         # a restart (user, 2026-08-21). Its own docstring already claimed this call existed.
         self._rebuild_acoustics()
         self._tree.set_view(view)
+        self._detail.set_view(view)
         self._set_project_params(view)
         self._refresh_open_detail()
 
@@ -2082,6 +2085,8 @@ class MainWindow(QMainWindow):
         group_id = self._detail.current_group_id()
         if group_id is None:
             return
+        # `set_view` above has already re-rendered a one-parameter view, which is built from the
+        # whole view rather than from a group.
         fresh_group = self._find_group(group_id)
         if fresh_group is None:
             self._detail.close_pane()
@@ -2111,6 +2116,8 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
 
         self._detail = DetailPane()
+        # What was copied and in what format, said where every other outcome is said.
+        self._detail.bankCopied.connect(lambda said: self._status_strip.notify(said))
         splitter.addWidget(self._detail)
 
         self._dialog_frame = _panel()
