@@ -201,3 +201,33 @@ def test_a_refusal_is_a_sentence_in_the_window_s_own_language(tmp_path, monkeypa
     # under it.
     assert dlg._seed_summary.sizePolicy().verticalPolicy() == npd.QSizePolicy.Policy.MinimumExpanding
 
+
+def test_the_in_app_model_survives_a_copy_that_skips_the_interview(tmp_path, monkeypatch):
+    """The interview is what used to carry the picked model, and a copy skips it -- so the choice
+    was dropped and the window opened on "no model chosen" (user, 2026-08-23). The dialog keeps it
+    where the caller can find it whether the interview ran or not."""
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
+    monkeypatch.setattr(npd, "ProfileInterviewDialog", _FakeInterviewDialog)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text(
+        '{"schema_version": 3, "car": {"make": "VW"}, '
+        '"dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"}, "channels": []}',
+        encoding="utf-8",
+    )
+    (source / "dsp_profile.json").write_text(
+        '{"dsp_profile": {"vendor": "Audiotec-Fischer", "name": "Helix DSP Ultra S"}}',
+        encoding="utf-8",
+    )
+
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._folder_edit.setText(str(tmp_path / "new"))
+    dlg._seed_edit.setText(str(source))
+    dlg._on_create()
+
+    assert dlg.seeded is not None and dlg.seeded.ok
+    assert dlg.interview_dialog is None, "same DSP: nothing left to interview about"
+    assert dlg.in_app_model == npd.AI_MODEL_IDS.get(dlg._ai_combo.currentText())
+    assert dlg.in_app_model, "and it is a real model id, not an empty string"
+

@@ -1799,9 +1799,12 @@ class MainWindow(QMainWindow):
                 return
             self._has_project = True
             self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
-            # The note STAYS, above the tree: rows with no values are honest only while something
-            # says why they have none.
-            self._left_status.setText(i18n.t("leftNoLedger"))
+            # The note stays above the tree -- rows with no values are honest only while
+            # something says why they have none -- but it says a DIFFERENT thing now. "The tree
+            # fills in once the first snapshot is written" reads as broken next to a tree that is
+            # already full of channels (user, 2026-08-23: "looks like a de-sync -- the channels
+            # are there and underneath it still says there are none").
+            self._left_status.setText(i18n.t("leftRigOnly"))
             self._left_status.setVisible(True)
             self._create_project_btn.setVisible(False)
             self._tree.setVisible(True)
@@ -1896,6 +1899,11 @@ class MainWindow(QMainWindow):
         # the answer. It says what it inherited rather than opening silently on somebody else's
         # facts.
         if dialog.seeded is not None and dialog.seeded_from is not None:
+            # The models picked in the dialog were being dropped on this path: the interview is
+            # what used to carry them, and a copy skips it. So a person chose Claude Opus 5, the
+            # window opened on "no model chosen", and the session they asked for never started
+            # (user, 2026-08-23).
+            new_window._adopt_choices_from_new_project(dialog)
             said = i18n.t("npSeedDone").format(
                 source=dialog.seeded_from.name, files=", ".join(dialog.seeded.written)
             )
@@ -2965,6 +2973,20 @@ class MainWindow(QMainWindow):
             self._dialog._set_busy(False)
             return
         self._start_tuning_session(opening=text)
+
+    def _adopt_choices_from_new_project(self, dialog) -> None:
+        """Carry the new-project dialog's model choice into the project it just made.
+
+        Only the in-app path: a terminal was already handed its own `--model`. Written to the
+        project's own settings rather than pushed into the combo, because that is where every
+        other reader looks -- the footer, the snapshot the session publishes, and the next window
+        to open this folder.
+        """
+        chosen = dialog.onboarding_ai_model if dialog.open_terminal_cli else dialog.in_app_model
+        if not chosen:
+            return
+        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, chosen)
+        self._reload_model_choices()
 
     def _start_tuning_session(self, opening: Optional[str] = None) -> None:
         """Front-end A: run the skill in-process and stream it into the dialog panel."""

@@ -107,6 +107,10 @@ class NewProjectDialog(QDialog):
         self.onboarding_vendor: str = ""
         self.onboarding_model: str = ""
         self.onboarding_ai_model: Optional[str] = None
+        #: The in-app pick, kept for the path that runs NO interview: a copied project skips the
+        #: capability questions, and the model chosen here would otherwise be dropped on the floor
+        #: -- the window then opened on "no model chosen" (user, 2026-08-23).
+        self.in_app_model: Optional[str] = None
         #: What was copied in, for the caller to report. None when the project starts empty.
         #: Typed loosely on purpose: the class is the method's (`rew_tool/project_seed.py`),
         #: reached through `vendor_loader`, so there is no import here to annotate it with.
@@ -449,8 +453,9 @@ class NewProjectDialog(QDialog):
 
         cli = self._run_via_combo.currentData()
         if cli is None:
+            self.in_app_model = AI_MODEL_IDS.get(self._ai_combo.currentText())
             if interview_needed:
-                ai_model = AI_MODEL_IDS.get(self._ai_combo.currentText())
+                ai_model = self.in_app_model
                 self.interview_dialog = ProfileInterviewDialog(
                     project_dir, vendor, model, ai_model, i18n.current_language(),
                     parent=self.parent(),
