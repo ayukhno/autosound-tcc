@@ -20,6 +20,40 @@ from PySide6.QtCore import QSettings  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _no_live_rew():
+    """Point the REW API at a port nothing listens on, for the whole session.
+
+    The suite was green because REW happened to be CLOSED. With a real REW open on this machine
+    -- which is the normal state while somebody is tuning -- `test_main_window.py` built a real
+    curve window, its workers really fetched impulse responses over HTTP, and closing the dialog
+    while two of them sat in `urlopen` aborted the process: exit 134, mid-run, in a test about a
+    button (measured 2026-08-23, with REW live on 4735).
+
+    Two things were wrong and this fixes both. A unit test must not reach a service on the
+    developer's machine, and a suite whose result depends on whether an unrelated application is
+    running is not a suite. A refused connection is what every one of these tests already expects,
+    so this changes nothing about what they assert -- only that they get the same answer whether
+    or not the tuner is mid-session.
+
+    NOT "stop REW": it may be live and mid-measurement, and this repository does not touch it
+    (cockpit rule 6). Tests that want REW's behaviour fake it themselves.
+    """
+    try:
+        from autosound_tcc.core import vendor_loader
+
+        api = vendor_loader.load_rew_api()
+    except Exception:  # noqa: BLE001 — no skill checked out: nothing can call REW anyway
+        yield
+        return
+    previous = api.BASE_URL
+    api.BASE_URL = "http://127.0.0.1:1"  # refused instantly, on every platform
+    try:
+        yield
+    finally:
+        api.BASE_URL = previous
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _end_qt_before_python_finalises():
     """Destroy the QApplication here, while the interpreter is still whole.
 

@@ -236,6 +236,9 @@ answers the first five questions anybody would ask.",
         "riFailed": "This file could not be read:",
         "riClose": "Close",
         "riImport": "Import from Resonalyze…",
+        "npSeedNoInterview": "Its dsp_profile.json comes too, so the capability interview is "
+                             "skipped — there is nothing left to ask about a processor already "
+                             "described. Choose a different DSP above and it runs as usual.",
         "npCreate": "Create",
         "npCancel": "Cancel",
         "projectOpenTip": "An empty folder is a valid new project — the intake fills it. Switching folders needs TCC opened again.",
@@ -939,6 +942,9 @@ Choose sweeps (sw) above to read this.",
         "riFailed": "Цей файл не вдалося прочитати:",
         "riClose": "Закрити",
         "riImport": "Імпорт з Resonalyze…",
+        "npSeedNoInterview": "Разом із ним прийде dsp_profile.json, тож інтерв'ю про можливості "
+                             "не буде — питати нема про що, процесор уже описаний. Виберіть інший "
+                             "DSP вище — і воно піде як завжди.",
         "npCreate": "Створити",
         "npCancel": "Скасувати",
         "projectOpenTip": "Порожня тека — валідний новий проєкт, інтейк її наповнить. Зміна теки потребує перезапуску TCC.",

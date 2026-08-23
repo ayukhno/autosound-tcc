@@ -68,13 +68,22 @@ def _esc(text: object) -> str:
     )
 
 
+def _hz(value: object) -> str:
+    """`65.0` is a float because JSON says so, and nobody tunes in tenths of a hertz here."""
+    return f"{value:g}" if isinstance(value, (int, float)) else str(value)
+
+
+def _band_line(band: dict) -> str:
+    return f"{_hz(band.get('f'))} {band.get('type')}{band.get('slope')}"
+
+
 def _row_line(row: dict) -> str:
     """One leg's ledger row as the six things a person checks it by."""
     def edge(key: str) -> str:
         band = row.get(key)
         if not isinstance(band, dict):
             return f"{key.upper()} OFF"
-        return f"{key.upper()} {band.get('f')} {band.get('type')}{band.get('slope')}"
+        return f"{key.upper()} {_band_line(band)}"
 
     bits = [edge("hp"), edge("lp")]
     gain, delay = row.get("gain_db"), row.get("ta_ms")
@@ -142,13 +151,12 @@ def render_html(result: dict) -> str:
         for key, band in (leg.get("dormant") or {}).items():
             out.append(
                 f'<br><span style="color:{t.faint};">○ {_esc(key.upper())} '
-                f'{_esc(band.get("f"))} {_esc(band.get("type"))}{_esc(band.get("slope"))} — '
-                f'{_esc(i18n.t("riDormant"))}</span>'
+                f'{_esc(_band_line(band))} — {_esc(i18n.t("riDormant"))}</span>'
             )
         for band in leg.get("dropped_eq_bands") or []:
             out.append(
                 f'<br><span style="color:{t.faint};">⊘ {_esc(band.get("type"))} '
-                f'{_esc(band.get("f"))} Hz {_esc(band.get("gain_db"))} dB — '
+                f'{_esc(_hz(band.get("f")))} Hz {_esc(_hz(band.get("gain_db")))} dB — '
                 f'{_esc(i18n.t("riDropped"))}</span>'
             )
         if leg.get("peq_preamp_db"):

@@ -145,6 +145,15 @@ class NewProjectDialog(QDialog):
         self._seed_findings = QCheckBox(i18n.t("npSeedFindings"))
         layout.addWidget(self._seed_findings)
 
+        # Said here rather than discovered afterwards: with the same DSP, the capability interview
+        # does not run at all, and a person who chose an AI model below deserves to know why they
+        # are never asked anything.
+        self._seed_no_interview = QLabel(i18n.t("npSeedNoInterview"))
+        self._seed_no_interview.setWordWrap(True)
+        self._seed_no_interview.setProperty("class", "kv-lbl")
+        self._seed_no_interview.setVisible(False)
+        layout.addWidget(self._seed_no_interview)
+
         layout.addWidget(_field_label(i18n.t("npProfile")))
         self._profile_combo = QComboBox()
         self._profile_combo.setProperty("class", "mini-select")
@@ -222,6 +231,7 @@ class NewProjectDialog(QDialog):
         for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
                        self._seed_findings):
             widget.setVisible(copying)
+        self._seed_no_interview.setVisible(False)
         if copying:
             self._on_seed_source(self._seed_edit.text())
 
@@ -242,9 +252,11 @@ class NewProjectDialog(QDialog):
         summary = project_seed.describe(source) if source is not None else None
         if source is None:
             self._set_seed_note("", warn=False)
+            self._seed_no_interview.setVisible(False)
             return
         if summary is None:
             self._set_seed_note(i18n.t("npSeedNotAProject"), warn=True)
+            self._seed_no_interview.setVisible(False)
             return
         self._set_seed_note(
             i18n.t("npSeedSummary").format(
@@ -269,6 +281,7 @@ class NewProjectDialog(QDialog):
         reaches by typing them correctly.
         """
         pair = project_seed.dsp_of(source)
+        self._seed_no_interview.setVisible(pair is not None)
         if pair is None:
             return
         for index in range(self._profile_combo.count()):

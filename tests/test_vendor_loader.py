@@ -18,10 +18,14 @@ pytestmark = pytest.mark.skipif(
 
 def test_load_rew_api():
     api = vendor_loader.load_rew_api()
-    assert api.BASE_URL == "http://localhost:4735"
     # Read functions present; the module is isolated under a namespaced name.
     assert hasattr(api, "get_measurements")
     assert api.__name__ == "autosound_tcc._vendor.rew_api"
+    # The port is asserted against the file the skill SHIPS, not against the loaded module's
+    # attribute: the suite re-points `BASE_URL` at a dead one so that no test can reach a REW
+    # somebody is mid-measurement on (tests/conftest.py, after exit 134 with REW live).
+    shipped = (vendor_loader.rew_tool_dir() / "rew_api.py").read_text(encoding="utf-8")
+    assert 'BASE_URL = "http://localhost:4735"' in shipped
 
 
 def test_load_dsp_state():
@@ -59,7 +63,9 @@ def test_bridge_wraps_loaded_api():
     from autosound_tcc.core.rew_bridge import RewBridge
 
     bridge = RewBridge()
-    assert bridge.base_url == "http://localhost:4735"
+    # The wiring, which is what this test is about: the facade reports whatever the loaded module
+    # holds, rather than a copy of the address made when it was written.
+    assert bridge.base_url == vendor_loader.load_rew_api().BASE_URL
     # Read-only guarantee: no write methods leak through the facade, EXCEPT the one narrow,
     # user-approved exception (rename_measurement, item 9, 2026-07-27 -- see rew_bridge.py's
     # module docstring). Don't widen this list without the same explicit sign-off.
