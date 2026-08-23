@@ -232,8 +232,10 @@ answers the first five questions anybody would ask.",
                      "is written.",
         "riClear": "No stated limit of this DSP refuses any of the {legs} legs. That answers for "
                    "the HARDWARE — a PC-Tool mode (Fine EQ) can be narrower, and the switch is at "
-                   "the screen. Banking the rows is the tuning gate's job: copy them and propose "
-                   "from the terminal.",
+                   "the screen. To bring it into the project: press “Copy rows (JSON)”, then ask "
+                   "the Generator in the AI dialog to bank them — as the FIRST ledger snapshot "
+                   "if this project has none yet, or as a proposed change if it does. The gate "
+                   "validates them and writes the settings sheet you enter in PC-Tool by hand.",
         "riCopyRows": "Copy rows (JSON)",
         "riCopied": "The rows are on the clipboard.",
         "riFailed": "This file could not be read:",
@@ -974,8 +976,10 @@ Choose sweeps (sw) above to read this.",
                      "записується.",
         "riClear": "Жодна заявлена межа цього DSP не відмовляє жодній з {legs} ніг. Це відповідь "
                    "про ЗАЛІЗО — режим PC-Tool (Fine EQ) може бути вужчим, і перемикається він на "
-                   "екрані. Занести рядки — робота тюнінгового гейта: скопіюйте їх і запропонуйте "
-                   "з термінала.",
+                   "екрані. Щоб занести це в проєкт: натисніть «Скопіювати рядки (JSON)» і "
+                   "попросіть Генератора в діалозі ШІ завести їх — ПЕРШИМ знімком леджера, якщо "
+                   "в проєкті його ще нема, або зміною-пропозицією, якщо вже є. Гейт перевірить "
+                   "їх і випише лист налаштувань, який ви вводите в PC-Tool руками.",
         "riCopyRows": "Скопіювати рядки (JSON)",
         "riCopied": "Рядки в буфері обміну.",
         "riFailed": "Цей файл не вдалося прочитати:",
