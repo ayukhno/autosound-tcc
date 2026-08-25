@@ -2044,7 +2044,14 @@ class MainWindow(QMainWindow):
             fragment = target_curve.fragment_for(target.path, target.name)
             if fragment:
                 url = QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={lang}")
-                url.setFragment(fragment, QUrl.ParsingMode.DecodedMode)
+                # StrictMode because `fragment_for` hands back an ALREADY percent-encoded
+                # string. `DecodedMode` — which this had — means "the text you gave me is plain,
+                # encode it for me", so Qt encoded it a second time: `%0A` became `%250A`, the
+                # page decoded once and got the literal characters `%0A` instead of a line break,
+                # and its parser found zero frequency/dB pairs. The user hit it on the first real
+                # project; my own browser check had missed it because that check built the URL in
+                # a shell and never went through Qt at all.
+                url.setFragment(fragment, QUrl.ParsingMode.StrictMode)
                 QDesktopServices.openUrl(url)
                 # Naming the card that should now be there is the whole point of this sentence:
                 # the published page can be older than this app for the minutes between a push and

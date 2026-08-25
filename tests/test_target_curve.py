@@ -189,3 +189,31 @@ def test_the_fragment_carries_the_curve_without_sending_it_anywhere(tmp_path):
 
 def test_a_curve_file_that_cannot_be_read_makes_no_fragment(tmp_path):
     assert target_curve.fragment_for(tmp_path / "nope.txt", "EPY") is None
+
+
+def test_the_fragment_survives_the_url_qt_actually_builds(tmp_path):
+    """The end of the path, through Qt — which is where it broke and where nothing looked.
+
+    `fragment_for` was right and the page was right; the join between them was not.
+    `QUrl.setFragment(..., DecodedMode)` means "this text is plain, encode it", so an
+    already-encoded fragment got encoded twice: `%0A` -> `%250A`. The page decodes once, gets the
+    characters `%0A` where a line break should be, and finds no frequency/dB pairs at all.
+
+    The browser check that passed before this was built in a shell and never went through Qt, so
+    it confirmed the two ends and skipped the seam. This asserts the seam: percent-decode the
+    fragment ONCE, the way `URLSearchParams` does, and real line breaks must come out.
+    """
+    from urllib.parse import parse_qs
+
+    from PySide6.QtCore import QUrl
+
+    curve = _curve(tmp_path / "EPY_0db_REW.txt")
+    fragment = target_curve.fragment_for(curve, "EPY")
+    url = QUrl("https://example.invalid/viewer.html?lang=uk")
+    url.setFragment(fragment, QUrl.ParsingMode.StrictMode)
+
+    delivered = url.toString().split("#", 1)[1]
+    data = parse_qs(delivered)["data"][0]
+    assert "\n" in data, "the page splits on real newlines; %0A as text finds nothing"
+    pairs = [line for line in data.splitlines() if line.strip() and not line.startswith("#")]
+    assert len(pairs) == 2 and pairs[0].split() == ["20", "0.0"]
