@@ -2053,10 +2053,13 @@ class MainWindow(QMainWindow):
                 # a shell and never went through Qt at all.
                 url.setFragment(fragment, QUrl.ParsingMode.StrictMode)
                 QDesktopServices.openUrl(url)
-                # Naming the card that should now be there is the whole point of this sentence:
-                # the published page can be older than this app for the minutes between a push and
-                # Pages catching up, and an old page ignores the fragment SILENTLY. A claim the
-                # reader can check beats a reassurance they cannot.
+                # One clause, naming the card that should be on the plot. The first version of
+                # this also explained that the tool does not bundle the curve, that the published
+                # page can lag this app, and asked the reader to report it — four clauses of our
+                # own business, on EVERY click, for what is the ordinary case rather than an
+                # exception (the user's call, 2026-08-25: "does this message make sense?"). The
+                # lag it warned about is not silent to a person anyway: they clicked to look at
+                # their curve, so its absence is the first thing they see.
                 self._status_strip.notify(
                     i18n.t("targetHandedOver").format(name=target.name)
                 )
