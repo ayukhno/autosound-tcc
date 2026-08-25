@@ -171,3 +171,21 @@ def test_a_curve_that_the_tool_already_has_is_not_copied(tmp_path):
     if not target_curve.tool_curves():
         pytest.skip("the vendored skill is not checked out")
     assert not target_curve.describe(tmp_path, "SQ-Comp-Ref").needs_dropping
+
+
+def test_the_fragment_carries_the_curve_without_sending_it_anywhere(tmp_path):
+    """`#curve=<name>&data=<REW text>`. The FRAGMENT and not the query, and that is the point as
+    much as the mechanism: a fragment never leaves the browser, so somebody's measured curve does
+    not reach a web server's logs on the way to a page that only had to draw it."""
+    curve = _curve(tmp_path / "EPY_0db_REW.txt")
+    fragment = target_curve.fragment_for(curve, "EPY")
+    assert fragment is not None and fragment.startswith("curve=EPY&data=")
+    from urllib.parse import parse_qs
+
+    parsed = parse_qs(fragment)
+    assert parsed["curve"] == ["EPY"]
+    assert "20 0.0" in parsed["data"][0] and "1000 -3.0" in parsed["data"][0]
+
+
+def test_a_curve_file_that_cannot_be_read_makes_no_fragment(tmp_path):
+    assert target_curve.fragment_for(tmp_path / "nope.txt", "EPY") is None

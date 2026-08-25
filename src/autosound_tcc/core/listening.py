@@ -141,7 +141,11 @@ def load(lang: str = "en") -> Sheet:
     # to move apart). The parser already falls back per entry; asking it for an unknown language
     # would just mark everything untranslated, which is the honest result.
     characteristics = module.characteristics(lang)
-    raw_tracks = module.tracks()
+    # `lang` here too (2026-08-25): a track's title is normally a NAME and is not translated, but
+    # a row with no artist (`own/*`, the EMMA position rows) carries a DESCRIPTION in the title
+    # slot -- and the first step of the first route is one of those, so a Ukrainian tree opened
+    # with one English sentence at the top of it.
+    raw_tracks = module.tracks(lang)
     links = module.links(lang)
     routes = module.routes()
 

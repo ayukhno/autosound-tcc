@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from urllib.parse import quote
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -145,6 +146,47 @@ def local_viewer_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "autosound-tcc"
     return base / "target-curve-viewer"
+
+
+def tool_takes_a_fragment() -> bool:
+    """Whether the method's visualiser can be handed a curve in the URL fragment.
+
+    Read from the vendored copy, which is what tells us the FEATURE exists in the method. The page
+    that actually opens is the published one, built from the same branch — so this is a proxy, and
+    the honest thing to know about it is that a pin newer than the deploy would be wrong for the
+    minutes between a push and Pages catching up. That window is why the local copy stays: it is
+    the fallback whenever this answers False.
+    """
+    source = viewer_source()
+    if source is None:
+        return False
+    try:
+        html = source.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "location.hash" in html and "'curve'" in html and "'data'" in html
+
+
+def fragment_for(curve_path: Path, name: str) -> Optional[str]:
+    """`curve=<name>&data=<REW text>`, percent-encoded, for the URL FRAGMENT.
+
+    ⚠️ **Built and tested, and NOT yet the path the window takes** (2026-08-25). The loader in the
+    method's page adds the curve TWICE: one fragment load produces two cards, `<name>` and
+    `<name> (loaded)`. Measured on a cleared localStorage with a forced reload and a name the
+    browser had never seen — the first two attempts at this were worthless because changing only
+    the fragment does not reload a page, so nothing ran at all. Reported to the skill; until it is
+    one card, the window keeps using the local injected copy, which was verified to produce
+    exactly three.
+
+    The fragment and not the query on purpose, and it is the method's choice as much as ours: a
+    fragment is never sent to the server, so a person's own measured curve does not reach GitHub's
+    logs on the way to a page that only needed to draw it.
+    """
+    try:
+        text = Path(curve_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return f"curve={quote(name, safe='')}&data={quote(text, safe='')}"
 
 
 def build_local_viewer(curve_path: Path, name: str, out_dir: Optional[Path] = None) -> Optional[Path]:

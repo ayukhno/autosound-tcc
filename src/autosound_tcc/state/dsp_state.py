@@ -33,7 +33,7 @@ channels instead of a table of blanks.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from autosound_tcc.state import project_view
@@ -543,5 +543,30 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     # as having had the new one. Fixing that needs the snapshot to say which project revision it was
     # taken under (SCR-024, raised for exactly this) — not something a consumer can infer.
     channels = project_view.load_channels()
-    return ProjectView.from_dict(raw, profile, hardware_controls=hardware_controls,
-                                  channels=channels)
+    view = ProjectView.from_dict(raw, profile, hardware_controls=hardware_controls,
+                                 channels=channels)
+    # `target` has TWO facts in it and the snapshot only carries one. What a snapshot records is
+    # what it was DESIGNED AGAINST -- historical, correct forever, and stale the moment somebody
+    # picks a different curve. The CURRENT target is a pointer, `process-state.targets[preset]`,
+    # which is the home `plan_audit.missing_records` already reads (skill session, 2026-08-25,
+    # found on a live tune). The header was reading the snapshot, so "set a target, see it in the
+    # header" did not work. Falls back to the snapshot's field, which is right for an old version
+    # and the only answer before any pointer exists.
+    current = current_target(preset)
+    return replace(view, target=current) if current else view
+
+
+def current_target(preset: str, project_dir_: Optional[Any] = None) -> Optional[str]:
+    """The curve this preset is aimed at NOW, from the process state, or None.
+
+    None means "nobody has set one", not "there is no file": a project before phase 0 legitimately
+    has no pointer, and the caller falls back to what the snapshot was designed against.
+    """
+    from autosound_tcc.state import process_view
+
+    state = process_view.load_state(project_dir_) or {}
+    targets = state.get("targets")
+    if not isinstance(targets, dict):
+        return None
+    value = targets.get(preset)
+    return str(value) if value else None
