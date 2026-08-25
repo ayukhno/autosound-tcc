@@ -179,8 +179,10 @@ _REW_DEFAULT_PORT = "4735"
 
 # Human-readable preset names for the header picker (dir names FULL/SQ are the ledger keys).
 _PRESET_LABELS = {
-    "FULL": {"en": '"FULL" (daily)', "uk": '"FULL" (повсякденний)'},
-    "SQ": {"en": '"SQ Jazzi v.2" (competition)', "uk": '"SQ Jazzi v.2" (змагальний)'},
+    "FULL": {"en": '"FULL" (daily)', "uk": '"FULL" (повсякденний)',
+             "pl": '"FULL" (codzienny)', "de": '"FULL" (Alltag)'},
+    "SQ": {"en": '"SQ Jazzi v.2" (competition)', "uk": '"SQ Jazzi v.2" (змагальний)',
+           "pl": '"SQ Jazzi v.2" (zawody)', "de": '"SQ Jazzi v.2" (Wettbewerb)'},
 }
 
 
@@ -798,11 +800,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._diag_btn)
 
         self._lang_combo = _mini_combo()
-        # Display "УК" (Cyrillic, macOS's own convention for Ukrainian) not the Latin "UK" -- that
-        # reads as United Kingdom, not Ukrainian (user request 2026-07-27). Display text is
-        # decoupled from the actual language code via itemData, same pattern as the preset combo.
-        self._lang_combo.addItem("EN", "en")
-        self._lang_combo.addItem("УК", "uk")
+        # Display text is decoupled from the actual language code via itemData, same pattern as
+        # the preset combo. The badges live in `i18n.LANGS` beside the tables, so a new language
+        # appears here by existing rather than by anyone remembering this line.
+        for _code, _badge in i18n.language_badges():
+            self._lang_combo.addItem(_badge, _code)
         idx = self._lang_combo.findData(i18n.current_language())
         if idx >= 0:
             self._lang_combo.setCurrentIndex(idx)
@@ -949,7 +951,7 @@ class MainWindow(QMainWindow):
         lang_menu = self._tip_menu(menu)
         lang_menu.setTitle(i18n.t("menuLanguage"))
         menu.addMenu(lang_menu)
-        for code, label in (("en", i18n.t("langNameEn")), ("uk", i18n.t("langNameUk"))):
+        for code, label in i18n.language_choices():
             action = lang_menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(i18n.current_language() == code)
@@ -1394,8 +1396,7 @@ class MainWindow(QMainWindow):
         gate = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
         return [
-            (i18n.t("cfgLanguage"), i18n.t("langNameUk") if i18n.current_language() == "uk"
-                                    else i18n.t("langNameEn")),
+            (i18n.t("cfgLanguage"), i18n.language_name()),
             (i18n.t("cfgGenerator"), label_for(generator)),
             # Beside the model, because it is half of the same fact: a record that names the model
             # but not how hard it was asked to think does not say what actually ran.
@@ -1927,7 +1928,7 @@ class MainWindow(QMainWindow):
                 said = f"{said} {i18n.t('npSeedOpen').format(open=still_open)}"
             new_window._status_strip.notify(said)
         if dialog.open_terminal_cli is not None:
-            language_name = i18n.t("langNameUk" if i18n.current_language() == "uk" else "langNameEn")
+            language_name = i18n.language_name()
             hint = i18n.t("npOnboardingHint").format(
                 vendor=dialog.onboarding_vendor,
                 model=dialog.onboarding_model,

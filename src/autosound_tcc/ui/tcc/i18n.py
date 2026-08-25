@@ -14,7 +14,26 @@ import weakref
 import shiboken6
 from typing import Callable
 
-Lang = str  # "en" | "uk"
+Lang = str  # "en" | "uk" | "pl" | "de"
+
+#: The languages the UI offers, in the order they are shown: the code the switch stores, the key
+#: holding the language's name, and the badge the header combo shows. ONE list -- the combo, the
+#: menu and the settings summary all read it, so adding a language is adding a table below plus a
+#: row here. The pair of hardcoded `("en", …), ("uk", …)` tuples this replaced is exactly how a
+#: third language comes to exist in the table and stay invisible in the window.
+#:
+#: The NAME is the form that fits INSIDE a sentence, because `npOnboardingHint` interpolates it
+#: ("conduct the interview in {language}" / "Веди інтерв'ю {language}"). Ukrainian settled that by
+#: choosing the instrumental case; Polish and German follow with "po polsku" and "auf Deutsch".
+#:
+#: The BADGE for Ukrainian is Cyrillic "УК" (macOS's own convention) rather than the Latin "UK",
+#: which reads as United Kingdom (user request 2026-07-27).
+LANGS: tuple[tuple[Lang, str, str], ...] = (
+    ("en", "langNameEn", "EN"),
+    ("uk", "langNameUk", "УК"),
+    ("pl", "langNamePl", "PL"),
+    ("de", "langNameDe", "DE"),
+)
 
 T: dict[Lang, dict[str, str]] = {
     "en": {
@@ -198,6 +217,8 @@ answers the first five questions anybody would ask.",
                             "Please conduct the interview in {language}.",
         "langNameEn": "English",
         "langNameUk": "Ukrainian",
+        "langNamePl": "Polish",
+        "langNameDe": "German",
         "npSeed": "System parameters",
         "npSeedNone": "Ask during onboarding (from scratch)",
         "npSeedFrom": "Copy from an existing project…",
@@ -986,6 +1007,8 @@ Choose sweeps (sw) above to read this.",
                             "model={model}. Веди інтерв'ю {language}.",
         "langNameEn": "англійською",
         "langNameUk": "українською",
+        "langNamePl": "польською",
+        "langNameDe": "німецькою",
         "npSeed": "Системні параметри",
         "npSeedNone": "Спитати в інтерв'ю (з нуля)",
         "npSeedFrom": "Скопіювати з наявного проєкту…",
@@ -1532,6 +1555,1659 @@ Choose sweeps (sw) above to read this.",
         "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
                            "(вручну). Ledger оновлено і переатестовано.",
     },
+    "pl": {
+        # Polish
+        "theme": 'motyw',
+        "dspPanel": 'DSP',
+        "projectParams": 'Parametry projektu',
+        "chanSum_channels": 'Kanały',
+        "chanSum_virtual_channels": 'Wirtualne',
+        "chanSum_physical_outputs": 'Wyjściowe',
+        "chanSum_inputs": 'Wejścia',
+        "chanSumOff": '{total} ({off} wył.)',
+        "chanSumAllOn": '{total} (wszystkie wł.)',
+        "cfgLanguage": 'Język',
+        "cfgGenerator": 'Generator AI',
+        "cfgEffort": 'Wysiłek',
+        "cfgCritic": 'Recenzent AI',
+        "cfgTheme": 'Motyw',
+        "cfgGate": 'Uprawnienia',
+        "cfgThemeLight": 'jasny',
+        "cfgThemeDark": 'ciemny',
+        "systemParams": 'Parametry systemu',
+        "audioAnalysis": 'Analiza car audio',
+        "leftNoProfile": 'Procesor jeszcze nieznany. Rozpocznij sesję i powiedz, jaki DSP jest w tym aucie — profil '
+                         'zapisuje się, gdy tylko go nazwiesz, a panel się wypełni.',
+        "leftNoLedger": 'Nie zdjęto jeszcze żadnych ustawień. Drzewo wypełni się, gdy powstanie pierwszy zrzut '
+                        'ledgera — już podczas strojenia.',
+        "planEmpty": 'Planu jeszcze nie ma. Skill zapisuje go, gdy sesja wchodzi w fazę — panel wypełni się, gdy '
+                     'pojawią się i zaczną zamykać kroki.',
+        "planNoProject": 'Nie otwarto projektu.',
+        "noDataYet": 'Brak danych',
+        "openQuestions": 'Otwarte',
+        "openQuestionsTitle": 'Otwarte pytania',
+        "curveRoundEmpty": '{round}: w REW nie ma pomiarów z tego przebiegu — otwarty jest inny projekt albo je '
+                           'usunięto.',
+        "seriesItem": 'seria {v}',
+        "logError": 'Coś poszło nie tak: {error} — szczegóły w {path}',
+        "rewPort": 'Port REW',
+        "rewOnlineTip": 'REW: online',
+        "rewOfflineTip": 'REW: nieosiągalny na tym porcie.\nAPI jest tylko w wersjach BETA REW — wydanie stabilne nie '
+                         'ma zakładki API w ogóle (roomeqwizard.com/beta.html).',
+        "createProject": '+ Utwórz nowy projekt',
+        "refreshProjectTip": 'Wczytaj projekt z dysku ponownie (profil, ledger)',
+        "selfSection": 'Ustawienia samego TCC',
+        "selfAliasTitle": 'Działające aliasy modeli: {n}',
+        "selfAliasDetail": '',
+        "selfAliasNoneTitle": 'Brak aliasów w warstwie samego TCC',
+        "selfAliasNoneDetail": 'To nie to samo, co «wybierak uruchamia to, co pokazuje»: skrypt recenzenta też podmienia, '
+                               'warstwę niżej — spada z API na lokalny CLI, a ten uruchamia model, na który jest ustawiony. '
+                               'Wiersz niżej porównuje, kto faktycznie odpowiedział.',
+        "selfReviewerNeverTitle": 'Recenzenta nie wywołano jeszcze w tym projekcie',
+        "selfReviewerNeverDetail": 'Dopóki nie odpowie, nie ma czego porównywać. Skonfigurowany model to deklaracja; wywołanie '
+                                   'to dowód.',
+        "selfReviewerOkTitle": 'Ostatnia recenzja przyszła od {model} — dokładnie od wybranego',
+        "selfReviewerDiffTitle": 'Odpowiedział nie ten recenzent, którego wybrano',
+        "selfReviewerDiffDetail": 'Wybrano {wanted}; odpowiedział {answered}. Nie pokazuje tego ani wybierak, ani `substituted` '
+                                  '— skrypt recenzenta spada z API Gemini na lokalny CLI (wystarczy 404), a CLI uruchamia '
+                                  'model, który ma ustawiony. Sprawdź, co jest wybrane w `agy`, albo przyjmij, że to jest ten '
+                                  'recenzent.',
+        "selfAliasCrossVendor": '{keys} uruchamia teraz model INNEGO producenta niż wybrany. Jeśli to recenzent — recenzja '
+                                'międzyproducencka się skończyła: sens drugiego producenta jest właśnie w tym, że nie dzieli '
+                                'martwych pól Generatora.',
+        "selfAliasSameModel": '{keys} — ten sam model, tylko zapisany z prefiksem tego, co go uruchamia. Nic nie jest '
+                              'podmienione: tak naprawiono nazwę zapisaną bez prefiksu. Usunięcie aliasu jest bezpieczne, o '
+                              'ile starsze zapisy nie odwołują się już do krótkiej nazwy.',
+        "selfAliasFix": 'Usuń wszystkie aliasy',
+        "selfAliasFixed": 'Usunięto aliasów: {n}. Wybieraki znów uruchamiają to, co pokazują.',
+        "selfCatalogueTitle": 'Zainstalowany, ale milczy: {clis}',
+        "selfCatalogueDetail": 'Ten CLI jest w PATH, a lista modeli wróciła pusta — więc jego trasa zniknęła z wybieraków. '
+                               'Wygląda to dokładnie jak «nie zainstalowano» i tak właśnie zapisany model zaczyna wyglądać '
+                               'na usunięty.',
+        "selfCatalogueFix": 'Zapytaj CLI ponownie',
+        "selfCatalogueFixed": 'Katalog odświeżony: modeli {n}.',
+        "selfCatalogueOkTitle": 'Każdy zainstalowany CLI odpowiedział swoimi modelami',
+        "selfRecommendOkTitle": 'Zalecana para jest tu dostępna',
+        "selfRecommendTitle": 'Nic z dostępnych nie pasuje do zalecanego: {roles}',
+        "selfRecommendDetail": 'Zalecenie to klasa, a nie nazwa modelu ({pairs}, na dzień {since}) — więc nowa wersja '
+                               'którejkolwiek z nich oznacza się sama. Jeśli nie pasuje nic, znaczy że sama klasa odeszła w '
+                               'przeszłość albo jej trasa nie jest zainstalowana. Wybierz świadomie: zapasowego zalecenia '
+                               'nie ma.',
+        "selfCheckFailed": 'Ta kontrola nie mogła się wykonać',
+        "diagFixDone": 'Naprawiono: {what}',
+        "diagTitle": 'Diagnostyka projektu',
+        "diagBtnTip": 'Co TCC znalazł na dysku: maszynowe pliki skilla, sprawdzone',
+        "diagChecking": 'Sprawdzam…',
+        "diagOk": 'OK — nie ma czego naprawiać',
+        "diagIssues": 'Znaleziono problemów: {n}',
+        "diagNoIssues": 'Brak problemów',
+        "diagAsk": 'Poproś sesję',
+        "diagAskText": 'Diagnostyka zgłasza problem w {subject}, słowami samej kontroli:\n\n    {issue}\n\nNapraw to '
+                       'komendami skilla (TCC tych plików nie zapisuje). Gdy skończysz, powiedz, jaką komendę '
+                       'wykonałeś — uruchomię `contract.py check` ponownie i zobaczymy, czy wiersz zniknął.',
+        "diagAskedAgo": 'poproszono {ago}, wciąż jest',
+        "diagAgoNow": 'przed chwilą',
+        "diagAgoMin": '{n} min temu',
+        "diagFiles": 'Pliki maszynowe',
+        "diagCross": 'Kontrole międzyplikowe',
+        "diagOpenQ": 'Otwarte pytania (intake niedokończony)',
+        "diagMissing": 'brak',
+        "diagUnavailable": 'Kontrola kontraktu niedostępna',
+        "diagCheckedAt": 'sprawdzono {at} · {ms} ms',
+        "diagTabProject": 'Projekt',
+        "diagTabInstall": 'Instalacja',
+        "diagTabLog": 'Logi',
+        "diagReport": 'Zgłoś problem',
+        "titleUpdate": 'jest aktualizacja',
+        "updWhy_source_checkout": 'uruchomiono ze źródeł — zaktualizuj przez git',
+        "updWhy_no_network": 'nie udało się połączyć z GitHubem',
+        "updWhy_not_found": 'nie znaleziono na tej maszynie',
+        "updWhy_not_a_checkout": 'to nie jest checkout gita, więc nie ma czego aktualizować na miejscu',
+        "updWhy_on_branch": 'na gałęzi — to czyjś katalog roboczy, a nie zainstalowane wydanie',
+        "updWhy_submodule": 'to submoduł checkoutu — zaktualizuj przez git, w',
+        "updWhy_dirty": 'ma niezacommitowane zmiany, więc zostawiam go w spokoju',
+        "updWhy_no_manifest": 'w manifeście nie ma wersji',
+        "updWhy_git_failed": 'git powiedział',
+        "updTcc": 'Zaktualizuj TCC',
+        "updSkill": 'Zaktualizuj metodę',
+        "updTccName": 'TCC',
+        "updSkillName": 'Metoda',
+        "updChecking": 'sprawdzam aktualizacje…',
+        "updAvailable": '{what} {here} — wyszła nowsza: {there}',
+        "updNewerBuild": '{what} {here} — wyszła nowsza kompilacja tej samej wersji',
+        "updNewerBuildOn": '{what} {here} — wyszła nowsza kompilacja z {date}',
+        "updCurrent": '{what} {here} — aktualna',
+        "updUnknown": 'nie udało się zapytać GitHuba — brak sieci albo ma swój dzień',
+        "updWorking": 'aktualizuję…',
+        "updSkillDone": 'Metoda jest teraz {version} — otwórz sesję AI ponownie, żeby ją podchwyciła',
+        "updTccHanded": 'Terminal jest otwarty i czeka, aż TCC się zamknie. Zamknij TCC — aktualizacja pójdzie sama, '
+                        'potem uruchom TCC ponownie.',
+        "updFailed": 'nie wyszło: {why}',
+        "diagLogNone": 'nie ma pliku logu — ten przebieg pisze tylko do terminala',
+        "diagInstallBlurb": 'Co jest zainstalowane na tej maszynie — wersje, skąd wzięła się każda część, które CLI '
+                            'odpowiadają. Skopiuj do wiadomości, gdy coś zgłaszasz: to odpowiada na pierwsze pięć pytań, '
+                            'które ktokolwiek zada.',
+        "diagInstallReading": 'czytam…',
+        "diagInstallCopy": 'Kopiuj',
+        "diagInstallCopied": 'Skopiowano',
+        "diagRefresh": 'Sprawdź ponownie',
+        "diagClose": 'Zamknij',
+        "diagStripIssues": 'Kontrakt projektu: problemów {n} — zobacz Diagnostykę (⚕)',
+        "diagStripError": 'Kontrola kontraktu niedostępna: {error}',
+        "projectRenderFailed": 'Nie udało się narysować projektu z dysku — na ekranie został ostatni działający widok. '
+                               '{error}',
+        "staleStrip": '{what} — do ponownego zmierzenia kanałów: {n} ({codes})',
+        "missingRecord": 'Nie zapisano: {what} — {why}.',
+        "criticSaved": 'Tekst zapisano w {path}',
+        "acousticsNone": 'Mapy wad jeszcze nie ma. Faza 0 mierzy, co to auto robi z dźwiękiem, i wiersze trafią tutaj '
+                         '— każdy z tym, co z nim wolno, a czego nie wolno zrobić.',
+        "flawHypothesis": 'niepotwierdzone',
+        "flawEvidenceHead": 'Odczytano z:',
+        "flawNoWhy": 'Z tym wpisem nie zapisano przyczyny — tylko sam pomiar.',
+        "flawAllChannels": 'wszystkie kanały',
+        "flawAction_notch": 'ciąć',
+        "flawAction_leave": 'zostawić',
+        "flawAction_no_boost": 'nie podbijać',
+        "flawAction_geometry": 'geometria',
+        "flawAction_delay": 'opóźnienie',
+        "flawAction_crossover": 'crossover',
+        "flawKind_room_gain": 'wzmocnienie kabiny',
+        "flawKind_modal_peak": 'moda kabiny',
+        "flawKind_cabin_null": 'zapadnięcie kabiny',
+        "flawKind_sbir": 'SBIR',
+        "flawKind_floor_bounce": 'odbicie od podłogi',
+        "flawKind_driver_resonance": 'rezonans głośnika',
+        "flawKind_non_min_phase": 'faza nieminimalna',
+        "flawKind_thd_spike": 'skok zniekształceń',
+        "flawKind_pair_suckout": 'zapadnięcie pary',
+        "supervisorUnbacked": 'Te kroki są zamknięte, a ich dowody nie wskazują na nic, co istnieje na dysku ani w '
+                              'REW:<br>{steps}<br>Albo praca jest zapisana tam, gdzie tego nie widzę, albo jej nie było.',
+        "recordTargetCurve": 'krzywa docelowa',
+        "recordTargetCurveWhy": 'faza 0 ją wybiera, a każda kolejna faza jest do niej mierzona — a na dysku nie zostało, '
+                                'którą krzywą wzięto',
+        "measNoTask": 'Zadania zdjęcia jeszcze nie ma. Wynika ono z fazy, słownika nazw i bieżącej wersji ledgera — '
+                      'więc pojawi się, gdy intake ustali nazwy kanałów.',
+        "measPhaseNoCapture": 'Ta faza nie robi pomiarów — pracuje na już zdjętej serii. Następne zadanie zdjęcia pojawi '
+                              'się razem z fazą, która go potrzebuje.',
+        "noProjectMeas": 'Brak projektu — nie ma czego zdejmować.',
+        "npTitle": 'Nowy projekt',
+        "npFolder": 'Folder projektu',
+        "npBrowse": 'Przeglądaj…',
+        "npProfile": 'Profil DSP',
+        "npAddNew": '+ Dodaj nowy (nie ma na liście)',
+        "npVendor": 'Producent DSP',
+        "npVendorPlaceholder": 'np. Helix, Musway',
+        "npModel": 'Model DSP',
+        "npModelPlaceholder": 'np. DSP Ultra S, M6V4',
+        "npRunVia": 'Prowadź onboarding przez',
+        "npRunInApp": 'W aplikacji (Claude)',
+        "npAiModel": 'Model AI',
+        "npTerminalModel": 'Model (opcjonalnie)',
+        "npTerminalModelPlaceholder": 'np. opus, gemini-2.5-pro — puste = domyślny CLI',
+        "npOnboardingHint": 'Skorzystaj ze skilla autosound-tuning do onboardingu profilu DSP. Podłącz się do serwera MCP '
+                            "'tcc' tego projektu (zob. .mcp.json) i wywołaj najpierw jego narzędzie "
+                            'check_existing_profile, dla vendor={vendor} model={model}. Prowadź wywiad {language}.',
+        "langNameEn": 'po angielsku',
+        "langNameUk": 'po ukraińsku',
+        "langNamePl": 'po polsku',
+        "langNameDe": 'po niemiecku',
+        "npSeed": 'Parametry systemu',
+        "npSeedNone": 'Zapytać w wywiadzie (od zera)',
+        "npSeedFrom": 'Skopiuj z istniejącego projektu…',
+        "npSeedPlaceholder": 'Folder projektu, w którym jest project.json',
+        "npSeedFindings": '…i to, co tam zmierzono (wady akustyczne, otwarte pytania)',
+        "npSeedNotAProject": 'Nie ma tu czytelnego project.json — nie ma czego kopiować.',
+        "npSeedSummary": '{car} · {dsp} · kanałów: {channels}',
+        "npSeedNote": '**Odziedziczono z `{source}` ({when}).** Profil systemu skopiowano z tamtego projektu, a nie '
+                      'napisano tutaj — zweryfikuj go z tą instalacją, zanim zaczniesz na nim polegać.',
+        "npSeedFailed": 'Nic nie skopiowano: {problem}',
+        "npSeedDone": 'Parametry systemu skopiowano z «{source}»: {files}. Są odziedziczone, a nie zmierzone tutaj '
+                      '— zweryfikuj je z tą instalacją.',
+        "npSeedHint": 'Parametry systemu skopiowano do tego folderu z projektu «{source}»: NAJPIERW przeczytaj '
+                      'project.json i dsp_profile.json i przejdź je razem z osobą, poprawiając to, co się różni. '
+                      'Nie proś o opisanie auta od zera.',
+        "riTitle": 'Import z projektu Resonalyze',
+        "riFilePlaceholder": 'Sesja wirtualnego DSP Resonalyze (.json)',
+        "riAgainst": 'Zweryfikowano z',
+        "riNoProfile": 'W projekcie nie ma dsp_profile.json — niczego nie zweryfikowano z prawdziwym procesorem. '
+                       'Każda wartość niżej jest pokazana, żadna nie jest sprawdzona.',
+        "riScene": 'Scena stereo',
+        "riSceneNote": 'To, do czego CELUJE Auto balance w Resonalyze. Wynik jest już wewnątrz wzmocnień i opóźnień '
+                       'każdego kanału niżej — nie wprowadzaj go drugi raz.',
+        "riUnbound": 'żaden kanał tego projektu nie pasuje',
+        "riDormant": 'jest w pliku, ale NIE działa (decyduje typ crossovera)',
+        "riDropped": 'odrzucono: pasmo przezroczyste, nic nie wnosi',
+        "riNotChecked": 'Nie sprawdzono, bo profil tego DSP nie podaje granicy',
+        "riBindNone": '— zostaw niepowiązane —',
+        "riBlocked": 'Ten procesor nie przyjmie planu w tej postaci: odmówiono wartości — {refused}, '
+                     'niepowiązanych kanałów — {unbound}. Nic nie jest zaokrąglane pod sprzęt i nic nie jest '
+                     'zapisywane.',
+        "riClear": 'Żadna podana granica tego DSP nie odmawia żadnemu z {legs} kanałów. To odpowiedź o SPRZĘCIE '
+                   '— tryb PC-Tool (Fine EQ) może być węższy, a przełącza się go na ekranie. Żeby wnieść to do '
+                   'projektu, naciśnij „Wyślij do zapisu”: wiersze wraz z prośbą trafią do pola dialogu z AI, '
+                   'gdzie je przeczytasz i wyślesz. Bramka je sprawdzi, zapisze zrzut i wypisze arkusz ustawień, '
+                   'który wprowadzasz w PC-Tool ręcznie.',
+        "riCopyRows": 'Kopiuj wiersze (JSON)',
+        "riCopied": 'Wiersze są w schowku.',
+        "riFailed": 'Nie udało się odczytać tego pliku:',
+        "riClose": 'Zamknij',
+        "riImport": 'Import z projektu Resonalyze…',
+        "npSeedNoInterview": 'Razem z nim przyjdzie dsp_profile.json, więc wywiadu o możliwościach nie będzie — nie ma o '
+                             'co pytać, procesor jest już opisany. Wybierz inny DSP wyżej, a pójdzie jak zwykle.',
+        "npSeedNoSkill": 'Skill autosound-tuning jest tu niedostępny, a kopiowanie mieszka w nim — zainstaluj skill '
+                         'albo wypełnij nowy projekt ręcznie.',
+        "npSeedOpen": 'W odziedziczonym profilu DSP jest jeszcze {open} faktów, których nikt nie potwierdził.',
+        "groupFieldsUnknown": 'sterowanie jeszcze nie wyliczone',
+        "menuProject": 'Projekt',
+        "menuSession": 'Sesja i modele',
+        "menuView": 'Wygląd',
+        "menuTools": 'Narzędzia',
+        "menuHelp": 'Pomoc i wsparcie',
+        "menuLanguage": 'Język',
+        "menuReload": 'Wczytaj ten projekt z dysku ponownie',
+        "menuZoomIn": 'Większy tekst',
+        "menuZoomOut": 'Mniejszy tekst',
+        "menuDiagnostics": 'Diagnostyka i aktualizacje…',
+        "menuTargetTool": 'Narzędzie krzywych docelowych (otworzy przeglądarkę)',
+        "riImportTip": 'Bierze z sesji wirtualnego DSP Resonalyze same USTAWIENIA — po kanałach: crossovery, '
+                       'opóźnienie, wzmocnienie, polaryzację i pasma EQ — i weryfikuje każdą wartość z tym, co twój '
+                       'procesor faktycznie przyjmie. Nie samą sesję, i nic nie zapisuje: odmawia zamiast zaokrąglać '
+                       'i oddaje wiersze, żebyś zapisał je przez bramkę strojenia.',
+        "menuStartSession": 'Rozpocznij sesję strojenia w TCC',
+        "menuTerminal": 'Otwórz terminal w tym projekcie',
+        "menuModels": 'Skonfiguruj modele (OMP)…',
+        "menuTheme": 'Zmień motyw (jasny / ciemny)',
+        "menuCopyCar": 'Skopiuj auto…',
+        "menuCopyCarTip": 'Zacznij projekt od już istniejącego: auto, sprzęt i montaż — marka, głośniki po kanałach, '
+                          'wzmacniacze, mikrofon, DSP i jego profil, słownik nazw. To, co ZMIERZONO w tamtym projekcie, '
+                          'zostaje tam, dopóki nie poprosisz. Poprawiasz to, co się różni, zamiast opisywać własne auto '
+                          'od nowa.',
+        "menuModelsTip": 'Jakich modeli wolno użyć temu projektowi — generator, krytyk i ile mają myśleć. Wszystko '
+                         'oprócz Claude idzie przez OMP, więc to, co zaznaczysz tu, jest tym, po co OMP wolno sięgnąć.',
+        "menuButton": '☰ Menu',
+        "riUnchecked": 'Nic nie sprawdzono. Ten projekt nie mówi, jaki ma procesor, więc wszystkie {legs} kanałów są '
+                       'pokazane, a żaden nie jest zweryfikowany — najpierw załóż auto (Menu ▸ Projekt) albo otwórz '
+                       'to na projekcie, w którym jest dsp_profile.json.',
+        "riUnboundVerdict": '{unbound} z {legs} kanałów pliku nie pasuje do żadnego kanału tego projektu. Ich wartości są '
+                            'w porządku; wiersza bez kanału nie da się zapisać pod żadną nazwą. Powiąż je niżej albo '
+                            'najpierw załóż kanały auta.',
+        "riNoChannels": 'Ten projekt nie ma jeszcze kanałów — nie ma do czego tego powiązać. Najpierw załóż auto: '
+                        'Menu ▸ Projekt ▸ Nowy projekt / Skopiuj auto.',
+        "npCopy": 'Skopiuj',
+        "npSeedTargetTaken": 'W folderze „{folder}” jest już projekt. Kopiowanie nigdy nie nadpisuje faktów, które ktoś '
+                             'potwierdził — wybierz pusty albo nowy folder.',
+        "leftRigOnly": 'To jest układ tak, jak opisuje go projekt — każdy kanał w swoim poziomie, na razie bez '
+                       'wartości. Wartości przyjdą z pierwszym zrzutem ledgera, podczas strojenia.',
+        "riProjectLink": 'Resonalyze autorstwa DIMOSUS — github.com/DIMOSUS/Resonalyze',
+        "riSendRows": 'Wyślij do zapisu',
+        "riSendFirst": 'Import z projektu Resonalyze — {file}. Zweryfikowano z profilem DSP tego projektu: {ok} '
+                       'wartości wchodzi, żadnej odmowy, {unknown} niesprawdzonych. Projekt nie ma jeszcze ledgera, '
+                       'więc zapisz to jako PIERWSZY zrzut presetu {preset}, przez bramkę. Niżej wiersze, po '
+                       'kanałach:',
+        "riSendPropose": 'Import z projektu Resonalyze — {file}. Zweryfikowano z profilem DSP tego projektu: {ok} '
+                         'wartości wchodzi, żadnej odmowy, {unknown} niesprawdzonych. Zaproponuj to jako zmianę '
+                         'presetu {preset} przez bramkę i pokaż arkusz ustawień. Niżej wiersze, po kanałach:',
+        "riPair": 'para {pair}, {side}',
+        "riSideLeft": 'lewa',
+        "riSideRight": 'prawa',
+        "tabGain": 'Poziom',
+        "tabDelay": 'Opóźnienia',
+        "tabPhase": 'Fazy',
+        "paramAllChannels": '{param} · wszystkie kanały',
+        "copyEqBank": 'Kopiuj EQ',
+        "copyEqDone": '{channel}: bank EQ jest w schowku, w formacie {format}.',
+        "copyEqLeftOut": 'Nie weszło, bo ten format tego nie niesie: {what}.',
+        "copyEqNoFormat": 'Formatu EQ dla tego procesora jeszcze nie ma — nic nie skopiowano, zamiast dawać coś, czego '
+                          'nikt nie wklei.',
+        "quitSavingElapsed": 'Zapisuję przed wyjściem — {sec} s (do {max} min). Okno zamknie się samo, gdy model zapisze '
+                             'stan projektu.',
+        "quitAbandonTitle": 'Zapis wciąż trwa',
+        "quitAbandonBody": 'Model zapisuje stan projektu już {sec} s. Zamknij teraz, a to, czego jeszcze nie zapisał, '
+                           'przepadnie — rozmowa odejdzie razem z oknem.',
+        "quitAbandonClose": 'Zamknij bez zapisu',
+        "quitAbandonWait": 'Poczekaj',
+        "copyEqCount": '{written} z {size} pasm — reszta zostanie zapisana jako pusta i nadpisze to, co jest teraz w '
+                       'tych slotach.',
+        "copyEqWritten": 'Pasm: {written}.',
+        "copyEqCrossovers": 'Wraz z crossoverem: {n}.',
+        "copiedValue": 'Skopiowano: {value}',
+        "criticClipboardOnly": 'tylko schowek',
+        "criticClipboardOnlyTip": '{model} to model producenta {vendor}, a ta maszyna nie ma ani jego klucza API, ani jego CLI. '
+                                  '`call_critic` zadziała — odda ci pakiet do recenzji ręcznej — ale nic nie zostanie wywołane.',
+        "criticUnknownVendorTip": 'Skrypt recenzenta wywołuje modele Google, Anthropic albo OpenAI; {model} nie jest żadnym z '
+                                  'nich, więc żaden tutejszy transport go nie uruchomi. Zamiast wywołania odda ci pakiet do '
+                                  'recenzji ręcznej.',
+        "protTitle": 'Filtry ochronne tego przebiegu pomiarów',
+        "protRound": 'Przebieg {series}. Co było w torze, gdy zdejmowano te sweepy.',
+        "protNoRound": 'Nie otwarto przebiegu pomiarów, więc nie ma do czego pisać. Najpierw otwórz przebieg — zapis '
+                       'o ochronie należy do tego przejścia, w którym mierzono.',
+        "protWhy": 'Filtr ochronny siedzi W NAGRANIU: kręci fazą daleko poza własnym zboczem, a styk trzy razy '
+                   'dalej może nieść około pięćdziesięciu stopni, które należą do stanowiska pomiarowego, a nie '
+                   'do auta. Zapisany tutaj — da się go wyjąć z krzywej. „Mierzone bez niczego” to odpowiedź '
+                   'warta zapisania; zostawienie kanału bez zapisu to nie to samo i nic dla niego nie zostanie '
+                   'poprawione.',
+        "protUnset": 'nie podano',
+        "protOff": 'bez ochrony',
+        "protFilter": 'filtry:',
+        "protHp": 'HP Hz',
+        "protLp": 'LP Hz',
+        "protSave": 'Zapisz',
+        "protRefused": '{channel}: {why}',
+        "protBtn": 'Ochrona',
+        "protBtnTip": 'Co było w torze, gdy zdejmowano ten przebieg — po kanałach. Zapisane da się wyjąć z '
+                      'krzywych; niezapisane nie jest poprawiane, bo korekta nad nieznanym torem daje dane, które '
+                      'tylko WYGLĄDAJĄ na poprawione.',
+        "protNoChannels": 'Ten projekt nie ma jeszcze kanałów, więc nie ma do czego pisać filtra ochronnego.',
+        "protWritten": 'Zapisano, co było w torze dla: {channels}. Ich krzywe da się czytać ze zdjętą ochroną.',
+        "npCreate": 'Utwórz',
+        "npCancel": 'Anuluj',
+        "projectNewTip": 'Folder + DSP + kto prowadzi onboarding. Może też ZACZĄĆ SIĘ OD ISTNIEJĄCEGO PROJEKTU: auto, '
+                         'głośniki, słownik i profil DSP przejeżdżają, a ty poprawiasz zamiast opisywać własne auto od '
+                         'nowa.',
+        "projectOpenTip": 'Wskaż TCC inny folder. Pusty też pasuje: stanie się nowym projektem, który wypełni rozmowa o '
+                          'aucie. Potem TCC otworzy się na nowo w wybranym folderze — okno jest związane z jednym '
+                          'projektem od samego startu.',
+        "projectSaveStateTip": 'Prosi model, żeby zapisał plan, dowody i wszystko, czego się dowiedział, do plików projektu. '
+                               'Rozmowa trwa dalej.',
+        "projectFreshSessionTip": 'Najpierw zapisze, potem zacznie od nowa z pustym kontekstem na TYM SAMYM modelu. To nie to '
+                                  'samo, co restart na innym: to dla rozmowy, która zrobiła się długa i droga, podczas gdy jej '
+                                  'wnioski są już na dysku.',
+        "gateTitle": 'Otwórz projekt strojenia',
+        "gateBlurb": 'TCC pracuje na jednym folderze projektu i wiąże się z nim przy starcie. Wybierz istniejący '
+                     'albo wpisz nową ścieżkę — pusty folder to poprawny nowy projekt, wypełni go rozmowa wstępna.',
+        "gateFolder": 'Folder projektu',
+        "gateFolderPlaceholder": '/ścieżka/do/auta',
+        "gateBrowse": 'Przeglądaj…',
+        "gateOpen": 'Otwórz',
+        "gateNote": 'Oba modele zapamiętują się razem z tym projektem, a nie globalnie — inny projekt ma swoje. '
+                    'Zmienisz je później w dolnym pasku.',
+        "projectSwitchTitle": 'Zmień projekt',
+        "projectSwitchBody": 'TCC wiąże jeden folder przy starcie, więc uruchomi się ponownie na „{name}”. Wszystko, czego '
+                             'bieżąca sesja nie zapisała na dysk, przepadnie — zapisz najpierw, jeśli to ważne.',
+        "projectNone": '⌂ wybierz projekt…',
+        "projectOpen": 'Otwórz folder projektu…',
+        "projectNew": 'Nowy projekt…',
+        "projectSaveState": 'Zapisz na dysk to, co wie model',
+        "projectFreshSession": 'Rozpocznij nową sesję (zapisze i wyczyści kontekst)',
+        "projectReopen": 'Folder zmieniony — otwórz TCC ponownie, żeby z nim pracować.',
+        "sessionSaved": 'Stan projektu zapisany na dysk. Sesja trwa dalej.',
+        "savedTccOnly": 'Własne ustawienia TCC są na dysku. Sesja nie działa, więc nie ma o co prosić modelu.',
+        "sessionFresh": 'Sesja zamknięta, stan zapisany — rozpoczynanie nowej z pustym kontekstem.',
+        "generator": 'Generator',
+        "preset": 'Preset',
+        "target": 'Krzywa docelowa',
+        "targetToolTip": 'Otwórz w narzędziu krzywych docelowych ↗',
+        "params": 'PARAMETRY',
+        "virtual": 'WIRTUALNE',
+        "output": 'WYJŚCIOWE',
+        "inputs": 'WEJŚCIA',
+        "paramsRow": 'params · wszystkie parametry w tabeli',
+        "tabTable": 'Tabela',
+        "close": 'zamknij ✕',
+        "outTitle": 'OUTPUT — fizyczne głośniki',
+        "virtTitle": 'VIRTUAL — voicing wejściowy',
+        "colChan": 'Kanał',
+        "eqHint": 'Tylko pasma <b>w użyciu</b>, a przy każdym od razu wszystkie parametry. All-pass (APF) to '
+                  'tutaj TYP pasma, a nie osobna kolumna. Bypass jest pokazany, ale z tego okna nie da się go '
+                  'jeszcze zmienić. Nieużywane pasma banku są ukryte.',
+        "shared": 'wspólne częstotliwości:',
+        "noShared": 'brak wspólnych częstotliwości',
+        "band": 'pasmo',
+        "legWait": 'czekam',
+        "legDone": 'gotowe',
+        "legBad": 'zdjęty, nie nadaje się',
+        "legSkip": 'pominięto',
+        "stepTagOkTip": 'Zamknięty, a jego dowód naprawdę jest na dysku — nazwany plik lub pomiar znaleziono.',
+        "stepTagUnprovenTip": 'Skill zamknął krok, ale dowód, który nazwał, nie wskazuje na nic na dysku: nie ma takiego '
+                              'pliku ani pomiaru o tej nazwie.\n\nTo nie to samo, co krok bez ptaszka. Tamten po prostu nie '
+                              'został skończony; ten zaraportowano jako skończony i nic za nim nie stoi.',
+        "stepTagWaitTip": 'Albo wciąż w toku, albo zamknięty i od tego czasu unieważniony — zmiana konfiguracji '
+                          'oznacza, że jego wynikowi nie można już ufać, więc trzeba zdjąć go ponownie.',
+        "chanOn": 'WŁ',
+        "chanOff": 'WYŁ',
+        "chanTurnOn": 'WŁĄCZ',
+        "chanTurnOff": 'WYŁĄCZ',
+        "chanToggleQueued": 'Poproszono o przełączenie {channel} → {state}. Sesja nie działa, więc prośba czeka w '
+                            'kolejce: model dostanie ją pierwszym ruchem następnej sesji.',
+        "signalNudge": 'TCC zaczął ruch przez {count} twoich próśb z interfejsu — nikt nie rozmawiał, a kliknięcie '
+                       'nie powinno na to czekać.',
+        "signalNudgePrompt": 'Arbiter skorzystał z interfejsu. Najpierw obsłuż sygnały wypisane wyżej, potwierdź każdy '
+                             'przez ack_signals, a potem krótko powiedz, co zrobiłeś.',
+        "chanToggleWaiting": 'poproszono · {secs}s',
+        "chanToggleLate": '⚠ brak odpowiedzi · {secs}s',
+        "chanToggleWaitTip": 'TCC poprosił model, żeby to zapisał; ledger pisze skill, nie TCC. Wiersz zmieni się, gdy '
+                             'model odpowie. Ponowne kliknięcie tylko odświeża oczekiwanie, drugiej prośby nie wysyła.',
+        "chanToggleAlreadyAsked": '{channel} — już poproszono, czekam na model. Drugi raz nie wysłano.',
+        "chanToggleTip": 'Poproś model, żeby włączył albo wyłączył ten kanał. TCC nie pisze ledgera — prośba idzie do '
+                         'sesji, a ona zapisuje zmianę.',
+        "chanToggleSent": 'Poproszono o przełączenie <b>{channel}</b> → {state}. Model zapisze to w ledgerze; drzewo '
+                          'nadąży, gdy zapis powstanie.',
+        "noSessionForSignal": 'Sesja nie działa — uruchom ją, a prośba do niej dotrze.',
+        "chanToggleConfirmTitle": 'Przełączyć ten kanał?',
+        "chanToggleConfirmOff": 'Wyłączyć <b>{channel}</b>?\n\nJego EQ, crossover i opóźnienie żyją w ledgerze i mogą nie '
+                                'przeżyć wyłączenia. TCC tego nie cofnie — zmianę zapisuje model.',
+        "chanToggleConfirmOn": 'Włączyć <b>{channel}</b>?\n\nTo zmiana strukturalna: kanał potrzebuje miejsca w słowniku, a '
+                               'fizyczne wyjście — swojego wirtualnego odpowiednika. Model to wyliczy i zapisze.',
+        "pillMute": 'MUTE',
+        "pillOff": 'OFF',
+        "attempt": 'próba',
+        "addStep": '+ dodaj krok',
+        "addStepPrompt": 'Krok sytuacyjny (tylko ten projekt):',
+        "measRead": 'Odczytaj',
+        "measReading": 'Czytam z REW…',
+        "measReadOk": 'Odczytano z REW pomiarów: {n} · pasuje {matched}, dodatkowych {extra}',
+        "measReadFail": 'Nie udało się odczytać z REW: {error}',
+        "measReadNoMeas": 'W REW nie ma pomiarów.',
+        "measUsedInStep": 'Użyto w kroku {steps}',
+        "assignNames": 'Nadaj nazwy',
+        "captureOrderTitle": 'Kolejność zdejmowania',
+        "captureOrderHint": 'Wybierz metodę zdejmowania, potem przeciągnij, żeby kolejność odpowiadała temu, jak naprawdę '
+                            'zdejmujesz kanały w REW. Zapisuje się osobno dla każdej metody i służy następnym razem.',
+        "captureMethodSw": 'SW',
+        "captureMethodRta": 'RTA',
+        "captureMethodRtaGroup": 'RTA GROUP',
+        "captureScanMismatch": 'W REW znaleziono nowych pomiarów: {found}, oczekiwano {expected} (po jednym na kanał w '
+                               'zapisanej kolejności). Zdejmij brakujące albo sprawdź kolejność i spróbuj ponownie.',
+        "captureRenaming": 'Zmieniam nazwy pomiarów w REW: {n}…',
+        "captureRenameOk": 'Zmieniono nazwy pomiarów zgodnie z zapisaną kolejnością kanałów: {n}.',
+        "captureRenameFail": 'Zmiana nazw zatrzymała się po {n} pomiarach: {error}',
+        "effectProcess": 'zapisać proces (plan, kroki, dziennik)',
+        "effectProfile": 'zapisać profil możliwości DSP',
+        "effectLedger": 'zapisać zrzut ustawień DSP do ledgera',
+        "effectProject": 'zapisać własne pliki projektu',
+        "effectContract": 'sprawdzić projekt według kontraktu skilla',
+        "gateMode": 'Pytać o',
+        "gateWrites": 'każdy zapis',
+        "gateForeign": 'tylko o to, czego skill nie posiada',
+        "gateModeTip": 'Skill nieustannie pisze do `process/`, `state/` i własnych plików projektu, a nowy projekt '
+                       'nie pyta o nic z tego: pytanie przy każdym `ls` to pytanie, które uczysz się przeklikiwać, a '
+                       'wtedy niczego nie chroni. Zatrzymuje się to, co zmienia auto — własne zapisy TCC do DSP i '
+                       'REW pytają wewnątrz narzędzia niezależnie od tego ustawienia. Zawęź tutaj, jeśli chcesz mieć '
+                       'przed oczami także ruch plikowy.',
+        "configureModels": 'modele…',
+        "configureModelsTitle": 'Modele w wyborze generatora',
+        "configureModelsBlurb": 'omp raportuje każdy model, o którym wie. Zaznacz te, do których masz dostęp — właśnie one '
+                                'trafią do wyboru generatora. Claude idzie przez Agent SDK i jest dostępny zawsze.',
+        "configureModelsFilter": 'filtruj po nazwie, dostawcy albo id',
+        "configureModelsCount": 'w katalogu omp: {n}',
+        "configureModelsSetup": 'Skonfiguruj omp…',
+        "configureModelsSetupTip": 'Otwórz własną konfigurację omp w terminalu — tam ustawia się konta, klucze API i logowania. '
+                                   'To ona decyduje, jakie modele pojawią się na liście wyżej, więc gdy skończysz i wrócisz '
+                                   'tutaj, lista zostanie odczytana ponownie. TCC nie trzyma żadnych z tych danych: terminal i '
+                                   'sesja w nim są twoje.',
+        "configureModelsSetupOpened": 'Konfiguracja omp jest otwarta w terminalu. Gdy skończysz, wróć do tego okna — lista zostanie '
+                                      'odczytana ponownie.',
+        "mcpDown": 'Serwer MCP nie działa, więc sesja nie ma przez co sięgnąć do TCC. Uruchom TCC ponownie; '
+                   'jeśli się powtarza — przyczyna jest tutaj i w logu:',
+        "mcpDownLog": 'log:',
+        "modelClipboardOnly": 'tylko schowek',
+        "modelInstallCli": 'zainstaluj CLI {cli}',
+        "modelRecommended": 'zalecana para',
+        "modelGoneTitle": 'Tego modelu już się nie oferuje',
+        "modelGone": 'W projekcie ustawiono {model}, a na tej maszynie nie ma już czym go uruchomić — modele '
+                     'wychodzą z obiegu. Wybierz, co ma działać zamiast niego; podmiana obowiązuje wszędzie, gdzie '
+                     'ta nazwa jeszcze występuje, nie tylko tutaj.',
+        "modelGoneWhy": 'już niedostępny na tej maszynie',
+        "modelAliased": '{old} działa teraz jako {new} na tej maszynie. Sesje to mówią, żeby zapis nie twierdził '
+                        'czegoś innego.',
+        "cliRouteQuiet": '{routes} jest zainstalowany, ale nie podał modeli — mógł wygasnąć jego własny login. Jego '
+                         'pozycji brakuje w wyborze recenzenta, ale to nie znaczy, że trasy nie ma.',
+        "modelFree": 'za darmo',
+        "ompMissing": '⚠️ omp nie jest zainstalowany — brew install can1357/tap/omp, albo wybierz model Claude.',
+        "copyValue": 'Kopiuj wartość',
+        "copyRow": 'Kopiuj wiersz',
+        "copyHint": 'Kopiuj podpowiedź',
+        "copySelection": 'Kopiuj zaznaczenie',
+        "copyMessage": 'Kopiuj wiadomość',
+        "aiMain": 'AI main',
+        "aiEffort": 'Wysiłek',
+        "aiCritic": 'AI critic',
+        "effort_high": 'high',
+        "effort_xhigh": 'x-high',
+        "effort_max": 'max',
+        "effortTip_high": 'Wystarczy do kroków rutynowych. Dolna granica dla strojenia — niżej model zgadza się zbyt '
+                          'łatwo.',
+        "effortTip_xhigh": 'Wartość domyślna, z zapasem. Pasuje do niemal każdego kroku strojenia.',
+        "effortTip_max": 'Do kroku naprawdę trudnego. Nic nie podnosi się tu samo — sesja zaczęta niżej tam zostanie, '
+                         'choćby praca okazała się bardzo trudna. Wolniej, a na trasie licznikowej także drożej.',
+        "effortNextSession": 'Wysiłek zadziała od następnej sesji — ta zostaje na poziomie, z którym wystartowała.',
+        "note": 'prototyp · prawdziwe dane (sound_AutoSci) · dopracowujemy formę',
+        "coffeeBtn": '☕ Postaw mi kawę',
+        "supportGithub": '💜 GitHub Sponsors',
+        "supportMonobank": '☕ Zbiórka na Monobank',
+        "fbBig": 'Napisz do dewelopera',
+        "fbBigTip": 'Błąd, pomysł, pytanie, „to nie ma sensu” — wszystko tutaj. Można dołączyć zrzut ekranu.',
+        "fbHead": 'Opinia o prototypie TCC',
+        "fbHint": 'Napisz, co się podoba / co zmienić. Skorzystaj z przycisków B / I / lista — nie trzeba pisać '
+                  'markdowna ręcznie.',
+        "fbPh": 'Twoja opinia o prototypie…',
+        "fbCancel": 'Anuluj',
+        "fbSendGithub": 'Wyślij na GitHub →',
+        "fbSendForm": 'Wyślij przez formularz →',
+        "fbVia": 'Jak wysłać:',
+        "fbViaGithub": 'Issue na GitHubie (mam konto)',
+        "fbViaForm": 'Formularz Google (konto niepotrzebne)',
+        "dialog": 'Dialog z AI',
+        "dialogSub": 'Generator ↔ Critic ↔ Arbiter',
+        "planTitle": 'Plan — Fakt',
+        "planSub": 'fazy + kroki',
+        "focus": '◆ TERAZ W FOKUSIE',
+        "measSub": 'zadanie pomiarowe',
+        "confirmAlways": 'Nie pytaj o to więcej w tym projekcie',
+        "gateAuto": 'Nie pytaj wcale (auto)',
+        "gateAutoTip": 'Narzędzia harnessa (powłoka, odczyty, edycje) działają bez pytania. Własne zapisy TCC do DSP '
+                       'i REW wciąż pytają — to one zmieniają auto.',
+        "autoAllowed": 'Auto-zgoda na <code>{tool}</code> — pytanie o to jest w tym projekcie wyłączone.',
+        "questionCancelled": 'Pytanie wycofano — tura może trwać dalej.',
+        "questionWithdrawn": 'Agent wycofał to pytanie.',
+        "questionWaiting": 'Czeka na twoją odpowiedź',
+        "questionFreeText": 'Wpisz odpowiedź poniżej — tu nie ma opcji do wyboru.',
+        "questionRole": 'PYTANIE',
+        "composerAnswer": 'Odpowiedz albo wpisz własną…',
+        "composerQueue": 'Napisz do Generatora… (pójdzie, gdy tura się skończy)',
+        "composer": 'Napisz do Generatora…',
+        "queueWaiting": '⏳ {count} twoich wiadomości pójdzie, gdy ta tura się skończy',
+        "queueSendNow": 'Wyślij teraz',
+        "newBelow": '↓ Nowe poniżej · {count}',
+        "newBelowTip": 'Gdy czytałeś, niżej pojawiły się nowe wiadomości. Pierwsze kliknięcie na ich początek, '
+                       'drugie na sam dół.',
+        "messageNotSent": 'Nie wysłano: sesja się zatrzymała. Twój tekst wrócił do pola.',
+        "quitSaving": 'Zapisuję przed wyjściem — czekam, aż model zapisze stan projektu. Okno zamknie się samo, gdy '
+                      'to nastąpi.',
+        "send": 'Wyślij',
+        "stop": 'Stop',
+        "notVisible": 'Nie widzę tej zmiany',
+        "notVisibleHint": 'Powiedz AI, że coś, co zmieniło, nie pojawiło się tutaj — żeby sprawdziło po dysku, zamiast '
+                          'powtarzać swoje twierdzenie.',
+        "notVisibleSent": 'Zaznaczono dla AI: <b>tego, co zgłosiła, tu nie widać</b> — sprawdzi po dysku.',
+        "agentThinking": 'Pracuje…',
+        "agentFailed": 'Błąd sesji',
+        "confirmAllowed": 'Arbiter <b>zezwolił</b> na <code>{tool}</code>.',
+        "confirmDenied": 'Arbiter <b>odrzucił</b> <code>{tool}</code>.',
+        "modelUnchosen": '— wybierz model —',
+        "startSessionNoModel": 'Najpierw wybierz model generatora.',
+        "startSessionReady": 'Uruchom sesję na {model}. Do tego czasu nic nie działa.',
+        "startSessionRunning": 'Sesja już działa.',
+        "restartSession": '▶ Uruchom ponownie na {model}',
+        "restartSessionTip": 'Żaden harness nie zmienia modelu w trwającej rozmowie — bieżąca się zakończy i zacznie się '
+                             'nowa sesja.',
+        "sessionStarting": 'Uruchamiam {model} — pierwsza tura czyta skilla i stan projektu, dlatego jest powolna.',
+        "sessionHandoff": 'Zapisuję stan projektu przed zmianą modelu…',
+        "sessionHandoffSave": 'Proszę model, żeby zapisał to, co wie, do plików projektu…',
+        "sessionHandoffQuit": 'Zapisuję przed zamknięciem — proszę model, żeby zapisał to, co wie, do plików projektu…',
+        "quitSaveSave": 'Zapisz turę',
+        "quitSaveDiscard": 'Nie zapisuj',
+        "quitSaveCancel": 'Zostań',
+        "quitSaveTitle": 'Zapisać przed zamknięciem?',
+        "quitSaveBody": 'Sesja trwa.\n\nTo, czego dowiedziała się w tej turze, nie jest na dysku, dopóki tego nie '
+                        'zapisze — zamknięcie teraz to zgubi. Zapis kosztuje jedną turę.',
+        "sessionHandoffFresh": 'Najpierw zapisuję, potem zaczynam nową sesję z pustym kontekstem…',
+        "sessionRestarted": 'Sesja zamknięta: restart na nowo wybranym modelu.',
+        "dialogIdle": 'nie uruchomiono · {model}',
+        "dialogNoModel": 'nie wybrano modelu',
+        "startSession": '▶ Sesja w TCC',
+        "openTerminal": '⧉ Terminal',
+        "terminalOpened": 'Otwarto terminal z <code>{cli}</code> w folderze projektu. Podchwyci TCC przez '
+                          '<code>.mcp.json</code>; przy pierwszym uruchomieniu zatwierdź serwer <b>tcc</b>.',
+        "criticClipboard": 'Ani API, ani CLI recenzenta nie było osiągalne, więc pakiet jest w <b>schowku</b>. Wklej go '
+                           'w dowolny czat AI, a odpowiedź wklej z powrotem tutaj — pętla działa, tylko idzie przez '
+                           'ciebie.',
+        "criticFailed": 'Wywołanie recenzenta nie powiodło się: {detail}',
+        "criticNotReady": 'Recenzent nie ma jeszcze czego czytać. Przy każdym wywołaniu czyta projekt z dysku od nowa, '
+                          "a ten folder nie przeszedł jeszcze intake'u — kontrakt i kontekst auta powstają, gdy zaczyna "
+                          'się strojenie. Sam kanał jest sprawny; zacznij strojenie, a recenzent zadziała od pierwszej '
+                          'propozycji.',
+        "criticNever": 'Krytyk: jeszcze nie wywoływany',
+        "curveSendMarkers": 'Markery',
+        "curveSendDelays": 'Opóźnienia',
+        "curveShift": 'opóźnienie',
+        "curveShiftTip": 'Przytrzymaj wybrany głośnik — przełącznik wybiera który. Zaczyna od tego, który przychodzi '
+                         'PIERWSZY (naturalny wybór przy pierwszym przejściu); wartość ujemna jest dozwolona, bo przy '
+                         'kolejnych przejściach poprawiasz kanał, w którym opóźnienie już jest. Poniżej zera nie może '
+                         'zejść SUMA na kanale — i odczyt to powie, gdy rejestr jest znany. Krok taki, jaki pozwala '
+                         'wpisać ten DSP. Nic nie jest stosowane: odczyt idzie jako propozycja.',
+        "curveDelayHead": 'opóźnienie do wyrównania (propozycja, nie zastosowano):',
+        "curveApfLabel": 'all-pass:',
+        "curveApfNone": '—',
+        "curveApfTip": 'All-pass dla głośnika wybranego przełącznikiem — tego samego, który poprawia pole '
+                       'opóźnienia. NIE zmienia poziomu i obraca fazę wokół f0: APF1 obraca o −90° na f0 (łącznie 0 '
+                       '→ −180°), APF2 o −180° na f0 (0 → −360°), a Q mówi, jaka część tego obrotu przypada tuż przy '
+                       'f0. Na charakterystyce krzywa się nie rusza; na fazie się obraca; i tu, i tam prognozowana '
+                       'suma (Σ) pokazuje, co to robi ze stykiem — i o to chodzi. Na impulsie narysowany przebieg '
+                       'zostaje taki, jak zdjęty (all-pass rozmazuje impuls); sumę niesie pasek. Nic nie jest '
+                       'stosowane: idzie jako propozycja w odczycie, słowami rejestru (APF2 250 Hz Q 0.71). I '
+                       'all-pass nie wypełnia dołka jednego głośnika — obrotem fazy przestraja się tylko sumę dwóch '
+                       'nakładających się głośników, więc czytaj go po sumie, nigdy po jednej krzywej. Matematyka '
+                       'jest własna skilla (dsp_math), nie ma tu jej drugiej kopii.',
+        "curveApfKindTip": 'Który rząd. APF1: sama f0, tam −90° — łagodniejsza ćwierć obrotu. APF2: f0 i Q, tam −180° — '
+                           'to, co przyjmuje slot APF2 w banku PEQ. Dwa APF1 na jednej f0 to jeden APF2 z Q 0.5.',
+        "curveApfF0Tip": 'Częstotliwość, wokół której obraca się faza. Ustaw ją tam, gdzie jest styk — na '
+                         'częstotliwości crossovera między dwoma sumowanymi głośnikami.',
+        "curveApfQTip": 'Jaka część z 360° przypada tuż przy f0 (tylko APF2). 0.71 obraca mniej więcej przez półtorej '
+                        'oktawy w obie strony od f0; wyższe Q obraca szybciej i gorzej trzyma się przy dryfie, jaki '
+                        'ma prawdziwe auto — własne poszukiwanie skilla zatrzymuje się na 4.',
+        "curveApfHead": 'all-pass do obrotu fazy (propozycja, nie zastosowano):',
+        "curveApfNoMaths": 'nie da się zasymulować all-passa: nie udało się wczytać matematyki filtrów skilla ({error})',
+        "unitMs": 'ms',
+        "unitSmp": 'próbek',
+        "curveDelayRelative": 'Względem {name}, który zostaje bez opóźnienia: mierzono tylko różnice między tymi '
+                              'głośnikami, więc zestaw podano od tego, który potrzebuje najmniej.',
+        "curveDelayLands": 'przyjście {was} → {now} ms',
+        "curveDelayTotal": 'na kanale → {total} ms',
+        "curveDelayBelowZero": '⚠ poniżej zera — kanał nie może tam zejść',
+        "curveBankImpossible": 'Coś z tego wyprowadza kanał poniżej zera, więc zestawu w tej postaci nie da się zastosować — '
+                               'powiedz, który punkt odniesienia ruszyć zamiast tego.',
+        "curveBankLabel": 'odczytane opóźnienia:',
+        "curveBankLabelIn": 'odczytane opóźnienia w {set}:',
+        "curveBankBtn": 'Odczytane opóźnienia ({n})',
+        "curveSumNoteBtn": 'Σ prognoza',
+        "curveGuidesTip": 'Zdejmij z obrazu wszystkie prowadnice: markery, poziomy, linię krzyżową i jej punkty. Nic '
+                          'nie ginie — każda wraca dokładnie tam, gdzie była, a odczyt zostaje tym samym zdaniem, bo '
+                          'niewidoczny marker to wciąż liczba, którą zdjąłeś. Gdy są schowane, nie da się ich '
+                          'przeciągnąć.',
+        "curveStripLinkTip": 'Podążaj za skalą częstotliwości wykresu. Na fazie pasek i wykres to te same częstotliwości, '
+                             'więc jeden zoom rusza obydwa i to, co widać na 3 kHz u góry, jest na 3 kHz na dole. Wyłącz, '
+                             'żeby przybliżyć dołek osobno, i włącz z powrotem, żeby znów je zestawić. Na impulsowej '
+                             'niedostępne: tam osią jest czas.',
+        "curveReadoutBtn": 'Markery',
+        "curveBankEmpty": 'opóźnień jeszcze nie ma — ustaw wyżej, a zostanie zapamiętane przy pomiarze',
+        "curveClearLabel": 'wyczyść:',
+        "curveClearDelay": 'Opóźnienia',
+        "curveClearMarkers": 'Markery',
+        "curveBankAsk": 'Opóźnienia odczytane przeze mnie z krzywych, TYLKO DO ANALIZY — nigdzie ich nie zapisuj i '
+                        'nie traktuj jako zmiany:',
+        "curveBankConvention": 'Umowa: wszystkie pomiary mają wspólny początek czasu (0 ms na osi impulsowej). Każda liczba '
+                               'niżej dodaje się do przyjścia TEGO pomiaru, tak jak go zdjęto; celem jest, żeby wszystkie '
+                               'głośniki wypadły na tym samym przyjściu.',
+        "curveBankArrival": 'przyjście',
+        "curveBankChannel": 'kanał',
+        "curveBankSpread": 'Rozrzut przyjść na {n} rozmieszczonych głośnikach: {spread} ms.',
+        "curveBankAtZero": 'Na ekranie, przesunięcia nie podano (0). To może być odniesienie, od którego liczono resztę, '
+                           'albo po prostu głośnik, do którego jeszcze nie doszły ręce — z tych danych nie da się tego '
+                           'rozróżnić: {names}',
+        "curveBankUnplaced": 'NIE rozmieszczone — na tych nie zrobiono jeszcze odczytu, więc nie ma ich na obrazie wyżej i '
+                             'NIE wolno zakładać, że są na zerze: {names}',
+        "curveBankNotForWriting": 'Powiedz, czy ten zestaw jest spójny: jakie przyjścia oznacza, czy coś z tego nie wygląda '
+                                  'raczej na błąd pomiaru niż na strojenie, i co sprawdziłbyś dalej. To odczyty z krzywych, a '
+                                  'nie cel — samo dokładne zrównanie przyjść nie naprawiało w tym aucie dokładności sceny, więc '
+                                  'traktuj je jako świadectwo i powiedz, co byś zmienił i dlaczego. Nic z tego nie jest '
+                                  'zastosowane.',
+        "curveBankAskApfOnly": 'Filtry all-pass, które ustawiłem na zmierzonych krzywych, TYLKO DO ANALIZY — nic nie '
+                               'zapisuj.',
+        "curveBankApf": 'All-pass po głośnikach, ustawiane przy obserwacji prognozowanej sumy (propozycja, nie '
+                        'zastosowano; nie zmienia poziomu, tylko fazę; APF1 = −90° na f0, APF2 = −180° na f0):',
+        "curveBankApfCaveat": 'Zasymulowane na posiadanych sweepach przez obrót zmierzonej fazy; NIE zweryfikowane pomiarem '
+                              'sumowania. Powiedz, czy ten obrót naprawia styk, czy tylko przenosi problem (i ciągnie za '
+                              'sobą timing powyżej f0), i jaki pomiar by to potwierdził.',
+        "curveNoMarkers": 'Przeciągnij marker na punkt, który masz na myśli.',
+        "curveMarkerModel": 'model',
+        "curveMarkerYou": 'ty',
+        "curveMarkerOne": '1',
+        "curveMarkerTwo": '2',
+        "curveMarkerN": 'marker {n}',
+        "curveTitle": 'Gdzie dokładnie?',
+        "curveAxes_v": 'Markery czytają częstotliwość (pionowe)',
+        "curveAxes_h": 'Markery czytają poziom (poziome)',
+        "curveAxes_vh": 'Markery czytają jedno i drugie, ustawiane osobno',
+        "curveAxes_vhs": 'Jeden punkt na krzywej daje oba — poziom idzie za częstotliwością',
+        "curveAxes_vx": 'Jedna pionowa linia: czyta OBIE krzywe przy tym x i różnicę między nimi',
+        "curveAxes_hx": 'Jedna pozioma linia: czyta, gdzie KAŻDA krzywa osiąga ten poziom (przecięcie najbliższe '
+                        'środka widoku)',
+        "curveCrossPairTip": 'Które dwie krzywe porównują Vx i Hx. Czytają jedną różnicę między jedną parą, więc gdy '
+                             'krzywych jest więcej — parę wskazujesz ty; zwykłe markery V/H/VH nadal czytają każdą krzywą, '
+                             'po jednej liczbie na każdą.',
+        "curveSumTip": 'Σ — pokaż, co te głośniki robią RAZEM: zespolona suma krzywych na ekranie, kreskowana, w dB, '
+                       'z już zastosowanym opóźnieniem każdego głośnika. Na fazie kładzie się na wykres po prawej '
+                       'osi; na impulsowej dostaje własny pasek pod spodem, bo tam osią wykresu jest czas, a sumy — '
+                       'częstotliwość. To arytmetyka na pomiarach, które już masz, więc zgadywanie nic nie kosztuje '
+                       'i nigdzie nic się nie zapisuje. Znaczy coś tylko wtedy, gdy wszystkie pomiary zdjęto od '
+                       'JEDNEGO wspólnego odniesienia czasu; przycisk Σ pod wykresem niesie werdykt — co sprawdzono, '
+                       'a czego nie.',
+        "curveSumHead": 'Prognozowana suma, kreskowana, w dB:',
+        "curveSumWorst": 'Najniższy punkt sumy: {depth} dB względem najgłośniejszego pojedynczego głośnika w tym '
+                         'miejscu, przy {hz} Hz.',
+        "curveSumNone": 'Sumy nie narysowano.',
+        "curveSumNoPlot": 'Ten widok nie zdołał zbudować osi, na której rysuje się sumę, więc nie ma jej gdzie położyć. '
+                          'Reszty okna to nie dotyczy.',
+        "curveSumTooFew": 'Jedna krzywa to nie suma: postaw na ekranie drugi pomiar.',
+        "curveSumNoData": 'Te krzywe nie niosą ani amplitudy, ani fazy, żeby je dodać — nie pochodzą ze sweepa REW.',
+        "curveGroupLabel": 'wypełnij:',
+        "curveGroupNone": '— bez grupy —',
+        "curveGroupKind_pairs": 'para',
+        "curveGroupKind_joints": 'styk',
+        "curveGroupKind_sides": 'strona',
+        "curveGroupKind_combos": 'zestaw',
+        "curveGroupNoGlossary": '— w tym projekcie nie ma słownika —',
+        "curveGroupTip": 'Wypełnij wybór całą grupą naraz — mid-basy, średnie, sub+mid-basy, jedną stronę, wszystko. '
+                         'Nazwy pochodzą ze słownika tego auta, a sweepy — te z wersji konfiguracji obok. Nic zbędnego '
+                         'się nie dociąga: uczestnik, dla którego REW nie ma sweepa, zostaje wymieniony, a nie po '
+                         'cichu pominięty. Grupa WYPEŁNIA i puszcza: zdejmiesz potem jeden chip i nic się nie '
+                         'podstawia z powrotem — i właśnie tak słychać, co ten jeden głośnik robi ze stykiem.',
+        "curveGroupVersionTip": 'Z której serii pomiarów bierze się sweepy grupy — to konfiguracja DSP, pod którą je zdjęto; '
+                                'w nazwie pomiaru w REW stoi jako `_N` i tak samo nazywa się w panelu pomiarów. Zaczyna od '
+                                'serii wspólnej dla krzywych już na ekranie albo od najnowszej, jaką to auto ma dla tych '
+                                'głośników, i można ją zmienić.',
+        "curveGroupMissing": '{group} na _{version}: {names} — tego nie ma w REW. Narysowano sumę innego zestawu.',
+        "curveGroupEmpty": '{group} na _{version}: w REW nie ma sweepa żadnego uczestnika, więc nic nie zmieniono.',
+        "curveChooseBtn": 'Wybierz… ({n})',
+        "curveChooseTip": 'Zaznacz dowolne pomiary — suma przyjmie ich tyle, ile dasz. Menu zostaje otwarte, więc cała '
+                          'strona to jedno przejście przez listę. Wszystko zaznaczone stoi jako chip wyżej, w kolorze '
+                          'swojej krzywej; grupa obok wypełnia te same chipy jednym ruchem.',
+        "curveChipRemoveTip": 'Zdejmij {title} z wykresu. Reszta zostaje na miejscu, a suma przelicza się bez niego — i '
+                              'właśnie tak słychać, co ten jeden głośnik robi ze stykiem.',
+        "curveChipOnlyTip": 'Jedyna krzywa na ekranie. Dodaj drugą, zanim zdejmiesz tę — okno, które nic nie rysuje, nic '
+                            'nie mówi.',
+        "curveChipMissingTip": 'REW nie dał krzywej dla {title}, więc nie ma go na wykresie, choć jest zaznaczony — i w '
+                               'sumie też go nie ma. Dlatego jest blady.',
+        "curveAt": 'przy',
+        "curveZoomAll": 'Pokaż wszystko, co jest w pomiarze',
+        "curveZoomAllShort": 'A',
+        "curveZoomDetail": 'Z powrotem do zakresu, od którego zaczęliśmy',
+        "curveZoomDetailShort": 'D',
+        "curveZoomOut": 'Oddal',
+        "curveZoomOutShort": '−',
+        "curveZoomIn": 'Przybliż',
+        "curveZoomInShort": '+',
+        "curveKind_impulse": 'impulsowa',
+        "curveKind_fr": 'charakterystyka',
+        "curveKind_phase": 'faza',
+        "curveRtaOnly": 'Pokazano charakterystykę: {titles} — pomiar MMM, a dla niego REW nie ma ani impulsowej, ani '
+                        'fazy.',
+        "curveRtaTip": 'Pomiar MMM: REW nie ma dla niego ani impulsowej, ani fazy. Przejdź na charakterystykę, żeby '
+                       'zobaczyć go na wykresie.',
+        "curveKindRtaTip": 'Nie dla pomiaru MMM — REW nie ma dla niego ani impulsowej, ani fazy. Żeby to czytać, wybierz '
+                           'wyżej sweepy (sw).',
+        "curveBtn": 'Krzywe — postaw marker tam, gdzie masz na myśli',
+        "curveNothing": 'Nie ma jeszcze czego rysować — najpierw odczytaj pomiary z REW.',
+        "curveLoading": 'Czytam krzywe z REW…',
+        "curveFailed": 'Nie udało się odczytać z REW: {error}',
+        "modelMissingRow": '{key} — tu niedostępny',
+        "modelMissingTip": 'Ten projekt prosi o model, którego ta maszyna nie oferuje. Zostaje wybrany i zostaje '
+                           'czerwony, dopóki nie wybierzesz innego — nic nie jest przekierowywane za twoimi plecami.',
+        "modelUnconfirmed": 'z poprzedniego uruchomienia',
+        "attachTip": 'Dołącz zrzut ekranu — zapisuje się w projekcie, model czyta plik',
+        "attachTitle": 'Dołącz zrzut ekranu',
+        "attachClear": 'Wyczyść',
+        "attachEmptyMac": '⌘⌃⇧4 kopiuje zrzut do schowka (⌘⇧4 zamiast tego zapisuje go na Biurku). Potem naciśnij tu '
+                          '⌘V.',
+        "attachEmptyWin": 'Win+Shift+S kopiuje zrzut do schowka. Potem naciśnij tu Ctrl+V.',
+        "attachEmptyOther": 'Skopiuj zrzut do schowka, potem naciśnij tu Ctrl+V.',
+        "attachCaption": 'Co na nim jest — np. „impulsowa w-L, pierwszy szczyt”',
+        "criticWarnTitle": 'O recenzencie',
+        "criticSubstituted": 'podmieniono',
+        "criticAnswered": 'odpowiedział {model}',
+        "criticSameVendor": 'ten sam producent co Generator',
+        "criticSameVendorTip": 'Recenzent i Generator to obaj {vendor}. Recenzja nadal się odbywa, ale recenzent wybrany dla '
+                               'niezależności międzyproducenckiej przestał nią być — waż jego zgodę niżej albo przywróć '
+                               'innego producenta.',
+        "sdkNoLogin": 'claude nie jest zalogowany',
+        "sdkNoLoginTip": 'Modele Claude działają przez twoją własną sesję `claude` — TCC nie ma własnego konta i nie '
+                         'zaloguje cię za ciebie. Dopóki się nie zalogujesz, ta trasa nie odpowie, cokolwiek pokazuje '
+                         'wybierak. W terminalu wykonaj:\n\n    {cmd}',
+        "criticStatus": 'Krytyk · {model} · {ago}',
+        "sessionResumed": 'wznowiono',
+        "sessionNew": 'nowa sesja',
+        "editChipLabel": 'Edycja parametrów projektu',
+        "editReasonsQ": 'Dlaczego?',
+        "reasonForgot": 'skill nie zapisał',
+        "reasonManual": 'zmieniłem coś ręcznie',
+        "editStartForgot": '◆ Edycja parametrów projektu — oznaczono: skill mógł nie zapisać ostatniej zmiany. Opisz, co '
+                           'powinno być w ledgerze; sprawdzę i poprawię.',
+        "editStartManual": '◆ Edycja parametrów projektu — zmieniłeś coś ręcznie. Powiedz, co i gdzie; zapiszę to w '
+                           'ledgerze, żeby kolejne rekomendacje to uwzględniały.',
+        "editDoneForgot": '✓ Sprawdzono ledger: w <code>Rear R Full</code> opóźnienie w dialogu wynosiło 9.5 ms, a na '
+                          'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
+        "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
+                          'zaktualizowany i ponownie zatwierdzony.',
+    },
+    "de": {
+        # German
+        "theme": 'Thema',
+        "dspPanel": 'DSP',
+        "projectParams": 'Projektparameter',
+        "chanSum_channels": 'Kanäle',
+        "chanSum_virtual_channels": 'Virtuelle',
+        "chanSum_physical_outputs": 'Ausgänge',
+        "chanSum_inputs": 'Eingänge',
+        "chanSumOff": '{total} ({off} aus)',
+        "chanSumAllOn": '{total} (alle an)',
+        "cfgLanguage": 'Sprache',
+        "cfgGenerator": 'KI-Generator',
+        "cfgEffort": 'Aufwand',
+        "cfgCritic": 'KI-Prüfer',
+        "cfgTheme": 'Thema',
+        "cfgGate": 'Berechtigungen',
+        "cfgThemeLight": 'hell',
+        "cfgThemeDark": 'dunkel',
+        "systemParams": 'Systemparameter',
+        "audioAnalysis": 'Car-Audio-Analyse',
+        "leftNoProfile": 'Noch kein DSP bekannt. Starte eine Sitzung und nenne den Prozessor dieses Autos — das Profil '
+                         'wird geschrieben, sobald er benannt ist, und dieses Panel füllt sich.',
+        "leftNoLedger": 'Noch keine Einstellungen erfasst. Der Baum füllt sich, sobald der erste Ledger-Schnappschuss '
+                        'geschrieben wird, während des Einmessens.',
+        "planEmpty": 'Noch kein Plan. Der Skill schreibt ihn, wenn eine Sitzung eine Phase betritt; dieses Panel '
+                     'füllt sich, während Schritte hinzukommen und geschlossen werden.',
+        "planNoProject": 'Kein Projekt geöffnet.',
+        "noDataYet": 'Noch keine Daten',
+        "openQuestions": 'Offen',
+        "openQuestionsTitle": 'Offene Fragen',
+        "curveRoundEmpty": '{round}: REW hat die Messungen dieser Runde nicht — es ist ein anderes Projekt geöffnet, '
+                           'oder sie wurden gelöscht.',
+        "seriesItem": 'Serie {v}',
+        "logError": 'Etwas ist schiefgelaufen: {error} — Details in {path}',
+        "rewPort": 'REW-Port',
+        "rewOnlineTip": 'REW: online',
+        "rewOfflineTip": 'REW: auf diesem Port nicht erreichbar.\nDie API gibt es nur in den BETA-Builds von REW — die '
+                         'Release-Version hat gar keinen API-Reiter (roomeqwizard.com/beta.html).',
+        "createProject": '+ Neues Projekt anlegen',
+        "refreshProjectTip": 'Projekt neu von der Platte lesen (Profil, Ledger)',
+        "selfSection": 'TCCs eigene Einstellungen',
+        "selfAliasTitle": '{n} Modell-Alias(e) aktiv',
+        "selfAliasDetail": '',
+        "selfAliasNoneTitle": 'Keine Modell-Aliase in TCCs eigener Schicht',
+        "selfAliasNoneDetail": 'Das ist nicht dasselbe wie „die Auswahl startet, was sie anzeigt“: das Prüfer-Skript ersetzt '
+                               'ebenfalls, eine Schicht tiefer — es fällt von der API auf ein lokales CLI zurück, und dieses '
+                               'CLI startet das Modell, auf das es eingestellt ist. Die Zeile darunter vergleicht, wer '
+                               'tatsächlich geantwortet hat.',
+        "selfReviewerNeverTitle": 'Der Prüfer wurde in diesem Projekt noch nicht aufgerufen',
+        "selfReviewerNeverDetail": 'Solange er nicht einmal geantwortet hat, gibt es nichts zu vergleichen. Ein eingestelltes '
+                                   'Modell ist eine Behauptung; ein Aufruf ist ein Beleg.',
+        "selfReviewerOkTitle": 'Die letzte Prüfung kam von {model}, also von dem angeforderten Modell',
+        "selfReviewerDiffTitle": 'Geantwortet hat nicht der ausgewählte Prüfer',
+        "selfReviewerDiffDetail": 'Angefordert war {wanted}; geantwortet hat {answered}. Weder die Auswahl noch `substituted` '
+                                  'zeigt das — das Prüfer-Skript fällt von der Gemini-API auf das lokale CLI zurück (ein 404 '
+                                  'genügt), und das CLI startet das Modell, auf das es gerade eingestellt ist. Prüfe, was in '
+                                  '`agy` ausgewählt ist, oder akzeptiere diesen Prüfer.',
+        "selfAliasCrossVendor": '{keys} startet jetzt ein Modell eines ANDEREN Anbieters als angefordert. Wenn das der Prüfer '
+                                'ist, hat die anbieterübergreifende Prüfung aufgehört — der Sinn eines zweiten Anbieters ist '
+                                'gerade, dass er die blinden Flecken des Generators nicht teilt.',
+        "selfAliasSameModel": '{keys} — dasselbe Modell, nur mit dem Präfix dessen genannt, was es startet. Nichts wird '
+                              'ersetzt: damit wird ein ohne Präfix geschriebener Name repariert, und den Alias zu entfernen '
+                              'ist sicher, solange kein älterer Eintrag noch auf den kurzen Namen verweist.',
+        "selfAliasFix": 'Alle Aliase entfernen',
+        "selfAliasFixed": '{n} Alias(e) entfernt. Die Auswahlen starten wieder, was sie anzeigen.',
+        "selfCatalogueTitle": 'Installiert, aber stumm: {clis}',
+        "selfCatalogueDetail": 'Dieses CLI liegt im PATH und seine Modellliste kam leer zurück, also fehlt seine Route in '
+                               'den Auswahlen — was sich genau wie „nicht installiert“ liest, und so kommt ein gespeichertes '
+                               'Modell dazu, verschwunden zu wirken.',
+        "selfCatalogueFix": 'Die CLIs erneut fragen',
+        "selfCatalogueFixed": 'Katalog aktualisiert: {n} Modell(e).',
+        "selfCatalogueOkTitle": 'Jedes installierte CLI hat mit seinen Modellen geantwortet',
+        "selfRecommendOkTitle": 'Das empfohlene Paar ist hier verfügbar',
+        "selfRecommendTitle": 'Nichts im Angebot entspricht der Empfehlung {roles}',
+        "selfRecommendDetail": 'Die Empfehlung ist eine Klasse, kein Modellname — {pairs}, Stand {since} —, deshalb wird '
+                               'eine neue Version von beiden automatisch markiert. Passt nichts, dann ist die Klasse selbst '
+                               'ausgelaufen oder ihre Route ist nicht installiert. Wähle bewusst; es gibt keine Empfehlung, '
+                               'auf die man zurückfallen kann.',
+        "selfCheckFailed": 'Diese Prüfung konnte nicht laufen',
+        "diagFixDone": 'Behoben: {what}',
+        "diagTitle": 'Projektdiagnose',
+        "diagBtnTip": 'Was TCC auf der Platte gefunden hat: die Maschinendateien des Skills, geprüft',
+        "diagChecking": 'Prüfe…',
+        "diagOk": 'OK — nichts zu beheben',
+        "diagIssues": '{n} Problem(e) gefunden',
+        "diagNoIssues": 'Keine Probleme',
+        "diagAsk": 'Die Sitzung bitten',
+        "diagAskText": 'Die Diagnose meldet ein Problem in {subject}, in den Worten der Prüfung selbst:\n\n    {issue}\n\n'
+                       'Behebe es mit den eigenen Befehlen des Skills (TCC schreibt diese Dateien nicht). Sag '
+                       'danach, welchen Befehl du ausgeführt hast — ich lasse `contract.py check` erneut laufen, und '
+                       'wir sehen, ob die Zeile weg ist.',
+        "diagAskedAgo": 'vor {ago} gebeten, immer noch da',
+        "diagAgoNow": 'gerade eben',
+        "diagAgoMin": 'vor {n} Min.',
+        "diagFiles": 'Maschinendateien',
+        "diagCross": 'Dateiübergreifende Prüfungen',
+        "diagOpenQ": 'Offene Fragen (Intake unvollständig)',
+        "diagMissing": 'fehlt',
+        "diagUnavailable": 'Vertragsprüfung nicht verfügbar',
+        "diagCheckedAt": 'geprüft {at} · {ms} ms',
+        "diagTabProject": 'Projekt',
+        "diagTabInstall": 'Installation',
+        "diagTabLog": 'Protokoll',
+        "diagReport": 'Problem melden',
+        "titleUpdate": 'Update verfügbar',
+        "updWhy_source_checkout": 'läuft aus einem Quell-Checkout — aktualisiere ihn mit git',
+        "updWhy_no_network": 'GitHub war nicht erreichbar',
+        "updWhy_not_found": 'auf dieser Maschine nicht gefunden',
+        "updWhy_not_a_checkout": 'kein git-Checkout, also gibt es nichts an Ort und Stelle zu aktualisieren',
+        "updWhy_on_branch": 'auf einem Branch — jemandes Arbeitsverzeichnis, kein installiertes Release',
+        "updWhy_submodule": 'ein Submodul eines Checkouts — aktualisiere es mit git, in',
+        "updWhy_dirty": 'hat uncommittete Änderungen und bleibt deshalb unangetastet',
+        "updWhy_no_manifest": 'keine Version im Manifest',
+        "updWhy_git_failed": 'git sagte',
+        "updTcc": 'TCC aktualisieren',
+        "updSkill": 'Methode aktualisieren',
+        "updTccName": 'TCC',
+        "updSkillName": 'Die Methode',
+        "updChecking": 'suche nach Updates…',
+        "updAvailable": '{what} {here} — eine neuere ist da: {there}',
+        "updNewerBuild": '{what} {here} — ein neuerer Build derselben Version ist da',
+        "updNewerBuildOn": '{what} {here} — ein neuerer Build ist da, vom {date}',
+        "updCurrent": '{what} {here} — aktuell',
+        "updUnknown": 'GitHub ließ sich nicht fragen — kein Netz, oder er hat seinen Tag',
+        "updWorking": 'aktualisiere…',
+        "updSkillDone": 'Die Methode ist jetzt {version} — öffne die KI-Sitzung neu, damit sie sie übernimmt',
+        "updTccHanded": 'Ein Terminal ist offen und wartet darauf, dass TCC sich schließt. Beende TCC — das Update '
+                        'läuft von selbst, danach starte TCC wieder.',
+        "updFailed": 'hat nicht geklappt: {why}',
+        "diagLogNone": 'keine Protokolldatei — dieser Lauf schreibt nur ins Terminal',
+        "diagInstallBlurb": 'Was auf dieser Maschine installiert ist — Versionen, woher jedes Teil kam, welche CLIs '
+                            'antworten. Kopiere es in eine Nachricht, wenn du etwas meldest: es beantwortet die ersten '
+                            'fünf Fragen, die jeder stellen würde.',
+        "diagInstallReading": 'lese…',
+        "diagInstallCopy": 'Kopieren',
+        "diagInstallCopied": 'Kopiert',
+        "diagRefresh": 'Erneut prüfen',
+        "diagClose": 'Schließen',
+        "diagStripIssues": 'Projektvertrag: {n} Problem(e) — siehe Diagnose (⚕)',
+        "diagStripError": 'Vertragsprüfung nicht verfügbar: {error}',
+        "projectRenderFailed": 'Das Projekt ließ sich nicht von der Platte zeichnen — auf dem Bildschirm steht noch die '
+                               'letzte funktionierende Ansicht. {error}',
+        "staleStrip": '{what} — {n} Kanal/Kanäle müssen neu gemessen werden: {codes}',
+        "missingRecord": 'Nicht festgehalten: {what} — {why}.',
+        "criticSaved": 'Text gespeichert in {path}',
+        "acousticsNone": 'Noch keine Fehlerkarte. Phase 0 misst, was dieser Innenraum mit dem Klang macht, und die '
+                         'Zeilen landen hier — jede mit dem, was man dagegen tun darf und was nicht.',
+        "flawHypothesis": 'nicht bestätigt',
+        "flawEvidenceHead": 'Abgelesen aus:',
+        "flawNoWhy": 'Zu diesem Eintrag wurde kein Grund festgehalten — nur die Messung selbst.',
+        "flawAllChannels": 'alle Kanäle',
+        "flawAction_notch": 'schneiden',
+        "flawAction_leave": 'belassen',
+        "flawAction_no_boost": 'nie anheben',
+        "flawAction_geometry": 'Geometrie',
+        "flawAction_delay": 'Delay',
+        "flawAction_crossover": 'Frequenzweiche',
+        "flawKind_room_gain": 'Room Gain',
+        "flawKind_modal_peak": 'Kabinenmode',
+        "flawKind_cabin_null": 'Kabinen-Auslöschung',
+        "flawKind_sbir": 'SBIR',
+        "flawKind_floor_bounce": 'Bodenreflexion',
+        "flawKind_driver_resonance": 'Chassis-Resonanz',
+        "flawKind_non_min_phase": 'nicht-minimalphasig',
+        "flawKind_thd_spike": 'Klirr-Spitze',
+        "flawKind_pair_suckout": 'Auslöschung im Paar',
+        "supervisorUnbacked": 'Diese Schritte sind geschlossen, und ihre Belege nennen nichts, was auf der Platte oder in '
+                              'REW existiert:<br>{steps}<br>Entweder ist die Arbeit irgendwo festgehalten, wohin ich nicht '
+                              'sehe, oder sie wurde nicht getan.',
+        "recordTargetCurve": 'die Zielkurve',
+        "recordTargetCurveWhy": 'Phase 0 wählt sie, und jede spätere Phase wird gegen sie gemessen, aber auf der Platte steht '
+                                'nirgends, welche Kurve genommen wurde',
+        "measNoTask": 'Noch keine Messaufgabe. Sie ergibt sich aus der Phase, dem Namensglossar und der aktuellen '
+                      'Ledger-Version — sie erscheint also, sobald der Intake die Kanalnamen festgelegt hat.',
+        "measPhaseNoCapture": 'Diese Phase misst nicht — sie arbeitet mit der bereits erfassten Serie. Die nächste '
+                              'Messaufgabe erscheint mit der Phase, die eine braucht.',
+        "noProjectMeas": 'Kein Projekt — noch nichts zu messen.',
+        "npTitle": 'Neues Projekt',
+        "npFolder": 'Projektordner',
+        "npBrowse": 'Durchsuchen…',
+        "npProfile": 'DSP-Profil',
+        "npAddNew": '+ Neu hinzufügen (nicht in der Liste)',
+        "npVendor": 'DSP-Hersteller',
+        "npVendorPlaceholder": 'z. B. Helix, Musway',
+        "npModel": 'DSP-Modell',
+        "npModelPlaceholder": 'z. B. DSP Ultra S, M6V4',
+        "npRunVia": 'Onboarding durchführen über',
+        "npRunInApp": 'In der App (Claude)',
+        "npAiModel": 'KI-Modell',
+        "npTerminalModel": 'Modell (optional)',
+        "npTerminalModelPlaceholder": 'z. B. opus, gemini-2.5-pro — leer = Standard des CLI',
+        "npOnboardingHint": 'Nutze den Skill autosound-tuning für das Onboarding des DSP-Profils. Verbinde dich mit dem '
+                            "'tcc'-MCP-Server dieses Projekts (siehe .mcp.json) und rufe zuerst dessen Werkzeug "
+                            'check_existing_profile auf, für vendor={vendor} model={model}. Führe das Interview '
+                            '{language}.',
+        "langNameEn": 'auf Englisch',
+        "langNameUk": 'auf Ukrainisch',
+        "langNamePl": 'auf Polnisch',
+        "langNameDe": 'auf Deutsch',
+        "npSeed": 'Systemparameter',
+        "npSeedNone": 'Im Interview fragen (von Grund auf)',
+        "npSeedFrom": 'Aus einem bestehenden Projekt kopieren…',
+        "npSeedPlaceholder": 'Ordner eines Projekts mit einer project.json',
+        "npSeedFindings": '…und was dort gemessen wurde (akustische Fehler, offene Fragen)',
+        "npSeedNotAProject": 'Hier gibt es keine lesbare project.json — nichts zu kopieren.',
+        "npSeedSummary": '{car} · {dsp} · {channels} Kanäle',
+        "npSeedNote": '**Geerbt von `{source}` ({when}).** Das Systemprofil wurde aus jenem Projekt kopiert, nicht '
+                      'hier geschrieben — gleiche es mit diesem Aufbau ab, bevor du dich darauf verlässt.',
+        "npSeedFailed": 'Es wurde nichts kopiert: {problem}',
+        "npSeedDone": 'Systemparameter aus „{source}“ kopiert: {files}. Sie sind geerbt, nicht hier gemessen — '
+                      'gleiche sie mit diesem Aufbau ab.',
+        "npSeedHint": 'Die Systemparameter wurden aus dem Projekt „{source}“ in diesen Ordner kopiert: lies ZUERST '
+                      'project.json und dsp_profile.json und geh sie mit der Person durch, wobei du korrigierst, '
+                      'was abweicht. Bitte nicht darum, das Auto von Grund auf zu beschreiben.',
+        "riTitle": 'Import aus einem Resonalyze-Projekt',
+        "riFilePlaceholder": 'Eine Resonalyze-Sitzung des virtuellen DSP (.json)',
+        "riAgainst": 'Geprüft gegen',
+        "riNoProfile": 'In diesem Projekt gibt es keine dsp_profile.json — es wurde gegen keinen realen Prozessor '
+                       'geprüft. Jeder Wert unten wird berichtet, keiner ist verifiziert.',
+        "riScene": 'Stereobühne',
+        "riSceneNote": 'Worauf Resonalyzes Auto balance zielt. Es steckt bereits in den Pegeln und Delays der '
+                       'einzelnen Kanäle unten — gib es kein zweites Mal ein.',
+        "riUnbound": 'kein Kanal dieses Projekts passt',
+        "riDormant": 'in der Datei, aber NICHT aktiv (die Art der Weiche entscheidet)',
+        "riDropped": 'verworfen: transparent, trägt nichts bei',
+        "riNotChecked": 'Nicht geprüft, weil dieses DSP-Profil die Grenze nicht nennt',
+        "riBindNone": '— nicht zuordnen —',
+        "riBlocked": 'Dieser Prozessor kann den Plan so nicht bekommen: {refused} Wert(e) abgelehnt, {unbound} '
+                     'Kanal/Kanäle nicht zugeordnet. Es wird nichts passend gerundet und nichts geschrieben.',
+        "riClear": 'Keine angegebene Grenze dieses DSP lehnt einen der {legs} Kanäle ab. Das ist die Antwort für '
+                   'die HARDWARE — ein PC-Tool-Modus (Fine EQ) kann enger sein, und umgeschaltet wird er am '
+                   'Bildschirm. Um es ins Projekt zu holen, drücke „Zum Eintragen senden“: die Zeilen und die '
+                   'Bitte landen im Eingabefeld des KI-Dialogs, wo du sie liest und absendest. Das Gate prüft '
+                   'sie, schreibt den Schnappschuss und erzeugt das Einstellungsblatt, das du im PC-Tool von '
+                   'Hand einträgst.',
+        "riCopyRows": 'Zeilen kopieren (JSON)',
+        "riCopied": 'Die Zeilen liegen in der Zwischenablage.',
+        "riFailed": 'Diese Datei konnte nicht gelesen werden:',
+        "riClose": 'Schließen',
+        "riImport": 'Aus einem Resonalyze-Projekt importieren…',
+        "npSeedNoInterview": 'Seine dsp_profile.json kommt mit, also entfällt das Fähigkeiten-Interview — zu einem bereits '
+                             'beschriebenen Prozessor bleibt nichts zu fragen. Wähle oben ein anderes DSP, dann läuft es '
+                             'wie gewohnt.',
+        "npSeedNoSkill": 'Der Skill autosound-tuning ist hier nicht verfügbar, und das Kopieren steckt in ihm — '
+                         'installiere den Skill, oder fülle das neue Projekt von Hand aus.',
+        "npSeedOpen": 'Im geerbten DSP-Profil stehen noch {open} Fakt(en), die niemand bestätigt hat.',
+        "groupFieldsUnknown": 'Regler noch nicht aufgezählt',
+        "menuProject": 'Projekt',
+        "menuSession": 'Sitzung und Modelle',
+        "menuView": 'Darstellung',
+        "menuTools": 'Werkzeuge',
+        "menuHelp": 'Hilfe und Support',
+        "menuLanguage": 'Sprache',
+        "menuReload": 'Dieses Projekt neu von der Platte lesen',
+        "menuZoomIn": 'Größerer Text',
+        "menuZoomOut": 'Kleinerer Text',
+        "menuDiagnostics": 'Diagnose und Updates…',
+        "menuTargetTool": 'Zielkurven-Werkzeug (öffnet den Browser)',
+        "riImportTip": 'Holt die EINSTELLUNGEN aus einer Resonalyze-Sitzung des virtuellen DSP — pro Kanal: Weichen, '
+                       'Delay, Pegel, Polarität und die EQ-Bänder — und prüft jeden Wert gegen das, was dein '
+                       'Prozessor tatsächlich annehmen kann. Nicht die Sitzung selbst, und es wird nichts '
+                       'geschrieben: es lehnt ab statt zu runden und gibt dir die Zeilen, um sie durchs Einmess-Gate '
+                       'einzutragen.',
+        "menuStartSession": 'Eine Einmess-Sitzung in TCC starten',
+        "menuTerminal": 'Ein Terminal in diesem Projekt öffnen',
+        "menuModels": 'Modelle einrichten (OMP)…',
+        "menuTheme": 'Thema wechseln (hell / dunkel)',
+        "menuCopyCar": 'Das Auto kopieren…',
+        "menuCopyCarTip": 'Ein Projekt aus einem bestehenden beginnen: das Auto, die Anlage und der Einbau — Marke, '
+                          'Chassis pro Kanal, Endstufen, Mikrofon, das DSP und sein Profil, das Namensglossar. Was im '
+                          'anderen Projekt GEMESSEN wurde, bleibt dort, solange du es nicht anforderst. Du korrigierst, '
+                          'was abweicht, statt dein Auto erneut zu beschreiben.',
+        "menuModelsTip": 'Welche Modelle dieses Projekt verwenden darf — den Generator, den Kritiker und wie '
+                         'angestrengt sie denken sollen. Alles außer Claude läuft über OMP, also ist das hier '
+                         'Markierte das, wonach OMP greifen darf.',
+        "menuButton": '☰ Menü',
+        "riUnchecked": 'Es wurde nichts geprüft. Dieses Projekt sagt nicht, welchen Prozessor es hat, also werden '
+                       'alle {legs} Kanäle berichtet und keiner ist verifiziert — richte zuerst das Auto ein (Menü ▸ '
+                       'Projekt), oder öffne dies in einem Projekt mit einer dsp_profile.json.',
+        "riUnboundVerdict": '{unbound} der {legs} Kanäle der Datei passen zu keinem Kanal dieses Projekts. Ihre Werte '
+                            'sind in Ordnung; eine Zeile ohne Kanal lässt sich unter keinem Namen eintragen. Ordne sie '
+                            'unten zu, oder richte zuerst die Kanäle des Autos ein.',
+        "riNoChannels": 'Dieses Projekt hat noch keine Kanäle — es gibt nichts, dem man dies zuordnen könnte. Richte '
+                        'zuerst das Auto ein: Menü ▸ Projekt ▸ Neues Projekt / Das Auto kopieren.',
+        "npCopy": 'Kopieren',
+        "npSeedTargetTaken": 'Im Ordner „{folder}“ liegt bereits ein Projekt. Kopieren schreibt nie über Fakten, die '
+                             'jemand bestätigt hat — wähle einen leeren oder einen neuen Ordner.',
+        "leftRigOnly": 'So beschreibt das Projekt die Anlage — jeder Kanal in seiner Ebene, noch ohne Werte. Die '
+                       'Werte kommen mit dem ersten Ledger-Schnappschuss, während des Einmessens.',
+        "riProjectLink": 'Resonalyze von DIMOSUS — github.com/DIMOSUS/Resonalyze',
+        "riSendRows": 'Zum Eintragen senden',
+        "riSendFirst": 'Import aus einem Resonalyze-Projekt — {file}. Gegen das DSP-Profil dieses Projekts geprüft: '
+                       '{ok} Werte eintragbar, keiner abgelehnt, {unknown} nicht überprüfbar. Dieses Projekt hat '
+                       'noch kein Ledger, trage es also als ERSTEN Schnappschuss des Presets {preset} ein, durchs '
+                       'Gate. Es folgen die Zeilen, nach Kanal:',
+        "riSendPropose": 'Import aus einem Resonalyze-Projekt — {file}. Gegen das DSP-Profil dieses Projekts geprüft: '
+                         '{ok} Werte eintragbar, keiner abgelehnt, {unknown} nicht überprüfbar. Schlage es als '
+                         'Änderung am Preset {preset} durchs Gate vor und zeig mir das Einstellungsblatt. Es folgen '
+                         'die Zeilen, nach Kanal:',
+        "riPair": 'Paar {pair} {side}',
+        "riSideLeft": 'links',
+        "riSideRight": 'rechts',
+        "tabGain": 'Pegel',
+        "tabDelay": 'Delays',
+        "tabPhase": 'Phasen',
+        "paramAllChannels": '{param} · alle Kanäle',
+        "copyEqBank": 'EQ kopieren',
+        "copyEqDone": '{channel}: der EQ-Satz liegt in der Zwischenablage, im Format {format}.',
+        "copyEqLeftOut": 'Nicht übernommen, weil dieses Format es nicht tragen kann: {what}.',
+        "copyEqNoFormat": 'Für diesen Prozessor gibt es noch kein EQ-Format — es wurde nichts kopiert, statt etwas, das '
+                          'niemand einfügen könnte.',
+        "quitSavingElapsed": 'Speichere vor dem Beenden — bisher {sec} s (bis zu {max} Min.). Das Fenster schließt sich '
+                             'von selbst, sobald das Modell das Projekt festgehalten hat.',
+        "quitAbandonTitle": 'Das Speichern läuft noch',
+        "quitAbandonBody": 'Das Modell hält das Projekt seit {sec} s fest. Schließt du jetzt, ist alles verloren, was es '
+                           'noch nicht geschrieben hat — das Gespräch geht mit dem Fenster.',
+        "quitAbandonClose": 'Ohne Speichern schließen',
+        "quitAbandonWait": 'Weiter warten',
+        "copyEqCount": '{written} von {size} Bändern — der Rest wird leer geschrieben und überschreibt, was in '
+                       'diesen Plätzen steht.',
+        "copyEqWritten": '{written} Band/Bänder.',
+        "copyEqCrossovers": 'Weichenzweige enthalten: {n}.',
+        "copiedValue": 'Kopiert: {value}',
+        "criticClipboardOnly": 'nur Zwischenablage',
+        "criticClipboardOnlyTip": '{model} ist ein Modell von {vendor}, und diese Maschine hat weder dessen API-Schlüssel noch '
+                                  'dessen CLI. `call_critic` funktioniert weiterhin — es gibt dir das Paket zur Prüfung von '
+                                  'Hand —, aber es wird nichts aufgerufen.',
+        "criticUnknownVendorTip": 'Das Prüfer-Skript ruft Modelle von Google, Anthropic oder OpenAI auf; {model} ist keines '
+                                  'davon, also kann kein Transport hier es starten. Es gibt dir stattdessen ein Paket zur '
+                                  'Prüfung von Hand.',
+        "protTitle": 'Schutzfilter dieser Messrunde',
+        "protRound": 'Runde {series}. Was im Signalweg war, während diese Sweeps aufgenommen wurden.',
+        "protNoRound": 'Es ist keine Messrunde offen, also gibt es nichts, wozu man etwas festhalten könnte. Öffne '
+                       'zuerst eine Runde — ein Schutz-Eintrag gehört zu dem Durchgang, in dem gemessen wurde.',
+        "protWhy": 'Ein Schutzfilter steckt IN der Aufnahme: er dreht die Phase weit über seine eigene '
+                   'Eckfrequenz hinaus, und eine Übernahme dreimal weiter oben kann rund fünfzig Grad tragen, '
+                   'die zum Messaufbau gehören und nicht zum Auto. Hier festgehalten, lässt er sich wieder aus '
+                   'der Kurve herausrechnen. „Ohne alles gemessen“ ist eine Antwort, die festzuhalten sich '
+                   'lohnt; einen Kanal gar nicht einzutragen ist nicht dasselbe, und für ihn wird nichts '
+                   'korrigiert.',
+        "protUnset": 'nicht erfasst',
+        "protOff": 'kein Schutz',
+        "protFilter": 'Filter:',
+        "protHp": 'HP Hz',
+        "protLp": 'LP Hz',
+        "protSave": 'Eintragen',
+        "protRefused": '{channel}: {why}',
+        "protBtn": 'Schutz',
+        "protBtnTip": 'Was im Signalweg war, während diese Runde gemessen wurde — pro Kanal. Festgehalten, lässt es '
+                      'sich wieder aus den Kurven herausrechnen; nicht festgehalten, wird nichts korrigiert, denn '
+                      'eine Korrektur über einen unbekannten Signalweg erzeugt Daten, die nur korrigiert aussehen.',
+        "protNoChannels": 'Dieses Projekt hat noch keine Kanäle, also gibt es nichts, wozu man einen Schutzfilter '
+                          'eintragen könnte.',
+        "protWritten": 'Festgehalten, was im Signalweg lag für: {channels}. Ihre Kurven lassen sich mit '
+                       'herausgerechnetem Schutz lesen.',
+        "npCreate": 'Anlegen',
+        "npCancel": 'Abbrechen',
+        "projectNewTip": 'Ordner + DSP + wer das Onboarding führt. Es kann auch VON EINEM BESTEHENDEN PROJEKT '
+                         'AUSGEHEN: das Auto, die Chassis, das Glossar und das DSP-Profil kommen mit, und du '
+                         'korrigierst, statt dein Auto erneut zu beschreiben.',
+        "projectOpenTip": 'Zeig TCC einen anderen Ordner. Ein leerer geht auch: er wird ein neues Projekt, und das '
+                          'Aufnahmegespräch füllt es. TCC öffnet sich danach neu auf dem gewählten Ordner — das Fenster '
+                          'ist von Anfang an an ein Projekt gebunden.',
+        "projectSaveStateTip": 'Bittet das Modell, den Plan, die Belege und alles Gelernte in die Projektdateien zu '
+                               'schreiben. Das Gespräch geht weiter.',
+        "projectFreshSessionTip": 'Speichert zuerst und beginnt dann mit leerem Kontext auf DEMSELBEN Modell neu. Nicht '
+                                  'dasselbe wie ein Neustart auf einem anderen: das ist für ein Gespräch, das lang und teuer '
+                                  'geworden ist, während seine Schlüsse schon auf der Platte stehen.',
+        "gateTitle": 'Ein Einmess-Projekt öffnen',
+        "gateBlurb": 'TCC arbeitet an einem Projektordner und bindet sich beim Start an ihn. Wähle einen '
+                     'bestehenden, oder tippe einen neuen Pfad — ein leerer Ordner ist ein gültiges neues Projekt, '
+                     'das Aufnahmegespräch füllt es.',
+        "gateFolder": 'Projektordner',
+        "gateFolderPlaceholder": '/pfad/zum/auto',
+        "gateBrowse": 'Durchsuchen…',
+        "gateOpen": 'Öffnen',
+        "gateNote": 'Beide Modelle werden mit diesem Projekt gemerkt, nicht global — ein anderes Projekt behält '
+                    'seine eigenen. Ändern kannst du sie später in der Fußleiste.',
+        "projectSwitchTitle": 'Projekt wechseln',
+        "projectSwitchBody": 'TCC bindet beim Start einen Ordner, also startet es auf „{name}“ neu. Alles, was die '
+                             'laufende Sitzung nicht auf die Platte geschrieben hat, geht verloren — speichere zuerst, '
+                             'wenn das zählt.',
+        "projectNone": '⌂ Projekt wählen…',
+        "projectOpen": 'Projektordner öffnen…',
+        "projectNew": 'Neues Projekt…',
+        "projectSaveState": 'Auf die Platte schreiben, was das Modell weiß',
+        "projectFreshSession": 'Neue Sitzung beginnen (speichert, dann Kontext leeren)',
+        "projectReopen": 'Ordner gewechselt — öffne TCC neu, um damit zu arbeiten.',
+        "sessionSaved": 'Projektzustand auf die Platte geschrieben. Die Sitzung läuft weiter.',
+        "savedTccOnly": 'TCCs eigene Einstellungen liegen auf der Platte. Es läuft keine Sitzung, also gibt es '
+                        'nichts, worum man das Modell bitten könnte.',
+        "sessionFresh": 'Sitzung beendet und Zustand gespeichert — beginne eine neue mit leerem Kontext.',
+        "generator": 'Generator',
+        "preset": 'Preset',
+        "target": 'Zielkurve',
+        "targetToolTip": 'Im Zielkurven-Werkzeug öffnen ↗',
+        "params": 'PARAMETER',
+        "virtual": 'VIRTUELL',
+        "output": 'AUSGÄNGE',
+        "inputs": 'EINGÄNGE',
+        "paramsRow": 'params · alle Parameter als Tabelle',
+        "tabTable": 'Tabelle',
+        "close": 'schließen ✕',
+        "outTitle": 'OUTPUT — physische Chassis',
+        "virtTitle": 'VIRTUAL — Eingangs-Voicing',
+        "colChan": 'Kanal',
+        "eqHint": 'Nur die <b>benutzten</b> Bänder, mit allen Parametern des jeweiligen Bandes auf einmal. Ein '
+                  'Allpass (APF) ist hier ein Band-TYP, keine eigene Spalte. Bypass wird angezeigt, lässt sich '
+                  'aus diesem Fenster aber noch nicht ändern. Die ungenutzten Bänder des Satzes sind '
+                  'ausgeblendet.',
+        "shared": 'gemeinsame Frequenzen:',
+        "noShared": 'keine gemeinsamen Frequenzen',
+        "band": 'Band',
+        "legWait": 'warte',
+        "legDone": 'fertig',
+        "legBad": 'aufgenommen, unbrauchbar',
+        "legSkip": 'übersprungen',
+        "stepTagOkTip": 'Geschlossen, und der Beleg liegt wirklich auf der Platte — die genannte Datei oder Messung '
+                        'wurde gefunden.',
+        "stepTagUnprovenTip": 'Vom Skill geschlossen, aber der genannte Beleg löst sich auf der Platte zu nichts auf: keine '
+                              'solche Datei, und keine Messung dieses Namens.\n\nDas ist nicht dasselbe wie ein nicht '
+                              'abgehakter Schritt. Ein solcher wurde nie fertig; dieser wurde als fertig gemeldet und hat '
+                              'nichts hinter sich.',
+        "stepTagWaitTip": 'Entweder noch in Arbeit, oder geschlossen und seither ungültig — eine Konfigurationsänderung '
+                          'bedeutet, dass dem Ergebnis nicht mehr zu trauen ist, es muss also neu aufgenommen werden.',
+        "chanOn": 'AN',
+        "chanOff": 'AUS',
+        "chanTurnOn": 'EINSCHALTEN',
+        "chanTurnOff": 'AUSSCHALTEN',
+        "chanToggleQueued": 'Es wurde gebeten, {channel} → {state} zu schalten. Es läuft keine Sitzung, also wartet es in '
+                            'der Schlange: das Modell bekommt es im ersten Zug der nächsten Sitzung.',
+        "signalNudge": 'TCC hat einen Zug für {count} Anfrage(n) begonnen, die du in der Oberfläche gestellt hast — '
+                       'es sprach niemand, und ein Klick sollte darauf nicht warten müssen.',
+        "signalNudgePrompt": 'Der Arbiter hat die Oberfläche benutzt. Bearbeite zuerst die oben aufgeführten Signale, '
+                             'bestätige jedes mit ack_signals und sag dann kurz, was du getan hast.',
+        "chanToggleWaiting": 'gefragt · {secs}s',
+        "chanToggleLate": '⚠ keine Antwort · {secs}s',
+        "chanToggleWaitTip": 'TCC hat das Modell gebeten, dies festzuhalten; das Ledger zu schreiben ist Sache des Skills. '
+                             'Die Zeile ändert sich, wenn das Modell antwortet. Erneut zu fragen, solange das steht, '
+                             'frischt nur die Wartezeit auf und sendet keine zweite Anfrage.',
+        "chanToggleAlreadyAsked": '{channel} — bereits gefragt, warte auf das Modell. Nicht zweimal gesendet.',
+        "chanToggleTip": 'Bitte das Modell, diesen Kanal ein- oder auszuschalten. TCC schreibt das Ledger nicht — die '
+                         'Anfrage geht an die Sitzung, die die Änderung festhält.',
+        "chanToggleSent": 'Es wurde gebeten, <b>{channel}</b> {state} zu schalten. Das Modell hält es im Ledger fest; '
+                          'der Baum folgt, sobald es geschrieben ist.',
+        "noSessionForSignal": 'Es läuft keine Sitzung — starte eine, und die Anfrage erreicht sie.',
+        "chanToggleConfirmTitle": 'Diesen Kanal schalten?',
+        "chanToggleConfirmOff": '<b>{channel}</b> ausschalten?\n\nSein EQ, seine Weiche und sein Delay leben im Ledger und '
+                                'überstehen das Ausschalten womöglich nicht. TCC kann das nicht rückgängig machen — die '
+                                'Änderung hält das Modell fest.',
+        "chanToggleConfirmOn": '<b>{channel}</b> einschalten?\n\nDas ist eine strukturelle Änderung: der Kanal braucht seinen '
+                               'Platz im Glossar, und ein physischer Ausgang braucht sein virtuelles Gegenstück. Das Modell '
+                               'klärt das und hält es fest.',
+        "pillMute": 'MUTE',
+        "pillOff": 'OFF',
+        "attempt": 'Versuch',
+        "addStep": '+ Schritt hinzufügen',
+        "addStepPrompt": 'Situativer Schritt (nur dieses Projekt):',
+        "measRead": 'Lesen',
+        "measReading": 'Lese aus REW…',
+        "measReadOk": '{n} Messung(en) aus REW gelesen · {matched} zugeordnet, {extra} zusätzlich',
+        "measReadFail": 'Konnte nicht aus REW lesen: {error}',
+        "measReadNoMeas": 'In REW wurden keine Messungen gefunden.',
+        "measUsedInStep": 'Verwendet in Schritt {steps}',
+        "assignNames": 'Namen vergeben',
+        "captureOrderTitle": 'Messreihenfolge',
+        "captureOrderHint": 'Wähle die Messmethode und zieh dann die Zeilen so, dass die Reihenfolge der entspricht, in '
+                            'der du die Kanäle in REW wirklich aufnimmst. Pro Methode gespeichert und beim nächsten Mal '
+                            'wiederverwendet.',
+        "captureMethodSw": 'SW',
+        "captureMethodRta": 'RTA',
+        "captureMethodRtaGroup": 'RTA GROUP',
+        "captureScanMismatch": '{found} neue Messung(en) in REW gefunden, erwartet waren {expected} (eine je Kanal in der '
+                               'gespeicherten Reihenfolge). Nimm die fehlenden auf oder prüfe die Reihenfolge, dann versuch '
+                               'es erneut.',
+        "captureRenaming": 'Benenne {n} Messung(en) in REW um…',
+        "captureRenameOk": '{n} Messung(en) passend zur gespeicherten Kanalreihenfolge umbenannt.',
+        "captureRenameFail": 'Umbenennen nach {n} Messung(en) fehlgeschlagen: {error}',
+        "effectProcess": 'den Prozess festhalten (Plan, Schritte, Journal)',
+        "effectProfile": 'das Fähigkeitsprofil des DSP schreiben',
+        "effectLedger": 'einen Ledger-Schnappschuss der DSP-Einstellungen eintragen',
+        "effectProject": 'die eigenen Dateien des Projekts schreiben',
+        "effectContract": 'das Projekt gegen den Vertrag des Skills prüfen',
+        "gateMode": 'Fragen bei',
+        "gateWrites": 'jedem Schreibvorgang',
+        "gateForeign": 'nur bei dem, was dem Skill nicht gehört',
+        "gateModeTip": 'Der Skill schreibt ständig in `process/`, `state/` und die eigenen Dateien des Projekts, und '
+                       'ein neues Projekt fragt zu all dem nicht: eine Rückfrage bei jedem `ls` ist eine, die man '
+                       'wegzuklicken lernt, und die schützt dann nichts. Was weiterhin für dich anhält, ist das, was '
+                       'das Auto verändert — TCCs eigene Schreibvorgänge ins DSP und nach REW fragen im Werkzeug '
+                       'selbst nach, wie das hier auch steht. Verenge es hier, wenn du auch den Dateiverkehr vor '
+                       'Augen haben willst.',
+        "configureModels": 'Modelle…',
+        "configureModelsTitle": 'Modelle in der Generator-Auswahl',
+        "configureModelsBlurb": 'omp meldet jedes Modell, das es kennt. Hake die an, zu denen du Zugang hast — genau die '
+                                'bietet die Generator-Auswahl an. Claude läuft über das Agent SDK und ist immer verfügbar.',
+        "configureModelsFilter": 'nach Name, Anbieter oder ID filtern',
+        "configureModelsCount": '{n} Modelle in omps Katalog',
+        "configureModelsSetup": 'omp einrichten…',
+        "configureModelsSetupTip": 'Öffne omps eigene Einrichtung in einem Terminal — dort werden Konten, API-Schlüssel und '
+                                   'Anmeldungen konfiguriert. Sie entscheidet, welche Modelle oben in der Liste erscheinen; wenn '
+                                   'du fertig bist und hierher zurückkommst, wird die Liste neu gelesen. TCC hält keine dieser '
+                                   'Zugangsdaten: das Terminal und die Sitzung darin gehören dir.',
+        "configureModelsSetupOpened": 'omps Einrichtung ist in einem Terminal offen. Wenn sie fertig ist, komm in dieses Fenster '
+                                      'zurück — die Liste wird neu gelesen.',
+        "mcpDown": 'Der MCP-Server läuft nicht, also hat eine Sitzung nichts, worüber sie TCC erreichen könnte. '
+                   'Starte TCC neu; wenn es weiter passiert, steht der Grund hier und im Protokoll:',
+        "mcpDownLog": 'Protokoll:',
+        "modelClipboardOnly": 'nur Zwischenablage',
+        "modelInstallCli": 'installiere das CLI {cli}',
+        "modelRecommended": 'empfohlenes Paar',
+        "modelGoneTitle": 'Dieses Modell wird nicht mehr angeboten',
+        "modelGone": 'Dieses Projekt steht auf {model}, und nichts auf dieser Maschine kann es noch starten — '
+                     'Modelle laufen aus. Wähle, was an seiner Stelle laufen soll; die Zuordnung gilt überall, wo '
+                     'dieser Name noch auftaucht, nicht nur hier.',
+        "modelGoneWhy": 'auf dieser Maschine nicht mehr angeboten',
+        "modelAliased": '{old} läuft auf dieser Maschine jetzt als {new}. Die Sitzungen sagen das, damit der Eintrag '
+                        'nichts anderes behauptet.',
+        "cliRouteQuiet": '{routes} ist installiert, hat aber keine Modelle aufgelistet — womöglich ist seine eigene '
+                         'Anmeldung abgelaufen. Seine Einträge fehlen in der Prüfer-Auswahl, sie sind nicht '
+                         'verschwunden.',
+        "modelFree": 'kostenlos',
+        "ompMissing": '⚠️ omp ist nicht installiert — brew install can1357/tap/omp, oder wähle ein Claude-Modell.',
+        "copyValue": 'Wert kopieren',
+        "copyRow": 'Zeile kopieren',
+        "copyHint": 'Hinweis kopieren',
+        "copySelection": 'Auswahl kopieren',
+        "copyMessage": 'Nachricht kopieren',
+        "aiMain": 'KI main',
+        "aiEffort": 'Aufwand',
+        "aiCritic": 'KI critic',
+        "effort_high": 'high',
+        "effort_xhigh": 'x-high',
+        "effort_max": 'max',
+        "effortTip_high": 'Genug für Routineschritte. Die Untergrenze fürs Einmessen — darunter stimmt ein Modell zu '
+                          'leicht zu.',
+        "effortTip_xhigh": 'Der Standard, mit Reserve. Passt für fast jeden Schritt einer Abstimmung.',
+        "effortTip_max": 'Für den wirklich schweren Schritt. Nichts steigt von selbst hierher — eine tiefer begonnene '
+                         'Sitzung bleibt tiefer, wie schwer die Arbeit auch wird. Langsamer, und auf einer '
+                         'abgerechneten Route teurer.',
+        "effortNextSession": 'Der Aufwand gilt ab der nächsten Sitzung — diese behält die Stufe, mit der sie gestartet '
+                             'ist.',
+        "note": 'Prototyp · echte Daten (sound_AutoSci) · die Form wird gefeilt',
+        "coffeeBtn": '☕ Spendier mir einen Kaffee',
+        "supportGithub": '💜 GitHub Sponsors',
+        "supportMonobank": '☕ Monobank-Sammeldose',
+        "fbBig": 'Dem Entwickler schreiben',
+        "fbBigTip": 'Ein Fehler, eine Idee, eine Frage, „das ergibt keinen Sinn“ — alles kommt hierher. Ein '
+                    'Screenshot kann mit.',
+        "fbHead": 'Rückmeldung zum TCC-Prototyp',
+        "fbHint": 'Sag uns, was dir gefällt / was zu ändern ist. Nutze die Schaltflächen B / I / Liste — '
+                  'Markdown von Hand ist nicht nötig.',
+        "fbPh": 'Deine Rückmeldung zum Prototyp…',
+        "fbCancel": 'Abbrechen',
+        "fbSendGithub": 'An GitHub senden →',
+        "fbSendForm": 'Über das Formular senden →',
+        "fbVia": 'Wie senden:',
+        "fbViaGithub": 'GitHub-Issue (ich habe ein Konto)',
+        "fbViaForm": 'Google-Formular (kein Konto nötig)',
+        "dialog": 'KI-Dialog',
+        "dialogSub": 'Generator ↔ Critic ↔ Arbiter',
+        "planTitle": 'Plan — Ist',
+        "planSub": 'Phasen + Schritte',
+        "focus": '◆ JETZT IM FOKUS',
+        "measSub": 'Messaufgabe',
+        "confirmAlways": 'In diesem Projekt nicht mehr danach fragen',
+        "gateAuto": 'Gar nicht fragen (auto)',
+        "gateAutoTip": 'Werkzeuge des Harness (Shell, Lesen, Bearbeiten) laufen ohne Rückfrage. TCCs eigene '
+                       'Schreibvorgänge ins DSP und nach REW fragen weiterhin nach — das sind die, die das Auto '
+                       'verändern.',
+        "autoAllowed": '<code>{tool}</code> automatisch erlaubt — die Rückfrage dazu ist für dieses Projekt aus.',
+        "questionCancelled": 'Frage zurückgezogen — der Zug kann weitergehen.',
+        "questionWithdrawn": 'Der Agent hat diese Frage zurückgenommen.',
+        "questionWaiting": 'Wartet auf deine Antwort',
+        "questionFreeText": 'Tipp deine Antwort unten ein — hier gibt es nichts auszuwählen.',
+        "questionRole": 'FRAGE',
+        "composerAnswer": 'Antworte, oder tipp deine eigene…',
+        "composerQueue": 'Dem Generator schreiben… (geht raus, wenn dieser Zug endet)',
+        "composer": 'Dem Generator schreiben…',
+        "queueWaiting": '⏳ {count} deiner Nachricht(en) gehen raus, wenn dieser Zug endet',
+        "queueSendNow": 'Jetzt senden',
+        "newBelow": '↓ Neue unten · {count}',
+        "newBelowTip": 'Während du gelesen hast, kamen neue Nachrichten. Der erste Klick springt an ihren Anfang, '
+                       'ein zweiter ganz nach unten.',
+        "messageNotSent": 'Nicht gesendet: die Sitzung hat gestoppt. Dein Text steht wieder im Feld.',
+        "quitSaving": 'Speichere vor dem Beenden — warte darauf, dass das Modell das Projekt festhält. Das Fenster '
+                      'schließt sich von selbst, sobald das erledigt ist.',
+        "send": 'Senden',
+        "stop": 'Stopp',
+        "notVisible": 'Ich sehe diese Änderung nicht',
+        "notVisibleHint": 'Sag der KI, dass etwas, das sie geändert hat, hier nicht aufgetaucht ist, damit sie es auf '
+                          'der Festplatte prüft, statt die Behauptung zu wiederholen.',
+        "notVisibleSent": 'Für die KI markiert: <b>etwas, das sie gemeldet hat, ist hier nicht sichtbar</b> — sie prüft '
+                          'es auf der Festplatte nach.',
+        "agentThinking": 'Arbeitet…',
+        "agentFailed": 'Sitzungsfehler',
+        "confirmAllowed": 'Der Arbiter hat <code>{tool}</code> <b>erlaubt</b>.',
+        "confirmDenied": 'Der Arbiter hat <code>{tool}</code> <b>abgelehnt</b>.',
+        "modelUnchosen": '— Modell wählen —',
+        "startSessionNoModel": 'Wähle zuerst ein Generator-Modell.',
+        "startSessionReady": 'Eine Sitzung auf {model} starten. Bis dahin läuft nichts.',
+        "startSessionRunning": 'Es läuft bereits eine Sitzung.',
+        "restartSession": '▶ Neu starten auf {model}',
+        "restartSessionTip": 'Kein Harness kann das Modell mitten im Gespräch wechseln — die laufende endet, und eine neue '
+                             'Sitzung beginnt.',
+        "sessionStarting": 'Starte {model} — der erste Zug liest den Skill und den Projektzustand, deshalb ist er '
+                           'langsam.',
+        "sessionHandoff": 'Speichere den Projektzustand vor dem Modellwechsel…',
+        "sessionHandoffSave": 'Bitte das Modell, sein Wissen in die Projektdateien zu schreiben…',
+        "sessionHandoffQuit": 'Speichere vor dem Schließen — bitte das Modell, sein Wissen in die Projektdateien zu '
+                              'schreiben…',
+        "quitSaveSave": 'Den Zug speichern',
+        "quitSaveDiscard": 'Nicht speichern',
+        "quitSaveCancel": 'Bleiben',
+        "quitSaveTitle": 'Vor dem Schließen speichern?',
+        "quitSaveBody": 'Eine Sitzung läuft.\n\nWas sie in diesem Zug gelernt hat, steht erst auf der Platte, wenn sie '
+                        'es schreibt — jetzt zu schließen verliert es. Speichern kostet einen Zug.',
+        "sessionHandoffFresh": 'Speichere zuerst, dann beginne ich eine neue Sitzung mit leerem Kontext…',
+        "sessionRestarted": 'Sitzung beendet: Neustart auf dem eben gewählten Modell.',
+        "dialogIdle": 'nicht gestartet · {model}',
+        "dialogNoModel": 'kein Modell gewählt',
+        "startSession": '▶ Sitzung in TCC',
+        "openTerminal": '⧉ Terminal',
+        "terminalOpened": 'Ein Terminal mit <code>{cli}</code> im Projektordner ist offen. Es findet TCC über '
+                          '<code>.mcp.json</code>; bestätige beim ersten Lauf den Server <b>tcc</b>.',
+        "criticClipboard": 'Weder die API noch das CLI des Prüfers war erreichbar, also liegt das Paket in deiner '
+                           '<b>Zwischenablage</b>. Füge es in einen beliebigen KI-Chat ein und die Antwort hier wieder '
+                           'zurück — der Kreis funktioniert weiter, er geht nur durch dich.',
+        "criticFailed": 'Der Aufruf des Prüfers ist fehlgeschlagen: {detail}',
+        "criticNotReady": 'Der Prüfer hat noch nichts zu lesen. Er liest das Projekt bei jedem Aufruf neu von der '
+                          'Festplatte, und dieser Ordner hat den Intake nicht durchlaufen — der Vertrag und der Kontext '
+                          'des Autos entstehen, wenn eine Abstimmung beginnt. Der Kanal selbst ist in Ordnung; starte '
+                          'die Abstimmung, und der Prüfer arbeitet ab dem ersten Vorschlag.',
+        "criticNever": 'Kritiker: noch nicht aufgerufen',
+        "curveSendMarkers": 'Marker',
+        "curveSendDelays": 'Delays',
+        "curveShift": 'Delay',
+        "curveShiftTip": 'Halte das gewählte Chassis zurück — der Schalter bestimmt, welches. Es beginnt bei dem, das '
+                         'ZUERST ankommt, die natürliche Wahl im ersten Durchgang; negativ ist erlaubt, denn in einem '
+                         'späteren Durchgang korrigierst du einen Kanal, der bereits ein Delay trägt. Was nicht unter '
+                         'null darf, ist die SUMME des Kanals, und der Ablesewert sagt das, sobald das Ledger bekannt '
+                         'ist. Die Schrittweite ist die, die dieses DSP eingeben lässt. Es wird nichts angewendet: der '
+                         'Ablesewert geht als Vorschlag hinaus.',
+        "curveDelayHead": 'Delay zum Ausrichten (Vorschlag, nicht angewendet):',
+        "curveApfLabel": 'Allpass:',
+        "curveApfNone": '—',
+        "curveApfTip": 'Ein Allpass für das Chassis, das der Schalter gewählt hat — dasselbe, das auch das '
+                       'Delay-Feld bearbeitet. Er ändert KEINEN Pegel und dreht die Phase um f0: APF1 dreht bei f0 '
+                       'um −90° (insgesamt 0 → −180°), APF2 bei f0 um −180° (0 → −360°), und Q sagt, wie viel dieser '
+                       'Drehung dicht bei f0 passiert. Im Frequenzgang bewegt sich die Kurve nicht; in der Phase '
+                       'dreht sie sich; in beiden zeigt die vorhergesagte Summe (Σ), was das mit der Übernahme macht '
+                       '— darum geht es. Im Impuls bleibt der gezeichnete Verlauf wie aufgenommen (ein Allpass '
+                       'verschmiert einen Impuls); die Summe im Streifen trägt ihn. Es wird nichts angewendet: er '
+                       'geht als Vorschlag in den Ablesewert, in den Worten des Ledgers (APF2 250 Hz Q 0.71). Und '
+                       'ein Allpass füllt keine Auslöschung eines einzelnen Chassis — durch Phasendrehung lässt sich '
+                       'nur die Summe zweier überlappender Chassis neu abstimmen, lies ihn also an der Summe, nie an '
+                       'einer einzelnen Kurve. Die Mathematik gehört dem Skill selbst (dsp_math), hier gibt es keine '
+                       'zweite Kopie.',
+        "curveApfKindTip": 'Welche Ordnung. APF1: nur f0, dort −90° — die sanftere Vierteldrehung. APF2: f0 und Q, dort '
+                           '−180° — das, was ein APF2-Platz in einem PEQ-Satz annimmt. Zwei APF1 auf einer f0 sind ein '
+                           'APF2 mit Q 0,5.',
+        "curveApfF0Tip": 'Die Frequenz, um die gedreht wird. Setz sie dorthin, wo die Übernahme liegt — auf die '
+                         'Trennfrequenz zwischen den beiden summierten Chassis.',
+        "curveApfQTip": 'Wie viel der 360° dicht bei f0 passiert (nur APF2). 0,71 dreht über etwa anderthalb Oktaven '
+                        'zu jeder Seite von f0; ein höheres Q dreht schneller und hält der Drift eines echten Autos '
+                        'schlechter stand — die Suche des Skills endet bei 4.',
+        "curveApfHead": 'Allpass zum Drehen der Phase (Vorschlag, nicht angewendet):',
+        "curveApfNoMaths": 'kein Allpass simulierbar: die Filtermathematik des Skills ließ sich nicht laden ({error})',
+        "unitMs": 'ms',
+        "unitSmp": 'Samples',
+        "curveDelayRelative": 'Bezogen auf {name}, das keines bekommt: gemessen wurden nur die Unterschiede zwischen diesen '
+                              'Chassis, der Satz ist also von dem aus angegeben, das am wenigsten braucht.',
+        "curveDelayLands": 'Ankunft {was} → {now} ms',
+        "curveDelayTotal": 'Kanal → {total} ms',
+        "curveDelayBelowZero": '⚠ unter null — dahin kann der Kanal nicht',
+        "curveBankImpossible": 'Eines davon führt einen Kanal unter null, der Satz lässt sich so also nicht anwenden — sag, '
+                               'welchen Bezugspunkt man stattdessen verschieben soll.',
+        "curveBankLabel": 'abgelesene Delays:',
+        "curveBankLabelIn": 'abgelesene Delays in {set}:',
+        "curveBankBtn": 'Abgelesene Delays ({n})',
+        "curveSumNoteBtn": 'Σ Prognose',
+        "curveGuidesTip": 'Nimm alle Hilfslinien aus dem Bild: die Marker, die Pegel, die Kreuzlinie und ihre Punkte. '
+                          'Nichts geht verloren — jede kommt genau dorthin zurück, wo sie war, und der Ablesewert '
+                          'bleibt derselbe Satz, denn ein Marker, den du nicht siehst, ist trotzdem eine Zahl, die du '
+                          'genommen hast. Solange sie verborgen sind, lassen sie sich nicht ziehen.',
+        "curveStripLinkTip": 'Der Frequenzskala des Diagramms folgen. In der Phase sind Streifen und Diagramm dieselben '
+                             'Frequenzen, ein Zoom bewegt also beide, und was oben bei 3 kHz steht, steht unten bei 3 kHz. '
+                             'Schalt es aus, um eine Auslöschung für sich zu vergrößern, und wieder ein, um sie erneut '
+                             'auszurichten. Im Impuls nicht angeboten: dort ist die Achse die Zeit.',
+        "curveReadoutBtn": 'Marker',
+        "curveBankEmpty": 'noch keine Delays abgelesen — stell oben eines ein, es wird je Messung behalten',
+        "curveClearLabel": 'leeren:',
+        "curveClearDelay": 'Delays',
+        "curveClearMarkers": 'Marker',
+        "curveBankAsk": 'Delays, die ich von den Kurven abgelesen habe, NUR ZUR ANALYSE — schreib sie nirgendwo hin '
+                        'und behandle sie nicht als Änderung:',
+        "curveBankConvention": 'Konvention: alle Messungen teilen einen Zeitnullpunkt (0 ms auf der Impulsachse). Jede Zahl '
+                               'unten wird auf die Ankunft DIESER Messung addiert, so wie sie aufgenommen wurde; das Ziel '
+                               'ist, dass alle Chassis auf derselben Ankunft landen.',
+        "curveBankArrival": 'Ankunft',
+        "curveBankChannel": 'Kanal',
+        "curveBankSpread": 'Streuung der resultierenden Ankünfte über die {n} platzierten Chassis: {spread} ms.',
+        "curveBankAtZero": 'Auf dem Bildschirm, keine Verschiebung eingegeben (0). Das kann der Bezug sein, von dem aus '
+                           'der Rest gemessen wurde, oder einfach ein Chassis, zu dem man noch nicht gekommen ist — die '
+                           'Daten hier können das nicht unterscheiden: {names}',
+        "curveBankUnplaced": 'NICHT platziert — an diesen wurde noch nichts abgelesen, sie fehlen also im Bild oben und '
+                             'dürfen NICHT als null angenommen werden: {names}',
+        "curveBankNotForWriting": 'Sag mir, ob dieser Satz stimmig ist: welche Ankünfte er impliziert, ob etwas davon eher nach '
+                                  'einem Messfehler als nach einer Abstimmung aussieht, und was du als Nächstes prüfen würdest. '
+                                  'Das sind Ablesewerte von den Kurven, kein Ziel — Ankünfte exakt auszurichten hat in diesem '
+                                  'Auto für sich genommen die Bühnengenauigkeit nicht repariert; nimm sie also als Indiz und '
+                                  'sag, was du ändern würdest und warum. Nichts davon ist angewendet.',
+        "curveBankAskApfOnly": 'Allpass-Filter, die ich an den gemessenen Kurven eingestellt habe, NUR ZUR ANALYSE — '
+                               'schreibe nichts.',
+        "curveBankApf": 'Allpass, pro Chassis eingestellt mit Blick auf die vorhergesagte Summe (Vorschlag, nicht '
+                        'angewendet; Betrag unverändert, nur Phase; APF1 = −90° bei f0, APF2 = −180° bei f0):',
+        "curveBankApfCaveat": 'An den vorhandenen Sweeps simuliert, indem die gemessene Phase gedreht wurde; NICHT durch '
+                              'einen Summenmessung bestätigt. Sag, ob die Drehung die Übernahme repariert oder das Problem '
+                              'nur verschiebt (und das Timing oberhalb f0 mitzieht), und welche Aufnahme es bestätigen '
+                              'würde.',
+        "curveNoMarkers": 'Zieh einen Marker auf den Punkt, den du meinst.',
+        "curveMarkerModel": 'Modell',
+        "curveMarkerYou": 'du',
+        "curveMarkerOne": '1',
+        "curveMarkerTwo": '2',
+        "curveMarkerN": 'Marker {n}',
+        "curveTitle": 'Wo genau?',
+        "curveAxes_v": 'Marker lesen die Frequenz (senkrecht)',
+        "curveAxes_h": 'Marker lesen den Pegel (waagerecht)',
+        "curveAxes_vh": 'Marker lesen beides, getrennt gesetzt',
+        "curveAxes_vhs": 'Ein Punkt auf der Kurve gibt beides — der Pegel folgt der Frequenz',
+        "curveAxes_vx": 'Eine senkrechte Linie: liest BEIDE Kurven bei diesem x und ihren Abstand',
+        "curveAxes_hx": 'Eine waagerechte Linie: liest, wo JEDE Kurve diesen Pegel erreicht (der Schnittpunkt nächst '
+                        'der Mitte der Ansicht)',
+        "curveCrossPairTip": 'Welche zwei Kurven Vx und Hx vergleichen. Sie lesen einen Abstand zwischen einem Paar, bei '
+                             'mehr Kurven auf dem Bildschirm nennst also du das Paar — die gewöhnlichen V/H/VH-Marker '
+                             'lesen weiterhin jede Kurve, je eine Zahl.',
+        "curveSumTip": 'Σ — zeichne, was diese Chassis ZUSAMMEN tun: die komplexe Summe der Kurven auf dem '
+                       'Bildschirm, gestrichelt, in dB, mit dem Delay jedes Chassis bereits angewendet. In der Phase '
+                       'liegt sie über dem Diagramm auf der rechten Achse; im Impuls bekommt sie einen eigenen '
+                       'Streifen darunter, denn dort ist die Achse des Diagramms die Zeit und die der Summe die '
+                       'Frequenz. Es ist Arithmetik auf Messungen, die du schon hast, ein Versuch kostet also nichts '
+                       'und es wird nirgendwo etwas geschrieben. Sie bedeutet nur etwas, wenn alle Messungen gegen '
+                       'EINEN gemeinsamen Zeitbezug aufgenommen wurden; die Σ-Schaltfläche unter dem Diagramm trägt '
+                       'das Urteil — was geprüft ist und was nicht.',
+        "curveSumHead": 'Vorhergesagte Summe, gestrichelt, in dB:',
+        "curveSumWorst": 'Tiefster Punkt der Summe: {depth} dB gegenüber dem dort lautesten einzelnen Chassis, bei '
+                         '{hz} Hz.',
+        "curveSumNone": 'Keine Summe gezeichnet.',
+        "curveSumNoPlot": 'Diese Ansicht konnte die Achse, auf der die Summe gezeichnet wird, nicht bauen, es gibt also '
+                          'keinen Platz dafür. Der Rest des Fensters ist davon unberührt.',
+        "curveSumTooFew": 'Eine Kurve ist keine Summe: hol eine zweite Messung auf den Bildschirm.',
+        "curveSumNoData": 'Diese Kurven tragen weder Betrag noch Phase zum Aufsummieren — sie stammen nicht aus einem '
+                          'REW-Sweep.',
+        "curveGroupLabel": 'füllen:',
+        "curveGroupNone": '— keine Gruppe —',
+        "curveGroupKind_pairs": 'Paar',
+        "curveGroupKind_joints": 'Übernahme',
+        "curveGroupKind_sides": 'Seite',
+        "curveGroupKind_combos": 'Kombination',
+        "curveGroupNoGlossary": '— kein Glossar in diesem Projekt —',
+        "curveGroupTip": 'Fülle die Auswahl mit einer ganzen Gruppe auf einmal — die Tiefmitteltöner, die Mitteltöner, '
+                         'Sub+Tiefmitteltöner, eine Seite, alles. Die Namen kommen aus dem Glossar dieses Autos, und '
+                         'die gewählten Sweeps sind die der Konfigurationsversion daneben. Es wird nichts geholt, was '
+                         'die Gruppe nicht nennt: ein Mitglied, für das REW keinen Sweep hat, wird gemeldet, nicht '
+                         'übersprungen. Sie FÜLLT und lässt dann los: nimmst du danach einen Chip weg, füllt nichts '
+                         'nach — und genau so hört man, was ein einzelnes Chassis mit der Übernahme macht.',
+        "curveGroupVersionTip": 'Aus welcher Aufnahmeserie die Sweeps der Gruppe stammen — die DSP-Konfiguration, unter der '
+                                'sie gemessen wurden, im REW-Titel als `_N` geschrieben und im Messpanel genauso benannt. Sie '
+                                'beginnt bei der Serie, die die Kurven auf dem Bildschirm teilen, oder bei der neuesten, die '
+                                'dieses Auto für diese Chassis hat, und du kannst sie verschieben.',
+        "curveGroupMissing": '{group} bei _{version}: {names} — nicht in REW. Gezeichnet ist die Summe eines anderen '
+                             'Satzes.',
+        "curveGroupEmpty": '{group} bei _{version}: REW hat von keinem Mitglied einen Sweep, es wurde also nichts '
+                           'geändert.',
+        "curveChooseBtn": 'Wählen… ({n})',
+        "curveChooseTip": 'Hake beliebige Messungen an — die Summe nimmt so viele, wie du ihr gibst. Das Menü bleibt '
+                          'offen, eine ganze Seite ist also ein Durchgang durch die Liste. Alles Angehakte steht als '
+                          'Chip darüber, in der Farbe seiner Kurve; eine Gruppe daneben füllt dieselben Chips in einem '
+                          'Zug.',
+        "curveChipRemoveTip": 'Nimm {title} aus dem Diagramm. Der Rest bleibt, wo er ist, und die Summe wird ohne es neu '
+                              'gerechnet — genau so hört man, was dieses eine Chassis mit der Übernahme macht.',
+        "curveChipOnlyTip": 'Die einzige Kurve auf dem Bildschirm. Füg eine weitere hinzu, bevor du diese wegnimmst — ein '
+                            'Fenster, das nichts zeichnet, hat nichts zu sagen.',
+        "curveChipMissingTip": 'REW hat für {title} keine Kurve geliefert, es steht also nicht im Diagramm, obwohl es '
+                               'ausgewählt ist — und in der Summe auch nicht. Deshalb wird es blass gezeigt.',
+        "curveAt": 'bei',
+        "curveZoomAll": 'Alles zeigen, was die Aufnahme enthält',
+        "curveZoomAllShort": 'A',
+        "curveZoomDetail": 'Zurück zum Bereich, mit dem dies geöffnet wurde',
+        "curveZoomDetailShort": 'D',
+        "curveZoomOut": 'Verkleinern',
+        "curveZoomOutShort": '−',
+        "curveZoomIn": 'Vergrößern',
+        "curveZoomInShort": '+',
+        "curveKind_impulse": 'Impulsantwort',
+        "curveKind_fr": 'Frequenzgang',
+        "curveKind_phase": 'Phase',
+        "curveRtaOnly": 'Gezeigt wird der Frequenzgang: {titles} — eine MMM-Aufnahme, und dafür hat REW weder '
+                        'Impulsantwort noch Phase.',
+        "curveRtaTip": 'Eine MMM-Aufnahme: REW hat dafür weder Impulsantwort noch Phase. Wechsle auf den '
+                       'Frequenzgang, um sie ins Diagramm zu holen.',
+        "curveKindRtaTip": 'Nicht für eine MMM-Aufnahme — REW hat dafür weder Impulsantwort noch Phase. Wähle oben '
+                           'Sweeps (sw), um dies zu lesen.',
+        "curveBtn": 'Kurven — setz einen Marker dorthin, wo du es meinst',
+        "curveNothing": 'Noch nichts zu zeichnen — lies zuerst die Messungen aus REW.',
+        "curveLoading": 'Lese die Kurven aus REW…',
+        "curveFailed": 'Konnte nicht aus REW lesen: {error}',
+        "modelMissingRow": '{key} — hier nicht verfügbar',
+        "modelMissingTip": 'Dieses Projekt verlangt ein Modell, das diese Maschine nicht anbietet. Es bleibt ausgewählt '
+                           'und bleibt rot, bis du ein anderes wählst — nichts wird hinter deinem Rücken umgeleitet.',
+        "modelUnconfirmed": 'vom letzten Start',
+        "attachTip": 'Einen Screenshot anhängen — wird im Projekt gespeichert, das Modell liest die Datei',
+        "attachTitle": 'Screenshot anhängen',
+        "attachClear": 'Leeren',
+        "attachEmptyMac": '⌘⌃⇧4 kopiert einen Screenshot in die Zwischenablage (⌘⇧4 legt ihn stattdessen auf den '
+                          'Schreibtisch). Drücke dann hier ⌘V.',
+        "attachEmptyWin": 'Win+Shift+S kopiert einen Screenshot in die Zwischenablage. Drücke dann hier Strg+V.',
+        "attachEmptyOther": 'Kopiere einen Screenshot in die Zwischenablage, drücke dann hier Strg+V.',
+        "attachCaption": 'Was darauf zu sehen ist — z. B. „w-L Impulsantwort, erster Peak“',
+        "criticWarnTitle": 'Zum Prüfer',
+        "criticSubstituted": 'ersetzt',
+        "criticAnswered": 'beantwortet von {model}',
+        "criticSameVendor": 'derselbe Anbieter wie der Generator',
+        "criticSameVendorTip": 'Prüfer und Generator sind beide {vendor}. Es wird weiterhin geprüft, aber ein Prüfer, der '
+                               'für anbieterübergreifende Unabhängigkeit gewählt wurde, ist keiner mehr — gewichte seine '
+                               'Zustimmung niedriger, oder stelle einen anderen Anbieter wieder her.',
+        "sdkNoLogin": 'claude ist nicht angemeldet',
+        "sdkNoLoginTip": 'Claude-Modelle laufen über deine eigene `claude`-Sitzung — TCC hat kein eigenes Konto und '
+                         'kann sich nicht für dich anmelden. Ohne Anmeldung kann diese Route nicht antworten, was die '
+                         'Auswahl auch anzeigt. Führe in einem Terminal aus:\n\n    {cmd}',
+        "criticStatus": 'Kritiker · {model} · {ago}',
+        "sessionResumed": 'fortgesetzt',
+        "sessionNew": 'neue Sitzung',
+        "editChipLabel": 'Projektparameter bearbeiten',
+        "editReasonsQ": 'Warum?',
+        "reasonForgot": 'der Skill hat nicht gespeichert',
+        "reasonManual": 'ich habe etwas von Hand geändert',
+        "editStartForgot": '◆ Projektparameter bearbeiten — markiert: der Skill hat eine kürzliche Änderung womöglich '
+                           'nicht gespeichert. Beschreibe, was im Ledger stehen sollte; ich prüfe es und korrigiere.',
+        "editStartManual": '◆ Projektparameter bearbeiten — du hast etwas von Hand geändert. Sag, was und wo; ich halte '
+                           'es im Ledger fest, damit spätere Empfehlungen es berücksichtigen.',
+        "editDoneForgot": '✓ Ledger geprüft: das Delay von <code>Rear R Full</code> stand im Dialog auf 9,5 ms, auf der '
+                          'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
+        "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
+                          'neu bestätigt.',
+    },
 }
 
 _lang: Lang = "en"
@@ -1545,6 +3221,25 @@ def current_language() -> Lang:
 def t(key: str) -> str:
     """Plain string lookup, falling back to English, then the key itself."""
     return T.get(_lang, {}).get(key, T["en"].get(key, key))
+
+
+def language_choices() -> list[tuple[Lang, str]]:
+    """`(code, name)` for every offered language, named in the CURRENT language."""
+    return [(code, t(key)) for code, key, _badge in LANGS]
+
+
+def language_badges() -> list[tuple[Lang, str]]:
+    """`(code, badge)` for every offered language -- the header combo's two-letter items."""
+    return [(code, badge) for code, _key, badge in LANGS]
+
+
+def language_name(lang: Lang | None = None) -> str:
+    """The name of `lang` (default: the current one), in the current language."""
+    lang = lang or _lang
+    for code, key, _badge in LANGS:
+        if code == lang:
+            return t(key)
+    return lang
 
 
 def tx(obj) -> str:
