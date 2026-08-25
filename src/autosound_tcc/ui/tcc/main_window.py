@@ -92,7 +92,7 @@ from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
-from autosound_tcc.ui.tcc import protective_dialog
+from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
@@ -1966,6 +1966,22 @@ class MainWindow(QMainWindow):
                 i18n.t("protWritten").format(channels=", ".join(dialog.written))
             )
 
+    def _open_listening(self) -> None:
+        """What the ear says about the state now in the car, in the method's own words.
+
+        The state it is written against is the LOADED view's version, not a remembered one: a
+        verdict stamped with the wrong snapshot is worse than one with no stamp, because it looks
+        attributable.
+        """
+        dialog, problem = listening_dialog.open_for(
+            config.project_dir(), getattr(self, "_view", None), self
+        )
+        if dialog is None:
+            self._status_strip.notify(problem, level="warn")
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.written:
+            self._status_strip.notify(dialog.saved_message())
+
     def _open_resonalyze_import(self) -> None:
         """Read-only on purpose. The dialog converts and checks; banking the rows is the tuning
         gate's job (`state/apply.py`), which validates against HEAD and produces the settings
@@ -2206,6 +2222,7 @@ class MainWindow(QMainWindow):
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
         self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
         self._meas_panel.protectiveRequested.connect(self._open_protective)
+        self._meas_panel.listeningRequested.connect(self._open_listening)
 
         return container
 
@@ -3851,8 +3868,13 @@ class MainWindow(QMainWindow):
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()
         self._audio_section.set_title(i18n.t("audioAnalysis"))
+        # No `self._audio_placeholder.setText(...)` here. That line crashed on every language
+        # switch in a project that HAS a measured flaw map (the user's own, 2026-08-25): the
+        # placeholder is only built on the branch where there are no flaws, so with flaws the
+        # attribute never existed. It was also wrong where it did not crash — `_rebuild_acoustics`
+        # has just written `acousticsNone` in the new language, and this replaced that sentence
+        # with the bare "no data yet".
         self._rebuild_acoustics()
-        self._audio_placeholder.setText(i18n.t("noDataYet"))
         self._dsp_section.set_title(i18n.t("dspPanel"))
         self._set_project_params(self._view)
         self._plan_title.setText(i18n.t("planTitle"))

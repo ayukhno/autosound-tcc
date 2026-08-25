@@ -2843,3 +2843,51 @@ def test_closing_again_mid_save_asks_before_throwing_the_turn_away(monkeypatch):
     assert not event.ignored
     assert window._handoff_timer is None and getattr(window, "_quit_tick", None) is None
 
+
+
+def test_a_language_switch_survives_a_project_that_has_a_flaw_map(tmp_path, monkeypatch):
+    """The user's own crash, 2026-08-25: switching language threw `AttributeError:
+    '_audio_placeholder'` and the window's error strip caught it.
+
+    `_audio_placeholder` is built ONLY on the branch of `_rebuild_acoustics` where there are no
+    flaws — it is the "nothing measured yet" sentence. `_retranslate` then set its text
+    unconditionally, so any project with a measured flaw map crashed on every switch. It was wrong
+    where it did not crash, too: `_rebuild_acoustics` had just written the explanatory sentence in
+    the new language and the next line replaced it with a bare "no data yet".
+
+    The suite missed it because every window it built had an EMPTY project, which is exactly the
+    branch that happens to create the attribute.
+    """
+    (tmp_path / "project.json").write_text(json.dumps({
+        "schema_version": 3,
+        "acoustics": {"flaws": [{"f_hz": 73, "level_db": 9, "kind": "modal_peak",
+                                 "action": "notch"}]},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _app()
+    window = MainWindow()
+    before = i18n.current_language()
+    try:
+        window._rebuild_acoustics()
+        assert not hasattr(window, "_audio_placeholder"), "a flaw map means no placeholder"
+        i18n.set_language("uk" if before != "uk" else "en")
+        window._retranslate()  # this is what threw
+    finally:
+        i18n.set_language(before)
+        window._retranslate()
+
+
+def test_the_empty_flaw_map_keeps_its_sentence_across_a_language_switch(tmp_path, monkeypatch):
+    """The other half of the same line: the placeholder must still say what the section is FOR
+    after a switch, not degrade to "no data yet"."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _app()
+    window = MainWindow()
+    before = i18n.current_language()
+    try:
+        i18n.set_language("uk" if before != "uk" else "en")
+        window._retranslate()
+        assert window._audio_placeholder.text() == i18n.t("acousticsNone")
+    finally:
+        i18n.set_language(before)
+        window._retranslate()

@@ -242,6 +242,55 @@ def set_protective(project_dir: Path, channel: str, legs) -> str:
     return _run(project_dir, args)
 
 
+def record_listening_verdict(
+    project_dir: Path,
+    pairs,
+    text: str = "",
+    route: str = "",
+    ledger_version: str = "",
+    note: str = "",
+) -> str:
+    """What the Arbiter heard: the pairs they ticked AND their own words, in one journal entry.
+
+    `pairs` is `[(track_id, characteristic_id, ok)]`. Both go in and NEITHER stands for the other:
+    the ticks carry structure a filter can read back, the text carries what the person meant after
+    editing it. Claiming the text equals the ticks is the thing this shape exists to avoid — they
+    click a phrase, then rewrite the sentence, and the two legitimately stop matching.
+
+    `ledger_version` is the state they were listening to, and the caller must pass what it READ
+    (the loaded view's version), never a remembered one: a verdict stamped with the wrong snapshot
+    is worse than one with no stamp, because it looks attributable.
+
+    Nothing is validated here. The skill checks every id against its own vocabulary and refuses an
+    unknown one; that refusal comes back verbatim for the dialog to show, for the same reason the
+    protective record does not pre-validate either.
+    """
+    args = ["listening-verdict"]
+    for track, characteristic, ok in pairs:
+        args += ["--pair", f"{track}:{characteristic}:{'ok' if ok else 'bad'}"]
+    for flag, value in (("--text", text), ("--route", route),
+                        ("--ledger-version", ledger_version), ("--note", note)):
+        if value:
+            args += [flag, str(value)]
+    return _run(project_dir, args)
+
+
+def listening_verdicts(
+    project_dir: Path,
+    track: str = "",
+    characteristic: str = "",
+    ledger_version: str = "",
+) -> str:
+    """Look back at what was heard, filtered. Reading, so it takes the same route as the writes
+    rather than parsing the journal here — the shape of an event is the skill's business."""
+    args = ["listening-verdicts"]
+    for flag, value in (("--track", track), ("--characteristic", characteristic),
+                        ("--ledger-version", ledger_version)):
+        if value:
+            args += [flag, str(value)]
+    return _run(project_dir, args)
+
+
 def set_target(project_dir: Path, preset: str, curve: str) -> str:
     """Point a preset at its active target curve."""
     return _run(project_dir, ["target", preset, curve])

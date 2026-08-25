@@ -292,6 +292,9 @@ class MeasurementPanel(QWidget):
     #: The header's "Protection" button. The panel does not own the dialog: it has neither the
     #: project's channel list nor the writer, and both live where the window already keeps them.
     protectiveRequested = Signal()
+    #: The header's "Listening" button (Phase 4). Same reason as the one above: the panel has
+    #: neither the method's vocabulary nor the writer.
+    listeningRequested = Signal()
     #: The grid switched to another capture series. The curve window listens: its delay bank is
     #: scoped by series, and a window left open while the panel moves would keep showing the
     #: corrections of a series nobody is looking at any more (user, 2026-08-12).
@@ -398,17 +401,6 @@ class MeasurementPanel(QWidget):
         self._curves_btn.clicked.connect(self._on_curves_clicked)
         head_row.addWidget(self._curves_btn)
 
-        # What was in the signal path while this round was measured. It lives here because it is a
-        # fact about the CAPTURE -- one protective set covers the sweeps of one pass -- and this
-        # header is where the round is. A word rather than a glyph: there is no icon for "what was
-        # in the chain", and inventing one would be a picture nobody can read.
-        self._protective_btn = QPushButton(i18n.t("protBtn"))
-        self._protective_btn.setProperty("class", "meas-icon-btn")
-        self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
-        self._protective_btn.clicked.connect(self.protectiveRequested.emit)
-        head_row.addWidget(self._protective_btn)
-
         self._read_btn = QPushButton()
         self._read_btn.setIcon(QIcon(str(_ICONS_DIR / "download.svg")))
         self._read_btn.setIconSize(QSize(16, 16))
@@ -418,6 +410,37 @@ class MeasurementPanel(QWidget):
         self._read_btn.clicked.connect(self._on_read_clicked)
         head_row.addWidget(self._read_btn)
         layout.addLayout(head_row)
+
+        # A second row for the two buttons that carry WORDS. They were in the row above and the
+        # words came out clipped ("Protectior", "Listening" against the edge — the user's own
+        # screenshot, 2026-08-25): that row is sized for 28×28 glyphs beside a stretching banner,
+        # and a label has no width to bargain with there. They belong together anyway — both write
+        # down a fact about the pass in front of you rather than acting on it, one from the
+        # measuring chain and one from the ear.
+        facts_row = QHBoxLayout()
+        facts_row.setSpacing(8)
+
+        # What was in the signal path while this round was measured: a fact about the CAPTURE, one
+        # protective set per pass. A word rather than a glyph, because there is no icon for "what
+        # was in the chain" and inventing one would be a picture nobody can read.
+        self._protective_btn = QPushButton(i18n.t("protBtn"))
+        self._protective_btn.setProperty("class", "reason-btn")
+        self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
+        self._protective_btn.clicked.connect(self.protectiveRequested.emit)
+        facts_row.addWidget(self._protective_btn)
+
+        # What the EAR says about the state now in the car (Phase 4).
+        self._listening_btn = QPushButton(i18n.t("lsnBtn"))
+        self._listening_btn.setProperty("class", "reason-btn")
+        self._listening_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._listening_tip = attach_tip(self._listening_btn, i18n.t("lsnBtnTip"))
+        self._listening_btn.clicked.connect(self.listeningRequested.emit)
+        facts_row.addWidget(self._listening_btn)
+
+        facts_row.addStretch(1)
+        layout.addLayout(facts_row)
+        self._fit_fact_buttons()
 
         self._status_label = QLabel("")
         self._status_label.setProperty("class", "meas-legend-label")
@@ -643,6 +666,19 @@ class MeasurementPanel(QWidget):
                 self._cols_layout.addWidget(row, r, c)
             self._col_next_row.append(len(group.items) + 1)
 
+    def _fit_fact_buttons(self) -> None:
+        """Keep the two word buttons wide enough for the words actually on them.
+
+        Qt's `sizeHint` for a QPushButton does not count the horizontal padding the stylesheet
+        adds (`.reason-btn` is `padding: 4px 12px`), so a label longer than the short ones that
+        class was built for gets clipped -- which is how "Protection" reached the user as
+        "Protectior". German is the long case here ("Schutz" is short but "Hören" sits beside a
+        wider neighbour in other rows), so this runs again after every language change rather than
+        once at build time.
+        """
+        for button in (self._protective_btn, self._listening_btn):
+            button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + 34)
+
     def retranslate(self) -> None:
         """Re-render whatever this panel is currently showing, in the new language.
 
@@ -666,6 +702,13 @@ class MeasurementPanel(QWidget):
         self._read_tip.set_text(i18n.t("measRead"))
         self._assign_names_tip.set_text(i18n.t("assignNames"))
         self._curves_tip.set_text(i18n.t("curveBtn"))
+        # Both of these are WORDS on the button, not glyphs, so the label has to move too -- the
+        # icon buttons above only need their tip re-set.
+        self._protective_btn.setText(i18n.t("protBtn"))
+        self._protective_tip.set_text(i18n.t("protBtnTip"))
+        self._listening_btn.setText(i18n.t("lsnBtn"))
+        self._listening_tip.set_text(i18n.t("lsnBtnTip"))
+        self._fit_fact_buttons()
 
     # ---- capture-order (item 9) ---------------------------------------------
 

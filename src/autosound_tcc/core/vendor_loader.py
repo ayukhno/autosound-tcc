@@ -166,6 +166,12 @@ _VENDORED = {
     # protective response IS a crossover, and `dsp_math.xo_response` is the method's one scipy
     # caller. `core/protective.py` asks before offering the correction anywhere.
     "protective.py": "autosound_tcc._vendor.protective",
+    # The listening vocabulary (2026-08-25): the characteristics a track exposes, in words, and
+    # which track exposes which. A PARSER of the method's own markdown rather than a JSON copy
+    # beside it -- the wording lives in one file, and a shape change fails in the SKILL's selftest
+    # instead of in a widget in a car. Registered like `resonalyze_vc`: a library with a thin CLI
+    # on top, and the window needs the structured result rather than its rendering.
+    "listening.py": "autosound_tcc._vendor.listening",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check

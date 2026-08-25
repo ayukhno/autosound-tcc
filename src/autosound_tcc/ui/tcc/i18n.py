@@ -837,6 +837,44 @@ Choose sweeps (sw) above to read this.",
                            "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
         "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
                            "Ledger updated and re-attested.",
+        # Phase 4, the listening panel (2026-08-25).
+        "lsnDropLast": 'Undo last',
+        "lsnBtn": 'Listening',
+        "lsnBtnTip": 'What this track was chosen to expose, in words — and a 🟢/❌ with your own sentence, written '
+                     'into the journal against the state you were listening to.',
+        "lsnTitle": 'Listening — what to judge, and what you heard',
+        "lsnWhy": 'Pick a track on the right, then the phrase that matches what you hear. It lands in the box '
+                  'on the left as a line you can rewrite. The tick and your words are both kept, and neither '
+                  'stands for the other: the tick is what a filter reads back, the words are what you meant.',
+        "lsnRoute": 'Pass',
+        "lsnRoute_first": 'first listen',
+        "lsnRoute_short": 'short (10 min)',
+        "lsnRoute_full": 'full pass',
+        "lsnRoute_league": 'next league',
+        "lsnRouteRoot": 'This pass',
+        "lsnAll": 'The whole library',
+        "lsnAt": 'at {timecode}',
+        "lsnCueTip": 'Where to hear it: {cue}',
+        "lsnRouteTip": 'If it comes out ✗: {route}',
+        "lsnText": 'What you heard, in your own words…',
+        "lsnTicked": 'Ticked ({n}):',
+        "lsnTickedEmpty": 'Nothing ticked yet — click a phrase on the right and it lands here and in the text.',
+        "lsnRemoveTip": 'Take this one off the record. The line it wrote stays in the text — rewrite it yourself if '
+                        'it no longer belongs.',
+        "lsnSave": 'Write it down',
+        "lsnSaved": 'Written: {n} verdict(s) against {version}.',
+        "lsnRefused": 'Not written: {why}',
+        "lsnNoPairs": 'Nothing to write yet: tick at least one phrase. Your words are kept with the ticks, not '
+                      'instead of them.',
+        "lsnSheet": 'The whole cheat sheet',
+        "lsnSheetTitle": 'Listening — the cheat sheet',
+        "lsnUnavailable": "The method's listening vocabulary could not be read here: {why}",
+        "lsnProblems": "The method's own check reports: {problems}",
+        "lsnNotTranslated": 'not translated yet — showing the English',
+        "lsnVersion": 'state {version}',
+        "lsnNoVersion": 'no ledger snapshot yet — the verdict is written without one, and cannot later be attributed '
+                        'to a state',
+        "lsnOwnHint": 'For a track that is not here, use “own” — say which track it was in your own words.',
     },
     "uk": {
         "theme": "тема",
@@ -1554,6 +1592,43 @@ Choose sweeps (sw) above to read this.",
                            "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
         "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
                            "(вручну). Ledger оновлено і переатестовано.",
+        # Phase 4, the listening panel (2026-08-25).
+        "lsnDropLast": 'Прибрати останню',
+        "lsnBtn": 'Слухання',
+        "lsnBtnTip": 'Що саме цей трек має показати — словами; і 🟢/❌ з твоїм реченням, записане в журнал проти '
+                     'того стану, який ти слухав.',
+        "lsnTitle": 'Слухання — що оцінювати і що почулось',
+        "lsnWhy": 'Обери трек праворуч, тоді фразу, яка збігається з тим, що чуєш. Вона ляже в поле ліворуч '
+                  'рядком, який можна переписати. Зберігається і позначка, і твої слова, і одне не заміняє '
+                  'інше: позначку потім читає фільтр, слова — це те, що ти мав на увазі.',
+        "lsnRoute": 'Прохід',
+        "lsnRoute_first": 'перше прослуховування',
+        "lsnRoute_short": 'короткий (10 хв)',
+        "lsnRoute_full": 'повний прохід',
+        "lsnRoute_league": 'наступна ліга',
+        "lsnRouteRoot": 'Цей прохід',
+        "lsnAll": 'Уся бібліотека',
+        "lsnAt": 'на {timecode}',
+        "lsnCueTip": 'Де це чути: {cue}',
+        "lsnRouteTip": 'Якщо вийшло ✗: {route}',
+        "lsnText": 'Що почулось, своїми словами…',
+        "lsnTicked": 'Позначено ({n}):',
+        "lsnTickedEmpty": 'Поки нічого не позначено — натисни фразу праворуч, і вона ляже сюди й у текст.',
+        "lsnRemoveTip": 'Прибрати це із запису. Рядок, який вона написала, лишиться в тексті — перепиши сам, якщо він '
+                        'більше не про те.',
+        "lsnSave": 'Записати',
+        "lsnSaved": 'Записано вердиктів: {n}, проти {version}.',
+        "lsnRefused": 'Не записано: {why}',
+        "lsnNoPairs": 'Писати поки нема чого: познач хоча б одну фразу. Твої слова зберігаються РАЗОМ із '
+                      'позначками, а не замість них.',
+        "lsnSheet": 'Вся шпаргалка',
+        "lsnSheetTitle": 'Слухання — шпаргалка',
+        "lsnUnavailable": 'Не вдалося прочитати словник слухання методу: {why}',
+        "lsnProblems": 'Власна перевірка методу каже: {problems}',
+        "lsnNotTranslated": 'ще не перекладено — показано англійською',
+        "lsnVersion": 'стан {version}',
+        "lsnNoVersion": 'знімка леджера ще нема — вердикт запишеться без нього, і його потім не привʼязати до стану',
+        "lsnOwnHint": 'Для треку, якого тут нема, візьми «own» — а який саме це був трек, скажи своїми словами.',
     },
     "pl": {
         # Polish
@@ -2359,6 +2434,45 @@ Choose sweeps (sw) above to read this.",
                           'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
         "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
                           'zaktualizowany i ponownie zatwierdzony.',
+        # Phase 4, the listening panel (2026-08-25).
+        "lsnDropLast": 'Cofnij ostatnią',
+        "lsnBtn": 'Odsłuch',
+        "lsnBtnTip": 'Co dokładnie ten utwór ma pokazać — słowami; oraz 🟢/❌ z twoim zdaniem, zapisane w dzienniku '
+                     'wobec stanu, którego słuchałeś.',
+        "lsnTitle": 'Odsłuch — co oceniać i co usłyszałeś',
+        "lsnWhy": 'Wybierz utwór po prawej, potem frazę, która pasuje do tego, co słyszysz. Trafi do pola po '
+                  'lewej jako wiersz, który możesz przepisać. Zapisuje się i zaznaczenie, i twoje słowa, i '
+                  'jedno nie zastępuje drugiego: zaznaczenie czyta potem filtr, słowa to jest to, co miałeś na '
+                  'myśli.',
+        "lsnRoute": 'Przejście',
+        "lsnRoute_first": 'pierwszy odsłuch',
+        "lsnRoute_short": 'krótkie (10 min)',
+        "lsnRoute_full": 'pełne przejście',
+        "lsnRoute_league": 'następna liga',
+        "lsnRouteRoot": 'To przejście',
+        "lsnAll": 'Cała biblioteka',
+        "lsnAt": 'na {timecode}',
+        "lsnCueTip": 'Gdzie to słychać: {cue}',
+        "lsnRouteTip": 'Jeśli wyszło ✗: {route}',
+        "lsnText": 'Co usłyszałeś, własnymi słowami…',
+        "lsnTicked": 'Zaznaczone ({n}):',
+        "lsnTickedEmpty": 'Nic jeszcze nie zaznaczono — kliknij frazę po prawej, a trafi tutaj i do tekstu.',
+        "lsnRemoveTip": 'Zdejmij to z zapisu. Wiersz, który napisała, zostaje w tekście — przepisz go sam, jeśli już '
+                        'nie pasuje.',
+        "lsnSave": 'Zapisz',
+        "lsnSaved": 'Zapisano werdyktów: {n}, wobec {version}.',
+        "lsnRefused": 'Nie zapisano: {why}',
+        "lsnNoPairs": 'Nie ma jeszcze czego zapisać: zaznacz choć jedną frazę. Twoje słowa zapisują się RAZEM z '
+                      'zaznaczeniami, a nie zamiast nich.',
+        "lsnSheet": 'Cała ściąga',
+        "lsnSheetTitle": 'Odsłuch — ściąga',
+        "lsnUnavailable": 'Nie udało się odczytać słownika odsłuchu metody: {why}',
+        "lsnProblems": 'Własna kontrola metody mówi: {problems}',
+        "lsnNotTranslated": 'jeszcze nieprzetłumaczone — pokazano po angielsku',
+        "lsnVersion": 'stan {version}',
+        "lsnNoVersion": 'nie ma jeszcze zrzutu ledgera — werdykt zapisze się bez niego i nie da się go potem '
+                        'przypisać do stanu',
+        "lsnOwnHint": 'Dla utworu, którego tu nie ma, weź „own” — a który to był utwór, powiedz własnymi słowami.',
     },
     "de": {
         # German
@@ -3207,6 +3321,46 @@ Choose sweeps (sw) above to read this.",
                           'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
         "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
                           'neu bestätigt.',
+        # Phase 4, the listening panel (2026-08-25).
+        "lsnDropLast": 'Letztes zurück',
+        "lsnBtn": 'Hören',
+        "lsnBtnTip": 'Was genau dieses Stück zeigen soll — in Worten; dazu ein 🟢/❌ mit deinem eigenen Satz, ins '
+                     'Journal geschrieben, gegen den Zustand, den du gehört hast.',
+        "lsnTitle": 'Hören — was zu beurteilen ist, und was du gehört hast',
+        "lsnWhy": 'Wähl rechts ein Stück, dann die Formulierung, die zu dem passt, was du hörst. Sie landet '
+                  'links im Feld als Zeile, die du umschreiben kannst. Beides wird behalten, das Häkchen und '
+                  'deine Worte, und keines steht für das andere: das Häkchen liest später ein Filter, die Worte '
+                  'sind das, was du gemeint hast.',
+        "lsnRoute": 'Durchgang',
+        "lsnRoute_first": 'erstes Hören',
+        "lsnRoute_short": 'kurz (10 Min.)',
+        "lsnRoute_full": 'voller Durchgang',
+        "lsnRoute_league": 'nächste Liga',
+        "lsnRouteRoot": 'Dieser Durchgang',
+        "lsnAll": 'Die ganze Bibliothek',
+        "lsnAt": 'bei {timecode}',
+        "lsnCueTip": 'Wo es zu hören ist: {cue}',
+        "lsnRouteTip": 'Wenn es ✗ wird: {route}',
+        "lsnText": 'Was du gehört hast, in deinen eigenen Worten…',
+        "lsnTicked": 'Angehakt ({n}):',
+        "lsnTickedEmpty": 'Noch nichts angehakt — klick rechts eine Formulierung an, sie landet hier und im Text.',
+        "lsnRemoveTip": 'Nimm das aus dem Eintrag. Die Zeile, die es geschrieben hat, bleibt im Text — schreib sie '
+                        'selbst um, wenn sie nicht mehr passt.',
+        "lsnSave": 'Eintragen',
+        "lsnSaved": 'Eingetragen: {n} Urteil(e), gegen {version}.',
+        "lsnRefused": 'Nicht eingetragen: {why}',
+        "lsnNoPairs": 'Noch nichts einzutragen: hak mindestens eine Formulierung an. Deine Worte werden ZUSAMMEN '
+                      'mit den Häkchen behalten, nicht an ihrer Stelle.',
+        "lsnSheet": 'Der ganze Spickzettel',
+        "lsnSheetTitle": 'Hören — der Spickzettel',
+        "lsnUnavailable": 'Das Hör-Vokabular der Methode konnte hier nicht gelesen werden: {why}',
+        "lsnProblems": 'Die eigene Prüfung der Methode meldet: {problems}',
+        "lsnNotTranslated": 'noch nicht übersetzt — gezeigt wird das Englische',
+        "lsnVersion": 'Zustand {version}',
+        "lsnNoVersion": 'noch kein Ledger-Schnappschuss — das Urteil wird ohne einen eingetragen und lässt sich '
+                        'später keinem Zustand zuordnen',
+        "lsnOwnHint": 'Für ein Stück, das hier nicht steht, nimm „own“ — welches es war, sag in deinen eigenen '
+                      'Worten.',
     },
 }
 
