@@ -2028,8 +2028,26 @@ class MainWindow(QMainWindow):
         was asked for and should not wait behind a file manager. What the strip then says is the
         part that was missing — that this curve is not in the tool, and where its file is.
         """
-        QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={i18n.current_language()}"))
+        lang = i18n.current_language()
         target = target_curve.describe(config.project_dir(), getattr(self._view, "target", None))
+
+        # The curve the tool lacks goes INTO a copy of the tool, which is the user's own question
+        # answered ("why not just put it in the viewer's folder?"): the folder is never read, the
+        # page makes no network request at all, so next to it is nowhere. Inside it works —
+        # verified in a browser, not reasoned about: the page then lists SQ-Comp-Ref, Flat and the
+        # project's own curve, with no console errors.
+        if target.needs_dropping:
+            local = target_curve.build_local_viewer(target.path, target.name)
+            if local is not None:
+                url = QUrl.fromLocalFile(str(local))
+                url.setQuery(f"lang={lang}")
+                QDesktopServices.openUrl(url)
+                self._status_strip.notify(
+                    i18n.t("targetLocalViewer").format(name=target.name)
+                )
+                return
+
+        QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={lang}"))
         if not target.name or target.in_tool:
             return
         if target.path is None:

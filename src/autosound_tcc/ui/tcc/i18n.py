@@ -837,6 +837,9 @@ Choose sweeps (sw) above to read this.",
                            "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
         "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
                            "Ledger updated and re-attested.",
+        "targetLocalViewer": 'The tool does not carry “{name}”, so this is a LOCAL copy of it with your curve already '
+                             'plotted — built from the method version this app is pinned to, not the live page. Everything '
+                             "else about it is the tool's own.",
         "targetNotInTool": "The tool does not ship “{name}” — it only carries the method's own curves, and learns any "
                            'other by having its file dropped on it. Yours is selected in the file manager: drag it onto '
                            'the page.',
@@ -1600,6 +1603,9 @@ Choose sweeps (sw) above to read this.",
                            "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
         "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
                            "(вручну). Ledger оновлено і переатестовано.",
+        "targetLocalViewer": 'Інструмент не несе «{name}», тож це ЛОКАЛЬНА його копія з уже нанесеною твоєю кривою — '
+                             'зібрана з тієї версії методу, на якій стоїть застосунок, а не жива сторінка. Усе інше в ній '
+                             '— інструментове.',
         "targetNotInTool": 'Інструмент не несе «{name}» — у ньому лише власні криві методу, а будь-яку іншу він '
                            'дізнається з файлу, який на нього перетягнули. Твій виділено у файловому менеджері: '
                            'перетягни його на сторінку.',
@@ -2450,6 +2456,9 @@ Choose sweeps (sw) above to read this.",
                           'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
         "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
                           'zaktualizowany i ponownie zatwierdzony.',
+        "targetLocalViewer": 'Narzędzie nie zawiera „{name}”, więc to jego LOKALNA kopia z już naniesioną twoją krzywą — '
+                             'zbudowana z wersji metody, na której stoi aplikacja, a nie żywa strona. Cała reszta w niej '
+                             'jest narzędzia.',
         "targetNotInTool": 'Narzędzie nie zawiera „{name}” — ma tylko własne krzywe metody, a każdą inną poznaje z '
                            'pliku, który na nie przeciągniesz. Twój jest zaznaczony w menedżerze plików: przeciągnij go '
                            'na stronę.',
@@ -3345,6 +3354,9 @@ Choose sweeps (sw) above to read this.",
                           'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
         "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
                           'neu bestätigt.',
+        "targetLocalViewer": 'Das Werkzeug trägt „{name}“ nicht, das hier ist also eine LOKALE Kopie davon mit deiner '
+                             'Kurve bereits darauf — gebaut aus der Methodenversion, auf die diese App gepinnt ist, nicht '
+                             'die Live-Seite. Alles andere daran gehört dem Werkzeug.',
         "targetNotInTool": 'Das Werkzeug bringt „{name}“ nicht mit — es trägt nur die eigenen Kurven der Methode und '
                            'lernt jede andere, indem man ihm die Datei darauflegt. Deine ist im Dateimanager ausgewählt: '
                            'zieh sie auf die Seite.',

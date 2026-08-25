@@ -124,3 +124,50 @@ def test_a_platform_with_no_select_form_opens_the_folder(monkeypatch, tmp_path):
     monkeypatch.setattr(target_curve.os, "name", "posix")
     command = target_curve.reveal_command(tmp_path / "curves" / "EPY.txt")
     assert command == ["xdg-open", str(tmp_path / "curves")]
+
+
+# ------------------------------------------- the copy of the tool with the curve in it
+def test_the_curve_goes_INTO_the_tool_because_beside_it_is_nowhere(tmp_path):
+    """The viewer performs no network request of any kind — its one curve is a JavaScript array
+    inside the HTML, and `curves/` exists so a PERSON can pick a file up and drop it. So a file
+    placed next to the page changes nothing, and the curve has to go in.
+
+    The injection uses the tool's FRONT DOOR: it builds a `File` and hands it to the page's own
+    file input, which is exactly what the picker does. Verified in a real browser — the page then
+    lists SQ-Comp-Ref, Flat and EPY, with no console errors.
+    """
+    if target_curve.viewer_source() is None:
+        pytest.skip("the vendored skill is not checked out")
+    curve = _curve(tmp_path / "EPY_0db_REW.txt")
+    out = target_curve.build_local_viewer(curve, "EPY", tmp_path / "viewer")
+    assert out is not None and out.name == "EPY.html"
+    html = out.read_text(encoding="utf-8")
+    assert 'id="curveFile"' in html, "the tool's own input must still be there"
+    assert "20 0.0" in html and "1000 -3.0" in html, "the curve's points travel with the copy"
+    assert html.count("</body>") == 1 and html.rindex("Added by TCC") < html.rindex("</body>")
+
+
+def test_the_injection_refuses_rather_than_producing_a_page_that_looks_right(tmp_path):
+    """An injection that silently does nothing restores the original bug in a form nobody can
+    see — the page opens, plots the wrong curve, and says nothing. So a viewer whose file input
+    has been renamed is a refusal, and the caller falls back to handing over the file."""
+    source = tmp_path / "viewer.html"
+    source.write_text("<html><body><div id='dropZone'></div></body></html>", encoding="utf-8")
+    curve = _curve(tmp_path / "EPY_0db_REW.txt")
+
+    import autosound_tcc.core.target_curve as module
+
+    original = module.viewer_source
+    try:
+        module.viewer_source = lambda: source
+        assert module.build_local_viewer(curve, "EPY", tmp_path / "out") is None
+    finally:
+        module.viewer_source = original
+
+
+def test_a_curve_that_the_tool_already_has_is_not_copied(tmp_path):
+    """`needs_dropping` is what gates the copy, and it is False for a curve the tool ships — the
+    online page is the better answer whenever it can answer at all."""
+    if not target_curve.tool_curves():
+        pytest.skip("the vendored skill is not checked out")
+    assert not target_curve.describe(tmp_path, "SQ-Comp-Ref").needs_dropping

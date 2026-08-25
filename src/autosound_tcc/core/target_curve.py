@@ -22,9 +22,11 @@ answer, and `core` stays testable without one.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -36,6 +38,12 @@ _SKILL_CURVES = ("references", "patterns", "target-curves", "curves")
 
 #: Where a project keeps its own, per the method's `target-curves/README.md`.
 _PROJECT_CURVES = ("rew_analitic", "target-curves")
+
+#: The two ids the injected copy relies on, checked before anything is written. The tool's own
+#: file input and its drop zone — public DOM, not internal JavaScript. If either is ever renamed
+#: the injection would quietly do nothing and the page would open with only its own curve, which
+#: is the exact bug this feature exists to fix, so the absence of one is a refusal instead.
+_VIEWER_ANCHORS = ('id="curveFile"', 'id="dropZone"')
 
 #: Suffixes a curve file's name carries beyond the curve's own name. `SQ-Comp-Ref_0db_REW.txt` is
 #: the curve `SQ-Comp-Ref` exported at 0 dB in REW's format; the export detail is not the identity.
@@ -116,6 +124,93 @@ def find_file(project_dir: Path, name: str) -> Optional[Path]:
         if len(inside) == 1:
             return inside[0]
     return None
+
+
+def viewer_source() -> Optional[Path]:
+    """The method's visualiser as it exists in this checkout, or None."""
+    try:
+        path = Path(vendor_loader.skill_dir()).joinpath(
+            "references", "patterns", "target-curves", "target_curves_visualizer.html")
+    except Exception:  # noqa: BLE001
+        return None
+    return path if path.is_file() else None
+
+
+def local_viewer_dir() -> Path:
+    """Where the injected copy is written. One place, overwritten, never the project folder."""
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches" / "autosound-tcc"
+    elif sys.platform.startswith("win"):
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "autosound-tcc"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "autosound-tcc"
+    return base / "target-curve-viewer"
+
+
+def build_local_viewer(curve_path: Path, name: str, out_dir: Optional[Path] = None) -> Optional[Path]:
+    """A copy of the visualiser that already has this curve on it, or None if it cannot be made.
+
+    This is the user's own question answered ("why not just put the curve in the viewer's
+    folder?"): the folder is not read. The page performs no network request of any kind — the one
+    curve it ships is a JavaScript array inside the HTML, and `curves/` exists so a PERSON can
+    pick a file up from it and drop it. So the curve goes INTO the copy, not next to it.
+
+    The injection uses the tool's own front door rather than its insides: it builds a `File` and
+    hands it to the page's file input, which is exactly what the picker does. Nothing about the
+    tool's internal functions or data structures is assumed — only that the input exists, which is
+    checked first, because an injection that silently does nothing would restore the original bug
+    in a form nobody can see.
+
+    Returns None rather than raising: every caller has a working fallback (reveal the file and let
+    the person drop it), and a failure here must degrade to that rather than to an error dialog.
+    """
+    source = viewer_source()
+    if source is None:
+        return None
+    try:
+        html = source.read_text(encoding="utf-8")
+        curve = Path(curve_path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not all(anchor in html for anchor in _VIEWER_ANCHORS):
+        return None
+    if "</body>" not in html:
+        return None
+
+    payload = json.dumps({"name": Path(curve_path).name, "text": curve})
+    script = f"""
+<!-- Added by TCC: this project's own target curve, handed to the tool through its own file
+     input — the same path a dropped file takes. Nothing else in this page is changed. -->
+<script>
+(function () {{
+  var curve = {payload};
+  function place() {{
+    var input = document.getElementById('curveFile');
+    if (!input || typeof DataTransfer === 'undefined') return;
+    var box = new DataTransfer();
+    box.items.add(new File([curve.text], curve.name, {{ type: 'text/plain' }}));
+    input.files = box.files;
+    input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+  }}
+  if (document.readyState === 'complete') {{ place(); }}
+  else {{ window.addEventListener('load', place); }}
+}})();
+</script>
+</body>"""
+    out_dir = Path(out_dir or local_viewer_dir())
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Written beside the target and moved into place: a half-written 500 KB page opened by a
+        # browser is a blank screen with no explanation.
+        handle, temp = tempfile.mkstemp(dir=str(out_dir), suffix=".html")
+        os.close(handle)
+        temp_path = Path(temp)
+        temp_path.write_text(html.replace("</body>", script, 1), encoding="utf-8")
+        final = out_dir / f"{name or 'curve'}.html"
+        temp_path.replace(final)
+    except OSError:
+        return None
+    return final
 
 
 def reveal_command(path: Path) -> list[str]:
