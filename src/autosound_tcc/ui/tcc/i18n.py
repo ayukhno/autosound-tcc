@@ -837,6 +837,14 @@ Choose sweeps (sw) above to read this.",
                            "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
         "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
                            "Ledger updated and re-attested.",
+        "targetNotInTool": "The tool does not ship “{name}” — it only carries the method's own curves, and learns any "
+                           'other by having its file dropped on it. Yours is selected in the file manager: drag it onto '
+                           'the page.',
+        "targetNoFile": 'The tool does not ship “{name}”, and no file for it was found in this project — the page '
+                        'opens with the curves it has. Export the curve into rew_analitic/target-curves/{name}/ and '
+                        'it can be dropped on.',
+        "targetRevealFailed": 'The tool does not ship “{name}”. The file manager would not open; the file is at {path} — '
+                              'drag it onto the page.',
         # Phase 4, the listening panel (2026-08-25).
         "lsnDropLast": 'Undo last',
         "lsnBtn": 'Listening',
@@ -1592,6 +1600,14 @@ Choose sweeps (sw) above to read this.",
                            "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
         "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
                            "(вручну). Ledger оновлено і переатестовано.",
+        "targetNotInTool": 'Інструмент не несе «{name}» — у ньому лише власні криві методу, а будь-яку іншу він '
+                           'дізнається з файлу, який на нього перетягнули. Твій виділено у файловому менеджері: '
+                           'перетягни його на сторінку.',
+        "targetNoFile": 'Інструмент не несе «{name}», і файлу для неї в цьому проєкті не знайшлось — сторінка '
+                        'відкриється з тими кривими, які в неї є. Виклади криву в rew_analitic/target-curves/{name}/ '
+                        '— і її можна буде перетягнути.',
+        "targetRevealFailed": 'Інструмент не несе «{name}». Файловий менеджер не відкрився; файл лежить тут: {path} — '
+                              'перетягни його на сторінку.',
         # Phase 4, the listening panel (2026-08-25).
         "lsnDropLast": 'Прибрати останню',
         "lsnBtn": 'Слухання',
@@ -2434,6 +2450,14 @@ Choose sweeps (sw) above to read this.",
                           'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
         "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
                           'zaktualizowany i ponownie zatwierdzony.',
+        "targetNotInTool": 'Narzędzie nie zawiera „{name}” — ma tylko własne krzywe metody, a każdą inną poznaje z '
+                           'pliku, który na nie przeciągniesz. Twój jest zaznaczony w menedżerze plików: przeciągnij go '
+                           'na stronę.',
+        "targetNoFile": 'Narzędzie nie zawiera „{name}”, a pliku dla niej w tym projekcie nie znaleziono — strona '
+                        'otworzy się z krzywymi, które ma. Wyeksportuj krzywą do rew_analitic/target-curves/{name}/, '
+                        'a będzie można ją przeciągnąć.',
+        "targetRevealFailed": 'Narzędzie nie zawiera „{name}”. Menedżer plików się nie otworzył; plik jest tutaj: {path} — '
+                              'przeciągnij go na stronę.',
         # Phase 4, the listening panel (2026-08-25).
         "lsnDropLast": 'Cofnij ostatnią',
         "lsnBtn": 'Odsłuch',
@@ -3321,6 +3345,14 @@ Choose sweeps (sw) above to read this.",
                           'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
         "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
                           'neu bestätigt.',
+        "targetNotInTool": 'Das Werkzeug bringt „{name}“ nicht mit — es trägt nur die eigenen Kurven der Methode und '
+                           'lernt jede andere, indem man ihm die Datei darauflegt. Deine ist im Dateimanager ausgewählt: '
+                           'zieh sie auf die Seite.',
+        "targetNoFile": 'Das Werkzeug bringt „{name}“ nicht mit, und im Projekt wurde keine Datei dafür gefunden — '
+                        'die Seite öffnet mit den Kurven, die sie hat. Exportiere die Kurve nach '
+                        'rew_analitic/target-curves/{name}/, dann lässt sie sich darauflegen.',
+        "targetRevealFailed": 'Das Werkzeug bringt „{name}“ nicht mit. Der Dateimanager ließ sich nicht öffnen; die Datei '
+                              'liegt unter {path} — zieh sie auf die Seite.',
         # Phase 4, the listening panel (2026-08-25).
         "lsnDropLast": 'Letztes zurück',
         "lsnBtn": 'Hören',

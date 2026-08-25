@@ -64,6 +64,7 @@ from autosound_tcc.core import (
     omp_session,
     process_writer,
     project_settings,
+    target_curve,
     terminal_launcher,
     updates,
 )
@@ -2016,7 +2017,33 @@ class MainWindow(QMainWindow):
         menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
 
     def _open_target_curve_tool(self, _event=None) -> None:
+        """Open the method's comparison tool — and hand it this project's curve if it lacks it.
+
+        The tool carries the curves the skill ships and learns every other one from a `.txt`
+        dropped on it. So a project whose target is its own curve used to open a page that had
+        never heard of it and said nothing about it: the header read "Resonalyze", the plot was
+        something else (the user's own report, 2026-08-25).
+
+        The page is opened FIRST and the file revealed after, deliberately: the browser is what
+        was asked for and should not wait behind a file manager. What the strip then says is the
+        part that was missing — that this curve is not in the tool, and where its file is.
+        """
         QDesktopServices.openUrl(QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={i18n.current_language()}"))
+        target = target_curve.describe(config.project_dir(), getattr(self._view, "target", None))
+        if not target.name or target.in_tool:
+            return
+        if target.path is None:
+            self._status_strip.notify(
+                i18n.t("targetNoFile").format(name=target.name), level="warn"
+            )
+            return
+        if target_curve.reveal(target.path):
+            self._status_strip.notify(i18n.t("targetNotInTool").format(name=target.name))
+        else:
+            self._status_strip.notify(
+                i18n.t("targetRevealFailed").format(name=target.name, path=target.path),
+                level="warn",
+            )
 
     def _on_preset_index(self, _index: int) -> None:
         preset = self._preset_combo.currentData()
