@@ -2036,6 +2036,25 @@ class MainWindow(QMainWindow):
         # page makes no network request at all, so next to it is nowhere. Inside it works —
         # verified in a browser, not reasoned about: the page then lists SQ-Comp-Ref, Flat and the
         # project's own curve, with no console errors.
+        if target.needs_dropping and target_curve.tool_takes_a_fragment():
+            # The live page, with the curve travelling in the URL FRAGMENT — which never leaves
+            # the browser, so a person's own measured curve does not reach a web server's logs on
+            # the way to a page that only had to draw it. Verified against the fixed loader: one
+            # card, and re-opening the same link recognises it rather than adding a second.
+            fragment = target_curve.fragment_for(target.path, target.name)
+            if fragment:
+                url = QUrl(f"{_TARGET_CURVE_TOOL_URL}?lang={lang}")
+                url.setFragment(fragment, QUrl.ParsingMode.DecodedMode)
+                QDesktopServices.openUrl(url)
+                # Naming the card that should now be there is the whole point of this sentence:
+                # the published page can be older than this app for the minutes between a push and
+                # Pages catching up, and an old page ignores the fragment SILENTLY. A claim the
+                # reader can check beats a reassurance they cannot.
+                self._status_strip.notify(
+                    i18n.t("targetHandedOver").format(name=target.name)
+                )
+                return
+
         if target.needs_dropping:
             local = target_curve.build_local_viewer(target.path, target.name)
             if local is not None:

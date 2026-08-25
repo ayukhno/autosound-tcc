@@ -170,13 +170,16 @@ def tool_takes_a_fragment() -> bool:
 def fragment_for(curve_path: Path, name: str) -> Optional[str]:
     """`curve=<name>&data=<REW text>`, percent-encoded, for the URL FRAGMENT.
 
-    ⚠️ **Built and tested, and NOT yet the path the window takes** (2026-08-25). The loader in the
-    method's page adds the curve TWICE: one fragment load produces two cards, `<name>` and
-    `<name> (loaded)`. Measured on a cleared localStorage with a forced reload and a name the
-    browser had never seen — the first two attempts at this were worthless because changing only
-    the fragment does not reload a page, so nothing ran at all. Reported to the skill; until it is
-    one card, the window keeps using the local injected copy, which was verified to produce
-    exactly three.
+    This is the window's primary path since the method's loader was fixed (`1ed2aad`). It briefly
+    was not: the first version added the curve TWICE — `loadFromHash` ran before `restore`, so the
+    freshly persisted curve was read back and drawn a second time. Found here, fixed there, and
+    re-checked here: one card on the first load, and re-opening the same link recognises the curve
+    rather than adding another.
+
+    How that was measured matters more than the result, because the first two attempts said
+    nothing: changing only a URL's fragment does NOT reload the page, so the handler never ran and
+    what was on screen came from a previous test's localStorage. The decisive form is a cleared
+    store, a forced reload (via `about:blank`), and a curve name the browser has never seen.
 
     The fragment and not the query on purpose, and it is the method's choice as much as ours: a
     fragment is never sent to the server, so a person's own measured curve does not reach GitHub's

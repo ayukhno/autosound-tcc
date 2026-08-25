@@ -837,6 +837,9 @@ Choose sweeps (sw) above to read this.",
                            "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
         "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
                            "Ledger updated and re-attested.",
+        "targetHandedOver": 'The tool does not carry “{name}”, so the curve went to the page in the link itself — it '
+                            'should be on the plot as “{name}”. If it is not there, the published tool is older than this '
+                            'app; say so and it will be handed over as a file instead.',
         "targetLocalViewer": 'The tool does not carry “{name}”, so this is a LOCAL copy of it with your curve already '
                              'plotted — built from the method version this app is pinned to, not the live page. Everything '
                              "else about it is the tool's own.",
@@ -1603,6 +1606,9 @@ Choose sweeps (sw) above to read this.",
                            "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
         "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
                            "(вручну). Ledger оновлено і переатестовано.",
+        "targetHandedOver": 'Інструмент не несе «{name}», тож крива поїхала на сторінку в самому посиланні — вона має '
+                            'бути на графіку як «{name}». Якщо її там нема, опублікований інструмент старіший за '
+                            'застосунок; скажи — і криву передаватимемо файлом.',
         "targetLocalViewer": 'Інструмент не несе «{name}», тож це ЛОКАЛЬНА його копія з уже нанесеною твоєю кривою — '
                              'зібрана з тієї версії методу, на якій стоїть застосунок, а не жива сторінка. Усе інше в ній '
                              '— інструментове.',
@@ -2456,6 +2462,9 @@ Choose sweeps (sw) above to read this.",
                           'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
         "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
                           'zaktualizowany i ponownie zatwierdzony.',
+        "targetHandedOver": 'Narzędzie nie zawiera „{name}”, więc krzywa pojechała na stronę w samym linku — powinna być '
+                            'na wykresie jako „{name}”. Jeśli jej tam nie ma, opublikowane narzędzie jest starsze niż ta '
+                            'aplikacja; powiedz, a będzie przekazywana plikiem.',
         "targetLocalViewer": 'Narzędzie nie zawiera „{name}”, więc to jego LOKALNA kopia z już naniesioną twoją krzywą — '
                              'zbudowana z wersji metody, na której stoi aplikacja, a nie żywa strona. Cała reszta w niej '
                              'jest narzędzia.',
@@ -3354,6 +3363,9 @@ Choose sweeps (sw) above to read this.",
                           'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
         "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
                           'neu bestätigt.',
+        "targetHandedOver": 'Das Werkzeug trägt „{name}“ nicht, die Kurve ist also im Link selbst mitgefahren — sie '
+                            'sollte als „{name}“ im Diagramm stehen. Steht sie nicht da, ist das veröffentlichte Werkzeug '
+                            'älter als diese App; sag Bescheid, dann wird sie stattdessen als Datei übergeben.',
         "targetLocalViewer": 'Das Werkzeug trägt „{name}“ nicht, das hier ist also eine LOKALE Kopie davon mit deiner '
                              'Kurve bereits darauf — gebaut aus der Methodenversion, auf die diese App gepinnt ist, nicht '
                              'die Live-Seite. Alles andere daran gehört dem Werkzeug.',
