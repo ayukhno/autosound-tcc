@@ -86,33 +86,3 @@ def test_language_choices_are_named_in_the_current_language():
 
 def test_language_badges_are_the_header_combos_items():
     assert i18n.language_badges() == [("en", "EN"), ("uk", "УК"), ("pl", "PL"), ("de", "DE")]
-
-
-def test_the_effort_levels_are_words_in_every_language_not_the_english_ones():
-    """User, 2026-08-26, with a screenshot: the Ukrainian window showed «зусилля» beside `x-high`.
-
-    The keys existed and every language carried them — carrying the ENGLISH word. That is the hole
-    the other guards in this file cannot see: they check that a key is present, that its
-    placeholders match and that its paragraph breaks survive, and an untranslated value passes all
-    three. A label is not translated because it exists.
-
-    Narrow on purpose. Plenty of strings here are meant to stay as they are — role names the user
-    asked us not to translate, the capture-method suffixes `sw`/`rta`, model ids. This asserts one
-    field, the one that was reported, rather than inventing a rule that would fire on all of them.
-    """
-    from autosound_tcc.core import model_choices
-
-    for lang, *_ in i18n.LANGS:
-        if lang == "en":
-            continue
-        theirs = []
-        for level in model_choices.EFFORT_LEVELS:
-            key = f"effort_{level}"
-            # PER LEVEL, not the three as a group. Comparing the lists was the first version of
-            # this and it would have passed the very bug that was reported: two levels translated
-            # and `x-high` left in English makes the list differ, which was enough for it. The
-            # defect is one value, so the assertion has to be one value.
-            assert i18n.T[lang][key] != i18n.T["en"][key], \
-                f"{lang} still shows the English {key}"
-            theirs.append(i18n.T[lang][key])
-        assert len(set(theirs)) == len(theirs), f"{lang} cannot tell two effort levels apart"

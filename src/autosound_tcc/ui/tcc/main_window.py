@@ -3979,6 +3979,12 @@ class MainWindow(QMainWindow):
         self._refresh_tip.set_text(i18n.t("refreshProjectTip"))
         self._diag_tip.set_text(i18n.t("diagBtnTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))
+        # All three, and the middle one was the one missing (user, 2026-08-26, with a screenshot:
+        # an English window with «зусилля» still on it). Its two neighbours were re-set here and it
+        # was not, so it kept whatever language the window was BUILT in — which for him is always
+        # Ukrainian, so the label never appeared to translate at all. Same defect as the listening
+        # panel's two word buttons a day earlier: a retranslate that covers a row except one widget.
+        self._ai_effort_lbl.setText(i18n.t("aiEffort"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
         self._refresh_critic_warning()
         for i in range(self._preset_combo.count()):

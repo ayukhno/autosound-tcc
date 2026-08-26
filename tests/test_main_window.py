@@ -2891,3 +2891,39 @@ def test_the_empty_flaw_map_keeps_its_sentence_across_a_language_switch(tmp_path
     finally:
         i18n.set_language(before)
         window._retranslate()
+
+
+def test_every_label_in_the_ai_row_follows_a_language_switch():
+    """User, 2026-08-26, with a screenshot: an English window with «зусилля» still in it.
+
+    `_ai_effort_lbl` was built from i18n and never re-set in `_retranslate`, while the two labels
+    either side of it were. For somebody whose window always opens in Ukrainian that reads as "this
+    field is never translated" — the string was there all along, the retranslate was missing it.
+    Second one in two days; the listening panel's two word buttons were the first, and were also a
+    row covered except for one widget.
+
+    Driven through `_on_language_selected`, the window's own handler: the labels do not follow a
+    bare `i18n.set_language`, so a test using that would prove nothing while passing.
+
+    Asserted FORWARD — switch to a language, expect that language — not by hunting leftovers. A
+    label that is never re-set keeps the language the window was BUILT in, which here is English,
+    so looking for stale foreign text finds nothing however broken the retranslate is.
+    """
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    row = {"aiMain": window._ai_main_lbl,
+           "aiEffort": window._ai_effort_lbl,
+           "aiCritic": window._ai_critic_lbl}
+    before = i18n.current_language()
+    try:
+        for lang, *_ in i18n.LANGS:
+            window._on_language_selected(lang)
+            for key, label in row.items():
+                assert label.text() == i18n.T[lang][key], (
+                    f"{key} shows {label.text()!r} after switching to {lang}"
+                )
+    finally:
+        window._on_language_selected(before)
