@@ -6,6 +6,75 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.22] — 2026-08-26 · released with the method, and three silent failures caught before the car
+
+Seventeen commits, and the release that pairs with **method `v3.0.33`** — the pin is exactly that
+tag, not a commit near it. Two of the three defects below broke nothing visibly: they took a
+number, or a whole panel, off the screen and said nothing, which is the failure this app keeps
+learning to hunt.
+
+### Added
+
+- **The app speaks four languages** — Polish and German beside English and Ukrainian. One list
+  decides what the window offers, so a language cannot sit in the table and be invisible in the
+  menu, and a test holds the four in step: same keys, same `{placeholders}`, same paragraph breaks.
+- **The listening panel.** A tree of tracks on the right; open a track, open a characteristic, and
+  the two finished sentences stand under it — one for right, one for wrong. Click one and it lands
+  in the box on the left as a line you rewrite freely. The tick and the text are both kept and
+  neither stands for the other: the pair goes to the method's journal, your wording goes with it.
+  Nothing here knows what is playing, on purpose — the route says what comes next, the clicks say
+  what happened.
+- **The target curve travels to the tool.** Clicking it in the header opens the visualiser with
+  the curve IN the link, so the page draws the project's own curve instead of a tool that has
+  never heard of it.
+- **Six tooltips** that say what the button does, in the words you used for it.
+
+### Changed
+
+- **The header's target curve reads the live pointer**, not the version stamped into a ledger
+  snapshot — the curve you are EQing against now, not the one an old snapshot was designed for.
+- **The message beside the target curve is one clause**, and only when it has something checkable
+  to say. It used to fire on every click of every project with a curve of its own, with three
+  clauses of our internal business and a contingency plan phrased as homework.
+- **The DSP's rate is read through the method's accessor**, under either of its two names. The
+  method renamed `sample_rate_hz` to `dsp_processing_rate_hz` because the old name never said
+  WHICH rate it is — the processor's, not the capture's — and both are read forever.
+- **The System-params REW row names the endpoint it actually reaches.** It printed `4735` beside
+  the reachability dot; with `REW_API_URL` pointing REW at another host the dot would have been
+  right and the label beside it wrong.
+
+### Fixed
+
+- **Closing the curve window while REW was answering could kill the app** (`SIGABRT`, mid-session,
+  with a crash report). It waited four seconds for its own fetch and then closed anyway; Qt aborts
+  the process when a running thread is destroyed. The window now asks the fetch to stop, waits
+  briefly, and hands one that is still busy to the shutdown path instead of destroying it. The same
+  half-guard in the measurement panel — the one open during a capture — went with it.
+- **Every group of curves came back empty** after the method added positions and controls to a
+  measurement's identity: this app built the lookup key by hand while filling the map through the
+  method's own function, so nothing matched and every driver was reported as one REW does not
+  hold. Both sides go through that function now.
+- **The curve reached the visualiser double-encoded** — the fragment was already percent-encoded
+  and Qt encoded it again, so the page decoded once, found the literal characters and drew nothing.
+
+### Upgrading
+
+**This release pairs with method `v3.0.33`.** Install or update both; the app is pinned to that
+exact tag. The previous release rode a commit fifteen past `v3.0.19`.
+
+- **Measurement names understand two new tokens** (method `v3.0.31`): a POSITION — `p1`…`p9` around
+  the head, `x0` at the tripod — and a CONTROL, `m-L_49ctl` / `_49rep` or `-ctl1` / `-ctl3`. Titles
+  carrying them now parse and keep their version and method. A group sum still takes only the
+  driver's PLAIN sweep: a capture at one point of the ellipsoid, or a drift reference, is a
+  measurement OF the driver and not the driver's own curve.
+- **`REW_API_URL` points the app at a REW that is not on this machine.** An unreachable address
+  fails per call — a red dot — rather than at startup.
+- **If you exported a set with `resonalyze_ir --process` before method `v3.0.28`**, check it: a
+  round keyed by a ledger version could not be found and `protectiveHighPass: null` was written for
+  channels that WERE protected, which reads downstream as "no filter". Re-export, or pass `--hpf`.
+  Three commands now refuse a missing round by name instead of proceeding through it.
+- Nothing in this release writes to a DSP, and nothing in it touches REW's state.
+
 ## [v0.1.21] — 2026-08-23 · an evening of his corrections, and two features that arrived with the method
 
 Twenty-three commits, every one of them work he drove in the session window, and most of them
