@@ -8,6 +8,7 @@ comparison decides "newer", and what stops the button touching somebody's own ch
 from __future__ import annotations
 
 import subprocess
+import sys
 
 import pytest
 
@@ -250,3 +251,55 @@ def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
     assert status.detail.endswith("autosound-tcc")
     ok, why, _detail = updates.apply_skill()
     assert ok is False and why == "submodule", "and the button cannot do it either"
+
+
+def test_our_installer_constants_agree_with_the_installers_own(monkeypatch):
+    """F-030. Four values here are "the installer's own constants, kept identical on purpose" —
+    and until the method grew a way to print them, identical meant somebody typed them twice.
+    The method's tag glob is written FOUR times: `install.sh`, `install.ps1`, `install.cmd`, and
+    this module. Its own checker keeps its three in step; ours was the copy nobody checked.
+
+    Read from the checker's OUTPUT, not from its source. A grep over their script would pass on
+    a comment and break silently on a refactor of theirs; `--print` is an interface they now
+    maintain, and an unknown name exits 2 with the available ones listed, so a typo here fails
+    loudly instead of comparing against an empty string. That last property is asserted too,
+    because it is the whole reason reading their output is safe.
+
+    The repository URLs are compared with a trailing `.git` taken off both sides, deliberately.
+    They are the same remote either way — `git ls-remote` accepts both — and the method spells
+    the skill's with the suffix and TCC's without. Asserting the characters would be asserting
+    somebody's punctuation and would fail on a difference nothing can act on; asserting the
+    remote is what the constant is FOR.
+    """
+    import subprocess as sp
+
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not initialized")
+    script = vendor_loader.skill_dir().parent.parent / "scripts" / "installer-consistency.py"
+    if not script.is_file():
+        pytest.skip(f"the method at this pin has no {script.name}")
+
+    done = sp.run([sys.executable, str(script), "--print"],
+                  capture_output=True, text=True, timeout=60, check=False)
+    assert done.returncode == 0, done.stderr
+    theirs = dict(
+        line.split("=", 1) for line in done.stdout.splitlines() if "=" in line
+    )
+
+    assert theirs.get("SKILL_TAG_GLOB") == updates.SKILL_TAG_GLOB
+    assert theirs.get("TCC_TAG_GLOB") == updates.TCC_TAG_GLOB
+    assert _same_remote(theirs.get("SKILL_REPO", ""), updates.SKILL_REPO)
+    assert _same_remote(theirs.get("TCC_REPO", ""), updates.TCC_REPO)
+
+    # And the guard that makes the four assertions above trustworthy: asking for a name that does
+    # not exist is an error with the real names in it, never an empty string.
+    missed = sp.run([sys.executable, str(script), "--print", "NO_SUCH_NAME"],
+                    capture_output=True, text=True, timeout=60, check=False)
+    assert missed.returncode != 0
+    assert "SKILL_TAG_GLOB" in (missed.stdout + missed.stderr)
+
+
+def _same_remote(a: str, b: str) -> bool:
+    return a.rstrip("/").removesuffix(".git") == b.rstrip("/").removesuffix(".git")

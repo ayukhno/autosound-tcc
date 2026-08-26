@@ -189,3 +189,91 @@ def i18n_text(key: str) -> str:
 
     return i18n.t(key).rsplit("}", 1)[-1].strip()
 
+
+
+def _pin_git(monkeypatch, answers: dict, tmp_path):
+    """Fake the method's checkout: `updates._git` by its first two arguments."""
+    from autosound_tcc.core import updates, vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "skill_repo_root", lambda: tmp_path)
+
+    def fake(*args, **kwargs):
+        for key, value in answers.items():
+            if args[: len(key)] == key:
+                return value
+        return (False, "")
+
+    monkeypatch.setattr(updates, "_git", fake)
+
+
+def test_a_pin_behind_a_released_tag_is_said_out_loud(monkeypatch, tmp_path):
+    """F-029. The pin is right and stays; what was missing is anyone SAYING it fell behind. It sat
+    on v3.0.11 while the method already had v3.0.12 with a changed `align_delay_polarity`
+    contract, and that surfaced only when somebody bumped it by hand."""
+    _pin_git(monkeypatch, {
+        ("rev-parse", "--show-superproject-working-tree"): (True, "/repo/tcc"),
+        ("rev-parse", "HEAD"): (True, "aaaaaaa"),
+        ("for-each-ref",): (True, "v3.0.34\nv3.0.33\n"),
+        ("rev-parse", "v3.0.34^{commit}"): (True, "bbbbbbb"),
+        ("rev-list", "--count"): (True, "3"),
+    }, tmp_path)
+
+    check = self_check._pin_check()
+
+    assert check.status == self_check.WARN
+    assert "v3.0.34" in check.title and "3" in check.title
+    assert check.fix is None, "a bump is a decision, not a deterministic repair — no button"
+    assert "checkout v3.0.34" in check.detail, "the command is named, since we cannot press it"
+
+
+def test_a_pin_at_the_newest_tag_says_which_one_and_that_it_is_local(monkeypatch, tmp_path):
+    """The OK row names the tag AND the limit of the answer: the tags are read from this checkout,
+    without asking the network, so a newer one may exist that was never fetched. A check that
+    cannot see everything should say what it looked at — otherwise it is the reassuring kind."""
+    _pin_git(monkeypatch, {
+        ("rev-parse", "--show-superproject-working-tree"): (True, "/repo/tcc"),
+        ("rev-parse", "HEAD"): (True, "bbbbbbb"),
+        ("for-each-ref",): (True, "v3.0.34\n"),
+        ("rev-parse", "v3.0.34^{commit}"): (True, "bbbbbbb"),
+    }, tmp_path)
+
+    check = self_check._pin_check()
+
+    assert check.status == self_check.OK
+    assert "v3.0.34" in check.title
+
+
+def test_an_installed_skill_is_not_this_rows_business(monkeypatch, tmp_path):
+    """No superproject means no submodule: an installed skill belongs to the update row
+    (`updates.check_skill`), and two rows saying the same thing in different words is worse."""
+    _pin_git(monkeypatch, {
+        ("rev-parse", "--show-superproject-working-tree"): (True, ""),
+    }, tmp_path)
+
+    assert self_check._pin_check().status == self_check.OK
+
+
+def test_running_ahead_of_the_releases_is_not_being_behind(monkeypatch, tmp_path):
+    """A developer pinned in FRONT of the newest tag is not out of date, and a row telling them to
+    check out backwards would be wrong — the same judgement `check_tcc` already makes."""
+    _pin_git(monkeypatch, {
+        ("rev-parse", "--show-superproject-working-tree"): (True, "/repo/tcc"),
+        ("rev-parse", "HEAD"): (True, "ccccccc"),
+        ("for-each-ref",): (True, "v3.0.34\n"),
+        ("rev-parse", "v3.0.34^{commit}"): (True, "bbbbbbb"),
+        ("rev-list", "--count"): (True, "0"),
+    }, tmp_path)
+
+    assert self_check._pin_check().status == self_check.OK
+
+
+def test_no_tags_to_compare_against_is_silence_not_an_alarm(monkeypatch, tmp_path):
+    """F-029's own rule: never BAD, never blocking. A shallow clone with no tags fetched has
+    nothing to say, and saying it loudly would train the reader to ignore the row."""
+    _pin_git(monkeypatch, {
+        ("rev-parse", "--show-superproject-working-tree"): (True, "/repo/tcc"),
+        ("rev-parse", "HEAD"): (True, "aaaaaaa"),
+        ("for-each-ref",): (True, ""),
+    }, tmp_path)
+
+    assert self_check._pin_check().status == self_check.OK

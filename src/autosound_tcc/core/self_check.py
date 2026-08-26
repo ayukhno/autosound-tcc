@@ -161,6 +161,68 @@ def _refresh_catalogue() -> str:
     return _t("selfCatalogueFixed").format(n=total)
 
 
+def _pin_check() -> Check:
+    """The vendored method sitting on an older release than the newest tag we know of (F-029).
+
+    The pin itself is right and stays: a live link to the method's `main` would hand the app a
+    deliberately unstable line, make a red suite unattributable (ours or theirs?), and break
+    reproducibility for anyone cloning this public repo. What was missing is that **nobody says
+    the pin has fallen behind** — it sat on v3.0.11 while the method already had v3.0.12 with a
+    changed `align_delay_polarity` contract, and that was noticed only by bumping it by hand. The
+    cockpit has been running this check for us every day since.
+
+    **Two deliberate departures from how F-029 was written on 2026-08-22, both because the rule
+    changed under it.** It said "N commits behind `main`" with `git submodule update --remote`.
+    Since then the pin follows TAGS, so:
+
+    * behind `main` is the NORMAL state between releases — a row that is always on is not a
+      warning, it is furniture. The question worth asking is whether a released TAG went by.
+    * `--remote` moves to the branch tip, which is exactly what we do not want. The command named
+      here checks out the tag.
+
+    No network, ever: it reads the tags this checkout already has. That makes an OK answer a
+    LOCAL one, and the title says so rather than implying the internet was asked — the honest
+    version of a check that cannot see everything. F-029's own rule, kept: never BAD, never
+    blocking, and silence when there is nothing to compare.
+
+    Only for a checkout with the submodule. An installed skill is the update row's business
+    (`updates.check_skill`), and two rows saying the same thing in different words is worse than
+    one.
+    """
+    from autosound_tcc.core import updates, vendor_loader
+
+    repo = vendor_loader.skill_repo_root()
+    if repo is None:
+        return Check("pin", OK, _t("selfPinOkTitle"))
+    inside, parent = updates._git("rev-parse", "--show-superproject-working-tree", cwd=repo)
+    if not (inside and parent):
+        # Not our submodule: an installed skill, or somebody's own checkout. Not this row's job.
+        return Check("pin", OK, _t("selfPinOkTitle"))
+    ok, head = updates._git("rev-parse", "HEAD", cwd=repo)
+    if not ok or not head:
+        return Check("pin", OK, _t("selfPinOkTitle"))
+    listed, tags = updates._git(
+        "for-each-ref", "--sort=-v:refname", "--format=%(refname:short)",
+        f"refs/tags/{updates.SKILL_TAG_GLOB}", cwd=repo)
+    newest = tags.splitlines()[0].strip() if listed and tags.strip() else ""
+    if not newest:
+        return Check("pin", OK, _t("selfPinOkTitle"))
+    resolved, tag_sha = updates._git("rev-parse", f"{newest}^{{commit}}", cwd=repo)
+    if not resolved or tag_sha == head:
+        return Check("pin", OK, _t("selfPinAtTitle").format(tag=newest))
+    counted, behind = updates._git("rev-list", "--count", f"HEAD..{newest}", cwd=repo)
+    if not counted or not behind.isdigit() or int(behind) == 0:
+        # Ahead of the newest tag, or unrelated history: a developer running in front of the
+        # releases is not out of date, and telling them to check out backwards would be wrong.
+        return Check("pin", OK, _t("selfPinAtTitle").format(tag=newest))
+    return Check(
+        "pin",
+        WARN,
+        _t("selfPinBehindTitle").format(tag=newest, n=behind),
+        _t("selfPinBehindDetail").format(tag=newest),
+    )
+
+
 def _reviewer_actual_check() -> Check:
     """Who answered last, against who was asked for.
 
@@ -239,7 +301,8 @@ def run() -> list[Check]:
     """Every self-check, worst first. Never raises: a diagnostics panel that crashes is worse than
     one that is missing a row."""
     checks = []
-    for probe in (_alias_check, _catalogue_check, _reviewer_actual_check, _recommendation_check):
+    for probe in (_alias_check, _catalogue_check, _pin_check, _reviewer_actual_check,
+                  _recommendation_check):
         try:
             checks.append(probe())
         except Exception as exc:  # noqa: BLE001 — a broken probe is a row, not a dead dialog
