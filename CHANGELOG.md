@@ -6,6 +6,42 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.24] — 2026-08-27 · the app can take its own shortcuts back out, and four labels stop speaking the wrong language
+
+Paired with method **`v3.0.36`**.
+
+### Added
+
+- **`autosound-tcc --uninstall-desktop`** — removes what `--install-desktop` made: the macOS
+  bundle, its Desktop alias, the Windows shortcuts. Only what is recognisably ours; a file of
+  yours under the same name is left alone and said so. It prints the paths it removed, one per
+  line, so the installer that calls it can show you what went and an uninstall stops being a
+  promise. Running it twice is fine — the second time there is nothing to do and it says nothing.
+
+### Fixed
+
+- **Four labels kept the language the window was opened in.** The effort picker's title, the
+  reviewer's status before the first review, the left panel's "no DSP yet", and the EQ copy
+  button: each is written when something happens rather than when the language changes, so each
+  held its first language until that something happened again. If your window always opens in
+  Ukrainian, they simply looked untranslated. Reported with a screenshot; the whole family went
+  with it, and a check now walks every label in the window after each switch.
+
+### Changed
+
+- **Effort levels stay `high · x-high · max` in every language.** They were briefly translated,
+  which was wrong: they name a setting of the model route, like a model name.
+
+### Upgrading
+
+Nothing to do. The pin moves from method `v3.0.35` to **`v3.0.36`**; nothing in the twelve modules
+this app calls changed across that range, checked file by file rather than taken on report.
+
+Two things the method now writes that you may see in this app: rows in the project's flaw list
+marked `hypothesis` (proposed from the solos, not confirmed), and a ledger version whose snapshot
+says it came from a **transcription** of the DSP's screens rather than from a measurement. Both are
+existing fields; this release does not yet render either differently from a confirmed one.
+
 ## [v0.1.23] — 2026-08-26 · the pin stops being silent, and our copy of the installer's constants is checked against the installer
 
 Paired with method **`v3.0.35`**. Three items that were open for four days, one of which turned out
