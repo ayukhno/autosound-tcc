@@ -129,3 +129,46 @@ def test_a_thread_that_will_not_stop_is_reported_rather_than_ignored():
     thread.wait(4000)
     assert not thread.isRunning()
     assert qt_shutdown.quiesce_widgets([holder]) == [], "a stopped thread is not stubborn"
+
+
+def test_a_detached_thread_is_still_the_exit_paths_business():
+    """F-027 hands a closing window's worker over here rather than letting Qt destroy it. That
+    only holds up if the exit path then covers it — otherwise the crash has moved, not gone.
+
+    It could never have been covered by `quiesce_widgets`, and not only because it has no widget
+    left: that function finds threads with `findChildren`, and every REW worker in this app is
+    constructed with NO parent, so it was never a child of the widget that started it.
+    """
+    stop = False
+
+    class _Stubborn(QThread):
+        def run(self) -> None:  # noqa: D102 - QThread override
+            while not stop:
+                self.msleep(1)
+
+    _app()
+    holder = QWidget()
+    thread = _Stubborn()  # parentless, like every worker this covers
+    thread.setObjectName("DetachedWorker")
+    thread.start()
+    while not thread.isRunning():
+        thread.msleep(1)
+
+    assert qt_shutdown.quiesce_widgets([holder]) == [], "no widget owns it — nothing to find"
+    qt_shutdown.detach(thread)
+    assert thread in qt_shutdown.detached()
+
+    original = qt_shutdown._THREAD_WAIT_MS
+    qt_shutdown._THREAD_WAIT_MS = 20
+    try:
+        left = qt_shutdown.quiesce_detached()
+    finally:
+        qt_shutdown._THREAD_WAIT_MS = original
+
+    assert [t.objectName() for t in left] == ["DetachedWorker"], \
+        "a thread nobody owns is exactly the one the exit path must decline over"
+
+    stop = True
+    thread.wait(4000)
+    _app().processEvents()  # `finished` is queued back to this thread
+    assert qt_shutdown.detached() == frozenset(), "and it lets go of itself when it ends"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import os
 import pathlib
+import threading
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -192,6 +193,26 @@ class _FakeBridge:
     def impulse_response(self, mid):
         xs, ys = _impulse(4.6)
         return [x / 1000.0 for x in xs], ys  # REW reports seconds; the panel plots ms
+
+
+class _AnsweringBridge(_FakeBridge):
+    """A REW that is IN THE MIDDLE of answering — the state every other fake here skips.
+
+    `_FakeBridge` returns instantly, so a worker built on it is finished before anything can
+    close over it, and F-027 could not be written down as a test. This one stops inside the call
+    until the test lets it go, which is what a real `GET /measurements` does for as long as REW
+    takes to reply.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.inside = threading.Event()
+        self.release = threading.Event()
+
+    def by_name(self, name, exact: bool = True):
+        self.inside.set()
+        self.release.wait(10)
+        return super().by_name(name, exact=exact)
 
 
 class _FrBridge(_FakeBridge):
@@ -982,6 +1003,36 @@ def test_without_a_processing_rate_the_reading_is_milliseconds_alone():
 
     assert view.samples(0.198) is None
     assert "smp" not in view.reading()
+
+
+def test_closing_the_window_while_rew_is_answering_does_not_take_the_process_with_it(monkeypatch):
+    """F-027. The window used to wait four seconds for its worker and then close ANYWAY — and Qt
+    answers a QThread destroyed while running with `qFatal`, which is `abort()`, not an exception.
+    So the failure needed REW to be genuinely answering, which is the ORDINARY case in the car:
+    two `exit=134` in one day with REW up, none at all with it down.
+
+    The third option is the one `qt_shutdown` already found at application exit: let it go. The
+    window closes now, the worker finishes its one call into a set nothing reads, and drops itself.
+    """
+    from autosound_tcc.ui.tcc import curve_dialog as cd
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    monkeypatch.setattr(cd, "_WORKER_WAIT_MS", 50)  # the wait is bounded; here it is just short
+    bridge = _AnsweringBridge()
+    dialog = _dialog(["w-L_01 (sw)"], bridge=bridge)
+    assert bridge.inside.wait(5), "the worker has to be INSIDE the call, or this proves nothing"
+    worker = dialog._worker
+
+    dialog.close()
+
+    assert worker.isRunning(), "still answering — this is the case that used to abort()"
+    assert dialog._worker is None, "the window no longer holds it"
+    assert worker in qt_shutdown.detached(), "and qt_shutdown does, so Qt never destroys it"
+
+    bridge.release.set()
+    assert worker.wait(5000), "it finishes on its own time"
+    _app().processEvents()  # `finished` comes back queued, like every cross-thread signal here
+    assert worker not in qt_shutdown.detached(), "and is forgotten once it has"
 
 
 @pytest.mark.parametrize("key", ["dsp_processing_rate_hz", "sample_rate_hz"])

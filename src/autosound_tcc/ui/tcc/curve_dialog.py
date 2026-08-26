@@ -35,7 +35,7 @@ from autosound_tcc.core import config, curve_groups, delay_bank
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, qt_shutdown
 from autosound_tcc.ui.tcc.curve_view import (
     CurveView,
     Trace,
@@ -340,6 +340,29 @@ def _peak_x(trace) -> float:
     return float(np.asarray(trace.x, dtype=float)[int(np.argmax(np.abs(y)))])
 
 
+#: How long a closing window waits for its own REW worker. Bounded for the reason `qt_shutdown`
+#: gives: a teardown that hangs is worse than the crash it prevents, and every call in flight is
+#: timeout-bounded already. Shorter than the old 4 s because the worker is asked to stop first.
+_WORKER_WAIT_MS = 2000
+
+
+def _stop_worker(worker: Optional[_CurveWorker]) -> None:
+    """Ask a REW worker to stop, wait briefly, and hand it over if it is still busy (F-027).
+
+    The bounded wait on its own left two outcomes and both are bad: destroy a running QThread —
+    which is `qFatal`, i.e. `abort()` mid-session with a crash report — or hang the closer until
+    REW replies. The third one is `qt_shutdown`'s, already proven at application exit: let it go.
+    The window closes now, the worker finishes its one in-flight call, and `qt_shutdown` owns it
+    from here — including at exit, where it is what makes the difference between a clean quit and
+    one more `~QThread` against a running thread.
+
+    Its signals are cut first, so nothing arrives at a widget that is on its way out.
+    """
+    if worker is None:
+        return
+    qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS, mute=(worker.done, worker.failed))
+
+
 class _CurveWorker(QThread):
     """Fetch each named measurement's curve.
 
@@ -361,6 +384,12 @@ class _CurveWorker(QThread):
         traces: list[Trace] = []
         problems: list[str] = []
         for title in self._titles:
+            # Asked to stop, so stop — between measurements, which is the only place this loop can
+            # be interrupted: the HTTP call inside is not cancellable and does not need to be, it
+            # is timeout-bounded (`rew_api._TIMEOUT_S`). A window closed over six selected titles
+            # otherwise held its closer for six round trips; now it costs at most one.
+            if self.isInterruptionRequested():
+                return
             # Per measurement, not per batch: one curve REW cannot produce must not take the other
             # one off the screen with it. The window shows what it has and names what it does not.
             try:
@@ -1466,14 +1495,14 @@ class CurveDialog(QDialog):
         return [t for t in self._selection if t] or list(self._titles)
 
     def _reload(self) -> None:
-        """Fetch whatever is selected. Waits out an in-flight worker rather than assigning over
-        it: Qt aborts the process when a running QThread is destroyed, which the measurement
-        panel learned the expensive way."""
+        """Fetch whatever is selected. Stops the in-flight worker rather than assigning over it:
+        Qt aborts the process when a running QThread is destroyed, which the measurement panel
+        learned the expensive way — and a bounded wait alone still assigns over the ones that
+        outlast it, so a slow REW turned a second click into the crash (`_stop_worker`)."""
         titles = self._chosen()
         if not titles:
             return
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.wait(4000)
+        _stop_worker(self._worker)
         self._status.setVisible(True)
         self._status.setText(i18n.t("curveLoading"))
         self._worker = _CurveWorker(self._bridge, titles, self._kind)
@@ -1656,7 +1685,14 @@ class CurveDialog(QDialog):
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """Qt aborts the process if a QThread is destroyed while running — the same `qFatal` the
-        measurement panel's workers are guarded against."""
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.wait(4000)
+        measurement panel's workers are guarded against.
+
+        F-027: the wait alone was not the guard it read as. It waited four seconds and then closed
+        ANYWAY, so a REW that was genuinely answering — the ordinary case in the car, where this
+        window is opened over a live capture session — took the whole app down with `abort()`
+        mid-session. `_stop_worker` asks first, waits a bounded two seconds, and hands a worker
+        that is still busy to `qt_shutdown` instead of letting the window's own teardown destroy it.
+        """
+        worker, self._worker = self._worker, None
+        _stop_worker(worker)
         super().closeEvent(event)

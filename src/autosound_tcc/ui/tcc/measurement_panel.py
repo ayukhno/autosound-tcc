@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core.rew_bridge import RewBridge
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, qt_shutdown
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -41,6 +41,11 @@ from autosound_tcc.ui.tcc.theme import current_theme
 # NOTICE.md at the repo root).
 _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
 from autosound_tcc.ui.tcc.mock_data import MeasItem, MeasSession, MEAS_SESSIONS, PLAN
+
+#: How long a closing panel waits for a REW worker before handing it to `qt_shutdown` (F-027).
+#: Six seconds was the old wait; it is the grace for a normal in-flight call, not a fix for a hung
+#: one, and what happens after it is what stopped being a crash.
+_WORKER_WAIT_MS = 6000
 
 # `ui/capture_order/<preset>/<method>` -- the user's declared REW capture sequence, one per capture
 # method (sw/rta/rta_group -- item 9 round 2, 2026-07-27: one button covers all three methods, so
@@ -846,10 +851,17 @@ class MeasurementPanel(QWidget):
         garbage-collected while still alive, which a running-but-unawaited worker risks the moment
         this panel (and its `self._worker`/etc. references) goes away. Each worker's own HTTP calls
         are timeout-bounded (rew_api.py's `_TIMEOUT_S`), so this wait is bounded too -- not a fix
-        for a truly hung call, just enough to let a normal in-flight one finish first."""
+        for a truly hung call, just enough to let a normal in-flight one finish first.
+
+        The wait alone was the same half-guard F-027 found in the curve window, one file over: it
+        waited and then closed ANYWAY, so a REW still answering after six seconds took the process
+        with it. These workers have no parent either, so `qt_shutdown.quiesce_widgets` never saw
+        them. One that outlasts the wait now goes to `qt_shutdown` instead of being destroyed --
+        which also puts it in front of the exit path, where it can be declined over rather than
+        aborted on.
+        """
         for worker in (self._worker, self._scan_worker, self._rename_worker):
-            if worker is not None and worker.isRunning():
-                worker.wait(6000)
+            qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS)
 
     curvesRequested = Signal(list)  # REW titles to plot — MainWindow opens the window
 

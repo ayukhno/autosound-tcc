@@ -49,6 +49,66 @@ from PySide6.QtWidgets import QApplication, QWidget
 #: in-flight call, and every worker in this app talks over timeout-bounded HTTP.
 _THREAD_WAIT_MS = 3000
 
+#: Threads still running with no widget behind them (F-027).
+#:
+#: A window that is closing cannot wait indefinitely for its own worker and cannot destroy it
+#: either — Qt answers a QThread destroyed while running with `qFatal`. So it hands it here: the
+#: set is what keeps the object alive, since a parentless QThread lives exactly as long as some
+#: Python reference to it does. `quiesce_widgets` could never have covered these, and not only
+#: after they are detached: it looks for threads with `findChildren`, and every REW worker in this
+#: app is built with NO parent, so it was never a child of the widget that started it.
+_DETACHED: set = set()
+
+
+def detach(thread: QThread) -> None:
+    """Take a still-running thread off a closing widget's hands; forget it when it ends.
+
+    `finished` crosses back as a queued connection — the thread OBJECT's affinity is the GUI
+    thread, whatever its `run` is doing — so the set is only ever touched from one thread.
+    """
+    _DETACHED.add(thread)
+    thread.finished.connect(lambda: _DETACHED.discard(thread))
+
+
+def detached() -> frozenset:
+    """What is running with nothing behind it. For the exit path, and for tests to check."""
+    return frozenset(_DETACHED)
+
+
+def stop_or_detach(thread: QThread | None, wait_ms: int, mute: Iterable = ()) -> bool:
+    """Ask a worker to stop; hand it over here if it will not, rather than destroying it.
+
+    The one move a closing widget can make that is neither `abort()` nor a hang, and the whole of
+    F-027. `mute` is the worker's own signals — cut before it is let go, so nothing arrives at a
+    widget that is already on its way out. True when it had to be detached.
+
+    `requestInterruption` is a REQUEST: a worker whose `run` never reads it simply does not stop
+    early, and that is not a reason to skip asking. What makes this safe either way is the branch
+    below, not the worker's cooperation.
+    """
+    if thread is None or not thread.isRunning():
+        return False
+    thread.requestInterruption()
+    if thread.wait(wait_ms):
+        return False
+    for signal in mute:
+        try:
+            signal.disconnect()
+        except (RuntimeError, TypeError):  # nothing connected, or the receiver is already gone
+            pass
+    detach(thread)
+    return True
+
+
+def _stop(thread: QThread) -> bool:
+    """Ask one thread to stop and wait out the bounded grace. True when it is still running."""
+    if not thread.isRunning():
+        return False
+    thread.requestInterruption()
+    thread.quit()
+    thread.wait(_THREAD_WAIT_MS)
+    return thread.isRunning()
+
 
 def quiesce_widgets(widgets: Iterable[QWidget]) -> list[QThread]:
     """Bring these widgets' background threads to a stop, so nothing is running when Qt goes.
@@ -88,15 +148,22 @@ def quiesce_widgets(widgets: Iterable[QWidget]) -> list[QThread]:
                         pass
         for thread in threads:
             try:
-                if not thread.isRunning():
-                    continue
-                thread.requestInterruption()
-                thread.quit()
-                thread.wait(_THREAD_WAIT_MS)
-                if thread.isRunning():
+                if _stop(thread):
                     stubborn.append(thread)
             except Exception:  # noqa: BLE001 -- same reason as above
                 pass
+    return stubborn
+
+
+def quiesce_detached() -> list[QThread]:
+    """The same, for the threads no widget owns any more. Returns those still running."""
+    stubborn: list[QThread] = []
+    for thread in list(_DETACHED):
+        try:
+            if _stop(thread):
+                stubborn.append(thread)
+        except Exception:  # noqa: BLE001 -- a failed cleanup must not stop the rest
+            pass
     return stubborn
 
 
@@ -126,7 +193,7 @@ def destroy_application() -> bool:
     app = QApplication.instance()
     if app is None:
         return True
-    still_running = quiesce_widgets(list(app.topLevelWidgets()))
+    still_running = quiesce_widgets(list(app.topLevelWidgets())) + quiesce_detached()
     if still_running:
         names = ", ".join(t.objectName() or type(t).__name__ for t in still_running)
         # Not silent: an exit that skipped its own teardown is a fact about the run, and the
