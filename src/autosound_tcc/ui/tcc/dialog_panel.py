@@ -343,6 +343,10 @@ class DialogPanel(QWidget):
 
         # Which AI session this conversation is: phase, and whether it was resumed or started
         # fresh. Blank until an agent is attached -- see `set_session_label`.
+        #: How to say whatever the chip currently says, in the language of the moment. The chip
+        #: is written by two methods and by neither of them again, so a language switch left
+        #: "no model chosen" in the language the panel was built in (F-033).
+        self._chip_again = None
         self._session_chip = QLabel("")
         self._session_chip.setProperty("class", "pill")
         self._session_chip.setHidden(True)
@@ -581,6 +585,8 @@ class DialogPanel(QWidget):
         user output, produced in one language, not a UI string. Flipping the interface language
         must leave the actual conversation exactly as it happened (user feedback 2026-07-26)."""
         self._title_label.setText(i18n.t("dialog"))
+        if self._chip_again is not None:
+            self._session_chip.setText(self._chip_again())
         self._attach_tip.set_text(i18n.t("attachTip"))
         self._sub_label.setText(i18n.t("dialogSub"))
         self._reasons_q_label.setText(i18n.t("editReasonsQ"))
@@ -885,15 +891,19 @@ class DialogPanel(QWidget):
         defensible default if "chosen but not running" is visible rather than inferred, which is
         what this chip is for.
         """
-        self._session_chip.setText(
-            i18n.t("dialogIdle").format(model=model) if model else i18n.t("dialogNoModel")
+        self._chip_again = lambda m=model: (
+            i18n.t("dialogIdle").format(model=m) if m else i18n.t("dialogNoModel")
         )
+        self._session_chip.setText(self._chip_again())
         self._session_chip.setHidden(False)
 
     def set_session_label(self, resumed: bool, phase: Optional[str]) -> None:
-        state = i18n.t("sessionResumed") if resumed else i18n.t("sessionNew")
-        label = f"{phase} · {state}" if phase else state
-        self._session_chip.setText(label)
+        def again(r=resumed, ph=phase) -> str:
+            state = i18n.t("sessionResumed") if r else i18n.t("sessionNew")
+            return f"{ph} · {state}" if ph else state
+
+        self._chip_again = again
+        self._session_chip.setText(again())
         self._session_chip.setHidden(False)
 
     def _clear_bubbles(self) -> None:

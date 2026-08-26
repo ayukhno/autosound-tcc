@@ -1717,6 +1717,9 @@ class MainWindow(QMainWindow):
         # The gap is answered by the trailing stretch below, which costs the tree nothing.
         layout.addWidget(self._dsp_section)
 
+        #: How to say the left panel's status again after a language switch — set by
+        #: `_show_left_status`, None when the text is an exception's own words (F-033).
+        self._left_status_again: Optional[Callable[[], str]] = None
         self._left_status = QLabel("")
         self._left_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._left_status.setProperty("class", "phead-sub")
@@ -1772,7 +1775,8 @@ class MainWindow(QMainWindow):
         self._dialog.clear_mock()
         profile_path = config.dsp_profile_path()
         if not profile_path.is_file():
-            self._show_left_status(i18n.t("leftNoProfile"), offer_create=True)
+            self._show_left_status(i18n.t("leftNoProfile"), offer_create=True,
+                                   again=lambda: i18n.t("leftNoProfile"))
             return
         try:
             from autosound_tcc.core import vendor_loader
@@ -1821,9 +1825,10 @@ class MainWindow(QMainWindow):
             # halves start disagreeing. The day `tier` is written for every channel, this branch
             # lights up on its own.
             if not any(group.rows_visible() for group in rig.groups):
+                head = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
                 self._show_left_status(
-                    f"{prof.get('vendor', '?')} {prof.get('name', '?')}\n\n"
-                    + i18n.t("leftNoLedger")
+                    f"{head}\n\n" + i18n.t("leftNoLedger"),
+                    again=lambda h=head: f"{h}\n\n" + i18n.t("leftNoLedger"),
                 )
                 return
             self._has_project = True
@@ -2118,7 +2123,8 @@ class MainWindow(QMainWindow):
         self._settings.setValue("ui/preset", preset)
         self._load_project()
 
-    def _show_left_status(self, message: str, offer_create: bool = False) -> None:
+    def _show_left_status(self, message: str, offer_create: bool = False,
+                          again: Optional[Callable[[], str]] = None) -> None:
         """No loaded DSP view right now -- all four `_load_project` failure branches route here.
 
         What this means is narrow, and it used to be read far too widely: "there is no
@@ -2133,6 +2139,10 @@ class MainWindow(QMainWindow):
         """
         self._has_project = False
         self._tree.setVisible(False)
+        # `again` is how to SAY this message in the language of the moment, kept so `_retranslate`
+        # can ask for it later. The two branches that have no `again` are the load failures, whose
+        # text is an exception's own words and belongs to no language (F-033).
+        self._left_status_again = again
         self._left_status.setText(message)
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(False)
@@ -3986,7 +3996,12 @@ class MainWindow(QMainWindow):
         # panel's two word buttons a day earlier: a retranslate that covers a row except one widget.
         self._ai_effort_lbl.setText(i18n.t("aiEffort"))
         self._ai_critic_lbl.setText(i18n.t("aiCritic"))
-        self._refresh_critic_warning()
+        # `_refresh_critic_status` rather than `_refresh_critic_warning`: it calls the warning
+        # itself and ALSO re-sets the status label, which said "Critic: not called yet" in the
+        # language the window was built in until F-033.
+        self._refresh_critic_status()
+        if self._left_status_again is not None:
+            self._left_status.setText(self._left_status_again())
         for i in range(self._preset_combo.count()):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()

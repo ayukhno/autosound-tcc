@@ -290,6 +290,10 @@ class DetailPane(QFrame):
         for field, tab in getattr(self, "_param_tabs", {}).items():
             tab.setText(_PARAM_TABS[field]())
         self._close_btn.setText(i18n.t("close"))
+        # With a group open, `refresh_with` rewrites this button (and the per-row ones) anyway.
+        # With the pane closed it does not run, and the button kept the language the pane was
+        # built in until it was next opened — invisible, and wrong the moment it appeared (F-033).
+        self._eq_copy.setText(i18n.t("copyEqBank"))
         if self._group is not None:
             self.refresh_with(self._group)
 

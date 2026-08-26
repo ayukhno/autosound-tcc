@@ -2927,3 +2927,52 @@ def test_every_label_in_the_ai_row_follows_a_language_switch():
                 )
     finally:
         window._on_language_selected(before)
+
+
+def test_no_label_in_the_window_is_left_in_the_language_it_was_built_in():
+    """F-033. The wider walk that found the four labels F-034's narrow guard could not see.
+
+    Every label the window owns, after switching to each language: nothing may still be showing an
+    English string whose translation in that language is a different word. The four it caught were
+    all the same shape — a label written by an EVENT (`criticNever` when the critic has not run,
+    `dialogNoModel` before a model is picked, `leftNoProfile` while there is no profile,
+    `copyEqBank` while the pane is closed) and never written again by `_retranslate`, so each kept
+    the language its window was BUILT in until its own event happened to fire.
+
+    **The filter is not cosmetic.** A word English uses anywhere is not evidence, whatever else it
+    also spells: German's `curveShift` is "Delay" where English's is "delay", so an English tab
+    reading "Delay" looked German until this existed. A label carries TEXT, not the key it came
+    from, and two keys can land on one word — case-folded, since case is all that separates those
+    two.
+
+    Forward, not by hunting leftovers: a label that is never re-set keeps the BUILD language, which
+    in this harness is English, so looking for stale foreign text finds nothing however broken the
+    retranslate is.
+    """
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    before = i18n.current_language()
+    try:
+        for lang, *_ in i18n.LANGS:
+            if lang == "en":
+                continue
+            window._on_language_selected(lang)
+            theirs = {v.casefold() for v in i18n.T[lang].values() if isinstance(v, str)}
+            english_only = {
+                text: key
+                for key, text in i18n.T["en"].items()
+                if isinstance(text, str) and text
+                and i18n.T[lang].get(key) not in (None, text)
+                and text.casefold() not in theirs
+            }
+            left = {
+                english_only[lbl.text().strip()]: lbl.text().strip()
+                for lbl in window.findChildren(QLabel)
+                if lbl.text().strip() in english_only
+            }
+            assert left == {}, f"still English after switching to {lang}: {left}"
+    finally:
+        window._on_language_selected(before)
