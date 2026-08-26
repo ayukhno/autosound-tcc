@@ -10,6 +10,22 @@ being the right one — the reason is on the entry).
 
 **Open as of 2026-08-22**, newest first: **SCR-052** (`_open_questions` is a paragraph where the contract says a key), **SCR-051** (the reviewer cannot go through omp) and **SCR-049** (the project backup nobody wrote down). Landed the same day they were filed: **SCR-054** and **SCR-056**, both in the method's `5216b92` — a fresh install now takes TCC's newest tag and lets the app build its own bundle. Withdrawn: SCR-053, SCR-055 — the reasoning is kept on each. SCR-050 (an all-pass the Arbiter dialled, as an input the method can check) landed on 2026-08-19. SCR-041 and SCR-042 closed on 2026-08-07; SCR-043, SCR-044 and SCR-045 on 2026-08-11, SCR-046, SCR-047 and SCR-048 on 2026-08-12. The table below is kept as the record of the last open batch.
 
+**Update 2026-08-26 — pin `v3.0.30`, and the skill's own answers on the rest.** SCR-028 and
+SCR-029 are **done**: both were `accepted` with nothing left but the pin bump, and the bump is in.
+Checked here rather than taken on report — sha ancestry AND a content grep of the pinned tree, one
+of which would have survived a rebase and the other would not.
+
+The skill session answered the remaining open ones (its words, not our verdict — each is a
+statement we have not run a check against):
+
+| SCR | the skill's answer |
+|-----|--------------------|
+| 052 `_open_questions` as a key | it will do this, as a small item in its stage D |
+| 049 project backup | a public promise in the installer, so **the user's decision**; until then the installer must not promise it. The skill proposes `git` in the project folder plus honest text |
+| 040 verification as a deterministic phase | `capture-check` and `verify_prediction` already give a verdict per capture and per junction; TCC runs the loop — the FORMAT to be agreed after its B2/B3 land |
+| 009 target curves as data | `target-curves/registry.json`, after 3.1.0 |
+| 051 `omp` transport | after 3.1.0 |
+
 | SCR | ask | where it bites |
 |-----|-----|----------------|
 | 041 | README/FAQ must name the supported pair | any other model reads as equally fine, and a downgrade fails by agreeing rather than by erroring |
@@ -480,9 +496,11 @@ writing the matching record leaves resume and any front-end with nothing real to
 
 ## SCR-028 — prescribed commands must not invoke a bare `python`
 
-**Status**: accepted — fixed in `autosound-skill-bridge` `344b57e` (branch `feat/tcc-sync-p0`,
-2026-08-04), option 2 (`python3` everywhere). Not `done`: the vendored submodule is still pinned at
-`7b93b75`, which does not carry it, so the pin bump is outstanding.
+**Status**: **done** 2026-08-26 — fixed in `344b57e` (branch `feat/tcc-sync-p0`, 2026-08-04),
+option 2 (`python3` everywhere). The pin bump was the only thing outstanding and it landed with
+`v3.0.30`. Verified at the pin BOTH ways, because a sha alone answers the wrong question once a
+branch has been rebased: `merge-base --is-ancestor` says yes, and a grep of the pinned tree for a
+bare `python ` in a prescribed command returns **0**.
 **Target**: **30 call sites across 8 files** (counted 2026-08-04): `rew_tool/state/schema.md` ×7,
 `rew_tool/project-schema.md` ×6, `SKILL.md` ×6, `references/core/project-intake.md` ×4,
 `references/tooling/helix-eq-export.md` ×3, `references/core/data-contract-universal.md` ×2,
@@ -522,9 +540,10 @@ interpreter, never a bare one.
 
 ## SCR-029 — skill self-location must be portable, not `file:///skills/...`
 
-**Status**: accepted — fixed in `autosound-skill-bridge` `dd7af76` (branch `feat/tcc-sync-p0`,
-2026-08-04): a "Resolving paths in this skill" preamble in SKILL.md declares the skill root and
-107 references were rewritten relative to it. Same outstanding pin bump as SCR-028.
+**Status**: **done** 2026-08-26 — fixed in `dd7af76` (branch `feat/tcc-sync-p0`, 2026-08-04): a
+"Resolving paths in this skill" preamble in SKILL.md declares the skill root and 107 references
+were rewritten relative to it. Same pin bump as SCR-028, same two-way check at the pin: ancestor,
+and `grep -rn "file:///skills"` over the pinned tree returns **0**.
 **Target**: **108 links across at least 12 files** (counted 2026-08-04) of the form
 `file:///skills/autosound-tuning/...` — `SKILL.md` ×47, then `phase_5_variations.md` ×7,
 `core/process-phases.md` ×7, `phase_4_listening.md` ×6, `phase_1_foundation.md` ×6,
