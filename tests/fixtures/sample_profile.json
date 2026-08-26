@@ -2,7 +2,7 @@
   "dsp_profile": {
     "name": "Test DSP",
     "vendor": "TestVendor",
-    "sample_rate_hz": 48000,
+    "dsp_processing_rate_hz": 48000,
     "groups": [
       {
         "id": "physical_outputs",

@@ -970,7 +970,7 @@ def test_the_delay_is_read_in_milliseconds_and_in_samples():
     assert view._shift_box.singleStep() == pytest.approx(0.01)
 
 
-def test_without_a_sample_rate_the_reading_is_milliseconds_alone():
+def test_without_a_processing_rate_the_reading_is_milliseconds_alone():
     """MUSWAY's own box goes to thousandths on a step nobody here has confirmed. A samples figure
     invented from a guessed rate would be a number the Arbiter could act on and shouldn't."""
     view = _view()
@@ -982,6 +982,33 @@ def test_without_a_sample_rate_the_reading_is_milliseconds_alone():
 
     assert view.samples(0.198) is None
     assert "smp" not in view.reading()
+
+
+@pytest.mark.parametrize("key", ["dsp_processing_rate_hz", "sample_rate_hz"])
+def test_the_processing_rate_is_read_under_either_of_its_two_names(key):
+    """The rename of 2026-08-25 arrives with the method, not with us.
+
+    The panel used to read `profile.get("sample_rate_hz")`. A profile written after the rename
+    carries only `dsp_processing_rate_hz`, so that `get` would answer `None` — and `None` here is
+    not an error, it is the documented "no rate on record" state: the samples simply stop being
+    printed beside the milliseconds. Nothing raises, no test fails, and the Arbiter loses a column
+    without being told. This is the test that would have caught it, and it takes both names
+    because the legacy one is still what an older installed skill writes.
+    """
+    import json
+
+    from autosound_tcc.core import config
+
+    config.dsp_profile_path().write_text(
+        json.dumps({"dsp_profile": {"delay": {"step_ms": 0.01}, key: 96000}}), encoding="utf-8"
+    )
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+
+    dialog._apply_delay_resolution()
+
+    assert dialog._processing_rate_hz() == 96000.0
+    assert dialog._view.samples(0.198) == 19
 
 
 def test_the_delay_is_sent_as_a_proposal_not_as_a_change():
@@ -1187,7 +1214,7 @@ def test_taking_the_common_part_off_is_what_makes_a_set_applicable():
 
     text = delay_bank.as_sentence(
         {"w-L_01 (sw)": -0.5, "m-L_01 (sw)": 0.25},
-        sample_rate_hz=96000,
+        processing_rate_hz=96000,
         lang_t=i18n.t,
         current=lambda title: {"w-L_01 (sw)": 0.1, "m-L_01 (sw)": 1.0}.get(title),
     )
@@ -1206,7 +1233,7 @@ def test_a_set_that_cannot_be_applied_still_says_so_before_the_model_has_to_noti
 
     text = delay_bank.as_sentence(
         {"w-L_01 (sw)": -0.5},
-        sample_rate_hz=96000,
+        processing_rate_hz=96000,
         lang_t=i18n.t,
         current=lambda title: {"w-L_01 (sw)": 0.1}.get(title),
     )
@@ -1284,7 +1311,7 @@ def test_the_set_states_what_the_numbers_are_measured_from():
 
     text = delay_bank.as_sentence(
         {"tw-L_01 (sw)": 1.2, "m-R_01 (sw)": 1.18},
-        sample_rate_hz=96000,
+        processing_rate_hz=96000,
         lang_t=i18n.t,
         at={"tw-L_01 (sw)": 2.95, "m-R_01 (sw)": 4.12},
     )

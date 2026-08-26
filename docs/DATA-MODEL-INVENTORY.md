@@ -57,7 +57,7 @@ API: `validate_profile` · `load_profile` · `save_profile` · `find_bundled(ven
 
 | Місце | Файли | Формат | Схема |
 | :-- | :-- | :-- | :-- |
-| TCC `data/dsp_profiles/` | `helix-dsp-ultra-s.json` | JSON | `dsp_profile:` обгортка, ключі `name, vendor, sources, sample_rate_hz, groups, parametric_eq, phase_control, polarity, delay, features, _open_questions` |
+| TCC `data/dsp_profiles/` | `helix-dsp-ultra-s.json` | JSON | `dsp_profile:` обгортка, ключі `name, vendor, sources, dsp_processing_rate_hz, groups, parametric_eq, phase_control, polarity, delay, features, _open_questions` |
 | `sound_AutoSci/dsp_profiles/` | `helix-dsp-ultra-s.yaml`, `musway-m6v4.yaml` | YAML | та сама обгортка `dsp_profile:` |
 | проект користувача | `dsp_profile.json` поруч із ledger | JSON | та сама |
 

@@ -1042,7 +1042,7 @@ class CurveView(QWidget):
         #: Which trace is held back. Defaults to the one that ARRIVES FIRST once traces are set —
         #: the only one a DSP can actually delay.
         self._shift_target = 0
-        self._sample_rate_hz = None
+        self._processing_rate_hz = None
         self._step_ms = _DEFAULT_STEP_MS
         self._crossing_dots = None
         self._syncing = False
@@ -1482,12 +1482,12 @@ class CurveView(QWidget):
             return self._traces[self._shift_target].name
         return ""
 
-    def set_resolution(self, step_ms, sample_rate_hz) -> None:
+    def set_resolution(self, step_ms, processing_rate_hz) -> None:
         """Step the delay by what the DSP offers, and count samples with its rate.
 
         Two different numbers, and the profile carries both: `delay.step_ms` is what the vendor's
-        software lets you TYPE (0.01 ms on this Helix), one sample at `sample_rate_hz` is what the
-        hardware RESOLVES (0.010417 ms at 96 kHz). The control steps by the first, because that is
+        software lets you TYPE (0.01 ms on this Helix), one sample at `processing_rate_hz` is what
+        the hardware RESOLVES (0.010417 ms at 96 kHz). The control steps by the first, because that is
         the box the Arbiter types into; the reading gives both, because the skill's own rule is
         that a delay is always stated in milliseconds AND samples.
 
@@ -1496,9 +1496,9 @@ class CurveView(QWidget):
         The user has been watching PC-Tool swallow a step with no explanation for it
         (2026-08-12); printing both numbers is the explanation.
         """
-        self._sample_rate_hz = float(sample_rate_hz) if sample_rate_hz else None
+        self._processing_rate_hz = float(processing_rate_hz) if processing_rate_hz else None
         step = float(step_ms) if step_ms else (
-            1000.0 / self._sample_rate_hz if self._sample_rate_hz else _DEFAULT_STEP_MS
+            1000.0 / self._processing_rate_hz if self._processing_rate_hz else _DEFAULT_STEP_MS
         )
         self._step_ms = step
         self._shift_box.setSingleStep(step)
@@ -1506,9 +1506,9 @@ class CurveView(QWidget):
 
     def samples(self, ms: float):
         """`ms` in whole samples at the DSP's rate, or None when the rate is not on record."""
-        if not self._sample_rate_hz:
+        if not self._processing_rate_hz:
             return None
-        return int(round(ms * self._sample_rate_hz / 1000.0))
+        return int(round(ms * self._processing_rate_hz / 1000.0))
 
     def set_delay_target(self, index: int) -> None:
         """Choose WHICH DRIVER you are editing. It does not move anything by itself.

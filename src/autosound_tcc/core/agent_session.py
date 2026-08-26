@@ -45,7 +45,8 @@ check_existing_profile hasn't confirmed — leave it null and move on rather tha
 
 ## The profile schema — follow this EXACTLY, it is consumed by code, not read by a human
 
-Top level: {{"name": str, "vendor": str, "groups": [...], "sample_rate_hz": number|null, \
+Top level: {{"name": str, "vendor": str, "groups": [...], "dsp_processing_rate_hz": \
+number|null, \
 "_open_questions": [...]}}. Add other descriptive top-level keys if you like (e.g. `presets`, \
 `input_routing`) — those are fine as freeform nested objects, they're just not rendered per-row.
 
@@ -153,7 +154,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
            "properties": {
                "path": {"type": "string",
                          "description": "Dotted path from the profile root, e.g. "
-                                        "'sample_rate_hz' or 'groups.0.fields'."},
+                                        "'dsp_processing_rate_hz' or 'groups.0.fields'."},
                "value": {"description": "The confirmed value (any JSON type)."},
            },
            "required": ["path", "value"]})

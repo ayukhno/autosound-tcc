@@ -527,15 +527,15 @@ def test_save_reset_and_finalize_profile_round_trip(tmp_path):
     mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
 
     asyncio.run(mcp.call_tool("check_existing_profile", {"vendor": "Musway", "model": "M6V4"}))
-    asyncio.run(mcp.call_tool("save_profile_field", {"path": "sample_rate_hz", "value": 96000}))
+    asyncio.run(mcp.call_tool("save_profile_field", {"path": "dsp_processing_rate_hz", "value": 96000}))
     asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.id", "value": "physical_outputs"}))
     asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.label", "value": "Output channels"}))
     asyncio.run(mcp.call_tool("save_profile_field", {"path": "groups.0.fields", "value": ["hp", "lp"]}))
 
     reset_result = json.loads(
-        _text(asyncio.run(mcp.call_tool("reset_profile_field", {"path": "sample_rate_hz"})))
+        _text(asyncio.run(mcp.call_tool("reset_profile_field", {"path": "dsp_processing_rate_hz"})))
     )
-    assert reset_result == {"reset": "sample_rate_hz", "found": True}
+    assert reset_result == {"reset": "dsp_processing_rate_hz", "found": True}
 
     # Every answer so far is already on disk, in the skill's draft -- a session that died here
     # would resume with all of it (SCR-025).
@@ -550,7 +550,7 @@ def test_save_reset_and_finalize_profile_round_trip(tmp_path):
     assert saved["groups"][0] == {
         "id": "physical_outputs", "label": "Output channels", "fields": ["hp", "lp"],
     }
-    assert "sample_rate_hz" not in saved  # reset before finalize, must not reappear
+    assert "dsp_processing_rate_hz" not in saved  # reset before finalize, must not reappear
     # finalize promotes the draft and clears it -- the skill's writer did the writing, not TCC.
     assert not (project_dir / "dsp_profile.draft.json").exists()
 

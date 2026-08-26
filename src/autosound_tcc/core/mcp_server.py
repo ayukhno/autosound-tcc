@@ -557,7 +557,8 @@ def build_server(
         everything answered so far.
 
         `path` is a dotted path relative to `project_profile` as returned by
-        check_existing_profile -- e.g. 'sample_rate_hz' or 'groups.0.fields'. `groups` is a flat
+        check_existing_profile -- e.g. 'dsp_processing_rate_hz' or 'groups.0.fields'. `groups` is a
+        flat
         array, each entry EXACTLY {{"id": "<snake_case_id>", "label": "<Human Label>",
         "fields": [<tokens>]}} -- `fields` must be a flat array of STRING TOKENS drawn ONLY from
         this vocabulary, nothing else:

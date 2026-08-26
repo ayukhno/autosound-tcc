@@ -1250,7 +1250,7 @@ class CurveDialog(QDialog):
         series = self._session()
         bank = delay_bank.load(session=series)
         text = delay_bank.as_sentence(
-            bank, self._sample_rate_hz(), i18n.t, self._current_delay_of,
+            bank, self._processing_rate_hz(), i18n.t, self._current_delay_of,
             at=delay_bank.arrivals(session=series),
             unplaced=self._unplaced(delay_bank.seen(session=series)),
             reference=delay_bank.references(session=series),
@@ -1304,8 +1304,8 @@ class CurveDialog(QDialog):
         delay_bank.clear(session=self._session())
         self._render_bank()
 
-    def _sample_rate_hz(self):
-        return getattr(self._view, "_sample_rate_hz", None)
+    def _processing_rate_hz(self):
+        return getattr(self._view, "_processing_rate_hz", None)
 
     def _apply_delay_resolution(self) -> None:
         """Step the delay control by what THIS processor accepts, from its own profile.
@@ -1315,19 +1315,35 @@ class CurveDialog(QDialog):
         sometimes moves nothing and sometimes moves two — the user has watched it happen and had
         no way to explain it. MUSWAY shows thousandths on a step nobody here has confirmed. So the
         control steps by `delay.step_ms` where the profile states one, and the reading carries the
-        sample count only when a sample rate is on record. Guessing either would put a number in
-        front of the Arbiter that the DSP never agreed to.
+        sample count only when the PROCESSING rate is on record. Guessing either would put a number
+        in front of the Arbiter that the DSP never agreed to.
+
+        The rate comes from the method's accessor, never from a key. It was
+        `profile.get("sample_rate_hz")` until the key was renamed to `dsp_processing_rate_hz`
+        (2026-08-25) — and a profile written after that rename carries only the new name, so the
+        old `get` would have returned `None` and the samples would have vanished from the reading
+        with nothing raised. `processing_rate_hz()` reads both names and is the one place that
+        knows which is canonical.
+
+        The legacy key stays as the fallback for one reason that is not tidiness: TCC updates
+        separately from the skill, and on an installed machine `vendor_loader` finds whatever
+        skill is installed there — which may predate the accessor. Asking for it with `getattr`
+        and reading the old name when it is missing keeps that machine's samples on screen instead
+        of dropping them exactly the way this change exists to prevent.
         """
         step, rate = None, None
         try:
             import json
+
+            from autosound_tcc.core import vendor_loader
 
             raw = json.loads(config.dsp_profile_path().read_text(encoding="utf-8"))
             profile = raw.get("dsp_profile") if isinstance(raw.get("dsp_profile"), dict) else raw
             delay = profile.get("delay")
             if isinstance(delay, dict):
                 step = delay.get("step_ms")
-            rate = profile.get("sample_rate_hz")
+            accessor = getattr(vendor_loader.load_dsp_profile(), "processing_rate_hz", None)
+            rate = accessor(profile) if accessor else profile.get("sample_rate_hz")
         except Exception:  # noqa: BLE001 — no profile yet is the ordinary case, not a failure
             pass
         self._view.set_resolution(

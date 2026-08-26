@@ -44,7 +44,7 @@ def seed(project_dir) -> Path:
     profile.save_profile(str(root / "dsp_profile.json"), {"dsp_profile": {
         "name": "Fixture DSP",
         "vendor": "Fixture",
-        "sample_rate_hz": 96000,
+        "dsp_processing_rate_hz": 96000,
         "delay": {"step_ms": 0.01},
         "polarity": {"scope": ["per driver output"]},
         "groups": [{

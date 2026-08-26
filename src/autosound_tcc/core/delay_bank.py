@@ -210,7 +210,7 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
 
 def as_sentence(
     bank: dict[str, float],
-    sample_rate_hz: Optional[float] = None,
+    processing_rate_hz: Optional[float] = None,
     lang_t=None,
     current=None,
     at: Optional[dict] = None,
@@ -261,8 +261,8 @@ def as_sentence(
     for title, ms in order:
         unit = t("unitMs")
         line = f"  {title}: {ms:+.3f} {unit}"
-        if sample_rate_hz:
-            line += f" ({int(round(ms * sample_rate_hz / 1000.0)):+d} {t('unitSmp')})"
+        if processing_rate_hz:
+            line += f" ({int(round(ms * processing_rate_hz / 1000.0)):+d} {t('unitSmp')})"
         measured = at.get(title)
         if measured is not None:
             # The arrival as CAPTURED, and where this delay puts it. Without the origin a set of

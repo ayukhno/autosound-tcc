@@ -12,7 +12,7 @@
       "user, confirmed in PC-Tool: EQ 10-40000 Hz, crossover corner 20-20480 Hz on every channel, 2026-08-23",
       "the method's own file is the authority on all of the above: autosound-tuning/knowledge/dsp/helix-dsp-ultra-s.md -- what is here is the machine-readable half the gates read, and it is synced FROM there, never the other way"
     ],
-    "sample_rate_hz": 96000,
+    "dsp_processing_rate_hz": 96000,
 
     "groups": [
       {

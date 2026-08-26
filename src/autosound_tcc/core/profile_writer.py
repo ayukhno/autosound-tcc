@@ -6,7 +6,8 @@ an interview through, so the host app assembled the file. It has one now, and th
 the two front-ends reach it: the in-app onboarding chat (`core/agent_session.py`) and any external
 CLI connected over MCP (`core/mcp_server.py`).
 
-What crosses this boundary is an INTENT ("the user confirmed `sample_rate_hz` is 96000"), never a
+What crosses this boundary is an INTENT ("the user confirmed `dsp_processing_rate_hz` is
+96000"), never a
 finished file. Validation, the `dsp_profile.draft.json` that survives a lost session, the JSON-
 decoding defences and the schema-version stamp all live on the skill's side, where the schema is
 owned — TCC gets whatever the writer decided, including its refusals.
