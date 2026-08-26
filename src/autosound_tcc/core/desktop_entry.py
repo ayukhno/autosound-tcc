@@ -193,7 +193,12 @@ def link_on_desktop(bundle: Path, result: Result, desktop: Path | None = None) -
         result.say(f"  left alone: something else is already called {BUNDLE_NAME} on the Desktop")
         return
     link.symlink_to(bundle)
-    result.say("  and an alias on the Desktop")
+    # Named, not described. The installer that calls `--install-desktop` echoes these lines to the
+    # person installing, and it asked for the PATHS one per line: "Built: <path>" is what the
+    # Windows branch already prints per shortcut, and an alias nobody names is one nothing can
+    # remove later. Prose here ("and an alias on the Desktop") left the only created path that the
+    # caller could not act on.
+    result.say(f"Built: {link}")
 
 
 def _install_macos(apps_dir: Path, launcher: Path) -> Result:

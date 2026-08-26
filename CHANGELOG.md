@@ -6,6 +6,43 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.23] — 2026-08-26 · the pin stops being silent, and our copy of the installer's constants is checked against the installer
+
+Paired with method **`v3.0.35`**. Three items that were open for four days, one of which turned out
+to have been finished on the day it was written down.
+
+### Added
+
+- **Diagnostics says when the method has released a version this app is not built against.** The
+  pin itself is deliberate and stays — a live link to the method's `main` would hand the app a line
+  that is unstable on purpose, and a red suite would stop saying whose change broke it. What was
+  missing is that nobody SAID the pin had fallen behind. No button: moving a pin is a decision, not
+  a repair with one outcome, so the row names the command and stops.
+
+  It reads the tags this checkout already has and never asks the network, so an OK answer here is a
+  LOCAL one — and the row says so rather than implying the internet was consulted.
+
+### Changed
+
+- **`--install-desktop` names every path it creates**, one per line, including the Desktop alias —
+  which used to be described ("and an alias on the Desktop") rather than named. The installer that
+  calls this command echoes those lines to you, and a path nothing printed is a path nothing can
+  remove later.
+
+### Fixed
+
+- **Our copy of the installer's four constants is now checked against the installer itself.** The
+  method's release-tag glob is written in four places: its three installers and this app. Its own
+  checker kept its three in step; ours was the copy nobody checked, and "identical on purpose"
+  meant somebody had typed it twice. It is read from the method's own `--print` output rather than
+  from its source, so a rename on their side fails our suite instead of drifting past it.
+
+### Upgrading
+
+Nothing to do. The pin moves from method `v3.0.33` to **`v3.0.35`**; nothing in the twelve modules
+this app calls changed in form or behaviour across that range — `dsp_profile` gained a function and
+a subcommand, which is additive, and that was verified here rather than taken on report.
+
 ## [v0.1.22] — 2026-08-26 · released with the method, and three silent failures caught before the car
 
 Seventeen commits, and the release that pairs with **method `v3.0.33`** — the pin is exactly that

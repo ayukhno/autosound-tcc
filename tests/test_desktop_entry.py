@@ -249,3 +249,30 @@ def test_version_flag_prints_and_does_not_start_the_app(capsys, monkeypatch):
 
     assert app_module.main() == 0
     assert capsys.readouterr().out.strip() == "9.9.9"
+
+
+def test_every_path_it_creates_is_printed_on_a_line_of_its_own(tmp_path):
+    """The caller's contract, stated by the installer that runs this (2026-08-26): print the paths
+    created, one per line. It echoes them to whoever is installing, and a path nobody printed is a
+    path nothing can remove later.
+
+    The Desktop alias used to be described instead of named — "and an alias on the Desktop" — so
+    the ONE created path the caller could not act on was the one it did not own. Asserted against
+    the filesystem rather than against the wording: whatever the lines say, everything that now
+    exists has to appear in them.
+    """
+    apps = tmp_path / "apps"
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    launcher = tmp_path / "bin" / "autosound-tcc"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o755)
+
+    result = desktop_entry._install_macos(apps, launcher)
+    desktop_entry.link_on_desktop(apps / desktop_entry.BUNDLE_NAME, result, desktop=desktop)
+
+    printed = "\n".join(result.lines)
+    for made in (apps / desktop_entry.BUNDLE_NAME, desktop / desktop_entry.BUNDLE_NAME):
+        assert made.exists() or made.is_symlink(), f"{made} was not created at all"
+        assert str(made) in printed, f"created {made} and did not print it"
