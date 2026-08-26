@@ -215,7 +215,17 @@ class GlossaryGroups:
         version and a channel renamed mid-project still matches its old captures (SCR-039). A
         capture carrying a MODIFIER (`w-L FX_2 (sw)`) is deliberately not accepted as the member's
         sweep: the modifier says the driver was measured with something else going on, and quietly
-        summing it would be a sum of a car nobody configured.
+        summing it would be a sum of a car nobody configured. Since 2026-08-26 the same is true of
+        a POSITION (`w-L_49 (sw) x0`, one point of the ellipsoid) and a CONTROL (`m-L_49ctl`, the
+        drift reference): both are captures OF the driver that are not the driver's plain sweep.
+
+        **Both sides of the key go through `name_key`, and that is the point, not tidiness.** The
+        key used to be spelled out here as a 4-tuple. On 2026-08-26 the method added `position` and
+        `control` to it, and this side kept asking with four — so every lookup missed, every group
+        came back with zero titles and every member listed as one REW does not hold. Nothing
+        raised; the window would simply have said the car had not been measured. A key built in two
+        places is one rename away from that, every time, so this one is built in the method's own
+        function and asked for with the fields a plain sweep has.
         """
         by_key: dict[tuple, str] = {}
         for title in available:
@@ -228,8 +238,8 @@ class GlossaryGroups:
         titles: list[str] = []
         missing: list[str] = []
         for code in group.members:
-            key = (self._resolve(code), None, self._version_n(version), METHOD)
-            found = by_key.get(key)
+            key = self._member_key(code, version)
+            found = by_key.get(key) if key is not None else None
             if found:
                 titles.append(found)
             else:
@@ -238,6 +248,23 @@ class GlossaryGroups:
                         missing=tuple(missing))
 
     # ---- internals -------------------------------------------------------
+
+    def _member_key(self, code: str, version: str):
+        """What a group member's PLAIN sweep is called, in `name_key`'s own terms.
+
+        A hand-made dict rather than a hand-made tuple: `name_key` reads its fields with `.get`,
+        so anything the method adds to the key later arrives here as `None` — which is exactly
+        what a plain sweep is, and exactly what a capture carrying a modifier, a position or a
+        control is NOT. That is the whole reason this does not spell the tuple out.
+        """
+        if self._naming is None:
+            return None
+        return self._naming.name_key({
+            "code_current": self._resolve(code),
+            "modifier": None,
+            "version_n": self._version_n(version),
+            "method": METHOD,
+        })
 
     def _resolve(self, code: str) -> str:
         """A code as the channel is named TODAY, so a rename does not hide its own captures."""

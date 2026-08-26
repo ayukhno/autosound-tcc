@@ -24,8 +24,14 @@ def test_load_rew_api():
     # The port is asserted against the file the skill SHIPS, not against the loaded module's
     # attribute: the suite re-points `BASE_URL` at a dead one so that no test can reach a REW
     # somebody is mid-measurement on (tests/conftest.py, after exit 134 with REW live).
+    #
+    # It stopped being a literal on 2026-08-26 (`REW_API_URL` overrides it, for a REW on another
+    # host). Two things are asserted rather than one, because the app depends on both: the DEFAULT
+    # is still REW's own 4735 — the number the System-params row shows — and the override exists,
+    # which is why that row derives what it shows instead of printing a constant.
     shipped = (vendor_loader.rew_tool_dir() / "rew_api.py").read_text(encoding="utf-8")
-    assert 'BASE_URL = "http://localhost:4735"' in shipped
+    assert '"http://localhost:4735"' in shipped
+    assert "REW_API_URL" in shipped
 
 
 def test_load_dsp_state():
@@ -114,3 +120,24 @@ def test_linking_reports_rather_than_raises_when_it_cannot(tmp_path, monkeypatch
     monkeypatch.setattr(vendor_loader, "is_available", lambda: False)
 
     assert vendor_loader.link_skill_into(tmp_path) is None
+
+
+def test_the_rew_row_names_the_endpoint_it_actually_reaches(monkeypatch):
+    """The System-params row printed the constant `4735` until the method gave `rew_api.BASE_URL`
+    a `REW_API_URL` override (2026-08-26). A row reading "4735" beside a green dot that had just
+    reached another host is the label asserting something nobody checked — the dot right, the fact
+    next to it wrong. So the row is derived, and this is what says so.
+
+    The suite itself is the reason this cannot be left to inspection: `conftest._no_live_rew` points
+    every test's REW at a dead port, so the "default" branch has to be arranged on purpose.
+    """
+    from autosound_tcc.ui.tcc import main_window
+
+    api = vendor_loader.load_rew_api()
+
+    monkeypatch.setattr(api, "BASE_URL", "http://localhost:4735")
+    assert main_window._rew_endpoint_label() == "4735", "the ordinary case stays a bare port"
+
+    monkeypatch.setattr(api, "BASE_URL", "http://studio-pc:4740")
+    assert main_window._rew_endpoint_label() == "http://studio-pc:4740", \
+        "and anything else is named in full rather than mislabelled as the default"

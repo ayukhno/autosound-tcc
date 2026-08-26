@@ -178,6 +178,24 @@ _MONOBANK_JAR_URL = "https://send.monobank.ua/jar/8wThVcodjm"
 # SCR-015).
 _REW_DEFAULT_PORT = "4735"
 
+
+def _rew_endpoint_label() -> str:
+    """What the REW row should SAY, which is where the bridge actually talks.
+
+    It printed the constant above until 2026-08-26, when the method gave `rew_api.BASE_URL` a
+    `REW_API_URL` override (a REW on another host). A label reading "4735" beside a green dot
+    that had just reached `studio-pc:4740` is the row asserting something nobody checked — the
+    dot would be right and the fact next to it wrong. So: the default port when the endpoint IS
+    the default, and the whole endpoint when it is not.
+    """
+    try:
+        from autosound_tcc.core.rew_bridge import RewBridge
+
+        url = str(RewBridge().base_url)
+    except Exception:  # noqa: BLE001 -- no skill checked out: the reference value is all there is
+        return _REW_DEFAULT_PORT
+    return _REW_DEFAULT_PORT if url == f"http://localhost:{_REW_DEFAULT_PORT}" else url
+
 # Human-readable preset names for the header picker (dir names FULL/SQ are the ledger keys).
 _PRESET_LABELS = {
     "FULL": {"en": '"FULL" (daily)', "uk": '"FULL" (повсякденний)',
@@ -1188,7 +1206,7 @@ class MainWindow(QMainWindow):
         self._rew_dot = TrafficLight(self._rew_status_class())
         self._retip_rew_dots()  # the new instance, and the header's, in the current language
         self._system_section.body_layout().addWidget(
-            _kv_row(i18n.t("rewPort"), _REW_DEFAULT_PORT, trailing=self._rew_dot)
+            _kv_row(i18n.t("rewPort"), _rew_endpoint_label(), trailing=self._rew_dot)
         )
         # NOT gated on `_has_project`: that means "project.json exists", and the DSP is known
         # from `dsp_profile.json` long before it. Hiding a fact TCC already has because a later
