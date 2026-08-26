@@ -61,9 +61,17 @@ class Result:
 
     ok: bool
     lines: list[str] = field(default_factory=list)
+    #: Lines for stderr even on success. `--uninstall-desktop` promises the calling installer that
+    #: stdout carries the removed PATHS and nothing else, so "I left this alone, it is not mine"
+    #: has to go somewhere that is still read but not parsed.
+    notes: list[str] = field(default_factory=list)
 
     def say(self, line: str) -> "Result":
         self.lines.append(line)
+        return self
+
+    def note(self, line: str) -> "Result":
+        self.notes.append(line)
         return self
 
 
@@ -463,3 +471,120 @@ def install_desktop(apps_dir: Path | None = None, launcher: Path | None = None) 
     return Result(False).say(
         f"--install-desktop has nothing to do on {system}: start the app with  {launcher}"
     )
+
+
+# ── taking it back out ────────────────────────────────────────────────────────────────────────
+#
+# The installer's own `--uninstall` removed the bundle and the alias by paths it GUESSED, while
+# the side that created them is this one. So it deletes what it did not make and cannot say
+# whether it got everything — asked for by the method's session, 2026-08-26, and the reason is
+# exactly the reason `--install-desktop` exists.
+#
+# The rule this half adds: **remove only what is recognisably ours.** Somebody's own file under
+# our name is theirs; it is left, named on stderr, and the exit code stays 0 — a person who put
+# it there did so on purpose, and an uninstaller that eats it is worse than one that misses it.
+
+
+def _is_our_bundle(bundle: Path) -> bool:
+    """A `.app` is ours if its Info.plist claims our bundle id.
+
+    The id is the one thing in there we own and macOS keys registration to — a folder with our
+    NAME could be anybody's, and matching on the name alone is how an uninstaller deletes
+    somebody's own app.
+    """
+    try:
+        return BUNDLE_ID in (bundle / "Contents" / "Info.plist").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _is_our_alias(link: Path) -> bool:
+    """A Desktop entry is ours if it is a SYMLINK pointing at something called `BUNDLE_NAME`.
+
+    By target, not by name: the name is what a collision looks like. A dangling link counts —
+    that is what our own alias becomes the moment the bundle goes, and refusing to tidy it would
+    leave the one piece of litter this command exists to prevent.
+    """
+    if not link.is_symlink():
+        return False
+    return Path(os.readlink(link)).name == BUNDLE_NAME
+
+
+def _remove(path: Path, result: Result, ours: bool) -> None:
+    """Delete one thing of ours, or say why it stayed. Never raises."""
+    if not ours:
+        result.note(f"Kept: {path} (not ours)")
+        return
+    try:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        else:
+            shutil.rmtree(path)
+    except OSError as exc:
+        result.ok = False
+        result.note(f"Could not remove {path}: {exc}")
+        return
+    result.say(f"Removed: {path}")
+
+
+def _uninstall_macos(apps_dir: Path) -> Result:
+    result = Result(True)
+    bundle = apps_dir / BUNDLE_NAME
+    link = Path.home() / "Desktop" / BUNDLE_NAME
+    # The alias FIRST, while the bundle it points at still exists: after the bundle goes the link
+    # dangles, and `_is_our_alias` reads the target rather than following it precisely so that
+    # order does not decide the answer. Doing it in this order anyway keeps the two independent.
+    if link.exists() or link.is_symlink():
+        _remove(link, result, _is_our_alias(link))
+    if bundle.exists():
+        _remove(bundle, result, _is_our_bundle(bundle))
+    return result
+
+
+def _windows_target_of(shortcut: Path) -> str:
+    """What a `.lnk` starts, or "" when it cannot be read. A COM call, like the one that made it."""
+    # Single-quoted PowerShell literal, doubling any quote inside it: a path is data here, and
+    # the `"..."` form the writing script uses would expand a `$` in somebody's folder name.
+    literal = "'" + str(shortcut).replace("'", "''") + "'"
+    script = (
+        "$s = New-Object -ComObject WScript.Shell; "
+        f"$l = $s.CreateShortcut({literal}); "
+        "Write-Output $l.TargetPath"
+    )
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            check=False, capture_output=True, text=True)
+    except OSError:
+        return ""
+    return (proc.stdout or "").strip() if proc.returncode == 0 else ""
+
+
+def _uninstall_windows() -> Result:
+    result = Result(True)
+    for target in _windows_targets():
+        if not target.exists():
+            continue
+        points_at = _windows_target_of(target)
+        ours = Path(points_at).stem in LAUNCHER_NAMES if points_at else False
+        _remove(target, result, ours)
+    return result
+
+
+def uninstall_desktop(apps_dir: Path | None = None) -> Result:
+    """Take back exactly what `install_desktop` put down. Called by `--uninstall-desktop`.
+
+    Success means nothing of ours is left, which INCLUDES there having been nothing to begin with:
+    the installer runs this before it removes the package, and "already gone" is the same outcome
+    as "just removed" to whoever is uninstalling. Run it twice and the second run prints nothing
+    and still exits 0.
+
+    Never touches a project folder, a virtualenv or the package: those are the installer's, and it
+    handles them after this returns.
+    """
+    system = platform.system()
+    if system == "Darwin":
+        return _uninstall_macos(apps_dir or Path.home() / "Applications")
+    if system == "Windows":
+        return _uninstall_windows()
+    return Result(True)

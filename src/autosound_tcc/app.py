@@ -72,6 +72,15 @@ def _parse(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Build the macOS app bundle (or the Windows shortcuts) for this install, and exit.",
     )
+    parser.add_argument(
+        "--uninstall-desktop",
+        action="store_true",
+        help="Remove what --install-desktop made — the macOS bundle and its Desktop alias, or the "
+             "Windows shortcuts. Recognised as ours by the bundle id in Info.plist, by an alias "
+             "being a symlink to a bundle of that name, and by a shortcut's target being one of "
+             "our launchers. Anything else under those names is left alone and named on stderr. "
+             "Never touches a project, an environment or the package itself.",
+    )
     known, _ = parser.parse_known_args(argv[1:])  # Qt takes its own flags off the same line
     return known
 
@@ -102,12 +111,17 @@ def main() -> int:
 
         print(install_report.app_version() or "unknown")
         return 0
-    if args.install_desktop:
+    if args.install_desktop or args.uninstall_desktop:
         from autosound_tcc.core import desktop_entry
 
-        result = desktop_entry.install_desktop()
+        result = (desktop_entry.uninstall_desktop() if args.uninstall_desktop
+                  else desktop_entry.install_desktop())
         for line in result.lines:
             print(line, file=sys.stdout if result.ok else sys.stderr)
+        # Always stderr, success or not: the calling installer parses stdout for the paths, and
+        # "left this alone, it is not mine" is for the person reading, not for the parser.
+        for line in result.notes:
+            print(line, file=sys.stderr)
         return 0 if result.ok else 1
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.

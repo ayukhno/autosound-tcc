@@ -276,3 +276,91 @@ def test_every_path_it_creates_is_printed_on_a_line_of_its_own(tmp_path):
     for made in (apps / desktop_entry.BUNDLE_NAME, desktop / desktop_entry.BUNDLE_NAME):
         assert made.exists() or made.is_symlink(), f"{made} was not created at all"
         assert str(made) in printed, f"created {made} and did not print it"
+
+
+# ── taking it back out ────────────────────────────────────────────────────────────────────────
+
+
+def _installed(tmp_path):
+    """A bundle and a Desktop alias, made the way `--install-desktop` makes them."""
+    apps = tmp_path / "apps"
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    launcher = tmp_path / "bin" / "autosound-tcc"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o755)
+    result = desktop_entry._install_macos(apps, launcher)
+    desktop_entry.link_on_desktop(apps / desktop_entry.BUNDLE_NAME, result, desktop=desktop)
+    return apps, desktop
+
+
+def test_it_removes_exactly_what_it_built_and_says_each_path(tmp_path, monkeypatch):
+    """The installer's own `--uninstall` deleted these by GUESSED paths while the side that made
+    them was this one. Asserted against the filesystem, not the wording: everything that existed
+    has to be gone AND named."""
+    apps, desktop = _installed(tmp_path)
+    monkeypatch.setattr(desktop_entry.Path, "home", staticmethod(lambda: tmp_path))
+    made = [apps / desktop_entry.BUNDLE_NAME, desktop / desktop_entry.BUNDLE_NAME]
+    assert all(p.exists() or p.is_symlink() for p in made)
+
+    result = desktop_entry._uninstall_macos(apps)
+
+    assert result.ok
+    printed = "\n".join(result.lines)
+    for path in made:
+        assert not (path.exists() or path.is_symlink()), f"{path} survived"
+        assert f"Removed: {path}" in printed, f"removed {path} and did not say so"
+
+
+def test_running_it_twice_is_success_with_nothing_to_report(tmp_path, monkeypatch):
+    """"Already gone" is the same outcome as "just removed" to whoever is uninstalling, and the
+    installer runs this on every uninstall. Nothing on stdout the second time."""
+    apps, _ = _installed(tmp_path)
+    monkeypatch.setattr(desktop_entry.Path, "home", staticmethod(lambda: tmp_path))
+
+    first = desktop_entry._uninstall_macos(apps)
+    second = desktop_entry._uninstall_macos(apps)
+
+    assert first.ok and first.lines
+    assert second.ok and second.lines == [], second.lines
+
+
+def test_somebody_elses_app_under_our_name_is_left_and_named(tmp_path, monkeypatch):
+    """A folder with our NAME could be anybody's; the bundle id in Info.plist is the part we own.
+    Deleting on the name alone is how an uninstaller eats somebody's own application."""
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    theirs = apps / desktop_entry.BUNDLE_NAME
+    (theirs / "Contents").mkdir(parents=True)
+    (theirs / "Contents" / "Info.plist").write_text("<plist>com.someone.else</plist>")
+    monkeypatch.setattr(desktop_entry.Path, "home", staticmethod(lambda: tmp_path))
+
+    result = desktop_entry._uninstall_macos(apps)
+
+    assert result.ok, "leaving somebody's file alone is success, not failure"
+    assert theirs.is_dir(), "it was not ours to delete"
+    assert result.lines == [], "and stdout carries removed paths only"
+    assert any("not ours" in note and str(theirs) in note for note in result.notes)
+
+
+def test_a_desktop_file_that_is_not_our_alias_is_left(tmp_path, monkeypatch):
+    """Ours is a SYMLINK to a bundle of that name. A real file there is somebody's own."""
+    apps, desktop = _installed(tmp_path)
+    link = desktop / desktop_entry.BUNDLE_NAME
+    link.unlink()
+    link.write_text("mine, actually")
+    monkeypatch.setattr(desktop_entry.Path, "home", staticmethod(lambda: tmp_path))
+
+    result = desktop_entry._uninstall_macos(apps)
+
+    assert result.ok
+    assert link.read_text() == "mine, actually"
+    assert any("not ours" in note for note in result.notes)
+
+
+def test_the_cli_carries_the_uninstall_flag():
+    from autosound_tcc import app
+
+    assert app._parse(["autosound-tcc", "--uninstall-desktop"]).uninstall_desktop is True
+    assert app._parse(["autosound-tcc"]).uninstall_desktop is False
