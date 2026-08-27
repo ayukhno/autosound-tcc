@@ -85,3 +85,36 @@ wording, is the next question, not a blocker.
 
 `opencode` is not covered here yet; it needs the same servers but its MCP config
 goes in `opencode.json`, not `.mcp.json`.
+
+---
+
+# `agent_boundary.py` — what the DSP-interview agent can actually see
+
+A separate question from the one above, with the same answer shape: ask a live session rather
+than read the documentation.
+
+`core/agent_session.py` fences the DSP-profile interview in with four `ClaudeAgentOptions`
+fields. Three can be asserted from the options object and `tests/test_agent_session.py` does.
+This script asks what the CLI on the other side actually does with them — and one of the four,
+`strict_mcp_config`, exists only because it was asked.
+
+```
+uv run --extra dev --python 3.12 python spike/agent_boundary.py
+```
+
+Costs two short model turns and needs a logged-in `claude`, which is why it is here and not in
+the suite. Re-run it by hand when the SDK or the CLI moves.
+
+Measured 2026-08-27 — claude-agent-sdk 0.2.145, CLI 2.1.247, on a machine with Gmail, Calendar,
+Drive and home-assistant connected:
+
+| | BASH | READ | foreign `mcp__` tools |
+|---|---|---|---|
+| `strict_mcp_config` unset | no | no | **39** |
+| `strict_mcp_config=True` | no | no | **0** |
+
+Two findings. `tools=[]` takes the built-in set away and leaves our own MCP tools working — the
+interview still runs. And `setting_sources=[]` does **not** cover connected MCP servers: they come
+from the CLI's own configuration, not from a settings file, so without the fourth field a DSP
+interview had the user's mail tools in its context. Neither is guessable from the field names.
+Background: `docs/TODO.md` F-035.

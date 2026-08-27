@@ -2,10 +2,49 @@
 app via the Claude Agent SDK).
 
 Scoped narrowly to ONE task — building or extending a DSP capability profile — never the whole
-autosound-tuning skill. The agent has no built-in Bash/Read/Write/Edit tools at all
-(`ClaudeAgentOptions.allowed_tools` lists only the five tools below); its entire filesystem reach
-is through them, and each is a closure hardcoded to exactly one project directory chosen by the
-CALLER, never a path the model supplies.
+autosound-tuning skill.
+
+Built-in tools granted: NONE
+
+The agent's entire filesystem reach is the five MCP tools built below, and each is a closure
+hardcoded to exactly one project directory chosen by the CALLER, never a path the model supplies.
+
+**That line is CHECKED, not trusted.** `tests/test_agent_session.py` parses it and compares it
+with `BUILTIN_TOOLS`, the value actually handed to `ClaudeAgentOptions.tools`. It is checked
+because it was wrong, and silently: it used to claim the same thing and name `allowed_tools` as
+the reason. `allowed_tools` does not do that — it auto-approves tools that are already there,
+while what exists at all is `tools`, which was never set. So the CLI's entire default tool set
+was present, and the only thing refusing a `Bash` call was the SDK raising over a `can_use_tool`
+callback we never passed. A boundary that holds by accident is not a boundary, and a docstring
+nobody can fail is not a claim (F-035).
+
+**Four fields say the boundary, and none of them may go back to a default:**
+
+| field | value | what the default would let in |
+|---|---|---|
+| `tools` | `BUILTIN_TOOLS` — empty | the CLI's whole built-in set, `Bash` included |
+| `cwd` | the project directory | TCC's own process directory, so a `.claude/settings.json` beside whatever the app was launched from |
+| `setting_sources` | `SETTING_SOURCES` — empty | every settings file on the machine, `~/.claude/settings.json` and its hooks first |
+| `strict_mcp_config` | `True` | every MCP server the person has connected to their own Claude Code |
+
+All four matter more than they look, because this interview has exactly ONE route — the Claude
+Agent SDK over the `claude` binary, no Gemini or Codex path, and a model picker that offers only
+Claude ids. Everybody who has run onboarding HAS Claude Code, set up the way they like it.
+
+Empty `setting_sources` also means no `CLAUDE.md`: the SDK needs `"project"` in this list to read
+them, and instructions picked up from whatever directory the app happened to start in are as
+arbitrary as the hooks. The agent's instructions are `_SYSTEM_PROMPT` and the checklist,
+deliberately, and nothing else.
+
+`strict_mcp_config` is here because emptying `setting_sources` does NOT cover it, which is not
+guessable from the field names and was found by asking a live session what it could see: with the
+other three set and this one left alone, the model listed **39** tools that were not ours —
+`mcp__claude_ai_Gmail__*`, `Google_Calendar`, `Google_Drive`. Connected MCP servers come from the
+CLI's own configuration, not from a settings file. With `strict_mcp_config=True`, **0**
+(`spike/agent_boundary.py`, 2026-08-27, SDK 0.2.145, CLI 2.1.247). Calling one would
+still have failed — on the same accidental exception this whole entry is about — but a DSP
+interview had the user's mail tools in its context, which is not a thing to leave standing on an
+accident.
 
 The question bank is `project-intake.md §4`'s DSP capability checklist, verbatim — the agent asks
 THOSE questions, it does not invent new ones.
@@ -18,6 +57,20 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import claude_sdk, config, profile_writer
+
+#: Built-in Claude Code tools this agent may use: NONE. Named rather than written inline because
+#: the module docstring's "Built-in tools granted" line is compared against it by a test — the
+#: claim and the value are one thing, and a change to either without the other fails.
+#:
+#: **A list, and it has to be one.** The SDK reads `[]` as "disable all built-in tools" only for a
+#: `list`; anything else falls through to its preset branch and comes out as `--tools default`,
+#: which is every tool there is (`_internal/transport/subprocess_cli.py`, measured on 0.2.145). A
+#: tuple here would therefore mean the exact opposite of what it looks like, quietly.
+BUILTIN_TOOLS: list[str] = []
+
+#: Settings files the CLI may read: none. Not the user's `~/.claude/settings.json`, not a
+#: `.claude/settings.json` next to wherever TCC was started. See the module docstring.
+SETTING_SOURCES: list[str] = []
 
 #: Bound into this module's globals by `claude_sdk.bind()` at the point the SDK is first needed —
 #: the SDK is an extra, and importing it here would stop the window opening on an install that
@@ -213,6 +266,15 @@ class OnboardingSession:
         ai_model: Optional[str] = None,
         language: str = "en",
     ) -> None:
+        # The folder is the CALLER's to make, and both callers do — `dsp_profile_interview._run`
+        # and `new_project_dialog._on_create` both `mkdir` before constructing this. Said out loud
+        # here because `cwd` made it load-bearing: the SDK spawns the CLI in that directory and
+        # refuses one that is not there, so a caller who forgot would otherwise get an SDK error
+        # several awaits later, on a worker thread, naming a path it did not choose.
+        if not project_dir.is_dir():
+            raise NotADirectoryError(
+                f"the interview's project directory does not exist: {project_dir} — "
+                "the caller creates it before starting the session")
         self.project_dir = project_dir
         self.vendor = vendor
         self.model = model
@@ -227,6 +289,15 @@ class OnboardingSession:
             mcp_servers={"dsp_onboarding": server},
             allowed_tools=allowed,
             model=ai_model or DEFAULT_MODEL,
+            # The boundary, stated rather than inherited (F-035). Copies, so that a caller holding
+            # a reference to the module constants cannot widen a live session's reach.
+            tools=list(BUILTIN_TOOLS),
+            cwd=project_dir,
+            setting_sources=list(SETTING_SOURCES),
+            # Only the server built above. NOT covered by the empty `setting_sources` — connected
+            # MCP servers live in the CLI's own configuration, and a live session with the other
+            # three set still listed 39 of the user's own tools. See the module docstring.
+            strict_mcp_config=True,
         )
         self._client = ClaudeSDKClient(options=self._options)
         self._started = False
