@@ -6,6 +6,59 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.25] — 2026-08-27 · the app says which method it was running, and the interview stops seeing your machine
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The commit comes first now, and that is the point of half this release: a version
+number is a signature, a commit is an identifier, and only one of them can be checked.
+
+### Added
+
+- **Every screenshot now says which method it was taken against.** The title bar carries the
+  method's commit in brackets beside its version, the installation report carries the whole
+  forty characters, and the update row shows it too. Before this, the app told you `skill 3.0.36`
+  and nothing else — and that number is kept by hand, so it could not say what the app was
+  actually running. In the method's own repository the two already disagree.
+
+### Fixed
+
+- **The update check compares commits, not version strings.** It used to compare the number in
+  the method's manifest against the newest release tag, which answers "are these two numbers
+  different" when the question is "is this checkout the one the tag names". A release cut without
+  the manifest being bumped read as up to date forever. The version stays on the row, because
+  that is what a person quotes.
+
+- **The DSP-profile interview no longer inherits your machine.** The onboarding agent runs on your
+  own Claude Code, and it was picking up whatever that had: settings files, hooks, the working
+  directory the app happened to be started from, and every MCP server you have connected — 39 of
+  them on the machine this was found on, including mail, calendar and drive tools. None of them
+  could be called, but they were in the agent's context, and none of that was ever intended: the
+  interview asks about your DSP and writes one file in your project. Its boundary is now stated
+  outright — no built-in tools, the project directory, no settings files, only its own five tools
+  — instead of holding by accident.
+
+### Changed
+
+- The interview refuses at once, by name, if the project folder it was given does not exist,
+  rather than failing later inside the SDK with a path it did not choose.
+
+### Also
+
+Two decisions were analysed and written down rather than left to be re-proposed: the vendored
+method stays a submodule, and there will be no signed `.pkg` or `.exe`. Code signing costs money
+on both platforms, and an unsigned installer is worse than the script it would replace —
+Gatekeeper and SmartScreen both warn on it, `curl | bash` and `irm | iex` warn on nothing. The
+reasons and the numbers are in `docs/ARCHITECTURE-NOTES.md` §8 and §9. The empty `packaging/`
+directories are gone with the second of those.
+
+Releases are cut by `make ship` from now on: it works out the next patch from the remote, refuses
+unless this file already names it, checks that the line above matches the method actually checked
+out, and only then bumps, tests, commits, tags and pushes. It is a dry run unless asked otherwise.
+
+### Upgrading
+
+Nothing to do. The method's pin does not move — still `v3.0.36`, the same commit as v0.1.24.
+
 ## [v0.1.24] — 2026-08-27 · the app can take its own shortcuts back out, and four labels stop speaking the wrong language
 
 Paired with method **`v3.0.36`**.
