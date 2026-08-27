@@ -118,3 +118,20 @@ interview still runs. And `setting_sources=[]` does **not** cover connected MCP 
 from the CLI's own configuration, not from a settings file, so without the fourth field a DSP
 interview had the user's mail tools in its context. Neither is guessable from the field names.
 Background: `docs/TODO.md` F-035.
+
+---
+
+# `submodule_absent.py` — the suite without the vendored method
+
+The measurement behind `docs/ARCHITECTURE-NOTES.md` §8, where removing the submodule was analysed
+and rejected. A pytest plugin that drops the submodule from `vendor_loader`'s candidate list
+rather than from the disk, so nothing is deleted to answer a question.
+
+```
+PYTHONPATH=spike uv run --extra dev --python 3.12 python -m pytest tests/ -q -p submodule_absent
+```
+
+Measured 2026-08-27 on pin `70a4fa7`: 1438 passed as-is; 178 failed with the submodule hidden and
+nothing in its place; 1438 passed again with `AUTOSOUND_SKILL_DIR` pointed at a neighbouring
+checkout. Full commands and the reason the installed-skill fallback is unreachable from inside the
+suite are in the file's own docstring.
