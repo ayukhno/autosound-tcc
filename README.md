@@ -301,22 +301,20 @@ make ship          # dry run: works out the next patch, checks everything, write
 make ship REAL=1   # the real thing: bump, test, commit, tag, push
 ```
 
-**The dry run comes first, always, and `REAL=1` waits for a yes.** Asking for a release in words —
-"new tag", "ship it", "cut a patch" — means `REAL=1` eventually, but never as the first step: the
-plan gets printed and looked at, and only then does anything get published. If the ask is
-ambiguous, the dry run is the answer to it, followed by a question. An irreversible act is not
-performed on a guess, and the last step here is irreversible in the strongest sense — a published
-tag cannot be moved or deleted afterwards by anyone.
+The dry run is the default because the last step publishes a tag, and a published tag cannot be
+moved or deleted afterwards by anyone.
 
-**There is no hand-rolled version of this.** `git commit`, `git tag` and `git push` typed out one
-after another are the same release with every gate missing: the version bump, the whole suite, the
-CHANGELOG entry that has to exist first, and the check that its `Paired with method` line matches
-the method actually checked out. A request phrased as those three commands is a request to ship,
-and should be answered with `make ship` — and with a note saying so.
+Before it writes anything, `make ship` requires a clean tree level with `origin/main`,
+`push.followTags` off, a CHANGELOG entry that already names the version being cut, and a
+`Paired with method` line on that entry matching the method this build actually reads. Then it
+bumps the version, runs the whole suite, and commits — so the tree that was tested is the tree
+that gets tagged. A failing suite rolls the bump back and leaves no commit and no tag.
 
-`make ship` refuses on anything but the next patch in TCC's own line. Minor, major, a jump, a
-pre-release, a moved tag, a GitHub release — all of those belong to a deliberate act somebody
-performs knowingly, not to a make target.
+It cuts nothing but the next patch in TCC's own line. Minor, major, a jump, a pre-release, a moved
+tag, a GitHub release: none of those are a make target's to make.
+
+Doing it by hand instead — `git commit`, `git tag`, `git push` in sequence — is the same release
+with all of the above skipped.
 </details>
 
 ## Reporting a problem
