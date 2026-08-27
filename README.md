@@ -293,6 +293,30 @@ TCC finds the skill by looking, first hit wins, at `$AUTOSOUND_SKILL_DIR`, the `
 of a checkout, `~/.claude/skills/autosound-tuning`, and then skill folders under
 `~/.claude/plugins/`. It needs the 3.x line and says so plainly if what it finds is older: only
 3.x has `project.json` and the contract checker, and TCC reads both.
+
+### Cutting a release
+
+```sh
+make ship          # dry run: works out the next patch, checks everything, writes nothing
+make ship REAL=1   # the real thing: bump, test, commit, tag, push
+```
+
+**The dry run comes first, always, and `REAL=1` waits for a yes.** Asking for a release in words —
+"new tag", "ship it", "cut a patch" — means `REAL=1` eventually, but never as the first step: the
+plan gets printed and looked at, and only then does anything get published. If the ask is
+ambiguous, the dry run is the answer to it, followed by a question. An irreversible act is not
+performed on a guess, and the last step here is irreversible in the strongest sense — a published
+tag cannot be moved or deleted afterwards by anyone.
+
+**There is no hand-rolled version of this.** `git commit`, `git tag` and `git push` typed out one
+after another are the same release with every gate missing: the version bump, the whole suite, the
+CHANGELOG entry that has to exist first, and the check that its `Paired with method` line matches
+the method actually checked out. A request phrased as those three commands is a request to ship,
+and should be answered with `make ship` — and with a note saying so.
+
+`make ship` refuses on anything but the next patch in TCC's own line. Minor, major, a jump, a
+pre-release, a moved tag, a GitHub release — all of those belong to a deliberate act somebody
+performs knowingly, not to a make target.
 </details>
 
 ## Reporting a problem

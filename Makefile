@@ -10,6 +10,12 @@ help:
 	@echo "make test           the whole suite (~5 min; there is no fast subset on purpose)"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
 	@echo "make ship REAL=1    the real release — bump, test, commit, tag, push"
+	@echo ""
+	@echo "Asking for a release — \"new tag\", \"ship it\", \"cut a patch\" — means REAL=1,"
+	@echo "but it is never the first thing done: the dry run and its plan come first, and"
+	@echo "REAL=1 waits for a yes. An irreversible act is not performed on a guess."
+	@echo "There is no hand-rolled version of this. commit + tag + push typed out one by"
+	@echo "one is the same release with the gates missing."
 
 test:
 	$(PY) -m pytest tests/ -q
