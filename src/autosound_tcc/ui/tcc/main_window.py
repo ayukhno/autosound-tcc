@@ -2925,11 +2925,28 @@ class MainWindow(QMainWindow):
         leaves the other to be guessed. The update word is here rather than in a badge because
         this is where the versions already are, and it is the line a person reads without being
         asked to (user, 2026-08-19).
+
+        The method also carries its COMMIT, in brackets. The title bar is the first thing on any
+        screenshot, and a version string cannot identify what the app was running: it is kept by
+        hand and has been seen to disagree with the tag. So a screenshot now says which method it
+        was taken against, and says it without being asked for (HUB-001). Twelve characters, the
+        same prefix the update row uses — the full sha is in the installation report.
         """
+        skill_version = install_report.skill_version()
+        skill_sha = install_report.skill_sha_short()
+        # Either half can be missing on a real machine: a folder outside a repository has no sha,
+        # a checkout without a manifest has no version. Whatever is known still goes on screen.
+        skill_part = ""
+        if skill_version and skill_sha:
+            skill_part = f"skill {skill_version} ({skill_sha})"
+        elif skill_version:
+            skill_part = f"skill {skill_version}"
+        elif skill_sha:
+            skill_part = f"skill ({skill_sha})"
         versions = " · ".join(
             part for part in (
                 f"TCC {install_report.app_version()}" if install_report.app_version() else "",
-                f"skill {install_report.skill_version()}" if install_report.skill_version() else "",
+                skill_part,
                 self._title_note,
             ) if part
         )

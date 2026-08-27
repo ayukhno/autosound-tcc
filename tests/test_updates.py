@@ -31,33 +31,98 @@ def _git_answers(monkeypatch, answers: dict):
     return calls
 
 
-def test_a_newer_tag_is_an_update_and_the_same_tag_is_not(monkeypatch, tmp_path):
+_HERE = "a" * 40
+_THERE = "b" * 40
+
+
+def _skill_at(monkeypatch, sha: str, version: str = "3.0.7"):
+    """An installed method sitting at `sha`, with `version` in its manifest."""
+    monkeypatch.setattr(install_report, "skill_sha", lambda: sha)
+    monkeypatch.setattr(install_report, "skill_version", lambda: version)
+
+
+def test_a_newer_tag_is_an_update_and_the_same_commit_is_not(monkeypatch, tmp_path):
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
     monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
-    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.6")
-    _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
+    _skill_at(monkeypatch, _HERE, "3.0.6")
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.7")})
 
     assert updates.check_skill().newer is True
 
-    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.7")
+    _skill_at(monkeypatch, _THERE, "3.0.7")
     status = updates.check_skill()
     assert status.newer is False
     assert status.latest == "3.0.7"
+    assert status.installed_sha == _THERE and status.latest_sha == _THERE
+
+
+def test_the_sha_decides_and_the_version_string_does_not(monkeypatch, tmp_path):
+    """HUB-001. `plugin.json`'s version is kept by hand, so two of them being equal says nothing
+    about whether this checkout is the one the tag names — in the method's own repository `main`
+    carries 3.0.36 while `marketplace.json` still says 2.8.3. A release cut without touching the
+    manifest used to read as up to date forever; now the commit answers and the number is only
+    shown."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    _skill_at(monkeypatch, _HERE, "3.0.36")
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.36")})
+
+    status = updates.check_skill()
+
+    assert status.newer is True, "same number, different commit — and the commit is the fact"
+    assert status.installed == status.latest == "3.0.36", "the number is still shown as it is"
+
+
+def test_an_annotated_tag_is_compared_by_the_COMMIT_it_points_at(monkeypatch, tmp_path):
+    """The trap `--refs` sets, measured in the hub's RELEASE-CHANNEL.md §8.2.
+
+    `ls-remote --refs` drops the peeled `^{}` line, and what is left for an ANNOTATED tag is the
+    sha of the tag OBJECT. A checked-out HEAD is a commit, so that comparison never matches and
+    every installation reads as out of date while looking like the network working."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    _skill_at(monkeypatch, _HERE)
+    calls = _git_answers(monkeypatch, {"ls-remote": (True,
+        f"{_THERE}\trefs/tags/v3.0.7\n{_HERE}\trefs/tags/v3.0.7^{{}}")})
+
+    status = updates.check_skill()
+
+    assert status.latest_sha == _HERE, "the commit, not the tag object"
+    assert status.newer is False, "this checkout IS v3.0.7"
+    ask = [call for call in calls if "ls-remote" in call][0]
+    assert "--refs" not in ask, "--refs would hide the peeled line"
+    assert f"{updates.SKILL_TAG_GLOB}^{{}}" in ask, (
+        "asked for explicitly, not left to a glob that happens to end in *")
 
 
 def test_ten_is_newer_than_nine(monkeypatch, tmp_path):
-    """The one comparison a string gets wrong: "3.0.10" < "3.0.9" alphabetically."""
+    """The one comparison a string gets wrong: "3.0.10" < "3.0.9" alphabetically. Which tag is
+    newest is still decided by its NAME — the shas only say whether we are standing on it."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
     monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
-    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.9")
+    _skill_at(monkeypatch, _HERE, "3.0.9")
     _git_answers(monkeypatch, {
-        "ls-remote": (True, "a\trefs/tags/v3.0.9\nb\trefs/tags/v3.0.10"),
+        "ls-remote": (True, f"{_HERE}\trefs/tags/v3.0.9\n{_THERE}\trefs/tags/v3.0.10"),
     })
 
     status = updates.check_skill()
 
     assert status.latest == "3.0.10"
+    assert status.latest_sha == _THERE
     assert status.newer is True
+
+
+def test_a_method_git_will_not_answer_for_is_not_up_to_date(monkeypatch, tmp_path):
+    """No sha means the question could not be asked, and "could not ask" is not "nothing new"."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    _skill_at(monkeypatch, "", "3.0.7")
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.8")})
+
+    status = updates.check_skill()
+
+    assert status.newer is False
+    assert status.installed_sha == "" and status.latest == "3.0.8"
 
 
 def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
@@ -67,9 +132,9 @@ def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
         "--git-dir": (True, ".git"),
         "--show-superproject-working-tree": (True, ""),
         "symbolic-ref": (True, "main"),
-        "ls-remote": (True, "sha\trefs/tags/v9.9.9"),
+        "ls-remote": (True, f"{_THERE}\trefs/tags/v9.9.9"),
     })
-    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.0")
+    _skill_at(monkeypatch, _HERE, "3.0.0")
 
     status = updates.check_skill()
 
@@ -237,11 +302,11 @@ def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
     release checkout. Updating it would check a tag out inside somebody's working repository and
     leave the parent's pin modified."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.7")
+    _skill_at(monkeypatch, _HERE, "3.0.7")
     _git_answers(monkeypatch, {
         "--git-dir": (True, ".git"),
         "--show-superproject-working-tree": (True, "/Users/somebody/dev/autosound-tcc"),
-        "ls-remote": (True, "sha\trefs/tags/v3.0.8"),
+        "ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.8"),
     })
 
     status = updates.check_skill()

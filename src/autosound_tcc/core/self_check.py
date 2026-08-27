@@ -189,7 +189,7 @@ def _pin_check() -> Check:
     (`updates.check_skill`), and two rows saying the same thing in different words is worse than
     one.
     """
-    from autosound_tcc.core import updates, vendor_loader
+    from autosound_tcc.core import install_report, updates, vendor_loader
 
     repo = vendor_loader.skill_repo_root()
     if repo is None:
@@ -198,8 +198,11 @@ def _pin_check() -> Check:
     if not (inside and parent):
         # Not our submodule: an installed skill, or somebody's own checkout. Not this row's job.
         return Check("pin", OK, _t("selfPinOkTitle"))
-    ok, head = updates._git("rev-parse", "HEAD", cwd=repo)
-    if not ok or not head:
+    # Through `install_report`, not a `rev-parse` of our own: this row, the title bar and the
+    # update check must all be talking about the same commit, and three callers asking git
+    # separately is three chances to disagree (autosound-hub HUB-001).
+    head = install_report.skill_sha()
+    if not head:
         return Check("pin", OK, _t("selfPinOkTitle"))
     listed, tags = updates._git(
         "for-each-ref", "--sort=-v:refname", "--format=%(refname:short)",

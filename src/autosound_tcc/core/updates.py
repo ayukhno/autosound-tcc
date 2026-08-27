@@ -136,6 +136,11 @@ class Status:
     detail: str = ""
     #: False when this installation is not ours to touch (a checkout, a hand-made symlink).
     updatable: bool = True
+    #: The commit that is here, and the commit the newest tag names — "" when either cannot be
+    #: read. For the method these are what `newer` is DECIDED by; `installed` and `latest` above
+    #: are the version strings shown beside them, because that is what a person quotes (HUB-001).
+    installed_sha: str = ""
+    latest_sha: str = ""
 
 
 def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
@@ -155,23 +160,50 @@ def _version_key(text: str) -> tuple:
     return tuple(int(part) for part in re.findall(r"\d+", text)) or (0,)
 
 
-def _newest_tag_in(repo: str, glob: str) -> str:
-    """The newest tag matching `glob` in `repo`, or "" if it cannot be asked."""
-    ok, out = _git("ls-remote", "--tags", "--refs", repo, glob)
+def _newest_tag_in(repo: str, glob: str) -> tuple[str, str]:
+    """The newest tag matching `glob` in `repo`, and the COMMIT it names. `("", "")` if unaskable.
+
+    **No `--refs`, and that is the whole point of this function.** `--refs` drops the peeled `^{}`
+    lines, and for an ANNOTATED tag the line that survives carries the sha of the TAG OBJECT, not
+    of the commit. A checked-out HEAD is a commit, so a comparison against the unpeeled sha never
+    matches: every installation on earth would read as out of date, and it would look like the
+    network working. Written down as a trap in the hub's `governance/RELEASE-CHANNEL.md` §8.2, and
+    live here — the method's `v3.0.36` is annotated, tag object `56ffb54`, commit `70a4fa7`
+    (measured 2026-08-27). A lightweight tag has no `^{}` line and needs the plain one, so both
+    are read and the peeled one wins.
+
+    The peel pattern is passed EXPLICITLY as a second one rather than left to `glob`. It works
+    either way today, because both globs here end in `*` and so match `…^{}` by accident — and an
+    accident is a bad thing to hang this on: narrowing a glob to an exact tag would drop the peel
+    again, silently, and bring back the very bug above.
+    """
+    ok, out = _git("ls-remote", "--tags", repo, glob, f"{glob}^{{}}")
     if not ok or not out:
-        return ""
-    tags = [line.rsplit("/", 1)[-1] for line in out.splitlines() if "/" in line]
-    return max(tags, key=_version_key) if tags else ""
+        return "", ""
+    shas: dict[str, str] = {}
+    for line in out.splitlines():
+        sha, _tab, ref = line.partition("\t")
+        if "/" not in ref:
+            continue
+        name = ref.rsplit("/", 1)[-1]
+        peeled = name.endswith("^{}")
+        name = name[:-3] if peeled else name
+        if peeled or name not in shas:
+            shas[name] = sha.strip()
+    if not shas:
+        return "", ""
+    newest = max(shas, key=_version_key)
+    return newest, shas[newest]
 
 
 def newest_tag() -> str:
     """The newest `v3.*` tag in the method's repository, or "" if it cannot be asked."""
-    return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)
+    return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)[0]
 
 
 def newest_tcc_tag() -> str:
     """The newest release tag of TCC itself, or "" if it cannot be asked."""
-    return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB)
+    return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB)[0]
 
 
 def _skill_repo_dir() -> Optional[Path]:
@@ -209,21 +241,40 @@ def _is_ours(repo: Path) -> tuple[bool, tuple[str, str]]:
         return False, ("dirty", "")
     return True, ("", "")
 def check_skill() -> Status:
-    """The method: the version installed here against the newest release tag."""
+    """The method: the commit installed here against the commit the newest release tag names.
+
+    **Compared by sha, not by the version string**, since HUB-001. `plugin.json`'s version is kept
+    by hand and in the method's own repository the two already disagree — `main` carries 3.0.36
+    while `marketplace.json` still says 2.8.3 (measured 2026-08-27). Comparing two hand-kept
+    strings answers "are these numbers different", when the question is "is this checkout the one
+    the tag names": a release cut without touching the manifest would read as up to date forever,
+    and a manifest bumped early would offer an installation an update to itself. The version stays
+    on the row because it is what a person reads — signature beside identifier, never instead.
+
+    "Ahead of the newest tag" is not a case here the way it is in `check_tcc`: `_is_ours` has
+    already turned away everything except the clean detached clone the installer parked on a tag.
+    """
     installed = install_report.skill_version()
+    sha = install_report.skill_sha()
     repo = _skill_repo_dir()
-    latest = newest_tag()
+    latest, latest_sha = _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)
     latest_version = latest.lstrip("v")
     if repo is None:
-        return Status("skill", installed, latest_version, False, "not_found", updatable=False)
+        return Status("skill", installed, latest_version, False, "not_found", updatable=False,
+                      installed_sha=sha, latest_sha=latest_sha)
     ours, (why, detail) = _is_ours(repo)
     if not ours:
-        return Status("skill", installed, latest_version, False, why, detail, updatable=False)
-    if not installed or not latest:
+        return Status("skill", installed, latest_version, False, why, detail, updatable=False,
+                      installed_sha=sha, latest_sha=latest_sha)
+    if not sha or not latest_sha:
+        # Nothing to compare against: no network, or a checkout git would not answer for. NOT
+        # "up to date" — `newer` stays False because it is unknown, the rule `check_tcc` keeps.
         return Status("skill", installed, latest_version, False,
-                      "" if installed else "no_manifest")
-    return Status("skill", installed, latest_version,
-                  _version_key(latest_version) > _version_key(installed))
+                      "" if installed else "no_manifest",
+                      installed_sha=sha, latest_sha=latest_sha)
+    return Status("skill", installed, latest_version, sha != latest_sha,
+                  "" if installed else "no_manifest",
+                  installed_sha=sha, latest_sha=latest_sha)
 
 
 

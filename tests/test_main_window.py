@@ -2571,6 +2571,11 @@ def test_the_title_bar_carries_both_versions():
         assert f"TCC {install_report.app_version()}" in title
     if install_report.skill_version():
         assert f"skill {install_report.skill_version()}" in title
+    # And the method's COMMIT, since HUB-001: a version string is kept by hand and cannot say
+    # which method the screenshot was taken against. Twelve characters, the same prefix the
+    # update row uses; the whole sha is in the installation report.
+    if install_report.skill_sha():
+        assert f"({install_report.skill_sha_short()})" in title
 
 
 def test_the_title_says_when_something_newer_exists(monkeypatch):

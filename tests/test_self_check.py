@@ -193,7 +193,7 @@ def i18n_text(key: str) -> str:
 
 def _pin_git(monkeypatch, answers: dict, tmp_path):
     """Fake the method's checkout: `updates._git` by its first two arguments."""
-    from autosound_tcc.core import updates, vendor_loader
+    from autosound_tcc.core import install_report, updates, vendor_loader
 
     monkeypatch.setattr(vendor_loader, "skill_repo_root", lambda: tmp_path)
 
@@ -204,6 +204,11 @@ def _pin_git(monkeypatch, answers: dict, tmp_path):
         return (False, "")
 
     monkeypatch.setattr(updates, "_git", fake)
+    # This row no longer runs its own `rev-parse HEAD`: since HUB-001 the method's sha is read in
+    # one place, so that this check, the title bar and the update row cannot end up naming
+    # different commits. Fed from the same answers, so the tests below say what they always said.
+    head_ok, head = answers.get(("rev-parse", "HEAD"), (False, ""))
+    monkeypatch.setattr(install_report, "skill_sha", lambda: head if head_ok else "")
 
 
 def test_a_pin_behind_a_released_tag_is_said_out_loud(monkeypatch, tmp_path):

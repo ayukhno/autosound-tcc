@@ -42,6 +42,15 @@ from autosound_tcc.core import child
 #: string; three seconds is already generous, and a hung one must not hang the panel.
 _PROBE_TIMEOUT = 3.0
 
+#: How much of a sha is shown where the whole thing will not fit — the title bar, the update row.
+#: Git's own abbreviation length: unambiguous in a repository this size, short enough to leave the
+#: project path readable. Everything that shortens uses THIS, so the short form is one prefix and
+#: not several (`skill_sha_short`).
+SHA_SHORT = 12
+
+#: What a commit looks like, so that a git error message cannot be mistaken for one.
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+
 #: The command-line tools TCC's own routes and the method's scripts reach for, and what each one
 #: is FOR — the value of this section is telling the reader which absence matters.
 _TOOLS: tuple[tuple[str, str], ...] = (
@@ -139,6 +148,11 @@ def _manifest() -> Optional[Path]:
 def skill_version() -> str:
     """The method's version, from the plugin manifest at the skill repository's root, or "".
 
+    A SIGNATURE FOR A PERSON, and not an identifier — `skill_sha()` is that. This number is kept
+    by hand and in the method's own repository the two already disagree: `main` carries 3.0.36
+    while `marketplace.json` still says 2.8.3 (measured 2026-08-27). It goes on screen because it
+    is what a person quotes; nothing is ever DECIDED by comparing it.
+
     One file read. Public because the window puts both versions in its title bar — the first thing
     on screen in any screenshot, which is where a version is worth most (user, 2026-08-19).
     """
@@ -151,8 +165,45 @@ def skill_version() -> str:
         return ""
 
 
+def skill_sha() -> str:
+    """The commit the method's checkout is at, or "" when it cannot be told.
+
+    **THE identifier of the method.** `skill_version()` is the signature beside it. Where anything
+    is compared this decides; where anything is shown, the version stands next to it. Two
+    identifiers would be one key kept in two places, and this pair has already been seen to drift
+    (see `skill_version`) — a version string is maintained by hand and a sha is not.
+
+    Read here and ONLY here. `core/self_check.py` and `core/updates.py` both call this instead of
+    asking git themselves, so the number in the title bar, the number in this report and the
+    number an update is decided by cannot come apart (autosound-hub HUB-001).
+
+    "" for a skill folder that is in no repository at all — a real answer, and the same one
+    `skill_version()` gives for a checkout with no manifest.
+    """
+    try:
+        root = vendor_loader.skill_repo_root()
+        if root is None:
+            return ""
+        out = _run(["git", "-C", str(root), "rev-parse", "HEAD"])
+        # `_run` hands back git's STDERR when git fails, so the answer is RECOGNISED rather than
+        # trusted: "fatal: not a git repository" in the field that identifies the method would be
+        # worse than an empty one, because it looks like data.
+        return out if _SHA.match(out) else ""
+    except Exception:  # noqa: BLE001 — no git on the machine is a finding, not a crash
+        return ""
+
+
+def skill_sha_short() -> str:
+    """`skill_sha()` cut to `SHA_SHORT`, for the two places the whole thing will not fit.
+
+    A PREFIX of the one number, never a second spelling of it: this report prints all forty
+    characters, and everything that shortens goes through here.
+    """
+    return skill_sha()[:SHA_SHORT]
+
+
 def _skill() -> Section:
-    """Where the method is, which version, and whether TCC can actually read it."""
+    """Where the method is, which commit, which version, and whether TCC can actually read it."""
     items: list[Item] = []
     try:
         path = vendor_loader.skill_dir()
@@ -161,6 +212,13 @@ def _skill() -> Section:
         # `plugin.json` sits at the REPOSITORY root — reached by following the installer's link,
         # never by counting levels up from the link itself (see vendor_loader.skill_repo_root).
         manifest = _manifest()
+        # The commit ABOVE the version, and whole. This is the line that says which method a
+        # screenshot was taken against, and it is the only one of the two a person can hand back
+        # to git. Half a sha would not be pasteable; the version below is what they read (HUB-001).
+        sha = skill_sha()
+        items.append(Item("commit", sha or "unknown",
+                          str(vendor_loader.skill_repo_root() or "") if sha
+                          else "not a git checkout"))
         version = skill_version()
         items.append(Item("version", version or "unknown", str(manifest) if version else ""))
         if not usable:

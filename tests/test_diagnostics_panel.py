@@ -517,6 +517,41 @@ def test_a_report_from_a_tab_that_was_never_opened_still_carries_the_versions(mo
     assert "Autosound+TCC" in opened[0] or "Autosound%20TCC" in opened[0]
 
 
+def test_the_update_row_carries_the_commit_beside_the_version():
+    """HUB-001. The version is what somebody says out loud; the commit is what the row can be
+    reproduced from. Both, or the screenshot loses one of them."""
+    from autosound_tcc.core import install_report, updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    here, there = "a" * 40, "b" * 40
+
+    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True,
+                                       installed_sha=here, latest_sha=there))
+
+    text = dialog._update_rows["skill"][0].text()
+    assert f"3.0.6 ({here[:install_report.SHA_SHORT]})" in text
+    assert f"3.0.7 ({there[:install_report.SHA_SHORT]})" in text
+
+
+def test_a_release_the_manifest_was_not_bumped_on_reads_as_a_newer_build():
+    """The case HUB-001 is about, on screen: the two version strings are equal and the commits are
+    not. It used to render as "up to date"; now it lands in the newer-build sentence, and the sha
+    is what makes that sentence checkable."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._show_update(updates.Status("skill", "3.0.36", "3.0.36", True,
+                                       installed_sha="a" * 40, latest_sha="b" * 40))
+
+    label, button = dialog._update_rows["skill"]
+    assert label.text() == i18n.t("updNewerBuild").format(
+        what=i18n.t("updSkillName"), here="3.0.36 (aaaaaaaaaaaa)")
+    assert button.isEnabled()
+
+
 def test_a_newer_build_of_the_same_version_is_said_in_words(monkeypatch):
     """TCC installs from a branch, so "newer" usually means the same number twice. Printing it as
     "0.1.7 — a newer one is out: 0.1.7" would be nonsense, and a hash is not for reading."""
