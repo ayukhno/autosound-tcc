@@ -15,12 +15,20 @@ under this script. It is not one. The hook parses the COMMAND LINE, and `make sh
 git verb at all, so it exits before it reaches any rule. Measured 2026-08-27:
 
     make ship                      -> exit 0   (the hook saw nothing)
-    bash -c 'git push --tags ...'  -> exit 0   (the verb is inside quotes)
+    bash -c 'git push --tags ...'  -> exit 0   (an interpreter, not a command it can read)
     git push --tags origin         -> exit 2   (refused)
 
-Filed as TCC-001 (autosound-hub#8) because it is the hub's boundary to decide about, not ours.
-The consequence here is simple: `check_rule()` below is a real check, not a formality, and it must
-keep saying the same thing as the hook.
+Raised with the hub as TCC-001 (autosound-hub#8) and **settled there**: it is recorded as a
+boundary rather than a defect, `governance/RELEASE-CHANNEL.md` §8.10, which splits the ways round
+the hook into two classes. WRAPPERS — the verb is in the line, just not at the front
+(`timeout git push`, `env git push`, `eval "git push"`) — were closed the same day and are held by
+a probe of theirs. OPAQUE launches — `make`, `./script.sh`, `python3 -c`, an interpreter — have no
+verb in the line, and the hub's own finding is that they are not catchable: the only event that
+sees a child process arrives AFTER it ran, and even then only when the target does not silence its
+output.
+
+So the hub does not pretend to cover this path, and `make ship` is squarely in the second class.
+`check_rule()` below is the ONLY barrier on it — not a formality, and not a second opinion.
 
 ## And why it ALSO asks the hook
 
@@ -34,6 +42,11 @@ counted as passed.
 
 The bump happens BEFORE the tests, so the tree that gets tested is character for character the
 tree that gets tagged — version included. A red suite rolls the bump back and leaves nothing.
+
+"The version" is two files, not one: `pyproject.toml` and `uv.lock`, which records the project's
+own version as well. Missing the second is how v0.1.25 came to be tagged on a tree whose lock said
+0.1.24 — found by this script's own clean-tree gate on the next run, which is the good way to find
+it and still one file too many to keep a single fact in.
 
 Everything up to and including the local tag is reversible. The single irreversible act is the
 last line of the script, on its own, by name.
@@ -263,6 +276,32 @@ def bump(root: Path, version: str) -> str:
     return was
 
 
+def tracked(root: Path, name: str) -> bool:
+    return bool(run(["git", "ls-files", "--error-unmatch", name], root, check=False))
+
+
+def relock(root: Path) -> None:
+    """Put the new version into `uv.lock` too, through uv rather than by hand.
+
+    `uv.lock` records the project's OWN version, so a bump leaves it stale — and this was found
+    the way such things are: the first `uv run` after v0.1.25 rewrote the lock, the tree went
+    dirty, and ship's own clean-tree gate refused the next release. Worse than the nuisance is
+    what it means for the tag already cut: `v0.1.25` names a tree whose lock says `0.1.24`, which
+    is precisely the kind of "two places, one fact" this project keeps paying for.
+
+    Through `uv lock`, not a regex: the lock is uv's file and its shape is uv's business. If uv is
+    not here, that is a STOP rather than a shrug — a release that silently leaves the lock behind
+    is the bug this function exists to close.
+    """
+    if not tracked(root, "uv.lock"):
+        return
+    done = subprocess.run(["uv", "lock", "--quiet"], cwd=str(root),
+                          capture_output=True, text=True)
+    if done.returncode != 0:
+        raise Stop("uv.lock is tracked and `uv lock` failed, so the lock would keep the old "
+                   f"version while the tag says otherwise:\n{done.stderr.strip()}")
+
+
 def method_sha(root: Path) -> str:
     """The commit of the method this build is against, through its one reader (HUB-001).
 
@@ -278,6 +317,7 @@ def method_sha(root: Path) -> str:
 
 def ship(root: Path, release: bool, test_command=None, hook: Path = HOOK,
          read_method_sha: Callable[[Path], str] = method_sha,
+         relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print) -> Plan:
     """The whole thing. Reads and decides first; writes only when `release` is true."""
     plan = Plan(root=root)
@@ -318,15 +358,20 @@ def ship(root: Path, release: bool, test_command=None, hook: Path = HOOK,
         return plan
 
     was = bump(root, plan.version)
+    relock_with(root)
     say(f"\n  version {was} -> {plan.version}")
     say("  running the suite…")
     done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
     if done.returncode != 0:
         bump(root, was)
+        relock_with(root)
         raise Stop(f"the suite failed ({done.returncode}) — the version bump was rolled back "
                    "and nothing was committed")
 
-    run(["git", "add", "pyproject.toml", "CHANGELOG.md"], root)
+    files = ["pyproject.toml", "CHANGELOG.md"]
+    if tracked(root, "uv.lock"):
+        files.append("uv.lock")
+    run(["git", "add", *files], root)
     run(["git", "commit", "-m", f"{plan.tag}: paired with method {plan.method_sha[:12]}"], root)
     run(["git", "tag", plan.tag], root)
     say(f"  committed and tagged {plan.tag} (still local — `git tag -d {plan.tag}` undoes it)")

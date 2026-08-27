@@ -24,9 +24,11 @@ test:
 # publish a tag, and a published tag can never be moved or deleted by anyone afterwards.
 #
 # Note for whoever edits this: the hub's `guard-release` hook does NOT see git commands run from
-# inside a make recipe — it parses the command line, and `make ship` has no git verb in it. There
-# is no safety net under this target; `scripts/ship.py` carries the rule itself, and checks it
-# against the hook rather than remembering it. Filed as autosound-hub#8.
+# inside a make recipe — it parses the command line, and `make ship` has no git verb in it. That
+# is settled and deliberate on the hub's side, written down as a boundary rather than a defect
+# (`governance/RELEASE-CHANNEL.md` §8.10): an opaque launch is not catchable, so the hub does not
+# claim to catch it. There is no safety net under this target. `scripts/ship.py` carries the rule
+# itself and compares it against the hook rather than remembering it.
 ship:
 ifeq ($(REAL),1)
 	$(PY) scripts/ship.py --release

@@ -31,6 +31,7 @@ somebody else's system and neither is destructive — a rejected push publishes 
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -83,6 +84,8 @@ def repo(tmp_path, monkeypatch):
     (work / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.24"), encoding="utf-8")
     (work / "CHANGELOG.md").write_text(
         CHANGELOG.format(tag="v0.1.25", sha=METHOD_SHA), encoding="utf-8")
+    (work / "uv.lock").write_text(
+        'name = "fixture"\nversion = "0.1.24"\n', encoding="utf-8")
     git(work, "add", "-A")
     git(work, "commit", "--quiet", "-m", "start")
     git(work, "tag", "v0.1.24")
@@ -93,11 +96,22 @@ def repo(tmp_path, monkeypatch):
     return work
 
 
+def _relock(root):
+    """What `uv lock` does to the one line this project cares about: carry pyproject's version
+    into the lock. Stubbed because the fixture is not a real uv project — what is under test is
+    that ship CALLS it and commits the result, not uv's own correctness."""
+    version = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(), re.M)
+    lock = root / "uv.lock"
+    lock.write_text(re.sub(r'^version = "[^"]+"', f'version = "{version.group(1)}"',
+                           lock.read_text(), flags=re.M), encoding="utf-8")
+
+
 def _run(repo, release=True, test_exit=0):
     """Ship on the fixture, with the suite stubbed to whatever outcome the test needs."""
     stub = [sys.executable, "-c", f"import sys; sys.exit({test_exit})"]
     return ship_mod.ship(repo, release=release, test_command=stub,
-                         read_method_sha=lambda _root: METHOD_SHA, say=lambda _m: None)
+                         read_method_sha=lambda _root: METHOD_SHA,
+                         relock_with=_relock, say=lambda _m: None)
 
 
 # ---------------------------------------------------------------- what the fixture proves
@@ -281,3 +295,29 @@ def test_ship_never_pushes_in_BULK_and_never_releases(repo):
     pushes = [line for line in code if "push" in line and "--tags" in line]
     assert not pushes, f"a push that carries no tag name: {pushes}"
     assert "gh release" not in body, "releases belong to the `release` role, not to a make target"
+
+
+def test_the_lock_file_moves_with_the_version_and_lands_in_the_release_commit(repo):
+    """Found by ship's own clean-tree gate, the first time it ran after a release.
+
+    `uv.lock` records the project's OWN version. Ship bumped `pyproject.toml` and not the lock, so
+    `v0.1.25` was tagged on a tree whose lock still said `0.1.24` — and the next `uv run` rewrote
+    it, leaving a dirty tree that refused the following release. One fact in two files, which is
+    the shape this project keeps paying for.
+    """
+    _run(repo)
+
+    assert 'version = "0.1.25"' in (repo / "uv.lock").read_text(encoding="utf-8")
+    assert git(repo, "status", "--porcelain") == "", "nothing left over for the next run to trip on"
+    changed = git(repo, "show", "--name-only", "--format=", "v0.1.25").split()
+    assert "uv.lock" in changed, f"the lock did not travel with the release commit: {changed}"
+
+
+def test_a_red_suite_puts_the_lock_back_too(repo):
+    """The rollback has to undo both halves, or a failed release leaves the lock ahead of the
+    version it locks."""
+    with pytest.raises(ship_mod.Stop):
+        _run(repo, test_exit=1)
+
+    assert 'version = "0.1.24"' in (repo / "uv.lock").read_text(encoding="utf-8")
+    assert git(repo, "status", "--porcelain") == ""
