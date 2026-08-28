@@ -8,7 +8,7 @@ published tag can never be moved or deleted by anyone — including the `release
 (hub `governance/RELEASE-CHANNEL.md`, and the hook's own `tag_rule`). So every check that can be
 made has to be made before it, and the command that does it must be asked for by name.
 
-## Why this file carries the rule instead of trusting the hook
+## Why this file needs a barrier at all
 
 The hub's `guard-release.py` refuses a bad tag or a bulk push, and it would look like a safety net
 under this script. It is not one. The hook parses the COMMAND LINE, and `make ship` contains no
@@ -28,15 +28,39 @@ sees a child process arrives AFTER it ran, and even then only when the target do
 output.
 
 So the hub does not pretend to cover this path, and `make ship` is squarely in the second class.
-`check_rule()` below is the ONLY barrier on it — not a formality, and not a second opinion.
+Between `make ship` and a published tag there is nothing but what this file does first.
 
-## And why it ALSO asks the hook
+## The barrier is the hub's, called rather than copied (HUB-003, autosound-hub#10)
 
-`check_rule()` is a second copy of somebody else's rule, and a second copy drifts — that is the
-lesson this repository keeps paying for. So `oracle()` feeds the hook the exact command strings
-this script would run and prints its verdicts. The rule stays in one place; we compare against it
-rather than remember it. When the hook cannot be found, that is REPORTED as unchecked, never
-counted as passed.
+It used to be `check_rule()` here — a second copy of the hook's rule, with `oracle()` beside it to
+catch the copy drifting from its owner. Caught is not the same as prevented, and this repository
+has paid for "one fact in two places" often enough to stop shipping the shape.
+
+Both are gone. The channel half of the preflight — clean tree, HEAD published, `push.followTags`,
+the tag free on the remote, the rule itself, and the hook's verdict on the exact command lines
+that will run — is `hub/scripts/release-preflight.py`, shared with `skill`. It does not restate
+the rule either: it imports `guard-release.tag_rule()` and calls it. One copy, for both repos.
+
+**No hub on this machine, no release.** The old hook check was allowed to say "not checked" and
+carry on, because it was a comparison and not a gate. This IS the gate, on a path the hook cannot
+see, so "not checked" here would mean nothing is checking the release at all — and unknown is a
+refusal, never "no objections" (hub `HUB-CONSTRAINTS.md` §1.4).
+
+That is about the carrier being ABSENT, which is a different thing from a single check inside it
+coming back `не перевірено` — the hook missing while the hub is here, most often. Those are
+printed and do not stop the release, and the decision is the carrier's own (`Check.gates`), not
+one this file takes a second view on. Holding a second view is how the copy came back.
+
+## What stayed: the inventory, and everything that writes
+
+The CHANGELOG entry and its `Paired with method` line, the bump, `uv.lock`, the suite, the commit,
+the tag and the two pushes. None of them has a second copy anywhere, so there is nothing to bring
+together: the boundary is ownership, not tidiness (hub `RELEASE-CHANNEL.md` §9).
+
+The two halves also REPORT differently, and that is deliberate. The carrier runs every channel
+check and names all of them at once, so one run tells a person everything that is not ready
+(§9.5). The inventory half below stops at the first, because those checks are sequential by data —
+there is no `Paired with method` line to check until there is an entry to read it from.
 
 ## The order, and the one thing it is built around
 
@@ -54,27 +78,18 @@ last line of the script, on its own, by name.
 from __future__ import annotations
 
 import argparse
-import json
-import os
+import importlib.util
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-#: `vX.Y.Z` and nothing after it. The same shape the hook accepts; anything else is not a patch.
-#: Kept identical to `guard-release.VERSION_RE` on purpose — `oracle()` is what proves it still is.
-VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-
-#: TCC's release line. The fourth copy of this glob (`install.sh`, `install.ps1`, `install.cmd`
-#: hold the others) and the method's `installer-consistency.py` is what keeps them in step —
-#: `tests/test_updates.py::test_our_installer_constants_agree_with_the_installers_own`.
-TAG_GLOB = "v*"
-
-#: Where the hub's hook lives, when it is on this machine at all. Ship works without it; it just
-#: says so out loud rather than pretending the check passed.
-HOOK = Path.home() / "dev" / "autosound-hub" / "hub" / "scripts" / "guard-release.py"
+#: The hub's carrier of the channel preflight. Ship does NOT work without it — see the module
+#: docstring. The version pattern and the release glob went with it: they were copies of the
+#: hook's, and the carrier reads the hook's own (`guard-release.VERSION_RE`, `RELEASE_GLOB`).
+CARRIER = Path.home() / "dev" / "autosound-hub" / "hub" / "scripts" / "release-preflight.py"
 
 #: The suite, whole. `docs/TESTING.md`: run everything, every time — there is deliberately no
 #: fast subset, and a release is the last place to invent one.
@@ -90,7 +105,6 @@ class Plan:
     """What ship worked out before it was allowed to touch anything."""
 
     root: Path
-    newest: str = ""
     tag: str = ""
     version: str = ""
     method_sha: str = ""
@@ -104,84 +118,42 @@ def run(argv, cwd: Path, check: bool = True) -> str:
     return (done.stdout or "").strip()
 
 
-# ---------------------------------------------------------------- read-only checks
+# ---------------------------------------------------------------- the channel half, borrowed
 
 
-def check_clean_tree(root: Path) -> None:
-    dirty = run(["git", "status", "--porcelain"], root)
-    if dirty:
-        raise Stop("the working tree is not clean — a release must be a tree somebody can "
-                   f"check out and get back:\n{dirty}")
+def load_carrier(path: Path = CARRIER):
+    """The hub's `release-preflight.py`, loaded by path — its name has a hyphen and will not import.
 
-
-def check_branch_synced(root: Path, remote: str = "origin") -> None:
-    """On `main`, and level with the remote.
-
-    Fetches first. Tagging a local `main` that is behind publishes a version nobody can reach by
-    the branch, and one that is ahead publishes commits the remote has never seen.
+    A hub that is not here is a STOP, and the sentence names the path it looked at. "The hub is
+    missing" and "nothing is checking this release" are the same statement on this path: the hook
+    never sees a git command run from inside a make recipe.
     """
-    branch = run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], root)
-    if branch != "main":
-        raise Stop(f"on branch `{branch}`, not `main` — a release is cut from main")
-    run(["git", "fetch", "--quiet", remote], root)
-    here = run(["git", "rev-parse", "HEAD"], root)
-    there = run(["git", "rev-parse", f"{remote}/main"], root)
-    if here != there:
-        raise Stop(f"`main` and `{remote}/main` differ ({here[:12]} vs {there[:12]}) — "
-                   "pull or push before shipping")
+    if not path.is_file():
+        raise Stop(
+            f"the hub's channel preflight is not on this machine ({path}), and it is the only "
+            "thing between `make ship` and a published tag — the hook cannot see git run from "
+            "inside a make recipe. Clone the hub to ~/dev/autosound-hub/hub and run ship again.")
+    spec = importlib.util.spec_from_file_location("release_preflight", path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # noqa: BLE001 — a hub that is here but will not load is still no gate
+        raise Stop(f"{path} is on this machine but did not load: {exc!r}. It reads the hook beside "
+                   "it (guard-release.py) at import time; half a hub is not a barrier.") from exc
+    return module
 
 
-def check_follow_tags(root: Path) -> None:
-    """`push.followTags=true` sends tags along with a branch push, WITHOUT the tag appearing in
-    the command. Ship pushes its tag by name and on purpose; a config that also sends it silently
-    would mean a tag can leave before the step meant to publish it — and before the hook can see a
-    name. The hub names the same trap in its plan (§9.3); this is the local half.
+def channel_checks(root: Path, path: Path = CARRIER):
+    """Every channel precondition, asked of the carrier. Returns `(tag, checks)`, writes nothing.
+
+    The role is named HERE and nowhere else: it decides which repository and which release line
+    the carrier reports on, and the hook it consults reads the repository from `cwd`. Ship cuts
+    patches in TCC's line and nothing else, so the one right answer is a constant, not a flag.
     """
-    done = subprocess.run(["git", "config", "--get", "push.followTags"],
-                          cwd=str(root), capture_output=True, text=True)
-    if (done.stdout or "").strip().lower() == "true":
-        raise Stop("push.followTags is true — tags would ride out with the branch push, "
-                   "unnamed and unseen. Turn it off: git config --unset push.followTags")
+    return load_carrier(path).preflight(root, role="tcc", want_next=True)
 
 
-def newest_tag(root: Path, remote: str = "origin") -> Optional[str]:
-    """The newest `vX.Y.Z` on the REMOTE — the same way the hook and the installers ask.
-
-    Network, not `git tag`: a local list can be behind, and then ship would propose a number the
-    hook computes differently and refuses. `--refs` is right HERE, where names are wanted — it
-    keeps `v0.1.24^{}` out of the list. (The opposite of comparing shas, where dropping the peeled
-    line is the bug — see `core/updates.py`.)
-    """
-    out = run(["git", "ls-remote", "--tags", "--refs", remote, TAG_GLOB], root, check=False)
-    names = [line.rsplit("/", 1)[-1] for line in out.splitlines() if "/" in line]
-    versions = [n for n in names if VERSION_RE.match(n)]
-    if not versions:
-        return None
-    return max(versions, key=lambda n: tuple(int(g) for g in VERSION_RE.match(n).groups()))
-
-
-def next_patch(newest: str) -> str:
-    major, minor, patch = (int(g) for g in VERSION_RE.match(newest).groups())
-    return f"v{major}.{minor}.{patch + 1}"
-
-
-def check_rule(tag: str, newest: str) -> None:
-    """Ship's own copy of the hook's rule — see this module's docstring for why it exists.
-
-    Only the part ship can reach: it cuts patches in TCC's own line, so anything else is not
-    ship's to do at all. Minor, major, a jump, a pre-release — all of those go through the
-    `release` role, and a `make` target that could do them would hollow that role out.
-    """
-    if not VERSION_RE.match(tag):
-        raise Stop(f"`{tag}` is not vX.Y.Z, so it is not a patch — that goes through `release`")
-    nmaj, nmin, npat = (int(g) for g in VERSION_RE.match(newest).groups())
-    maj, minor, patch = (int(g) for g in VERSION_RE.match(tag).groups())
-    if (maj, minor) != (nmaj, nmin):
-        raise Stop(f"`{tag}` changes major/minor against `{newest}` — that is an event, not "
-                   "daily work. Through the `release` role.")
-    if patch != npat + 1:
-        raise Stop(f"expected `{next_patch(newest)}` (one after `{newest}`), got `{tag}` — "
-                   "a patch is exactly +1 on the last number")
+# ---------------------------------------------------------------- the inventory, ours alone
 
 
 def check_changelog(root: Path, tag: str) -> str:
@@ -227,38 +199,6 @@ def check_paired_method(changelog: str, method_sha: str) -> None:
         raise Stop(f"CHANGELOG says the method is `{said}`, the checkout is at "
                    f"`{method_sha[:12]}` — if `{said}` is a tag, put the sha beside it so this "
                    "can be checked rather than believed")
-
-
-# ---------------------------------------------------------------- the oracle
-
-
-def oracle(root: Path, commands: list, hook: Path = HOOK) -> list:
-    """Ask the hub's hook what it makes of the exact commands ship would run.
-
-    The point is NOT to gate on the answer — `check_rule` already did that. It is to compare our
-    copy of the rule against its one owner, cheaply and without touching anything: no network, no
-    writes, repeatable. A disagreement here means one of the two moved, and it shows up before a
-    release rather than during one.
-
-    Returns `(command, verdict, reason)` per command. A missing hook yields "не перевірено" and
-    that is what gets printed — an unavailable check is never a passed one.
-    """
-    results = []
-    for command in commands:
-        if not hook.is_file():
-            results.append((command, "не перевірено", f"хука нема: {hook}"))
-            continue
-        payload = json.dumps({"tool_name": "Bash", "cwd": str(root),
-                              "tool_input": {"command": command}})
-        done = subprocess.run([sys.executable, str(hook)], input=payload,
-                              capture_output=True, text=True,
-                              env={**os.environ, "HUB_ROLE": "tcc"})
-        if done.returncode == 0:
-            results.append((command, "ДОЗВОЛЕНО", ""))
-        else:
-            why = (done.stdout or done.stderr or "").strip().replace("\n", " ")
-            results.append((command, "ВІДМОВА", why[:200]))
-    return results
 
 
 # ---------------------------------------------------------------- the writing half
@@ -315,43 +255,49 @@ def method_sha(root: Path) -> str:
     return install_report.skill_sha()
 
 
-def ship(root: Path, release: bool, test_command=None, hook: Path = HOOK,
+def ship(root: Path, release: bool, test_command=None,
+         channel: Callable[[Path], tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print) -> Plan:
     """The whole thing. Reads and decides first; writes only when `release` is true."""
     plan = Plan(root=root)
 
-    check_clean_tree(root)
-    check_branch_synced(root)
-    check_follow_tags(root)
-
-    newest = newest_tag(root)
-    if newest is None:
-        raise Stop(f"no `{TAG_GLOB}` tag on the remote to count from — the first release is not "
-                   "ship's to invent")
-    plan.newest = newest
-    plan.tag = next_patch(newest)
-    plan.version = plan.tag.lstrip("v")
-    check_rule(plan.tag, newest)
+    tag, checks = channel(root)
+    say("  channel preflight — hub/scripts/release-preflight.py:")
+    for check in checks:
+        # The carrier's own verdicts and sentences, not a translation of them: rewording somebody
+        # else's refusal is how the wording drifts from what they actually said.
+        say(f"    {check.verdict:<12} {check.name:<34} {check.line}")
+    refused = [check for check in checks if check.gates]
+    if refused:
+        raise Stop(f"the channel preflight refuses this release — {len(refused)} of "
+                   f"{len(checks)}:\n"
+                   + "\n".join(f"    {check.name}: {check.line}" for check in refused))
+    if not tag:
+        # Belt: the carrier returns no tag only alongside a refusal, and ship invents no number.
+        raise Stop("the channel preflight worked out no tag and refused nothing — ask it "
+                   "directly before shipping")
+    plan.tag = tag
+    plan.version = tag.lstrip("v")
 
     changelog = check_changelog(root, plan.tag)
 
     plan.method_sha = read_method_sha(root)
     check_paired_method(changelog, plan.method_sha)
 
+    # The three lines that will actually run. The carrier builds the SAME three to put in front
+    # of the hook, from its own literal — so an edit here that is not made there would leave the
+    # oracle vouching for lines nobody runs. Pinned on this side by
+    # `test_ship_never_pushes_in_BULK_and_never_releases`; the other side is the hub's.
     plan.commands = [
         f"git tag {plan.tag}",
         "git push origin main",
         f"git push origin {plan.tag}",
     ]
 
-    say(f"  newest on remote : {newest}")
     say(f"  next patch       : {plan.tag}")
     say(f"  method           : {plan.method_sha[:12] or '(unknown)'}")
-    say("  hook says:")
-    for command, verdict, why in oracle(root, plan.commands, hook):
-        say(f"    {command:<28} {verdict} {why}")
 
     if not release:
         say("\n  DRY RUN — nothing was written. Real run: make ship REAL=1")
@@ -396,6 +342,10 @@ def main(argv=None) -> int:
     try:
         ship(root, release=args.release)
     except Stop as stop:
+        # Flushed first, or the refusal overtakes the lines it refers to: `say` goes to stdout,
+        # which is block-buffered the moment this is piped anywhere, and stderr is not. Seen on
+        # the first live run of this file (the carrier's own `main` carries the same line).
+        sys.stdout.flush()
         print(f"\n  STOP: {stop}", file=sys.stderr)
         return 1
     return 0

@@ -304,11 +304,19 @@ make ship REAL=1   # the real thing: bump, test, commit, tag, push
 The dry run is the default because the last step publishes a tag, and a published tag cannot be
 moved or deleted afterwards by anyone.
 
-Before it writes anything, `make ship` requires a clean tree level with `origin/main`,
-`push.followTags` off, a CHANGELOG entry that already names the version being cut, and a
-`Paired with method` line on that entry matching the method this build actually reads. Then it
-bumps the version, runs the whole suite, and commits — so the tree that was tested is the tree
-that gets tagged. A failing suite rolls the bump back and leaves no commit and no tag.
+Before it writes anything, `make ship` checks two halves. The **channel** half — a clean tree
+level with `origin/main`, `push.followTags` off, the next tag still free on the remote, and the
+tag rule itself — belongs to the hub and is asked of it: `hub/scripts/release-preflight.py`,
+shared with the method's repository, which calls the release hook's own rule rather than keeping
+a second copy of it. One run names everything that is not ready, not just the first thing. Without
+the hub on the machine ship refuses outright: the hook cannot see a git command run from inside a
+make recipe, so a missing carrier means nothing at all is checking the release.
+
+The **inventory** half is TCC's own and stays here: a CHANGELOG entry that already names the
+version being cut, and a `Paired with method` line on that entry matching the method this build
+actually reads. Then it bumps the version, runs the whole suite, and commits — so the tree that
+was tested is the tree that gets tagged. A failing suite rolls the bump back and leaves no commit
+and no tag.
 
 It cuts nothing but the next patch in TCC's own line. Minor, major, a jump, a pre-release, a moved
 tag, a GitHub release: none of those are a make target's to make.

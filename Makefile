@@ -27,8 +27,10 @@ test:
 # inside a make recipe — it parses the command line, and `make ship` has no git verb in it. That
 # is settled and deliberate on the hub's side, written down as a boundary rather than a defect
 # (`governance/RELEASE-CHANNEL.md` §8.10): an opaque launch is not catchable, so the hub does not
-# claim to catch it. There is no safety net under this target. `scripts/ship.py` carries the rule
-# itself and compares it against the hook rather than remembering it.
+# claim to catch it. There is no safety net under this target: what checks a release is
+# `scripts/ship.py`, and the channel half of what it checks is the hub's own
+# `scripts/release-preflight.py` — called, not copied here (HUB-003). No hub on the machine means
+# nothing is checking, so ship refuses rather than carrying on.
 ship:
 ifeq ($(REAL),1)
 	$(PY) scripts/ship.py --release
