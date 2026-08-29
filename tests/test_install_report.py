@@ -102,7 +102,10 @@ def test_the_report_carries_the_commit_the_method_is_at(tmp_path, monkeypatch):
     """HUB-001. The version in `plugin.json` is a signature kept by hand — in the method's own
     repository it has been seen to disagree with the tag — so it cannot identify what the app was
     running. Without the commit, no screenshot, bug report or diagnostic dump carried an
-    identifier for the method at all. Whole, not shortened: this is the pasteable artifact."""
+    identifier for the method at all. Whole, not shortened: this is the pasteable artifact.
+
+    Since F-036 it is also the ONLY place the app shows the commit — the title bar and the update
+    row keep the version alone, and this report is what somebody pastes into a chat."""
     from autosound_tcc.core import vendor_loader
 
     real = _fake_clone(tmp_path / "clone")
@@ -110,7 +113,6 @@ def test_the_report_carries_the_commit_the_method_is_at(tmp_path, monkeypatch):
     monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(real))
 
     assert install_report.skill_sha() == sha
-    assert install_report.skill_sha_short() == sha[:install_report.SHA_SHORT]
 
     text = install_report.as_text()
     assert sha in text, "the whole sha, so it can be handed back to git"

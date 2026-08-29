@@ -42,12 +42,6 @@ from autosound_tcc.core import child
 #: string; three seconds is already generous, and a hung one must not hang the panel.
 _PROBE_TIMEOUT = 3.0
 
-#: How much of a sha is shown where the whole thing will not fit — the title bar, the update row.
-#: Git's own abbreviation length: unambiguous in a repository this size, short enough to leave the
-#: project path readable. Everything that shortens uses THIS, so the short form is one prefix and
-#: not several (`skill_sha_short`).
-SHA_SHORT = 12
-
 #: What a commit looks like, so that a git error message cannot be mistaken for one.
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -174,8 +168,9 @@ def skill_sha() -> str:
     (see `skill_version`) — a version string is maintained by hand and a sha is not.
 
     Read here and ONLY here. `core/self_check.py` and `core/updates.py` both call this instead of
-    asking git themselves, so the number in the title bar, the number in this report and the
-    number an update is decided by cannot come apart (autosound-hub HUB-001).
+    asking git themselves, so the number this report prints and the number an update is decided by
+    cannot come apart (autosound-hub HUB-001). The title bar and the update row used to be on that
+    list; since F-036 they show the version alone and ask nothing of this.
 
     "" for a skill folder that is in no repository at all — a real answer, and the same one
     `skill_version()` gives for a checkout with no manifest.
@@ -193,15 +188,6 @@ def skill_sha() -> str:
         return ""
 
 
-def skill_sha_short() -> str:
-    """`skill_sha()` cut to `SHA_SHORT`, for the two places the whole thing will not fit.
-
-    A PREFIX of the one number, never a second spelling of it: this report prints all forty
-    characters, and everything that shortens goes through here.
-    """
-    return skill_sha()[:SHA_SHORT]
-
-
 def _skill() -> Section:
     """Where the method is, which commit, which version, and whether TCC can actually read it."""
     items: list[Item] = []
@@ -212,9 +198,10 @@ def _skill() -> Section:
         # `plugin.json` sits at the REPOSITORY root — reached by following the installer's link,
         # never by counting levels up from the link itself (see vendor_loader.skill_repo_root).
         manifest = _manifest()
-        # The commit ABOVE the version, and whole. This is the line that says which method a
-        # screenshot was taken against, and it is the only one of the two a person can hand back
-        # to git. Half a sha would not be pasteable; the version below is what they read (HUB-001).
+        # The commit ABOVE the version, and whole. Since F-036 this is the ONLY place the app
+        # shows it — the title bar and the update row carry the version alone — and it is the one
+        # of the two a person can hand back to git. This report is pasted into a chat, which is
+        # where provenance is asked for; half a sha would not be pasteable (HUB-001, narrowed).
         sha = skill_sha()
         items.append(Item("commit", sha or "unknown",
                           str(vendor_loader.skill_repo_root() or "") if sha

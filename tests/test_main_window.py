@@ -2571,11 +2571,12 @@ def test_the_title_bar_carries_both_versions():
         assert f"TCC {install_report.app_version()}" in title
     if install_report.skill_version():
         assert f"skill {install_report.skill_version()}" in title
-    # And the method's COMMIT, since HUB-001: a version string is kept by hand and cannot say
-    # which method the screenshot was taken against. Twelve characters, the same prefix the
-    # update row uses; the whole sha is in the installation report.
+    # And NOT the method's commit. It was here from HUB-001, on the argument that the title is on
+    # every screenshot; live on Windows the brackets read as noise in the one line a person reads
+    # without being asked, and F-036 narrowed the identifier to the installation report, which is
+    # the artefact that gets pasted into a chat. Held here so it cannot drift back in unnoticed.
     if install_report.skill_sha():
-        assert f"({install_report.skill_sha_short()})" in title
+        assert install_report.skill_sha()[:12] not in title
 
 
 def test_the_title_says_when_something_newer_exists(monkeypatch):

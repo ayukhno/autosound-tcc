@@ -137,8 +137,9 @@ class Status:
     #: False when this installation is not ours to touch (a checkout, a hand-made symlink).
     updatable: bool = True
     #: The commit that is here, and the commit the newest tag names — "" when either cannot be
-    #: read. For the method these are what `newer` is DECIDED by; `installed` and `latest` above
-    #: are the version strings shown beside them, because that is what a person quotes (HUB-001).
+    #: read. For the method these are what `newer` is DECIDED by, and since F-036 they are not
+    #: printed on the row at all: `installed` and `latest` above are what a person reads and
+    #: quotes, and the whole commit is in the installation report (HUB-001, narrowed).
     installed_sha: str = ""
     latest_sha: str = ""
 

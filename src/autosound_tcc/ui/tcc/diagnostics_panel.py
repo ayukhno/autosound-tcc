@@ -148,22 +148,6 @@ def _reason(key: str, detail: str = "") -> str:
     return f"{text}: {detail}" if detail else text
 
 
-def _with_sha(version: str, sha: str) -> str:
-    """`3.0.36 (70a4fa704b79)` — the number a person quotes, and the commit it actually is.
-
-    Appended rather than substituted: the version is what somebody says out loud, the sha is what
-    a bug report can be reproduced from, and a row carrying only one of them loses the other from
-    every screenshot (HUB-001). The same prefix length as the title bar, from the one constant
-    that shortens; the whole sha is in the report below.
-
-    Nothing added when the sha could not be read — a row that says `(unknown)` is noise.
-    """
-    if not sha:
-        return version
-    short = sha[:install_report.SHA_SHORT]
-    return f"{version} ({short})" if version else f"({short})"
-
-
 def _note(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("class", "phead-sub")
@@ -470,38 +454,37 @@ class DiagnosticsDialog(QDialog):
         label, button = self._update_rows[status.name]
         title = i18n.t("updTccName") if status.name == "tcc" else i18n.t("updSkillName")
         here = status.installed or "?"
-        # Two variables on purpose. `here` and `status.latest` are the bare version strings and
-        # they stay that way, because the BRANCHING below asks whether the two numbers differ —
-        # a different question from what gets printed. `shown_*` is what gets printed, with the
-        # commit beside the number wherever one is known (HUB-001).
-        shown_here = _with_sha(here, status.installed_sha)
-        shown_there = _with_sha(status.latest, status.latest_sha)
+        # Version numbers only, since F-036: the commit used to be appended to both of these, and
+        # the brackets read as noise on the row the same way they did in the title bar. The sha is
+        # still what the COMPARISON is made on (`updates.py`), and it is still printed whole in the
+        # report below — it stopped being repeated in the line that only announces the number.
         # Assigned every time, not only switched on: this row is re-rendered after an update and
         # on every re-check, and a button still live over "up to date" is an offer to do nothing.
         button.setEnabled(status.newer and status.updatable)
         if status.newer and status.latest and status.latest != here:
             label.setText(i18n.t("updAvailable").format(
-                what=title, here=shown_here, there=shown_there))
+                what=title, here=here, there=status.latest))
         elif status.newer:
             # Same version number, different build. Normal for TCC, because it installs from a
             # branch and the number only moves when a release is cut — and, since HUB-001, a real
             # case for the method too: a release the manifest was not bumped on lands here rather
-            # than reading as up to date. The date says how far behind for TCC; for the method the
-            # sha in `shown_here` is what makes the sentence checkable.
+            # than reading as up to date. This row is the thinnest one on the panel since F-036:
+            # both numbers are equal and the commits that differ are no longer printed, so it says
+            # THAT there is a newer build and not which. The report below still names both.
             key = "updNewerBuildOn" if status.detail else "updNewerBuild"
-            label.setText(i18n.t(key).format(what=title, here=shown_here, date=status.detail))
+            label.setText(i18n.t(key).format(what=title, here=here, date=status.detail))
         elif status.latest and status.latest == here:
             # Up to date FIRST, whatever else is true of this installation. A caveat about why the
             # button cannot act — a submodule, a working tree — is an answer to "why can I not
             # update", and that is not the question when there is nothing to update (spotted by
             # reading the row after a submodule bump, 2026-08-19).
-            label.setText(i18n.t("updCurrent").format(what=title, here=shown_here))
+            label.setText(i18n.t("updCurrent").format(what=title, here=here))
         elif status.reason:
-            label.setText(f"{title} {shown_here} — {_reason(status.reason, status.detail)}")
+            label.setText(f"{title} {here} — {_reason(status.reason, status.detail)}")
         elif not status.latest:
             label.setText(i18n.t("updUnknown"))
         else:
-            label.setText(i18n.t("updCurrent").format(what=title, here=shown_here))
+            label.setText(i18n.t("updCurrent").format(what=title, here=here))
 
     def _update_skill(self) -> None:
         """Done here, in the app: it is another folder's git checkout and takes about a second."""

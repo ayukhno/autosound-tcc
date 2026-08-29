@@ -517,10 +517,13 @@ def test_a_report_from_a_tab_that_was_never_opened_still_carries_the_versions(mo
     assert "Autosound+TCC" in opened[0] or "Autosound%20TCC" in opened[0]
 
 
-def test_the_update_row_carries_the_commit_beside_the_version():
-    """HUB-001. The version is what somebody says out loud; the commit is what the row can be
-    reproduced from. Both, or the screenshot loses one of them."""
-    from autosound_tcc.core import install_report, updates
+def test_the_update_row_carries_the_version_and_not_the_commit():
+    """F-036, narrowing HUB-001. The commit was appended to both numbers here; the brackets read
+    as noise on the row exactly as they did in the title bar, and the identifier now lives in the
+    installation report — whole, and in the artefact people paste into a chat.
+
+    The sha is still what `updates.py` COMPARES on. What changed is only what is printed."""
+    from autosound_tcc.core import updates
 
     _app()
     dialog = DiagnosticsDialog()
@@ -530,14 +533,19 @@ def test_the_update_row_carries_the_commit_beside_the_version():
                                        installed_sha=here, latest_sha=there))
 
     text = dialog._update_rows["skill"][0].text()
-    assert f"3.0.6 ({here[:install_report.SHA_SHORT]})" in text
-    assert f"3.0.7 ({there[:install_report.SHA_SHORT]})" in text
+    assert "3.0.6" in text and "3.0.7" in text
+    assert here[:12] not in text and there[:12] not in text, "the commit does not drift back in"
 
 
 def test_a_release_the_manifest_was_not_bumped_on_reads_as_a_newer_build():
     """The case HUB-001 is about, on screen: the two version strings are equal and the commits are
-    not. It used to render as "up to date"; now it lands in the newer-build sentence, and the sha
-    is what makes that sentence checkable."""
+    not. It used to render as "up to date"; it lands in the newer-build sentence instead.
+
+    This is the row F-036 costs something on, and the cost is named rather than discovered: with
+    the sha gone the sentence says THAT there is a newer build and not which one. The button still
+    offers the update, and the report still names both commits — the row stopped being the place
+    that answers "which build", which it only ever answered in twelve characters anyway.
+    """
     from autosound_tcc.core import updates
 
     _app()
@@ -548,7 +556,7 @@ def test_a_release_the_manifest_was_not_bumped_on_reads_as_a_newer_build():
 
     label, button = dialog._update_rows["skill"]
     assert label.text() == i18n.t("updNewerBuild").format(
-        what=i18n.t("updSkillName"), here="3.0.36 (aaaaaaaaaaaa)")
+        what=i18n.t("updSkillName"), here="3.0.36")
     assert button.isEnabled()
 
 
