@@ -26,14 +26,22 @@ the checks it returns are stand-ins, and `test_the_stand_in_has_the_carriers_sha
 against the real module when the hub is on this machine: the same attributes, the same verdict
 strings, the same thing gating. A stand-in nobody compares is how a green suite starts lying.
 
+**The path to the carrier is held here too, since HUB-005 (autosound-hub#12).** Ship asking the
+carrier proves nothing if ship cannot find it: an absolute path built from `$HOME` pointed at a
+folder that had been renamed, and ship fell before its first check. Everything above stayed green
+through it — a seam is only tested from the side that is wired up.
+
 **What none of it proves** is the first real run: GitHub's own reaction to the pushes. That is
 somebody else's system and it is not destructive — a rejected push publishes nothing.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
+import itertools
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -257,12 +265,29 @@ def test_unchecked_is_printed_and_does_not_stop_the_release(repo):
 
 def test_a_missing_hub_is_a_refusal_not_a_shrug(tmp_path):
     """The decision HUB-003 left to this role. The hook is invisible to `make ship`, so a carrier
-    that is not there means nothing at all is checking the release."""
-    with pytest.raises(ship_mod.Stop) as stop:
-        ship_mod.load_carrier(tmp_path / "not-here.py")
+    that is not there means nothing at all is checking the release.
 
-    assert "not on this machine" in str(stop.value)
-    assert str(tmp_path / "not-here.py") in str(stop.value), "it must name the path it looked at"
+    The hint in that refusal is checked too (HUB-005): it used to be a hand-typed
+    `~/dev/autosound-hub/hub`, and after the rename it sent the reader off to clone the hub into a
+    folder where the hub already sat under a different name. A hint that leads somewhere dead
+    costs more than no hint, because the reader goes and works.
+    """
+    missing = tmp_path / "nothing-here" / "hub" / "scripts" / "release-preflight.py"
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.load_carrier(missing)
+
+    said = str(stop.value)
+    assert "not on this machine" in said
+    assert str(missing) in said, "it must name the path it looked at"
+
+    # Picked out on its own. Asking merely whether the folder appears in the sentence proves
+    # nothing — it is a PREFIX of the full path named a clause earlier, so the check passes while
+    # the hint is still a constant. Caught by mutation: the first version of this assertion was
+    # green with `~/dev/autosound/hub` typed back in.
+    hint = re.search(r"Clone the hub to (\S+) and run ship again", said)
+    assert hint, f"the refusal must keep its `Clone the hub to ...` hint; got: {said}"
+    assert hint.group(1) == str(missing.parents[1]), "the hint is computed from the path, not typed"
 
 
 def test_ship_defaults_to_the_real_carrier():
@@ -318,6 +343,67 @@ def test_the_stand_in_has_the_carriers_shape():
     assert real.gates is stand_in.gates is True, "a refusal must gate in both"
     assert carrier.Check("n", UNKNOWN, "l").gates is checks(("n", UNKNOWN))[0].gates is False, (
         "`не перевірено` must gate in neither — it is not a refusal")
+
+
+#: A fresh module name per load: `CARRIER` is computed at import, so a cached module would answer
+#: for the tree it was first loaded from and every case after the first would prove nothing.
+_LOADS = itertools.count()
+
+
+def load_ship_from(path: Path):
+    """Import a COPY of `ship.py` living somewhere else. Importing it runs nothing."""
+    spec = importlib.util.spec_from_file_location(f"ship_under_test_{next(_LOADS)}", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # `dataclasses` looks the module up by name to build `Plan`
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        del sys.modules[spec.name]
+    return module
+
+
+def two_trees(base: Path, parent_name: str) -> tuple[Path, Path]:
+    """`<parent_name>/{tcc,hub}` — the two sibling trees, as the machine really carries them.
+
+    The carrier is a stand-in: this is about FINDING it, and `load_carrier` asks only whether the
+    path is a file before it reads it.
+    """
+    tcc = base / parent_name / "tcc"
+    (tcc / "scripts").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "ship.py", tcc / "scripts" / "ship.py")
+    carrier = base / parent_name / "hub" / "scripts" / "release-preflight.py"
+    carrier.parent.mkdir(parents=True)
+    carrier.write_text("# stand-in for the hub's release-preflight.py\n", encoding="utf-8")
+    return tcc, carrier
+
+
+#: Yesterday's name, today's name, and one nobody has used: none of them is written down in ship,
+#: and the folder above the trees may be called anything at all.
+PARENT_NAMES = ("autosound", "autosound-hub", "some-other-name")
+
+#: Where ship is started from in practice: `make` stands in the root, a person stands in
+#: `scripts/`, and `make -C` (or an absolute path) starts it from a folder unrelated to both.
+LAUNCH_POINTS = ("root", "scripts", "elsewhere")
+
+
+@pytest.mark.parametrize("parent_name", PARENT_NAMES)
+@pytest.mark.parametrize("launched_from", LAUNCH_POINTS)
+def test_the_carrier_is_found_from_the_file_not_from_cwd(tmp_path, monkeypatch, parent_name,
+                                                         launched_from):
+    """Same answer from every launch point, under any name of the folder above (HUB-005).
+
+    The two forms this replaces both fail here. An absolute `$HOME` path points outside these
+    trees entirely. A `cwd`-relative `../hub/...` fails two launch points of three — and passes
+    the one from the repository root, which is exactly where a hand check would stand.
+    """
+    tcc, carrier = two_trees(tmp_path, parent_name)
+    here = {"root": tcc, "scripts": tcc / "scripts", "elsewhere": tmp_path}[launched_from]
+    monkeypatch.chdir(here)
+
+    ship_elsewhere = load_ship_from(tcc / "scripts" / "ship.py")
+
+    assert ship_elsewhere.CARRIER == carrier.resolve()
+    assert ship_elsewhere.CARRIER.is_file()
 
 
 # ---------------------------------------------------------------- what ship still owns
