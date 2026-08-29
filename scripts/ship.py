@@ -89,7 +89,14 @@ from typing import Callable
 #: The hub's carrier of the channel preflight. Ship does NOT work without it — see the module
 #: docstring. The version pattern and the release glob went with it: they were copies of the
 #: hook's, and the carrier reads the hook's own (`guard-release.VERSION_RE`, `RELEASE_GLOB`).
-CARRIER = Path.home() / "dev" / "autosound-hub" / "hub" / "scripts" / "release-preflight.py"
+#:
+#: Anchored to THIS FILE, not to `$HOME` and not to `cwd`: the hub is the tree beside ours, so the
+#: only thing between them is the folder above, and a path written from here survives that folder
+#: being renamed. It did not survive it as an absolute path — `autosound-hub` → `autosound` on
+#: 2026-08-29 pointed ship at nothing and it fell before the first check (HUB-005,
+#: autosound-hub#12). `cwd` is no better an anchor: ship runs from the repo root under `make`, from
+#: `scripts/` by hand, and from anywhere at all under `make -C`.
+CARRIER = Path(__file__).resolve().parents[2] / "hub" / "scripts" / "release-preflight.py"
 
 #: The suite, whole. `docs/TESTING.md`: run everything, every time — there is deliberately no
 #: fast subset, and a release is the last place to invent one.
@@ -132,7 +139,7 @@ def load_carrier(path: Path = CARRIER):
         raise Stop(
             f"the hub's channel preflight is not on this machine ({path}), and it is the only "
             "thing between `make ship` and a published tag — the hook cannot see git run from "
-            "inside a make recipe. Clone the hub to ~/dev/autosound-hub/hub and run ship again.")
+            f"inside a make recipe. Clone the hub to {path.parents[1]} and run ship again.")
     spec = importlib.util.spec_from_file_location("release_preflight", path)
     module = importlib.util.module_from_spec(spec)
     try:

@@ -495,7 +495,7 @@ the wheel… TCC LOOKS for the installed skill instead of carrying one.» У в�
 **Звірити при вживанні:**
 
 ```bash
-git -C ~/dev/autosound-hub/tcc rev-parse --short HEAD
+git -C ~/dev/autosound/tcc rev-parse --short HEAD
 uv build --wheel --out-dir /tmp/whl && unzip -l /tmp/whl/*.whl | grep -ci "autosound.tuning\|rew_tool"
 ```
 

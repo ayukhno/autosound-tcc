@@ -1089,7 +1089,7 @@ if not self.can_use_tool:
 
 Ми `cwd` не задаємо, тож `claude` стартує там, звідки запущено **TCC**. Отже «проєктний»
 `.claude/settings.json` — непередбачуваний: запуск TCC із теки, що має свої хуки, підтягне їх
-**в інтервʼю про DSP**. Наприклад, TCC, запущений із `autosound-hub/hub`, візьме хаб-хуки.
+**в інтервʼю про DSP**. Наприклад, TCC, запущений із `autosound/hub`, візьме хаб-хуки.
 
 **Що зробити**: `cwd=project_dir`. Тека проєкту вже є в `OnboardingSession.__init__` і вже є
 єдиною теку, до якої дотягуються наші пʼять інструментів — нехай і сесія стоїть там же.
@@ -1138,7 +1138,7 @@ if not self.can_use_tool:
 **Звірити при вживанні:**
 
 ```bash
-git -C ~/dev/autosound-hub/tcc rev-parse --short HEAD
+git -C ~/dev/autosound/tcc rev-parse --short HEAD
 uv run --extra dev --python 3.12 python -c "import importlib.metadata as m; print(m.version('claude-agent-sdk'))"
 ```
 
