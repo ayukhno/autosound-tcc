@@ -198,9 +198,10 @@ def _pin_check() -> Check:
     if not (inside and parent):
         # Not our submodule: an installed skill, or somebody's own checkout. Not this row's job.
         return Check("pin", OK, _t("selfPinOkTitle"))
-    # Through `install_report`, not a `rev-parse` of our own: this row, the title bar and the
-    # update check must all be talking about the same commit, and three callers asking git
-    # separately is three chances to disagree (autosound-hub HUB-001).
+    # Through `install_report`, not a `rev-parse` of our own: this row, the installation report
+    # and the update check must all be talking about the same commit, and three callers asking git
+    # separately is three chances to disagree (autosound-hub HUB-001; the title bar was on this
+    # list until F-036 took the sha out of it).
     head = install_report.skill_sha()
     if not head:
         return Check("pin", OK, _t("selfPinOkTitle"))

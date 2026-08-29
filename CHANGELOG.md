@@ -6,6 +6,61 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.26] — 2026-08-29 · the method's commit moves to where it is evidence, and two Windows faults are named
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The method has not moved since v0.1.25; everything below is TCC's own.
+
+### Changed
+
+- **The method's commit is shown in one place now — the installation report — and that is a
+  narrowing, not a reversal.** v0.1.25 put it in three: the title bar, the update row, and the
+  report. Two of the three turned out to be uncomfortable to read. In the window title it looked
+  like `TCC 0.1.25 · skill 3.0.37 (757e2a344385)`, and that title is the one line a person reads
+  without being asked to; the same brackets rode along on the update row. The identifier is not
+  being taken away, it is being kept where it does its work: the report is what somebody pastes
+  into a chat when the question is "which method was that", and it carries the whole forty
+  characters, above the version. What an update is decided by has not changed either — the
+  comparison behind the button still runs on the commit, never on the version string, which is
+  what v0.1.25 was really about.
+
+  The cost, said here rather than found later: when a release is cut without the method's manifest
+  being bumped, the update row now says a newer build exists without saying which one. The button
+  still offers it, and the report still names both commits.
+
+### Known
+
+Both are on Windows, both are found and written down, neither is fixed in this release.
+
+- **"Pin to taskbar" on a running window makes a shortcut named Python that silently does nothing
+  when clicked.** Windows builds the pin from the running window's own relaunch properties, and
+  those are not set, so it falls back to the process image — `pythonw.exe`. The desktop shortcut
+  the installer writes is stamped correctly and works; it is pinning the LIVE window that produces
+  the dead one. Until it is fixed, pin the installed shortcut rather than the open window.
+
+- **A console window blinks once at startup.** It is not one of the two consoles the app opens on
+  purpose (the update window and the terminal launcher). The leading suspect is the startup update
+  check: it runs `git ls-remote`, and the `git-remote-https` that git spawns in turn is not
+  covered by the flag that hides the child. Nothing is wrong with the app when it appears, and
+  nothing is lost by ignoring it.
+
+### Also
+
+Release machinery, none of it visible in the app. `make ship` no longer keeps its own copy of the
+hub's tag rule: the channel checks — clean tree, published HEAD, the tag free on the remote, and
+the rule itself — are asked of `hub/scripts/release-preflight.py`, so one copy of that rule now
+serves both this repository and the method's. The path to that carrier is anchored to ship's own
+file rather than to a home directory, after a folder rename above the trees pointed it at nothing
+and ship fell before its first check; nine cases hold the shape it has to keep. `uv.lock` travels
+with the version bump instead of being left a release behind. And the measurement behind
+`docs/ARCHITECTURE-NOTES.md` §8 moved out of a scratch directory into `spike/`, so the numbers
+that section states can be reproduced by whoever doubts them.
+
+### Upgrading
+
+Nothing to do, and nothing to expect: the app itself is unchanged apart from the two lines above.
+The method's pin does not move — still `v3.0.36`, the same commit as v0.1.25 and v0.1.24.
+
 ## [v0.1.25] — 2026-08-27 · the app says which method it was running, and the interview stops seeing your machine
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
