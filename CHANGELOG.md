@@ -6,6 +6,51 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.27] — 2026-09-01 · the taskbar pin is given something to relaunch
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The method has not moved since v0.1.25; everything below is TCC's own.
+
+### Fixed
+
+- **Pinning the running window should now make a pin that is ours and that starts the app.**
+  v0.1.26 listed this as a known fault: `Pin to taskbar` on the live window produced a shortcut
+  called `Python` which, once the app was closed, did nothing at all when clicked — silently. The
+  cause was never the icon. Windows builds a pin of a live window from that window's own relaunch
+  properties, and finding none it falls back to the process image, `pythonw.exe`; the pin was
+  starting a bare interpreter with no script, and the interpreter was exiting immediately, which
+  is what "nothing happens" looked like from outside. The window now carries the three properties
+  that answer the question Windows is actually asking — which command to relaunch, which name to
+  show, which icon to draw.
+
+  It also no longer rides on the shortcut stamping having worked. That step is allowed to fail
+  quietly: the PowerShell it needs has every right not to compile on a given machine, and when it
+  did fail the install still looked complete while the pin stayed Python's.
+
+  **Not confirmed on Windows yet, and that is said here rather than left to be discovered.** The
+  machine this was written on cannot execute the path at all. The code is written against the
+  documented API contract, and the half that can be checked anywhere — the property identifiers
+  and the exact strings that go into them — is under test on every platform. The first real
+  measurement is the next Windows session. If the pin still says `Python` after this release, then
+  this did not fix it, and that is worth saying rather than working around.
+
+### Known
+
+- **A console window still blinks once at startup.** Unchanged from v0.1.26 and not fixed here.
+  The leading suspect is the startup update check: it runs `git ls-remote`, and the
+  `git-remote-https` that git spawns in turn is not covered by the flag that hides the child.
+  Nothing is wrong with the app when it appears, and nothing is lost by ignoring it.
+
+- **Pinning from the DESKTOP SHORTCUT is a different route, and it has never been measured.**
+  Named because the fix above is about the other one. Windows reads different properties for the
+  two, so one of them working says nothing about the other.
+
+### Also
+
+Nothing in the app. Every check that needs a Windows machine is now one list meant to be executed
+in one sitting (`docs/TODO.md`, "Windows-сеанс") instead of lines scattered across three trees.
+The sitting is somebody's afternoon, and asking for it three times is three chances to get none.
+
 ## [v0.1.26] — 2026-08-29 · the method's commit moves to where it is evidence, and two Windows faults are named
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
