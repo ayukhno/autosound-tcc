@@ -182,6 +182,14 @@ def main() -> int:
     if not ensure_project_chosen(force=args.choose_project):
         return 0
     window = MainWindow()
+    # AFTER the window exists, and a different question from `claim()` above. That one told
+    # Windows which application this PROCESS is; this tells it what to put in a pin of this
+    # WINDOW, and Windows asks the two in different places -- which is why claiming the id
+    # was not enough and F-037 came back on the pin. `winId()` forces the native handle the
+    # property store hangs off; a widget that has never been shown does not have one yet.
+    # Guarded here rather than only inside, so no other platform grows a new call at startup.
+    if os.name == "nt":
+        windows_identity.stamp_window(int(window.winId()))
     window.show()
     code = app.exec()
     # Qt ends HERE rather than in whatever is left of the interpreter. Returning straight out of
