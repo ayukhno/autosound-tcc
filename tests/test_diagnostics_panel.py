@@ -7,6 +7,7 @@ is checked out (`test_contract_check.py` covers the real checker).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -641,3 +642,18 @@ def test_the_rew_line_reads_the_v3017_shape(monkeypatch):
     shown = _rew_line(dups)
     assert shown.startswith("REW: DUPLICATE TITLES"), shown
     assert "w-L_02 ×2" in shown
+
+
+def test_the_screenshot_is_named_where_the_person_still_has_it():
+    """SKL-010: the button opens a browser form, and dragging an image into that form works — so
+    the app already puts the reporter where an attachment is possible. Nothing said so, in the
+    window or in the form, and four reports arrived without the picture that WAS the report."""
+    _app()
+    dialog = DiagnosticsDialog()
+
+    assert i18n.t("diagReportShot") in _texts(dialog), "beside the button that opens the form"
+
+    template = (Path(__file__).resolve().parents[1]
+                / ".github" / "ISSUE_TEMPLATE" / "beta-report.yml").read_text()
+    assert "id: screenshot" in template, "and the form has a box to drop it into"
+    assert "autosound-tuning-skill" in template, "and says which reports do not belong here"

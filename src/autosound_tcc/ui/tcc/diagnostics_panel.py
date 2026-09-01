@@ -344,6 +344,14 @@ class DiagnosticsDialog(QDialog):
         self._report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._report_btn.clicked.connect(self._open_issue)
         buttons.addWidget(self._report_btn)
+        # For a bug in a WINDOW the screenshot is the evidence, and the button opens the one place
+        # it can be attached — a browser form, where dragging an image in works. Nothing said so:
+        # not here, not in the form (SKL-010, after four reports arrived with the picture missing
+        # and the reporter blocked on `gh issue create` having no attachment flag). This is the
+        # last moment the person still has the picture in front of them.
+        self._report_hint = QLabel(i18n.t("diagReportShot"))
+        self._report_hint.setProperty("class", "phead-sub")
+        buttons.addWidget(self._report_hint)
         buttons.addStretch(1)
         self._refresh_btn = QPushButton(i18n.t("diagRefresh"))
         self._refresh_btn.setProperty("class", "reason-btn")
@@ -739,6 +747,7 @@ class DiagnosticsDialog(QDialog):
             self._update_rows[name][1].setText(i18n.t(key))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._report_btn.setText(i18n.t("diagReport"))
+        self._report_hint.setText(i18n.t("diagReportShot"))
         self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
         self._render()
 
