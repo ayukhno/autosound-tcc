@@ -139,11 +139,19 @@ On Windows the same four are `-Terminal`, `-NoReviewer`, `-NoGitHub`, `-NoOmp`, 
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Terminal
 ```
 
-Prefer a double-click on Windows?
+Prefer a double-click on Windows? Either way gets you `install.cmd`, which runs the same installer
+and keeps the window open at the end so you can read what happened. `install.cmd -Terminal` and the
+other options work there too.
+
+**One file.** Open [install.cmd](https://github.com/ayukhno/autosound-tuning-skill/blob/main/install.cmd)
+and press **Download raw file** — the ⤓ button above the text. Use that button, not a plain link to
+the file: GitHub serves it as text, so the browser displays it and "Save as" offers to write a
+`.txt`. The saved `.cmd` fetches the rest from GitHub by itself.
+
+**Or the whole thing.**
 [Download the repository ZIP](https://github.com/ayukhno/autosound-tuning-skill/archive/refs/heads/main.zip),
 right-click it and choose *Extract All* (do not run the file from inside the ZIP), then double-click
-`install.cmd`. It runs the same installer and keeps the window open at the end so you can read
-what happened. `install.cmd -Terminal` and the other options work there too.
+`install.cmd` inside.
 </details>
 
 <details>
