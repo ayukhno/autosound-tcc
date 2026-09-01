@@ -3006,22 +3006,40 @@ def _stepper_width(box) -> int:
     ("_apf_f0", "20000.0 Hz"),
     ("_apf_q", "10.00"),
 ])
-def test_a_number_box_has_room_for_its_value_and_the_steppers_both(attribute, widest):
+def test_a_number_box_has_room_for_its_value_and_the_steppers_under_every_style(attribute, widest):
     """CAR-005, from a Windows run: the arrows were drawn ON the text. `0.000 ms` showed as
     `0.000`, `250.0 Hz` as `250.0 H`, `0.70` as `0.7` — and a Q of `0.7` is not the Q of `0.70`.
 
-    The widths were 96 / 104 / 72, measured on macOS with the steppers macOS draws; Windows draws
-    wider ones into the same box. So the assertion is not a pixel count either: whatever this
-    platform's style reserves for its arrows, the widest value the range can produce still has to
-    fit beside it.
+    The widths were 96 / 104 / 72, measured on macOS with the steppers macOS draws. **Run over
+    every style this Qt offers**, because the point of the fix is that the number is not a
+    constant somebody measured on their own machine: `QStyleFactory` gives `macOS`, `Windows` and
+    `Fusion` here, and the delay box under the `Windows` style is the ticket reproduced — that
+    style reserves more room for its arrows, and the old 96 px left 65 px for text that needs 69
+    (measured, 2026-09-01). It is not the native `windows11` style a real Windows machine uses,
+    which draws wider steppers still; it is the closest thing to a second platform that this one
+    can produce, and it fails the old constant exactly the way the report describes.
     """
+    from PySide6.QtWidgets import QStyleFactory
+
     view = _view()
     box = getattr(view, attribute)
+    styles = []
+    try:
+        for key in QStyleFactory.keys():
+            style = QStyleFactory.create(key)
+            styles.append(style)  # held: a style the widget is using must not be collected
+            for widget in (view._shift_box, view._apf_f0, view._apf_q):
+                widget.setStyle(style)
+            view._fit_number_boxes()
 
-    room = box.width() - _stepper_width(box)
-
-    assert room >= box.fontMetrics().horizontalAdvance(widest), (
-        f"{attribute}: {box.width()}px box, {_stepper_width(box)}px of steppers")
+            room = box.width() - _stepper_width(box)
+            assert room >= box.fontMetrics().horizontalAdvance(widest), (
+                f"{attribute} under {key}: {box.width()}px box, "
+                f"{_stepper_width(box)}px of steppers")
+    finally:
+        for widget in (view._shift_box, view._apf_f0, view._apf_q):
+            widget.setStyle(None)
+        view._fit_number_boxes()
 
 
 def test_the_boxes_follow_the_zoom_instead_of_clipping_at_it():
