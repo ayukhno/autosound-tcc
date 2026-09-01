@@ -27,6 +27,11 @@ Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on tha
   quietly: the PowerShell it needs has every right not to compile on a given machine, and when it
   did fail the install still looked complete while the pin stayed Python's.
 
+  **Confirmed on Windows on 2026-09-01, the day after release.** The pin made from the live window
+  starts the app and is labelled `Autosound TCC`. Pinning from the DESKTOP SHORTCUT, below, is a
+  different route and is still unmeasured. The paragraph that follows is how this shipped, and is
+  left standing rather than rewritten: it was true when the tag was cut.
+
   **Not confirmed on Windows yet, and that is said here rather than left to be discovered.** The
   machine this was written on cannot execute the path at all. The code is written against the
   documented API contract, and the half that can be checked anywhere — the property identifiers
