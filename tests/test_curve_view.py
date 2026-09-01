@@ -2990,6 +2990,77 @@ def test_pressing_a_marker_control_puts_the_guides_back():
     assert view.guides_hidden() is False
 
 
+def test_the_scale_up_the_y_axis_is_the_tuners_to_change():
+    """User, 2026-09-01: "треба щоб можна було змінювати масштаб по осі Y (вверх), по горізонталі
+    є — все ок". Auto-ranged y fits the loudest thing on screen, and against that a 1.5 dB dip is
+    a few pixels tall — which no amount of x zoom makes taller."""
+    view = _view()
+    view.focus_x(4.0, 5.0)
+    box = view._plot.getViewBox()
+    box.setYRange(-1.0, 1.0, padding=0)
+    x_before, (low, high) = box.viewRange()
+
+    view.zoom_y(1 / 1.6)
+    x_after, (tight_low, tight_high) = box.viewRange()
+    assert tight_high - tight_low == pytest.approx((high - low) / 1.6, rel=1e-6)
+    assert (tight_low + tight_high) / 2 == pytest.approx((low + high) / 2, abs=1e-9), \
+        "about the centre, so what was being looked at stays under the eye"
+    assert x_after == pytest.approx(x_before), "and the horizontal span, which was fine, is untouched"
+
+    view.zoom_y(1.6)
+    _x, back = box.viewRange()
+    assert back == pytest.approx([low, high]), "a press out and a press back land on the same view"
+
+
+def test_the_y_zoom_says_which_axis_it_moves_and_so_does_the_x_zoom():
+    """Two pairs of −/+ beside each other, both unlabelled, would be a guess. `A` and `D` move
+    both axes at once and keep their letters."""
+    view = _view()
+
+    assert [key for _b, key in view._zoom_buttons] == [
+        "curveZoomAll", "curveZoomDetail",
+        "curveZoomOut", "curveZoomIn", "curveZoomYOut", "curveZoomYIn",
+    ]
+    labels = {key: button.text() for button, key in view._zoom_buttons}
+    assert [labels[k] for k in ("curveZoomOut", "curveZoomIn")] == ["X−", "X+"]
+    assert [labels[k] for k in ("curveZoomYOut", "curveZoomYIn")] == ["Y−", "Y+"]
+
+    # And the buttons act: Y+ stretches the curves, i.e. it NARROWS the range on the scale.
+    box = view._plot.getViewBox()
+    box.setYRange(-1.0, 1.0, padding=0)
+    dict(zip([k for _b, k in view._zoom_buttons],
+             [b for b, _k in view._zoom_buttons]))["curveZoomYIn"].click()
+    _x, (low, high) = box.viewRange()
+    assert high - low < 2.0
+
+
+def test_the_way_back_from_a_hand_set_y_scale_is_the_D_button():
+    """`setYRange` takes the auto-range off, which is the point — the scale is the tuner's from
+    then on. A tuner who wants the curves fitted again presses the buttons that already mean that.
+
+    The flag is what is asserted for **D**, not the numbers: `enableAutoRange` marks the box and
+    pyqtgraph refits on the next paint, which offscreen never comes — so the range here is read
+    after asking for that pass by hand. **A** computes on the spot and needs no such help.
+    """
+    view = _view()
+    view.focus_x(4.0, 5.0)
+    box = view._plot.getViewBox()
+    fitted = box.viewRange()[1]
+    view.zoom_y(1 / 8.0)
+    _x, (low, high) = box.viewRange()
+    assert box.state["autoRange"][1] is False, "a hand-set scale stays where the tuner put it"
+
+    view.show_detail()
+    assert box.state["autoRange"][1], "D hands the vertical scale back to the fitter"
+    box.updateAutoRange()
+    assert box.viewRange()[1] == pytest.approx(fitted), "and it fits the curves again"
+
+    # A gets there too, from a scale set by hand and without waiting for a paint.
+    view.zoom_y(1 / 8.0)
+    view.show_all()
+    assert box.viewRange()[1][1] - box.viewRange()[1][0] > high - low
+
+
 def test_the_view_controls_leave_the_hide_alone():
     """The other half of the rule. A tuner who took every line off in order to LOOK at the traces
     would lose that the moment they zoomed in, and the Σ and link toggles are not about guides."""

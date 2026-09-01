@@ -171,6 +171,11 @@ _STRIP_MIN_PX = 84
 #: auto-ranging over that flattens the part being argued about.
 _STRIP_BAND_HZ = (20.0, 20000.0)
 _PLOT_MIN_PX = 140
+#: How much one press of a zoom button changes the span, on either axis. One number for both
+#: directions and for both signs, so a press out and a press back land on the same view. 1.6 is
+#: what the x buttons have always stepped by, kept as-is: the horizontal zoom is the one part of
+#: this row nobody complained about (user, 2026-09-01: "по горізонталі є - все ок").
+_ZOOM_FACTOR = 1.6
 #: Where the share the tuner dragged to is kept. In the app's own store, beside the theme, the
 #: zoom and the tree's collapse state — the same store this window's siblings already persist
 #: their layout in (`app_settings`), so a curve window opened tomorrow opens the way it was left.
@@ -991,11 +996,16 @@ class CurveView(QWidget):
         row.addWidget(self._guides_btn)
         row.addWidget(self._link_btn)
 
+        # A and D move both axes at once; the four after them move ONE, and say which on the
+        # button. The x pair used to be a bare − and +, which was unambiguous while it was the
+        # only pair here and stops being so the moment a second one stands beside it.
         for key, handler in (
             ("curveZoomAll", self.show_all),
             ("curveZoomDetail", self.show_detail),
-            ("curveZoomOut", lambda: self.zoom(1.6)),
-            ("curveZoomIn", lambda: self.zoom(1 / 1.6)),
+            ("curveZoomOut", lambda: self.zoom(_ZOOM_FACTOR)),
+            ("curveZoomIn", lambda: self.zoom(1 / _ZOOM_FACTOR)),
+            ("curveZoomYOut", lambda: self.zoom_y(_ZOOM_FACTOR)),
+            ("curveZoomYIn", lambda: self.zoom_y(1 / _ZOOM_FACTOR)),
         ):
             button = QPushButton(i18n.t(key + "Short"))
             button.setProperty("class", "zoom-btn")
@@ -2656,6 +2666,28 @@ class CurveView(QWidget):
         centre = (low + high) / 2.0
         half = (high - low) * factor / 2.0
         view.setXRange(centre - half, centre + half, padding=0)
+
+    def zoom_y(self, factor: float) -> None:
+        """The same, up the y axis (user, 2026-09-01: there was no way to change it at all).
+
+        Auto-ranged y is the default and is right for a first look — it fits the curves and moves
+        on. It is wrong for the question this window is usually open on: a 1.5 dB dip on a
+        frequency response, or a driver's phase turning over, is a few pixels tall in a view scaled
+        to the loudest thing on screen, and no amount of x zoom makes it taller.
+
+        `setYRange` takes the auto-range off as it goes, which is the point — from here the scale
+        is the tuner's until they ask for it back. **D** is the way back (`show_detail` re-enables
+        it), and so is **A**.
+
+        The sum's own axis is deliberately left alone. It is a second scale on the right precisely
+        so that a joint sitting 6 dB above either driver does not move the measurements
+        (`_build_sum_axis`), and a stretch of the left axis is not a statement about the right one.
+        """
+        view = self._plot.getViewBox()
+        _x, (low, high) = view.viewRange()
+        centre = (low + high) / 2.0
+        half = (high - low) * factor / 2.0
+        view.setYRange(centre - half, centre + half, padding=0)
 
     def set_y_unit(self, unit: str) -> None:
         """dB on a frequency response, degrees on a phase, nothing on an impulse."""
