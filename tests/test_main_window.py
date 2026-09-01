@@ -3008,3 +3008,39 @@ def test_the_protection_button_answers_where_it_was_pressed(tmp_path, monkeypatc
 
     assert said, "a press that produces nothing at all is what was reported"
     assert i18n.t("protNoChannels") in said[0]
+
+
+def test_the_right_column_scrolls_when_the_capture_list_is_long():
+    """F-040, from a screenshot: a round of 102 captures made a card 1864 px tall inside a 778 px
+    column, with nothing to scroll it — the bottom of the list was off the screen, not merely
+    below the fold. The plan card above it was squeezed to 62 px in the bargain.
+
+    One scroll for the whole column, which is what the LEFT column already does and for the same
+    reason; a floor under the plan card so the one below cannot crush it.
+    """
+    from PySide6.QtWidgets import QScrollArea
+
+    from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
+
+    _app()
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    names = [f"{code}_{n:02d}" for n in range(1, 18)
+             for code in ("sw", "w-L", "w-R", "m-L", "m-R", "tw-L")]
+    window._meas_panel.set_sessions((MeasSession(
+        id="v1", version={"en": "Series 1", "uk": "серія 1"},
+        groups=(MeasGroup(type="sw (LB)", items=tuple(MeasItem(n, "done", 1) for n in names)),),
+    ),))
+    # Two passes: the offscreen platform settles a layout of this size one request later.
+    QApplication.processEvents()
+    window.resize(1441, 901)
+    QApplication.processEvents()
+
+    area = next(a for a in window._right.findChildren(QScrollArea) if type(a) is QScrollArea)
+    assert area.verticalScrollBar().maximum() > 0, "the column that overflowed can be scrolled"
+    assert window._meas_panel.height() >= window._meas_panel.sizeHint().height(), (
+        "and the card is drawn at its full height inside it, not clipped to the viewport")
+    assert window._plan_panel.height() >= 160, "the plan card is not crushed by the one below it"
+
+    window.hide()

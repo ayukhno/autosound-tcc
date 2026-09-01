@@ -117,6 +117,10 @@ from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
+#: How little of the plan card the capture card below it may leave. About five rows — enough to
+#: read which phase is open and what the current step is, which is the whole reason it is on
+#: screen while a round is being captured.
+_PLAN_MIN_PX = 180
 _LANG_KEY = "ui/lang"
 # Which models drive this project lives WITH the project (`.tcc/tcc-project.json`): opening a
 # second folder must not silently re-point the first. Which omp models this machine can reach is
@@ -2291,9 +2295,33 @@ class MainWindow(QMainWindow):
 
     def _build_right(self) -> QWidget:
         container = QWidget()
-        layout = QVBoxLayout(container)
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        # One scroll for the whole column — the same answer the left column already carries, and
+        # for the same reason. The capture card was added at its natural height with nothing
+        # around it, so a round of 102 measurements made a card 1864 px tall inside a 778 px
+        # column: the bottom of the list was not merely unscrollable, it was off the screen, and
+        # the plan panel above it was squeezed to 62 px (measured, 2026-09-01, F-040 — the user's
+        # screenshot shows exactly those two symptoms).
+        #
+        # Around the COLUMN and not around the list, which is the other half of the same lesson:
+        # F-002 was a section scrolling inside a column that did not, and that reads as broken
+        # twice over — the wheel does nothing where you point it and the section below is
+        # unreachable anyway.
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        # The layout BEFORE `setWidget`, like the left column: a widget handed over bare never
+        # told the area it had grown, and the scrollbar stayed at range 0 while the content was
+        # 2008 px in a 778 px viewport (measured while fixing this).
+        right_scroll.setWidget(inner)
+        outer.addWidget(right_scroll)
 
         plan_panel = _panel()
         plan_layout = QVBoxLayout(plan_panel)
@@ -2301,6 +2329,12 @@ class MainWindow(QMainWindow):
         plan_head, self._plan_title, self._plan_sub = _phead("planTitle", "planSub")
         plan_layout.addWidget(plan_head)
         self._plan_panel = PlanPanel()
+        # A floor under it, because the column above now scrolls: `PlanPanel` is itself a scroll
+        # area and its minimum hint is a few dozen pixels, so in a column whose content is taller
+        # than the window it was handed exactly that — 62 px, two cramped rows, which is what the
+        # user's screenshot shows above the capture card (F-040, measured). The card that says
+        # where the tune stands must not be squeezed to nothing by the card below it.
+        self._plan_panel.setMinimumHeight(_PLAN_MIN_PX)
         plan_layout.addWidget(self._plan_panel, stretch=1)
         layout.addWidget(plan_panel, stretch=1)
 
