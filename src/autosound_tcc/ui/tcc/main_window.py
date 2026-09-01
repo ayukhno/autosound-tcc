@@ -1983,7 +1983,16 @@ class MainWindow(QMainWindow):
         """
         dialog = protective_dialog.open_for(config.project_dir(), getattr(self, "_view", None), self)
         if dialog is None:
-            self._status_strip.notify(i18n.t("protNoChannels"), level="warn")
+            # Answered where the question was asked. This button sits at the bottom of the right
+            # column and the status strip is under the header, so a refusal written there is, from
+            # the presser's side, nothing happening at all — F-041, reported as exactly that. The
+            # strip is for what TCC found on disk by itself; a click deserves an answer next to
+            # the click, which is what the model-warning boxes above already do.
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle(i18n.t("protBtn"))
+            box.setText(i18n.t("protNoChannels"))
+            box.exec()
             return
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.written:
             self._status_strip.notify(

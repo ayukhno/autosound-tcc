@@ -262,19 +262,59 @@ def _last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
-def channel_codes(view) -> list[str]:
-    """Every channel of the rig, outputs first, in the order the panels show them."""
+def project_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
+    """Every channel `project.json` names, in file order, minus the empty slots.
+
+    Channel IDENTITY lives in `project.json` and tunable state lives in the ledger (SCR-001), so
+    this is the list that exists from intake onwards — before a single snapshot has been written.
+    `hidden` is a slot with no driver assigned: nothing was in its chain, because there is no
+    chain.
+    """
+    from autosound_tcc.state import project_view
+
+    try:
+        entries = project_view.load_channels(project_dir).values()
+    except Exception:  # noqa: BLE001 — an unreadable project is "no channels", not a crash
+        return []
+    codes: list[str] = []
+    for entry in entries:
+        code = str(entry.get("code") or "")
+        # The map is keyed by id, code and every previous name, so one channel arrives up to three
+        # times; `code` is the identity and dedupes them.
+        if code and code not in codes and not entry.get("hidden"):
+            codes.append(code)
+    return codes
+
+
+def channel_codes(view, project_dir: Optional[Path] = None) -> list[str]:
+    """Every channel of the rig: the loaded view's order first, then whatever it left out.
+
+    The view WAS the only source, and that is F-041 — the button was dead in exactly the state it
+    exists for. A view is a ledger snapshot shaped by the profile, and phase 0 is before any
+    snapshot: `main_window` only draws a rig without one when `project.json` gives a channel a
+    `tier`, which today it does for spare slots alone, so on a project that is being measured for
+    the first time `_view` is `None`. Empty list, no dialog, and the refusal went to a strip at
+    the top of the window while the button is at the bottom of the right column — which is what
+    "нічого не відбувається" was (user, Windows, 2026-09-01).
+
+    The view stays FIRST because it carries the order the panels show and the rule about what is
+    switched off. `project.json` then adds what it did not have: on a tuned project usually
+    nothing, on a fresh one everything, and in between the channels no ledger row has met yet.
+    """
     codes: list[str] = []
     for group in getattr(view, "groups", ()) or ():
         for row in group.rows_visible():
             if row.name not in codes:
                 codes.append(row.name)
+    for code in project_channel_codes(project_dir):
+        if code not in codes:
+            codes.append(code)
     return codes
 
 
 def open_for(project_dir: Path, view, parent=None) -> Optional[ProtectiveDialog]:
     """Build the dialog for the current rig, or None when there are no channels to ask about."""
-    codes = channel_codes(view)
+    codes = channel_codes(view, project_dir)
     if not codes:
         return None
     return ProtectiveDialog(project_dir, codes, parent=parent)

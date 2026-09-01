@@ -2982,3 +2982,29 @@ def test_no_label_in_the_window_is_left_in_the_language_it_was_built_in():
             assert left == {}, f"still English after switching to {lang}: {left}"
     finally:
         window._on_language_selected(before)
+
+
+def test_the_protection_button_answers_where_it_was_pressed(tmp_path, monkeypatch):
+    """F-041, reported as "нажимаю кнопку «Захист» ... і нічого не відбувається" (Windows,
+    2026-09-01).
+
+    Two things made that true, and this is the second one: the refusal was written to the status
+    strip, which sits under the header, while the button is at the bottom of the right column —
+    and on that run the bottom of the column was off the screen entirely (F-040). A click gets its
+    answer next to the click; the strip stays what it is, the place for what TCC found on disk by
+    itself.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)  # a folder with no project in it
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    said: list[str] = []
+    monkeypatch.setattr(QMessageBox, "exec",
+                        lambda self: said.append(self.text()) or QMessageBox.StandardButton.Ok)
+
+    _app()
+    window = MainWindow()
+    window._open_protective()
+
+    assert said, "a press that produces nothing at all is what was reported"
+    assert i18n.t("protNoChannels") in said[0]

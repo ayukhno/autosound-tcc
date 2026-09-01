@@ -135,6 +135,81 @@ def _round(tmp_path):
     return tmp_path
 
 
+def _described(tmp_path, channels):
+    """A project that names channels and has NO ledger — phase 0, the first sweeps."""
+    from autosound_tcc.core import vendor_loader
+
+    project = vendor_loader.load_project()
+    vendor_loader.load_project()
+    proj = project.Project(str(tmp_path))
+    proj.save({
+        "schema_version": project.SCHEMA_VERSION,
+        "channels": channels,
+        "glossary": {"schema_version": 1,
+                     "channels": [{"code": c["code"], "active": True} for c in channels]},
+    })
+    return tmp_path
+
+
+def test_the_channels_come_from_the_project_before_any_ledger_exists(tmp_path):
+    """F-041, reported as "нажимаю «Захист» ... і нічого не відбувається" (Windows, 2026-09-01).
+
+    The list came from the loaded ledger view alone, and this button exists for the state BEFORE
+    a ledger: raw sweeps, phase 0. `main_window` only draws a rig without a snapshot when
+    `project.json` gives a channel a `tier`, which today it does for spare slots alone — so
+    `_view` is None, the list was empty, and `open_for` returned None. What the presser saw was
+    nothing at all, because the refusal went to the status strip at the top of the window while
+    the button is at the bottom of the right column.
+    """
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import channel_codes, open_for
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}, {"code": "tw-L"}])
+
+    assert channel_codes(None, project) == ["m-L", "m-R", "tw-L"]
+    QApplication.instance() or QApplication([])
+    assert open_for(project, None) is not None, "the dialog opens on raw measurements"
+
+
+def test_a_slot_with_no_driver_is_not_offered(tmp_path):
+    """`hidden` is a slot nobody assigned a driver to (SCR-003): there was no chain, so there is
+    nothing to say about what was in it."""
+    from autosound_tcc.ui.tcc.protective_dialog import channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "spare-1", "hidden": True}])
+
+    assert channel_codes(None, project) == ["m-L"]
+
+
+def test_the_view_leads_and_the_project_fills_in_what_it_left_out(tmp_path):
+    """The view carries the order the panels show and knows which channels are switched off, so
+    it stays first. It is not, however, complete: a channel `project.json` names and no ledger row
+    has met yet was silently missing from a dialog that asks about the MEASURING RIG."""
+    from autosound_tcc.ui.tcc.protective_dialog import channel_codes
+
+    class _Row:
+        def __init__(self, name):
+            self.name = name
+
+    class _Group:
+        def __init__(self, names):
+            self._names = names
+
+        def rows_visible(self):
+            return [_Row(name) for name in self._names]
+
+    class _View:
+        groups = (_Group(["w-L", "w-R"]),)
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "w-L"}])
+
+    assert channel_codes(_View(), project) == ["w-L", "w-R", "m-L"]
+
+
 def test_the_dialog_opens_on_what_the_round_already_says(tmp_path):
     """Re-opening it is a review, not a blank form — and the three answers stay three."""
     import os
