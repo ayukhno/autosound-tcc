@@ -46,9 +46,10 @@ Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on tha
   `git-remote-https` that git spawns in turn is not covered by the flag that hides the child.
   Nothing is wrong with the app when it appears, and nothing is lost by ignoring it.
 
-- **Pinning from the DESKTOP SHORTCUT is a different route, and it has never been measured.**
-  Named because the fix above is about the other one. Windows reads different properties for the
-  two, so one of them working says nothing about the other.
+- ~~**Pinning from the DESKTOP SHORTCUT is a different route, and it has never been measured.**~~
+  **Measured on 2026-09-01, the day after release: it works too**, from the Desktop shortcut and
+  from the Start Menu. Listed here as unknown when the tag was cut, and struck through rather than
+  deleted so the release note still says what was known at the time.
 
 ### Also
 
