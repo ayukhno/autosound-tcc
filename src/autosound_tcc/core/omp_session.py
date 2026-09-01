@@ -707,6 +707,19 @@ class OmpSession:
             # The line people screenshot, so it carries the reason again: by now the first Notice
             # has scrolled, and "gave up" on its own says nothing about what to do next.
             gave_up = f"omp gave up after {attempt} attempts — this turn produced nothing."
+            # ...and a turn that produced nothing is OVER. It was not, and that is CAR-004: the
+            # credits ran out mid-turn, omp retried its ten times, said so, and then said nothing
+            # ever again. No `turn_end` frame follows a give-up, so the window sat on "thinking"
+            # with a queued message promised "the moment this turn ends" — a promise that had
+            # nothing left to come true. The Arbiter got out with `Send now`, which is a button
+            # for a state the app should not have been in.
+            #
+            # Marked as a finished ROUND rather than yielding `TurnEnd` here, deliberately. If omp
+            # does carry on after giving up on one model call, the next frame is activity and
+            # clears this again (`_ACTIVITY_TYPES`, above) — so nothing is cut off underneath a
+            # session that recovered. If nothing follows, `_prompt` closes the turn after its
+            # ordinary 2.5 s grace instead of waiting out `SILENCE_WARN_S` and then forever.
+            self._round_ended_at = time.time()
             return [Notice(f"{gave_up} {self._retry_reason}".strip())]
 
         if kind == _EXCHANGE_END:

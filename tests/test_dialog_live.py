@@ -920,6 +920,35 @@ def test_the_queue_row_counts_what_is_waiting(tmp_path):
     assert "2" in panel._queue_label.text()
 
 
+def test_a_turn_that_produced_nothing_still_releases_the_queue(tmp_path):
+    """CAR-004, the panel's half. The credits ran out mid-turn, omp retried ten times and said
+    "this turn produced nothing" — and the window went on saying "thinking" while a queued message
+    promised to go "the moment this turn ends". Nothing was going to end it; `Send now` was the
+    only way out, which is a button for a state the app should not reach.
+
+    What closes that turn is `omp_session` (`test_omp_replay`: a give-up is a finished round).
+    Everything below is what already happens once a boundary does arrive — asserted here because
+    that is the promise the queue makes, and it is the one that was broken."""
+    from autosound_tcc.core.agent_events import Notice
+
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("тоді спробуй ще раз")
+    panel._on_send()
+    worker.chunk.emit(
+        Notice("omp gave up after 10 attempts — this turn produced nothing. "
+               "Google API error (429): credits depleted.")
+    )
+
+    assert panel._busy, "the notice lands mid-turn; it is not itself an ending"
+    assert worker.sent == []
+
+    worker.turn_done.emit()
+
+    assert worker.sent == ["тоді спробуй ще раз"], "no hand on the button"
+    assert panel._queue_row.isHidden(), "the promise was kept, so it stops being made"
+    assert panel._busy, "and busy again for the turn that message just started"
+
+
 def test_send_now_interrupts_the_turn_that_is_holding_the_queue(tmp_path):
     """The queue's promise depends on a turn boundary arriving, and a turn silent for minutes may
     never produce one — the state this button was added under, with "[120s with no output]" as the

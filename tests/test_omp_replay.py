@@ -525,6 +525,46 @@ def test_a_retry_that_ran_out_says_that_instead(tmp_path):
     assert "gave up" in events[0].text
 
 
+def test_a_turn_that_produced_nothing_is_a_turn_that_ended(tmp_path):
+    """CAR-004, from a Windows run on 2026-09-01. The credits ran out mid-turn; omp retried its
+    ten times, said "produced nothing" — and then said nothing ever again. There is no `turn_end`
+    frame after a give-up, so the window kept saying "thinking" and a queued message kept promising
+    to go "the moment this turn ends", which nothing was ever going to make true. The Arbiter got
+    out by pressing `Send now`.
+
+    A finished ROUND rather than a `TurnEnd` outright: `_prompt` closes the turn 2.5 s later if
+    nothing follows, and the next test says what happens when something does."""
+    replay = Replay(tmp_path)
+    replay.session._handle({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10,
+                            "errorMessage": "Google API error (429): credits depleted."})
+
+    replay.session._handle({"type": "auto_retry_end", "success": False, "attempt": 10})
+
+    assert replay.session._round_ended_at, "the turn is closing, not hanging"
+
+
+def test_a_session_that_carries_on_after_giving_up_is_not_cut_off(tmp_path):
+    """The other half of the same rule. omp giving up on one model call is not proof that the turn
+    is finished — if the next frame is work, the turn goes on."""
+    replay = Replay(tmp_path)
+    replay.session._handle({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10})
+    replay.session._handle({"type": "auto_retry_end", "success": False, "attempt": 10})
+
+    replay.session._handle({"type": "message_start"})
+
+    assert not replay.session._round_ended_at, "activity reopens it"
+
+
+def test_a_recovered_storm_leaves_the_turn_running(tmp_path):
+    """A storm that ENDED WELL is not an ending at all: the answer omp finally got is the turn."""
+    replay = Replay(tmp_path)
+    replay.session._handle({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 10})
+
+    replay.session._handle({"type": "auto_retry_end", "success": True, "attempt": 7})
+
+    assert not replay.session._round_ended_at
+
+
 def test_a_retry_end_without_a_storm_is_not_narrated(tmp_path):
     replay = Replay(tmp_path)
 
