@@ -189,6 +189,31 @@ _SPLIT_KEY = "curve/sumSplitShare"
 _DERIVED_PREFIX = "trace#"
 
 
+def fit_number_box(box) -> None:
+    """Give a spin box the width the PLATFORM says it needs, instead of a number typed here.
+
+    The three number fields under the plot wore `setFixedWidth(96 / 104 / 72)`, measured on macOS
+    with the steppers the macOS style draws. Windows draws wider ones into the same box, and there
+    they landed on top of the text: the delay showed `0.000` with its ` ms` under the arrows,
+    `250.0 Hz` showed as `250.0 H`, and `0.70` as `0.7` (Arbiter, run `testTCC8`, 2026-09-01 —
+    CAR-005). A unit that is half covered makes a different number: on a Q, `0.7` and `0.70` are
+    not the same value, and these are the fields a filter is dialled with.
+
+    `sizeHint` is Qt's own answer to the question the fixed width was guessing at — the widest text
+    the range can produce WITH prefix and suffix, plus the frame, plus whatever room this style
+    reserves for its steppers. `ensurePolished` comes first so the application's sheet (12 px, and
+    whatever the zoom scaled that to) is already on the widget when its font is measured.
+
+    The steppers themselves are still left to the base style, and the reason stands unchanged in
+    `theme.py`: a rule on `::up-button` hands the sub-control to `QStyleSheetStyle`, which then
+    draws no arrow at all without an `image:`. That measurement was made in two THEMES on one
+    platform; asking the style for the width is what makes it survive a second platform without
+    reopening the decision.
+    """
+    box.ensurePolished()
+    box.setFixedWidth(box.sizeHint().width())
+
+
 def trace_token(index: int) -> str:
     """The colour NAME of trace `index`: a palette token for the first two, a derived one after.
 
@@ -844,7 +869,7 @@ class CurveView(QWidget):
         # impossible instead of the box refusing to express it.
         self._shift_box.setRange(-50.0, 50.0)
         self._shift_box.setSuffix(" ms")
-        self._shift_box.setFixedWidth(96)
+        # width from the style — see `fit_number_box` (CAR-005)
         # C locale: everything else in this window prints a dot, and a box that reads "0,198" next
         # to a readout saying "0.198" makes the reader check whether they are the same number.
         self._shift_box.setLocale(QLocale(QLocale.Language.C))
@@ -881,7 +906,7 @@ class CurveView(QWidget):
         self._apf_f0.setAccelerated(True)
         self._apf_f0.setSuffix(" Hz")
         self._apf_f0.setValue(_DEFAULT_APF_F0_HZ)
-        self._apf_f0.setFixedWidth(104)
+        # width from the style — see `fit_number_box` (CAR-005)
         # C locale, like the delay box beside it: one window, one decimal separator.
         self._apf_f0.setLocale(QLocale(QLocale.Language.C))
         self._apf_f0.valueChanged.connect(self._on_apf_control)
@@ -897,7 +922,7 @@ class CurveView(QWidget):
         self._apf_q.setSingleStep(0.05)
         self._apf_q.setAccelerated(True)
         self._apf_q.setValue(allpass_mod.DEFAULT_Q)
-        self._apf_q.setFixedWidth(72)
+        # width from the style — see `fit_number_box` (CAR-005)
         self._apf_q.setLocale(QLocale(QLocale.Language.C))
         self._apf_q.valueChanged.connect(self._on_apf_control)
         attach_tip(self._apf_q, tip_html(i18n.t("curveApfQTip")))
@@ -1068,6 +1093,7 @@ class CurveView(QWidget):
         self._update_link_button()
         # ...and the all-pass boxes into theirs: nothing chosen, so f0 and Q are shut.
         self._sync_apf_controls()
+        self._fit_number_boxes()
 
     @staticmethod
     def _thin_the_y_grid(plot: pg.PlotWidget) -> None:
@@ -1492,6 +1518,15 @@ class CurveView(QWidget):
             return self._traces[self._shift_target].name
         return ""
 
+    def _fit_number_boxes(self) -> None:
+        """The three fields a filter is dialled with, each as wide as its own contents need.
+
+        Called at construction, on every theme or zoom change (the sheet's font size moves with
+        both), and after `set_resolution`, which can add a fourth decimal to the delay.
+        """
+        for box in (self._shift_box, self._apf_f0, self._apf_q):
+            fit_number_box(box)
+
     def set_resolution(self, step_ms, processing_rate_hz) -> None:
         """Step the delay by what the DSP offers, and count samples with its rate.
 
@@ -1513,6 +1548,8 @@ class CurveView(QWidget):
         self._step_ms = step
         self._shift_box.setSingleStep(step)
         self._shift_box.setDecimals(4 if step < 0.01 else 3)
+        # A fourth decimal is a wider number, and the box has to be able to show it.
+        self._fit_number_boxes()
 
     def samples(self, ms: float):
         """`ms` in whole samples at the DSP's rate, or None when the rate is not on record."""
@@ -2560,6 +2597,9 @@ class CurveView(QWidget):
         # The hide-guides toggle carries its state as a colour written from the palette that was
         # current when it was written — the same reason the plot's pens are rebuilt below.
         self._update_guides_button()
+        # A theme switch is also a FONT switch: the sheet carries the size, and the zoom scales
+        # it. A box sized for the old font is the CAR-005 symptom again, one zoom step later.
+        self._fit_number_boxes()
         # Traces and markers are rebuilt rather than recoloured in place: both already know how to
         # draw themselves from the current theme, and two ways of doing it is one too many.
         traces, positions = list(self._traces), self.positions()

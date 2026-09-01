@@ -2990,6 +2990,74 @@ def test_pressing_a_marker_control_puts_the_guides_back():
     assert view.guides_hidden() is False
 
 
+def _stepper_width(box) -> int:
+    """How much of the box THIS style spends on its up/down arrows."""
+    from PySide6.QtWidgets import QStyle, QStyleOptionSpinBox
+
+    option = QStyleOptionSpinBox()
+    option.initFrom(box)
+    rects = [box.style().subControlRect(QStyle.ComplexControl.CC_SpinBox, option, sub, box)
+             for sub in (QStyle.SubControl.SC_SpinBoxUp, QStyle.SubControl.SC_SpinBoxDown)]
+    return max(rect.width() for rect in rects)
+
+
+@pytest.mark.parametrize("attribute, widest", [
+    ("_shift_box", "-50.000 ms"),
+    ("_apf_f0", "20000.0 Hz"),
+    ("_apf_q", "10.00"),
+])
+def test_a_number_box_has_room_for_its_value_and_the_steppers_both(attribute, widest):
+    """CAR-005, from a Windows run: the arrows were drawn ON the text. `0.000 ms` showed as
+    `0.000`, `250.0 Hz` as `250.0 H`, `0.70` as `0.7` — and a Q of `0.7` is not the Q of `0.70`.
+
+    The widths were 96 / 104 / 72, measured on macOS with the steppers macOS draws; Windows draws
+    wider ones into the same box. So the assertion is not a pixel count either: whatever this
+    platform's style reserves for its arrows, the widest value the range can produce still has to
+    fit beside it.
+    """
+    view = _view()
+    box = getattr(view, attribute)
+
+    room = box.width() - _stepper_width(box)
+
+    assert room >= box.fontMetrics().horizontalAdvance(widest), (
+        f"{attribute}: {box.width()}px box, {_stepper_width(box)}px of steppers")
+
+
+def test_the_boxes_follow_the_zoom_instead_of_clipping_at_it():
+    """A width settled at one font size is the same defect one zoom step later, and the zoom is
+    exactly what moves it: `A+` re-applies the sheet with a bigger `font-size`, which beats any
+    font set in code. This is what a constant could not do."""
+    from autosound_tcc.ui.tcc import theme as theme_mod
+
+    app = _app()
+    view = _view()
+    before = view._shift_box.width()
+    was = theme_mod._APPLIED  # this sheet is the whole application's; put it back after
+
+    try:
+        theme_mod.apply_theme(app, "dark", scale=1.5)
+        view.apply_theme()
+
+        assert view._shift_box.width() > before
+        room = view._shift_box.width() - _stepper_width(view._shift_box)
+        assert room >= view._shift_box.fontMetrics().horizontalAdvance("-50.000 ms")
+    finally:
+        mode, scale, _qss = was or ("dark", 1.0, "")
+        theme_mod.apply_theme(app, mode, scale)
+
+
+def test_a_fourth_decimal_is_given_room_when_the_dsp_asks_for_one():
+    """`set_resolution` adds a decimal below a 0.01 ms step — a wider number in the same box."""
+    view = _view()
+    coarse = view._shift_box.width()
+
+    view.set_resolution(0.0052, 192000)
+
+    assert view._shift_box.decimals() == 4
+    assert view._shift_box.width() >= coarse
+
+
 def test_the_scale_up_the_y_axis_is_the_tuners_to_change():
     """User, 2026-09-01: "треба щоб можна було змінювати масштаб по осі Y (вверх), по горізонталі
     є — все ок". Auto-ranged y fits the loudest thing on screen, and against that a 1.5 dB dip is
