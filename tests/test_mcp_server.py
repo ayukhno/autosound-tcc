@@ -80,6 +80,56 @@ def _text(result) -> str:
     return blocks[0].text
 
 
+def test_every_tool_reaches_the_model_with_its_instructions(tmp_path):
+    """A tool with no description is a tool the model has to guess at, and one of ours had none.
+
+    `save_profile_field`'s instructions are computed — the field vocabulary comes off the skill's
+    writer — and they were written as an f-string under the `def`. That is not a docstring:
+    Python keeps only a plain literal there, so `__doc__` was None and FastMCP registered an empty
+    string. Measured on the built server before the fix: every other tool 122–1351 characters,
+    that one 0 — including the sentence "one field per call … don't batch everything to the end",
+    which is exactly what the interview in SKL-009 did not do.
+
+    Asserted over ALL tools, because the next computed description will be written the same way.
+    """
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    tools = asyncio.run(mcp.list_tools())
+    silent = [tool.name for tool in tools if not (tool.description or "").strip()]
+
+    assert not silent, "these tools reach the model with no description at all"
+    saver = next(tool for tool in tools if tool.name == "save_profile_field")
+    assert "don't batch everything to the end" in saver.description, "the instruction is delivered"
+    assert "groups" in saver.description and "fields" in saver.description, "and so is the shape"
+
+
+def test_a_tool_call_and_its_answer_land_in_the_log(tmp_path, caplog):
+    """The run that produced SKL-009 left 88 log lines, 34 of them Qt's own, and not one record
+    that a half-hour interview had happened. Level and rotation were configured all along
+    (`app_log.setup`); what was missing was any call at INFO."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    with caplog.at_level(logging.INFO, logger=app_log.LOGGER_NAME):
+        asyncio.run(mcp.call_tool("get_tcc_state", {}))
+
+    lines = [record.getMessage() for record in caplog.records]
+    assert any(line.startswith("mcp get_tcc_state(") for line in lines), lines
+    assert any(line.startswith("mcp get_tcc_state -> ") for line in lines), lines
+
+
+def test_the_log_line_does_not_carry_the_whole_payload(tmp_path):
+    """A log nobody can page through is the same as no log."""
+    long_answer = "x" * 5_000
+
+    brief = mcp_server._brief(long_answer)
+
+    assert len(brief) < 300 and brief.endswith("… (cut)")
+
+
 def test_tool_surface_is_the_documented_set(tmp_path):
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
 

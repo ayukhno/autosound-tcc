@@ -49,6 +49,7 @@ Nothing on this surface writes project data any more.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import secrets
 import socket
@@ -63,6 +64,7 @@ from mcp.server.fastmcp import FastMCP
 
 from autosound_tcc.core import (
     agent_session,
+    app_log,
     config,
     critic,
     model_choices,
@@ -91,6 +93,49 @@ _ACK_REMINDER = (
     "superseded). `refused` needs a note saying why. Un-acked signals are raised again every "
     "turn."
 )
+
+
+#: How much of a tool's arguments and of its answer goes into the log. Enough to tell one call
+#: from the next — which field was saved, whether the writer refused — and not the whole payload:
+#: `get_pending_signals` can answer with kilobytes, and a log nobody can page through is the same
+#: as no log (report on the run of 2026-09-01: 88 lines, 34 of them Qt warnings, and a completed
+#: interview that left no trace at all).
+_LOG_VALUE_CHARS = 200
+
+
+def _brief(value: Any) -> str:
+    """One line, bounded, and it says when it cut."""
+    text = " ".join(str(value).split())
+    return text if len(text) <= _LOG_VALUE_CHARS else text[:_LOG_VALUE_CHARS] + "… (cut)"
+
+
+def _logged(fn):
+    """A tool that says, at INFO, that it was called and what it answered.
+
+    One wrapper rather than a log line inside each of the twenty-eight tools: a line per tool is
+    twenty-eight chances to forget one, and the one that gets forgotten is the one whose absence
+    is later reported as "the log shows nothing" (`SKL-009`).
+
+    `functools.wraps` is what keeps this invisible to FastMCP: the schema it builds comes from
+    `inspect.signature` and `__doc__`, and both follow `__wrapped__`.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        log = app_log.logger()
+        shown = kwargs if kwargs else args
+        log.info("mcp %s(%s)", fn.__name__, _brief(shown) if shown else "")
+        try:
+            result = await fn(*args, **kwargs)
+        except Exception:
+            # `exception` and re-raise: the model still gets the failure it would have got, and
+            # the file now says which tool produced it.
+            log.exception("mcp %s raised", fn.__name__)
+            raise
+        log.info("mcp %s -> %s", fn.__name__, _brief(result))
+        return result
+
+    return wrapper
 
 
 def _vendor_of(model: Optional[str]) -> str:
@@ -310,6 +355,18 @@ def build_server(
         ),
     )
 
+    def tool(**kwargs):
+        """`mcp.tool`, with `_logged` between the function and the registry.
+
+        Every `@mcp.tool()` below is spelled `@tool()` so that adding a tool cannot mean
+        forgetting to log it — the only door into the registry runs through here.
+        """
+
+        def register(fn):
+            return mcp.tool(**kwargs)(_logged(fn))
+
+        return register
+
     def _load_process_state() -> tuple[Optional[dict[str, Any]], Optional[str]]:
         """The skill's process state, read through the skill's own module (`state/process.py`).
 
@@ -334,7 +391,7 @@ def build_server(
 
     # ---- reads -------------------------------------------------------------
 
-    @mcp.tool()
+    @tool()
     async def get_tcc_state() -> str:
         """What the Arbiter currently has on screen: preset, ledger version, selection, edit mode.
 
@@ -388,7 +445,7 @@ def build_server(
             )
         return json.dumps(state, ensure_ascii=False, indent=2)
 
-    @mcp.tool()
+    @tool()
     async def get_pending_signals() -> str:
         """Every user signal raised in the UI and not yet acknowledged. Reading is not handling.
 
@@ -415,7 +472,7 @@ def build_server(
             payload["_ack"] = _ACK_REMINDER
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    @mcp.tool()
+    @tool()
     async def ack_signals(ids: list[str], outcome: str, note: str = "") -> str:
         """Close user signals: say what happened to what the Arbiter asked for.
 
@@ -456,7 +513,7 @@ def build_server(
         except Exception:
             pass
 
-    @mcp.tool()
+    @tool()
     async def wait_for_signal(timeout_seconds: float = 900.0) -> str:
         """Park until the Arbiter does something in the UI, then return those signals.
 
@@ -484,7 +541,7 @@ def build_server(
             await _heartbeat(waited, deadline)
         return json.dumps({"signals": [], "count": 0, "timed_out": True})
 
-    @mcp.tool()
+    @tool()
     async def get_ledger(preset: str, version: str = "") -> str:
         """Read a DSP-state ledger snapshot (`v_NNN.json`) for one preset; blank version = HEAD.
 
@@ -515,14 +572,14 @@ def build_server(
     # skill's `dsp_profile.py`, which owns the draft, the validation and the schema stamp. No
     # Arbiter gate here -- these touch neither the DSP nor REW, and the gate that matters is the
     # skill's own refusal to finalize an incomplete profile.
-    @mcp.tool()
+    @tool()
     async def get_capability_checklist() -> str:
         """The fixed DSP capability-checklist questions to ask the human about (project-intake.md
         §4). Ask closed questions with concrete options where you can, 2-3 per turn -- never dump
         the whole remaining list into one message, even when several are still open."""
         return json.dumps(profile_writer.capability_checklist(), ensure_ascii=False)
 
-    @mcp.tool()
+    @tool()
     async def check_existing_profile(vendor: str, model: str) -> str:
         """Call this FIRST, before asking the human anything. Starts (or resumes) this project's
         interview draft and checks the bundled reference library for an EXACT vendor+model match --
@@ -549,23 +606,39 @@ def build_server(
             "bundled_exact_match": bundled,
         }, ensure_ascii=False)
 
-    @mcp.tool()
-    async def save_profile_field(path: str, value: Any) -> str:
-        f"""Save one confirmed field into the in-progress profile draft (call
-        check_existing_profile first). One field per call, as soon as it's confirmed -- don't
-        batch everything to the end. Each call lands on disk, so an interrupted interview keeps
-        everything answered so far.
+    # The one tool whose instructions have to be COMPUTED — the field vocabulary comes off the
+    # skill's own writer — and, until 2026-09-01, the one tool that reached the model with nothing
+    # at all. An f-string under a `def` is not a docstring: Python keeps only a plain literal
+    # there, so `save_profile_field.__doc__` was None and FastMCP registered an empty description.
+    # Measured on the built server: every other tool 122–1351 characters, this one **0**.
+    #
+    # What the model therefore never saw, on the interview reported in SKL-009: "one field per
+    # call, as soon as it's confirmed — don't batch everything to the end", the exact shape of a
+    # `groups` entry, and the vocabulary itself. That run saved four fields in eight seconds at
+    # the end of a half-hour interview and finalized a profile full of nulls. The instruction
+    # against precisely that was in this file the whole time and never left it.
+    #
+    # Passed as `description=` rather than written under the `def`, because that is the only way
+    # to hand FastMCP a string that had to be built.
+    save_field_doc = (
+        "Save one confirmed field into the in-progress profile draft (call "
+        "check_existing_profile first). One field per call, as soon as it's confirmed -- don't "
+        "batch everything to the end. Each call lands on disk, so an interrupted interview keeps "
+        "everything answered so far.\n\n"
+        "`path` is a dotted path relative to `project_profile` as returned by "
+        "check_existing_profile -- e.g. 'dsp_processing_rate_hz' or 'groups.0.fields'. `groups` "
+        'is a flat array, each entry EXACTLY {"id": "<snake_case_id>", "label": "<Human Label>", '
+        '"fields": [<tokens>]} -- `fields` must be a flat array of STRING TOKENS drawn ONLY from '
+        "this vocabulary, nothing else:\n"
+        + json.dumps(profile_writer.field_vocabulary())
+        + "\nA capability that doesn't fit this vocabulary belongs in `_open_questions`, not a "
+        "made-up field name."
+    )
 
-        `path` is a dotted path relative to `project_profile` as returned by
-        check_existing_profile -- e.g. 'dsp_processing_rate_hz' or 'groups.0.fields'. `groups` is a
-        flat
-        array, each entry EXACTLY {{"id": "<snake_case_id>", "label": "<Human Label>",
-        "fields": [<tokens>]}} -- `fields` must be a flat array of STRING TOKENS drawn ONLY from
-        this vocabulary, nothing else:
-        {json.dumps(profile_writer.field_vocabulary())}
-        A capability that doesn't fit this vocabulary belongs in `_open_questions`, not a made-up
-        field name.
-        """
+    @tool(description=save_field_doc)
+    async def save_profile_field(path: str, value: Any) -> str:
+        """One confirmed field into the draft. What the MODEL is told is `save_field_doc` above —
+        this line is for whoever reads the file."""
         if not profile_writer.has_draft(project_dir):
             return json.dumps({"error": "call check_existing_profile first"})
         try:
@@ -574,7 +647,7 @@ def build_server(
         except profile_writer.ProfileWriterError as exc:
             return json.dumps({"saved": False, "error": str(exc)})
 
-    @mcp.tool()
+    @tool()
     async def reset_profile_field(path: str) -> str:
         """Delete a field from the draft (by dotted path) so it can be re-saved from scratch --
         recovery if a previous save_profile_field produced the wrong shape (e.g. a list written as
@@ -586,7 +659,7 @@ def build_server(
         except profile_writer.ProfileWriterError as exc:
             return json.dumps({"reset": False, "error": str(exc)})
 
-    @mcp.tool()
+    @tool()
     async def finalize_profile() -> str:
         """Validate the draft and write `dsp_profile.json`. Call this when the interview is done or
         the human says they're done -- do not just say so in text, call the tool.
@@ -621,26 +694,26 @@ def build_server(
                            "active_phase": (state or {}).get("active_phase")},
                           ensure_ascii=False)
 
-    @mcp.tool()
+    @tool()
     async def enter_phase(phase: str) -> str:
         """Make a phase current (−1…5) and record it. Phases are the skill's fixed skeleton --
         entering one instantiates its template steps; you do not invent phases."""
         return await asyncio.to_thread(_record, process_writer.enter_phase, phase)
 
-    @mcp.tool()
+    @tool()
     async def add_step(step_id: str, name: str, situational: bool = False) -> str:
         """Add a plan step. `situational=True` records it as this car's own insert rather than one
         instantiated from the phase template -- the distinction is what makes a plan readable
         later."""
         return await asyncio.to_thread(_record, process_writer.add_step, step_id, name, situational)
 
-    @mcp.tool()
+    @tool()
     async def start_step(step_id: str) -> str:
         """Begin, or re-begin, a step. Re-beginning is attempt N+1 -- a redo is recorded next to the
         first try, never on top of it."""
         return await asyncio.to_thread(_record, process_writer.start_step, step_id)
 
-    @mcp.tool()
+    @tool()
     async def finish_step(step_id: str, evidence: list[str]) -> str:
         """Close a step. `evidence` is REQUIRED, and at least one item must RESOLVE rather than
         describe: a REW capture name in the grammar (`tw-L_1 (rta)` -- the method suffix is what
@@ -651,19 +724,19 @@ def build_server(
         same call."""
         return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
 
-    @mcp.tool()
+    @tool()
     async def skip_step(step_id: str, superseded_by: str = "") -> str:
         """Supersede a step. It stays visible in the plan -- steps are never deleted, and what
         replaced this one is worth naming."""
         return await asyncio.to_thread(_record, process_writer.skip_step, step_id, superseded_by)
 
-    @mcp.tool()
+    @tool()
     async def block_step(step_id: str, reason: str) -> str:
         """Mark a step blocked and say what blocks it -- a gate waiting on the human, a measurement
         that cannot be taken yet."""
         return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
 
-    @mcp.tool()
+    @tool()
     async def record_decision(
         question: str, answer: str, step: str = "", invalidates: str = ""
     ) -> str:
@@ -677,7 +750,7 @@ def build_server(
             _record, process_writer.record_decision, question, answer, step, invalidates
         )
 
-    @mcp.tool()
+    @tool()
     async def check_captures(titles: list[str] = []) -> str:
         """Check the open round's captures against REW and record the verdict (SCR-040).
 
@@ -690,7 +763,7 @@ def build_server(
         everything the round expects."""
         return await asyncio.to_thread(_record, process_writer.check_captures, titles or None)
 
-    @mcp.tool()
+    @tool()
     async def start_capture(version: str, expected: list[str], step: str = "") -> str:
         """Open a capture round before measuring: the ledger version being captured at, and the
         titles the phase asks for (SCR-034).
@@ -706,20 +779,20 @@ def build_server(
             _record, process_writer.start_capture, version, expected, step
         )
 
-    @mcp.tool()
+    @tool()
     async def record_capture(title: str) -> str:
         """A measurement came back, by its REW title. One that was not on the round's list is
         recorded as unplanned rather than refused -- the derivation can only say what SHOULD have
         been taken, so "this came back and nobody asked for it" has nowhere else to live."""
         return await asyncio.to_thread(_record, process_writer.record_capture, title)
 
-    @mcp.tool()
+    @tool()
     async def skip_capture(title: str, reason: str) -> str:
         """A capture deliberately NOT taken, and why. The reason is required: skipped and
         not-yet-taken render identically without it, and the next session proposes it again."""
         return await asyncio.to_thread(_record, process_writer.skip_capture, title, reason)
 
-    @mcp.tool()
+    @tool()
     async def close_capture(reason: str = "") -> str:
         """Close the open capture round. Whatever is neither taken nor skipped is recorded as
         outstanding rather than quietly dropped."""
@@ -727,7 +800,7 @@ def build_server(
 
     # ---- writes (every one gated on the Arbiter) ---------------------------
 
-    @mcp.tool()
+    @tool()
     async def propose_change(
         channel: str, param: str, from_value: str, to_value: str, rationale: str
     ) -> str:
@@ -747,7 +820,7 @@ def build_server(
         bridge.show_proposal(proposal)
         return json.dumps({"shown": True, "proposal": proposal}, ensure_ascii=False)
 
-    @mcp.tool()
+    @tool()
     async def write_rew_filters(measurement: str, filters: list[dict]) -> str:
         """Write a filter set into REW's own model for `measurement` (by name). Needs confirmation.
 
@@ -780,7 +853,7 @@ def build_server(
         rew_api.set_filters(mid, filters)
         return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)})
 
-    @mcp.tool()
+    @tool()
     async def copy_helix_eq(text: str, note: str = "") -> str:
         """Put a DSP-format EQ block on the Arbiter's clipboard to paste into their DSP software.
 
@@ -800,7 +873,7 @@ def build_server(
         bridge.copy_to_clipboard(text)
         return json.dumps({"copied": True, "chars": len(text)})
 
-    @mcp.tool()
+    @tool()
     async def show_curves(
         titles: list[str], markers: list[float] | None = None,
         kind: str = "impulse", note: str = "",
@@ -837,7 +910,7 @@ def build_server(
             "next": "the Arbiter's reading will arrive as a message; end your turn and wait for it",
         })
 
-    @mcp.tool()
+    @tool()
     async def call_critic(package: str, trace_path: str = "", model: str = "") -> str:
         """Send a proposal package to the Critic (a different vendor's model) and return its reply.
 
@@ -907,7 +980,7 @@ def build_server(
             ensure_ascii=False,
         )
 
-    @mcp.tool()
+    @tool()
     async def report_phase(phase: str = "") -> str:
         """Re-read the process from disk and tell you what it actually says. Not a recorder --
         record with `enter_phase` / `add_step` / `start_step` / `finish_step` on this same surface,
