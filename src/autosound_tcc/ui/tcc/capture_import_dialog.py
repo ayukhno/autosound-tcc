@@ -70,9 +70,15 @@ class CaptureImportDialog(QDialog):
         self._name_sets = dict(name_sets or {})
         #: Proposed names, by uuid. Empty means "leave the title alone".
         self._names: dict[str, str] = {}
+        #: `{uuid: {"hp": "80", "lp": ""}}` — what was typed into the two protective cells, as
+        #: typed. Empty means "read this curve as measured", which is not a claim that the chain
+        #: was empty; see `core/protective.py` for why those are different things.
+        self._legs: dict[str, dict] = {}
         #: What the last "Give names" or Apply had to say about the names themselves — a count that
         #: did not line up, or a clash. Cleared by the next successful fill.
         self._plan_note = ""
+        #: Channels whose two rows described two different chains. Filled by `protective()`.
+        self.protective_conflicts: list[str] = []
 
         self._all = capture_import.candidates(self._measurements, project_dir)
         #: Ticked by uuid rather than by row, because +10 and the filter both re-render the table
@@ -103,11 +109,11 @@ class CaptureImportDialog(QDialog):
         head.setWordWrap(True)
         layout.addWidget(head)
 
-        self._table = QTableWidget(0, 4)
+        self._table = QTableWidget(0, 6)
         self._table.setProperty("class", "ptable")
         self._table.setHorizontalHeaderLabels(
             [i18n.t("capImportColTake"), i18n.t("capImportColTitle"), i18n.t("capImportColWhen"),
-             i18n.t("capImportColName")])
+             i18n.t("capImportColName"), i18n.t("capImportColHp"), i18n.t("capImportColLp")])
         # Only the name column is typed into; `_render` gives exactly that column the flag.
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
@@ -123,6 +129,8 @@ class CaptureImportDialog(QDialog):
         # wrong when it does.
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._table, stretch=1)
@@ -221,6 +229,19 @@ class CaptureImportDialog(QDialog):
                 name.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 name.setToolTip(i18n.t("capImportNoUuid"))
             self._table.setItem(index, 3, name)
+
+            # The protective chain, in the row and nothing but the row (user, 2026-09-02: "все в
+            # строчці без форм"). A frequency here IS the statement, and the statement is an LR24
+            # — whoever ran something else opens `Protection`, where both dropdowns live.
+            for column, key in ((4, "hp"), (5, "lp")):
+                cell = QTableWidgetItem(self._legs.get(row.uuid, {}).get(key, ""))
+                if row.identified:
+                    cell.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
+                                  | Qt.ItemFlag.ItemIsSelectable)
+                else:
+                    cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                cell.setToolTip(i18n.t("capImportProtTip"))
+                self._table.setItem(index, column, cell)
         self._table.blockSignals(False)
         self._render_note(len(rows))
 
@@ -259,6 +280,17 @@ class CaptureImportDialog(QDialog):
                 self._ticked.add(uuid)
             else:
                 self._names.pop(uuid, None)
+        elif item.column() in (4, 5):
+            key = "hp" if item.column() == 4 else "lp"
+            typed = item.text().strip()
+            legs = self._legs.setdefault(uuid, {})
+            if typed:
+                legs[key] = typed
+                self._ticked.add(uuid)  # same reason as a name: a record nobody takes in is none
+            else:
+                legs.pop(key, None)
+            if not legs:
+                self._legs.pop(uuid, None)
 
     def _on_give_names(self) -> None:
         """Fill names downwards from the selected row, out of a set the tuner picks.
@@ -308,8 +340,39 @@ class CaptureImportDialog(QDialog):
             self._plan_note = i18n.t("capImportClash").format(names=", ".join(clashes))
             self._render()
             return
+        conflicts = (self.protective(), self.protective_conflicts)[1]
+        if conflicts:
+            self._plan_note = i18n.t("capImportProtClash").format(
+                channels=", ".join(sorted(set(conflicts))))
+            self._render()
+            return
         self.accept()
 
     def taken(self) -> list[capture_import.Candidate]:
         """What the panel should write down once whatever renaming there is has happened."""
         return self.ticked_rows()
+
+    def protective(self) -> dict:
+        """`{channel: legs}` for every ticked row that names a chain — the round's own record.
+
+        Keyed by CHANNEL and not by row, because that is what the record is about: the same channel
+        captured twice with two methods is two rows and one signal path. Two rows that disagree are
+        not silently merged — the first one wins and the second is reported, since a chain that was
+        described two ways is a question for the person, not for a rule.
+        """
+        out: dict[str, dict] = {}
+        self.protective_conflicts = []
+        for row in self.ticked_rows():
+            legs = capture_import.legs_from(*(self._legs.get(row.uuid, {}).get(k, "")
+                                              for k in ("hp", "lp")))
+            if legs is None:
+                continue
+            channel = capture_import.channel_of(
+                row, self._names.get(row.uuid, ""), self._project_dir)
+            if not channel:
+                continue
+            if channel in out and out[channel] != legs:
+                self.protective_conflicts.append(channel)
+                continue
+            out[channel] = legs
+        return out

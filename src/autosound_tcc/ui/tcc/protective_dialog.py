@@ -346,9 +346,35 @@ def channel_codes(view, project_dir: Optional[Path] = None) -> list[str]:
     return codes
 
 
+def round_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
+    """The channels the open capture round is actually about, in the order it expects them.
+
+    This is what the button opens on now that the import table is where a protective filter is
+    ENTERED (`docs/CAPTURE-IMPORT-PLAN.md`): the dialog's job is reviewing and correcting what was
+    written, and the record belongs to a round. Showing the whole rig here would offer rows for
+    channels this pass never touched.
+    """
+    from autosound_tcc.core import capture_import
+    from autosound_tcc.state import process_view
+
+    round_ = process_view.capture_round(project_dir) or {}
+    titles = list(round_.get("expected") or []) + list((round_.get("taken") or {}).keys())
+    codes: list[str] = []
+    for title in titles:
+        code = capture_import.channel_from_title(title, project_dir)
+        if code and code not in codes:
+            codes.append(code)
+    return codes
+
+
 def open_for(project_dir: Path, view, parent=None) -> Optional[ProtectiveDialog]:
-    """Build the dialog for the current rig, or None when there are no channels to ask about."""
-    codes = channel_codes(view, project_dir)
+    """Build the dialog over the open round's channels, or the whole rig when there is no round.
+
+    The fallback is not a formality: a project with no round open is exactly where somebody goes
+    to READ what a past pass recorded, and offering nothing there would be the F-041 symptom
+    again — a button that answers a press with nothing.
+    """
+    codes = round_channel_codes(project_dir) or channel_codes(view, project_dir)
     if not codes:
         return None
     return ProtectiveDialog(project_dir, codes, parent=parent)

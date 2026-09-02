@@ -332,3 +332,43 @@ def test_a_baseline_capture_with_no_record_is_the_one_case_worth_asking_about(tm
 
     assert action == "check"
     assert "m-L" in detail
+
+
+def test_the_button_opens_on_the_round_being_reviewed_not_on_the_whole_rig(tmp_path):
+    """Now that a protective filter is ENTERED in the import table, this dialog is where one is
+    reviewed and corrected — and the record belongs to a round. Offering the whole rig here would
+    put rows in front of the tuner for channels this pass never touched."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.ui.tcc.protective_dialog import open_for, round_channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}, {"code": "tw-L"}])
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("v_001", ["m-L_01 (sw)", "m-R_01 (sw)"])
+
+    assert round_channel_codes(project) == ["m-L", "m-R"]
+
+    QApplication.instance() or QApplication([])
+    dialog = open_for(project, None)
+    assert [row.code for row in dialog._rows] == ["m-L", "m-R"], "tw-L was not in this pass"
+
+
+def test_with_no_round_open_it_still_shows_the_rig_to_read(tmp_path):
+    """A project with no round open is exactly where somebody goes to READ what a past pass
+    recorded. Answering a press with nothing there is the F-041 symptom again."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import open_for, round_channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}])
+
+    assert round_channel_codes(project) == []
+    QApplication.instance() or QApplication([])
+    assert [row.code for row in open_for(project, None)._rows] == ["m-L", "m-R"]

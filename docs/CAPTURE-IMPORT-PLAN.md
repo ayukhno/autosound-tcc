@@ -240,13 +240,27 @@ list only for the rows it already has.)
    them (`core/protective.py`'s docstring and the `protWhy` text) plus the two marks above.
 4. **Listening to the composer row**, shown only in phase 4. **Done 2026-09-02.**
 
-**Where step 3 stands, 2026-09-02.** Its two unambiguous halves are done: TCC's own reading of the
-protective record is corrected (module docstring, `protWhy` in four languages, and a
-`should_de_embed` wrapper so nothing asks `de_embed` cold), and the `LR24` button is in the
-existing dialog. What is left is the COLUMN in the import table, and it waits on purpose: it needs
-a decision nobody has made yet — whether the cell edits in place or opens a small editor, and how a
-row resolves to a channel before it has been named. Guessing either would be building a shape to
-throw away.
+**Step 3 finished 2026-09-02, and the shape of it is the user's answer to the question this note
+left open:** *"все в строчці без форм: імʼя або є, або буде в цій таблиці і якщо є захисний фільтр
+то він на цій строчці і все однозначно."*
+
+So the column is not a cell that opens an editor. It is **two fields in the row — HP Hz and LP Hz
+— and a frequency typed there IS the statement.** The statement is an `LR24`, because nearly every
+protective filter in a measuring chain is one; anyone who ran something else opens `Protection`,
+where both dropdowns live and the `LR24` button now sits beside them.
+
+Which channel a row is about is the same answer: the name it is being given, or the one it already
+has. The grammar reads it, and without the skill installed the plain reading — everything before
+the first `_` — is right for every name the grammar itself would build.
+
+Per CHANNEL, not per row: the same channel captured with two methods is two rows and one signal
+path. Two rows that agree collapse into one record; two rows that DISAGREE are not merged and not
+picked between — Apply stops and names the channel, because a chain described two ways is a
+question for the person.
+
+And the card's `Protection` button is now the review: it opens over the channels of the open
+round (falling back to the rig when no round is open, which is where somebody goes to read what a
+past pass recorded).
 
 ## Risks and what is not yet known
 

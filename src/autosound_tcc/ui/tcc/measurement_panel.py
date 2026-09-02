@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import capture_import, config
+from autosound_tcc.core import capture_import, config, process_writer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import i18n, qt_shutdown
@@ -309,7 +309,10 @@ class MeasurementPanel(QWidget):
         #: and the round they belong to. Held between the dialog closing and the rename returning.
         self._taking: list = []
         self._renaming: list = []
+        self._protective: dict = {}
         self._round_id = ""
+        #: Extra sentences on the status line, kept as keys — see `_add_status`.
+        self._status_extra: list = []
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
         self._settings = get_settings()
@@ -461,13 +464,23 @@ class MeasurementPanel(QWidget):
     def _set_status(self, key: str, **kwargs) -> None:
         """Show a status line, remembering WHICH line it is so `retranslate` can redraw it."""
         self._status = (key, kwargs)
+        self._status_extra = []
+        self._render_status()
+
+    def _add_status(self, key: str, **kwargs) -> None:
+        """A second sentence on the same line — an import says two things at once (what came in,
+        and what was written about the chain), and remembering them as KEYS rather than as text is
+        what keeps a language switch from freezing them mid-sentence."""
+        self._status_extra.append((key, kwargs))
         self._render_status()
 
     def _render_status(self) -> None:
         if self._status is None:
             return
-        key, kwargs = self._status
-        self._status_label.setText(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
+        parts = []
+        for key, kwargs in [self._status, *self._status_extra]:
+            parts.append(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
+        self._status_label.setText(" ".join(parts))
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
@@ -833,6 +846,7 @@ class MeasurementPanel(QWidget):
             return
         self._taking = list(dialog.taken())
         self._renaming = dialog.renames()
+        self._protective = dialog.protective()
         if not self._renaming:
             self._finish_import({})
             return
@@ -859,9 +873,35 @@ class MeasurementPanel(QWidget):
             self._set_status("capImportRenamed", n=written, renamed=len(titles))
         else:
             self._set_status("capImportDone", n=written)
+        self._write_protective()
         # The store changed, so what this project holds changed: the window rebuilds the checklist
         # off it (`main_window._on_rew_titles_changed`).
         self.titlesChanged.emit()
+
+    def _write_protective(self) -> None:
+        """Record what was in the signal path, one channel at a time.
+
+        Independent per channel, unlike the Protection dialog's own save: there the refusals are
+        about legs somebody typed into one form, and writing half of them leaves a record that is
+        half this form and half the last. Here each row is its own statement, and a channel the
+        writer refuses must not silence the six that were fine — it is named, with the gate's own
+        words, and the rest are written.
+        """
+        if not self._protective:
+            return
+        done, refused = [], []
+        for channel, legs in sorted(self._protective.items()):
+            try:
+                process_writer.set_protective(config.project_dir(), channel, legs)
+                done.append(channel)
+            except Exception as exc:  # noqa: BLE001 — the gate's words, not ours
+                lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+                refused.append(i18n.t("capImportProtRefused").format(
+                    channel=channel, why=lines[-1] if lines else str(exc)))
+        if done:
+            self._add_status("capImportProtSaved", channels=", ".join(done))
+        for sentence in refused:
+            self._add_status("capImportProtRefusedLine", line=sentence)
 
     def _on_import_renamed(self, renamed: list) -> None:
         self._finish_import(dict(renamed))

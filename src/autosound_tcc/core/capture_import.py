@@ -345,6 +345,67 @@ def duplicate_targets(pairs: Iterable[tuple[str, str]], measurements: dict) -> l
     return sorted(set(clashes))
 
 
+#: The protective filter a frequency typed into the import table means. The user's own decision
+#: (2026-09-02): the dropdowns are worth having for whoever needs them, but they live in the
+#: `Protection` dialog — in the table a frequency IS the statement, and the statement is an LR24,
+#: because nearly every protective filter in a measuring chain is one.
+QUICK_LEG = {"type": "LR", "slope": 24}
+
+
+def channel_of(row: "Candidate", proposed: str = "", project_dir: Optional[Path] = None) -> str:
+    """Which channel this row is about: from the name it is being GIVEN, or the one it has.
+
+    "Імʼя або є, або буде в цій таблиці" (user, 2026-09-02) — so a row always knows its channel by
+    the time it matters, and a protective filter typed on the row belongs to that channel.
+
+    The grammar answers first, because it is the one that knows `w-L_02 (sw)` and `w-L_2 (sw)` are
+    one channel. Without the skill installed the fallback is the plain reading — everything before
+    the first `_` — which is right for every name the grammar itself would build.
+    """
+    return channel_from_title(str(proposed or row.title or ""), project_dir)
+
+
+def channel_from_title(title: str, project_dir: Optional[Path] = None) -> str:
+    """The channel a REW title names, by the grammar where there is one."""
+    title = str(title or "").strip()
+    if not title:
+        return ""
+    try:
+        from autosound_tcc.core import config as _config, vendor_loader
+
+        naming = vendor_loader.load_naming()
+        glossary = naming.Glossary.for_project(str(project_dir or _config.project_dir()))
+        parsed = naming.parse_name(title, glossary)
+        if parsed and parsed.get("channel"):
+            return str(parsed["channel"])
+    except Exception:  # noqa: BLE001 — no skill, no glossary: read the name as written
+        pass
+    return title.split("_", 1)[0].split(" ", 1)[0].strip()
+
+
+def legs_from(hp_hz: str, lp_hz: str):
+    """The two frequencies as the ledger's crossover vocabulary, or None for "take nothing out".
+
+    None rather than `"OFF"`, and that is the corrected model rather than an omission: an empty
+    cell says "read this curve as measured", which is not the same as claiming the chain was
+    empty. There is nearly always something in it — the DSP's own working crossovers — and they
+    belong there (`core/protective.py`).
+    """
+    legs = {}
+    for kind, raw in (("hp", hp_hz), ("lp", lp_hz)):
+        text = str(raw or "").strip().replace(",", ".")
+        if not text:
+            continue
+        try:
+            value = float(text)
+        except ValueError:
+            # Left as typed: the skill's writer refuses it in its own words, and a window that
+            # quietly repairs what a gate would refuse teaches people to trust the window.
+            value = text
+        legs[kind] = {"f": value, **QUICK_LEG}
+    return legs or None
+
+
 def resolve_ordinals(measurements: dict, uuids: Iterable[str]) -> dict[str, str]:
     """`uuid -> REW's ordinal RIGHT NOW`, from a freshly fetched answer.
 

@@ -288,3 +288,86 @@ def test_rew_holding_nothing_shows_a_line_rather_than_an_empty_table(tmp_path):
 
     assert _titles(dialog) == []
     assert i18n.t("capImportEmpty") in dialog._note.text()
+
+
+# ---- what was in the signal path, typed on the row ------------------------------------------
+
+
+def test_a_frequency_on_the_row_is_the_whole_statement(tmp_path):
+    """User, 2026-09-02: "все в строчці без форм... якщо є захисний фільтр то він на цій строчці і
+    все однозначно". So a frequency IS the statement, and the statement is an LR24 — the dropdowns
+    stay in the Protection dialog for whoever ran something else."""
+    dialog = _dialog(_rew(2), tmp_path, waiting=2)
+    dialog._table.item(0, 3).setText("w-L_02 (sw)")
+
+    dialog._table.item(0, 4).setText("80")
+
+    assert dialog.protective() == {"w-L": {"hp": {"f": 80.0, "type": "LR", "slope": 24}}}
+
+
+def test_both_legs_ride_on_the_same_row(tmp_path):
+    dialog = _dialog(_rew(1), tmp_path, waiting=1)
+    dialog._table.item(0, 3).setText("m-L_02 (sw)")
+
+    dialog._table.item(0, 4).setText("80")
+    dialog._table.item(0, 5).setText("3500")
+
+    assert dialog.protective() == {"m-L": {
+        "hp": {"f": 80.0, "type": "LR", "slope": 24},
+        "lp": {"f": 3500.0, "type": "LR", "slope": 24},
+    }}
+
+
+def test_an_empty_pair_of_cells_says_nothing_at_all(tmp_path):
+    """Empty means "read this curve as measured" — not a claim that the chain was empty. There is
+    nearly always something in it, the DSP's own working crossovers, and they belong there."""
+    dialog = _dialog(_rew(3), tmp_path, waiting=3)
+
+    assert dialog.protective() == {}
+
+
+def test_the_channel_comes_from_the_name_the_row_is_being_given(tmp_path):
+    """"Імʼя або є, або буде в цій таблиці" — so the row knows its channel by the time it matters."""
+    answer = _rew(1)
+    answer["1"]["title"] = "tw-R_02 (sw)"  # already named in REW
+    dialog = _dialog(answer, tmp_path, waiting=1)
+
+    dialog._table.item(0, 4).setText("2500")
+
+    assert list(dialog.protective()) == ["tw-R"]
+
+
+def test_typing_a_filter_takes_the_row_with_it(tmp_path):
+    dialog = _dialog(_rew(12), tmp_path, waiting=1)
+    uuid = dialog._table.item(0, 0).data(cid_uuid())
+    assert uuid not in dialog._ticked
+
+    dialog._table.item(0, 4).setText("80")
+
+    assert uuid in dialog._ticked
+
+
+def test_one_channel_described_two_ways_is_a_question_not_a_merge(tmp_path):
+    """The same channel captured with two methods is two rows and one signal path. Two rows that
+    disagree are not silently merged — that is a question for the person."""
+    dialog = _dialog(_rew(2), tmp_path, waiting=2)
+    dialog._table.item(0, 3).setText("w-L_02 (sw)")
+    dialog._table.item(1, 3).setText("w-L_02 (rta)")
+    dialog._table.item(0, 4).setText("80")
+    dialog._table.item(1, 4).setText("100")
+
+    dialog._on_apply()
+
+    assert dialog.result() != int(dialog.DialogCode.Accepted), "nothing left the dialog"
+    assert "w-L" in dialog._note.text()
+
+
+def test_the_same_chain_on_two_rows_of_one_channel_is_fine(tmp_path):
+    dialog = _dialog(_rew(2), tmp_path, waiting=2)
+    dialog._table.item(0, 3).setText("w-L_02 (sw)")
+    dialog._table.item(1, 3).setText("w-L_02 (rta)")
+    dialog._table.item(0, 4).setText("80")
+    dialog._table.item(1, 4).setText("80")
+
+    assert list(dialog.protective()) == ["w-L"]
+    assert dialog.protective_conflicts == []

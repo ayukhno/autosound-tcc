@@ -111,6 +111,9 @@ def test_read_offers_the_list_instead_of_folding_it_into_the_card(tmp_path, monk
         def renames(self):
             return []
 
+        def protective(self):
+            return {}
+
     monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
     panel._on_import_offer({"1": {"title": "somebody-elses_99 (sw)", "uuid": "z",
                                   "date": "2026-Aug-25 20:11:31"}})
