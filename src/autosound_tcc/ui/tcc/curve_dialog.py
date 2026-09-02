@@ -76,8 +76,8 @@ def _is_rta(title: str) -> bool:
 
     Matched anywhere in the title rather than only at the end, because an experiment in flight
     tags the name AFTER the method suffix ("w-L_2 (rta) INV") — the same trailing "extra" the
-    measurement panel's `_classify_title` already allows for — and a tagged capture is still an
-    MMM one with no impulse in it.
+    naming grammar already allows for (`state/measurement_view._extras`) — and a tagged capture is
+    still an MMM one with no impulse in it.
     """
     return _RTA_SUFFIX in str(title).casefold()
 

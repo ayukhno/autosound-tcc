@@ -220,7 +220,14 @@ list only for the rows it already has.)
 1. **The imported store and the dialog's list.** ⤓ opens a dialog that lists REW's measurements by
    date with the "unprocessed only" filter and +10; Apply marks the checklist and records the
    uuids. No renaming, no protection yet. **This is the step that stops the card growing**, so it
-   goes first.
+   goes first. **Done 2026-09-02.** Two things came out different from this note, and both are in
+   the code's own comments: the pre-tick is the round's own count and NOT the whole window (the
+   window is deliberately wider, and the extra rows are context — ticking them would take
+   measurements into a round nobody captured them for); and `known_titles()` is the UNION of the
+   store and what REW showed this session rather than the store alone, so an existing project does
+   not read as uncaptured on the first launch after the update. What the tick decides is what this
+   project has taken IN; what REW holds stays a separate fact, and the plan audit and the curve
+   window's title list both ask for that one.
 2. **The rename column and "Give names"**, moving the ⇅ button's flow into the dialog.
 3. **The protection column**, and the card's button turned into review-and-correct. Nothing waits
    on the method: the semantics are already the method's, and what changes is TCC's own reading of
