@@ -249,3 +249,122 @@ list only for the rows it already has.)
 - **The shape of the checklist grid itself** (a row per channel with a dot per method, instead of a
   column per method). Named on 2026-09-02 as a separate question and left open — this note is about
   what gets INTO the card, not how the card is laid out.
+
+---
+
+# Implementation plan
+
+Written 2026-09-02 against `tcc@076e555`, after reading the seams the change goes through. The
+design above says WHAT; this says WHERE in the code, WHAT gets retired, and HOW each step proves
+itself. Each step lands as its own commit set with the full suite green, and step 1 is a patch on
+its own.
+
+## Four seams, and what happens at each
+
+| seam | today | after |
+|---|---|---|
+| **"captured" in the checklist** | `measurement_view.build_session(phase, version, titles)` — `titles` is `panel.known_titles()`, i.e. what REW showed THIS SESSION | `known_titles()` = titles recorded in the imported store **∪** what REW showed. The checklist stays true with REW closed, or filtered |
+| **⤓ Read** | `_on_read_done` folds every REW title into the grid; unmatched ones become "additional" rows | ⤓ opens the import dialog. Nothing is folded in without a tick |
+| **⇅ Give names** | `_on_scan_done`: "the `expected` highest ordinals are the newest batch" — the heuristic the measurements above disprove | the dialog's rows, ordered by `date`, resolved to ordinals by `uuid` **at rename time** |
+| **rename itself** | `_RewRenameWorker`: pairs `(ordinal, title)`, one call each, stops at the first refusal, reports how far it got | kept as is — it already does exactly what the design asks. The pairs are built later and better |
+
+## Modules
+
+- **`core/capture_import.py` — new, no Qt.** The imported store (`.tcc/imported-measurements.json`,
+  schema `{"schema": 1, "measurements": {uuid: {title, round, when, date}}}`), the tolerant `date`
+  parser, the window ("as many as are waiting, +10 backwards"), the "unprocessed only" filter, the
+  uuid→ordinal resolve against a fresh `measurements()` answer, and the two sequence checks
+  (re-take out of order; imported-but-not-shown count). Everything the dialog decides lives here and
+  is tested without a window.
+- **`ui/tcc/capture_import_dialog.py` — new.** The table and its four controls. Owns no logic that
+  `capture_import` could own.
+- **`ui/tcc/protective_legs.py` — new, extracted.** The leg editor now inside
+  `protective_dialog._ChannelRow` (frequency, type, slope ×2) plus the `LR24` button, so the
+  import table and the review dialog show the same widget.
+- **Changed:** `measurement_panel.py` (⤓ and ⇅ rewired, "additional" rows and the fold retired,
+  `known_titles` union), `main_window.py` (wiring; listening visibility), `dialog_panel.py`
+  (listening button), `protective_dialog.py` (review mode), `core/protective.py` (docstring;
+  `should_de_embed` wrapper), `i18n.py` (strings ×4).
+
+## Step 1 — the store and the list (the patch that stops the card growing)
+
+**Build:** `capture_import` (store, parser, window, filter); the dialog with columns ☑ · REW title ·
+when, the checkbox, `+10`, Apply; ⤓ opens it. Apply records the ticked uuids and marks the
+checklist through the `known_titles` union → `titlesChanged`. The footer line under the list:
+"showing what REW is showing now" + the imported-but-not-shown count when it is non-zero.
+
+**Retire:** `_add_dynamic_row`, `_additional_titles`, the `measReadOk` "matched/extra" line, and the
+fold in `_on_read_done`. `_RewReadWorker` stays as the fetcher the dialog uses.
+
+**Tests — new:** store round-trip and per-project scope; the parser on `2026-Jun-22 12:10:35`, on a
+non-English month (falls back, keeps REW order, says so), on garbage; the window at 3 waiting / 0
+waiting / fewer measurements than N; the filter hiding imported uuids and the checkbox showing
+them again; Apply → store written, `titlesChanged` emitted, checklist row turns done **with REW
+returning nothing** (the closed-REW case, which is the point of the union).
+**Tests — retired:** the seven `test_read_done_*`, `test_second_read_does_not_duplicate_additional_rows`,
+`test_read_on_a_phase_with_no_columns_does_not_blow_up` (its concern moves into the dialog: a round
+with no expected rows still lists, and says the phase expects nothing).
+
+**Proves itself when:** on the 102-measurement file the card holds only the round's rows, and the
+dialog opens on ≤ N rows where N is what the round is waiting for.
+
+## Step 2 — names
+
+**Build:** the *new name* column; **"Give names"** = `ChannelOrderDialog` opened from the selected
+row, filling downwards; the re-take mark (date order ≠ fill order — a badge on the row, never a
+block, per the user's rule); the duplicate guard (proposed titles checked against REW's current
+titles AND against each other before anything is sent); Apply renames through `_RewRenameWorker`
+with pairs resolved **inside the worker** from a fresh `measurements()` — the shortest possible
+window between resolve and rename. A refused rename is written on its row; the rows before it stay
+done, the rows after it stay pending.
+
+**Retire:** the ⇅ button on the card, `_scan_and_match`, `_on_scan_done`'s ordinal heuristic,
+`_pending_order`. The saved-order settings key (`ui/capture_order/<preset>/<method>`) is kept and
+still seeds the order dialog.
+
+**Tests — new:** fill-downwards from row k; the mark on an out-of-order date; refuse a duplicate
+target (both kinds); **the reshuffle test** — a fake bridge whose ordinals change between the list
+call and the rename call, and the right measurement is still renamed because the pair was resolved
+by uuid at rename time; a refusal mid-batch leaves exactly the rows before it renamed.
+**Tests — retired:** `test_scan_match_*` (2), `test_rename_done_and_failed_update_status_label`.
+
+## Step 3 — protection
+
+**Build:** `protective_legs` extracted, with `LR24`; the column in the table (per channel, mirrored
+across that channel's rows); Apply writes `process_writer.set_protective` **only for filled rows** —
+an empty cell writes nothing, by the corrected model; the baseline mark ("baseline, not marked —
+was protection in force?") on empty rows when the round is a baseline one; the card's button opens
+`protective_dialog` in **review mode** over the channels the round has (`capture.expected` parsed to
+codes) — which also closes F-041's open half. `core/protective.py`: docstring rewritten to the
+method's own model, `should_de_embed` wrapped for the curve window to use later; `protWhy` rewritten
+in four languages.
+
+**Tests:** `LR24` fills type and slope; mirroring across two rows of one channel; empty writes
+nothing and `record_for` shows no entry; the baseline mark appears on a phase-0 round and not on a
+later one; review mode lists the round's channels and nothing else; the four `protWhy` strings no
+longer say "nothing will be corrected for it".
+
+## Step 4 — listening
+
+**Build:** `DialogPanel.set_listening_available(bool)` + a button beside the attach button, hidden
+by default; `main_window._refresh_capture_task` flips it on `active_phase == "4"` and wires it to
+`_open_listening`; the card's button and `listeningRequested` go.
+
+**Tests:** hidden in phases −1..3, shown in 4; the click opens the same dialog `_open_listening`
+did.
+
+## Order, and what ships when
+
+1 → 2 → 3 → 4. Step 1 alone is a release-worthy patch (it is the fix for the 1864-px card); 2 and 3
+ship together (both are columns of the same table); 4 is small and rides with whichever comes next.
+Each step: its own commits, full suite green, TODO/plan updated in the same commit set.
+
+## Still open until a machine answers
+
+- **`date` on a Ukrainian Windows.** The parser logs the raw string when it cannot read it, so the
+  first failure on that machine tells us the format instead of just falling back.
+- **What `baseline` means to `should_de_embed`.** Phase 0 → `True` is the obvious source; whether a
+  later phase's `_N` re-baseline should count is the method's call. Step 3 passes phase-0 only and
+  says so in the mark's text.
+- **The REW filter.** Known and unfixable from here; the dialog says what it shows and counts what
+  it cannot see.
