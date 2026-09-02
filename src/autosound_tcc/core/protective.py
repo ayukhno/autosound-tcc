@@ -16,11 +16,23 @@ is the two things a window needs and a library cannot answer:
 * **turning a measurement into what the maths takes and back**: REW gives magnitude in dB and phase
   in degrees, the correction works on a complex response.
 
-**`None` is not `"OFF"`, and this module never lets them collapse.** A channel with no record is an
-unanswered question and `de_embed` REFUSES it -- a correction over an unknown chain produces data
-that looks corrected. A channel recorded as `"OFF"` is a measured fact that nothing was in the
-chain, and comes back unchanged. Both of those are the method's rules; what this module adds is
-making sure the window can tell the two apart when it decides what to draw and what to say.
+**What the record IS, corrected 2026-09-02.** This module used to say a channel with no record was
+an unanswered question, and that `de_embed` refuses it because a correction over an unknown chain
+produces data that looks corrected. That was our reading, not the method's, and it was wrong at the
+root: it treated the record as a DESCRIPTION of the measuring chain. There is nearly always
+something in that chain — the DSP's own working crossovers, which belong there and must not be
+taken out — so "no record" cannot mean "nothing was in it".
+
+The record is an INSTRUCTION to the analysis. Empty: process the curve as measured, take nothing
+out. Filled: take these out first. The method already says exactly this, in
+`rew_tool/protective.should_de_embed`, whose default answer is `("no", ...)` — in its own words,
+"a working capture: it measured the system as configured, so whatever filters were in it belong
+there. This is the DEFAULT and it is an answer, not a shrug." `de_embed` does raise on `None`, but
+its own message says the caller should have asked `should_de_embed` first.
+
+The one case the method still wants a person for is `("check", ...)`: a BASELINE capture — taken
+before any crossover was designed — carrying no record. Filters in force during a baseline sweep
+are protection almost by definition, and that is the single place a forgotten flag is recoverable.
 
 ⚠️ **Not for verifying a finished tune.** There the filter is supposed to be in the chain, and
 removing it measures something nobody configured. De-embedding belongs to reading a driver's own
@@ -150,13 +162,30 @@ def default_corrected(record: Optional[dict]) -> Optional[bool]:
 
 
 def legs_of(record: Optional[dict], channel: str):
-    """The `{hp, lp}` in force for one channel, or None when NOBODY SAID.
+    """The `{hp, lp}` to take out of this channel's curve, or None for "take nothing out".
 
-    Straight through to the method, including the distinction the whole feature turns on: None is
-    an unanswered question, `{"hp": "OFF", "lp": "OFF"}` is a recorded fact that the chain was
-    clean.
+    Straight through to the method. `{"hp": "OFF", "lp": "OFF"}` is the same instruction spelled
+    explicitly, and older records use it; both mean the curve is analysed as measured.
     """
     return _module().legs_of(record, channel)
+
+
+def should_de_embed(record: Optional[dict], channel: str, *, baseline: bool = False):
+    """`("no"|"yes"|"check", detail)` — the method's own decision, asked instead of guessed.
+
+    This is the call `de_embed`'s error message points at, and the reason nothing in TCC should ask
+    `de_embed` cold: `"no"` is the default and is an answer, not a shrug. `"check"` is the one that
+    needs a person — a baseline capture with no record — and the caller passes `baseline` because
+    only it knows which phase the round belongs to; this module deliberately does not go looking.
+
+    Degrades to `("no", reason)` when the skill is not installed: with no maths to take anything
+    out with, "as measured" is the only thing that can honestly be drawn.
+    """
+    try:
+        module = _module()
+    except ProtectiveUnavailable as exc:
+        return "no", str(exc)
+    return module.should_de_embed(record, channel, baseline=baseline)
 
 
 def matters_at(legs, freq_hz: float) -> bool:

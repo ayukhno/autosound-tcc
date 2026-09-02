@@ -3086,3 +3086,27 @@ def test_the_first_ledger_snapshot_is_watched_for_before_state_exists(tmp_path, 
     watched = window._watched_project_dirs()
     assert str(ledger) in watched and str(ledger / "FULL") in watched
     assert window._preset_combo.currentData() == "FULL"
+
+
+def test_the_ear_button_follows_the_active_phase(tmp_path, monkeypatch):
+    """One place decides it: the process state's own `active_phase`. Phase 4 is the ear's
+    (`core/listening.py`), and in every other phase the button is not there to be looked past."""
+    from autosound_tcc.state import process_view
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(process_view, "capture_round", lambda *_a, **_k: None)
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    window._refresh_capture_task({"active_phase": "0"})
+    assert window._dialog._listen_btn.isHidden()
+
+    window._refresh_capture_task({"active_phase": "4"})
+    assert not window._dialog._listen_btn.isHidden()
+
+    window._refresh_capture_task({"active_phase": "-1"})
+    assert window._dialog._listen_btn.isHidden()

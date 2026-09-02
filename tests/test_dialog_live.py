@@ -1309,3 +1309,25 @@ def test_copying_a_message_gives_back_the_table_and_not_a_column_of_cells(tmp_pa
 
     assert "| Ws | 116° | у межах одного оберту |" in copied, "the row survives as a row"
     assert copied.count("\n") < written.count("\n") + 2, "and not one line per cell"
+
+
+def test_the_ear_gets_a_button_in_the_composer_and_only_in_its_own_phase(tmp_path):
+    """User, 2026-09-02: "кнопка «Слухання» іде до рядка діалога біля загрузки фото і зʼявляється
+    тільки в фазі коли йде прослуховування".
+
+    It used to sit on the capture card permanently — a card about sweeps, carrying a button for a
+    thing that happens with a track playing, in one phase out of six."""
+    panel = DialogPanel()
+    assert panel._listen_btn.isHidden()
+
+    panel.set_listening_available(True)
+    assert not panel._listen_btn.isHidden()
+    assert panel._listen_btn.text() == i18n.t("lsnBtn")
+
+    asked = []
+    panel.listeningRequested.connect(lambda: asked.append(True))
+    panel._listen_btn.click()
+    assert asked == [True], "the panel asks; the window owns the dialog"
+
+    panel.set_listening_available(False)
+    assert panel._listen_btn.isHidden()

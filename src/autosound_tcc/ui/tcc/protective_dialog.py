@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import process_writer, protective
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import mini_combo
 
 #: The ledger's own crossover vocabulary. Not read from the DSP profile on purpose: a protective
@@ -50,6 +51,12 @@ from autosound_tcc.ui.tcc.theme import mini_combo
 #: to is the wrong constraint here.
 TYPES = ("LR", "BW", "BE", "CH")
 SLOPES = (6, 12, 18, 24, 30, 36, 42, 48)
+
+#: What the one-press button fills in. Linkwitz-Riley 24 dB/oct: the protective filter nearly
+#: every measuring chain actually carries, and the one a tuner would otherwise pick out of two
+#: dropdowns for every channel of every round.
+QUICK_TYPE, QUICK_SLOPE = "LR", 24
+QUICK_LABEL = f"{QUICK_TYPE}{QUICK_SLOPE}"
 
 #: What a channel row says about itself. Three states, because there are three answers.
 STATE_UNSET = "unset"
@@ -75,8 +82,10 @@ class _ChannelRow:
         self.state.currentIndexChanged.connect(self._sync)
         grid.addWidget(self.state, row, 1)
 
-        self.hp_f, self.hp_type, self.hp_slope = self._leg_widgets(grid, row, 2, "protHp")
-        self.lp_f, self.lp_type, self.lp_slope = self._leg_widgets(grid, row, 5, "protLp")
+        self.hp_f, self.hp_type, self.hp_slope, self.hp_quick = self._leg_widgets(
+            grid, row, 2, "protHp")
+        self.lp_f, self.lp_type, self.lp_slope, self.lp_quick = self._leg_widgets(
+            grid, row, 6, "protLp")
 
         self._fill_from(legs)
         self._sync()
@@ -96,7 +105,29 @@ class _ChannelRow:
         for value in SLOPES:
             slope.addItem(str(value), value)
         grid.addWidget(slope, row, col + 2)
-        return freq, kind, slope
+        # The one press that covers the ordinary case (user, 2026-09-02: "додати маленьку кнопочку
+        # по нажаттю якої фільтр стає LR24"). Two combos are the honest surface — a protective
+        # filter can be anything that was in the chain — but nearly every one of them is an LR24,
+        # and choosing it twice per channel is a toll on the common path.
+        #
+        # It also removes a real trap: the skill's writer refuses a leg with a frequency and no
+        # type or slope, so "type 80 and press Record" is a refusal today. This is the fix for it.
+        quick = QPushButton(QUICK_LABEL)
+        quick.setProperty("class", "reason-btn")
+        quick.setCursor(Qt.CursorShape.PointingHandCursor)
+        quick.setFixedWidth(46)
+        attach_tip(quick, i18n.t("protQuickTip"))
+        quick.clicked.connect(lambda: self._quick_fill(kind, slope))
+        grid.addWidget(quick, row, col + 3)
+        return freq, kind, slope, quick
+
+    def _quick_fill(self, kind: QComboBox, slope: QComboBox) -> None:
+        """LR24 into this leg, and the row into "filters" — a press on a disabled row otherwise
+        fills boxes nobody can see and answers `None`."""
+        if self.state.currentData() != STATE_FILTER:
+            self.state.setCurrentIndex(self.state.findData(STATE_FILTER))
+        kind.setCurrentIndex(max(0, kind.findData(QUICK_TYPE)))
+        slope.setCurrentIndex(max(0, slope.findData(QUICK_SLOPE)))
 
     def _fill_from(self, legs) -> None:
         """Show what the round already says about this channel, unchanged."""
@@ -125,6 +156,9 @@ class _ChannelRow:
         for widget in (self.hp_f, self.hp_type, self.hp_slope,
                        self.lp_f, self.lp_type, self.lp_slope):
             widget.setEnabled(editing)
+        # The LR24 buttons stay live in every state: pressing one IS the statement that this
+        # channel had a filter, and a button that only works once you have already said so is a
+        # button for a thing you no longer need.
 
     def _leg(self, freq: QLineEdit, typ: QComboBox, slope: QComboBox):
         """One leg as the ledger states it, or None when the row is empty.

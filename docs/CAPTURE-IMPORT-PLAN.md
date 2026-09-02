@@ -238,7 +238,15 @@ list only for the rows it already has.)
 3. **The protection column**, and the card's button turned into review-and-correct. Nothing waits
    on the method: the semantics are already the method's, and what changes is TCC's own reading of
    them (`core/protective.py`'s docstring and the `protWhy` text) plus the two marks above.
-4. **Listening to the composer row**, shown only in phase 4.
+4. **Listening to the composer row**, shown only in phase 4. **Done 2026-09-02.**
+
+**Where step 3 stands, 2026-09-02.** Its two unambiguous halves are done: TCC's own reading of the
+protective record is corrected (module docstring, `protWhy` in four languages, and a
+`should_de_embed` wrapper so nothing asks `de_embed` cold), and the `LR24` button is in the
+existing dialog. What is left is the COLUMN in the import table, and it waits on purpose: it needs
+a decision nobody has made yet — whether the cell edits in place or opens a small editor, and how a
+row resolves to a channel before it has been named. Guessing either would be building a shape to
+throw away.
 
 ## Risks and what is not yet known
 

@@ -171,6 +171,11 @@ class DialogPanel(QWidget):
     arbiterAnswered = Signal(str, str)
     # Typing into the composer with no session running is a request to start one -- see `_on_send`.
     startRequested = Signal(str)
+    #: The ear's own button, beside the one that attaches a screenshot. It lives HERE and not on
+    #: the capture card because listening is not a capture: it happens while a track plays and the
+    #: sentence about it is written to the model in this very composer (user, 2026-09-02). The
+    #: panel does not own the dialog — MainWindow does, as with every other writer.
+    listeningRequested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -417,6 +422,17 @@ class DialogPanel(QWidget):
         self._attach_btn.clicked.connect(self._on_attach_image)
         composer_layout.addWidget(self._attach_btn)
 
+        # Hidden until the phase that is about listening. A permanent button for a thing you do in
+        # one phase out of six is a button people learn to look past — and it used to sit on the
+        # capture card, which is a card about sweeps.
+        self._listen_btn = QPushButton(i18n.t("lsnBtn"))
+        self._listen_btn.setProperty("class", "reason-btn")
+        self._listen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._listen_tip = attach_tip(self._listen_btn, i18n.t("lsnBtnTip"))
+        self._listen_btn.clicked.connect(self.listeningRequested.emit)
+        self._listen_btn.setHidden(True)
+        composer_layout.addWidget(self._listen_btn)
+
         self._send_btn = QPushButton(i18n.t("send"))
         self._send_btn.setProperty("class", "composer-send")
         self._send_btn.clicked.connect(self._on_send)
@@ -433,6 +449,10 @@ class DialogPanel(QWidget):
         self._stop_btn.setHidden(True)
         composer_layout.addWidget(self._stop_btn)
         outer.addWidget(composer)
+
+    def set_listening_available(self, available: bool) -> None:
+        """Show the ear's button, or take it away. Driven by the active phase, not by a setting."""
+        self._listen_btn.setHidden(not available)
 
     def put_in_composer(self, text: str) -> None:
         """Append a line to the composer without sending it. Used by anything that produces a
@@ -480,6 +500,8 @@ class DialogPanel(QWidget):
         self._new_below_btn.setToolTip(i18n.t("newBelowTip"))
         self._show_new_below()  # a no-op unless it is up; then the count line follows the language
         self._send_btn.setText(i18n.t("send"))
+        self._listen_btn.setText(i18n.t("lsnBtn"))
+        self._listen_tip.set_text(i18n.t("lsnBtnTip"))
         self._stop_btn.setText(i18n.t("stop"))
         self._not_visible_btn.setText("👁 " + i18n.t("notVisible"))
         self._not_visible_btn.setToolTip(i18n.t("notVisibleHint"))

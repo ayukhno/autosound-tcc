@@ -264,3 +264,71 @@ def test_the_gate_refuses_a_half_given_leg_and_the_dialog_shows_its_words(tmp_pa
     assert "m-L" in said and "f type slope" in said, said
     assert "Traceback" not in said, "the gate's sentence, not the CLI's wrapper"
 
+
+def test_one_press_makes_the_leg_the_filter_it_almost_always_is(tmp_path):
+    """User, 2026-09-02: "додати маленьку кнопочку по нажаттю якої фільтр стає LR24". Two dropdowns
+    are the honest surface — a protective filter can be whatever was in the chain — but nearly
+    every one of them is an LR24, and choosing it twice per channel is a toll on the common path.
+
+    It also removes a real trap: the skill's writer refuses a leg with a frequency and no type or
+    slope, so "type 80 and press Record" was a refusal."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, STATE_UNSET, ProtectiveDialog
+
+    project = _round(tmp_path)
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L"])
+    row = dialog._rows[0]
+    assert row.state.currentData() == STATE_UNSET
+
+    row.hp_quick.click()
+
+    assert row.state.currentData() == STATE_FILTER, "a press is the statement that there was one"
+    assert (row.hp_type.currentData(), row.hp_slope.currentData()) == ("LR", 24)
+    row.hp_f.setText("80")
+    assert row.answer() == {"hp": {"f": 80.0, "type": "LR", "slope": 24}}
+
+
+def test_the_quick_button_works_before_the_row_has_been_switched_on(tmp_path):
+    """A button that only works once you have already said "filters" is a button for a thing you
+    no longer need."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
+
+    project = _round(tmp_path)
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L"])
+    row = dialog._rows[0]
+
+    assert row.hp_quick.isEnabled() and row.lp_quick.isEnabled()
+    assert not row.hp_f.isEnabled(), "the fields themselves are still off until it is pressed"
+
+
+def test_the_method_decides_whether_to_de_embed_and_its_default_is_no(tmp_path):
+    """Corrected 2026-09-02. TCC used to read "no record" as an unanswered question and refuse.
+    That was our reading: the record is an INSTRUCTION to the analysis, not a description of the
+    chain — there is nearly always something in the chain, the DSP's own working crossovers, and
+    they belong there. The method's own default says so."""
+    from autosound_tcc.core import protective as core
+
+    assert core.should_de_embed(None, "m-L")[0] == "no"
+    assert core.should_de_embed({"channels": {}}, "m-L")[0] == "no"
+
+
+def test_a_baseline_capture_with_no_record_is_the_one_case_worth_asking_about(tmp_path):
+    """Filters in force during a baseline sweep — taken before any crossover was designed — are
+    protection almost by definition, and that is the single place a forgotten flag is recoverable."""
+    from autosound_tcc.core import protective as core
+
+    action, detail = core.should_de_embed({"channels": {}}, "m-L", baseline=True)
+
+    assert action == "check"
+    assert "m-L" in detail

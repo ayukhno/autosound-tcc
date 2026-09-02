@@ -117,6 +117,10 @@ from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
+#: The phase the ear works in — `core/listening.py`: "Phase 4 is the ear's phase: play a track,
+#: decide whether one thing about the sound is right or wrong, write it down." A string because
+#: that is what `process-state.json` carries, and phase `-1` exists.
+_LISTENING_PHASE = "4"
 #: How little of the plan card the capture card below it may leave. About five rows — enough to
 #: read which phase is open and what the current step is, which is the whole reason it is on
 #: screen while a round is being captured.
@@ -2273,6 +2277,9 @@ class MainWindow(QMainWindow):
         dialog_layout = QVBoxLayout(self._dialog_frame)
         dialog_layout.setContentsMargins(0, 0, 0, 0)
         self._dialog = DialogPanel()
+        # The ear's button lives in the composer now, and only in the phase that is about
+        # listening — `_refresh_capture_task` turns it on and off from the process state.
+        self._dialog.listeningRequested.connect(self._open_listening)
         self._dialog.startRequested.connect(self._on_dialog_start_requested)
         self._dialog.turnFinished.connect(self._supervise_turn)
         self._dialog.arbiterAnswered.connect(self._record_decision)
@@ -2367,7 +2374,6 @@ class MainWindow(QMainWindow):
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
         self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
         self._meas_panel.protectiveRequested.connect(self._open_protective)
-        self._meas_panel.listeningRequested.connect(self._open_listening)
 
         return container
 
@@ -2885,6 +2891,11 @@ class MainWindow(QMainWindow):
         redraw a checklist is how a window stops responding while the car is running.
         """
         phase = state.get("active_phase")
+        # The ear's phase, and the one place this window decides it. Off in every other phase:
+        # a permanent button for a thing you do in one phase out of six is a button people learn
+        # to look past (user, 2026-09-02 — it used to sit on the capture card, which is a card
+        # about sweeps).
+        self._dialog.set_listening_available(str(phase) == _LISTENING_PHASE)
         if not phase:
             return
         titles = getattr(self._meas_panel, "known_titles", lambda: [])()

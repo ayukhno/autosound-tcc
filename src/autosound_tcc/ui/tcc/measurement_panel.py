@@ -287,9 +287,6 @@ class MeasurementPanel(QWidget):
     #: The header's "Protection" button. The panel does not own the dialog: it has neither the
     #: project's channel list nor the writer, and both live where the window already keeps them.
     protectiveRequested = Signal()
-    #: The header's "Listening" button (Phase 4). Same reason as the one above: the panel has
-    #: neither the method's vocabulary nor the writer.
-    listeningRequested = Signal()
     #: The grid switched to another capture series. The curve window listens: its delay bank is
     #: scoped by series, and a window left open while the panel moves would keep showing the
     #: corrections of a series nobody is looking at any more (user, 2026-08-12).
@@ -412,14 +409,6 @@ class MeasurementPanel(QWidget):
         self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
         self._protective_btn.clicked.connect(self.protectiveRequested.emit)
         facts_row.addWidget(self._protective_btn)
-
-        # What the EAR says about the state now in the car (Phase 4).
-        self._listening_btn = QPushButton(i18n.t("lsnBtn"))
-        self._listening_btn.setProperty("class", "reason-btn")
-        self._listening_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._listening_tip = attach_tip(self._listening_btn, i18n.t("lsnBtnTip"))
-        self._listening_btn.clicked.connect(self.listeningRequested.emit)
-        facts_row.addWidget(self._listening_btn)
 
         facts_row.addStretch(1)
         layout.addLayout(facts_row)
@@ -654,7 +643,7 @@ class MeasurementPanel(QWidget):
         wider neighbour in other rows), so this runs again after every language change rather than
         once at build time.
         """
-        for button in (self._protective_btn, self._listening_btn):
+        for button in (self._protective_btn,):
             button.setMinimumWidth(button.fontMetrics().horizontalAdvance(button.text()) + 34)
 
     def retranslate(self) -> None:
@@ -683,8 +672,6 @@ class MeasurementPanel(QWidget):
         # icon buttons above only need their tip re-set.
         self._protective_btn.setText(i18n.t("protBtn"))
         self._protective_tip.set_text(i18n.t("protBtnTip"))
-        self._listening_btn.setText(i18n.t("lsnBtn"))
-        self._listening_tip.set_text(i18n.t("lsnBtnTip"))
         self._fit_fact_buttons()
 
     # ---- capture-order (item 9) ---------------------------------------------
