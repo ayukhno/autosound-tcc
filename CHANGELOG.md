@@ -6,6 +6,31 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.30] — 2026-09-02 · the protective filter goes on the row it belongs to
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The method has not moved since v0.1.25; everything below is TCC's own.
+
+### Added
+
+- **Two more columns in the import list — HP Hz and LP Hz — and a frequency typed there is the
+  whole statement.** It means an `LR24`, because nearly every protective filter in a measuring
+  chain is one; anyone who ran something else opens **Protection**, where both dropdowns live and
+  the `LR24` button now sits beside them. No sub-form, no cell that opens an editor: the name and
+  the chain are on the same row as the measurement they describe.
+
+  The record is kept per CHANNEL, not per row — the same channel captured with two methods is two
+  rows and one signal path. Two rows that agree collapse into one record; two that disagree stop
+  Apply and name the channel, because a chain described two ways is a question for a person.
+  Leaving the cells empty writes nothing, which means "read this curve as measured" and is not a
+  claim that the chain was empty.
+
+### Changed
+
+- **The card's "Protection" button is now the review.** Entering a filter happens in the import
+  list; this opens over the channels of the open capture round — falling back to the whole rig when
+  no round is open, which is where somebody goes to read what a past pass recorded.
+
 ## [v0.1.29] — 2026-09-02 · reading REW becomes a choice instead of a flood
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
