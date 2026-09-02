@@ -229,6 +229,12 @@ list only for the rows it already has.)
    project has taken IN; what REW holds stays a separate fact, and the plan audit and the curve
    window's title list both ask for that one.
 2. **The rename column and "Give names"**, moving the ⇅ button's flow into the dialog.
+   **Done 2026-09-02.** One thing came out sharper than this note had it: the guard against a
+   re-take is not the date column but the COUNT. A re-take is later, so the list stays in perfect
+   capture order and the dates reveal nothing; what reveals it is three measurements taking two
+   names. `plan_renames` reports both ends of that (`leftover`, `unnamed`) and the dialog says it
+   before anything is sent. The date mark survives for the other case — the list falling back to
+   REW's own order when a date could not be read.
 3. **The protection column**, and the card's button turned into review-and-correct. Nothing waits
    on the method: the semantics are already the method's, and what changes is TCC's own reading of
    them (`core/protective.py`'s docstring and the `protWhy` text) plus the two marks above.

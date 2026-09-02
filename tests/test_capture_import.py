@@ -229,3 +229,87 @@ def test_ordinals_are_resolved_from_a_fresh_answer_because_a_hand_can_move_them(
 
     assert now == {"76bc75cf": "2", "702253b5": "1"}
     assert ci.resolve_ordinals(after_the_swap, ["gone"]) == {}, "deleted since: no pair, no rename"
+
+
+# ---- laying names onto measurements -------------------------------------------------------
+
+
+def test_names_are_laid_down_from_the_row_the_tuner_picked(tmp_path):
+    """The user's own description of the flow (2026-09-02): "я стаю в перший замір, нажимаю кнопку
+    «Дати назву»". Downwards from a row a person chose, not onto "the newest N" — they know which
+    measurement starts the batch, and a heuristic does not."""
+    rows = ci.candidates(_rew(("old", "u0", "2026-Aug-25 20:00:00"),
+                              ("Measurement 1", "u1", "2026-Aug-25 20:10:00"),
+                              ("Measurement 2", "u2", "2026-Aug-25 20:10:10")), tmp_path)
+
+    plan = ci.plan_renames(rows, ["w-L_02 (sw)", "w-R_02 (sw)"], start=1)
+
+    assert plan.pairs == (("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)"))
+    assert plan.lines_up
+
+
+def test_a_retake_shows_up_as_a_count_that_does_not_line_up(tmp_path):
+    """The way this goes wrong in a car, and the reason `leftover`/`unnamed` exist. The tuner
+    captures a declared sequence; one sweep does not come out and is taken again. Now there are
+    three measurements for two names, and filling downwards would put the second name on the
+    re-take. The DATES cannot reveal it — a re-take is later, so the list is in perfect capture
+    order — and the names cannot either, because they have not been given yet. The count can."""
+    rows = ci.candidates(_rew(("Measurement 1", "u1", "2026-Aug-25 20:10:00"),
+                              ("Measurement 2", "u2", "2026-Aug-25 20:10:10"),
+                              ("Measurement 3", "u3", "2026-Aug-25 20:10:20")), tmp_path)
+
+    plan = ci.plan_renames(rows, ["w-L_02 (sw)", "w-R_02 (sw)"])
+
+    assert plan.pairs == (("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)"))
+    assert plan.unnamed == ("u3",) and not plan.leftover
+    assert not plan.lines_up, "and the dialog says so before anything is renamed"
+
+
+def test_more_names_than_measurements_is_the_same_answer_from_the_other_end(tmp_path):
+    rows = ci.candidates(_rew(("Measurement 1", "u1", "2026-Aug-25 20:10:00")), tmp_path)
+
+    plan = ci.plan_renames(rows, ["w-L_02 (sw)", "w-R_02 (sw)"])
+
+    assert plan.leftover == ("w-R_02 (sw)",) and not plan.unnamed
+    assert not plan.lines_up
+
+
+def test_a_measurement_with_no_uuid_is_not_given_a_name(tmp_path):
+    """It cannot be recognised again after the rename, so renaming it is a name nobody can trace
+    back to a measurement."""
+    rows = ci.candidates(_rew(("nameless", "", "2026-Aug-25 20:10:00"),
+                              ("Measurement 2", "u2", "2026-Aug-25 20:10:10")), tmp_path)
+
+    plan = ci.plan_renames(rows, ["w-L_02 (sw)"])
+
+    assert plan.pairs == (("u2", "w-L_02 (sw)"),)
+
+
+# ---- and not letting two graphs answer to one name ----------------------------------------
+
+
+def test_two_rows_asking_for_the_same_name_are_caught_before_anything_is_sent(tmp_path):
+    answer = _rew(("Measurement 1", "u1", "2026-Aug-25 20:10:00"),
+                  ("Measurement 2", "u2", "2026-Aug-25 20:10:10"))
+
+    clashes = ci.duplicate_targets([("u1", "w-L_02 (sw)"), ("u2", "w-L_02 (sw)")], answer)
+
+    assert clashes == ["w-L_02 (sw)"]
+
+
+def test_a_name_rew_already_holds_is_caught_too(tmp_path):
+    """The method's identity model rests on a title being one measurement's name — two graphs
+    called `m-L_02 (sw)` are a channel that cannot be resolved afterwards."""
+    answer = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                  ("Measurement 2", "u2", "2026-Aug-25 20:10:10"))
+
+    assert ci.duplicate_targets([("u2", "m-L_02 (sw)")], answer) == ["m-L_02 (sw)"]
+
+
+def test_a_batch_that_shuffles_names_among_its_own_members_is_not_a_clash(tmp_path):
+    """It passes through a moment where two titles collide and comes out fine, so checking against
+    the measurements being renamed would refuse a rename that is perfectly good."""
+    answer = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                  ("m-R_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
+
+    assert ci.duplicate_targets([("u1", "m-R_02 (sw)"), ("u2", "m-L_02 (sw)")], answer) == []

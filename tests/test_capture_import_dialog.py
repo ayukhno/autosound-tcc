@@ -12,7 +12,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from autosound_tcc.core import capture_import  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -43,6 +43,12 @@ def _dialog(measurements, tmp_path, **kwargs) -> CaptureImportDialog:
 
 def _titles(dialog) -> list[str]:
     return [dialog._table.item(row, 1).text() for row in range(dialog._table.rowCount())]
+
+
+def cid_uuid():
+    from autosound_tcc.ui.tcc import capture_import_dialog as cid
+
+    return cid._UUID
 
 
 def _tick_state(dialog, row: int) -> bool:
@@ -102,17 +108,129 @@ def test_plus_ten_reaches_back_without_losing_a_tick(tmp_path):
     assert not any(_tick_state(dialog, index) for index in range(10)), "the older ten are context"
 
 
-def test_apply_writes_down_exactly_what_was_ticked(tmp_path):
+def test_plus_ten_is_an_action_not_a_switch(tmp_path):
+    """Each press reaches another portion further back, and the button goes out when there is
+    nothing further to reach (user asked outright, 2026-09-02)."""
+    dialog = _dialog(_rew(28), tmp_path, waiting=6)
+    assert len(_titles(dialog)) == 10
+
+    dialog._more_btn.click()
+    assert len(_titles(dialog)) == 20
+    dialog._more_btn.click()
+
+    assert len(_titles(dialog)) == 28, "the third portion runs out of list, not out of presses"
+    assert not dialog._more_btn.isEnabled()
+
+
+def test_apply_hands_over_exactly_what_was_ticked(tmp_path):
     dialog = _dialog(_rew(12), tmp_path, waiting=3, round_id="cap_007")
     assert len(dialog.ticked_rows()) == 3
     dialog._table.item(9, 0).setCheckState(Qt.CheckState.Unchecked)  # the newest of the three
 
     dialog._on_apply()
 
-    assert dialog.written == 2
-    stored = capture_import.load_imported(tmp_path)
-    assert len(stored) == 2
-    assert all(entry["round"] == "cap_007" for entry in stored.values())
+    assert [row.uuid for row in dialog.taken()] == ["u10", "u11"]
+    assert dialog.result() == int(dialog.DialogCode.Accepted)
+
+
+# ---- names -------------------------------------------------------------------------------
+
+
+_SETS = {"sw": [("w-L_02", "w-L_02 (sw)"), ("w-R_02", "w-R_02 (sw)"), ("m-L_02", "m-L_02 (sw)")]}
+
+
+def _give_names(dialog, monkeypatch, order=None, method="sw", accept=True):
+    """Drive `ChannelOrderDialog` without opening it — it has its own tests."""
+    from autosound_tcc.ui.tcc import capture_import_dialog as cid
+
+    class _Picker:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def exec(self):
+            return (QDialog.DialogCode.Accepted if accept else QDialog.DialogCode.Rejected)
+
+        def get_method(self):
+            return method
+
+        def get_order(self):
+            return order if order is not None else [code for code, _label in _SETS["sw"]]
+
+    monkeypatch.setattr(cid, "ChannelOrderDialog", _Picker)
+    dialog._on_give_names()
+
+
+def test_names_are_filled_downwards_from_the_row_that_is_selected(tmp_path, monkeypatch):
+    """The user's own flow: "я стаю в перший замір, нажимаю кнопку «Дати назву»"."""
+    dialog = _dialog(_rew(5), tmp_path, waiting=5, name_sets=_SETS)
+    dialog._table.setCurrentCell(2, 0)
+
+    _give_names(dialog, monkeypatch)
+
+    assert dialog.renames() == [("u3", "w-L_02 (sw)"), ("u4", "w-R_02 (sw)"),
+                                ("u5", "m-L_02 (sw)")]
+    assert dialog._table.item(2, 3).text() == "w-L_02 (sw)"
+
+
+def test_a_count_that_does_not_line_up_is_said_before_anything_is_sent(tmp_path, monkeypatch):
+    """Three names onto four measurements: the fourth is usually a re-take, and filling blindly
+    would put every name after it on the wrong graph."""
+    dialog = _dialog(_rew(4), tmp_path, waiting=4, name_sets=_SETS)
+    dialog._table.setCurrentCell(0, 0)
+
+    _give_names(dialog, monkeypatch)
+
+    assert len(dialog.renames()) == 3, "what lines up is still filled in"
+    assert i18n.t("capImportUneven").format(rows=1, names=0) in dialog._note.text()
+
+
+def test_typing_a_name_takes_the_row_with_it(tmp_path):
+    """A rename nobody takes in is a rename for nothing."""
+    dialog = _dialog(_rew(12), tmp_path, waiting=1)
+    row = 0
+    uuid = dialog._table.item(row, 0).data(cid_uuid())
+    assert uuid not in dialog._ticked
+
+    dialog._table.item(row, 3).setText("m-L_02 (sw)")
+
+    assert uuid in dialog._ticked
+    assert (uuid, "m-L_02 (sw)") in dialog.renames()
+
+
+def test_a_name_that_is_already_the_title_is_not_a_rename(tmp_path):
+    dialog = _dialog(_rew(3), tmp_path, waiting=3)
+
+    dialog._table.item(0, 3).setText("m_1 (sw)")
+
+    assert dialog.renames() == [], "REW is not asked to rename a measurement to what it is called"
+
+
+def test_two_rows_asking_for_one_name_stop_apply(tmp_path):
+    """Caught where the names were typed, before anything is sent: the method's identity model
+    rests on a title being one measurement's name."""
+    dialog = _dialog(_rew(3), tmp_path, waiting=3)
+    dialog._table.item(0, 3).setText("w-L_02 (sw)")
+    dialog._table.item(1, 3).setText("w-L_02 (sw)")
+
+    dialog._on_apply()
+
+    assert dialog.result() != int(dialog.DialogCode.Accepted), "nothing left the dialog"
+    assert "w-L_02 (sw)" in dialog._note.text()
+    assert i18n.t("capImportClash").split("{")[0].strip() in dialog._note.text()
+
+
+def test_a_retake_out_of_time_order_is_marked_when_the_list_is_rews_own(tmp_path):
+    """In capture order there is nothing to mark. When a date could not be read the list falls back
+    to REW's order, and there a re-take sits among its neighbours with an earlier time."""
+    answer = _rew(3)
+    answer["1"]["date"] = "2026-Aug-25 20:10:00"
+    answer["2"]["date"] = "2026-Aug-25 20:09:00"
+    answer["3"]["date"] = "2026-жов-01 10:00:00"
+
+    dialog = _dialog(answer, tmp_path, waiting=3)
+
+    assert "↻" in dialog._table.item(1, 2).text()
+    assert "↻" not in dialog._table.item(0, 2).text()
 
 
 def test_the_dialog_does_not_claim_to_show_everything_rew_holds(tmp_path):

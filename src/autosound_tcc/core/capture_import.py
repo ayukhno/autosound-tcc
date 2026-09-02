@@ -281,6 +281,70 @@ def out_of_sequence(rows: list[Candidate]) -> set[str]:
     return marked
 
 
+@dataclass(frozen=True)
+class Naming:
+    """What "Give names" worked out: the pairs to send, and what did not line up.
+
+    `leftover` and `unnamed` are the same fact from two ends, and the fact is worth a sentence
+    because it is the way this goes wrong in a car. The tuner captures a declared sequence; one
+    sweep does not come out and is taken again; now there are six measurements for five names, and
+    filling downwards puts every name after the dud on the wrong measurement. The dates cannot
+    reveal it — a re-take is LATER, so the list is in perfect capture order — and the names cannot
+    either, because they have not been given yet. What reveals it is the count.
+    """
+
+    pairs: tuple[tuple[str, str], ...]
+    leftover: tuple[str, ...]
+    unnamed: tuple[str, ...]
+
+    @property
+    def lines_up(self) -> bool:
+        return not self.leftover and not self.unnamed
+
+
+def plan_renames(rows: list[Candidate], names: Iterable[str], start: int = 0) -> Naming:
+    """Lay `names` onto `rows` from `start` downwards, one to one.
+
+    Downwards from a row the tuner picked, rather than onto "the newest N": that is the user's own
+    description of the flow (2026-09-02, "я стаю в перший замір"), and it is the half a person can
+    do that a heuristic cannot — they know which measurement is the first of the batch, including
+    when the first one was a dud they are leaving behind.
+    """
+    targets = [row for row in rows[max(int(start), 0):] if row.identified]
+    wanted = [str(name) for name in names if str(name).strip()]
+    paired = tuple((row.uuid, name) for row, name in zip(targets, wanted))
+    return Naming(
+        pairs=paired,
+        leftover=tuple(wanted[len(paired):]),
+        unnamed=tuple(row.uuid for row in targets[len(paired):]),
+    )
+
+
+def duplicate_targets(pairs: Iterable[tuple[str, str]], measurements: dict) -> list[str]:
+    """Proposed titles that would leave REW holding one name twice.
+
+    Checked before anything is sent, and against both ends: the batch's own names, and the titles
+    REW already holds — minus the measurements being renamed, since a batch that shuffles names
+    among its own members passes through a moment where they collide and comes out fine.
+
+    The method's whole identity model rests on a title being one measurement's name
+    (`rew_api.duplicate_titles` exists for the same reason), so this is not tidiness: two graphs
+    called `m-L_02 (sw)` are a channel that cannot be resolved afterwards.
+    """
+    pairs = list(pairs)
+    moving = {uuid for uuid, _name in pairs}
+    held = {str((raw or {}).get("title") or "")
+            for uuid, raw in ((str((raw or {}).get("uuid") or ""), raw)
+                              for raw in (measurements or {}).values())
+            if uuid not in moving}
+    clashes, seen = [], set()
+    for _uuid, name in pairs:
+        if name in seen or name in held:
+            clashes.append(name)
+        seen.add(name)
+    return sorted(set(clashes))
+
+
 def resolve_ordinals(measurements: dict, uuids: Iterable[str]) -> dict[str, str]:
     """`uuid -> REW's ordinal RIGHT NOW`, from a freshly fetched answer.
 

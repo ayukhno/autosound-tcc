@@ -98,8 +98,6 @@ def test_read_offers_the_list_instead_of_folding_it_into_the_card(tmp_path, monk
     opened = {}
 
     class _Dialog:
-        written = 2
-
         def __init__(self, measurements, **kwargs):
             opened["measurements"] = measurements
             opened["kwargs"] = kwargs
@@ -107,13 +105,19 @@ def test_read_offers_the_list_instead_of_folding_it_into_the_card(tmp_path, monk
         def exec(self):
             return QDialog.DialogCode.Accepted
 
+        def taken(self):
+            return []
+
+        def renames(self):
+            return []
+
     monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
     panel._on_import_offer({"1": {"title": "somebody-elses_99 (sw)", "uuid": "z",
                                   "date": "2026-Aug-25 20:11:31"}})
 
     assert len(panel._rows) == before, "nothing enters the card without a tick"
     assert opened["measurements"], "and the tuner is shown what REW answered"
-    assert i18n.t("capImportDone").format(n=2) in panel._status_label.text()
+    assert i18n.t("capImportDone").format(n=0) in panel._status_label.text()
 
 
 def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch):
@@ -128,8 +132,6 @@ def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch)
     seen = {}
 
     class _Dialog:
-        written = 0
-
         def __init__(self, measurements, **kwargs):
             seen.update(kwargs)
 
@@ -253,65 +255,95 @@ def test_scan_worker_emits_failed_on_exception():
     assert len(errors) == 1
 
 
-def test_scan_match_reports_mismatch_when_short():
+def test_the_rename_worker_addresses_measurements_by_uuid_not_by_position():
+    """The measurement of 2026-09-02: the user swapped two rows in REW by hand and the API returned
+    the same measurements with those two ordinals exchanged — every uuid, title and date unchanged.
+    A pair built when the table was drawn would rename the wrong graph, which is the exact failure
+    the method's identity hygiene is written against."""
     _app()
-    panel = MeasurementPanel()
-    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
-    panel._pending_order = ["A", "B", "C", "D", "E"]
-    panel._on_scan_done({"1": {}, "2": {}})
-    text = panel._status_label.text()
-    assert "2" in text and "5" in text
-
-
-def test_scan_match_starts_rename_when_counts_line_up():
-    _app()
-    panel = MeasurementPanel()
-    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
-    panel._bridge = _FakeBridge({})  # not used by _on_scan_done itself, just needs .rename_measurement
-    panel._pending_order = ["w_L", "w_R"]
-    panel._on_scan_done({"5": {}, "6": {}})
-    assert panel._rename_worker is not None
-    assert panel._rename_worker._pairs == [("5", "w_L"), ("6", "w_R")]
-    # A real QThread was started (unlike the other worker tests, which call .run() directly) --
-    # must join it before the test returns, or Qt aborts the process ("QThread: Destroyed while
-    # thread is still running") once `panel`/`_rename_worker` get garbage-collected.
-    panel._rename_worker.wait(2000)
-
-
-def test_rename_worker_renames_in_order_and_emits_done():
-    _app()
-    bridge = _FakeBridge({})
-    worker = _RewRenameWorker(bridge, [("5", "w_L"), ("6", "w_R")])
+    # REW's answer AFTER the swap: u_late is now ordinal 1, u_early is 2.
+    bridge = _FakeBridge({"1": {"title": "m-L_49rep (sw)", "uuid": "u_late"},
+                          "2": {"title": "r-R_49 (sw)", "uuid": "u_early"}})
+    worker = _RewRenameWorker(bridge, [("u_early", "w-L_02 (sw)")])
     results = []
     worker.done.connect(lambda r: results.append(r))
+
     worker.run()
-    assert results == [[("5", "w_L"), ("6", "w_R")]]
-    assert bridge.renamed == [("5", "w_L"), ("6", "w_R")]
+
+    assert bridge.renamed == [("2", "w-L_02 (sw)")], "the ordinal is looked up now, not remembered"
+    assert results == [[("u_early", "w-L_02 (sw)")]]
 
 
-def test_rename_worker_stops_at_first_failure_and_reports_progress():
+def test_a_measurement_that_vanished_between_the_list_and_apply_stops_the_batch():
+    """Deleted, or hidden by a filter switched on since the table was drawn. Either way there is
+    nothing to rename, and guessing one by position is how `m-R` data ends up labelled `m-L`."""
     _app()
-    bridge = _FakeBridge({}, rename_fails_at=1)
-    worker = _RewRenameWorker(bridge, [("5", "w_L"), ("6", "w_R"), ("7", "tw_L")])
+    bridge = _FakeBridge({"1": {"title": "still here", "uuid": "u1"}})
+    worker = _RewRenameWorker(bridge, [("u1", "w-L_02 (sw)"), ("gone", "w-R_02 (sw)")])
     failures = []
     worker.failed.connect(lambda msg, renamed: failures.append((msg, renamed)))
+
     worker.run()
-    assert len(failures) == 1
-    msg, renamed = failures[0]
-    assert "REW rejected the rename" in msg
-    assert renamed == [("5", "w_L")]  # stopped after the first success, before the failing 2nd call
+
+    message, renamed = failures[0]
+    assert "w-R_02 (sw)" in message
+    assert renamed == [("u1", "w-L_02 (sw)")], "and what did go through is reported as gone through"
 
 
-def test_rename_done_and_failed_update_status_label():
+def test_the_rename_worker_stops_at_the_first_refusal_and_says_how_far_it_got():
     _app()
-    panel = MeasurementPanel()
-    panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
-    panel._on_rename_done([("5", "w_L"), ("6", "w_R")])
-    assert "2" in panel._status_label.text()
+    bridge = _FakeBridge({"1": {"title": "a", "uuid": "u1"}, "2": {"title": "b", "uuid": "u2"},
+                          "3": {"title": "c", "uuid": "u3"}}, rename_fails_at=1)
+    worker = _RewRenameWorker(bridge, [("u1", "w-L"), ("u2", "w-R"), ("u3", "tw-L")])
+    failures = []
+    worker.failed.connect(lambda msg, renamed: failures.append((msg, renamed)))
 
-    panel._on_rename_failed("boom", [("5", "w_L")])
-    text = panel._status_label.text()
-    assert "boom" in text and "1" in text
+    worker.run()
+
+    message, renamed = failures[0]
+    assert "REW rejected the rename" in message
+    assert renamed == [("u1", "w-L")], "before the failing second call, and no further"
+
+
+def test_only_what_carries_its_new_name_is_written_down(tmp_path, monkeypatch):
+    """A measurement whose rename never happened is still called what it was called. Recording it
+    under a name it does not have would put a title in the checklist that nothing in REW answers
+    to; left out, it comes back on the next press, untouched and still unprocessed."""
+    from autosound_tcc.core import capture_import, config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    answer = {"1": {"title": "Measurement 1", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "Measurement 2", "uuid": "u2", "date": "2026-Aug-25 20:10:10"},
+              "3": {"title": "Measurement 3", "uuid": "u3", "date": "2026-Aug-25 20:10:20"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    panel._renaming = [("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)")]
+
+    panel._on_import_rename_failed("REW rejected the rename", [("u1", "w-L_02 (sw)")])
+
+    stored = capture_import.load_imported(tmp_path)
+    assert set(stored) == {"u1", "u3"}, "u2 was asked for and did not get it: it comes back"
+    assert stored["u1"]["title"] == "w-L_02 (sw)"
+    assert stored["u3"]["title"] == "Measurement 3", "nobody asked to rename that one"
+
+
+def test_a_batch_that_went_through_is_written_down_under_its_new_names(tmp_path, monkeypatch):
+    from autosound_tcc.core import capture_import, config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    answer = {"1": {"title": "Measurement 1", "uuid": "u1", "date": "2026-Aug-25 20:10:00"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    panel._renaming = [("u1", "w-L_02 (sw)")]
+
+    panel._on_import_renamed([("u1", "w-L_02 (sw)")])
+
+    assert capture_import.imported_titles(tmp_path) == ["w-L_02 (sw)"]
+    assert i18n.t("capImportRenamed").format(n=1, renamed=1) in panel._status_label.text()
 
 
 def test_method_channel_pairs_uses_meas_order_by_default():
@@ -396,7 +428,6 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     panel.show_session("v9")
     assert "Used in step 2.2" in panel._session_tip.text()
     assert not panel._read_btn.isEnabled()
-    assert not panel._assign_names_btn.isEnabled()
     assert panel._session_combo.currentData() == "v9"  # combo follows programmatic switches too
 
     panel.show_session("v10")
@@ -551,8 +582,6 @@ def test_a_phase_that_captures_nothing_still_offers_the_list(tmp_path, monkeypat
     seen = {}
 
     class _Dialog:
-        written = 0
-
         def __init__(self, measurements, **kwargs):
             seen.update(kwargs)
 

@@ -34,6 +34,8 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import capture_import
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps
 
 #: Where a row's uuid rides on its checkbox item, so a tick survives a re-render.
@@ -50,6 +52,7 @@ class CaptureImportDialog(QDialog):
         waiting: int = 0,
         round_id: str = "",
         has_task: bool = True,
+        name_sets: Optional[dict] = None,
         project_dir: Optional[Path] = None,
         parent=None,
     ) -> None:
@@ -62,8 +65,14 @@ class CaptureImportDialog(QDialog):
         self._round_id = str(round_id or "")
         self._project_dir = project_dir
         self._pages = 0
-        #: How many measurements were written on Apply — the panel reports it.
-        self.written = 0
+        #: `{method: [(channel id, the full name a capture gets in REW)]}` — the round's own name
+        #: sets, in the order the tuner declared. Built by the panel, which owns the sessions.
+        self._name_sets = dict(name_sets or {})
+        #: Proposed names, by uuid. Empty means "leave the title alone".
+        self._names: dict[str, str] = {}
+        #: What the last "Give names" or Apply had to say about the names themselves — a count that
+        #: did not line up, or a clash. Cleared by the next successful fill.
+        self._plan_note = ""
 
         self._all = capture_import.candidates(self._measurements, project_dir)
         #: Ticked by uuid rather than by row, because +10 and the filter both re-render the table
@@ -78,6 +87,11 @@ class CaptureImportDialog(QDialog):
         #: be waiting for, nothing is pre-ticked: there is no batch to guess at.
         newest = capture_import.unprocessed(self._all)[-self._waiting:] if self._waiting else []
         self._ticked = {row.uuid for row in newest if row.identified}
+        #: Rows whose capture time runs backwards against the row above — a sweep taken again
+        #: because the first attempt did not come out. Marked, never refused: the user's own
+        #: instruction (2026-09-02). In capture order this set is empty by construction; it fills
+        #: when the dates could not be read and the list is in REW's own order instead.
+        self._retakes = capture_import.out_of_sequence(self._all)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
@@ -89,18 +103,26 @@ class CaptureImportDialog(QDialog):
         head.setWordWrap(True)
         layout.addWidget(head)
 
-        self._table = QTableWidget(0, 3)
+        self._table = QTableWidget(0, 4)
         self._table.setProperty("class", "ptable")
         self._table.setHorizontalHeaderLabels(
-            [i18n.t("capImportColTake"), i18n.t("capImportColTitle"), i18n.t("capImportColWhen")])
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            [i18n.t("capImportColTake"), i18n.t("capImportColTitle"), i18n.t("capImportColWhen"),
+             i18n.t("capImportColName")])
+        # Only the name column is typed into; `_render` gives exactly that column the flag.
+        self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
+                                    | QTableWidget.EditTrigger.EditKeyPressed
+                                    | QTableWidget.EditTrigger.AnyKeyPressed)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # The date sits BESIDE the proposed name on purpose: they are read together. A re-take
+        # lands out of time order, and the name about to be written on it is the thing that goes
+        # wrong when it does.
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._table, stretch=1)
@@ -125,6 +147,13 @@ class CaptureImportDialog(QDialog):
         self._more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._more_btn.clicked.connect(self._on_more)
         controls.addWidget(self._more_btn)
+        self._name_btn = QPushButton(i18n.t("capImportGiveNames"))
+        self._name_btn.setProperty("class", "reason-btn")
+        self._name_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._name_btn.clicked.connect(self._on_give_names)
+        self._name_btn.setEnabled(bool(self._name_sets))
+        attach_tip(self._name_btn, i18n.t("assignNames"))
+        controls.addWidget(self._name_btn)
         controls.addStretch(1)
         cancel = QPushButton(i18n.t("npCancel"))
         cancel.setProperty("class", "reason-btn")
@@ -178,12 +207,26 @@ class CaptureImportDialog(QDialog):
             # REW's own string, verbatim. It is a display date formatted by REW's locale, and
             # printing our own reformatting of something we could not fully parse would be
             # inventing precision.
-            self._table.setItem(index, 2, QTableWidgetItem(row.date))
+            when = QTableWidgetItem(row.date)
+            if row.uuid in self._retakes:
+                when.setText(f"↻ {row.date}")
+                when.setToolTip(i18n.t("capImportRetake"))
+            self._table.setItem(index, 2, when)
+
+            name = QTableWidgetItem(self._names.get(row.uuid, ""))
+            if row.identified:
+                name.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
+                              | Qt.ItemFlag.ItemIsSelectable)
+            else:
+                name.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                name.setToolTip(i18n.t("capImportNoUuid"))
+            self._table.setItem(index, 3, name)
         self._table.blockSignals(False)
         self._render_note(len(rows))
 
     def _render_note(self, shown: int) -> None:
-        lines = [i18n.t("capImportShowing")]
+        lines = [self._plan_note] if self._plan_note else []
+        lines.append(i18n.t("capImportShowing"))
         if not capture_import.ordered_by_date(self._all) and self._all:
             lines.append(i18n.t("capImportRewOrder"))
         missing = capture_import.missing_imported(self._measurements, self._project_dir)
@@ -197,21 +240,76 @@ class CaptureImportDialog(QDialog):
     # ---- what the tuner does -------------------------------------------------------------
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        if item.column() != 0:
-            return
-        uuid = str(item.data(_UUID) or "")
+        row = item.row()
+        take = self._table.item(row, 0)
+        uuid = str(take.data(_UUID) or "") if take is not None else ""
         if not uuid:
             return
-        if item.checkState() == Qt.CheckState.Checked:
+        if item.column() == 0:
+            if item.checkState() == Qt.CheckState.Checked:
+                self._ticked.add(uuid)
+            else:
+                self._ticked.discard(uuid)
+        elif item.column() == 3:
+            typed = item.text().strip()
+            if typed:
+                self._names[uuid] = typed
+                # Typing a name is asking for that measurement, so it stops being unticked by
+                # accident: a rename nobody takes in is a rename for nothing.
+                self._ticked.add(uuid)
+            else:
+                self._names.pop(uuid, None)
+
+    def _on_give_names(self) -> None:
+        """Fill names downwards from the selected row, out of a set the tuner picks.
+
+        The set and the order are `ChannelOrderDialog`'s, unchanged — it already asks exactly the
+        two questions this needs ("which capture method" and "in what order do you sweep"), and it
+        already remembers the answer per preset. What moved is where it is asked FROM: it used to
+        be a button on the card that then guessed which REW measurements were "the newest batch"
+        by their ordinals. That guess is what the measurements of 2026-09-02 disproved.
+        """
+        picker = ChannelOrderDialog(self._name_sets, parent=self)
+        if picker.exec() != QDialog.DialogCode.Accepted:
+            return
+        method = picker.get_method()
+        if method is None:
+            return
+        labels = dict(self._name_sets.get(method) or [])
+        names = [labels.get(code, code) for code in picker.get_order()]
+        rows = self.visible_rows()
+        start = max(self._table.currentRow(), 0)
+        plan = capture_import.plan_renames(rows, names, start)
+        for uuid, name in plan.pairs:
+            self._names[uuid] = name
             self._ticked.add(uuid)
-        else:
-            self._ticked.discard(uuid)
+        self._plan_note = "" if plan.lines_up else i18n.t("capImportUneven").format(
+            rows=len(plan.unnamed), names=len(plan.leftover))
+        self._render()
+
+    def renames(self) -> list[tuple[str, str]]:
+        """`(uuid, new title)` for every ticked row that is actually being renamed."""
+        return [(row.uuid, self._names[row.uuid]) for row in self.ticked_rows()
+                if self._names.get(row.uuid) and self._names[row.uuid] != row.title]
 
     def _on_more(self) -> None:
         self._pages += 1
         self._render()
 
     def _on_apply(self) -> None:
-        self.written = capture_import.record_imported(
-            self.ticked_rows(), round_id=self._round_id, project_dir=self._project_dir)
+        """Check the names here, where they were typed; the renaming itself is the panel's.
+
+        The check is not tidiness. The method's identity model rests on a title being one
+        measurement's name — two graphs called `m-L_02 (sw)` are a channel nothing can resolve
+        afterwards — and a batch caught before it is sent is a batch nobody has to undo.
+        """
+        clashes = capture_import.duplicate_targets(self.renames(), self._measurements)
+        if clashes:
+            self._plan_note = i18n.t("capImportClash").format(names=", ".join(clashes))
+            self._render()
+            return
         self.accept()
+
+    def taken(self) -> list[capture_import.Candidate]:
+        """What the panel should write down once whatever renaming there is has happened."""
+        return self.ticked_rows()

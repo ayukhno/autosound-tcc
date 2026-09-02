@@ -36,7 +36,6 @@ from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import i18n, qt_shutdown
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
-from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
@@ -137,12 +136,25 @@ class _RewScanWorker(QThread):
 
 
 class _RewRenameWorker(QThread):
-    """Renames measurements in sequence, one REW HTTP call per pair. Stops at the first failure
-    rather than pressing on with a half-renamed batch -- `renamed` in the `failed` payload lets the
-    caller report exactly how far it got."""
+    """Renames measurements in sequence, one REW HTTP call per pair, addressed by uuid.
 
-    done = Signal(list)  # list of (mid, new_title) actually renamed, in order
-    failed = Signal(str, list)  # error message, list of (mid, new_title) renamed before it failed
+    **The pairs come in as `(uuid, title)` and the ordinal is worked out HERE**, from a
+    `measurements()` call made immediately before the first rename. That is the whole reason this
+    worker exists rather than a loop in the dialog: between the list a person read and the moment
+    they pressed Apply, REW's ordinals can have moved — measured on 2026-09-02, a manual drag
+    swapped two of them while every uuid, title and date stayed put. A pair built when the table
+    was drawn would rename the wrong measurement, which is the exact failure the method's identity
+    hygiene is written against (`rew-api-quirks.md`).
+
+    Renaming itself does not reshuffle (`rew_api.rename_measurement`: the ordinal is unchanged,
+    only the title), so one resolve at the top of the batch is enough.
+
+    Stops at the first failure rather than pressing on with a half-renamed batch -- `renamed` in
+    the `failed` payload lets the caller report exactly how far it got, and record exactly that
+    much."""
+
+    done = Signal(list)  # list of (uuid, new_title) actually renamed, in order
+    failed = Signal(str, list)  # error message, list of (uuid, new_title) renamed before it failed
 
     def __init__(self, bridge: RewBridge, pairs: list[tuple[str, str]]) -> None:
         super().__init__()
@@ -152,12 +164,25 @@ class _RewRenameWorker(QThread):
     def run(self) -> None:
         renamed: list[tuple[str, str]] = []
         try:
-            for mid, title in self._pairs:
-                self._bridge.rename_measurement(mid, title)
-                renamed.append((mid, title))
-        except Exception as exc:  # noqa: BLE001
+            live = self._bridge.measurements()
+        except Exception as exc:  # noqa: BLE001 — REW went away between the list and Apply
             self.failed.emit(f"{type(exc).__name__}: {exc}", renamed)
             return
+        ordinals = capture_import.resolve_ordinals(live, [uuid for uuid, _title in self._pairs])
+        for uuid, title in self._pairs:
+            mid = ordinals.get(uuid)
+            if mid is None:
+                # Deleted, or hidden by a filter switched on since the list was drawn. Either way
+                # there is no measurement to rename, and guessing one by position is how `m-R`
+                # data ends up under the `m-L` label.
+                self.failed.emit(i18n.t("capImportGone").format(title=title), renamed)
+                return
+            try:
+                self._bridge.rename_measurement(mid, title)
+            except Exception as exc:  # noqa: BLE001
+                self.failed.emit(f"{type(exc).__name__}: {exc}", renamed)
+                return
+            renamed.append((uuid, title))
         self.done.emit(renamed)
 
 
@@ -276,7 +301,6 @@ class MeasurementPanel(QWidget):
         super().__init__()
         self._bridge = RewBridge()
         self._worker: "_RewReadWorker | None" = None
-        self._scan_worker: "_RewScanWorker | None" = None
         # Every title this panel has seen REW hold, this session. There was no such collection at
         # all: `known_titles()` was called by the checklist and by the supervisor's own audit, and
         # the panel never defined it, so both silently ran on "REW holds nothing" -- a checklist
@@ -284,10 +308,14 @@ class MeasurementPanel(QWidget):
         # step with a measurement.
         self._known_titles: set[str] = set()
         self._rename_worker: "_RewRenameWorker | None" = None
+        #: What the open import dialog handed over: the rows to write down, the renames to send,
+        #: and the round they belong to. Held between the dialog closing and the rename returning.
+        self._taking: list = []
+        self._renaming: list = []
+        self._round_id = ""
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
         self._settings = get_settings()
-        self._pending_order: list[str] = []
         # Sessions, newest first -- [0] is the live, in-progress task (see MEAS_SESSIONS' own
         # docstring). `_viewing_id` is whichever one the grid currently shows; Read/Scan/assign-
         # names always act on the live session regardless (see `_on_read_clicked` etc.'s guard).
@@ -345,14 +373,6 @@ class MeasurementPanel(QWidget):
         # Icon-only, not full-text buttons -- the text labels ate too much of this header row next
         # to the version banner (user request 2026-07-27). Full label moved to the tooltip. Real
         # SVG icons (Lucide, ISC-licensed -- NOTICE.md), not unicode glyphs, for a sharper look.
-        self._assign_names_btn = QPushButton()
-        self._assign_names_btn.setIcon(QIcon(str(_ICONS_DIR / "reorder.svg")))
-        self._assign_names_btn.setIconSize(QSize(16, 16))
-        self._assign_names_btn.setProperty("class", "meas-icon-btn")
-        self._assign_names_btn.setFixedSize(28, 28)
-        self._assign_names_tip = attach_tip(self._assign_names_btn, i18n.t("assignNames"))
-        self._assign_names_btn.clicked.connect(self._on_assign_names_clicked)
-        head_row.addWidget(self._assign_names_btn)
         # Curves, with markers on them: the panel that turns "I read it differently" into a
         # number (see `curve_view.py`). Beside Read because that is where the measurements are.
         self._curves_btn = QPushButton()
@@ -468,7 +488,6 @@ class MeasurementPanel(QWidget):
         for widget in (
             self._session_combo,
             self._version,
-            self._assign_names_btn,
             self._curves_btn,
             self._read_btn,
         ):
@@ -488,7 +507,6 @@ class MeasurementPanel(QWidget):
         for widget in (
             self._session_combo,
             self._version,
-            self._assign_names_btn,
             self._curves_btn,
             self._read_btn,
         ):
@@ -588,7 +606,6 @@ class MeasurementPanel(QWidget):
                             + [_step_label(s) for s in session.used_in_steps])
             )
         self._version.setVisible(False)
-        self._assign_names_btn.setEnabled(is_live)
         self._read_btn.setEnabled(is_live)
         idx = self._session_combo.findData(session_id)
         if idx >= 0 and self._session_combo.currentIndex() != idx:
@@ -661,7 +678,6 @@ class MeasurementPanel(QWidget):
         for label, (_status, key) in zip(self._legend_labels, _LEGEND):
             label.setText(i18n.t(key))
         self._read_tip.set_text(i18n.t("measRead"))
-        self._assign_names_tip.set_text(i18n.t("assignNames"))
         self._curves_tip.set_text(i18n.t("curveBtn"))
         # Both of these are WORDS on the button, not glyphs, so the label has to move too -- the
         # icon buttons above only need their tip re-set.
@@ -715,32 +731,6 @@ class MeasurementPanel(QWidget):
                 methods[key] = ordered + remaining
         return methods
 
-    def _on_assign_names_clicked(self) -> None:
-        # Always opens -- one button now covers all three capture methods (sw/RTA/RTA-group), so
-        # picking a method is mandatory every time; there's no "just reuse the last one" default to
-        # silently fall back to (user request 2026-07-27 round 2, replacing the old first-use/
-        # modifier-key/"don't show again" gating, which assumed a single implicit method).
-        dialog = ChannelOrderDialog(self._method_channel_pairs(), parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        method = dialog.get_method()
-        if method is None:
-            return
-        order = dialog.get_order()
-        self._settings.setValue(self._capture_order_key(method), json.dumps(order))
-        self._scan_and_match(order)
-
-    def _scan_and_match(self, order: list[str]) -> None:
-        if self._scan_worker is not None and self._scan_worker.isRunning():
-            return
-        self._status_label.setHidden(False)
-        self._set_status("measReading")
-        self._pending_order = order
-        self._replace_worker("_scan_worker", _RewScanWorker(self._bridge))
-        self._scan_worker.done.connect(self._on_scan_done)
-        self._scan_worker.failed.connect(self._on_read_failed)
-        self._scan_worker.start()
-
     def known_titles(self) -> list[str]:
         """Every capture title this project can be said to have: what REW showed this session, and
         what the project has taken in. Sorted, so callers are order-stable.
@@ -757,41 +747,6 @@ class MeasurementPanel(QWidget):
         self._known_titles.update(t for t in titles if str(t).strip())
         if len(self._known_titles) != before:
             self.titlesChanged.emit()
-
-    def _on_scan_done(self, measurements: dict) -> None:
-        self.rewStatusChanged.emit(True)
-        self._remember_titles(
-            (m or {}).get("title", "") for m in (measurements or {}).values()
-        )
-        order = self._pending_order
-        expected = len(order)
-        found_count = len(measurements)
-        if found_count < expected:
-            self._set_status("captureScanMismatch", found=found_count, expected=expected)
-            return
-        # The `expected` highest-ordinal ids are treated as "the newest batch" -- same "highest
-        # ordinal = most recent" heuristic as _RewReadWorker (rew-api-quirks.md: REW's own ordinal
-        # position is fragile, not a real timestamp). Sorted ascending so the OLDEST of that batch
-        # lines up with the FIRST channel in the saved capture order, matching capture sequence.
-        newest_ids = sorted(
-            measurements, key=lambda k: int(k) if str(k).isdigit() else -1
-        )[-expected:]
-        # First-cut naming: the target title is just the channel id from the saved order (e.g.
-        # "w_L") -- no capture-version or sweep/RTA-method suffix, since neither is tracked by this
-        # button yet (see naming-and-structure.md §3 for the fuller `<channel>_<version> (method)`
-        # convention). Extend here once a "current capture version/method" concept exists.
-        pairs = list(zip(newest_ids, order))
-        self._set_status("captureRenaming", n=len(pairs))
-        self._replace_worker("_rename_worker", _RewRenameWorker(self._bridge, pairs))
-        self._rename_worker.done.connect(self._on_rename_done)
-        self._rename_worker.failed.connect(self._on_rename_failed)
-        self._rename_worker.start()
-
-    def _on_rename_done(self, renamed: list) -> None:
-        self._set_status("captureRenameOk", n=len(renamed))
-
-    def _on_rename_failed(self, message: str, renamed: list) -> None:
-        self._set_status("captureRenameFail", error=message, n=len(renamed))
 
     def _replace_worker(self, attr: str, worker: QThread) -> QThread:
         """Put `worker` in `self.<attr>`, waiting out whatever was there.
@@ -823,7 +778,7 @@ class MeasurementPanel(QWidget):
         which also puts it in front of the exit path, where it can be declined over rather than
         aborted on.
         """
-        for worker in (self._worker, self._scan_worker, self._rename_worker):
+        for worker in (self._worker, self._rename_worker):
             qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS)
 
     curvesRequested = Signal(list)  # REW titles to plot — MainWindow opens the window
@@ -876,20 +831,62 @@ class MeasurementPanel(QWidget):
             (m or {}).get("title", "") for m in measurements.values()
         )
         round_ = process_view.capture_round() or {}
+        self._round_id = str(round_.get("id") or "")
         dialog = CaptureImportDialog(
             measurements,
             waiting=sum(1 for row in self._rows if row.status == "wait"),
-            round_id=str(round_.get("id") or ""),
+            round_id=self._round_id,
             has_task=bool(self._sessions and self._sessions[0].groups),
+            name_sets=self._method_channel_pairs() if self._sessions else {},
             project_dir=config.project_dir(),
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._set_status("measReadCancelled", n=len(measurements))
             return
-        self._set_status("capImportDone", n=dialog.written)
+        self._taking = list(dialog.taken())
+        self._renaming = dialog.renames()
+        if not self._renaming:
+            self._finish_import({})
+            return
+        # Renaming is HTTP, so it is a worker; and the worker resolves uuid -> ordinal itself, from
+        # an answer it fetches immediately before the first call. See `_RewRenameWorker`.
+        self._set_status("capImportRenaming", n=len(self._renaming))
+        self._replace_worker("_rename_worker", _RewRenameWorker(self._bridge, self._renaming))
+        self._rename_worker.done.connect(self._on_import_renamed)
+        self._rename_worker.failed.connect(self._on_import_rename_failed)
+        self._rename_worker.start()
+
+    def _finish_import(self, titles: dict, only: "set | None" = None) -> None:
+        """Write down what was taken in, under the names REW now has for them.
+
+        `only` narrows the batch to what actually carries its new name: a measurement whose rename
+        never happened is still called what it was called, and recording it under a name it does
+        not have would put a title in the checklist that nothing in REW answers to. Left out, it
+        simply comes back on the next ⤓ — untouched, and still unprocessed.
+        """
+        rows = self._taking if only is None else [r for r in self._taking if r.uuid in only]
+        written = capture_import.record_imported(
+            rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+        if titles:
+            self._set_status("capImportRenamed", n=written, renamed=len(titles))
+        else:
+            self._set_status("capImportDone", n=written)
         # The store changed, so what this project holds changed: the window rebuilds the checklist
         # off it (`main_window._on_rew_titles_changed`).
+        self.titlesChanged.emit()
+
+    def _on_import_renamed(self, renamed: list) -> None:
+        self._finish_import(dict(renamed))
+
+    def _on_import_rename_failed(self, message: str, renamed: list) -> None:
+        titles = dict(renamed)
+        asked = {uuid for uuid, _title in self._renaming}
+        keep = {row.uuid for row in self._taking if row.uuid in titles or row.uuid not in asked}
+        rows = [row for row in self._taking if row.uuid in keep]
+        written = capture_import.record_imported(
+            rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+        self._set_status("capImportRenameFail", n=len(renamed), error=message, taken=written)
         self.titlesChanged.emit()
 
     def _on_read_failed(self, message: str) -> None:
