@@ -496,7 +496,14 @@ def load_hardware_controls(project_dir_: Optional[Any] = None) -> dict:
     path = config.project_path(project_dir_)
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text())
+    # `encoding="utf-8"`, and it is not a detail: without it `read_text` uses the MACHINE's
+    # locale encoding, which on a Windows box is its ANSI code page. `project.json` carries the
+    # tuner's own words — channel descriptions in Ukrainian — and cp1252 cannot decode them, so
+    # this line raised `UnicodeDecodeError` and took `load_project_view` down with it: no DSP
+    # tree, no target curve, on a file that is perfectly valid (Windows, 2026-09-01). A function
+    # whose docstring promises "absent file or key -> {}, not an error" must not be the one that
+    # throws. Every file this project writes is UTF-8; every reader of one says so.
+    data = json.loads(path.read_text(encoding="utf-8"))
     controls = data.get("hardware", {}).get("controls", {})
     return controls if isinstance(controls, dict) else {}
 

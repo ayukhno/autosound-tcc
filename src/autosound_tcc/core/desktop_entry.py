@@ -175,9 +175,12 @@ def build_macos_bundle(apps_dir: Path, launcher: Path) -> tuple[Path, bool]:
         shutil.copyfile(icns, bundle / "Contents" / "Resources" / "AutosoundTCC.icns")
         icon_name = "AutosoundTCC"
 
-    (bundle / "Contents" / "Info.plist").write_text(_plist(display_name, icon_name))
+    # UTF-8 by name, like every other file this app writes: the display name comes from the
+    # caller and the launcher line carries a path, and neither is guaranteed to be ASCII.
+    (bundle / "Contents" / "Info.plist").write_text(_plist(display_name, icon_name),
+                                                    encoding="utf-8")
     exe = bundle / "Contents" / "MacOS" / "autosound-tcc"
-    exe.write_text(_launcher_script(launcher))
+    exe.write_text(_launcher_script(launcher), encoding="utf-8")
     exe.chmod(0o755)
     return bundle, bool(icon_name)
 

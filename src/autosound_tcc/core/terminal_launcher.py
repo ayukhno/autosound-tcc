@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import child
+from autosound_tcc.core import app_log, child
 
 # Agent CLIs we know how to launch, in the order we'd suggest them. The value is the executable
 # name to look for on PATH; `agy` is Antigravity's Gemini CLI, which the tuning skill's own critic
@@ -110,8 +110,14 @@ def run_line(line: str) -> None:
 
     `line` is a shell line this app composed, never user text.
     """
+    # Which door was taken, in the log. A person cannot screenshot a console window that blinks
+    # (user, Windows, 2026-09-02: "зʼявляються віндоус вікна одне не велике інше зовсім мале —
+    # але швидко і я не встигаю зробити скріншот"), and this line turns that into something
+    # readable afterwards: which branch, and the exact command it started.
+    log = app_log.logger()
     if sys.platform == "darwin":
         app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
+        log.info("terminal: %s via osascript", app)
         if app == "iTerm":
             script = (
                 'tell application "iTerm"\n'
@@ -134,8 +140,13 @@ def run_line(line: str) -> None:
         # entire purpose is a window somebody types in. Saying so beats being an exception
         # somebody has to remember.
         if shutil.which("wt"):
+            log.info("terminal: windows terminal (wt cmd /k), line=%s", line)
             subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True, **child.wants_a_console())
             return
+        # `shell=True` means cmd.exe /c runs `start`, so there are TWO consoles for a moment: the
+        # shell's own, which exits at once, and the one `start` opens and keeps. That is the
+        # likeliest reading of the two windows reported above, and the log says which path ran.
+        log.info("terminal: start + cmd /k via shell, line=%s", line)
         subprocess.Popen(
             f'start "" cmd /k {line}', shell=True, close_fds=True, **child.wants_a_console()
         )
@@ -151,6 +162,7 @@ def run_line(line: str) -> None:
             continue
         held = f"{line}; echo; read -p 'Enter to close '"
         tail = [held] if wants_shell_string else ["bash", "-lc", held]
+        log.info("terminal: %s", argv[0])
         subprocess.Popen([*argv, *tail], close_fds=True)
         return
     raise TerminalLaunchError("no supported terminal emulator found on PATH")

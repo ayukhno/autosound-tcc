@@ -464,3 +464,50 @@ def test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it(tmp_path
 
     assert vendor_loader.is_available()
     assert vendor_loader.skill_dir() == good
+
+
+def test_every_file_this_app_reads_or_writes_names_its_encoding():
+    """A text handle with no `encoding` uses the MACHINE's locale encoding, and that is a bug that
+    only exists on somebody else's computer.
+
+    Bought on 2026-09-01 (autosound-tcc#4): `load_hardware_controls` read `project.json` with
+    `Path.read_text()`, the Windows box's locale encoding was cp1252, the project's channel
+    descriptions were in Ukrainian — `UnicodeDecodeError`, and the DSP panel plus the target curve
+    went blank with nothing said. Every machine here decodes it fine, because macOS's locale
+    encoding IS UTF-8; that is why the line survived review, and why this is a test and not a
+    habit.
+
+    The report that found it said this was the only such call in the tree. It was not: this scan
+    found three more (two writing the macOS bundle, one opening the process lock in text mode).
+    None of them had bitten yet, which is the point of running it over everything.
+    """
+    import ast
+
+    offenders = []
+    for file in sorted((ROOT / "src").rglob("*.py")):
+        tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("read_text", "write_text", "open"):
+                continue
+            if any(kw.arg == "encoding" for kw in node.keywords):
+                continue
+            # `importlib.metadata`'s `Distribution.read_text(name)` is a different API — its
+            # argument is a FILENAME inside the distribution, and it decodes as UTF-8 itself.
+            inner = node.func.value
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) \
+                    and inner.func.id == "distribution":
+                continue
+            if node.func.attr == "open":
+                mode = ""
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    mode = str(node.args[0].value)
+                for kw in node.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        mode = str(kw.value.value)
+                if "b" in mode:
+                    continue  # bytes carry no encoding to get wrong
+            offenders.append(f"{file.relative_to(ROOT)}:{node.lineno} {node.func.attr}()")
+
+    assert not offenders, "text I/O without an explicit encoding:\n" + "\n".join(offenders)

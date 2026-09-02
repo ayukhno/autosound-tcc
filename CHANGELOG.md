@@ -6,6 +6,95 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.28] — 2026-09-02 · a project written in Ukrainian stops blanking its own panels
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The method has not moved since v0.1.25; everything below is TCC's own.
+
+### Fixed
+
+- **The DSP panel and the target curve went blank on any project whose `project.json` contains a
+  character outside the machine's legacy code page — in practice, every project written in
+  Ukrainian.** One line read that file with `Path.read_text()` and no encoding, so it decoded with
+  the MACHINE's locale encoding; on a Windows box that is its ANSI code page, and Cyrillic channel
+  descriptions raised `UnicodeDecodeError` inside a function whose own docstring promises it never
+  fails. The exception took `load_project_view` down with it, which is why two visibly unrelated
+  panels emptied at once and arrived as two separate complaints. Reported with a full
+  reproduction, autosound-tcc#4.
+
+  Every machine here decodes that file correctly, because macOS's locale encoding IS UTF-8 — which
+  is exactly how the line survived review. There is now a test that walks the whole source tree and
+  fails on any text read or write that does not name its encoding: it found three more (two writing
+  the macOS bundle, one opening the process lock), none of which had bitten yet.
+
+- **"Protection" did nothing on raw measurements — the state the button exists for.** The channel
+  list came from the loaded ledger view alone, and phase 0 is before any ledger, so the list was
+  empty and the dialog was never built. The only sign was a line in the status strip under the
+  header, while the button is at the bottom of the right column. Channels now come from
+  `project.json` as well, which names them from intake onwards, and a refusal is answered next to
+  the click. The same fix stops channels without a ledger row being silently left out of a dialog
+  that asks about the measuring rig.
+
+- **The right-hand column could not be scrolled.** A round of 102 captures made a card 1864 px tall
+  inside a 778 px column with nothing to scroll it: the bottom of the list was off the screen, not
+  merely below the fold, and the plan card above it was squeezed to 62 px. One scroll for the whole
+  column now, which is what the left column already had, and a floor under the plan card.
+
+- **The onboarding interview showed nothing until a turn was over, and a finished interview could
+  vanish.** Text is streamed into the window as it arrives, a written profile is announced in the
+  conversation rather than only in the status line, and the window renders the model's Markdown
+  instead of printing it — a question's answer options no longer arrive glued into one paragraph,
+  and the answer box takes more than one line. It also speaks the language the rest of the app is
+  set to.
+
+- **`save_profile_field` reached the model with an empty description.** Its instructions were
+  written as an f-string under the `def`, which Python does not keep as a docstring, so the model
+  never saw "one field per call — don't batch everything to the end", the shape of a `groups`
+  entry, or the field vocabulary. That is why an interview could end in a profile full of nulls.
+
+- **The number fields under the curve plot no longer have the steppers drawn over their text.**
+  `0.000 ms` showed as `0.000`, `250.0 Hz` as `250.0 H` and `0.70` as `0.7` on Windows: the widths
+  were constants measured on macOS, where the arrows are narrower. They are now asked of the style
+  that is actually drawing them, and re-asked on every zoom.
+
+- **A turn that produced nothing now ends.** When omp gave up on a model it could not reach — a
+  quota exhausted mid-turn, ten retries, "this turn produced nothing" — no end-of-turn frame
+  followed, so the window kept saying it was thinking and a queued message kept promising to go
+  "the moment this turn ends". Nothing was going to make that true except the Send-now button.
+
+### Added
+
+- **The curve window scales its Y axis.** `Y−` and `Y+` beside the existing zoom, which only ever
+  moved the frequency axis; `D` and `A` hand the scale back to the fitter. A 1.5 dB dip in a view
+  auto-scaled to the loudest thing on screen is a few pixels tall, and no amount of horizontal zoom
+  makes it taller.
+
+- **A log that says what happened.** The level and the rotation were configured all along; the
+  calls were missing, so a completed interview left no trace at all. Every MCP tool call and its
+  answer, the onboarding window's turns, and which terminal the updater opened are now recorded at
+  INFO — the last one because a console window that blinks cannot be screenshotted.
+
+- **The bug-report form says a screenshot can be dragged into it**, in the window before the form
+  opens and in the form itself, and it now names which repository takes reports about the app and
+  which takes reports about the tuning method.
+
+### Known
+
+- **"Update TCC" flashes two console windows on Windows** (`docs/TODO.md`, F-043). The fallback
+  path opens two by construction — the shell's own and the one it starts — but both were reported
+  as disappearing, which that does not explain. Nothing is changed until the log line added here
+  says which path ran.
+
+- **A pin made from the DESKTOP SHORTCUT does not merge with the running window** (`docs/TODO.md`,
+  F-044). Two taskbar icons appear and the older one starts a second copy of TCC; pinning from the
+  live window is unaffected. The shortcut's `AppUserModel.ID` is written by a PowerShell step that
+  is allowed to fail quietly, and nothing today reports whether it did. Reported on 2026-09-02,
+  after this release's code was written; unfixed here.
+
+- **A console window still blinks once at startup**, and on 2026-09-02 a terminal window was
+  reported blinking with it. The first is unchanged from v0.1.26; the second is not explained by
+  anything that runs at startup, which is why the launcher now logs the door it takes.
+
 ## [v0.1.27] — 2026-09-01 · the taskbar pin is given something to relaunch
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is

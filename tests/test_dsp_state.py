@@ -577,3 +577,34 @@ def test_a_renamed_channel_is_one_row_in_the_rig_not_three():
     rows = view.groups[0].rows
     assert [r.name for r in rows] == ["w-L"], "one channel, under the name it goes by now"
 
+
+def test_the_project_file_is_read_as_utf8_and_not_as_the_machines_locale(tmp_path, monkeypatch):
+    """A Ukrainian project blanked the DSP panel and the target curve on Windows (autosound-tcc#4).
+
+    `Path.read_text()` with no `encoding` uses the MACHINE's locale encoding — on that box cp1252
+    — and `project.json` carries the tuner's own words. The decode raised inside
+    `load_hardware_controls`, which its own docstring promises never fails ("absent file or key ->
+    {}, not an error"), and took `load_project_view` down with it. Two visibly unrelated panels
+    went blank from one line, which is why it arrived as two separate complaints.
+
+    The proof this test carries is the same bytes read the way that machine read them: valid
+    UTF-8, undecodable in cp1252. macOS never sees it, because its locale encoding IS UTF-8 —
+    which is exactly how the line survived review here.
+    """
+    import pytest
+
+    from autosound_tcc.core import config
+    from autosound_tcc.state.dsp_state import load_hardware_controls
+
+    project = tmp_path / "project.json"
+    project.write_text(json.dumps({
+        "schema_version": 3,
+        "hardware": {"controls": {"RearRC": "0 dB", "SubRC": "−3 dB"}},
+        "channels": [{"code": "w-L", "descr": "мідбас у дверях, лівий"}],
+    }, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+
+    with pytest.raises(UnicodeDecodeError):
+        project.read_text(encoding="cp1252")  # what the old line did on that machine
+
+    assert load_hardware_controls(tmp_path) == {"RearRC": "0 dB", "SubRC": "−3 dB"}

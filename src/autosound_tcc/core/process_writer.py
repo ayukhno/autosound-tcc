@@ -89,7 +89,10 @@ def _exclusive(project_dir: Path, timeout_s: float) -> Iterator[None]:
     """
     lock_path = _process_dir(project_dir)
     lock_path.mkdir(parents=True, exist_ok=True)
-    handle = (lock_path / _LOCK_NAME).open("a+")
+    # Nothing is ever written into it — the file IS the lock — but it is opened in text mode,
+    # and a text handle with no encoding is the same defect as the one that emptied the DSP
+    # panel on a Ukrainian Windows. One rule, no exceptions to remember.
+    handle = (lock_path / _LOCK_NAME).open("a+", encoding="utf-8")
     try:
         if fcntl is None:  # no flock here; the caller is still serialised by `_THREAD_LOCK`
             yield
