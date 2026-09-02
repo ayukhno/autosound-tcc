@@ -2481,12 +2481,36 @@ class MainWindow(QMainWindow):
         return paths
 
     def _watched_project_dirs(self) -> list[str]:
-        """`state/` and each preset under it. A directory watch is what catches a file that did not
-        exist when the watcher was armed — the first `v_001.json`, or a second preset appearing —
-        which a file watch by definition cannot."""
-        root = config.state_root()
-        if config.chosen_project_dir() is None or not root.is_dir():
+        """The project folder, `state/`, and each preset under it.
+
+        A directory watch is what catches a file that did not exist when the watcher was armed —
+        the first `v_001.json`, or a second preset appearing — which a file watch by definition
+        cannot.
+
+        **The project folder is on the list because `state/` is not there yet**, and that was the
+        whole bug (autosound-tcc#3): the guard returned `[]` when `state/` was missing, so the
+        mechanism written to catch the first snapshot was switched off in exactly the situation it
+        exists for. And that situation is not an edge case, it is the normal first run — TCC opens
+        on a new project, the interview writes `project.json` and `dsp_profile.json`, and the
+        ledger arrives last, into a directory that did not exist when the watcher was armed. The
+        preset then stayed `null` for the whole session, which blanks the DSP panel and, through
+        `current_target(None)`, the target curve with it; only reopening the project brought them
+        back.
+
+        The folder is watched **only while `state/` is missing**, which is the whole of what this
+        adds. Once the ledger exists, `state/` itself catches every later preset and snapshot, and
+        keeping the folder on the list would buy nothing but a project reload per file written
+        beside `project.json` — the onboarding interview writes its draft on every answer. Measured
+        while fixing this: watching it unconditionally made a reload land in the middle of a test
+        that had just filled the capture panel, and wiped it. That is the app's own behaviour, not
+        the test's: a reload re-renders from disk, and re-rendering costs whatever was on screen.
+        """
+        project_dir = config.chosen_project_dir()
+        if project_dir is None:
             return []
+        root = config.state_root()
+        if not root.is_dir():
+            return [str(project_dir)]
         return [str(root)] + [str(root / preset) for preset in config.available_presets(root)]
 
     def _arm_project_watcher(self) -> None:

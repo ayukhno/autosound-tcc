@@ -3010,7 +3010,7 @@ def test_the_protection_button_answers_where_it_was_pressed(tmp_path, monkeypatc
     assert i18n.t("protNoChannels") in said[0]
 
 
-def test_the_right_column_scrolls_when_the_capture_list_is_long():
+def test_the_right_column_scrolls_when_the_capture_list_is_long(tmp_path, monkeypatch):
     """F-040, from a screenshot: a round of 102 captures made a card 1864 px tall inside a 778 px
     column, with nothing to scroll it — the bottom of the list was off the screen, not merely
     below the fold. The plan card above it was squeezed to 62 px in the bargain.
@@ -3021,6 +3021,12 @@ def test_the_right_column_scrolls_when_the_capture_list_is_long():
     from PySide6.QtWidgets import QScrollArea
 
     from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
+
+    # Pointed at an empty folder, so nothing on this machine can change under the window while it
+    # is being measured: the project watcher would otherwise fire a reload, and a reload re-renders
+    # the capture card from disk — i.e. empties the one this test just filled by hand.
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
 
     _app()
     window = MainWindow()
@@ -3044,3 +3050,39 @@ def test_the_right_column_scrolls_when_the_capture_list_is_long():
     assert window._plan_panel.height() >= 160, "the plan card is not crushed by the one below it"
 
     window.hide()
+
+
+def test_the_first_ledger_snapshot_is_watched_for_before_state_exists(tmp_path, monkeypatch):
+    """autosound-tcc#3: on a new project `ui.preset` stayed `null` for the whole session — DSP
+    panel blank, target curve blank with it — and only reopening the project brought them back.
+
+    The directory watch that exists to catch the first `v_001.json` was switched off by the very
+    condition it exists for: `state/` does not exist until that file is written, and the guard
+    returned `[]` when it was missing. That is the NORMAL first run, not an edge case: the ledger
+    is always the last artefact to appear, always into a folder nobody was watching.
+    """
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    ledger = tmp_path / "state"
+    ledger.rename(tmp_path / "state.later")  # a project that has not been tuned yet
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    assert not (tmp_path / "state").is_dir(), "the situation this is about"
+    assert str(tmp_path) in window._watched_project_dirs(), (
+        "the folder the ledger will appear in is what has to be watched")
+
+    # ...and once it appears, the re-arm reaches it and the preset resolves without reopening.
+    (tmp_path / "state.later").rename(ledger)
+    window._on_project_file_changed()
+    window._reload_project_files()
+
+    watched = window._watched_project_dirs()
+    assert str(ledger) in watched and str(ledger / "FULL") in watched
+    assert window._preset_combo.currentData() == "FULL"
