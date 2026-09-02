@@ -54,7 +54,7 @@ Opened by ⤓ (which stops folding anything in by itself).
 | REW title | what REW calls it now |
 | when | `date`, so the sequence is visible and arguable |
 | new name | empty = leave the title alone. Filled by hand or by **"Give names"** |
-| protection | the answer for that channel: `—` / `OFF` / `HP 80 LR24`, edited in place |
+| protection | the answer for that channel: empty (nothing was in the chain) or a filter, `HP 80 LR24`, edited in place — see the section below for why empty writes `OFF` |
 
 **Controls:** the "unprocessed only" checkbox (on), **+10** (another portion of older ones),
 **"Give names"**, **Apply**.
@@ -73,6 +73,37 @@ take the other nineteen down with it, and must not be reported as one sentence a
 
 **The protective value is per CHANNEL, not per row.** The same channel captured with two methods is
 two rows and one chain: the cell mirrors across the rows of that channel, and Apply writes it once.
+
+## The protective answer, simplified — two states on screen, three in the file
+
+Added 2026-09-02, after the user opened the existing dialog and asked for less: **"не вказано"
+should mean "no protection"; what makes protection is a crossover — an HP or an LP entered, or
+nothing.** And: type and slope are worth keeping for whoever needs them, but there should be a
+small button that turns the leg into **LR24** in one press.
+
+The second half is easy and is taken as asked: an `LR24` button per leg, filling type and slope
+into the visible fields. It also removes a real trap — the skill's writer refuses a leg that has a
+frequency but no type or slope, so "type 80 and press Apply" is today a refusal, and the button is
+the fix for it.
+
+The first half is taken **with one correction, and the correction is the whole reason this
+paragraph exists.** On screen there are now two answers: a filter, or nothing. In the FILE there
+must still be three, because two of them are different facts and the method paid for the
+difference: a channel recorded as `OFF` was swept with nothing in the chain, and a channel with no
+record is a question nobody answered. `protective.de_embed` **refuses** the second rather than
+treating it as clean — the measurement behind that rule is the same junction reading −49° with the
+protection in the chain and +3° with it out.
+
+So: **an empty cell, on Apply, writes an explicit `OFF`.** That is honest here in a way it would
+not have been before, and the reason is this plan's own design — the column stands in the import
+dialog, on every row being imported, so "empty" is not "nobody was asked", it is "I looked at this
+row and there was nothing in the chain". What disappears is the third CHOICE, which the tuner had
+to hold in their head; what stays is the third STATE, for records nobody has answered for.
+
+Which those are, concretely: everything written before this change, and anything the skill wrote
+from its own side. The review dialog (below) therefore still shows `не вказано` where it is what is
+stored — a screen that renamed old silence into "no protection" would be asserting something
+nobody said.
 
 ## The way back for a protective record
 
