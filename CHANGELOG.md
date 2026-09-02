@@ -6,6 +6,84 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.29] — 2026-09-02 · reading REW becomes a choice instead of a flood
+
+Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
+**`v3.0.36`**. The method has not moved since v0.1.25; everything below is TCC's own.
+
+### Added
+
+- **⤓ now opens a list of REW's measurements and asks which of them come in.** It used to fold
+  every title REW held into the capture card: on the run that produced this change, 102 titles —
+  16 expected and 86 appended as "additional" rows — a card 1864 px tall, most of it another car's
+  library, inside a card called "IN FOCUS NOW". Nothing enters the round without a tick now.
+
+  The list opens on as many measurements as the round is waiting for, oldest of that batch first,
+  with **+10 earlier** to reach further back one portion at a time and a **unprocessed only** box
+  that hides what this project has already taken in. What was taken in is remembered per project,
+  so the checklist no longer empties itself when REW is closed — or filtered.
+
+- **Names are given in that same list.** A **new name** column, and **Give names**, which asks the
+  same two questions the old ⇅ button did (which capture method, in what order do you sweep) and
+  then fills downwards from the row you are standing on. Nothing is sent until Apply, and a batch
+  that would leave REW holding one name twice is refused before it goes.
+
+- **An `LR24` button** on each protective leg. Two dropdowns stay for whoever needs them, but
+  nearly every protective filter is an LR24, and choosing it twice per channel was a toll on the
+  ordinary path. It also fixes a real trap: the skill's writer refuses a leg with a frequency and
+  no type or slope, so "type 80 and press Record" used to be a refusal.
+
+### Changed
+
+- **Renames address a measurement by its `uuid`, and look up REW's ordinal at the moment of the
+  call.** Measured on a live REW on 2026-09-02: the same measurement is number 1 with a filter on
+  and number 18 with it off, and dragging a row by hand exchanges two ordinals while every uuid,
+  title and date stays put. The old flow picked "the N highest ordinals" as the newest batch —
+  which, with a filter switched on in REW, is a rename landing on somebody else's curve.
+
+- **The order of the list is capture time, not REW's.** Also measured: rows captured at 13:25 were
+  served after rows captured at 20:11. Where a date cannot be read — it is a display string
+  formatted by REW's own locale, not a timestamp — the list keeps REW's order and says so instead
+  of sorting around it.
+
+- **"Listening" moved from the capture card into the message composer**, beside the attach button,
+  and appears only in phase 4 — the ear's phase. The capture card is about sweeps.
+
+- **What a protective record means, corrected.** TCC read "no record" as an unanswered question and
+  refused to correct anything for it. That was TCC's reading, not the method's, and it was wrong at
+  the root: it treated the record as a description of the measuring chain. There is nearly always
+  something in that chain — the DSP's own working crossovers, which belong there — so "no record"
+  cannot mean "nothing was in it". The record is an instruction: empty, read the curve as measured;
+  filled, take these out first. The method already says exactly that.
+
+### Fixed
+
+- **The preset never resolved on a new project**, so the DSP panel and the target curve stayed
+  blank for the whole session and only came back when the project was reopened. The directory watch
+  that exists to catch the first `v_001.json` was switched off by the very condition it exists for:
+  `state/` does not exist until that file is written. Reported as autosound-tcc#3.
+
+- **The right-hand column could not be scrolled** — measured at 1864 px of content in a 778 px
+  column, with the plan card squeezed to 62 px above it. One scroll for the whole column now, and a
+  floor under the plan card (`docs/TODO.md`, F-040).
+
+### Known
+
+- **The protective column is not in the import list yet.** Its two settled halves shipped (the
+  reading above, and the `LR24` button); the column itself waits on a decision about how the cell
+  is edited and how a row resolves to a channel before it has been named
+  (`docs/CAPTURE-IMPORT-PLAN.md`, step 3).
+
+- **A filter switched on in REW's own window changes what its API answers** — 17, then 85, then 102
+  measurements from one file — and a filtered answer is renumbered with no gaps, so nothing in it
+  reveals what is hidden. The import list says what it is showing rather than claiming to show
+  everything, and counts the measurements this project has taken in that REW is not showing.
+  Recorded for the method's own reference doc as `autosound-hub#50`.
+
+- **"Update TCC" flashes two console windows on Windows** (F-043), and **a pin made from the desktop
+  shortcut does not merge with the running window** (F-044). Both unchanged from v0.1.28; the
+  launcher now logs which door it took, so the next occurrence is readable from `tcc.log`.
+
 ## [v0.1.28] — 2026-09-02 · a project written in Ukrainian stops blanking its own panels
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
