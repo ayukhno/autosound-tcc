@@ -37,12 +37,43 @@ in it is expensive.
   I already imported" needs: a measurement we imported and then renamed by hand in REW must stay
   hidden, and a title match cannot promise that.
 - **The `date` is the order.** Not REW's list order: the user warns that REW's own **sorting**
-  changes it and REW's **filters** hide part of the list in its UI. Capture time is what "по черзі"
-  means, and it is the one order neither of those touches.
+  changes it and REW's **filters** hide part of the list. Capture time is what "по черзі" means.
+  But `date` is a DISPLAY string, not ISO — measured on a live instance: `2026-Jun-22 12:10:35`,
+  the month as a word, i.e. formatted by REW's (Java) locale. On a Ukrainian Windows it may not be
+  `Jun`. So: parse tolerantly, and where the parse fails, keep REW's own order and say on screen
+  that the order is REW's rather than capture time. Never sort by a string compare of that field.
 
 **Where the imported set lives:** `.tcc/imported-measurements.json` in the project —
 `uuid -> {title at import, round id, when}`. Per project, because "already imported" is a fact
 about this car's work, not about this machine.
+
+### REW's UI filter reaches the API — measured, 2026-09-02
+
+This was the open risk of the first draft, and the answer is the bad one. With **"impedance and RTA
+only"** switched on in REW's own list, `GET /measurements` returned **17 measurements, every one of
+them `(imp)` or `(rta)`**. The API does not serve what REW HOLDS; it serves what REW is currently
+SHOWING.
+
+Two consequences, and the second is the dangerous one.
+
+1. **"Everything REW holds" is not available to us.** The dialog must not claim it. One line under
+   the list: what is shown is what REW is showing now.
+2. **A filter breaks "по черзі" exactly where it matters.** The ordinals came back renumbered
+   `1..17` with **no gaps**, so a hidden measurement leaves no trace to detect. With a filter on,
+   two adjacent rows in our list need not be adjacent captures — and "Give names" fills downwards
+   in sequence, so names would land on the wrong curves. That is precisely the failure the method's
+   identity hygiene was written against (`m-R` data pulled under the `m-L` label).
+
+What the dialog does about it, since it cannot see the filter's state:
+
+- **the date column carries its weight here** — it is the one visible sign that the sequence has a
+  hole in it, so it sits beside the proposed name and the tuner reads them together before Apply;
+- **a count the tuner can compare**: this project has N measurements recorded as imported; if some
+  of them are not in REW's current answer, say so — "REW is showing 17; 6 of this project's
+  imported measurements are not among them" is either a deletion or a filter, and both are worth
+  knowing before renaming anything;
+- **nothing is renamed without the tuner seeing the whole table**, which is the design anyway:
+  names are proposals in a column until Apply.
 
 ## The import dialog
 
