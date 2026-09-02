@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "autosound-tcc"
-version = "0.1.27"
+version = "0.1.28"
 description = "Read-only Tuning Command Center for car-audio DSP tuning (macOS + Windows)."
 readme = "README.md"
 # 3.11, not 3.10. The old floor was a promise nobody kept: there is no CI, nothing has ever run
