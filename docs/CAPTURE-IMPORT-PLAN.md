@@ -64,7 +64,40 @@ Two consequences, and the second is the dangerous one.
    in sequence, so names would land on the wrong curves. That is precisely the failure the method's
    identity hygiene was written against (`m-R` data pulled under the `m-L` label).
 
-What the dialog does about it, since it cannot see the filter's state:
+**Confirmed a second time, same session:** the filter was switched to sweeps only and the same
+call returned **85 measurements, every one `(sw)`** — a set that does not overlap the first answer
+at all. Same REW, same file, two filters, two different truths.
+
+That second answer carried two facts the first one could not show, and both change the design:
+
+- **REW's list order is not capture order.** Rows 74–85 were captured at 13:25–13:28 and are served
+  AFTER rows 11–73, captured at 20:11–20:34. So "the last ones in the list" and "the last ones
+  captured" are different sets, and sorting by `date` is not a refinement — it is the only way to
+  get the sequence the tuner means.
+- **A re-take breaks the name order, and only the date shows it.** `tw-L p8_49 (sw)` is timed
+  20:17:29 and `tw-L p9_49 (sw)` 20:17:02 — p8 was taken again after p9. Read by name, that pair
+  is in order; read by time, it is not. This is the concrete case the date column beside the
+  proposed name is for.
+
+**Unfiltered, the same call returns 102** — 7 `(imp)` + 10 `(rta)` + 85 `(sw)`, and 102 is exactly
+the number the Windows run reported. The two filtered answers partition the whole set, so the file
+is the same one that produced this note.
+
+That third answer settles what an ordinal IS: **`sw_01 (sw)` is number 1 under the sweep filter and
+number 18 with no filter** — one measurement, one uuid, two positions. The ordinal is the index of
+a VIEW.
+
+And a fourth, on purpose: the user swapped rows 101 and 102 **by hand** in REW. The call reflects
+it exactly — the two exchanged ordinals, every uuid, title and date unchanged. So the position
+moves for three different reasons (a filter, a sort, a hand) and the uuid for none of them.
+
+The swap also left the tail out of time order — 101 is `13:28:01`, 102 is `13:27:20` — which is the
+same shape as the honest case the user named: **a re-take of something that did not come out** ends
+up out of sequence. Their instruction on it is the design rule here: **worth the tuner's attention,
+not a stopper.** "Give names" fills downwards and MARKS the rows where capture time disagrees with
+the fill order; it does not refuse, and it does not renumber anything on its own.
+
+What the dialog does about the filter, since it cannot see its state:
 
 - **the date column carries its weight here** — it is the one visible sign that the sequence has a
   hole in it, so it sits beside the proposed name and the tuner reads them together before Apply;
@@ -85,7 +118,7 @@ Opened by ⤓ (which stops folding anything in by itself).
 | REW title | what REW calls it now |
 | when | `date`, so the sequence is visible and arguable |
 | new name | empty = leave the title alone. Filled by hand or by **"Give names"** |
-| protection | the answer for that channel: empty (nothing was in the chain) or a filter, `HP 80 LR24`, edited in place — see the section below for why empty writes `OFF` |
+| protection | what to take out of this curve before it is analysed: empty (take nothing out) or a filter, `HP 80 LR24`, edited in place |
 
 **Controls:** the "unprocessed only" checkbox (on), **+10** (another portion of older ones),
 **"Give names"**, **Apply**.
@@ -105,36 +138,74 @@ take the other nineteen down with it, and must not be reported as one sentence a
 **The protective value is per CHANNEL, not per row.** The same channel captured with two methods is
 two rows and one chain: the cell mirrors across the rows of that channel, and Apply writes it once.
 
-## The protective answer, simplified — two states on screen, three in the file
+## What the protective record actually is: an instruction, not a description
 
-Added 2026-09-02, after the user opened the existing dialog and asked for less: **"не вказано"
-should mean "no protection"; what makes protection is a crossover — an HP or an LP entered, or
-nothing.** And: type and slope are worth keeping for whoever needs them, but there should be a
-small button that turns the leg into **LR24** in one press.
+Corrected by the user on 2026-09-02, and the correction goes deeper than the wording. The first
+draft of this note treated the record as a description of the measuring chain, and proposed that an
+empty cell be written as `OFF` — "swept with nothing in the chain".
 
-The second half is easy and is taken as asked: an `LR24` button per leg, filling type and slope
-into the visible fields. It also removes a real trap — the skill's writer refuses a leg that has a
-frequency but no type or slope, so "type 80 and press Apply" is today a refusal, and the button is
-the fix for it.
+**That is false, and the reason is the car.** There is nearly always something in the chain: the
+DSP's own working crossovers, which are supposed to be there and which must NOT be taken out of the
+curve. Writing `OFF` would claim the opposite.
 
-The first half is taken **with one correction, and the correction is the whole reason this
-paragraph exists.** On screen there are now two answers: a filter, or nothing. In the FILE there
-must still be three, because two of them are different facts and the method paid for the
-difference: a channel recorded as `OFF` was swept with nothing in the chain, and a channel with no
-record is a question nobody answered. `protective.de_embed` **refuses** the second rather than
-treating it as clean — the measurement behind that rule is the same junction reading −49° with the
-protection in the chain and +3° with it out.
+The record is not about the chain. It is an instruction to the analysis:
 
-So: **an empty cell, on Apply, writes an explicit `OFF`.** That is honest here in a way it would
-not have been before, and the reason is this plan's own design — the column stands in the import
-dialog, on every row being imported, so "empty" is not "nobody was asked", it is "I looked at this
-row and there was nothing in the chain". What disappears is the third CHOICE, which the tuner had
-to hold in their head; what stays is the third STATE, for records nobody has answered for.
+| the cell | what it means |
+|---|---|
+| empty | **process the curve as measured** — take nothing out |
+| a filter | **take this out first**, then process |
 
-Which those are, concretely: everything written before this change, and anything the skill wrote
-from its own side. The review dialog (below) therefore still shows `не вказано` where it is what is
-stored — a screen that renamed old silence into "no protection" would be asserting something
-nobody said.
+That is the whole model, and it is simpler than the three states it replaces because it stops
+asking the tuner a question about the world and asks them one about the work.
+
+### What it costs, said once
+
+Under the old model a channel with no record was refused by `de_embed`: a correction over an
+unknown chain produces data that looks corrected, so silence was treated as "nobody answered" and
+blocked. Under the new one, silence is a valid instruction — and the case that refusal caught, a
+protective filter that was in the chain and never written down, now passes through and its phase is
+read as the driver's own.
+
+Two things make that acceptable rather than a loss:
+
+- the column now stands in the import dialog, on **every row being imported**, so the question is
+  asked at the moment the answer is known, instead of being remembered later;
+- the analysis can still SAY what it assumed — "no protective record for this channel; read as
+  measured" — which is the honest half of the old refusal without the blocking half.
+
+### The method already says this — the stricter reading is ours
+
+Checked before writing a ticket, and the ticket is not needed. `rew_tool/protective.py` already
+carries exactly the model above, in `should_de_embed(record, channel, baseline=)`:
+
+* `("no", …)` — **the default**, in its own words: *"a working capture: it measured the system as
+  configured, so whatever filters were in it belong there. This is the DEFAULT and it is an answer,
+  not a shrug."*
+* `("yes", legs)` — marked raw, and here is what to take out.
+* `("check", …)` — it looks raw and is not marked.
+
+`de_embed(None)` does raise, but not because silence is unknowable: its own message says the caller
+should have asked `should_de_embed` first, and that under the working-by-default rule there is
+nothing to take out.
+
+**The reading that treats silence as an unanswered question is TCC's own** — the docstring of
+`core/protective.py` and the `protWhy` sentence in the UI ("leaving a channel unrecorded is not the
+same thing, and nothing will be corrected for it"). Both are ours to fix, and fixing them is cheap
+in the most useful way: **nothing consumes the correction yet.** `de_embed` and `default_corrected`
+have no caller in any window today; the dialog only reads existing legs. So the semantics can be
+put right before there is a single curve drawn from them.
+
+### What we keep from the method that this design almost threw away
+
+`should_de_embed`'s third answer, `"check"`, is worth more here than anywhere: it fires when a
+**baseline** capture — one taken before any crossover was designed — carries no protective record.
+That is the single case where a forgotten flag is recoverable, because filters in force during a
+baseline sweep are protection almost by definition.
+
+And baseline is exactly where the tuner is when this dialog is most used. So: on a baseline round,
+a row left empty is **marked** in the table — "baseline, not marked; was protection in force?" —
+in the same shape as the order warning above. It asks; it does not block, and it does not fill
+anything in on the tuner's behalf.
 
 ## The way back for a protective record
 
@@ -151,7 +222,9 @@ list only for the rows it already has.)
    uuids. No renaming, no protection yet. **This is the step that stops the card growing**, so it
    goes first.
 2. **The rename column and "Give names"**, moving the ⇅ button's flow into the dialog.
-3. **The protection column**, and the card's button turned into review-and-correct.
+3. **The protection column**, and the card's button turned into review-and-correct. Nothing waits
+   on the method: the semantics are already the method's, and what changes is TCC's own reading of
+   them (`core/protective.py`'s docstring and the `protWhy` text) plus the two marks above.
 4. **Listening to the composer row**, shown only in phase 4.
 
 ## Risks and what is not yet known
