@@ -209,3 +209,16 @@ def test_the_body_puts_the_words_first_and_the_pictures_under_them():
     got = body_with_shots("it would not open", ("https://raw/1.png", "https://raw/2.png"))
     assert got.startswith("it would not open")
     assert got.count("![") == 2 and got.index("https://raw/1.png") < got.index("https://raw/2.png")
+
+
+def test_the_control_appears_exactly_when_this_build_can_publish(monkeypatch):
+    """Tied to the capability rather than to a version: the control showed up on its own the day
+    the pin reached the method that has the uploader, and it would go away again on its own if a
+    build ever shipped without one. Nothing here needs editing when either happens."""
+    from autosound_tcc.core import issue_assets
+    from autosound_tcc.ui.tcc import feedback_dialog as fd
+
+    _app()
+    dialog = fd.FeedbackDialog("https://github.com/x/y/issues/new", "")
+
+    assert dialog._shots_box.isVisibleTo(dialog) is issue_assets.available()

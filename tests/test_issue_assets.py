@@ -29,11 +29,10 @@ class _Gate:
         return self._answer(dest_name)
 
 
-def test_this_checkout_cannot_publish_yet_and_says_so_plainly():
-    """Not a placeholder assertion: the pin is behind the method that has the uploader (#60), and
-    `available()` is what keeps the window from offering a control nothing could carry. The day
-    the pin moves this flips on its own — which is the point of asking the FUNCTION, not the file.
-    """
+def test_publishing_is_offered_only_where_the_gate_has_an_uploader():
+    """`available()` is what keeps the window from offering a control nothing could carry. It asks
+    for the FUNCTION rather than the file, which is why it flipped on its own the day the pin
+    reached v3.0.40 — the gate module itself had been there for months (#60)."""
     gate = issue_assets._gate()
     assert gate is not None, "the side-effect gate itself has been in the method for a long time"
     assert issue_assets.available() is hasattr(gate, "upload_issue_asset")
@@ -95,9 +94,10 @@ def test_a_stop_half_way_reports_what_is_already_public(monkeypatch, tmp_path):
     ({"returncode": 0}, None),
 ])
 def test_the_url_is_read_out_of_whatever_the_gate_answers(answer, expect):
-    """`guarded_run` answers with a dict; the uploader is documented as answering with the URL.
-    Both are read rather than one of them assumed — this call cannot be exercised against the real
-    gate until the pin reaches it (#60), and guessing which one would be the whole bug."""
+    """`guarded_run` answers with a dict; the uploader is DOCUMENTED as answering with the URL.
+    Both are read rather than one of them assumed — and the tolerance turned out to be the working
+    half: the real gate returns the dict. The shapes are kept side by side here so a later change
+    to either one is a failing case rather than a silent `None`."""
     assert issue_assets._url_of(answer) == expect
 
 
@@ -109,3 +109,40 @@ def test_nothing_is_claimed_when_the_uploader_is_absent(monkeypatch, tmp_path):
     got = issue_assets.publish([shot], consented=True)
 
     assert not got.ok and got.urls == ()
+
+
+def test_the_real_gate_answers_a_dict_and_the_url_is_still_found(tmp_path):
+    """Against the METHOD'S OWN uploader, with the network faked at the runner.
+
+    Worth its own test because the one thing this adapter could not check until the pin moved was
+    the shape of the answer — and the docstring and the code disagree: `upload_issue_asset` is
+    documented as returning "its verified raw URL" and actually returns `guarded_run`'s dict. The
+    tolerant read was not caution, it was the difference between working and not.
+    """
+    shot = tmp_path / "a.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    seen = {}
+
+    def runner(argv):
+        seen["argv"] = argv
+        return 0, "https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/" \
+                  "issue-assets/issues/20260903-1.png\n", ""
+
+    got = issue_assets.publish([shot], consented=True, runner=runner)
+
+    assert got.ok, got.problem
+    assert got.urls[0].endswith("/issues/20260903-1.png")
+    # The repo and the branch are the gate's, hardcoded there; the caller only names the file.
+    assert seen["argv"][:4] == ["gh", "api", "-X", "PUT"]
+    assert "ayukhno/autosound-tuning-skill" in seen["argv"][4]
+
+
+def test_the_gate_refuses_a_publish_nobody_consented_to(tmp_path):
+    """The method's own rail, not ours: this is the assertion that proves the window's `consented`
+    is load-bearing rather than decorative."""
+    shot = tmp_path / "a.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    got = issue_assets.publish([shot], consented=False, runner=lambda argv: (0, "", ""))
+
+    assert not got.ok and "SIDE-EFFECT REFUSED" in got.problem
