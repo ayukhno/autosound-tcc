@@ -231,3 +231,131 @@ def test_the_in_app_model_survives_a_copy_that_skips_the_interview(tmp_path, mon
     assert dlg.in_app_model == npd.AI_MODEL_IDS.get(dlg._ai_combo.currentText())
     assert dlg.in_app_model, "and it is a real model id, not an empty string"
 
+
+
+class _StubSeeder:
+    """A seeder whose `seed()` reports what it was told to, so the dialog's own rendering can be
+    tested apart from the method's version. The real module is exercised by the tests above and by
+    the method's own selftest; what belongs here is what TCC does with the answer."""
+
+    PROFILE_FILE = "dsp_profile.json"
+
+    def __init__(self, describe, report):
+        self._describe, self._report = describe, report
+        self.seeded_into = []
+
+    def describe(self, source):
+        return self._describe
+
+    def dsp_of(self, source):
+        return ("Audiotec-Fischer", "Helix DSP Ultra S")
+
+    def seed(self, source, target, **kwargs):
+        self.seeded_into.append((str(source), str(target), kwargs))
+        return self._report
+
+
+class _Described:
+    def __init__(self, car, dsp, channels):
+        self.car, self.dsp, self.channels = car, dsp, channels
+
+
+class _Report:
+    def __init__(self, channels, amps=0, flaws=0, questions=0):
+        self.ok = True
+        self.written = ["project.json"]
+        self.channels, self.amps = channels, amps
+        self.flaws, self.questions = flaws, questions
+        self.profile_open = 0
+        self.problem = None
+
+
+def _dialog_on(source, seeder, monkeypatch, vendor="Musway", model="M6V4"):
+    monkeypatch.setattr(npd, "_seeder", lambda: seeder)
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._vendor_edit.setText(vendor)
+    dlg._model_edit.setText(model)
+    dlg._seed_edit.setText(str(source))
+    return dlg
+
+
+def test_the_note_says_what_would_travel_not_what_the_source_holds(tmp_path, monkeypatch):
+    """The count shown before Create is a promise, and the seeder is about to stop keeping this
+    one: topology belongs to the processor, so picking a different one leaves the channel grid
+    behind (skill, SKL-014). Twenty Helix channels landing in an 8-output DSP is what the old
+    promise cost, and `remove-channel` does not exist.
+
+    So the dialog stops predicting: it asks the seeder with the flags Create will use and draws
+    the answer. Stubbed here — what is under test is the rendering, not the method's version.
+    """
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    seeder = _StubSeeder(_Described("VW Passat B8 2017", "Helix DSP Ultra S", 20), _Report(0))
+
+    dlg = _dialog_on(source, seeder, monkeypatch)
+
+    said = dlg._seed_summary.text()
+    assert "20" in said, "the source's own size is still stated"
+    assert npd.i18n.t("npSeedTravels").format(channels=0, amps=0) in said
+    assert npd.i18n.t("npSeedNoChannels") in said, "said BEFORE Create, not discovered after"
+
+
+def test_the_findings_tick_stops_being_offered_blind(tmp_path, monkeypatch):
+    """"…and what was measured there" said nothing about how much that is — the box was ticked
+    without knowing whether it carried two rows or forty (#48). The preview counts them, because
+    ticking the box is what changes the answer."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    seeder = _StubSeeder(_Described("VW Passat B8 2017", "Helix DSP Ultra S", 20),
+                         _Report(20, amps=2, flaws=18, questions=3))
+
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    dlg._seed_findings.setChecked(True)
+
+    said = dlg._seed_summary.text()
+    assert "18" in said and "3" in said, "how many flaws and how many questions"
+    assert seeder.seeded_into[-1][2]["include_findings"] is True, "asked with the tick as set"
+    assert npd.i18n.t("npSeedNoChannels") not in said, "same processor: nothing stays behind"
+
+
+def test_the_preview_seeds_into_a_throwaway_folder_never_the_real_one(tmp_path, monkeypatch):
+    """A preview that wrote where Create writes would be Create, done early and without being
+    asked. The target it hands the seeder is a temp dir, and it is gone by the time the note is
+    drawn."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    target = tmp_path / "the_real_one"
+    seeder = _StubSeeder(_Described("VW", "Helix", 4), _Report(4))
+
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    dlg._folder_edit.setText(str(target))
+    dlg._refresh_seed_note()
+
+    assert seeder.seeded_into, "the seeder was asked"
+    for _src, used_target, _kwargs in seeder.seeded_into:
+        assert str(target) not in used_target, "never the folder Create will use"
+        assert not os.path.exists(used_target), "and it does not outlive the question"
+    assert list(source.iterdir()) == [source / "project.json"], "the source is untouched"
+
+
+def test_prefilling_the_dsp_from_the_source_does_not_loop(tmp_path, monkeypatch):
+    """`_prefill_dsp` writes the DSP fields; those fields redraw the note; the note reads them
+    back. Without the guard the two take turns until the stack runs out — this is the test that
+    would have caught it."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+
+    dlg = _dialog_on(source, seeder, monkeypatch)          # constructing at all is half the test
+
+    assert not dlg._prefilling, "the guard is cleared afterwards, not left on"
+    assert dlg._seed_summary.text(), "and the note was drawn once the fields settled"
+    # Bounded, not merely finite: the fields settle in a couple of writes, and every extra write
+    # is another seed into a temp folder. A number that creeps up here is the loop coming back
+    # slowly instead of all at once.
+    assert len(seeder.seeded_into) <= 4, seeder.seeded_into

@@ -18,6 +18,7 @@ Two consequences show up here rather than in that module:
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -100,6 +101,12 @@ class NewProjectDialog(QDialog):
         self.setWindowTitle(i18n.t("npTitle"))
         self.setMinimumWidth(420)
         self.interview_dialog: Optional[ProfileInterviewDialog] = None
+        #: `describe()`'s answer for the folder currently picked, kept so the note can be redrawn
+        #: when the DSP choice changes without reading the folder again.
+        self._seed_describes = None
+        #: `_prefill_dsp` writes into the DSP fields, and those fields redraw the note -- without
+        #: this the two would call each other. Set while prefilling, cleared after.
+        self._prefilling = False
         # Set by _on_create() instead when "run via" picks a terminal CLI rather than the in-app
         # chat -- main_window._open_new_project_dialog() branches on whichever ended up non-None.
         self.open_terminal_cli: Optional[str] = None
@@ -174,6 +181,9 @@ class NewProjectDialog(QDialog):
         # Off by default: these were measured or decided in the OTHER project, and their evidence
         # names measurements that exist only there (see the method's `project_seed.py`).
         self._seed_findings = QCheckBox(i18n.t("npSeedFindings"))
+        # The tick changes what travels, so it changes the numbers under it: the flag used to be
+        # offered blind -- "and what was measured there" with no count of what "what" is (#48).
+        self._seed_findings.toggled.connect(self._refresh_seed_note)
         layout.addWidget(self._seed_findings)
 
         # Said here rather than discovered afterwards: with the same DSP, the capability interview
@@ -195,11 +205,13 @@ class NewProjectDialog(QDialog):
             self._profile_combo.addItem(f"{vendor} — {name}", (vendor, name))
         self._profile_combo.addItem(i18n.t("npAddNew"), None)
         self._profile_combo.currentIndexChanged.connect(self._on_profile_selected)
+        self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note)
         layout.addWidget(self._profile_combo)
 
         self._vendor_edit = QLineEdit()
         self._vendor_edit.setPlaceholderText(i18n.t("npVendorPlaceholder"))
         self._vendor_edit.textChanged.connect(self._sync_create_enabled)
+        self._vendor_edit.textChanged.connect(self._refresh_seed_note)
         self._vendor_label = _field_label(i18n.t("npVendor"))
         layout.addWidget(self._vendor_label)
         layout.addWidget(self._vendor_edit)
@@ -207,6 +219,7 @@ class NewProjectDialog(QDialog):
         self._model_edit = QLineEdit()
         self._model_edit.setPlaceholderText(i18n.t("npModelPlaceholder"))
         self._model_edit.textChanged.connect(self._sync_create_enabled)
+        self._model_edit.textChanged.connect(self._refresh_seed_note)
         self._model_label = _field_label(i18n.t("npModel"))
         layout.addWidget(self._model_label)
         layout.addWidget(self._model_edit)
@@ -290,6 +303,7 @@ class NewProjectDialog(QDialog):
         source = self._seed_source()
         seeder = _seeder()
         summary = seeder.describe(source) if (source is not None and seeder) else None
+        self._seed_describes = summary
         if source is None:
             self._set_seed_note("", warn=False)
             self._seed_no_interview.setVisible(False)
@@ -298,13 +312,68 @@ class NewProjectDialog(QDialog):
             self._set_seed_note(i18n.t("npSeedNotAProject"), warn=True)
             self._seed_no_interview.setVisible(False)
             return
-        self._set_seed_note(
-            i18n.t("npSeedSummary").format(
-                car=summary.car, dsp=summary.dsp or "—", channels=summary.channels
-            ),
-            warn=False,
-        )
         self._prefill_dsp(source)
+        self._refresh_seed_note()
+
+    def _would_travel(self, source: Path):
+        """What the seeder WOULD carry — asked of the seeder rather than predicted.
+
+        The note used to render `describe()`, which counts what the SOURCE holds. That is a
+        different number from what lands, and the gap is about to widen: the profile only travels
+        when the processor is the same, and the method is tying the channel topology to that same
+        answer, because topology belongs to the processor and the processor is what changed
+        (skill, SKL-014). Twenty Helix channels landing in an 8-output DSP is what that costs when
+        nobody says so first, and `remove-channel` does not exist.
+
+        So the number is not predicted here. The seed runs into a throwaway folder with exactly
+        the flags Create will use, and its report is what gets drawn — which follows the method's
+        behaviour without this file having to know it, including the change that has not reached
+        our vendored copy yet. `seed()` never writes into the source; that is its own promise.
+        """
+        seeder = _seeder()
+        if seeder is None:
+            return None
+        with tempfile.TemporaryDirectory(prefix="tcc-seed-preview-") as tmp:
+            target = Path(tmp) / "preview"
+            target.mkdir()
+            try:
+                return seeder.seed(
+                    source,
+                    target,
+                    include_findings=self._seed_findings.isChecked(),
+                    copy_profile=seeder.dsp_of(source) == (
+                        self._vendor_edit.text().strip(), self._model_edit.text().strip()),
+                    note=i18n.t("npSeedNote"),
+                )
+            except Exception:      # noqa: BLE001 — a preview must never take the dialog down
+                return None
+
+    def _refresh_seed_note(self, *_args) -> None:
+        """Redraw the note. Called again whenever the DSP choice changes, because the DSP is what
+        decides how much of the source travels."""
+        if self._prefilling or self._seed_describes is None:
+            return
+        # The DSP fields are built after this label, and `_on_seed_mode` can fire in between.
+        if getattr(self, "_vendor_edit", None) is None:
+            return
+        source = self._seed_source()
+        if source is None:
+            return
+        summary = self._seed_describes
+        lines = [i18n.t("npSeedSummary").format(
+            car=summary.car, dsp=summary.dsp or "—", channels=summary.channels)]
+        report = self._would_travel(source)
+        if report is not None and report.ok:
+            key = "npSeedTravelsFindings" if self._seed_findings.isChecked() else "npSeedTravels"
+            lines.append(i18n.t(key).format(
+                channels=report.channels, amps=report.amps,
+                flaws=report.flaws, questions=report.questions))
+            if summary.channels and not report.channels:
+                # The one a person has to read BEFORE pressing Create: wanting the findings and
+                # not the channels was impossible, so the working answer was to go around the
+                # seeder by hand — and the findings only travel with it.
+                lines.append(i18n.t("npSeedNoChannels"))
+        self._set_seed_note("\n".join(lines), warn=False)
 
     def _set_seed_note(self, text: str, *, warn: bool) -> None:
         self._seed_summary.setText(text)
@@ -328,17 +397,23 @@ class NewProjectDialog(QDialog):
         self._seed_no_interview.setVisible(pair is not None)
         if pair is None:
             return
-        for index in range(self._profile_combo.count()):
-            if self._profile_combo.itemData(index) == pair:
-                self._profile_combo.setCurrentIndex(index)
-                return
-        for index in range(self._profile_combo.count()):
-            if self._profile_combo.itemData(index) is None:
-                self._profile_combo.setCurrentIndex(index)
-                break
-        # After the combo, never before: selecting "Add new" clears both fields.
-        self._vendor_edit.setText(pair[0])
-        self._model_edit.setText(pair[1])
+        # Guarded: every line below writes into a field that redraws the note, and the note reads
+        # these fields back. Without the flag the two would take turns until the stack ran out.
+        self._prefilling = True
+        try:
+            for index in range(self._profile_combo.count()):
+                if self._profile_combo.itemData(index) == pair:
+                    self._profile_combo.setCurrentIndex(index)
+                    return
+            for index in range(self._profile_combo.count()):
+                if self._profile_combo.itemData(index) is None:
+                    self._profile_combo.setCurrentIndex(index)
+                    break
+            # After the combo, never before: selecting "Add new" clears both fields.
+            self._vendor_edit.setText(pair[0])
+            self._model_edit.setText(pair[1])
+        finally:
+            self._prefilling = False
 
     def _on_run_via_selected(self, _index: int) -> None:
         """The Claude-specific AI_MAIN_MODELS picker only means anything for the in-app path;
