@@ -178,6 +178,12 @@ _VENDORED = {
     # `core/issue_assets.available()` asks whether the FUNCTION exists rather than the file, and
     # the window hides the control until it does (the `eq_export.py` posture, two entries up).
     "gates/side_effect.py": "autosound_tcc._vendor.side_effect",
+    # The cabin library and the "have we built on this body before" search (2026-09-03, v3.0.40).
+    # The matching rule lives there and only there: `body_slug` plus an exact-match discipline in
+    # which a platform sibling is a different car. `core/car_library.py` supplies the one half the
+    # method cannot — which project folders to look in, since it keeps no registry and TCC has the
+    # recent list.
+    "car_profile.py": "autosound_tcc._vendor.car_profile",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check

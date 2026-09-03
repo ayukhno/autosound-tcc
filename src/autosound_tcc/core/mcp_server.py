@@ -65,6 +65,7 @@ from mcp.server.fastmcp import FastMCP
 from autosound_tcc.core import (
     agent_session,
     app_log,
+    car_library,
     config,
     critic,
     model_choices,
@@ -605,6 +606,61 @@ def build_server(
             "open_questions": current.get("open_questions", []),
             "bundled_exact_match": bundled,
         }, ensure_ascii=False)
+
+    @tool()
+    async def check_existing_car(
+        make: str, model: str, generation: str = "", body: str = ""
+    ) -> str:
+        """Call this as soon as you know the car, BEFORE planning an intake from scratch. The
+        cabin twin of check_existing_profile: has this body been described before, and have we
+        built on it?
+
+        Four parts identify a cabin: `make`, `model` (the nameplate, e.g. "Passat"), `generation`
+        (the model run, e.g. "B8") and `body` ("sedan" / "wagon" / "hatchback"). DO NOT ask for
+        the year to decide this and never match on it -- the generation IS the span of years whose
+        acoustics count as the same, so two builds of one generation and body are one cabin
+        whether 2017 or 2018, while the same year in another shell is another cabin. Ask the year
+        only as a description of this particular car.
+
+        Three answers come back and they are three, not two:
+        * `bundled_exact_match` -- the library's page for EXACTLY this cabin, or null. Null is a
+          real answer: nobody has described it, so the intake starts clean. A near miss is never
+          reported: a platform sibling is a different car and merely naming one does the damage.
+        * `prior_projects` -- builds WE have done on this same body, each with how many flaw-map
+          rows it holds and which captures they were read off. Put this in front of the person as
+          a question ("there is prior material for this cabin, this much of it -- carry it as
+          hypotheses?"), never as a decision you take quietly. Those captures live in THAT
+          project, so anything carried travels as a hypothesis, never as fact.
+        * `unknown` -- projects that could not say what body they are, because nobody recorded
+          one. SHOW THIS SEPARATELY. A project that did not record its body is not a project on
+          another body, and reporting it as "none" is how material goes missing in silence.
+        """
+        return json.dumps(
+            car_library.look_up(make, model, generation, body), ensure_ascii=False
+        )
+
+    @tool()
+    async def save_car(
+        make: str, model: str, generation: str = "", body: str = "", year: Any = None
+    ) -> str:
+        """Record the car in project.json as FOUR parts, as soon as they are confirmed.
+
+        `make`, `model` (nameplate), `generation` (model run), `body` (sedan / wagon / hatchback).
+        `year` is optional and describes this one car; it classifies nothing.
+
+        Record the body even when it feels obvious. Without it this project answers "no body
+        recorded" forever -- and then check_existing_car cannot tell it from a wagon, so neither
+        this build nor any later one can be matched against the cabin library or against the
+        earlier builds. That is a silent loss: nothing breaks today, and the material is simply
+        not there tomorrow.
+        """
+        try:
+            car = car_library.record(
+                config.project_dir(), make, model, generation, body, year
+            )
+        except Exception as exc:  # noqa: BLE001 — the writer's refusal is an answer
+            return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False)
+        return json.dumps({"recorded": True, "car": car}, ensure_ascii=False)
 
     # The one tool whose instructions have to be COMPUTED — the field vocabulary comes off the
     # skill's own writer — and, until 2026-09-01, the one tool that reached the model with nothing

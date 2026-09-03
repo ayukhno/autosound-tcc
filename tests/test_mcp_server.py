@@ -143,6 +143,12 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "get_ledger",
         "get_capability_checklist",
         "check_existing_profile",
+        # The cabin twin (SKL-020): has this BODY been described, and have we built
+        # on it. The writer beside it exists because the in-app interview has no
+        # Bash at all — `tools` is `BUILTIN_TOOLS`, empty — so without a tool a
+        # TCC-made project could never record its body.
+        "check_existing_car",
+        "save_car",
         "save_profile_field",
         "reset_profile_field",
         "finalize_profile",
@@ -1059,3 +1065,65 @@ def test_a_clipboard_fallback_says_why_it_was_always_going_to_be_one(tmp_path, m
     project_settings.set_value(config.tcc_dir(project), "critic", "agy:gemini-3.1-pro-high")
     assert mcp_server.clipboard_reason(project) == ""
 
+
+
+def test_the_cabin_question_reaches_the_model_with_all_three_answers(tmp_path, monkeypatch):
+    """`check_existing_profile` gives the processor answer on its own; the cabin one used to
+    depend on a session remembering to look, and on the live intake it looked, decided silently,
+    and the material sat unused for two days (public `skill#19`).
+
+    The third answer is the one that has to survive the trip: `unknown` is projects that never
+    recorded a body, and reporting them as "none" is that same failure a floor down.
+    """
+    from autosound_tcc.core import car_library
+
+    if not car_library.available():
+        pytest.skip("the car library arrived with method v3.0.40")
+
+    other = tmp_path / "silent"
+    other.mkdir()
+    (other / "project.json").write_text(
+        json.dumps({"schema_version": 3, "car": {"make": "VW", "model": "Passat B8"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mcp_server.config, "recent_projects", lambda: [other])
+    monkeypatch.setattr(mcp_server.config, "chosen_project_dir", lambda: None)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    got = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_car",
+        {"make": "VW", "model": "Passat", "generation": "B8", "body": "sedan"},
+    ))))
+
+    assert got["bundled_exact_match"]["slug"] == "vw-passat-b8-sedan"
+    assert got["prior_projects"] == []
+    assert [u["path"] for u in got["unknown"]] == [str(other)]
+
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    said = tools["check_existing_car"].description
+    assert "SHOW THIS SEPARATELY" in said, "the model is told not to fold `unknown` into `none`"
+    assert "never match on it" in said, "and that the year classifies nothing"
+
+
+def test_the_interview_can_record_a_body_because_it_has_no_other_way_to(tmp_path, monkeypatch):
+    """`agent_session.BUILTIN_TOOLS` is empty — the in-app interview has no Bash at all — so
+    without this tool a TCC-made project could never record its body, and would answer "no body
+    recorded" for the rest of its life. Nothing breaks the day it happens; the material is simply
+    not there the day somebody looks."""
+    from autosound_tcc.core import car_library
+
+    if not car_library.available():
+        pytest.skip("the car library arrived with method v3.0.40")
+
+    monkeypatch.setattr(mcp_server.config, "project_dir", lambda: tmp_path)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool(
+        "save_car",
+        {"make": "VW", "model": "Passat", "generation": "B8", "body": "sedan", "year": 2018},
+    ))))
+
+    assert said["recorded"] is True
+    assert said["car"]["body"] == "sedan" and said["car"]["generation"] == "B8"
+    saved = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
+    assert saved["car"]["make"] == "VW", "written through the method's own writer"
