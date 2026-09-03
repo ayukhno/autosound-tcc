@@ -13,20 +13,43 @@ from __future__ import annotations
 
 import urllib.parse
 
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QTextCursor, QTextListFormat
+from pathlib import Path
+
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextCursor, QTextListFormat
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QRadioButton,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
+from autosound_tcc.core import issue_assets
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+
+#: Big enough to recognise a name, a path or an installer's logo in a screenshot — which is the
+#: only thing this preview is for. A thumbnail too small to read is a consent screen that shows
+#: nothing (SKL-019).
+THUMB_W, THUMB_H = 220, 140
+
+
+def body_with_shots(body: str, urls) -> str:
+    """The report's own text, then the pictures under it, as Markdown GitHub renders.
+
+    Under, never inside: the text is what a person wrote and the images are evidence for it, and
+    a body that opens with three screenshots reads as a bug report with no words in it.
+    """
+    if not urls:
+        return body
+    shots = [f"![{i18n.t('fbShotsAlt').format(n=n)}]({url})" for n, url in enumerate(urls, 1)]
+    return "\n\n".join([body] + shots).strip()
 
 
 class FeedbackDialog(QDialog):
@@ -74,6 +97,41 @@ class FeedbackDialog(QDialog):
         self._editor.setMinimumHeight(120)
         outer.addWidget(self._editor)
 
+        # ---- screenshots ---------------------------------------------------
+        # Offered only where they can actually travel: the gate's uploader arrives with a method
+        # newer than this checkout's pin, and a control that attaches pictures nothing can carry
+        # is a promise the Send button then breaks (SKL-019; `core/issue_assets.available()`).
+        self._shots: list[Path] = []
+        self._shots_box = QWidget()
+        shots_layout = QVBoxLayout(self._shots_box)
+        shots_layout.setContentsMargins(0, 0, 0, 0)
+        shots_layout.setSpacing(6)
+        add_row = QHBoxLayout()
+        self._shots_add = QPushButton(i18n.t("fbShotsAdd"))
+        self._shots_add.setProperty("class", "fb-tool")
+        self._shots_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._shots_add.clicked.connect(self._on_add_shots)
+        add_row.addWidget(self._shots_add)
+        add_row.addStretch(1)
+        shots_layout.addLayout(add_row)
+        # The sentence that makes the pictures a decision rather than an attachment. It appears
+        # WITH them, not above an empty row: a warning about nothing is read once and then never.
+        self._shots_warn = QLabel(i18n.t("fbShotsWarn"))
+        self._shots_warn.setWordWrap(True)
+        self._shots_warn.setProperty("class", "fb-hint")
+        self._shots_warn.setVisible(False)
+        shots_layout.addWidget(self._shots_warn)
+        self._strip = QHBoxLayout()
+        self._strip.setSpacing(8)
+        self._strip.addStretch(1)
+        shots_layout.addLayout(self._strip)
+        self._shots_problem = QLabel("")
+        self._shots_problem.setWordWrap(True)
+        self._shots_problem.setProperty("class", "kv-warn")
+        self._shots_problem.setVisible(False)
+        shots_layout.addWidget(self._shots_problem)
+        outer.addWidget(self._shots_box)
+
         via = QLabel(i18n.t("fbVia"))
         via.setProperty("class", "fb-hint")
         outer.addWidget(via)
@@ -111,6 +169,81 @@ class FeedbackDialog(QDialog):
         self._radio_github.toggled.connect(self._sync_send_label)
         self._sync_send_label()
 
+    # ---- screenshots ------------------------------------------------------
+
+    def _on_add_shots(self) -> None:
+        pattern = " ".join(f"*{s}" for s in issue_assets.IMAGE_SUFFIXES)
+        picked, _ = QFileDialog.getOpenFileNames(
+            self, i18n.t("fbShotsPick"), "", f"{i18n.t('fbShotsKind')} ({pattern})"
+        )
+        for name in picked:
+            path = Path(name)
+            if path not in self._shots:
+                self._shots.append(path)
+        self._rebuild_strip()
+
+    def _rebuild_strip(self) -> None:
+        while self._strip.count():
+            item = self._strip.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+        unreadable = []
+        for path in list(self._shots):
+            card = self._shot_card(path)
+            if card is None:
+                # A file Qt cannot draw is a file nobody can check before it is published, so it
+                # does not go: dropped here, and said, rather than travelling unseen.
+                unreadable.append(path.name)
+                self._shots.remove(path)
+                continue
+            self._strip.addWidget(card)
+        self._strip.addStretch(1)
+        self._shots_warn.setVisible(bool(self._shots))
+        self._say_problem(i18n.t("fbShotsUnreadable").format(names=", ".join(unreadable))
+                          if unreadable else "")
+
+    def _shot_card(self, path: Path):
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        card = QWidget()
+        column = QVBoxLayout(card)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        shot = QLabel()
+        shot.setPixmap(pixmap.scaled(THUMB_W, THUMB_H, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation))
+        shot.setCursor(Qt.CursorShape.PointingHandCursor)
+        # A thumbnail is enough to notice a name in a title bar; it is not enough to read one.
+        # Clicking opens the file itself, in whatever the machine views images with.
+        shot.mousePressEvent = lambda _event, p=path: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(p)))
+        attach_tip(shot, i18n.t("fbShotsOpen"))
+        column.addWidget(shot)
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        name = ElidedLabel(path.name, min_width=60)
+        name.setProperty("class", "cline2")
+        row.addWidget(name, 1)
+        drop = QPushButton("×")
+        drop.setProperty("class", "fb-tool")
+        drop.setCursor(Qt.CursorShape.PointingHandCursor)
+        attach_tip(drop, i18n.t("fbShotsDrop"))
+        drop.clicked.connect(lambda _checked=False, p=path: self._drop_shot(p))
+        row.addWidget(drop)
+        column.addLayout(row)
+        return card
+
+    def _drop_shot(self, path: Path) -> None:
+        if path in self._shots:
+            self._shots.remove(path)
+        self._rebuild_strip()
+
+    def _say_problem(self, text: str) -> None:
+        self._shots_problem.setText(text)
+        self._shots_problem.setVisible(bool(text))
+
     # ---- toolbar ----------------------------------------------------------
 
     def _toggle_bold(self) -> None:
@@ -137,10 +270,26 @@ class FeedbackDialog(QDialog):
         self._send.setText(
             i18n.t("fbSendGithub") if self._radio_github.isChecked() else i18n.t("fbSendForm")
         )
+        # A public form takes text from the clipboard and nothing else, so the pictures have
+        # nowhere to go on that route. Hidden rather than explained: an offer that is withdrawn
+        # at Send is worse than one never made.
+        self._shots_box.setVisible(issue_assets.available() and self._radio_github.isChecked())
 
     def _on_send(self) -> None:
         if self._radio_github.isChecked():
             body = self._editor.toMarkdown().strip()
+            if self._shots:
+                # `consented=True` is EARNED here, and this is the only place in either half that
+                # can earn it: these are the pictures still on screen after a person looked at
+                # them and dropped the ones that should not travel.
+                published = issue_assets.publish(self._shots, consented=True)
+                body = body_with_shots(body, published.urls)
+                if not published.ok:
+                    # Nothing is posted on a partial upload — but what already went up cannot be
+                    # taken back, so the count is said rather than swallowed.
+                    self._say_problem(i18n.t("fbShotsFailed").format(
+                        problem=published.problem, n=len(published.urls)))
+                    return
             url = self._github_url
             if body:
                 url = f"{self._github_url}?body={urllib.parse.quote(body)}"

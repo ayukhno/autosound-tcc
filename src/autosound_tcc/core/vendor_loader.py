@@ -172,6 +172,12 @@ _VENDORED = {
     # instead of in a widget in a car. Registered like `resonalyze_vc`: a library with a thin CLI
     # on top, and the window needs the structured result rather than its rendering.
     "listening.py": "autosound_tcc._vendor.listening",
+    # The side-effect gate (2026-09-03): the one place that knows which repo an outbound write may
+    # touch. The module itself has been there for a long time; `upload_issue_asset` — publishing a
+    # screenshot that goes with a problem report — arrives with a method newer than this pin, so
+    # `core/issue_assets.available()` asks whether the FUNCTION exists rather than the file, and
+    # the window hides the control until it does (the `eq_export.py` posture, two entries up).
+    "gates/side_effect.py": "autosound_tcc._vendor.side_effect",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
