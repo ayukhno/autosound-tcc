@@ -646,7 +646,12 @@ def test_the_process_tools_actually_write_the_journal(tmp_path):
         for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert [e["type"] for e in events] == [
+    # The journal opens with a provenance header since method v3.0.37: `written_by` names the
+    # checkout that wrote what follows, by sha, and it is written once per run rather than per
+    # event. Asserted rather than filtered away — a stamp nobody checks is a stamp that can go
+    # missing quietly, and it is the one thing in the file that says two runs are comparable.
+    assert events[0]["type"] == "written_by"
+    assert [e["type"] for e in events[1:]] == [
         "phase_entered", "step_added", "attempt_started", "step_done"
     ]
     assert json.loads(
@@ -746,7 +751,10 @@ def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
         for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert types == [
+    # `written_by` first: the provenance header, method v3.0.37. Checked in full in
+    # `test_the_process_tools_actually_write_the_journal`; here it is only stepped over.
+    assert types[0] == "written_by"
+    assert types[1:] == [
         "phase_entered",
         "capture_task_issued",
         "capture_taken",

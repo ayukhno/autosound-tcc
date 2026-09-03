@@ -153,10 +153,18 @@ def test_a_second_order_all_pass_is_minus_one_eighty_at_f0_and_a_full_turn_overa
 
 @needs_skill
 def test_a_higher_q_turns_faster_near_f0():
-    """What Q MEANS on an all-pass: not depth, but how much of the turn happens next to `f0`."""
+    """What Q MEANS on an all-pass: not depth, but how much of the turn happens next to `f0`.
+
+    Measured ON A GRID, and that is not incidental. Phase is only continuous relative to its
+    neighbours, so `phase_deg` has nothing to unwrap against when it is handed two lone points --
+    it returns the raw angle, and the raw angle at exactly `f0` sits on the ±180° boundary. The
+    two-point version of this test read `+161°` where it wanted `-198°`: the same angle, the other
+    branch. The physics never moved (v3.0.39: -265° at Q=4 against -198° at Q=0.7).
+    """
     just_above = 100.0 * 2 ** (1 / 6)
-    steep = Allpass(2, 100.0, 4.0).phase_deg([100.0, just_above])[1]
-    gentle = Allpass(2, 100.0, 0.7).phase_deg([100.0, just_above])[1]
+    grid = _grid()
+    steep = np.interp(just_above, grid, Allpass(2, 100.0, 4.0).phase_deg(grid))
+    gentle = np.interp(just_above, grid, Allpass(2, 100.0, 0.7).phase_deg(grid))
     assert steep < gentle < -180.0
 
 
