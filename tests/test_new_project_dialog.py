@@ -317,6 +317,7 @@ def test_the_findings_tick_stops_being_offered_blind(tmp_path, monkeypatch):
 
     said = dlg._seed_summary.text()
     assert "18" in said and "3" in said, "how many flaws and how many questions"
+    assert npd.i18n.t("npSeedFindingsEvidence") in said, "and where their proof lives"
     assert seeder.seeded_into[-1][2]["include_findings"] is True, "asked with the tick as set"
     assert npd.i18n.t("npSeedNoChannels") not in said, "same processor: nothing stays behind"
 

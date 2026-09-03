@@ -242,6 +242,7 @@ answers the first five questions anybody would ask.",
         "npSeedTravels": "Travels: {channels} channels · {amps} amps",
         "npSeedTravelsFindings": "Travels: {channels} channels · {amps} amps · {flaws} flaw-map rows · {questions} open questions",
         "npSeedNoChannels": "Different processor — the channel grid stays behind; onboarding will set it up.",
+        "npSeedFindingsEvidence": "Those rows were read off captures in the source project — the proof lives there, not here.",
         "npSeedNote": "**Inherited from `{source}` ({when}).** The system profile was copied from "
                       "that project, not written here — check it against this build before relying "
                       "on it.",
@@ -1135,6 +1136,7 @@ Choose sweeps (sw) above to read this.",
         "npSeedTravels": "Поїде: каналів {channels} · підсилювачів {amps}",
         "npSeedTravelsFindings": "Поїде: каналів {channels} · підсилювачів {amps} · рядків мапи вад {flaws} · відкритих питань {questions}",
         "npSeedNoChannels": "Процесор інший — сітка каналів не поїде; її задасть онбординг.",
+        "npSeedFindingsEvidence": "Ці рядки прочитані із замірів проєкту-джерела — доказ лежить там, не тут.",
         "npSeedNote": "**Успадковано з `{source}` ({when}).** Профіль системи скопійовано з того "
                       "проєкту, а не написано тут — звірте його з цією збіркою, перш ніж на нього "
                       "спиратись.",
@@ -1978,6 +1980,7 @@ Choose sweeps (sw) above to read this.",
         "npSeedTravels": 'Pojedzie: kanałów {channels} · wzmacniaczy {amps}',
         "npSeedTravelsFindings": 'Pojedzie: kanałów {channels} · wzmacniaczy {amps} · wierszy mapy wad {flaws} · otwartych pytań {questions}',
         "npSeedNoChannels": 'Inny procesor — siatka kanałów zostaje; ustali ją onboarding.',
+        "npSeedFindingsEvidence": 'Te wiersze odczytano z pomiarów projektu źródłowego — dowód jest tam, nie tutaj.',
         "npSeedNote": '**Odziedziczono z `{source}` ({when}).** Profil systemu skopiowano z tamtego projektu, a nie '
                       'napisano tutaj — zweryfikuj go z tą instalacją, zanim zaczniesz na nim polegać.',
         "npSeedFailed": 'Nic nie skopiowano: {problem}',
@@ -2885,6 +2888,7 @@ Choose sweeps (sw) above to read this.",
         "npSeedTravels": 'Kommt mit: {channels} Kanäle · {amps} Endstufen',
         "npSeedTravelsFindings": 'Kommt mit: {channels} Kanäle · {amps} Endstufen · {flaws} Zeilen der Fehlerkarte · {questions} offene Fragen',
         "npSeedNoChannels": 'Anderer Prozessor — das Kanalraster bleibt zurück; das Onboarding legt es fest.',
+        "npSeedFindingsEvidence": 'Diese Zeilen stammen aus Messungen des Quellprojekts — der Beleg liegt dort, nicht hier.',
         "npSeedNote": '**Geerbt von `{source}` ({when}).** Das Systemprofil wurde aus jenem Projekt kopiert, nicht '
                       'hier geschrieben — gleiche es mit diesem Aufbau ab, bevor du dich darauf verlässt.',
         "npSeedFailed": 'Es wurde nichts kopiert: {problem}',

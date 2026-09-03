@@ -368,6 +368,12 @@ class NewProjectDialog(QDialog):
             lines.append(i18n.t(key).format(
                 channels=report.channels, amps=report.amps,
                 flaws=report.flaws, questions=report.questions))
+            if self._seed_findings.isChecked() and (report.flaws or report.questions):
+                # Where those rows POINT, not just how many: their `evidence` names captures that
+                # exist in the source project and nowhere in this one. Carrying them is legitimate
+                # — they are the same car — but a row whose proof lives elsewhere is a different
+                # thing from one measured here, and the person ticking the box is who has to know.
+                lines.append(i18n.t("npSeedFindingsEvidence"))
             if summary.channels and not report.channels:
                 # The one a person has to read BEFORE pressing Create: wanting the findings and
                 # not the channels was impossible, so the working answer was to go around the
