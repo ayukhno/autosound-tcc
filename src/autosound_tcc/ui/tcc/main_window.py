@@ -1235,14 +1235,33 @@ class MainWindow(QMainWindow):
         """
         clear_layout(self._audio_section.body_layout())
         flaws = acoustics_view.load_flaws()
+        shown, hidden = acoustics_view.split_for_owner(flaws)
         if not flaws:
             # Before phase 0 there is nothing measured, and that is the ordinary state of a new
             # project rather than a fault: the intake fills this in.
             self._audio_placeholder = self._placeholder_label(i18n.t("acousticsNone"))
             self._audio_section.body_layout().addWidget(self._audio_placeholder)
             return
-        for flaw in flaws:
+        if not shown:
+            # A measured map whose every row is tuning plan. NOT the sentence above: "no map yet"
+            # would be false, and a panel that lies about the state of the work is worse than one
+            # that shows too much.
+            self._audio_placeholder = self._placeholder_label(
+                i18n.t("acousticsOnlyPlan").format(n=hidden)
+            )
+            self._audio_section.body_layout().addWidget(self._audio_placeholder)
+            return
+        for flaw in shown:
             self._audio_section.body_layout().addWidget(self._flaw_row(flaw))
+        if hidden:
+            # Said, not silently dropped: rows a person saw yesterday vanishing without a word
+            # reads as lost data. One muted line, no way to unfold it -- the plan is the skill's
+            # working surface, and this panel is the owner's page (SKL-015).
+            note = QLabel(i18n.t("acousticsPlanHidden").format(n=hidden))
+            note.setProperty("class", "cline2")
+            note.setContentsMargins(12, 6, 12, 6)
+            note.setWordWrap(True)
+            self._audio_section.body_layout().addWidget(note)
 
     def _flaw_row(self, flaw) -> QWidget:
         """`188 Hz · Q5 · +5.5 dB` on one line, the verdict on the next, the reason on hover."""
@@ -1258,24 +1277,47 @@ class MainWindow(QMainWindow):
         # The dot IS the verdict: correctable, leave alone, never boost, or fixed by something
         # that is not EQ. A reader scanning the column should not have to read words to see it.
         top.addWidget(TrafficLight(flaw.tone))
+        # What fixed `32 Hz · −4....` is the line below this one, not a number here. Measured on
+        # the Passat map at the panel's real width (260 px, 222 usable): the value's policy is
+        # `Ignored`, so the layout reserves NOTHING for it and hands it whatever the tags leave.
+        # With three items up here that was about 53 px. With two it is ~134, and the widest
+        # headline on an owner's row wants 110 — so nothing is cut at the width people actually
+        # use, and below it the label elides cleanly instead of drawing past its slot.
+        #
+        # `min_width` is not the lever it looks like: it is the floor `_elide` cuts TO, not room
+        # the layout promises. Raising it to 110 was tried first and is worse — a 110 px string
+        # painted into a 74 px slot is clipped mid-glyph, which is the very thing being fixed.
         head = ElidedLabel(flaw.headline, min_width=60)
         head.setProperty("class", "pk")
         top.addWidget(head, 1)
         action = QLabel(i18n.t(f"flawAction_{flaw.action}"))
         action.setProperty("class", "stag")
         top.addWidget(action)
+        outer.addLayout(top)
+
+        # Second line: the doubt, then what it is in words. The status used to sit up top as a
+        # third tag and was the thing that squeezed the value out — and it got clipped itself
+        # (`не підтвер` on the same screenshot). Down here it has the width to be whole.
+        second = QHBoxLayout()
+        second.setContentsMargins(0, 0, 0, 0)
+        second.setSpacing(6)
         if flaw.is_hypothesis:
             # Said in words, not only in the dot's colour: "not settled yet" is the kind of thing
             # a reader has to be able to see without knowing the palette.
             unsure = QLabel(i18n.t("flawHypothesis"))
             unsure.setProperty("class", "stag stag-attempt")
-            top.addWidget(unsure)
-        outer.addLayout(top)
-
+            second.addWidget(unsure)
         detail = ", ".join(flaw.channels) if flaw.channels else i18n.t("flawAllChannels")
-        line = ElidedLabel(f"{i18n.t('flawKind_' + flaw.kind)} · {detail}", min_width=60)
+        # The owner's sentence when the method wrote one, the method's vocabulary when it did
+        # not. Which is the whole trade: on the live map 14 rows of 18 carried a token only the
+        # method knows (`MMM`, `§26`, `еліпсоїд`, `ILL-POSED`). `kind` and the channels do not
+        # disappear either way — the hover tip has said both since this row was written.
+        line = ElidedLabel(
+            flaw.plain or f"{i18n.t('flawKind_' + flaw.kind)} · {detail}", min_width=60
+        )
         line.setProperty("class", "cline2")
-        outer.addWidget(line)
+        second.addWidget(line, 1)
+        outer.addLayout(second)
 
         # The tip is the row's whole substance -- a headline says WHAT was measured, and only
         # this says why it was called that and what it was read off. It used to be `why` and the

@@ -174,6 +174,11 @@ answers the first five questions anybody would ask.",
         # The flaw map (SCR-015). `action` is the load-bearing half — what may and may not be done
         # about a feature — so each value gets a short label a reader can scan, not a raw key.
         "acousticsNone": "No flaw map yet. Phase 0 measures what this cabin does to the sound, and the rows land here — each with what may and may not be done about it.",
+        # What this section shows is what the car will still be doing after the tune. The cuts and
+        # the crossings are the tuner's working plan, and they are not shown here — but they are
+        # counted, because rows a person read yesterday vanishing without a word reads as a fault.
+        "acousticsPlanHidden": "{n} more — the tuning plan (cuts, crossovers); not shown here.",
+        "acousticsOnlyPlan": "Everything measured so far is tuning plan ({n} rows) — cuts and crossovers, which the tune removes. What the car will still be doing afterwards has not been recorded yet.",
         "flawHypothesis": "not settled",
         "flawEvidenceHead": "Read off:",
         "flawNoWhy": "No reason was recorded with this entry -- only the measurement itself.",
@@ -1063,6 +1068,8 @@ Choose sweeps (sw) above to read this.",
         "missingRecord": "Не записано: {what} — {why}.",
         "criticSaved": "Текст збережено у {path}",
         "acousticsNone": "Карти дефектів ще немає. Фаза 0 міряє, що ця машина робить зі звуком, і рядки з'являться тут — кожен із тим, що з ним можна й чого не можна.",
+        "acousticsPlanHidden": "ще {n} — робочий план тюна (вирізи, стики); тут не показані.",
+        "acousticsOnlyPlan": "Усе, що поки зміряно, — робочий план тюна ({n} рядків): вирізи і стики, яких після тюна не буде. Того, що лишиться в машині, ще не записано.",
         "flawHypothesis": "не підтверджено",
         "flawEvidenceHead": "Прочитано з:",
         "flawNoWhy": "Причину із цим записом не зафіксували — тільки сам вимір.",
@@ -1900,6 +1907,8 @@ Choose sweeps (sw) above to read this.",
         "criticSaved": 'Tekst zapisano w {path}',
         "acousticsNone": 'Mapy wad jeszcze nie ma. Faza 0 mierzy, co to auto robi z dźwiękiem, i wiersze trafią tutaj '
                          '— każdy z tym, co z nim wolno, a czego nie wolno zrobić.',
+        "acousticsPlanHidden": 'jeszcze {n} — roboczy plan strojenia (cięcia, zwrotnice); tu nie pokazane.',
+        "acousticsOnlyPlan": 'Wszystko, co dotąd zmierzono, to roboczy plan strojenia ({n} wierszy): cięcia i zwrotnice, których po strojeniu nie będzie. Tego, co zostanie w aucie, jeszcze nie zapisano.',
         "flawHypothesis": 'niepotwierdzone',
         "flawEvidenceHead": 'Odczytano z:',
         "flawNoWhy": 'Z tym wpisem nie zapisano przyczyny — tylko sam pomiar.',
@@ -2800,6 +2809,8 @@ Choose sweeps (sw) above to read this.",
         "criticSaved": 'Text gespeichert in {path}',
         "acousticsNone": 'Noch keine Fehlerkarte. Phase 0 misst, was dieser Innenraum mit dem Klang macht, und die '
                          'Zeilen landen hier — jede mit dem, was man dagegen tun darf und was nicht.',
+        "acousticsPlanHidden": 'noch {n} — der Arbeitsplan der Abstimmung (Absenkungen, Trennungen); hier nicht gezeigt.',
+        "acousticsOnlyPlan": 'Alles bisher Gemessene ist Arbeitsplan der Abstimmung ({n} Zeilen): Absenkungen und Trennungen, die es nach der Abstimmung nicht mehr gibt. Was im Auto bleibt, ist noch nicht erfasst.',
         "flawHypothesis": 'nicht bestätigt',
         "flawEvidenceHead": 'Abgelesen aus:',
         "flawNoWhy": 'Zu diesem Eintrag wurde kein Grund festgehalten — nur die Messung selbst.',

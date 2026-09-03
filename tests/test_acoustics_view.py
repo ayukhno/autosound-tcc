@@ -161,3 +161,80 @@ def test_a_time_domain_kind_the_method_adds_later_still_shows(tmp_path, monkeypa
 
     flaws = acoustics_view.load_flaws(tmp_path)
     assert [flaw.headline for flaw in flaws] == ["group delay step · +4 ms"]
+
+
+def test_the_owners_page_keeps_what_outlives_the_tune_and_counts_the_rest(tmp_path, monkeypatch):
+    """The section sits next to "project parameters" and "system parameters", so it answers the
+    same question they do: what IS this car. A cut and a crossover point are the tuner's plan —
+    after the tune they do not exist — and on the Passat's live map they were 8 rows of 18, at the
+    same weight as two that ask the owner for money (owner's decision 2026-09-02, SKL-015).
+
+    Counted rather than silently dropped: eight rows gone from a map read yesterday is what a
+    fault looks like.
+    """
+    import json
+
+    from autosound_tcc.state import acoustics_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"acoustics": {"flaws": [
+        {"f_hz": 32, "level_db": -4, "kind": "cabin_null", "action": "no_boost"},
+        {"f_hz": 73, "level_db": 9, "kind": "driver_resonance", "action": "notch"},
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry"},
+        {"f_hz": 400, "level_db": -5, "kind": "pair_suckout", "action": "crossover"},
+        {"f_hz": 5500, "level_db": -6, "kind": "driver_resonance", "action": "leave"},
+        {"t_ms": 3.2, "kind": "energy_lag", "action": "delay"},
+    ]}}))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    flaws = acoustics_view.load_flaws(tmp_path)
+    shown, hidden = acoustics_view.split_for_owner(flaws)
+
+    assert [flaw.action for flaw in shown] == ["no_boost", "geometry", "leave"]
+    assert hidden == 3, "notch, crossover and delay are the plan, and the count says so"
+    assert len(flaws) == 6, "the map on disk is untouched — the audience is the panel's business"
+
+
+def test_an_action_the_method_adds_later_stays_off_the_owners_page(tmp_path, monkeypatch):
+    """An ALLOW-list, and that direction IS the decision: a kind nobody has reviewed is working
+    data until somebody says otherwise, so it does not appear on an owner's page by default.
+
+    The opposite default would put every future `action` in front of the owner the day the method
+    invents it — which is how the panel got into this state in the first place.
+    """
+    import json
+
+    from autosound_tcc.state import acoustics_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"acoustics": {"flaws": [
+        {"f_hz": 90, "level_db": -3, "kind": "port_noise", "action": "rebuild_enclosure"},
+        {"f_hz": 120, "level_db": -6, "kind": "cabin_null", "action": "leave"},
+    ]}}))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    shown, hidden = acoustics_view.split_for_owner(acoustics_view.load_flaws(tmp_path))
+
+    assert [flaw.action for flaw in shown] == ["leave"]
+    assert hidden == 1
+
+
+def test_the_owners_sentence_is_read_when_the_method_wrote_one(tmp_path, monkeypatch):
+    """`plain` is the row in the owner's language — what a person HEARS. `why` cannot serve: it
+    carries the audit trail too, and its longest on the live map was 763 characters with `MMM`,
+    `§26` and `ILL-POSED` in it. Empty until the method fills it (SKL-016), and the row then
+    reads exactly as it did before."""
+    import json
+
+    from autosound_tcc.state import acoustics_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"acoustics": {"flaws": [
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry",
+         "plain": "На цій частоті бас глухне — заважає стійка, не налаштування.",
+         "why": "SBIR §26, MMM _0, еліпсоїд"},
+        {"f_hz": 5500, "level_db": -6, "kind": "driver_resonance", "action": "leave"},
+    ]}}))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    flaws = acoustics_view.load_flaws(tmp_path)
+
+    assert flaws[0].plain.startswith("На цій частоті")
+    assert flaws[1].plain == "", "absent is empty, not a crash and not a placeholder"

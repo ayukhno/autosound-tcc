@@ -1971,6 +1971,111 @@ def test_a_project_with_no_flaw_map_says_so_rather_than_showing_nothing(tmp_path
     assert i18n.t("acousticsNone")[:20] in texts
 
 
+def _window_with_flaws(tmp_path, monkeypatch, flaws) -> MainWindow:
+    """A window whose project holds exactly these flaw rows."""
+    import json as _json
+
+    from autosound_tcc.core import config
+
+    _app()
+    (tmp_path / "project.json").write_text(
+        _json.dumps({"schema_version": 3, "acoustics": {"flaws": flaws}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    return MainWindow()
+
+
+def _flaw_rows(window) -> list:
+    return [w for w in window._audio_section.findChildren(QWidget)
+            if getattr(w, "hover_tip", None) is not None]
+
+
+def test_the_flaw_map_shows_the_owner_only_what_outlives_the_tune(tmp_path, monkeypatch):
+    """The section stands next to "project parameters" and answers the same question — what this
+    car IS. Cuts and crossover points are the tuner's working plan and will not exist afterwards;
+    on the Passat's live map they were 8 rows of 18, at the same weight as two that ask the owner
+    for money (owner, 2026-09-02, SKL-015).
+
+    The count stays visible: rows a person read yesterday vanishing without a word reads as a
+    fault, not as a decision.
+    """
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 73, "level_db": 9, "kind": "driver_resonance", "action": "notch"},
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry"},
+        {"f_hz": 400, "level_db": -5, "kind": "pair_suckout", "action": "crossover"},
+        {"f_hz": 5500, "level_db": -6, "kind": "driver_resonance", "action": "leave"},
+    ])
+
+    texts = " ".join(w.text() for w in window._audio_section.findChildren(QLabel))
+    assert "160 Hz" in texts and "5500 Hz" in texts
+    assert "73 Hz" not in texts and "400 Hz" not in texts, "the plan is not the owner's page"
+    assert i18n.t("acousticsPlanHidden").format(n=2) in texts, "said, not silently dropped"
+
+
+def test_a_map_that_is_all_tuning_plan_does_not_claim_there_is_no_map(tmp_path, monkeypatch):
+    """"No flaw map yet" would be false, and a panel that lies about the state of the work is
+    worse than one that shows too much. Phase 0 has run; what it recorded is simply all plan."""
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 73, "level_db": 9, "kind": "driver_resonance", "action": "notch"},
+        {"f_hz": 400, "level_db": -5, "kind": "pair_suckout", "action": "crossover"},
+    ])
+
+    texts = " ".join(w.text() for w in window._audio_section.findChildren(QLabel))
+    assert i18n.t("acousticsNone")[:20] not in texts
+    assert i18n.t("acousticsOnlyPlan").format(n=2) in texts
+
+
+def test_the_value_and_the_status_do_not_share_a_line_with_the_verdict(tmp_path, monkeypatch):
+    """The owner's screenshot read `32 Hz · −4....` and `не підтвер` — the number, its unit and
+    the status all cut, which is everything the row is read for.
+
+    Cause, measured at the panel's real width (260 px, 222 usable): three items on the top line,
+    and the value's size policy is `Ignored`, so the layout reserves nothing for it and hands it
+    what the tags leave — about 53 px. Asserted structurally rather than in pixels: the fix is
+    that the status is no longer up there, and that is what must not come back.
+    """
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 32, "level_db": -4, "kind": "cabin_null", "action": "no_boost",
+         "status": "hypothesis"},
+    ])
+
+    rows = _flaw_rows(window)
+    assert rows, "the flaw row is there"
+    outer = rows[0].layout()
+    top = next(outer.itemAt(i).layout() for i in range(outer.count())
+               if outer.itemAt(i).layout() is not None)
+    on_top = [w.text() for i in range(top.count())
+              if (w := top.itemAt(i).widget()) is not None and isinstance(w, QLabel)]
+    everywhere = [w.text() for w in rows[0].findChildren(QLabel)]
+
+    assert "32 Hz · -4 dB" in on_top, "the value stays on the first line"
+    assert i18n.t("flawAction_no_boost") in on_top, "so does the verdict"
+    assert i18n.t("flawHypothesis") not in on_top, "the status is what moved down"
+    assert i18n.t("flawHypothesis") in everywhere, "moved, not dropped"
+
+
+def test_the_owners_sentence_takes_the_second_line_when_the_method_wrote_one(
+    tmp_path, monkeypatch
+):
+    """14 rows of 18 carried a token only the method knows — `MMM`, `§26`, `еліпсоїд`,
+    `ILL-POSED`. When the method writes a plain sentence (SKL-016) it takes the second line; the
+    kind and the channels do not vanish, the hover tip has carried both since this row existed."""
+    import re
+
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry",
+         "channels": ["m-FL"], "plain": "Тут бас глухне через стійку, а не через налаштування."},
+    ])
+
+    rows = _flaw_rows(window)
+    texts = [w.text() for w in rows[0].findChildren(QLabel)]
+    assert any(t.startswith("Тут бас глухне") for t in texts)
+    assert i18n.t("flawKind_sbir") not in " ".join(texts), "the method's word left the row"
+    plain_tip = re.sub(r"<[^>]+>", " ", rows[0].hover_tip.text())
+    assert i18n.t("flawKind_sbir") in plain_tip and "m-FL" in plain_tip, "both still on hover"
+
+
 def test_a_project_whose_model_retired_is_offered_a_replacement(tmp_path, monkeypatch):
     """Models retire and the name in a project's settings outlives them. Silence here is a Start
     button that does nothing; picking the first row silently is a reviewer nobody chose."""
@@ -2863,11 +2968,15 @@ def test_a_language_switch_survives_a_project_that_has_a_flaw_map(tmp_path, monk
 
     The suite missed it because every window it built had an EMPTY project, which is exactly the
     branch that happens to create the attribute.
+
+    `action` matters to this fixture since SKL-015: the row has to be one the owner's panel
+    actually draws, or the map is "all tuning plan" and the placeholder legitimately comes back —
+    which is a different branch from the one this test is about.
     """
     (tmp_path / "project.json").write_text(json.dumps({
         "schema_version": 3,
-        "acoustics": {"flaws": [{"f_hz": 73, "level_db": 9, "kind": "modal_peak",
-                                 "action": "notch"}]},
+        "acoustics": {"flaws": [{"f_hz": 73, "level_db": 9, "kind": "driver_resonance",
+                                 "action": "leave"}]},
     }), encoding="utf-8")
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     _app()

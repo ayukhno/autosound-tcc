@@ -33,6 +33,22 @@ _ACTION_TONE = {
     "crossover": "info",
 }
 
+#: What the OWNER's panel shows: the part of the map that is still true after the tune.
+#: Geometry and install, a fact of the car nobody will correct, and physics that must never be
+#: boosted because it is interference rather than a shortage of level.
+#:
+#: The rest -- `notch`, `crossover`, `delay` -- is the tuning PLAN: the cuts the tuner will make
+#: and the crossings they will choose, none of which will exist as a defect once the work is done.
+#: On the Passat's live map that was 8 rows of 18, sitting at the same weight as two that ask the
+#: owner for money (a tweeter pod, a rebuild of the rear doors) -- and the section sits in the row
+#: that says what the project IS, next to "project parameters" and "system parameters" (owner's
+#: decision 2026-09-02, SKL-015).
+#:
+#: An ALLOW-list, not a deny-list, and that direction is the decision: a kind the method adds
+#: later is working data until somebody says otherwise, so it stays out of the owner's page by
+#: default rather than appearing there unreviewed.
+_OWNER_ACTIONS = frozenset({"geometry", "leave", "no_boost"})
+
 
 #: The kinds that are a property of TIME rather than of frequency (skill v3.0.17,
 #: `project.py TIME_DOMAIN_KINDS`): they carry `t_ms` instead of `level_db`, and `f_hz` is optional
@@ -62,10 +78,24 @@ class Flaw:
     #: `hypothesis` or `confirmed`. Absent in the file means confirmed: every map written before
     #: the field existed was written as fact, and re-labelling history would be its own lie.
     status: str = "confirmed"
+    #: One short sentence in the owner's language -- what a person HEARS, not what the method
+    #: measured. Written by the skill (SKL-016); empty until it is, and the row then reads as it
+    #: always did. `why` cannot serve: it carries the audit trail as well as the explanation, and
+    #: on the live map its longest was 763 characters with `MMM`, `§26` and `ILL-POSED` in it.
+    plain: str = ""
 
     @property
     def is_hypothesis(self) -> bool:
         return self.status == "hypothesis"
+
+    @property
+    def is_owner_fact(self) -> bool:
+        """Does this row survive the tune -- i.e. does the owner's panel show it?
+
+        The line runs along `action` alone; no new field was needed, which is why this landed
+        without waiting for the method (SKL-015, owner 2026-09-02).
+        """
+        return self.action in _OWNER_ACTIONS
 
     @property
     def tone(self) -> str:
@@ -149,6 +179,7 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
                     q=float(row["q"]) if row.get("q") else None,
                     bw_oct=float(row["bw_oct"]) if row.get("bw_oct") else None,
                     why=str(row.get("why") or ""),
+                    plain=str(row.get("plain") or ""),
                     evidence=tuple(str(e) for e in row.get("evidence") or ()),
                 )
             )
@@ -161,6 +192,20 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
     return tuple(
         sorted(out, key=lambda flaw: (flaw.f_hz is None, flaw.f_hz or 0.0, flaw.t_ms or 0.0))
     )
+
+
+def split_for_owner(flaws) -> tuple[tuple[Flaw, ...], int]:
+    """`(what the panel shows, how many it withheld)`.
+
+    Two returns rather than one filtered list, because the count is shown: eight rows quietly
+    gone from a map somebody read yesterday looks like lost data, and a panel that says what it
+    is not showing costs one muted line to say so.
+
+    `load_flaws` deliberately keeps returning everything -- the map on disk is the map, and the
+    audience is the panel's business, not the reader's.
+    """
+    shown = tuple(flaw for flaw in flaws if flaw.is_owner_fact)
+    return shown, len(tuple(flaws)) - len(shown)
 
 
 def _optional_float(value) -> Optional[float]:
