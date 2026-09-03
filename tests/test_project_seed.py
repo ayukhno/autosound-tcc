@@ -125,7 +125,24 @@ def test_the_profile_travels_only_when_it_is_the_same_dsp(seeder, tmp_path):
     assert (tmp_path / "same" / seeder.PROFILE_FILE).is_file()
     assert seeder.PROFILE_FILE not in other.written
     assert not (tmp_path / "other" / seeder.PROFILE_FILE).exists()
-    assert json.loads((tmp_path / "other" / "project.json").read_text(encoding="utf-8"))["channels"]
+
+    # What travels WITHOUT the profile is a rule that lives in the method, so it is read from the
+    # method rather than copied here. Up to v3.0.36 `--no-profile` skipped one FILE and the channel
+    # topology came over anyway; since `skill@8c3da3a` the keys are split in two — `CAR_KEYS`
+    # travel, `DSP_KEYS` (dsp, hardware, channels, glossary, channel_summary, presets) do not —
+    # because topology belongs to the processor, and the processor is what changed (SKL-018).
+    #
+    # This line was the snapshot of the old half and would have gone red the day the pin moved,
+    # asserting the very behaviour skill#18 was filed to remove. Asked of the module, it follows
+    # the pin without another edit.
+    other_data = json.loads((tmp_path / "other" / "project.json").read_text(encoding="utf-8"))
+    travels = set(getattr(seeder, "CAR_KEYS", seeder.SYSTEM_KEYS))
+    assert ("channels" in other_data) == ("channels" in travels)
+    if hasattr(seeder, "DSP_KEYS"):
+        # 20 Helix channels in an 8-output DSP is what the old answer cost, and `remove-channel`
+        # does not exist. The car still travels — same drivers, same doors, new processor.
+        assert "channels" in seeder.DSP_KEYS and "car" not in seeder.DSP_KEYS
+        assert other_data["car"], "the car is not what changed"
 
 
 def test_an_inherited_profile_says_how_much_of_it_is_still_open(seeder, tmp_path):
