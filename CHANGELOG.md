@@ -6,6 +6,59 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.31] — 2026-09-03 · what the owner sees, and what a report can carry
+
+Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
+**`v3.0.40`**. The pin moves for the first time since v0.1.25, four tags at once, and three of the
+changes below only exist because it did.
+
+### Added
+
+- **A problem report can carry screenshots.** Add them, and every one is shown before anything
+  leaves the machine: a 220×140 thumbnail, a click to open it full size, and an × on each picture
+  on its own. That step is the whole feature, not decoration around the upload — it is the only
+  place in either half that ever sees what is in the frame, and a shot of a DSP window carries a
+  file path with somebody's name in it, the car, an installer's branding. What goes to a public
+  repository does not come back.
+
+  So consent is not a checkbox: what travels is what was still on screen when Send was pressed.
+  A file the app cannot draw does not travel at all and says so — if it cannot be shown it cannot
+  be checked. If an upload stops half-way, nothing is posted, but the number already published is
+  named rather than swallowed with the error.
+
+- **"Has this cabin been described before?" is now a question the interview asks, not one it has
+  to remember.** Two tools: one answers with the method's page for EXACTLY this body (or a clean
+  "no" — a platform sibling is a different car and is never even mentioned), our own earlier
+  builds on that body with how much measured material each holds, and — kept separate — projects
+  that never recorded a body at all. That third answer matters: a project that cannot say what it
+  is is not a project on something else, and reporting it as "none" is how material goes missing
+  quietly. The other tool records the car as four parts — make, model, generation, body — because
+  without the body this project answers "no body recorded" for the rest of its life. The year
+  describes one car and classifies nothing: a generation already IS the span of years whose
+  acoustics count as the same.
+
+### Changed
+
+- **"Car audio analysis" shows the owner what will still be true after the tune.** It sits beside
+  "project parameters" and "system parameters", so it answers the same question they do — what
+  this car IS. Cuts and crossover points are the tuner's working plan and will not exist when the
+  work is done; on one real map that was 8 rows of 18, standing at the same weight as two that ask
+  the owner for money. What is hidden is counted, not silently dropped.
+
+- **The new-project window says what will actually travel, instead of what the source holds.**
+  It asks the seeder with exactly the flags the button will use and shows the answer — including
+  how many flaw-map rows and open questions the "carry the findings" tick would bring, which used
+  to be ticked blind, and a line saying their evidence names captures that live in the OTHER
+  project. With the method's new split, picking a different processor leaves the channel grid
+  behind, and the window now says so before the click rather than after.
+
+### Fixed
+
+- **The flaw row no longer cuts the number it is read for.** It showed `32 Hz · −4....` with a
+  status reading `не підтвер`: three items competed on one line, and the value's size policy means
+  the layout reserves nothing for it — about 53 px of the 222 the panel has. The status moved to
+  the second line, where it fits whole and leaves the value ~134.
+
 ## [v0.1.30] — 2026-09-02 · the protective filter goes on the row it belongs to
 
 Paired with method `70a4fa704b7971c17525e8f54798a52276c1e984` — the tag on that commit is
