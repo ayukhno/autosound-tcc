@@ -4139,14 +4139,16 @@ def test_the_top_is_one_wrapping_row_in_the_order_the_user_asked_for():
     row = dialog._chip_row
     order = [row.itemAt(i).widget() for i in range(row.count())]
 
-    assert order[:4] == [dialog._version_combo, dialog._kind_combo,
-                         dialog._group_combo, dialog._choose_btn]
-    assert [w.title() for w in order[4:4 + 2]] == dialog._chosen(), "then the chips, in plot order"
-    # ...and a bigger selection still lands after the four controls rather than among them.
+    # Five controls since 2026-09-06: the protection toggle joined them (tcc#16), last of the
+    # controls and still before the chips.
+    assert order[:5] == [dialog._version_combo, dialog._kind_combo,
+                         dialog._group_combo, dialog._choose_btn, dialog._prot_btn]
+    assert [w.title() for w in order[5:5 + 2]] == dialog._chosen(), "then the chips, in plot order"
+    # ...and a bigger selection still lands after the controls rather than among them.
     _pick_group(dialog, "ALL")
     _fetch(dialog)
     grown = [row.itemAt(i).widget() for i in range(row.count())]
-    assert grown[:4] == order[:4]
+    assert grown[:5] == order[:5]
     assert [chip.title() for chip in _chips(dialog)] == dialog._chosen()
 
 
@@ -4208,3 +4210,56 @@ def test_the_picker_offers_the_capture_rounds_and_narrows_to_what_one_took(tmp_p
     combo.setCurrentIndex(offered.index("round:cap_000"))
     assert dialog._selectable() == []
     assert dialog._group_note, "and the window says where it looked"
+
+
+# ---- the protective filter, in or out ---------------------------------------------------------
+
+
+def test_the_protective_filter_is_taken_out_of_the_curve_when_the_round_recorded_one():
+    """`core/protective.de_embed` existed with ZERO call sites (tcc#16), so a phase-0 solo swept
+    behind a protective high-pass was drawn with the filter still in it. You cannot see it: a
+    protective LR4 @100 and a designed one are the same filter, and at a junction three times away
+    that is tens of degrees."""
+    import numpy as np
+
+    from autosound_tcc.ui.tcc.curve_dialog import _without_protection
+
+    freqs = np.array([50.0, 100.0, 400.0, 2000.0])
+    mag = np.zeros(4)
+    phase = np.zeros(4)
+
+    same_mag, same_phase, note = _without_protection(freqs, mag, phase, None)
+    assert note == "" and same_mag is mag and same_phase is phase, "no record, no correction"
+
+    legs = {"hp": {"f": 100, "type": "LR", "slope": 24}}
+    out_mag, out_phase, note = _without_protection(freqs, mag, phase, legs)
+
+    assert note == ""
+    assert not np.allclose(out_phase, phase), "the phase is what this is about"
+    assert abs(out_mag[-1] - mag[-1]) < 0.5, "far above the corner nothing is taken out"
+
+
+def test_a_measurement_with_no_phase_is_drawn_as_measured_rather_than_refused():
+    """A correction that cannot run costs the correction, never the curve the window was opened
+    for."""
+    import numpy as np
+
+    from autosound_tcc.ui.tcc.curve_dialog import _without_protection
+
+    freqs = np.array([100.0, 400.0])
+    mag = np.zeros(2)
+
+    got_mag, got_phase, note = _without_protection(
+        freqs, mag, None, {"hp": {"f": 100, "type": "LR", "slope": 24}})
+
+    assert got_mag is mag and got_phase is None and note == ""
+
+
+def test_the_toggle_is_off_and_disabled_when_the_round_recorded_nothing():
+    """Disabled and not hidden: a control that vanishes reads as a feature that does not exist,
+    and the hover is where the difference is said."""
+    dialog = _group_dialog()
+
+    assert not dialog._prot_btn.isChecked()
+    assert not dialog._prot_btn.isEnabled(), "nothing recorded for this round"
+    assert dialog._legs_by_title() == {}

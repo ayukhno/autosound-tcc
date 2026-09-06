@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config, curve_groups, delay_bank
+from autosound_tcc.core import capture_import, config, curve_groups, delay_bank, protective
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
@@ -363,6 +363,26 @@ def _stop_worker(worker: Optional[_CurveWorker]) -> None:
     qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS, mute=(worker.done, worker.failed))
 
 
+def _without_protection(freqs, magnitude_db, phase_deg, legs):
+    """`(magnitude, phase, note)` with the protective chain taken out — or exactly what came in.
+
+    Off the GUI thread, inside the worker, because that is where the curve is. Every refusal is a
+    NOTE rather than an exception: a correction that cannot run must cost the correction, never
+    the curve the tuner opened the window for. Phase is what the whole thing is about — the method
+    measured the same junction at −49° with the protection in the chain and +3° without it — so a
+    measurement REW gave no phase for cannot be corrected at all, and says so.
+    """
+    if not legs or phase_deg is None or magnitude_db is None:
+        return magnitude_db, phase_deg, ""
+    try:
+        corrected = protective.de_embed(freqs, magnitude_db, phase_deg, legs)
+    except Exception as exc:  # noqa: BLE001 — no scipy, no skill, or a record it refuses
+        return magnitude_db, phase_deg, f"{type(exc).__name__}"
+    if not corrected.changed:
+        return magnitude_db, phase_deg, ""
+    return corrected.magnitude_db, corrected.phase_deg, ""
+
+
 class _CurveWorker(QThread):
     """Fetch each named measurement's curve.
 
@@ -374,11 +394,18 @@ class _CurveWorker(QThread):
     done = Signal(list)  # list[Trace]
     failed = Signal(str)
 
-    def __init__(self, bridge: RewBridge, titles: Sequence[str], kind: str) -> None:
+    def __init__(self, bridge: RewBridge, titles: Sequence[str], kind: str,
+                 legs_by_title: Optional[dict] = None) -> None:
         super().__init__()
         self._bridge = bridge
         self._titles = list(titles)
         self._kind = kind
+        #: `{title: legs}` for the titles whose protective filter is to be taken back OUT of the
+        #: curve before it is drawn. Empty (the default) means "as measured", which is what this
+        #: window did for its whole life: `core/protective.de_embed` existed with zero call sites,
+        #: so a phase-0 solo swept behind a protective high-pass was read with the filter still in
+        #: it — and at a junction three times away that is tens of degrees (tcc#16).
+        self._legs = dict(legs_by_title or {})
 
     def run(self) -> None:
         traces: list[Trace] = []
@@ -407,21 +434,29 @@ class _CurveWorker(QThread):
                     "method": method,
                     "start_time_s": _start_time_of(measurement),
                 }
+                legs = self._legs.get(title)
                 if self._kind == "impulse":
                     times, samples = self._bridge.impulse_response(mid)
                     # numpy from here down. These are 262 144 points per trace, and a Python list
                     # comprehension over them was the panel's actual cost, not the HTTP call
                     # (measured: fetch 0.03 s).
                     x = np.asarray(times, dtype=float) * KINDS["impulse"]["scale_x"]
+                    # The impulse itself is drawn as measured: the correction the method
+                    # provides works on the complex FREQUENCY response, and inventing an inverse
+                    # transform here would be TCC doing arithmetic that belongs to the method. The
+                    # spectrum under it — what the sum's strip is drawn from — is corrected.
                     traces.append(
                         Trace(title, x, np.asarray(samples, dtype=float),
-                              **self._spectrum(mid), **facts)
+                              **self._spectrum(mid, legs), **facts)
                     )
                 else:
                     # Both halves, from the one call that returns both. Keeping only the one being
                     # drawn is what used to make a sum impossible without a second round trip —
                     # and a sum needs the magnitude AND the phase of every driver in it.
                     freqs, mag, phase = self._bridge.frequency_response(mid)
+                    mag, phase, note = _without_protection(freqs, mag, phase, legs)
+                    if note:
+                        problems.append(note)
                     values = phase if self._kind == "phase" else mag
                     if values is None:
                         raise ValueError("no phase in this measurement")
@@ -443,7 +478,7 @@ class _CurveWorker(QThread):
             return
         self.done.emit(traces)
 
-    def _spectrum(self, mid) -> dict:
+    def _spectrum(self, mid, legs=None) -> dict:
         """The frequency-domain half of an impulse capture, for the sum's strip under the plot.
 
         One extra REW call per measurement, taken every time rather than when Σ happens to be on:
@@ -462,6 +497,7 @@ class _CurveWorker(QThread):
             return {}
         if freqs is None or mag is None:
             return {}
+        mag, phase, _note = _without_protection(freqs, mag, phase, legs)
         return {
             "freqs_hz": np.asarray(freqs, dtype=float),
             "magnitude_db": np.asarray(mag, dtype=float),
@@ -507,6 +543,10 @@ class CurveDialog(QDialog):
         #: refused — the status line is then free to disappear, as it did before. `_note` is the
         #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
         self._note = ""
+        #: Whether a person has moved the protection toggle themselves. Until they do, the round
+        #: decides (`protective.default_corrected`); after they do, the window stops overruling
+        #: them every time the picker moves.
+        self._touched_protection = False
         self._refused_note = ""
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
@@ -671,7 +711,8 @@ class CurveDialog(QDialog):
         # can build any set at all. `Choose…` last of the four and first thing before the chips it
         # writes: it is where ANY selection is made (user, 2026-08-18: "хай 'Обрати' буде
         # основним, а групи це допомога швидкого вибору").
-        for widget in (self._version_combo, self._kind_combo, self._group_combo, self._choose_btn):
+        for widget in (self._version_combo, self._kind_combo, self._group_combo,
+                       self._choose_btn, self._prot_btn):
             self._chip_row.addWidget(widget)
         self._render_chips()
         return self._chip_holder
@@ -818,6 +859,19 @@ class CurveDialog(QDialog):
         self._choose_menu = _StayOpenMenu(self)
         self._choose_actions: dict[str, QAction] = {}
         self._choose_btn.setMenu(self._choose_menu)
+
+        # As measured, or with the protective filter taken back out. A protective `LR4 @100` and a
+        # designed one are the same filter, so nothing in the picture says which you are looking
+        # at — the record does, and until now nothing read it: `protective.de_embed` had zero call
+        # sites in the app (tcc#16). Its default is the ROUND's own (`default_corrected`): a
+        # phase-0 read wants the driver, a verification wants the tune as configured.
+        self._prot_btn = QPushButton("")
+        self._prot_btn.setProperty("class", "zoom-btn")
+        self._prot_btn.setCheckable(True)
+        self._prot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        attach_tip(self._prot_btn, tip_html(i18n.t("curveProtTip")))
+        self._prot_btn.toggled.connect(self._on_protection_toggled)
+        self._sync_protection_button()
         self._fill_choose_menu()
         self._sync_version_combo()
 
@@ -907,6 +961,78 @@ class CurveDialog(QDialog):
             if version:
                 return str(version)
         return ""
+
+    # ---- the protective filter, in or out ------------------------------------------------
+
+    def _protective_record(self) -> Optional[dict]:
+        """The record for the round being looked at, in the shape `protective.legs_of` reads.
+
+        The chosen round first — this window's version picker is how a person says which pass they
+        are reading — and the OPEN round when nothing is chosen. Built from the journal fold rather
+        than asked of the skill, because that fold is what makes a CLOSED round answerable at all
+        (`process_view.capture_rounds`, which learned to carry `protective` on 2026-09-06).
+        """
+        round_id = self._chosen_round()
+        for round_ in self._rounds():
+            if round_id and str(round_.get("id") or "") != round_id:
+                continue
+            if not round_id and round_.get("closed"):
+                continue
+            channels = round_.get("protective") or {}
+            if not channels and not round_id:
+                continue
+            return {"series": round_.get("id"), "phase": round_.get("phase"),
+                    "version": round_.get("version"), "channels": channels}
+        return None
+
+    def _legs_by_title(self) -> dict:
+        """`{title: legs}` for what is being plotted, empty when the correction is off.
+
+        Empty is also the answer when the record says a channel was swept clean: `legs_of` returns
+        the `"OFF"` shape, `de_embed` finds nothing to remove, and the curve is drawn as measured
+        either way — the two states this record has (2026-09-06).
+        """
+        if not self._prot_btn.isChecked():
+            return {}
+        record = self._protective_record()
+        if not record:
+            return {}
+        out: dict = {}
+        for title in self._chosen():
+            channel = capture_import.channel_from_title(title)
+            legs = protective.legs_of(record, channel) if channel else None
+            if legs:
+                out[title] = legs
+        return out
+
+    def _sync_protection_button(self) -> None:
+        """Label, state and availability, from the round in front of the tuner.
+
+        Disabled — not hidden — when this installation cannot do the arithmetic (no scipy, no
+        skill) or the round recorded nothing: a control that vanishes reads as a feature that does
+        not exist, and the hover says which of the two it is.
+        """
+        record = self._protective_record()
+        why = protective.reason()
+        usable = not why and bool((record or {}).get("channels"))
+        self._prot_btn.setEnabled(usable)
+        if not self._prot_btn.isEnabled() and self._prot_btn.isChecked():
+            self._prot_btn.setChecked(False)
+        elif usable and not self._touched_protection:
+            # The round's own answer, until somebody says otherwise: phase −1/0/1 reads a driver's
+            # own behaviour and wants the filter out; a later phase is verifying a tune that is
+            # supposed to have it in.
+            wanted = protective.default_corrected(record)
+            if wanted is not None and wanted != self._prot_btn.isChecked():
+                self._prot_btn.setChecked(bool(wanted))
+        self._prot_btn.setText(
+            i18n.t("curveProtOff") if self._prot_btn.isChecked() else i18n.t("curveProtIn")
+        )
+
+    def _on_protection_toggled(self, _checked: bool) -> None:
+        self._touched_protection = True
+        self._sync_protection_button()
+        self._reload()
 
     def _rounds(self) -> list[dict]:
         """Every capture round this project recorded, newest first. Empty when there is no
@@ -1505,7 +1631,8 @@ class CurveDialog(QDialog):
         _stop_worker(self._worker)
         self._status.setVisible(True)
         self._status.setText(i18n.t("curveLoading"))
-        self._worker = _CurveWorker(self._bridge, titles, self._kind)
+        self._sync_protection_button()
+        self._worker = _CurveWorker(self._bridge, titles, self._kind, self._legs_by_title())
         self._worker.done.connect(self._on_curves)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()

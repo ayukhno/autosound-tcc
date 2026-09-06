@@ -847,6 +847,9 @@ sum of a different set.",
         "curveGroupEmpty": "{group} at _{version}: REW holds no sweep of any member, so nothing \
 was changed.",
         "curveChooseBtn": "Choose… ({n})",
+        "curveProtIn": "protection: in",
+        "curveProtOff": "protection: out",
+        "curveProtTip": "A protective filter is IN the recording and looks exactly like a designed one. Out: it is taken back out of the curve before it is drawn, using what the round recorded. In: the curve as measured — which is the right reading for a sweep through the tune you are building.",
         "curveChooseTip": "Tick any measurements you like — the sum takes as many as you give it. \
 The menu stays open, so a whole side is one trip through the list. Everything ticked is a chip \
 above, in its curve's own colour; a group beside this fills the same chips in one go.",
@@ -1695,6 +1698,9 @@ Choose sweeps (sw) above to read this.",
         "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \
 не змінено.",
         "curveChooseBtn": "Обрати… ({n})",
+        "curveProtIn": "захист: у кривій",
+        "curveProtOff": "захист: знято",
+        "curveProtTip": "Захисний фільтр сидить У ЗАПИСІ й виглядає точно як проєктний. «Знято» — його виймають із кривої перед малюванням, за тим, що записав прохід. «У кривій» — крива як знята, і це правильне читання для свіпу крізь тюн, який ти будуєш.",
         "curveChooseTip": "Познач будь-які заміри — сума приймає стільки, скільки даси. Меню не \
 закривається, тож ціла сторона — це один захід у список. Усе позначене стоїть чіпом вище, у \
 кольорі своєї кривої; група поруч заповнює ті самі чіпи одним рухом.",
@@ -2615,6 +2621,9 @@ Choose sweeps (sw) above to read this.",
         "curveGroupMissing": '{group} na _{version}: {names} — tego nie ma w REW. Narysowano sumę innego zestawu.',
         "curveGroupEmpty": '{group} na _{version}: w REW nie ma sweepa żadnego uczestnika, więc nic nie zmieniono.',
         "curveChooseBtn": 'Wybierz… ({n})',
+        "curveProtIn": 'ochrona: w krzywej',
+        "curveProtOff": 'ochrona: zdjęta',
+        "curveProtTip": 'Filtr ochronny siedzi W NAGRANIU i wygląda dokładnie jak projektowy. „Zdjęta" — wyjmuje się go z krzywej przed rysowaniem, według tego, co zapisał przebieg. „W krzywej" — krzywa taka, jak nagrana, i to właściwe odczytanie dla pomiaru przez budowany tune.',
         "curveChooseTip": 'Zaznacz dowolne pomiary — suma przyjmie ich tyle, ile dasz. Menu zostaje otwarte, więc cała '
                           'strona to jedno przejście przez listę. Wszystko zaznaczone stoi jako chip wyżej, w kolorze '
                           'swojej krzywej; grupa obok wypełnia te same chipy jednym ruchem.',
@@ -3582,6 +3591,9 @@ Choose sweeps (sw) above to read this.",
         "curveGroupEmpty": '{group} bei _{version}: REW hat von keinem Mitglied einen Sweep, es wurde also nichts '
                            'geändert.',
         "curveChooseBtn": 'Wählen… ({n})',
+        "curveProtIn": 'Schutz: in der Kurve',
+        "curveProtOff": 'Schutz: herausgenommen',
+        "curveProtTip": 'Ein Schutzfilter steckt IN der Aufnahme und sieht genauso aus wie ein geplanter. „Herausgenommen": er wird vor dem Zeichnen wieder aus der Kurve genommen, nach dem, was die Runde festgehalten hat. „In der Kurve": die Kurve wie gemessen — die richtige Lesart für einen Sweep durch den Tune, den du gerade baust.',
         "curveChooseTip": 'Hake beliebige Messungen an — die Summe nimmt so viele, wie du ihr gibst. Das Menü bleibt '
                           'offen, eine ganze Seite ist also ein Durchgang durch die Liste. Alles Angehakte steht als '
                           'Chip darüber, in der Farbe seiner Kurve; eine Gruppe daneben füllt dieselben Chips in einem '

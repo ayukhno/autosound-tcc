@@ -68,6 +68,63 @@ def wants_a_console() -> dict:
     return {}
 
 
+#: Argv heads that mean "this is the agent's own CLI". Matched by basename without an extension,
+#: because Windows spells it `claude.cmd` / `claude.exe` and POSIX spells it `claude`. Short and
+#: closed on purpose: it decides which child is given a console to hand DOWN, and a loose match
+#: would hand one to something that then shows it.
+AGENT_COMMANDS = frozenset({"claude", "omp", "agy", "node"})
+
+
+def hidden_console() -> dict:
+    """A console for the agent process that nobody ever sees — for its GRANDCHILDREN to inherit.
+
+    The problem this is for (tcc#13): `CREATE_NO_WINDOW` gives the agent NO console at all, which
+    is right for a short probe and wrong for a long-running CLI that spawns dozens of console
+    programs itself. A console program started by a parent with no console gets a NEW console, and
+    a new console is a new window — so TCC's own correct choice at its level produced the flashing
+    one level down, on `python`, `git` and `gh` calls TCC never makes. "Blinking with terminal and
+    win windows", continuously, for a whole working session.
+
+    So: one console, created hidden (`CREATE_NEW_CONSOLE` + `STARTUPINFO` with `SW_HIDE`), which
+    every grandchild attaches to instead of allocating its own. Nothing is drawn because the
+    console window is never shown.
+
+    **Not verified on Windows.** It is written from the documented behaviour of console
+    inheritance and has been run on nothing but a Mac, where every branch here is empty by
+    definition. The corner cases are real — a child that calls `AllocConsole` itself, a
+    non-console binary in the chain — and this note stays until somebody watches it on the machine
+    that has the problem.
+    """
+    new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
+    if not sys.platform.startswith("win") or new_console is None:
+        return {}
+    info_cls = getattr(subprocess, "STARTUPINFO", None)
+    if info_cls is None:
+        # A Windows without the structure is not a Windows this can hide a console on. The console
+        # would be VISIBLE, which is worse than the flashing it is meant to stop.
+        return {}
+    info = info_cls()
+    info.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+    info.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return {"creationflags": int(new_console), "startupinfo": info}
+
+
+def is_agent_command(args) -> bool:
+    """Does this argv start the agent's own CLI? Used to decide who gets the hidden console.
+
+    Deliberately narrow: everything else keeps `CREATE_NO_WINDOW`, which is the right default for
+    a child that spawns nothing.
+    """
+    first = args[0] if isinstance(args, (list, tuple)) and args else args
+    if isinstance(first, (list, tuple)):
+        first = first[0] if first else ""
+    try:
+        name = str(first).replace("\\", "/").rsplit("/", 1)[-1].lower()
+    except Exception:  # noqa: BLE001 — an argv we cannot read is not the agent
+        return False
+    return name.split(".", 1)[0] in AGENT_COMMANDS
+
+
 def hide_console_windows() -> None:
     """Stop console windows appearing for children this process does not spawn itself.
 
@@ -105,8 +162,18 @@ def hide_console_windows() -> None:
     if original is None or getattr(original, "_autosound_quiet", False):
         return
 
+    hidden = hidden_console()
+
     @functools.wraps(original)
     async def open_process(*args, **kwargs):
+        # The agent's CLI gets a hidden console of its own to hand DOWN to the `python`, `git` and
+        # `gh` it runs (tcc#13); everything else keeps "no console at all", which is right for a
+        # child that spawns nothing.
+        if hidden and is_agent_command(args[0] if args else kwargs.get("command")):
+            kwargs.setdefault("startupinfo", hidden["startupinfo"])
+            kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) \
+                | hidden["creationflags"]
+            return await original(*args, **kwargs)
         kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) | flag
         return await original(*args, **kwargs)
 
