@@ -6,6 +6,116 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.32] — 2026-09-06 · green means taken, and a curve can be read without its protective filter
+
+Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
+**`v3.0.40`**. The pin does not move; everything below is this side of the boundary.
+
+Almost all of it comes from one live run on a real project: eleven things watched going wrong in
+an afternoon, and every one of them is named where it is fixed.
+
+### Added
+
+- **The read window ticks the measurements it recognises, by NAME.** It used to tick the last few
+  unprocessed rows, which is a guess about position — and the measurements a round is waiting for
+  are not always the newest ones. Now a row whose title already answers to a name the round asks
+  for opens ticked, wherever it sits in the list, and the window scrolls to it. **Two graphs under
+  one name tick neither**: which of them came out is yours to say, and both are marked and named
+  under the table instead. The list also shows REW's own number for each row — for finding it in
+  REW's window, and for nothing else: it is the index of a view, and a filter renumbers it.
+
+- **Taking measurements in IS the pass now.** A capture round could only ever be opened by a
+  session through its tools, so a tuner working alone took measurements the ledger never heard of
+  — and the first thing that writes about the pass refused: "no capture round is open", over seven
+  green rows. Applying the read opens the round, records each capture under the name REW has for
+  it after any rename, and writes the protective record, all off the window's thread.
+
+- **A curve can be drawn with the protective filter taken back out.** The apparatus was there and
+  called by nothing: a phase-0 solo swept behind a protective high-pass was read with the filter
+  still in it, and you cannot see that in the picture — a protective `LR4 @100` and a designed one
+  are the same filter, and at a junction three times away it is tens of degrees. The curve window
+  has a switch, and its default is the round's own: a phase-0 read wants the filter out, a
+  verification of a finished tune wants it in.
+
+- **Each capture row says whether it was measured behind a protective filter**, with the frequency
+  and the slope on the hover. Past passes too — the journal fold did not carry that record at all
+  until now.
+
+- **The car is on the panel.** A project records the cabin it is about, and nothing ever showed it
+  back: the panel described the processor, the amps, the microphone and the source, and never said
+  which car any of it is installed in. And when the body is missing it now SAYS so, in the same
+  accent as an unanswered intake question — a blank row is exactly how that loss stays silent.
+
+- **Something on screen while the app starts.** A second and a half of imports, then a window
+  build; after an update, longer still, because the tool environment was rewritten and nothing is
+  byte-compiled yet. All of it used to happen behind an empty screen.
+
+### Changed
+
+- **Green means TAKEN.** It used to mean "REW is showing a title like that right now", so opening
+  the read window over another build's REW session turned a whole checklist green before anything
+  was taken. What REW holds decides what can be offered; only a record of taking decides what is
+  done.
+
+- **The protection record has two states, not three.** An empty row says there was no protective
+  filter, which is an answer — the analysis reads that curve as measured. The "not recorded"
+  choice is gone from the window, and every channel of a pass is written. Whether the method keeps
+  a third state on its side is a question standing with it, not something this window guesses at.
+
+- **The read window opens at 80% of the main window, and the curve window opens full screen.**
+  Both used to state a size in pixels and look at nothing.
+
+- **The REW dot answers for now rather than for the session.** It was probed once per launch, so
+  REW started after TCC stayed red until the app was restarted — while the diagnostics panel, one
+  section over, was reporting REW reachable. It is re-asked when you press ↻, when diagnostics
+  run, when you come back to the window, and on a slow timer while you are in it; a failed read
+  puts it out.
+
+- **The channel-tier summary moved to System params**, beside the car, the processor and the amps.
+  It had been in "project parameters" on the argument that it is not part of the DSP ledger —
+  true, and not the same claim as "not part of the rig".
+
+- **"Have we built on this cabin before?" now says where it looked.** The answer is bounded by the
+  projects TCC has been opened on — there is no registry and nothing scans the disk — and an empty
+  answer was being read as "no prior material" when it meant "none among these". A folder inside a
+  project also counts as that project now: that is how the previous build on the very same cabin
+  answered "none".
+
+- **The onboarding window runs on the same thread implementation as the main dialog**, and honours
+  the same font setting, sizing and scrolling. It had its own copy of everything, and the copy was
+  missing the parts that matter when a session dies.
+
+### Fixed
+
+- **The capture card no longer runs off the right edge of the panel.** Its two buttons were
+  outside the visible area and a whole column with them. Names shorten with the full one on the
+  hover, the columns share the width, and the panel starts wider.
+
+- **`LR24` reached the tuner as `.R24`.** The button's width was a number; it is measured from the
+  text now, like the two that learned this before it.
+
+- **Two pieces of one onboarding turn glued into one sentence** — `existing profile.Перевірив:`.
+  A turn interrupted by a tool call arrives in parts, and nothing put a break between them.
+
+- **An onboarding session that died left the window saying "thinking" forever**, with the input
+  disabled and nothing in the log. The shared thread reports its own end whatever the reason, and
+  closing the window now winds a running turn down instead of expiring a wait.
+
+- **The onboarding interview logs its tool calls.** The log wrapper covered the server the
+  external CLI talks to and not the one the window's own interview drives — the half a new owner
+  meets first was the half with no record at all.
+
+- **The interview's language rule moved into its system prompt**, so an English sentence stops
+  appearing above a Ukrainian answer.
+
+- **A flaw row that never stated its status looked exactly like one that said "confirmed".** The
+  reading has not changed (that default is the method's), but silence is now visible as silence.
+
+- **Console windows on Windows.** The one module that spawned without the app's own quiet flags
+  now uses them, and the agent's CLI is given a single hidden console for the `python`, `git` and
+  `gh` it runs to inherit rather than each opening its own. **The second half is unverified**: it
+  is written from documented behaviour and has run on nothing but a Mac, where none of it applies.
+
 ## [v0.1.31] — 2026-09-03 · what the owner sees, and what a report can carry
 
 Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
