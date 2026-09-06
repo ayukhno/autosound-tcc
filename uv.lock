@@ -43,7 +43,7 @@ wheels = [
 
 [[package]]
 name = "autosound-tcc"
-version = "0.1.32"
+version = "0.1.33"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
