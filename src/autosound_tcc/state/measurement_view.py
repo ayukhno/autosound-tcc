@@ -96,7 +96,9 @@ def protective_phrase(legs) -> str:
         freq = leg.get("f")
         if freq in (None, "", 0):
             continue
-        shape = " ".join(str(v) for v in (leg.get("type"), leg.get("slope")) if v)
+        # `LR24`, the way the app spells it everywhere else (`protective_dialog.QUICK_LABEL`) —
+        # not `LR 24`, which reads as two facts.
+        shape = "".join(str(v) for v in (leg.get("type"), leg.get("slope")) if v)
         parts.append(f"{label} {freq:g}" if isinstance(freq, (int, float)) else f"{label} {freq}")
         if shape:
             parts[-1] = f"{parts[-1]} {shape}"
@@ -159,11 +161,34 @@ def build_session(
             parsed[naming.name_key(entry)] = entry
     # The same reading over what the PROJECT took in, which is a different question from what REW
     # is showing (see the docstring). This is the one that colours a row.
+    def _key(title: str):
+        entry = naming.parse_name(str(title), glossary)
+        return naming.name_key(entry) if entry else None
+
     taken_keys = set()
     for title in (titles if taken is None else taken):
-        entry = naming.parse_name(title, glossary)
-        if entry:
-            taken_keys.add(naming.name_key(entry))
+        key = _key(title)
+        if key is not None:
+            taken_keys.add(key)
+    # And what the ROUNDS recorded, which is the other half of "taken" and the bigger one: the ⤓
+    # window writes the import store, a session writes the round, and a project driven by a model
+    # has everything in the round and nothing in the store. Watched on the live project
+    # (`testTCC8`, 2026-09-06): `cap_002` held fourteen captures, every one verified `ok`, and the
+    # checklist above it said "waiting" for all fourteen.
+    #
+    # Two things are deliberate here. **Every round at this version, not only the open one** — a
+    # pass that closed did not un-take its measurements, and asking for them again is the checker
+    # crying wolf. And **through `name_key`**: the round records the title as typed (`tw-L_01
+    # (sw)`) while the checklist derives `tw-L_1 (sw)`, and a raw-string comparison misses that —
+    # which is exactly how it missed all fourteen.
+    for round_at in process_view.capture_rounds(project):
+        if str(round_at.get("version") or "").lstrip("v_").lstrip("0") not in (
+                "", str(version).lstrip("v_").lstrip("0")):
+            continue
+        for title in (round_at.get("taken") or {}):
+            key = _key(title)
+            if key is not None:
+                taken_keys.add(key)
 
     # SCR-014: a capture whose channel was invalidated by a `config_change` is not "done" -- the
     # graph exists and is unusable, which is a different thing from missing, and the panel has a

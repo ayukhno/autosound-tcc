@@ -55,7 +55,11 @@ an afternoon, and every one of them is named where it is fixed.
 - **Green means TAKEN.** It used to mean "REW is showing a title like that right now", so opening
   the read window over another build's REW session turned a whole checklist green before anything
   was taken. What REW holds decides what can be offered; only a record of taking decides what is
-  done.
+  done — and "taken" is the whole record: the read window's own store AND every pass the ledger
+  has at this series, including passes that were closed. Checked against a real project before
+  this went out: a closed pass holding fourteen verified captures had read as fourteen rows still
+  waiting, because only the open pass was consulted and the titles were compared as raw strings
+  (`tw-L_01 (sw)` against the checklist's `tw-L_1 (sw)`).
 
 - **The protection record has two states, not three.** An empty row says there was no protective
   filter, which is an answer — the analysis reads that curve as measured. The "not recorded"

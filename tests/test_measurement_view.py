@@ -474,7 +474,7 @@ def test_the_round_says_what_was_in_each_channel_chain(project):
     session = mv.build_session("0", 1, ["w-L_1 (sw)"], project, taken=["w-L_1 (sw)"])
     by_name = {item.name: item for group in session.groups for item in group.items}
 
-    assert by_name["w-L_1 (sw)"].protective == "HP 100 LR 24"
+    assert by_name["w-L_1 (sw)"].protective == "HP 100 LR24"
     assert by_name["w-R_1 (sw)"].protective == "", "a channel nobody recorded says nothing"
 
 
@@ -487,3 +487,18 @@ def test_off_reads_the_same_as_nothing_recorded(project):
     by_name = {item.name: item for group in session.groups for item in group.items}
 
     assert by_name["w-L_1 (sw)"].protective == ""
+
+
+def test_a_round_that_closed_did_not_un_take_its_measurements(project):
+    """Watched on the live project (`testTCC8`, 2026-09-06): `cap_002` held fourteen captures,
+    every one verified `ok`, the round was closed — and the checklist above it said "waiting" for
+    all fourteen. Two causes, both here: only the OPEN round was consulted, and the comparison was
+    raw strings, so the round's `tw-L_01 (sw)` never met the checklist's `tw-L_1 (sw)`."""
+    process = _round(project, version=1, expected=["w-L_01 (sw)"], taken=["w-L_01 (sw)"])
+    process.close_capture("зроблено")
+
+    session = mv.build_session("0", 1, [], project, taken=[])
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_DONE, "the record says it was taken"
+    assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT, "and the one nobody took is still waiting"

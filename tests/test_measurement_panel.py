@@ -842,9 +842,9 @@ def test_a_row_says_what_was_in_the_chain_while_it_was_measured():
     from autosound_tcc.ui.tcc.mock_data import MeasItem
 
     _app()
-    protected = _MeasRow(MeasItem(name="m-L_1", status="done", protective="HP 100 LR 24"), "sw")
+    protected = _MeasRow(MeasItem(name="m-L_1", status="done", protective="HP 100 LR24"), "sw")
     plain = _MeasRow(MeasItem(name="m-R_1", status="done"), "sw")
 
     assert protected._prot.isVisibleTo(protected)
     assert not plain._prot.isVisibleTo(plain)
-    assert "HP 100 LR 24" in protected._prot_tip.text()
+    assert "HP 100 LR24" in protected._prot_tip.text()
