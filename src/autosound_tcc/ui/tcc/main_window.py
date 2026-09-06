@@ -3122,6 +3122,15 @@ class MainWindow(QMainWindow):
             self._mcp_error = f"{type(exc).__name__}: {exc}"
             app_log.logger().exception("the MCP server did not start: %s", exc)
             self._status_strip.notify(f"MCP: {exc}", level="warn")
+            return
+        # The server is up, and `.mcp.json` may still not be: that file is an advertisement for a
+        # CLI started in the project folder, and the in-app session never reads it. Said in the
+        # strip because the consequence is real and invisible otherwise — a terminal session will
+        # not find TCC — but NOT as "the server did not start", which is what it used to say about
+        # a server that was serving (user's log, 2026-09-06).
+        if getattr(self._mcp_server, "config_error", ""):
+            self._status_strip.notify(
+                i18n.t("mcpNoConfig").format(error=self._mcp_server.config_error), level="warn")
 
     def _match_icon_buttons(self) -> None:
         """Pin the diagnostics button to the reload button's size, whatever the platform did.

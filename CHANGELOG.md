@@ -6,6 +6,45 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.33] — 2026-09-06 · the server was up all along, and the legend was what cut the card
+
+Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
+**`v3.0.40`**. The pin does not move.
+
+Everything here came out of the first live run of `v0.1.32` on Windows, within the hour.
+
+### Fixed
+
+- **The MCP server was reported as "did not start" while it was serving — and the session then ran
+  with no tools at all.** What actually failed was writing `.mcp.json`, a file that exists to
+  advertise the server to a CLI started in the project folder; the window's own session connects by
+  port and token and never reads it. That write now says so and steps aside instead of taking the
+  server down with it.
+
+  The refusal underneath it was `PermissionError`, and it was **not about permissions**: the file
+  carried Windows' HIDDEN attribute, and `open(..., "w")` truncates through `CREATE_ALWAYS`, which
+  Windows refuses on a hidden file unless the caller repeats the attribute. The error says nothing
+  about hiding, so it read as a rights problem for three hours. The config is written through a
+  temporary file and a rename now — a rename has no such rule, it is atomic (a half-written
+  `.mcp.json` is a CLI that cannot parse its own configuration), and the hidden attribute is put
+  back afterwards: whoever hid the file did not ask to have it unhidden.
+
+- **The capture card no longer runs off the edge of the panel.** Measured on a real project: the
+  card wanted 369 px in a column that had 249, and 345 of those were the legend — four items in a
+  row that could not shrink by a pixel. The names had been taught to give ground the day before;
+  the legend had not. It wraps now, and the card asks for 209.
+
+- **A window blinking at startup.** The splash was hidden and shown again around the project gate,
+  and the gate only opens when no project is remembered — so on every ordinary launch that was a
+  window flashing off and on for nothing.
+
+### Changed
+
+- **The wrapping row layout is one implementation, shared** by the curve window's chips and the
+  capture card's legend. Moving it turned up a fault of its own: asked how wide it would *like* to
+  be, it answered with the narrowest it could *survive* — so a parent that reads the hint as a
+  preference handed it that width and got every item on a line of its own.
+
 ## [v0.1.32] — 2026-09-06 · green means taken, and a curve can be read without its protective filter
 
 Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is

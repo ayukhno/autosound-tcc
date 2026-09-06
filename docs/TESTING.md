@@ -65,3 +65,41 @@ rather than by memory for exactly that reason.
   reading the developer's real model aliases before that last one existed.
 * A test that needs a CLI to be present monkeypatches `model_choices.cli_available` itself; its
   patch runs after the fixture's and wins.
+
+## A fixture takes the AWKWARD shape by default (2026-09-06)
+
+A fixture is written by the same head as the code, so it carries the same assumptions — and a
+test built on it cannot see the one thing it most needs to: that the author assumed wrong. Ours
+did exactly that. Every capture-round fixture wrote titles in the checklist's own spelling
+(`sw_1 (sw)`) and left the round open, so nothing in the suite could tell whether the code
+compared identities or strings. It compared strings. A real project — a copy of a working one,
+taken from the Windows VM the day before a tag — holds titles as a person types them in REW
+(`sw_01 (sw)`) and passes that were closed hours ago. On it, a closed pass with fourteen verified
+captures read as fourteen rows still waiting, and the whole suite was green.
+
+So, for anything shaped like a record somebody else writes:
+
+* **titles go in as typed**, zero-padded, while assertions use the derived name (`_as_typed` in
+  `tests/test_measurement_view.py`);
+* **the pass is closed** unless the test is about an open one;
+* **the writer is the other one** — what a session records through the skill, not what the window
+  records through its own store.
+
+`pad=False` and friends exist for the tidy case, and a tidy fixture must say why it is tidy.
+
+The rule pays immediately: making the shape awkward turned up a second instance of the same fault
+in the same function — a skip and a verdict were also matched as raw strings, so a capture ruled
+out by a person and one the arithmetic called unusable were both lost to a zero.
+
+**Not a substitute for real data, and not a dependence on it either.** A copy of a live project is
+worth running when one happens to be at hand; it must never become a gate, because the supply of
+live projects shrinks as the app stops being tested and starts being used.
+
+## After a defect: the two questions, out loud
+
+1. **Does this get a regression test?** Not automatically — a test that pins a typo is noise. It
+   gets one when the defect was an assumption rather than a slip: something the code believed
+   about its data, its platform or its caller.
+2. **On which specimen?** **By default, the latest one** — the shape the most recent real
+   occurrence had, not the smallest one that reproduces. The smallest case is the author's model of
+   the bug; the real one is the bug.

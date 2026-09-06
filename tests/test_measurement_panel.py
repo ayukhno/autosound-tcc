@@ -848,3 +848,30 @@ def test_a_row_says_what_was_in_the_chain_while_it_was_measured():
     assert protected._prot.isVisibleTo(protected)
     assert not plain._prot.isVisibleTo(plain)
     assert "HP 100 LR24" in protected._prot_tip.text()
+
+
+def test_the_card_fits_the_column_it_lives_in():
+    """Measured on the user's project (2026-09-06): the card's minimum was 369 px against the 249
+    the right column had, so it was cut at the window's edge with a whole method column gone. The
+    legend was 345 of those 369 — four items in a row that could not shrink. It wraps now."""
+    from autosound_tcc.ui.tcc import theme
+    from autosound_tcc.ui.tcc.flow_layout import FlowLayout
+
+    app = _app()
+    # Every width here rides on the app-wide stylesheet, and a test that ran earlier leaves the
+    # zoom where it put it. Measuring against whatever that was is how the first version of this
+    # test passed alone and failed in the suite — twice.
+    theme.apply_theme(app, "light", scale=1.0)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+
+    assert isinstance(panel._legend.layout(), FlowLayout), "a legend that wraps, not one that cuts"
+    # RELATIVE, not a pixel count. The first version of this test asserted `<= 260 px` and passed
+    # alone while failing in the full suite: an earlier test leaves the app-wide font scale where
+    # it put it, and every width here moves with it. What must hold at any font is that the legend
+    # can give up most of its width — which is exactly what it could not do before.
+    legend = panel._legend
+    assert legend.minimumSizeHint().width() * 2 < legend.sizeHint().width(), (
+        "the legend must be able to shrink far below its one-row width")
+    assert legend.minimumSizeHint().width() * 2 < panel.minimumSizeHint().width(), (
+        "and it is no longer the widest thing in the card — it was 345 of the card's 369")

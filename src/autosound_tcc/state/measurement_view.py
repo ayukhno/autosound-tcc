@@ -201,7 +201,14 @@ def build_session(
     # snapshot of another application's session.
     round_ = live_round
     recorded_taken = {str(t) for t in (round_.get("taken") or {})}
+    # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
+    # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
+    # `sw_1 (sw)`. The taken half was corrected on the live project; these two are the same fault
+    # in the same function, found by making the fixtures write titles the way a person does.
+    # A decision ruled out and a verdict of "unusable" are exactly the facts that must not be lost
+    # to a zero.
     recorded_skipped = {str(t) for t in (round_.get("skipped") or {})}
+    skipped_keys = {_key(t) for t in recorded_skipped} - {None}
     # What the arithmetic said about each curve (SCR-040). A verdict outranks "a title exists":
     # a sweep that never finished and a muted channel both leave a title behind, and every later
     # phase used to compute on them.
@@ -209,17 +216,21 @@ def build_session(
         str(title): (entry or {}).get("verified") or {}
         for title, entry in (round_.get("taken") or {}).items()
     }
+    verdicts_by_key = {
+        _key(title): verdict for title, verdict in verdicts.items() if _key(title) is not None
+    }
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
-        if name in recorded_skipped:
+        key = naming.name_key(entry) if entry else None
+        if name in recorded_skipped or (key is not None and key in skipped_keys):
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
-        verdict = verdicts.get(name)
+        verdict = verdicts.get(name) or verdicts_by_key.get(key)
         if verdict and not verdict.get("ok"):
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is.
             return STATUS_STALE
-        if naming.name_key(entry) not in taken_keys and name not in recorded_taken:
+        if key not in taken_keys and name not in recorded_taken:
             # Waiting, even when REW is showing a curve by that name: a title in another
             # application's list is not this project taking a measurement in (user, 2026-09-06).
             # The read window opens on it ticked, and the tick is what makes it done.

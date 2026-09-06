@@ -267,13 +267,13 @@ def main() -> int:
     # until that folder is known. Backing out of the gate exits rather than falling through to a
     # folder nobody picked -- which is what used to happen, silently, on every fresh install.
     _say(app, splash, i18n.t("splashProject"))
-    if splash is not None:
-        # The gate is a modal somebody has to answer; a splash floating over it is in the way.
-        splash.hide()
+    # The splash is NOT hidden around the gate. It was, on the argument that a modal has to be
+    # answered and a splash over it is in the way — but the gate only appears when nothing is
+    # remembered, and on every ordinary launch that hide-and-show was a window blinking on and off
+    # for no reason at all (user, on Windows, 2026-09-06, on the first run of v0.1.32). The splash
+    # does not hold `WindowStaysOnTopHint`, so a modal that does open takes focus above it.
     if not ensure_project_chosen(force=args.choose_project):
         return 0
-    if splash is not None:
-        splash.show()
     _say(app, splash, i18n.t("splashWindow"))
     window = MainWindow()
     # AFTER the window exists, and a different question from `claim()` above. That one told

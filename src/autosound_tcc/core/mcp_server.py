@@ -51,8 +51,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import os
 import secrets
 import socket
+import stat
+import tempfile
 import threading
 import time
 from concurrent.futures import Future
@@ -1096,11 +1099,24 @@ def _free_port(preferred: int = DEFAULT_PORT, tries: int = 20) -> int:
     raise RuntimeError(f"no free port in {preferred}..{preferred + tries}")
 
 
+#: How many times a write of `.mcp.json` is attempted, and how long between tries. Windows hands
+#: out a `PermissionError` for a file another process has open for a moment — an antivirus or the
+#: indexer right after the folder was touched — and the classic answer is to wait and ask again.
+_CONFIG_WRITE_TRIES = 3
+_CONFIG_WRITE_PAUSE_S = 0.3
+
+
 def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     """Advertise this server in the project's `.mcp.json` so any CLI launched there finds it.
 
     Merges rather than overwrites: the file is the user's, and clobbering it would silently
     disconnect whatever other MCP servers they had configured for this project.
+
+    **Retried, and the read-only bit is cleared** before the last try. On Windows a file marked
+    read-only refuses `open(..., "w")` with the same `PermissionError` a transient lock gives, and
+    both were seen on the user's machine (2026-09-06). This file is TCC's own advertisement — a
+    flag on it is not a decision anybody made about their configuration — so clearing it is
+    honest, and it is logged.
     """
     path = config.mcp_config_path(project_dir)
     try:
@@ -1113,8 +1129,82 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
         "url": f"http://127.0.0.1:{port}/mcp",
         "headers": {"X-TCC-Token": token},
     }
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    for attempt in range(1, _CONFIG_WRITE_TRIES + 1):
+        try:
+            _write_atomically(path, body)
+            return path
+        except PermissionError:
+            if attempt == _CONFIG_WRITE_TRIES:
+                raise
+            if attempt == _CONFIG_WRITE_TRIES - 1 and path.exists():
+                try:
+                    path.chmod(path.stat().st_mode | stat.S_IWRITE)
+                    app_log.logger().info("mcp config was read-only, cleared: %s", path)
+                except OSError:
+                    pass  # not ours to clear: the next attempt reports the original refusal
+            time.sleep(_CONFIG_WRITE_PAUSE_S)
     return path
+
+
+#: Windows file attributes this cares about. Read through `ctypes` rather than a helper module,
+#: because there is no cross-platform one and this is two calls.
+_FILE_ATTRIBUTE_HIDDEN = 0x02
+_INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+
+
+def _hidden(path: Path) -> bool:
+    """Does this file carry Windows' HIDDEN attribute? False everywhere else, and on any error."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — no ctypes, no windll: treat it as not hidden
+        return False
+    return attrs != _INVALID_FILE_ATTRIBUTES and bool(attrs & _FILE_ATTRIBUTE_HIDDEN)
+
+
+def _rehide(path: Path) -> None:
+    """Put the HIDDEN attribute back after a rename dropped it. Best effort, by design."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
+        if attrs != _INVALID_FILE_ATTRIBUTES:
+            ctypes.windll.kernel32.SetFileAttributesW(  # type: ignore[attr-defined]
+                str(path), attrs | _FILE_ATTRIBUTE_HIDDEN)
+    except Exception:  # noqa: BLE001 — the file is written; its attribute is cosmetic beside that
+        pass
+
+
+def _write_atomically(path: Path, body: str) -> None:
+    """Write beside the target and rename over it.
+
+    **Why not `write_text`.** It truncates through `CREATE_ALWAYS`, and Windows refuses that on a
+    file carrying the HIDDEN attribute unless the caller repeats the attribute — the refusal comes
+    back as `PermissionError` with nothing in it about hiding. That is what stopped the MCP server
+    on the user's machine: `attrib` answered `A   H` for a `.mcp.json` nobody had made read-only
+    (2026-09-06). A rename over the target has no such rule.
+
+    Atomic anyway, which this file wanted regardless: a half-written `.mcp.json` is a CLI that
+    cannot parse its own configuration. The HIDDEN attribute is put back afterwards — the rename
+    drops it, and whoever hid the file did not ask us to unhide it.
+    """
+    was_hidden = _hidden(path)
+    handle, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".mcp-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    if was_hidden:
+        _rehide(path)
 
 
 class TccMcpServer:
@@ -1124,6 +1214,11 @@ class TccMcpServer:
     here touches Qt — the tools reach the GUI only through `UiBridge`, whose Qt implementation is
     responsible for marshalling back to the GUI thread.
     """
+
+    #: Why `.mcp.json` could not be written, when it could not. Kept apart from `failure`: one is
+    #: the server not running, the other is the server running and un-advertised, and the window
+    #: says different things about them.
+    config_error: str = ""
 
     def __init__(
         self,
@@ -1192,7 +1287,19 @@ class TccMcpServer:
         self._ready.wait(timeout=5.0)
         self._wait_until_serving()
         if write_config:
-            write_mcp_config(self.project_dir, self.port, self.token)
+            # NOT fatal, and this is the whole correction (2026-09-06). The server is SERVING by
+            # the time this runs; `.mcp.json` is an advertisement for a CLI launched in the
+            # project folder, and the in-app session connects by port and token without ever
+            # reading it. A `PermissionError` on that file used to escape `start()`, so the window
+            # reported "the MCP server did not start" — about a server that was up — and the
+            # session then ran with no tools at all, with one line in the log as the only sign.
+            try:
+                write_mcp_config(self.project_dir, self.port, self.token)
+            except OSError as exc:
+                self.config_error = f"{type(exc).__name__}: {exc}"
+                app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
+                                         "CLI started in the project folder will not find it",
+                                         type(exc).__name__, exc)
         return self.port
 
     def _wait_until_serving(self, timeout: float = 5.0) -> None:

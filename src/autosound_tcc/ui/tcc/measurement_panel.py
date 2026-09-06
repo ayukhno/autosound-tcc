@@ -38,6 +38,7 @@ from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import i18n, qt_shutdown
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
+from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
@@ -577,9 +578,19 @@ class MeasurementPanel(QWidget):
 
         legend = QWidget()
         self._legend = legend
-        legend_layout = QHBoxLayout(legend)
+        # A row that WRAPS, not one that cannot shrink. Measured on the user's own project
+        # (2026-09-06): this legend's minimum was 345 px against a card that had 249, so it — not
+        # the measurement columns — was what pushed the card past the edge of the panel and cut
+        # it. Eliding is the wrong tool here: a legend explaining "знятий, не підходить" is read,
+        # and "зня…" keeps the width while losing the point.
+        legend_layout = _FlowLayout(legend, spacing=10)
         legend_layout.setContentsMargins(0, 0, 0, 0)
-        legend_layout.setSpacing(10)
+        # A wrapping layout answers its height only when asked WITH a width, and a widget has to
+        # say it works that way or the layout above it reserves one row and the second is drawn
+        # over whatever is under it. The curve window's chip row says the same thing about itself.
+        policy = legend.sizePolicy()
+        policy.setHeightForWidth(True)
+        legend.setSizePolicy(policy)
         self._legend_labels: list[QLabel] = []
         for status, key in _LEGEND:
             dot = TrafficLight(status)
@@ -588,7 +599,6 @@ class MeasurementPanel(QWidget):
             legend_layout.addWidget(dot)
             legend_layout.addWidget(text)
             self._legend_labels.append(text)
-        legend_layout.addStretch(1)
         layout.addWidget(legend)
 
         self._cols_layout = QGridLayout()

@@ -8,6 +8,7 @@ because a checklist with impossible rows in it stops being read.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -251,19 +252,41 @@ def test_a_recapture_after_the_change_makes_it_done_again(project):
     assert by_name["w-L_1 (sw)"] == mv.STATUS_DONE
 
 
+def _as_typed(title: str) -> str:
+    """A title the way a PERSON types it in REW: `sw_1 (sw)` -> `sw_01 (sw)`.
+
+    Zero-padding is what REW titles carry in the field, and the checklist derives the unpadded
+    form — `naming.name_key` exists precisely because those two are one name. A fixture that
+    writes both sides in the same spelling cannot tell whether the code compares keys or strings.
+    """
+    return re.sub(r"_(\d)(?=\D|$)", r"_0\1", str(title))
+
+
 def _round(project, **fields):
-    """Write a capture round the way the skill would (SCR-034), through the skill's own writer."""
+    """Write a capture round the way the skill would (SCR-034), through the skill's own writer.
+
+    **The awkward shape is the default** (2026-09-06). Titles go in ZERO-PADDED, as typed in REW,
+    while every assertion is written against the derived name — because that is the shape a real
+    project has and the shape no fixture here had. It cost a regression that reached a tag's door:
+    a closed pass holding fourteen verified captures read as fourteen rows still waiting, and
+    every test passed, because every fixture wrote the round in the checklist's own spelling.
+
+    `pad=False` for a fixture that is deliberately about the tidy case.
+    """
     from autosound_tcc.state import process_view
 
+    pad = fields.pop("pad", True)
+    typed = _as_typed if pad else (lambda title: str(title))
     module = vendor_loader.load_process()
     _intake.seed(project)
     process = module.Process(str(process_view.process_dir(project)))
     process.enter_phase("0")
-    process.start_capture(fields.pop("version", 1), expected=fields.pop("expected", ()))
+    process.start_capture(fields.pop("version", 1),
+                          expected=[typed(t) for t in fields.pop("expected", ())])
     for title in fields.pop("taken", ()):
-        process.record_capture(title)
+        process.record_capture(typed(title))
     for title, reason in (fields.pop("skipped", {}) or {}).items():
-        process.skip_capture(title, reason)
+        process.skip_capture(typed(title), reason)
     return process
 
 
@@ -502,3 +525,24 @@ def test_a_round_that_closed_did_not_un_take_its_measurements(project):
 
     assert statuses["w-L_1 (sw)"] == mv.STATUS_DONE, "the record says it was taken"
     assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT, "and the one nobody took is still waiting"
+
+
+def test_the_round_fixture_writes_titles_the_way_a_person_types_them(project):
+    """The fixture's own promise, pinned. A tidy-up that writes `sw_1 (sw)` into the round would
+    leave every test in this file passing for the wrong reason — which is exactly the state it was
+    in until 2026-09-06."""
+    process = _round(project, version=1,
+                     expected=["sw_1 (sw)", "w-L_1 (sw)"], taken=["sw_1 (sw)"],
+                     skipped={"w-L_1 (sw)": "саб відключений"})
+
+    round_ = process.load()["capture"]
+
+    assert round_["expected"] == ["sw_01 (sw)", "w-L_01 (sw)"]
+    assert list(round_["taken"]) == ["sw_01 (sw)"]
+    assert list(round_["skipped"]) == ["w-L_01 (sw)"]
+
+    # ...and the checklist, which derives the unpadded name, still reads all three facts.
+    session = mv.build_session("0", 1, [], project, taken=[])
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_SKIPPED

@@ -1133,3 +1133,65 @@ def test_the_interview_can_record_a_body_because_it_has_no_other_way_to(tmp_path
     assert said["car"]["body"] == "sedan" and said["car"]["generation"] == "B8"
     saved = json.loads((tmp_path / "project.json").read_text(encoding="utf-8"))
     assert saved["car"]["make"] == "VW", "written through the method's own writer"
+
+
+def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, monkeypatch, caplog):
+    """From the user's own log (2026-09-06): `PermissionError` on `.mcp.json` escaped `start()`,
+    the window said "the MCP server did not start" — about a server that was SERVING — and the
+    session then ran with no tools at all. The file is an advertisement for a CLI started in the
+    project folder; the in-app session connects by port and token and never reads it."""
+    import logging
+
+    from autosound_tcc.core import app_log, mcp_server as mod
+
+    def _refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    # The write goes through a temp file and a rename now (a hidden file cannot be truncated in
+    # place on Windows), so this is where a refusal has to be planted.
+    monkeypatch.setattr(mod.os, "replace", _refuse)
+    server = mod.TccMcpServer(bridge=HeadlessBridge(tmp_path), project_dir=tmp_path)
+    try:
+        with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+            port = server.start()
+
+        assert port, "the server is up"
+        assert "PermissionError" in server.config_error
+        assert any("mcp config not written" in r.getMessage() for r in caplog.records)
+    finally:
+        server.stop()
+
+
+def test_the_advertisement_is_renamed_over_never_truncated_in_place(tmp_path):
+    """`attrib` on the user's machine answered `A   H` — the file was HIDDEN, not read-only, and
+    Windows refuses `CREATE_ALWAYS` (which is what `open(..., "w")` does) on a hidden file unless
+    the caller repeats the attribute. The refusal arrives as `PermissionError` saying nothing about
+    hiding. A rename over the target has no such rule — and is atomic, which a config a CLI parses
+    wanted anyway."""
+    from autosound_tcc.core import mcp_server as mod
+
+    path = tmp_path / ".mcp.json"
+    path.write_text('{"mcpServers": {"other": {"type": "http"}}}', encoding="utf-8")
+    inode_before = path.stat().st_ino
+
+    mod.write_mcp_config(tmp_path, 8765, "token")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["tcc"]["url"].endswith(":8765/mcp")
+    assert data["mcpServers"]["other"], "somebody else's server is still theirs"
+    assert path.stat().st_ino != inode_before, "a new file was renamed over the old one"
+    assert not list(tmp_path.glob(".mcp-*.tmp")), "and nothing was left behind"
+
+
+def test_a_read_only_advertisement_is_written_anyway(tmp_path, monkeypatch):
+    """The file is TCC's own advertisement — a read-only flag on it is not a decision anybody made
+    about their configuration. Cleared on the last attempt, and said in the log."""
+    from autosound_tcc.core import mcp_server as mod
+
+    path = tmp_path / ".mcp.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o444)
+
+    written = mod.write_mcp_config(tmp_path, 8765, "token")
+
+    assert json.loads(written.read_text(encoding="utf-8"))["mcpServers"]["tcc"]["type"] == "http"
