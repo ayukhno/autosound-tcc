@@ -1230,6 +1230,11 @@ class MainWindow(QMainWindow):
         the REW-online dot too (clear_layout destroys the old instance) from `self._rew_online`,
         which is what survives across rebuilds."""
         clear_layout(self._system_section.body_layout())
+        # The car FIRST, above everything: it is the object the DSP, the amps and the drivers are
+        # installed in, and every measurement is made inside it. `save_car` insists the body be
+        # recorded and nothing in the app ever showed it back, so a project with a fully recorded
+        # cabin described its whole rig and never said which car (tcc#11).
+        self._add_car_row()
         self._rew_dot = TrafficLight(self._rew_status_class())
         self._retip_rew_dots()  # the new instance, and the header's, in the current language
         self._system_section.body_layout().addWidget(
@@ -1242,7 +1247,33 @@ class MainWindow(QMainWindow):
         rows = project_view.load_system_params()
         for label, value in rows:
             self._system_section.body_layout().addWidget(_kv_row(label, value))
+        # How many channels the processor drives, and how many are off. It rendered in Project
+        # params until 2026-09-06, put there by SCR-016 on the argument that it is "not part of
+        # the DSP ledger" — true, and not the same claim as "not part of the rig". Project params
+        # is the session and the workspace; a channel count is the equipment (Arbiter's call).
+        for tier_id, total, off in project_view.load_channel_summary():
+            self._system_section.body_layout().addWidget(
+                _kv_row(_tier_label(tier_id), _tier_count(total, off))
+            )
         self._add_channel_switches()
+
+    def _add_car_row(self) -> None:
+        """The cabin this project is about — or, when nobody recorded it, a row that says so.
+
+        A blank is what makes the loss silent: `save_car`'s own warning is that an unrecorded body
+        "answers 'no body recorded' forever", and `check_existing_car` keeps `unknown` as its own
+        bucket for exactly that reason. This is the other half of the same fix, on the panel.
+        """
+        line, missing = project_view.load_car()
+        if line:
+            self._system_section.body_layout().addWidget(_kv_row(i18n.t("carLabel"), line))
+        if "body" in missing:
+            # The accent register (`open-q`), the one that asks something of the reader — not the
+            # muted placeholder that says "nothing here yet".
+            chip = self._placeholder_label(
+                f"🟡 {i18n.t('carNone') if not line else i18n.t('carNoBody')}")
+            chip.setProperty("class", "phead-sub open-q")
+            self._system_section.body_layout().addWidget(chip)
 
     def _rebuild_acoustics(self) -> None:
         """The car's acoustic flaw map — what this cabin does, and what may be done about it.
@@ -2288,12 +2319,9 @@ class MainWindow(QMainWindow):
         # "am I on the branch I think, is anything unsaved?" meant leaving the app.
         for label, value in project_view.git_facts():
             self._project_section.body_layout().addWidget(_kv_row(label, value))
-        summary_rows = project_view.load_channel_summary() if view else ()
+        # The channel-tier summary used to render here; it is a fact about the rig, so it moved to
+        # System params (`_rebuild_system_params`, 2026-09-06).
         open_questions = project_view.load_open_questions() if view else ()
-        for tier_id, total, off in summary_rows:
-            self._project_section.body_layout().addWidget(
-                _kv_row(_tier_label(tier_id), _tier_count(total, off))
-            )
         if open_questions:
             # In a group of their own, with a count. They used to be loose chips appended straight
             # under the channel-summary rows, so a paragraph about rear-fill routing read as an

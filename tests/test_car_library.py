@@ -8,6 +8,7 @@ What this module owns is the half the method cannot have — which project folde
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -47,7 +48,10 @@ def test_a_near_miss_is_not_named_at_all(tmp_path):
     got = car_library.look_up("VW", "Passat", "B7", "sedan", dirs=[])
 
     assert got["bundled_exact_match"] is None
-    assert "b8" not in json.dumps(got).lower(), "no suggestion, no did-you-mean, no fallback"
+    # The ANSWER carries no near miss. `searched` is deliberately excluded: it is the scope this
+    # looked in (tcc#10), and the folder names on a real machine are nobody's suggestion.
+    answer = {key: value for key, value in got.items() if key != "searched"}
+    assert "b8" not in json.dumps(answer).lower(), "no suggestion, no did-you-mean, no fallback"
 
 
 def test_a_body_that_was_never_recorded_is_its_own_answer(tmp_path):
@@ -111,3 +115,43 @@ def test_an_empty_part_is_absent_rather_than_blank(tmp_path):
     assert "body" not in car and car["generation"] == "B8"
     saved = json.loads((folder / "project.json").read_text(encoding="utf-8"))
     assert saved["car"] == car and saved["project_rev"] >= 1, "written through the method's writer"
+
+
+def test_the_answer_says_where_it_looked(tmp_path):
+    """An empty `prior_projects` used to be indistinguishable from "we looked nowhere". On the
+    live intake it meant "none among the eight folders TCC has opened", and the build on the very
+    same cabin — never opened in TCC — was folded into "none" (tcc#10)."""
+    same = _project(tmp_path, "same", {"make": "VW", "model": "Passat",
+                                       "generation": "B8", "body": "sedan"})
+
+    got = car_library.look_up("VW", "Passat", "B8", "sedan", dirs=[same])
+
+    assert str(same) in got["searched"]
+    assert [entry["path"] for entry in got["prior_projects"]] == [str(same)]
+
+
+def test_a_folder_inside_a_project_finds_the_project(tmp_path):
+    """What TCC remembers is what was opened, and a sub-folder of a project has no `project.json`
+    of its own — the method drops it from both buckets, so it does not even come back as
+    `unknown`. That is how the previous build on this cabin answered "none"."""
+    project = _project(tmp_path, "build-a", {"make": "VW", "model": "Passat",
+                                             "generation": "B8", "body": "sedan"})
+    inside = project / "rew_analitic"
+    inside.mkdir()
+
+    got = car_library.look_up("VW", "Passat", "B8", "sedan", dirs=[inside])
+
+    assert [entry["path"] for entry in got["prior_projects"]] == [str(project)]
+
+
+def test_the_open_project_is_not_reported_as_its_own_prior_build(tmp_path, monkeypatch):
+    """It is prepended as a candidate on purpose — but an un-normalised path made it a DIFFERENT
+    Path from the same folder in the recent list, so it arrived twice."""
+    project = _project(tmp_path, "open-now", {"make": "VW", "model": "Passat",
+                                              "generation": "B8", "body": "sedan"})
+    monkeypatch.setattr(car_library.config, "chosen_project_dir", lambda: project)
+
+    got = car_library.look_up("VW", "Passat", "B8", "sedan",
+                              dirs=[Path(str(project) + "/.")])
+
+    assert [entry["path"] for entry in got["prior_projects"]] == [str(project)]

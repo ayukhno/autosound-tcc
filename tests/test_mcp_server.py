@@ -1105,6 +1105,10 @@ def test_the_cabin_question_reaches_the_model_with_all_three_answers(tmp_path, m
     said = tools["check_existing_car"].description
     assert "SHOW THIS SEPARATELY" in said, "the model is told not to fold `unknown` into `none`"
     assert "never match on it" in said, "and that the year classifies nothing"
+    # And what the answer is bounded BY. "builds WE have done" promised the whole shop; what it
+    # can deliver is the folders TCC has been opened on, and nothing said so (tcc#10).
+    assert "AMONG THE PROJECTS TCC HAS OPENED" in said
+    assert got["searched"] == [str(other)], "the scope travels with the answer"
 
 
 def test_the_interview_can_record_a_body_because_it_has_no_other_way_to(tmp_path, monkeypatch):

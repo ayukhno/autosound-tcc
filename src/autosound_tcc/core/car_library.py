@@ -57,21 +57,22 @@ def look_up(
     *,
     dirs: Optional[Sequence[Path]] = None,
 ) -> dict:
-    """`{"bundled_exact_match", "prior_projects", "unknown", "slug"}` — or an `error`.
+    """`{"bundled_exact_match", "prior_projects", "unknown", "searched", "slug"}` — or an `error`.
 
     `bundled_exact_match` is `None` when nobody has described this cabin, and that IS the answer:
     it is what a session needs to hear before starting an intake from scratch. It never means
     "close enough exists" — the method offers no near miss and neither does this.
+
+    **`searched` is the scope, and it is part of the answer.** This module has no registry of
+    projects and does not scan disks; it looks in the folders TCC has been opened on. An empty
+    `prior_projects` therefore means "none among these", and without the list it was read as "no
+    prior material for this cabin" — the exact silent loss the `unknown` bucket exists to prevent,
+    one floor up (tcc#10). A build that was never opened in TCC is not a build on another body.
     """
     module = _module()
     if module is None:
         return {"error": "this build has no car library (the method is older than v3.0.40)"}
-    candidates = [Path(d) for d in dirs] if dirs is not None else config.recent_projects()
-    current = config.chosen_project_dir()
-    if current is not None and current not in candidates:
-        # The project open right now is a candidate like any other, and it is the one a person
-        # would be most surprised to see missing from the answer.
-        candidates = [current, *candidates]
+    candidates = _candidates(dirs)
     matches, unknown = module.find_prior_projects(
         [str(d) for d in candidates], make, model, generation, body
     )
@@ -80,7 +81,44 @@ def look_up(
         "bundled_exact_match": module.find_bundled_car(make, model, generation, body),
         "prior_projects": matches,
         "unknown": unknown,
+        "searched": [str(d) for d in candidates],
     }
+
+
+def _candidates(dirs: Optional[Sequence[Path]] = None) -> list[Path]:
+    """Where to look, deduplicated, with the open project first.
+
+    Two things are corrected here rather than in the method, because both are TCC's own half of
+    the boundary:
+
+    * **The same project twice.** The open project was prepended after a plain `in` test, and an
+      un-normalised path (`~/x/../x`, a different case on Windows) is a different `Path` — so it
+      could arrive as its own prior build.
+    * **A recent entry that is a sub-folder of a project.** `config.recent_projects()` holds what
+      was opened, and a folder inside a project has no `project.json` of its own, so the method
+      drops it from BOTH buckets — it does not even come back as `unknown`. That is how a build on
+      the very same cabin, one level up, answered "none" (tcc#10). The parent is added as a
+      candidate; no scanning, one step up and only when the parent is a project.
+    """
+    raw = [Path(d) for d in dirs] if dirs is not None else config.recent_projects()
+    current = config.chosen_project_dir()
+    if current is not None:
+        raw = [current, *raw]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in raw:
+        for candidate in (path, path.parent):
+            try:
+                key = str(candidate.resolve())
+            except OSError:  # a path that no longer resolves is not a candidate
+                continue
+            if key in seen:
+                continue
+            if candidate is not path and not (candidate / "project.json").is_file():
+                break  # the parent is not a project: this entry contributes only itself
+            seen.add(key)
+            out.append(candidate)
+    return out
 
 
 def record(

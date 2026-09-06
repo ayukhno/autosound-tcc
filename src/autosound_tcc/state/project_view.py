@@ -160,6 +160,47 @@ def load_channel_summary(
     return tuple(rows)
 
 
+#: The identity parts of a car, in the order they are read. `year` is deliberately not here:
+#: `save_car` says it "describes this one car; it classifies nothing", so it is display, not
+#: identity, and its absence is not a gap worth naming.
+CAR_PARTS = ("make", "model", "generation", "body")
+
+
+def load_car(project_dir_: Optional[Path] = None) -> tuple[str, tuple[str, ...]]:
+    """`(one line to show, the identity parts that are missing)` from `project.json["car"]`.
+
+    A project records the cabin it is about and nothing in the app ever showed it back, so the
+    panel described the whole rig — DSP, amps, mic, source — without saying which car any of it is
+    installed in (tcc#11). The second half of the answer is the load-bearing one: `save_car` warns
+    that an unrecorded body is a SILENT loss ("nothing breaks today, and the material is simply not
+    there tomorrow"), and a blank row is exactly how silence stays silent.
+
+    **The generation is not repeated.** Projects written before `save_car` folded it into the
+    nameplate (`"model": "Passat B8"`), and joining the parts blindly reads `VW Passat B8 B8`.
+    """
+    car = _load(project_dir_).get("car")
+    if not isinstance(car, dict):
+        return "", CAR_PARTS
+    parts = {key: str(car.get(key) or "").strip() for key in CAR_PARTS}
+    missing = tuple(key for key in CAR_PARTS if not parts[key])
+    words: list[str] = []
+    for key in CAR_PARTS:
+        value = parts[key]
+        if not value:
+            continue
+        if key == "generation" and words and words[-1].lower().endswith(value.lower()):
+            continue  # already inside the nameplate — the legacy shape
+        words.append(value)
+    line = " ".join(words)
+    year = car.get("year")
+    if line and year:
+        line = f"{line} · {year}"
+    wheel = str(car.get("wheel") or "").strip()
+    if line and wheel:
+        line = f"{line} ({wheel})"
+    return line, missing
+
+
 def channel_name(entry: dict) -> Optional[str]:
     """The name a channel goes by today — its `code` (SCR-039).
 

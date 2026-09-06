@@ -200,3 +200,32 @@ def test_git_facts_never_raise_on_a_broken_repo(tmp_path):
     (tmp_path / ".git").write_text("not a repo, just a file called .git")
 
     assert project_view.git_facts(tmp_path) == ()
+
+
+def test_the_car_is_one_line_and_the_generation_is_not_said_twice(tmp_path):
+    """Projects written before `save_car` folded the generation into the nameplate
+    (`"model": "Passat B8"`), and joining the parts blindly reads `VW Passat B8 B8` (tcc#11)."""
+    _write(tmp_path, {"car": {"make": "VW", "model": "Passat B8", "generation": "B8",
+                              "body": "sedan", "year": 2019}})
+
+    line, missing = project_view.load_car(tmp_path)
+
+    assert line == "VW Passat B8 sedan · 2019"
+    assert missing == ()
+
+
+def test_a_body_nobody_recorded_comes_back_as_a_gap_not_as_a_blank(tmp_path):
+    """`save_car` calls it a silent loss: nothing breaks today, and the material is not there
+    tomorrow. The panel can only say so if the loader says which part is missing."""
+    _write(tmp_path, {"car": {"make": "VW", "model": "Passat", "generation": "B8"}})
+
+    line, missing = project_view.load_car(tmp_path)
+
+    assert line == "VW Passat B8"
+    assert missing == ("body",)
+
+
+def test_no_car_block_at_all_is_its_own_answer(tmp_path):
+    _write(tmp_path, {"dsp": {"vendor": "Musway", "model": "M6V4"}})
+
+    assert project_view.load_car(tmp_path) == ("", project_view.CAR_PARTS)

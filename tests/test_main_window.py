@@ -218,9 +218,13 @@ def _kv_texts(section) -> dict[str, str]:
 
 
 def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypatch):
-    """SCR-015/016 (`state/project_view.py`): System params renders `project.json`'s DSP/amp/mic
-    facts, and Project params gets an extra channel-tier-summary row plus an open-question chip --
-    none of this is re-derived from the ledger, all of it comes straight from the file."""
+    """SCR-015/016 (`state/project_view.py`): System params renders `project.json`'s car, DSP, amp
+    and mic facts plus the channel-tier summary, and Project params keeps the open-question chips
+    -- none of this is re-derived from the ledger, all of it comes straight from the file.
+
+    The channel summary moved here from Project params on 2026-09-06 (tcc#11): SCR-016 put it
+    there because it is not part of the DSP ledger, which is true and is not the same claim as
+    "not part of the rig"."""
     import json
 
     profile = {
@@ -232,6 +236,7 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     }
     (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
     (tmp_path / "project.json").write_text(json.dumps({
+        "car": {"make": "VW", "model": "Passat", "generation": "B8", "body": "sedan"},
         "dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
         "amps": [{"role": "front", "make": "Helix", "model": "P Six DSP"}],
         "mic": {"model": "UMIK-1"},
@@ -255,10 +260,10 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
     assert system_kv["DSP"] == "Audiotec-Fischer Helix DSP Ultra S"
     assert system_kv["Amp (front)"] == "Helix P Six DSP"
     assert system_kv["Mic"] == "UMIK-1"
-
-    project_kv = _kv_texts(window._project_section)
+    # The cabin all of the above is installed in, and the first row of the section.
+    assert system_kv[i18n.t("carLabel")] == "VW Passat B8 sedan"
     # Translated through i18n, not prettified out of the JSON key (F-006).
-    assert project_kv["Virtual channels"] == "8 (1 off)"
+    assert system_kv["Virtual channels"] == "8 (1 off)"
 
     # The open questions live in a collapsible group of their own, with a count on its header, so
     # they stop reading as a footnote to the channel-summary row above them (F-005).
@@ -279,6 +284,32 @@ def test_project_json_feeds_system_params_and_channel_summary(tmp_path, monkeypa
         Qt.TextInteractionFlag.NoTextInteraction
     assert any(w.text() == "1" for w in group.findChildren(QLabel)
                if w.property("class") == "cnt"), "the header counts them"
+
+
+def test_a_project_with_no_body_recorded_says_so_rather_than_showing_nothing(tmp_path, monkeypatch):
+    """`save_car` calls an unrecorded body a SILENT loss — "nothing breaks today, and the material
+    is simply not there tomorrow". A blank row is exactly how silence stays silent (tcc#11)."""
+    import json
+
+    from autosound_tcc.ui.tcc.labels import ElidedLabel
+
+    (tmp_path / "project.json").write_text(json.dumps({
+        "car": {"make": "VW", "model": "Passat", "generation": "B8"},  # no body
+        "dsp": {"vendor": "Musway", "model": "M6V4"},
+    }))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
+
+    _app()
+    window = MainWindow()
+
+    kv = _kv_texts(window._system_section)
+    assert kv[i18n.t("carLabel")] == "VW Passat B8", "what IS recorded still shows"
+    asking = [
+        w.text() for w in window._system_section.findChildren(QLabel)
+        if "open-q" in str(w.property("class") or "") and not isinstance(w, ElidedLabel)
+    ]
+    assert any(i18n.t("carNoBody") in t for t in asking), asking
 
 
 def test_the_composer_is_the_way_in():

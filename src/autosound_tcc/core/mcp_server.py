@@ -590,14 +590,20 @@ def build_server(
         * `bundled_exact_match` -- the library's page for EXACTLY this cabin, or null. Null is a
           real answer: nobody has described it, so the intake starts clean. A near miss is never
           reported: a platform sibling is a different car and merely naming one does the damage.
-        * `prior_projects` -- builds WE have done on this same body, each with how many flaw-map
-          rows it holds and which captures they were read off. Put this in front of the person as
-          a question ("there is prior material for this cabin, this much of it -- carry it as
-          hypotheses?"), never as a decision you take quietly. Those captures live in THAT
-          project, so anything carried travels as a hypothesis, never as fact.
+        * `prior_projects` -- builds on this same body AMONG THE PROJECTS TCC HAS OPENED, each
+          with how many flaw-map rows it holds and which captures they were read off. Put this in
+          front of the person as a question ("there is prior material for this cabin, this much of
+          it -- carry it as hypotheses?"), never as a decision you take quietly. Those captures
+          live in THAT project, so anything carried travels as a hypothesis, never as fact.
         * `unknown` -- projects that could not say what body they are, because nobody recorded
           one. SHOW THIS SEPARATELY. A project that did not record its body is not a project on
           another body, and reporting it as "none" is how material goes missing in silence.
+
+        `searched` says WHERE it looked, and you must read it before concluding anything from an
+        empty `prior_projects`. There is no registry of projects and nothing scans the disk: the
+        scope is the folders this TCC has been opened on. A build that was never opened here does
+        not appear -- so "nothing found" means "nothing among these", and the person is the one
+        who knows whether there is a folder TCC has not seen. ASK them rather than concluding.
         """
         return json.dumps(
             car_library.look_up(make, model, generation, body), ensure_ascii=False
