@@ -463,3 +463,27 @@ def test_a_phase_that_really_captures_nothing_still_says_so(project):
 
     assert session.groups == ()
     assert "no capture" in session.version["en"]
+
+
+def test_the_round_says_what_was_in_each_channel_chain(project):
+    """The record is per channel and per pass, and until now nothing rendered it: a capture taken
+    behind a protective high-pass looked exactly like one taken clean (tcc#15)."""
+    process = _round(project, expected=["w-L_1 (sw)"])
+    process.set_protective("w-L", {"hp": {"f": 100, "type": "LR", "slope": 24}})
+
+    session = mv.build_session("0", 1, ["w-L_1 (sw)"], project, taken=["w-L_1 (sw)"])
+    by_name = {item.name: item for group in session.groups for item in group.items}
+
+    assert by_name["w-L_1 (sw)"].protective == "HP 100 LR 24"
+    assert by_name["w-R_1 (sw)"].protective == "", "a channel nobody recorded says nothing"
+
+
+def test_off_reads_the_same_as_nothing_recorded(project):
+    """Two states, not three (2026-09-06): both mean "read the curve as measured"."""
+    process = _round(project, expected=["w-L_1 (sw)"])
+    process.set_protective("w-L", "OFF")
+
+    session = mv.build_session("0", 1, ["w-L_1 (sw)"], project, taken=["w-L_1 (sw)"])
+    by_name = {item.name: item for group in session.groups for item in group.items}
+
+    assert by_name["w-L_1 (sw)"].protective == ""

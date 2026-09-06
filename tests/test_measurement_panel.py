@@ -832,3 +832,19 @@ def test_a_row_with_empty_filter_cells_is_recorded_as_no_protective_filter(tmp_p
 
     assert captured["protective"]["w-L"] == "OFF"
     assert captured["protective"]["m-L"] == {"hp": {"f": 100.0, "type": "LR", "slope": 24}}
+
+
+def test_a_row_says_what_was_in_the_chain_while_it_was_measured():
+    """You cannot tell from a curve — a protective LR4 @100 and a designed one are the same
+    filter, and the difference at a junction is tens of degrees. The row is the only place it can
+    be seen (tcc#15). Two states: a filter, or nothing."""
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
+    from autosound_tcc.ui.tcc.mock_data import MeasItem
+
+    _app()
+    protected = _MeasRow(MeasItem(name="m-L_1", status="done", protective="HP 100 LR 24"), "sw")
+    plain = _MeasRow(MeasItem(name="m-R_1", status="done"), "sw")
+
+    assert protected._prot.isVisibleTo(protected)
+    assert not plain._prot.isVisibleTo(plain)
+    assert "HP 100 LR 24" in protected._prot_tip.text()

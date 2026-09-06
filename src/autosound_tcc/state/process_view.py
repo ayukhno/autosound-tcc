@@ -125,7 +125,8 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
             continue
         round_ = rounds.get(rid)
         if round_ is None:
-            round_ = rounds[rid] = {"id": rid, "expected": [], "taken": {}, "skipped": {}}
+            round_ = rounds[rid] = {"id": rid, "expected": [], "taken": {}, "skipped": {},
+                                    "protective": {}}
             order.append(rid)
         kind = event.get("type")
         if kind == "capture_task_issued":
@@ -149,6 +150,11 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
                 round_["taken"].setdefault(str(title), {})["verified"] = {"ok": True}
             for title in event.get("bad") or []:
                 round_["taken"].setdefault(str(title), {})["verified"] = {"ok": False}
+        elif kind == "capture_protective":
+            # What was in the signal path while this pass was measured, per channel. The fold was
+            # missing entirely, so a past round came back with no `protective` at all and the
+            # panel could only mark the round being captured right now (tcc#15).
+            round_.setdefault("protective", {})[str(event.get("channel"))] = event.get("legs")
         elif kind == "capture_round_closed":
             round_["closed"] = event.get("at") or True
 

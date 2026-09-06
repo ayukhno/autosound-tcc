@@ -1357,6 +1357,14 @@ class MainWindow(QMainWindow):
             unsure = QLabel(i18n.t("flawHypothesis"))
             unsure.setProperty("class", "stag stag-attempt")
             second.addWidget(unsure)
+        elif flaw.is_unstated:
+            # The row is READ as confirmed — the schema's own default, and TCC does not diverge
+            # from it — but nobody said so. Those were indistinguishable on screen until now, and
+            # a writer that dropped `--status` put sixteen rows from another processor's project
+            # in front of a person as settled fact (tcc#5).
+            unstated = QLabel(i18n.t("flawStatusUnstated"))
+            unstated.setProperty("class", "stag")
+            second.addWidget(unstated)
         detail = ", ".join(flaw.channels) if flaw.channels else i18n.t("flawAllChannels")
         # The owner's sentence when the method wrote one, the method's vocabulary when it did
         # not. Which is the whole trade: on the live map 14 rows of 18 carried a token only the

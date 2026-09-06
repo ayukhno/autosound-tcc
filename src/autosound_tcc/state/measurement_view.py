@@ -78,6 +78,31 @@ def groups_from_titles(titles) -> list[dict]:
     ]
 
 
+def protective_phrase(legs) -> str:
+    """What was in the chain, as a phrase for a row — `"HP 80 LR24 · LP 3500 LR24"`, or `""`.
+
+    Empty for `"OFF"`, for a channel nobody listed, and for a leg with no frequency: all of them
+    are the same instruction to the analysis — read the curve as measured (`core/protective.py`).
+    Two states, not three, since 2026-09-06; the third one is a question standing with the method
+    (hub#71), not something this renderer should invent a look for.
+    """
+    if not isinstance(legs, dict):
+        return ""
+    parts = []
+    for kind, label in (("hp", "HP"), ("lp", "LP")):
+        leg = legs.get(kind)
+        if not isinstance(leg, dict):
+            continue
+        freq = leg.get("f")
+        if freq in (None, "", 0):
+            continue
+        shape = " ".join(str(v) for v in (leg.get("type"), leg.get("slope")) if v)
+        parts.append(f"{label} {freq:g}" if isinstance(freq, (int, float)) else f"{label} {freq}")
+        if shape:
+            parts[-1] = f"{parts[-1]} {shape}"
+    return " · ".join(parts)
+
+
 def build_session(
     phase: str,
     version,
@@ -185,10 +210,26 @@ def build_session(
         issues = (verdicts.get(name) or {}).get("issues") or []
         return "; ".join(str(i) for i in issues) or None
 
+    protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}
+
+    def protective_for(name: str) -> str:
+        """What the round says was in this channel's chain while it was measured.
+
+        By channel, because the record is: one signal path per channel, whatever methods it was
+        captured with. You cannot tell it from the curve — a protective `LR4 @100` and a designed
+        one are the same filter — so the row is the only place it can be seen (tcc#15).
+        """
+        entry = naming.parse_name(name, glossary) or {}
+        for code in (entry.get("code"), entry.get("code_current"), entry.get("channel")):
+            if code and str(code) in protective:
+                return protective_phrase(protective[str(code)])
+        return ""
+
     groups = []
     for spec in groups_spec:
         items = tuple(
-            MeasItem(name=name, status=status_for(name), extra=issues_for(name))
+            MeasItem(name=name, status=status_for(name), extra=issues_for(name),
+                     protective=protective_for(name))
             for name in spec["names"]
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
@@ -279,12 +320,23 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         issues = ((taken.get(name) or {}).get("verified") or {}).get("issues") or []
         return "; ".join(str(i) for i in issues) or None
 
+    protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}
+
+    def protective_for(name: str) -> str:
+        """Same fact for a past round — read from the journal fold (`process_view.capture_rounds`),
+        which did not carry it until 2026-09-06, so history had no marker at all."""
+        from autosound_tcc.core import capture_import
+
+        code = capture_import.channel_from_title(name)
+        return protective_phrase(protective.get(code)) if code else ""
+
     groups = tuple(
         MeasGroup(
             type=spec["label"],
             method=spec.get("method"),
             items=tuple(
-                MeasItem(name=name, status=status_for(name), extra=issues_for(name))
+                MeasItem(name=name, status=status_for(name), extra=issues_for(name),
+                         protective=protective_for(name))
                 for name in spec["names"]
             ),
         )

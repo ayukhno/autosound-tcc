@@ -238,3 +238,19 @@ def test_the_owners_sentence_is_read_when_the_method_wrote_one(tmp_path, monkeyp
 
     assert flaws[0].plain.startswith("На цій частоті")
     assert flaws[1].plain == "", "absent is empty, not a crash and not a placeholder"
+
+
+def test_a_row_that_never_said_its_status_is_not_the_same_as_one_that_said_confirmed(tmp_path):
+    """The default stays `confirmed` — that is the skill's own schema and TCC is a consumer. What
+    changed is that the two are now distinguishable: `project.py flaw --status hypothesis` was
+    parsed and silently dropped, so sixteen rows imported from another processor's project landed
+    with no `status` key at all and rendered as settled fact (tcc#5, SKL-017)."""
+    _write(tmp_path, [
+        {"kind": "peak", "f_hz": 188, "level_db": 5.5, "action": "cut", "status": "confirmed"},
+        {"kind": "peak", "f_hz": 250, "level_db": 4.0, "action": "cut"},
+    ])
+
+    stated, silent = acoustics_view.load_flaws(tmp_path)
+
+    assert (stated.status, stated.status_stated, stated.is_unstated) == ("confirmed", True, False)
+    assert (silent.status, silent.status_stated, silent.is_unstated) == ("confirmed", False, True)

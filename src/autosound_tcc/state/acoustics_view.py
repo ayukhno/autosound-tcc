@@ -78,6 +78,12 @@ class Flaw:
     #: `hypothesis` or `confirmed`. Absent in the file means confirmed: every map written before
     #: the field existed was written as fact, and re-labelling history would be its own lie.
     status: str = "confirmed"
+    #: Whether the file actually SAID that. The default above is schema fidelity and stays; what
+    #: was missing is that a row nobody labelled rendered exactly like one labelled `confirmed`,
+    #: so a writer bug (`project.py flaw --status` silently dropped, `SKL-017`) reached the panel
+    #: as unearned certainty. Sixteen rows from another processor's project read as fact that way.
+    #: This is the difference between "stated as confirmed" and "said nothing at all" (tcc#5).
+    status_stated: bool = True
     #: One short sentence in the owner's language -- what a person HEARS, not what the method
     #: measured. Written by the skill (SKL-016); empty until it is, and the row then reads as it
     #: always did. `why` cannot serve: it carries the audit trail as well as the explanation, and
@@ -87,6 +93,13 @@ class Flaw:
     @property
     def is_hypothesis(self) -> bool:
         return self.status == "hypothesis"
+
+    @property
+    def is_unstated(self) -> bool:
+        """A row that never said what it is. Read as `confirmed` (the schema's own default) and
+        shown as unstated, because those are two different things to a person deciding whether to
+        park a crossover corner inside this pocket."""
+        return not self.status_stated
 
     @property
     def is_owner_fact(self) -> bool:
@@ -175,6 +188,7 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
                     kind=kind,
                     action=str(row.get("action", "")),
                     status=str(row.get("status") or "confirmed"),
+                    status_stated=bool(str(row.get("status") or "").strip()),
                     channels=tuple(str(c) for c in row.get("channels") or ()),
                     q=float(row["q"]) if row.get("q") else None,
                     bw_oct=float(row["bw_oct"]) if row.get("bw_oct") else None,

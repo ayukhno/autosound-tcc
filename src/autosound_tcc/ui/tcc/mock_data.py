@@ -175,6 +175,12 @@ class MeasItem:
     # expected channel); `additional` = True means this whole row is outside the expected list.
     extra: "str | None" = None
     additional: bool = False
+    # What was in the signal path while this capture was measured, as a short phrase ("HP 80
+    # LR24"). Empty means the round's record says there was no protective filter — or says
+    # nothing, which reads the same downstream (`core/protective.py`). It is on the ITEM rather
+    # than looked up by the panel because the row is a renderer: the round and the grammar that
+    # turns a title into a channel both live where the session is built.
+    protective: str = ""
 
 
 @dataclass(frozen=True)

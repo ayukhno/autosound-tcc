@@ -346,6 +346,7 @@ class _MeasRow(QWidget):
         self._count = item.count
         self._extra = item.extra
         self._additional = item.additional
+        self._protective = getattr(item, "protective", "")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -353,6 +354,14 @@ class _MeasRow(QWidget):
         layout.addWidget(self._dot)
         self._name_label = _MeasName()
         layout.addWidget(self._name_label, 1)
+        #: What was in the signal path while this channel was measured. A glyph, not the numbers:
+        #: the column is ~100 px wide and the numbers go on the hover (the same lesson as the
+        #: names themselves). Hidden when the round says there was no protective filter — two
+        #: states, which is what the record has since 2026-09-06.
+        self._prot = QLabel("⌁")
+        self._prot.setProperty("class", "mn-prot")
+        self._prot_tip = attach_tip(self._prot)
+        layout.addWidget(self._prot)
         self._render()
 
     def _render(self) -> None:
@@ -365,6 +374,9 @@ class _MeasRow(QWidget):
         self._name_label.style().unpolish(self._name_label)
         self._name_label.style().polish(self._name_label)
         self._name_label.set_parts(base, self._extra, self._additional)
+        self._prot.setVisible(bool(self._protective))
+        if self._protective:
+            self._prot_tip.set_text(i18n.t("measProtTip").format(legs=self._protective))
 
     @property
     def status(self) -> str:
