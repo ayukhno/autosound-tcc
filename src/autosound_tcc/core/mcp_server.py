@@ -96,47 +96,11 @@ _ACK_REMINDER = (
 )
 
 
-#: How much of a tool's arguments and of its answer goes into the log. Enough to tell one call
-#: from the next — which field was saved, whether the writer refused — and not the whole payload:
-#: `get_pending_signals` can answer with kilobytes, and a log nobody can page through is the same
-#: as no log (report on the run of 2026-09-01: 88 lines, 34 of them Qt warnings, and a completed
-#: interview that left no trace at all).
-_LOG_VALUE_CHARS = 200
-
-
-def _brief(value: Any) -> str:
-    """One line, bounded, and it says when it cut."""
-    text = " ".join(str(value).split())
-    return text if len(text) <= _LOG_VALUE_CHARS else text[:_LOG_VALUE_CHARS] + "… (cut)"
-
-
-def _logged(fn):
-    """A tool that says, at INFO, that it was called and what it answered.
-
-    One wrapper rather than a log line inside each of the twenty-eight tools: a line per tool is
-    twenty-eight chances to forget one, and the one that gets forgotten is the one whose absence
-    is later reported as "the log shows nothing" (`SKL-009`).
-
-    `functools.wraps` is what keeps this invisible to FastMCP: the schema it builds comes from
-    `inspect.signature` and `__doc__`, and both follow `__wrapped__`.
-    """
-
-    @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
-        log = app_log.logger()
-        shown = kwargs if kwargs else args
-        log.info("mcp %s(%s)", fn.__name__, _brief(shown) if shown else "")
-        try:
-            result = await fn(*args, **kwargs)
-        except Exception:
-            # `exception` and re-raise: the model still gets the failure it would have got, and
-            # the file now says which tool produced it.
-            log.exception("mcp %s raised", fn.__name__)
-            raise
-        log.info("mcp %s -> %s", fn.__name__, _brief(result))
-        return result
-
-    return wrapper
+#: The logging wrapper lives in `core/app_log` now, not here: there are two tool servers — this
+#: one for the external CLI, and `core/agent_session.build_tools` for the in-app onboarding window
+#: — and only this one was covered (tcc#9). `mcp_server` cannot be the home of something the
+#: onboarding path has to import: it pulls in FastMCP and uvicorn.
+_logged = app_log.logged_tool
 
 
 def _vendor_of(model: Optional[str]) -> str:

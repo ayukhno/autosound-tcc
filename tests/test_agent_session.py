@@ -180,3 +180,56 @@ def _session(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_session.profile_writer, "start", lambda *a, **kw: None)
     monkeypatch.setattr(agent_session.profile_writer, "draft", lambda *a, **kw: {"draft": {}})
     return agent_session.OnboardingSession(tmp_path, "Musway", "M6V4")
+
+
+def test_two_text_blocks_do_not_glue_into_one_sentence():
+    """`I'll start by checking for an existing profile.Перевірив:` — what the tuner actually read
+    (tcc#8). A turn interrupted by a tool call arrives as two TextBlocks, and the consumer
+    concatenates whatever it is handed."""
+    import asyncio
+
+    from autosound_tcc.core import agent_session
+
+    class _Block:
+        def __init__(self, text):
+            self.text = text
+
+    class _Assistant:
+        def __init__(self, *texts):
+            self.content = [_Block(t) for t in texts]
+
+    class _Result:
+        pass
+
+    class _Client:
+        async def receive_response(self):
+            yield _Assistant("I'll start by checking.")
+            yield _Assistant("Перевірив: профілю нема.")
+            yield _Result()
+
+    session = agent_session.OnboardingSession.__new__(agent_session.OnboardingSession)
+    session._client = _Client()
+    monkey = agent_session.AssistantMessage, agent_session.ResultMessage
+    agent_session.AssistantMessage, agent_session.ResultMessage = _Assistant, _Result
+    agent_session.TextBlock, old_block = _Block, agent_session.TextBlock
+    try:
+        async def _read():
+            return "".join([chunk async for chunk in session._drain()])
+
+        joined = asyncio.run(_read())
+    finally:
+        agent_session.AssistantMessage, agent_session.ResultMessage = monkey
+        agent_session.TextBlock = old_block
+
+    assert "checking.\n\nПеревірив" in joined, joined
+
+
+def test_the_language_rule_is_in_the_system_prompt_not_only_in_the_opening_turn():
+    """One line of pressure in the first user message against a long English system prompt is how
+    an English preamble ends up above a Ukrainian answer."""
+    from autosound_tcc.core import agent_session
+
+    prompt = agent_session._SYSTEM_PROMPT
+
+    assert "## Language" in prompt
+    assert "EVERY word you emit" in prompt

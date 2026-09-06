@@ -56,7 +56,7 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import claude_sdk, config, profile_writer
+from autosound_tcc.core import app_log, claude_sdk, config, profile_writer
 
 #: Built-in Claude Code tools this agent may use: NONE. Named rather than written inline because
 #: the module docstring's "Built-in tools granted" line is compared against it by a test — the
@@ -138,6 +138,10 @@ Steps:
    finalize_profile. Do not just say you're done in text — call the tool. If it comes back
    "not written", the writer's gate refused the draft and told you why — fix that field and call
    it again; your answers are safe on disk either way.
+
+## Language
+
+The opening prompt names the interview's language. EVERY word you emit is in it — including the short narration before a tool call ("I'll start by checking..."), any heading, and any apology. The tuner reads one window, and a sentence in another language in front of the answer reads as a different speaker (tcc#8: an English preamble above a Ukrainian body).
 """
 
 
@@ -157,6 +161,20 @@ LANGUAGE_NAMES = {"en": "English", "uk": "Ukrainian"}
 
 def language_name(code: str) -> str:
     return LANGUAGE_NAMES.get(code, code)
+
+
+def _logged_tool(*args, **kwargs):
+    """The SDK's `@tool`, with `app_log.logged_tool` between the function and the registry.
+
+    Every tool below is spelled `@_logged_tool(...)` for the same reason `mcp_server` has its own
+    shim: adding a tool must not mean remembering to log it. This is the half that had no log at
+    all — the external CLI's server was covered, the window's own tools were not (tcc#9).
+    """
+
+    def register(fn):
+        return tool(*args, **kwargs)(app_log.logged_tool(fn))
+
+    return register
 
 
 def build_tools(project_dir: Path, vendor: str, model: str):
@@ -179,14 +197,14 @@ def build_tools(project_dir: Path, vendor: str, model: str):
         draft["data"] = profile_writer.draft(project_dir).get("draft", {})
         return draft["data"]
 
-    @tool("get_capability_checklist",
+    @_logged_tool("get_capability_checklist",
           "Return the fixed DSP capability-checklist questions (project-intake.md §4) to ask "
           "the user about.", {})
     async def get_capability_checklist(_args: dict) -> dict:
         return {"content": [{"type": "text",
                               "text": json.dumps(profile_writer.capability_checklist())}]}
 
-    @tool("check_existing_profile",
+    @_logged_tool("check_existing_profile",
           "Check the project's own in-progress profile and the bundled reference library for an "
           "EXACT vendor+model match. Never treat a different model's profile as fact.", {})
     async def check_existing_profile(_args: dict) -> dict:
@@ -201,7 +219,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
         }
         return {"content": [{"type": "text", "text": json.dumps(out)}]}
 
-    @tool("save_profile_field",
+    @_logged_tool("save_profile_field",
           "Save one confirmed field into the in-progress profile draft.",
           {"type": "object",
            "properties": {
@@ -220,7 +238,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
         return {"content": [{"type": "text",
                               "text": f"saved {result['set']} = {result['value']!r}"}]}
 
-    @tool("reset_profile_field",
+    @_logged_tool("reset_profile_field",
           "Delete a field from the draft (by dotted path) so it can be re-saved from scratch. "
           "Use this if a previous save_profile_field produced the wrong shape (e.g. a list "
           "written as a string).",
@@ -237,7 +255,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
             return {"content": [{"type": "text", "text": f"{args['path']} not found"}]}
         return {"content": [{"type": "text", "text": f"reset {args['path']}"}]}
 
-    @tool("finalize_profile",
+    @_logged_tool("finalize_profile",
           "Validate and write the profile to disk. Call this when the interview is done.", {})
     async def finalize_profile(_args: dict) -> dict:
         try:
@@ -310,6 +328,8 @@ class OnboardingSession:
 
     async def start(self) -> AsyncIterator[str]:
         """Open the session with an initial prompt naming the DSP; yields text chunks."""
+        app_log.logger().info("onboarding session starting: %s %s in %s",
+                              self.vendor, self.model, self.project_dir)
         await self._client.connect()
         self._started = True
         prompt = (
@@ -330,14 +350,36 @@ class OnboardingSession:
             yield chunk
 
     async def _drain(self) -> AsyncIterator[str]:
+        """The turn's text, block by block, with the boundary between blocks kept.
+
+        A turn interrupted by a tool call arrives as two or more `TextBlock`s, and the consumer
+        concatenates whatever it is handed. Without a separator that reads as one run-on sentence
+        — the tuner saw `I'll start by checking for an existing profile.Перевірив:` (tcc#8). The
+        blank line is inserted HERE rather than in the window, because both consumers (the window
+        and `dsp_profile_interview`'s CLI) had the same seam.
+        """
+        previous = ""
         async for message in self._client.receive_response():
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
+                        if previous and not previous.endswith("\n") \
+                                and not block.text.startswith("\n"):
+                            yield "\n\n"
                         yield block.text
+                        previous = block.text
             elif isinstance(message, ResultMessage):
                 return
 
     async def close(self) -> None:
-        if self._started:
-            await self._client.disconnect()
+        """Shut the session down, and say so — including WHY there is nothing to shut down.
+
+        "onboarding session closing" used to be logged unconditionally by the window's own worker,
+        with no reason, so a normal end, a close by the tuner and a session that never connected
+        all read the same in the file (tcc#9).
+        """
+        if not self._started:
+            app_log.logger().info("onboarding session closed before it started")
+            return
+        app_log.logger().info("onboarding session closing: %s %s", self.vendor, self.model)
+        await self._client.disconnect()

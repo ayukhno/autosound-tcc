@@ -117,15 +117,17 @@ def test_a_tool_call_and_its_answer_land_in_the_log(tmp_path, caplog):
         asyncio.run(mcp.call_tool("get_tcc_state", {}))
 
     lines = [record.getMessage() for record in caplog.records]
-    assert any(line.startswith("mcp get_tcc_state(") for line in lines), lines
-    assert any(line.startswith("mcp get_tcc_state -> ") for line in lines), lines
+    assert any(line.startswith("tool get_tcc_state(") for line in lines), lines
+    assert any(line.startswith("tool get_tcc_state -> ") for line in lines), lines
 
 
 def test_the_log_line_does_not_carry_the_whole_payload(tmp_path):
     """A log nobody can page through is the same as no log."""
+    from autosound_tcc.core import app_log
+
     long_answer = "x" * 5_000
 
-    brief = mcp_server._brief(long_answer)
+    brief = app_log.brief(long_answer)
 
     assert len(brief) < 300 and brief.endswith("… (cut)")
 

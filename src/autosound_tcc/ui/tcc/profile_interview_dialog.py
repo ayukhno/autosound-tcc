@@ -23,7 +23,10 @@ line breaks in HTML; and answers were typed into a `QLineEdit`, which flattens a
 `SKL-008`, from a Windows run on 2026-09-01, with the screenshot.
 
 So the window stays and the duplication goes: rendering and input come from `chat_text`, which the
-main panel uses too, and a fix to either is a fix in both.
+main panel uses too, and a fix to either is a fix in both. Since 2026-09-06 the THREAD comes from
+`ui/tcc/agent_worker.py` as well — that module's docstring had claimed since the day it was written
+that it was generalised from here, while this window still ran its own copy without the parts that
+matter when a session dies (`closed`, `CancelledError`, an escalating `shutdown`).
 
 ## And it showed nothing until a turn was over (SKL-009)
 
@@ -37,12 +40,10 @@ and `finalize_profile` says so in the transcript rather than only in the status 
 
 from __future__ import annotations
 
-import asyncio
-import queue
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSize, QThread, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
@@ -55,80 +56,14 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import app_log
 from autosound_tcc.core.agent_session import OnboardingSession
-from autosound_tcc.ui.tcc import chat_text, i18n
+from autosound_tcc.ui.tcc import chat_text, i18n, sizing
+from autosound_tcc.ui.tcc.agent_worker import AgentWorker
+from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.chat_text import ComposerInput
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 #: The same Lucide set the main panel's composer uses (NOTICE.md).
 _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
-
-
-class _AgentWorker(QThread):
-    """Owns the asyncio event loop + OnboardingSession. `send(text)` is safe to call from the
-    GUI thread; everything else (the SDK client, the queue consumer loop) lives here."""
-
-    chunk = Signal(str)
-    turn_done = Signal()
-    profile_saved = Signal(str)  # emits the on-disk path once finalize_profile actually wrote it
-    failed = Signal(str)
-
-    def __init__(
-        self,
-        project_dir: Path,
-        vendor: str,
-        model: str,
-        ai_model: Optional[str] = None,
-        language: str = "en",
-    ) -> None:
-        super().__init__()
-        self._project_dir = project_dir
-        self._vendor = vendor
-        self._model = model
-        self._ai_model = ai_model
-        self._language = language
-        self._inbox: "queue.Queue[Optional[str]]" = queue.Queue()
-        self._session: Optional[OnboardingSession] = None
-
-    def send(self, text: str) -> None:
-        """Enqueue a user message for the worker loop to consume. Thread-safe."""
-        self._inbox.put(text)
-
-    def stop(self) -> None:
-        self._inbox.put(None)  # sentinel: end the session
-
-    def run(self) -> None:
-        try:
-            asyncio.run(self._main())
-        except Exception as exc:  # surface to the GUI instead of dying silently in the thread
-            app_log.logger().exception("onboarding session died")
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-
-    async def _main(self) -> None:
-        log = app_log.logger()
-        self._session = OnboardingSession(
-            self._project_dir, self._vendor, self._model, self._ai_model, self._language
-        )
-        try:
-            log.info("onboarding session starting: %s %s in %s",
-                     self._vendor, self._model, self._project_dir)
-            async for text in self._session.start():
-                self.chunk.emit(text)
-            self.turn_done.emit()
-            loop = asyncio.get_running_loop()
-            while True:
-                user_text = await loop.run_in_executor(None, self._inbox.get)
-                if user_text is None:
-                    break
-                log.info("onboarding answer sent: %d chars", len(user_text))
-                async for text in self._session.send(user_text):
-                    self.chunk.emit(text)
-                self.turn_done.emit()
-                profile_path = self._session.project_dir / "dsp_profile.json"
-                if profile_path.is_file():
-                    self.profile_saved.emit(str(profile_path))
-        finally:
-            log.info("onboarding session closing")
-            await self._session.close()
 
 
 class ProfileInterviewDialog(QDialog):
@@ -152,10 +87,17 @@ class ProfileInterviewDialog(QDialog):
         super().__init__(parent)
         self._project_dir = Path(project_dir)
         self.setWindowTitle(i18n.t("interviewTitle").format(vendor=vendor, model=model))
-        self.resize(560, 640)
+        # Measured against the window it opened from, like the read table, instead of the 560x640
+        # it used to state in pixels (`ui/tcc/sizing.py` for why none of these ever looked).
+        sizing.fit_to_parent(self, 0.7)
 
         self._transcript = QTextEdit()
         self._transcript.setReadOnly(True)
+        # The same setting the main dialog's bubbles honour (`dialog_panel.apply_font_scale`).
+        # This window read it nowhere at all, so A−/A+ in the app moved every surface except the
+        # one a new owner meets first (tcc#8).
+        scale = float(get_settings().value("ui/dialog_font_scale", 1.0))
+        self._transcript.setStyleSheet(f"QTextEdit {{ font-size: {13.0 * scale:.1f}px; }}")
         self._composer = ComposerInput()
         self._composer.setPlaceholderText(i18n.t("interviewPlaceholder"))
 
@@ -196,11 +138,24 @@ class ProfileInterviewDialog(QDialog):
 
         app_log.logger().info("onboarding window opened: %s %s, project=%s",
                               vendor, model, self._project_dir)
-        self._worker = _AgentWorker(project_dir, vendor, model, ai_model, language)
+        #: The written profile is announced ONCE. The worker used to stat `dsp_profile.json` after
+        #: every turn and re-emit, so any turn after `finalize_profile` appended a second
+        #: "profile written" bubble — masked in the real flow only because the caller closes the
+        #: window on the first one.
+        self._said_saved = False
+        # The shared worker (`ui/tcc/agent_worker.py`), not a private copy. That module's own
+        # docstring says it was generalised from this window, and until now that was not true:
+        # this one had no `closed` signal, no `CancelledError` branch and no `finally`, so a
+        # session that died outside `except Exception` left the window sitting on "thinking"
+        # with the input disabled and nothing in the log (tcc#9).
+        self._worker = AgentWorker(
+            lambda: OnboardingSession(Path(project_dir), vendor, model, ai_model, language),
+            parent=self,
+        )
         self._worker.chunk.connect(self._on_chunk)
         self._worker.turn_done.connect(self._on_turn_done)
-        self._worker.profile_saved.connect(self._on_profile_saved)
         self._worker.failed.connect(self._on_failed)
+        self._worker.closed.connect(self._on_closed)
         self._worker.start()
 
     def _set_input_enabled(self, enabled: bool) -> None:
@@ -216,9 +171,13 @@ class ProfileInterviewDialog(QDialog):
 
     def _append_bubble(self, who: str, text: str) -> None:
         """A finished message. `text` is Markdown from a model or plain text from a person, and
-        `chat_text.markdown` escapes both — nothing reaches the document as markup by accident."""
+        `chat_text.markdown` escapes both — nothing reaches the document as markup by accident.
+
+        Always scrolled to: this is either what the tuner just typed or something said TO them
+        about the run, and neither is "more of the stream they scrolled away from".
+        """
         self._transcript.append(self._bubble(who, chat_text.markdown(text)))
-        self._scroll_to_end()
+        self._scroll_to_end(force=True)
 
     def _on_chunk(self, text: str) -> None:
         """One piece of the turn being spoken, on screen as it arrives.
@@ -254,10 +213,46 @@ class ProfileInterviewDialog(QDialog):
         self._status.setText(i18n.t("interviewYourTurn"))
         self._set_input_enabled(True)
         self._composer.setFocus()
+        self._check_profile_written()
 
-    def _scroll_to_end(self) -> None:
+    def _check_profile_written(self) -> None:
+        """Did this turn end with a profile on disk? Asked here, on the GUI thread, and answered
+        at most once — a stat of one file is cheaper than a signal nobody can de-duplicate."""
+        if self._said_saved:
+            return
+        path = self._project_dir / "dsp_profile.json"
+        if not path.is_file():
+            return
+        self._said_saved = True
+        self._on_profile_saved(str(path))
+
+    def _on_closed(self) -> None:
+        """The worker's thread ended. Whatever the reason, the window stops looking busy.
+
+        This is the signal the private worker never had: a session that died outside
+        `except Exception` left "thinking" on screen forever, which is indistinguishable from a
+        model that is still working (tcc#9).
+        """
+        app_log.logger().info("onboarding worker finished")
+        if self._said_saved:
+            return
+        self._set_input_enabled(False)
+        self._status.setText(i18n.t("interviewEnded"))
+
+    #: How far from the bottom still counts as "at the bottom", in pixels. A couple of lines:
+    #: the bar moves under a stream, and an exact comparison would call every reader a scroller.
+    _AT_BOTTOM_PX = 40
+
+    def _scroll_to_end(self, force: bool = False) -> None:
+        """Follow the stream — unless the reader has scrolled up to look at something.
+
+        It used to slam the bar to `maximum()` on every chunk, so reading an earlier question
+        while the model was still speaking was impossible: the view was yanked back within
+        milliseconds. Same rule as the main panel's `_stick_to_bottom`.
+        """
         bar = self._transcript.verticalScrollBar()
-        bar.setValue(bar.maximum())
+        if force or bar.value() >= bar.maximum() - self._AT_BOTTOM_PX:
+            bar.setValue(bar.maximum())
 
     # ---- what the tuner does -------------------------------------------------------------
 
@@ -310,7 +305,10 @@ class ProfileInterviewDialog(QDialog):
         self._set_input_enabled(False)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """`shutdown()`, not `stop()` + `wait()`: the sentinel is only read BETWEEN turns, so a
+        window closed mid-turn used to expire the wait and let Qt destroy a running QThread. The
+        shared worker escalates — interrupt, sentinel, cancel — and says whether it worked."""
         app_log.logger().info("onboarding window closed")
-        self._worker.stop()
-        self._worker.wait(3000)
+        if not self._worker.shutdown(5000):
+            app_log.logger().warning("onboarding worker did not stop in time")
         super().closeEvent(event)

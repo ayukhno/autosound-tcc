@@ -24,6 +24,7 @@ Nothing here imports Qt at module level: `app.py` sets this up before the QAppli
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import sys
@@ -31,7 +32,7 @@ import threading
 import traceback
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 LOGGER_NAME = "autosound_tcc"
 _MAX_BYTES = 2 * 1024 * 1024
@@ -42,6 +43,55 @@ _BACKUPS = 3
 # in the file.
 _ui_sink: Optional[Callable[[str, Path], None]] = None
 _log_path: Optional[Path] = None
+
+
+#: How much of a tool's arguments and of its answer goes into the log. Enough to tell one call
+#: from the next — which field was saved, whether the writer refused — and not the whole payload:
+#: a tool can answer with kilobytes, and a log nobody can page through is the same as no log
+#: (report on the run of 2026-09-01: 88 lines, 34 of them Qt warnings, and a completed interview
+#: that left no trace at all).
+LOG_VALUE_CHARS = 200
+
+
+def brief(value: Any) -> str:
+    """One line, bounded, and it says when it cut."""
+    text = " ".join(str(value).split())
+    return text if len(text) <= LOG_VALUE_CHARS else text[:LOG_VALUE_CHARS] + "… (cut)"
+
+
+def logged_tool(fn):
+    """Wrap an async agent tool so it says, at INFO, that it was called and what it answered.
+
+    One wrapper rather than a log line inside each tool: a line per tool is one chance per tool to
+    forget, and the one that gets forgotten is the one whose absence is later reported as "the log
+    shows nothing" (`SKL-009`).
+
+    It lives HERE, not in `core/mcp_server.py` where it was written, because there are two tool
+    servers and only one of them was covered: the external CLI talks to `mcp_server`, and the
+    in-app onboarding window drives `agent_session.build_tools` instead. The half a person meets
+    first was the half with no log at all (tcc#9). `core/app_log` is what both may import —
+    `mcp_server` pulls in FastMCP and uvicorn, and the onboarding path must not.
+
+    `functools.wraps` is what keeps this invisible to FastMCP and to the SDK: the schema they
+    build comes from `inspect.signature` and `__doc__`, and both follow `__wrapped__`.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        log = logger()
+        shown = kwargs if kwargs else args
+        log.info("tool %s(%s)", fn.__name__, brief(shown) if shown else "")
+        try:
+            result = await fn(*args, **kwargs)
+        except Exception:
+            # `exception` and re-raise: the caller still gets the failure it would have got, and
+            # the file now says which tool produced it.
+            log.exception("tool %s raised", fn.__name__)
+            raise
+        log.info("tool %s -> %s", fn.__name__, brief(result))
+        return result
+
+    return wrapper
 
 
 def log_dir() -> Path:

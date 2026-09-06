@@ -4,9 +4,9 @@ Both defects it is asserted against were watched happening on Windows on 2026-09
 `SKL-009`): a completed interview that the window never rendered, and a model's Markdown printed
 with its asterisks, its options glued into one paragraph, and answers typed into a one-line field.
 
-The real `_AgentWorker` spins up a Claude Agent SDK session, which has no place in a test — it is
-replaced by a fake carrying the same four signals, so everything below exercises the window's own
-half of the contract.
+The real worker spins up a Claude Agent SDK session, which has no place in a test — `AgentWorker`
+(shared with the tuning dialog since tcc#9) is replaced by a fake carrying the same signals, so
+everything below exercises the window's own half of the contract.
 """
 
 from __future__ import annotations
@@ -30,12 +30,16 @@ _KEEP: list = []
 
 
 class _FakeWorker(QObject):
-    """The four signals the dialog listens to, and nothing behind them."""
+    """`AgentWorker`'s surface, and nothing behind it.
 
-    chunk = Signal(str)
+    `closed` is here because the window now listens to it: the private worker this replaced had no
+    such signal, which is why a session that died left the window on "thinking" forever (tcc#9).
+    """
+
+    chunk = Signal(object)
     turn_done = Signal()
-    profile_saved = Signal(str)
     failed = Signal(str)
+    closed = Signal()
 
     def __init__(self, *_args, **_kwargs) -> None:
         super().__init__()
@@ -52,6 +56,10 @@ class _FakeWorker(QObject):
     def stop(self) -> None:
         self.stopped = True
 
+    def shutdown(self, _ms: int = 0) -> bool:
+        self.stopped = True
+        return True
+
     def wait(self, _ms: int = 0) -> bool:
         return True
 
@@ -59,7 +67,7 @@ class _FakeWorker(QObject):
 @pytest.fixture
 def dialog(tmp_path, monkeypatch):
     QApplication.instance() or QApplication([])
-    monkeypatch.setattr(pid, "_AgentWorker", _FakeWorker)
+    monkeypatch.setattr(pid, "AgentWorker", _FakeWorker)
     window = pid.ProfileInterviewDialog(tmp_path, "Musway", "M6V4")
     _KEEP.append(window)
     return window
@@ -111,13 +119,51 @@ def test_the_written_profile_is_said_in_the_conversation(dialog, tmp_path):
     """It used to be the status label alone — the one part of the window a tuner reading the
     transcript is not looking at. Eighty-nine seconds after the profile was written, the tuner was
     in another window asking whether one existed."""
-    path = str(tmp_path / "dsp_profile.json")
+    path = tmp_path / "dsp_profile.json"
+    path.write_text("{}", encoding="utf-8")
 
-    dialog._worker.profile_saved.emit(path)
+    dialog._worker.turn_done.emit()
 
     shown = _text(dialog)
-    assert path in shown, "where it was written, in the transcript"
+    assert str(path) in shown, "where it was written, in the transcript"
     assert i18n.t("interviewDone") in shown, "and that the interview is over"
+
+
+def test_the_written_profile_is_announced_once(dialog, tmp_path):
+    """The worker used to stat the file after EVERY turn and re-emit, so each turn after
+    `finalize_profile` appended another "profile written" bubble."""
+    (tmp_path / "dsp_profile.json").write_text("{}", encoding="utf-8")
+
+    dialog._worker.turn_done.emit()
+    dialog._worker.turn_done.emit()
+    dialog._worker.turn_done.emit()
+
+    assert _text(dialog).count(i18n.t("interviewDone")) == 1
+
+
+def test_a_worker_that_ends_stops_the_window_looking_busy(dialog):
+    """The signal the private worker never had. A session that died outside `except Exception`
+    left "thinking" on screen, which is exactly what a model still working looks like."""
+    dialog._status.setText(i18n.t("interviewThinking"))
+
+    dialog._worker.closed.emit()
+
+    assert dialog._status.text() == i18n.t("interviewEnded")
+
+
+def test_reading_earlier_turns_is_not_yanked_back_by_the_stream(dialog):
+    """`_scroll_to_end` used to slam the bar to the bottom on every chunk."""
+    for n in range(60):
+        dialog._worker.chunk.emit(f"рядок {n}\n")
+    dialog._worker.turn_done.emit()
+    bar = dialog._transcript.verticalScrollBar()
+    if bar.maximum() == 0:
+        return  # an offscreen viewport that fits everything: nothing to scroll away from
+    bar.setValue(0)
+
+    dialog._worker.chunk.emit("ще один рядок")
+
+    assert bar.value() == 0, "the reader stays where they scrolled"
 
 
 def test_the_answer_box_is_the_same_one_the_main_dialog_uses(dialog):
@@ -145,14 +191,14 @@ def test_the_interview_writes_its_own_trail_at_info(tmp_path, monkeypatch, caplo
     that a half-hour interview had happened: level and rotation were configured, the calls were
     missing."""
     QApplication.instance() or QApplication([])
-    monkeypatch.setattr(pid, "_AgentWorker", _FakeWorker)
+    monkeypatch.setattr(pid, "AgentWorker", _FakeWorker)
 
     with caplog.at_level(logging.INFO, logger=app_log.LOGGER_NAME):
         window = pid.ProfileInterviewDialog(tmp_path, "Musway", "M6V4")
         _KEEP.append(window)
+        (tmp_path / "dsp_profile.json").write_text("{}", encoding="utf-8")
         window._worker.chunk.emit("двадцять символів!!")
         window._worker.turn_done.emit()
-        window._worker.profile_saved.emit(str(tmp_path / "dsp_profile.json"))
 
     lines = [record.getMessage() for record in caplog.records]
     assert any(line.startswith("onboarding window opened") for line in lines), lines
