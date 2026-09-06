@@ -753,7 +753,9 @@ def build_server(
     @tool()
     async def enter_phase(phase: str) -> str:
         """Make a phase current (−1…5) and record it. Phases are the skill's fixed skeleton --
-        entering one instantiates its template steps; you do not invent phases."""
+        you do not invent phases. Steps are added separately with `add_step`: entering a phase
+        instantiates NOTHING, and a session that believed otherwise worked a whole phase with an
+        empty plan (tcc#7)."""
         return await asyncio.to_thread(_record, process_writer.enter_phase, phase)
 
     @tool()

@@ -33,6 +33,13 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from autosound_tcc.core import child
+
+# Every spawn here goes through `child.quiet()`, like the other twelve modules that spawn. It was
+# the one exception (tcc#14) and got away with it only because `app.py` installs a process-wide
+# `Popen` patch before the `--install-desktop` branch runs — a house rule that holds by accident
+# somewhere else is not a rule this module keeps.
+
 #: What the bundle and the shortcuts are called. Not the package name -- `autosound-tcc` is what
 #: you type, "Autosound TCC" is what it is.
 BUNDLE_NAME = "Autosound TCC.app"
@@ -233,6 +240,7 @@ def _install_macos(apps_dir: Path, launcher: Path) -> Result:
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            **child.quiet(),
         )
     link_on_desktop(bundle, result)
 
@@ -405,6 +413,7 @@ def _install_windows(launcher: Path) -> Result:
         check=False,
         capture_output=True,
         text=True,
+        **child.quiet(),
     )
     if proc.returncode != 0:
         # The command still works from a terminal, and saying so is the difference between a
@@ -439,6 +448,7 @@ def _stamp_windows(targets: list[Path], result: Result) -> None:
         check=False,
         capture_output=True,
         text=True,
+        **child.quiet(),
     )
     if proc.returncode == 0:
         result.say(f"They are: {BUNDLE_ID}  (pinned and running are one taskbar button)")
@@ -557,7 +567,7 @@ def _windows_target_of(shortcut: Path) -> str:
     try:
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            check=False, capture_output=True, text=True)
+            check=False, capture_output=True, text=True, **child.quiet())
     except OSError:
         return ""
     return (proc.stdout or "").strip() if proc.returncode == 0 else ""

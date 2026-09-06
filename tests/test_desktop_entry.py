@@ -179,6 +179,29 @@ def test_a_machine_that_cannot_stamp_still_keeps_its_shortcuts(monkeypatch, tmp_
     assert any("second taskbar button" in line for line in result.lines)
 
 
+def test_every_spawn_here_goes_through_child_quiet(monkeypatch, tmp_path):
+    """This module was the one exception to the house rule (tcc#14): twelve spawning modules pass
+    `child.quiet()` and these four did not. They got away with it because `app.py` patches `Popen`
+    process-wide before the install branch runs — a rule that holds somewhere else by accident is
+    not a rule this module keeps."""
+    seen: list = []
+
+    def _run(*args, **kwargs):
+        seen.append(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    result = desktop_entry.Result(True)
+    desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result)
+    desktop_entry._windows_target_of(tmp_path / "Autosound TCC.lnk")
+
+    assert seen, "the spawns were not reached"
+    quiet = desktop_entry.child.quiet()
+    for kwargs in seen:
+        for key, value in quiet.items():
+            assert kwargs.get(key) == value, f"{key} not passed: {kwargs}"
+
+
 def test_nothing_installed_is_a_sentence_not_a_traceback(monkeypatch):
     monkeypatch.setattr(desktop_entry, "resolve_launcher", lambda: None)
     result = desktop_entry.install_desktop()

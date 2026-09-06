@@ -16,9 +16,11 @@ dropped in skill schema v3 because it restated values already stored as fields h
 * **`_open_questions`** as onboarding TODO chips, so unresolved intake facts are visible in the UI,
   not only on disk.
 
-**Car audio analysis stays a placeholder** (SCR-015 point 2) — `project.json` has no schema for
-acoustic-analysis facts (cabin RT60, install-quality notes) yet, and this module does not invent
-one; a loader here is a small addition once the skill defines it.
+**Car audio analysis is no longer a placeholder** (it was, under SCR-015 point 2, while
+`project.json` had no schema for acoustic facts). The schema arrived and so did the loader — it
+lives one module over, in `state/acoustics_view.py::load_flaws`, and `main_window._rebuild_acoustics`
+renders a row per flaw. This note is kept rather than deleted because the sentence it replaces
+outlived the work by weeks and sent a reader looking for something that was already there.
 
 Returns empty tuples when `project.json` doesn't exist yet, same convention as
 `state/dsp_state.py::load_hardware_controls` — a brand-new project reads as "nothing yet", not an

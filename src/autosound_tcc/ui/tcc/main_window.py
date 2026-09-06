@@ -1768,13 +1768,14 @@ class MainWindow(QMainWindow):
         """The left panel is a top-level accordion (user request 2026-07-28): System params /
         Project params / Car audio analysis / DSP, each a collapsible `SidebarSection` styled flat
         like the DSP tree's own `.ghead` group headers (a border-bottom line, no card background --
-        matching backgrounds top-to-bottom was a follow-up correction the same day). Only DSP and
-        System params (partially) have real content today -- Project params comes from
-        `project.json`'s own facts (see `_set_project_params`; D2, SKILL-SYNC-PLAN.md --
-        `project_profile.json` is retired, the skill writes one file), and Car audio analysis
-        stays a placeholder until the car-audio skill defines where that data comes from
-        (SKILL-CHANGE-REQUESTS SCR-015). System params leads (user request 2026-07-28) since it's
-        the one project-setup fact block most relevant before diving into DSP tuning."""
+        matching backgrounds top-to-bottom was a follow-up correction the same day). All four hold
+        real content now: Project params comes from `project.json`'s own facts (see
+        `_set_project_params`; D2, SKILL-SYNC-PLAN.md -- `project_profile.json` is retired, the
+        skill writes one file), and Car audio analysis renders the flaw map through
+        `state/acoustics_view.load_flaws` (`_rebuild_acoustics`) -- it was a placeholder under
+        SCR-015 and stopped being one when the skill defined the schema. System params leads (user
+        request 2026-07-28) since it's the one project-setup fact block most relevant before diving
+        into DSP tuning."""
         panel = _panel()
         outer = QVBoxLayout(panel)
         outer.setContentsMargins(0, 0, 0, 0)
