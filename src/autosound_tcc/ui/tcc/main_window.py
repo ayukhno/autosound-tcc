@@ -20,6 +20,7 @@ import weakref
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QEvent,
     QFileSystemWatcher,
     QPoint,
     QProcess,
@@ -82,7 +83,7 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_view
-from autosound_tcc.ui.tcc import copy_menu, i18n
+from autosound_tcc.ui.tcc import copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
@@ -125,6 +126,12 @@ _LISTENING_PHASE = "4"
 #: read which phase is open and what the current step is, which is the whole reason it is on
 #: screen while a round is being captured.
 _PLAN_MIN_PX = 180
+#: How often the REW-online dot re-asks, while this window has the focus. Thirty seconds because
+#: the probe pulls REW's whole measurement list — cheap for a local HTTP call, not free — and
+#: because what it is watching for (REW being started or closed beside TCC) happens on the scale
+#: of minutes. It replaces "once per launch", which is what made the dot answer for the session
+#: rather than for now.
+_REW_PING_MS = 30_000
 _LANG_KEY = "ui/lang"
 # Which models drive this project lives WITH the project (`.tcc/tcc-project.json`): opening a
 # second folder must not silently re-point the first. Which omp models this machine can reach is
@@ -447,10 +454,14 @@ def _detect_system_mode() -> str:
 
 
 class _RewPingWorker(QThread):
-    """One-shot connectivity probe for the System-params REW-online dot -- mirrors
-    `measurement_panel._RewReadWorker`'s shape (a synchronous HTTP call off the GUI thread), but
-    only ever runs once per launch. Ongoing freshness comes from `MeasurementPanel.rewStatusChanged`
-    instead of a recurring poll here."""
+    """Connectivity probe for the REW-online dot: one synchronous HTTP call, off the GUI thread.
+
+    It used to run exactly once per launch, and that is what made the dot a lie for the rest of
+    the session: REW started after TCC stayed red until the app was restarted, and ↻ re-read the
+    disk while the diagnostics check probed REW and threw the answer away (user, 2026-09-06 —
+    "тільки вихід-вхід"). It is re-run now: on ↻, on every diagnostics result, whenever the
+    measurement panel talks to REW, and on a slow timer while the window has focus.
+    """
 
     result = Signal(bool)
 
@@ -663,7 +674,10 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([260, 900, 300])
+        # The right column starts wider than it used to (300): it holds the capture card, whose
+        # three method columns plus the two header buttons were coming out over its edge on the
+        # user's screen (2026-09-06). The rows elide, so this is head-room rather than a fix.
+        splitter.setSizes([260, 880, 340])
         # A side panel is a fixed column with a handle, not something that resizes itself. Without
         # this a single long row grew the panel, the panel grew the window, and a maximised window
         # grew past the screen edge -- reported exactly that way. The handle still works.
@@ -680,15 +694,20 @@ class MainWindow(QMainWindow):
         self._load_process()
         self._start_mcp_server()
 
-        # One-shot REW-online probe (System-params dot); ongoing freshness comes from a real
-        # Read/Scan on the measurement panel instead of a recurring poll here. Same escape hatch
-        # as the MCP server just above -- this is a real outbound network call, and the test suite
-        # relies on AUTOSOUND_TCC_MCP=0 to stay off the network entirely.
+        # The REW-online dot. Same escape hatch as the MCP server just above -- this is a real
+        # outbound network call, and the test suite relies on AUTOSOUND_TCC_MCP=0 to stay off the
+        # network entirely.
         self._rew_ping: "_RewPingWorker | None" = None
+        self._ping_rew()
+        # And again, unattended: REW is another application, and it is started, closed and
+        # restarted while TCC stays open. Slow on purpose (the probe pulls the measurement list),
+        # and only while this window has the focus — a dot nobody is looking at is not worth a
+        # request every half minute.
+        self._rew_timer = QTimer(self)
+        self._rew_timer.setInterval(_REW_PING_MS)
+        self._rew_timer.timeout.connect(self._ping_rew_if_active)
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
-            self._rew_ping = _RewPingWorker(RewBridge())
-            self._rew_ping.result.connect(self._set_rew_online)
-            self._rew_ping.start()
+            self._rew_timer.start()
         self._meas_panel.rewStatusChanged.connect(self._set_rew_online)
         self._meas_panel.titlesChanged.connect(self._on_rew_titles_changed)
         self._capture_check: "_CaptureCheckWorker | None" = None
@@ -1484,6 +1503,27 @@ class MainWindow(QMainWindow):
             dot.set_status(self._rew_status_class())
         self._retip_rew_dots()
 
+    def _ping_rew(self) -> None:
+        """Ask REW whether it is there, unless a previous ask is still out.
+
+        Every door into this is a moment when the answer could have changed: the window opening,
+        ↻, a diagnostics run, the timer. Never two at once — the probe is an HTTP call with its own
+        timeout, and stacking them up would put a queue of threads behind a REW that is not
+        answering.
+        """
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            return
+        if self._rew_ping is not None and self._rew_ping.isRunning():
+            return
+        self._rew_ping = _RewPingWorker(RewBridge())
+        self._rew_ping.result.connect(self._set_rew_online)
+        self._rew_ping.start()
+
+    def _ping_rew_if_active(self) -> None:
+        """The timer's door. A window in the background is a window nobody is reading a dot on."""
+        if self.isActiveWindow():
+            self._ping_rew()
+
     # ---- diagnostics (TCC-TZ.md §8) -----------------------------------------
 
     def _reload_from_disk(self) -> None:
@@ -1494,6 +1534,9 @@ class MainWindow(QMainWindow):
         """
         self._safe_load_project()
         self._start_contract_check()
+        # And REW, which is the other half of "what changed since I looked": it is a separate
+        # application, and the answer used to survive only a restart of this one.
+        self._ping_rew()
 
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
@@ -1545,6 +1588,13 @@ class MainWindow(QMainWindow):
 
     def _on_contract_result(self, report: ContractReport) -> None:
         self._contract_report = report
+        # The check has just asked REW the same question the dot answers, and the answer used to
+        # be thrown away here: the panel could say "16/16 captured" while the dot beside it stayed
+        # red because the one probe of the session ran before REW was started (user, 2026-09-06).
+        # `skipped` is not an answer — that is `--no-rew`, where nothing was asked.
+        rew = report.rew() if report.available else {}
+        if rew and not str(rew.get("note") or "").startswith("skipped"):
+            self._set_rew_online(bool(rew.get("reachable")))
         if self._diag_dialog is not None:
             self._diag_dialog.set_report(report)
         if not report.available:
@@ -1682,7 +1732,13 @@ class MainWindow(QMainWindow):
             # PlotItem constructs parentless QMenus every time, and enough construct/destroy
             # cycles segfault the process from inside its own `__init__` (2026-08-12).
             dialog.reset(titles, markers=markers or [], kind=kind, available=available)
-        dialog.show()
+        if not dialog.isVisible():
+            # Full screen the first time it is opened (user, 2026-09-06: "вікно з графіками на
+            # макс.розмір"). Only while it is closed: this one window outlives every question it
+            # is re-pointed at, and re-maximising it would undo the size its owner left it at.
+            sizing.open_maximised(dialog)
+        else:
+            dialog.show()
         dialog.raise_()
 
     def _open_diagnostics(self) -> None:
@@ -2941,9 +2997,14 @@ class MainWindow(QMainWindow):
         if not phase:
             return
         titles = getattr(self._meas_panel, "known_titles", lambda: [])()
-        sessions = measurement_view.build_sessions(phase, self._capture_version(state), titles)
+        # Two lists, two questions (2026-09-06): what REW is SHOWING decides what can be offered
+        # and what counts as an extra; what the project TOOK IN decides what is done. Folded
+        # together, opening the read window was enough to turn the whole checklist green.
+        taken = getattr(self._meas_panel, "taken_titles", lambda: titles)()
+        version = self._capture_version(state)
+        sessions = measurement_view.build_sessions(phase, version, titles, taken=taken)
         if sessions:
-            self._meas_panel.set_sessions(sessions)
+            self._meas_panel.set_sessions(sessions, version=version)
             # The plan's per-step measurement icon reads the same list: a step gets one when a
             # round's captures are named in its evidence (SCR-035 makes sure they are).
             self._plan_panel.set_sessions(sessions)
@@ -3982,6 +4043,17 @@ class MainWindow(QMainWindow):
         server = getattr(self, "_mcp_server", None)
         if server is not None:
             server.stop()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Coming back to TCC is a moment to re-ask REW.
+
+        The other application is the one being alt-tabbed to: REW gets started, a file gets
+        opened, REW gets closed. Waiting out the timer after that is half a minute of a dot that
+        is known to be stale — and the timer only runs while this window is the active one.
+        """
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._ping_rew()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # A live session holds things only the model can write down. Quitting used to shut it down

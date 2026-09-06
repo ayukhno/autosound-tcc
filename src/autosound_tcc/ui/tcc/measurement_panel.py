@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 import re
+from html import escape
 from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QSizePolicy,
     QStyle,
     QStyleOptionComboBox,
     QComboBox,
@@ -186,6 +188,76 @@ class _RewRenameWorker(QThread):
         self.done.emit(renamed)
 
 
+class _LedgerWriteWorker(QThread):
+    """Everything the ledger has to be told about a batch that just came in, off the GUI thread.
+
+    **It opens the round when there is none.** A capture round is a PASS (SCR-034), and until now
+    only a session could open one, through MCP `start_capture` — there was no path from the window
+    at all. So a tuner working without a model took measurements the ledger never heard of, and the
+    first thing that writes about the pass refused: "Набір замірів не відкрито, тож писати нема до
+    чого" on the Protection dialog, with seven green rows on screen behind it (user, 2026-09-06).
+    Taking measurements in IS the pass; this is where that is written down.
+
+    Off the thread because each of these is the skill's own CLI in a subprocess (`process_writer`),
+    a few hundred milliseconds apiece. The protective half used to run on the GUI thread; one round
+    of seven channels plus the captures is several seconds of a window that does not repaint.
+
+    Every write is independent and a refusal is named rather than raised: a channel the gate turns
+    down must not silence the six that were fine, and a capture that will not record must not take
+    the protective record with it.
+    """
+
+    done = Signal(dict)
+
+    def __init__(self, *, project_dir: Path, round_id: str, version, expected: list,
+                 titles: list, protective: dict) -> None:
+        super().__init__()
+        self._project_dir = project_dir
+        self._round_id = str(round_id or "")
+        self._version = version
+        self._expected = list(expected or [])
+        self._titles = list(titles or [])
+        self._protective = dict(protective or {})
+
+    @staticmethod
+    def _why(exc: Exception) -> str:
+        """The gate's own last line — its words, not ours (`PROTOCOL` §2.6 in the hub, and the
+        same rule the Protection dialog follows)."""
+        lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+        return lines[-1] if lines else f"{type(exc).__name__}: {exc}"
+
+    def run(self) -> None:
+        result: dict = {"round_id": self._round_id, "opened": "", "recorded": [],
+                        "refused": [], "prot_done": [], "prot_refused": []}
+        if not self._round_id:
+            try:
+                process_writer.start_capture(
+                    self._project_dir, str(self._version), self._expected)
+                round_ = process_view.capture_round(self._project_dir) or {}
+                result["round_id"] = str(round_.get("id") or "")
+                result["opened"] = result["round_id"]
+            except Exception as exc:  # noqa: BLE001 — the gate's words, not ours
+                # Without a round there is nowhere for the rest to go. The measurements are in the
+                # project's own store either way (`capture_import.record_imported` ran first).
+                result["refused"].append(self._why(exc))
+                self.done.emit(result)
+                return
+        for title in self._titles:
+            try:
+                process_writer.record_capture(self._project_dir, title)
+                result["recorded"].append(title)
+            except Exception as exc:  # noqa: BLE001
+                result["refused"].append(self._why(exc))
+        for channel, legs in sorted(self._protective.items()):
+            try:
+                process_writer.set_protective(self._project_dir, channel, legs)
+                result["prot_done"].append(channel)
+            except Exception as exc:  # noqa: BLE001
+                result["prot_refused"].append(
+                    i18n.t("capImportProtRefused").format(channel=channel, why=self._why(exc)))
+        self.done.emit(result)
+
+
 class TrafficLight(QLabel):
     """A small colored dot, `status` one of the `tl-*` QSS classes (theme.py) -- originally this
     panel's own legend dot, public because main_window.py reuses it for the REW-online indicator."""
@@ -199,6 +271,64 @@ class TrafficLight(QLabel):
         self.setProperty("class", f"tl tl-{status}")
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class _MeasName(QLabel):
+    """A capture's name, which gives ground instead of demanding room.
+
+    `labels.ElidedLabel` is the app's own answer to this and it is plain text only; this label has
+    to colour a trailing qualifier and the whole name of an off-checklist graph, so it renders
+    HTML. It therefore elides the composite string itself and re-colours what survived.
+
+    Why it has to: the right column is a fixed ~300 px (`main_window._build_right`) with its
+    horizontal scrollbar deliberately off, so a card that asks for more is simply cut. Three
+    columns of `m-L_01 (sw) · 3` ask for more — and what went over the edge was the right-hand end
+    of the card, including the two icon buttons in its header (user, 2026-09-06, with the picture).
+
+    The full name is on the hover whenever anything was cut, so nothing is lost — only moved.
+    """
+
+    #: Enough for a dot, a channel and the start of the method — below this the row says nothing.
+    _MIN_WIDTH = 46
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setTextFormat(Qt.TextFormat.RichText)
+        # `Ignored`: the row takes the width the column has, and never sets it.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(self._MIN_WIDTH)
+        self._base = ""
+        self._extra = ""
+        self._additional = False
+
+    def set_parts(self, base: str, extra: Optional[str] = None, additional: bool = False) -> None:
+        self._base = str(base or "")
+        self._extra = str(extra or "")
+        self._additional = bool(additional)
+        self._draw()
+
+    def full_text(self) -> str:
+        """The name as it stands, uncut — what the row is actually about."""
+        return f"{self._base} {self._extra}".strip() if self._extra else self._base
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._draw()
+
+    def _draw(self) -> None:
+        theme = current_theme()
+        full = self.full_text()
+        shown = self.fontMetrics().elidedText(
+            full, Qt.TextElideMode.ElideRight, max(self.width(), self._MIN_WIDTH))
+        self.setToolTip(full if shown != full else "")
+        head, tail = shown[:len(self._base)], shown[len(self._base):].strip()
+        if self._additional:
+            html = f'<span style="color:{theme.info}">{escape(shown)}</span>'
+        elif tail:
+            html = f'{escape(head)} <span style="color:{theme.info}">{escape(tail)}</span>'
+        else:
+            html = escape(shown)
+        super().setText(html)
 
 
 class _MeasRow(QWidget):
@@ -221,32 +351,35 @@ class _MeasRow(QWidget):
         layout.setSpacing(6)
         self._dot = TrafficLight(item.status)
         layout.addWidget(self._dot)
-        self._name_label = QLabel()
-        self._name_label.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(self._name_label)
-        layout.addStretch(1)
+        self._name_label = _MeasName()
+        layout.addWidget(self._name_label, 1)
         self._render()
 
     def _render(self) -> None:
-        t = current_theme()
         base = with_method(self.item_name, self.method_suffix)
         if self._count:
             base += f" · {self._count}"
-        if self._additional:
-            html = f'<span style="color:{t.info}">{base}</span>'
-        elif self._extra:
-            html = f'{base} <span style="color:{t.info}">{self._extra}</span>'
-        else:
-            html = base
-        self._name_label.setText(html)
+        # Class first, text second: the class carries the font (`.mn` is the monospace face), and
+        # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")
         self._name_label.style().unpolish(self._name_label)
         self._name_label.style().polish(self._name_label)
+        self._name_label.set_parts(base, self._extra, self._additional)
 
     @property
     def status(self) -> str:
         """What this row currently shows -- one of the `_LEGEND` keys."""
         return self._status
+
+    @property
+    def additional(self) -> bool:
+        """Whether this row is a graph outside the checklist rather than one it asks for.
+
+        Read when the round says what it is waiting for: an extra is something REW happens to hold
+        at this version, and pre-ticking those would take another sitting's curves into the round —
+        the exact noise the import window exists to keep out.
+        """
+        return bool(self._additional)
 
 
 
@@ -311,6 +444,13 @@ class MeasurementPanel(QWidget):
         self._renaming: list = []
         self._protective: dict = {}
         self._round_id = ""
+        #: What the round was waiting for when ⤓ was pressed — the pass's own list, read before
+        #: anything was written and used to open the round if none was open.
+        self._expected: list = []
+        #: The ledger series the checklist was derived at, handed down by the window with the
+        #: sessions. Needed to OPEN a round: a round is a pass AT a version (SCR-034).
+        self._capture_version = None
+        self._ledger_worker: "_LedgerWriteWorker | None" = None
         #: Extra sentences on the status line, kept as keys — see `_add_status`.
         self._status_extra: list = []
         self._rows: list[_MeasRow] = []
@@ -519,13 +659,19 @@ class MeasurementPanel(QWidget):
     def _session(self, session_id: str) -> MeasSession:
         return next(s for s in self._sessions if s.id == session_id)
 
-    def set_sessions(self, sessions) -> None:
+    def set_sessions(self, sessions, version=None) -> None:
         """Replace the mock series with one derived from the glossary + REW (SCR-008).
 
         Passing None or an empty tuple says so in words. An empty grid would read as "everything
         captured" rather than "nothing known", and the mock it used to fall back to read as a
         series someone had already taken.
+
+        `version` is the ledger series the checklist was derived at — the window works it out
+        (`main_window._capture_version`) and the panel needs it to OPEN a capture round when the
+        tuner takes measurements without a session having opened one (2026-09-06).
         """
+        if version is not None:
+            self._capture_version = version
         if not sessions:
             self.set_no_project(i18n.t("measNoTask"))
             return
@@ -622,6 +768,10 @@ class MeasurementPanel(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self._rows = []
+        # A stretch survives the widgets it was set for, so a session with fewer groups than the
+        # last one would keep reserving room for columns that no longer exist.
+        for column in range(len(getattr(self, "_col_methods", ()))):
+            self._cols_layout.setColumnStretch(column, 0)
         self._col_next_row = []
         self._col_methods: list[str] = []
         # A phase that captures nothing (phase 1 analyses the series phase 0 took) is a real
@@ -638,6 +788,10 @@ class MeasurementPanel(QWidget):
             header = QLabel(group.type)
             header.setProperty("class", "mcol-h")
             self._cols_layout.addWidget(header, 0, c)
+            # Every column gets the same share of a column that cannot grow: without this the
+            # first group takes the width its longest name asks for and the last one goes over
+            # the edge of the card (user, 2026-09-06). The rows elide inside their share.
+            self._cols_layout.setColumnStretch(c, 1)
             method_suffix = _method_suffix_for(group, c)
             self._col_methods.append(method_suffix)
             for r, item in enumerate(group.items, start=1):
@@ -742,6 +896,24 @@ class MeasurementPanel(QWidget):
         """
         return sorted(self._known_titles | set(capture_import.imported_titles()))
 
+    def taken_titles(self) -> list[str]:
+        """What this project has TAKEN IN — the half of `known_titles` that colours a row.
+
+        Split out on 2026-09-06: folded together, a title REW happened to be showing turned a slot
+        green before anything was taken, and the tuner then hit "no capture round is open" on the
+        first thing that actually writes (Protection). REW's list is an offer; this is the record.
+        """
+        return sorted(capture_import.imported_titles())
+
+    def outstanding_titles(self) -> list[str]:
+        """The full REW names this round is still waiting for, in the grid's own order.
+
+        What the import window opens ticked on. Extras are left out on purpose: they are graphs
+        REW holds that this checklist never asked for.
+        """
+        return [with_method(row.item_name, row.method_suffix) for row in self._rows
+                if row.status == "wait" and not row.additional]
+
     def _remember_titles(self, titles) -> None:
         before = len(self._known_titles)
         self._known_titles.update(t for t in titles if str(t).strip())
@@ -778,7 +950,7 @@ class MeasurementPanel(QWidget):
         which also puts it in front of the exit path, where it can be declined over rather than
         aborted on.
         """
-        for worker in (self._worker, self._rename_worker):
+        for worker in (self._worker, self._rename_worker, self._ledger_worker):
             qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS)
 
     curvesRequested = Signal(list)  # REW titles to plot — MainWindow opens the window
@@ -832,9 +1004,13 @@ class MeasurementPanel(QWidget):
         )
         round_ = process_view.capture_round() or {}
         self._round_id = str(round_.get("id") or "")
+        # Read once, HERE, and kept: this is what the pass is about. By the time the batch is
+        # written down the grid has already been rebuilt off the store, so asking again would
+        # answer with what is STILL outstanding — and open a round expecting the leftovers.
+        self._expected = self.outstanding_titles()
         dialog = CaptureImportDialog(
             measurements,
-            waiting=sum(1 for row in self._rows if row.status == "wait"),
+            expected=self._expected,
             round_id=self._round_id,
             has_task=bool(self._sessions and self._sessions[0].groups),
             name_sets=self._method_channel_pairs() if self._sessions else {},
@@ -873,35 +1049,76 @@ class MeasurementPanel(QWidget):
             self._set_status("capImportRenamed", n=written, renamed=len(titles))
         else:
             self._set_status("capImportDone", n=written)
-        self._write_protective()
         # The store changed, so what this project holds changed: the window rebuilds the checklist
         # off it (`main_window._on_rew_titles_changed`).
         self.titlesChanged.emit()
+        self._write_ledger(rows, titles)
 
-    def _write_protective(self) -> None:
-        """Record what was in the signal path, one channel at a time.
+    def _write_ledger(self, rows: list, titles: dict) -> None:
+        """Tell the ledger about the pass: open the round if there is none, record each capture
+        under the name REW now has for it, and write the protective record.
 
-        Independent per channel, unlike the Protection dialog's own save: there the refusals are
-        about legs somebody typed into one form, and writing half of them leaves a record that is
-        half this form and half the last. Here each row is its own statement, and a channel the
-        writer refuses must not silence the six that were fine — it is named, with the gate's own
-        words, and the rest are written.
+        Under the names REW NOW has: a measurement recorded under the name it had before the
+        rename is a title nothing in REW answers to — the same rule `_finish_import` already keeps
+        for the project's own store.
         """
-        if not self._protective:
+        taken = [str((titles or {}).get(row.uuid) or row.title)
+                 for row in rows if row.identified]
+        if not taken and not self._protective:
             return
-        done, refused = [], []
-        for channel, legs in sorted(self._protective.items()):
-            try:
-                process_writer.set_protective(config.project_dir(), channel, legs)
-                done.append(channel)
-            except Exception as exc:  # noqa: BLE001 — the gate's words, not ours
-                lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
-                refused.append(i18n.t("capImportProtRefused").format(
-                    channel=channel, why=lines[-1] if lines else str(exc)))
-        if done:
-            self._add_status("capImportProtSaved", channels=", ".join(done))
-        for sentence in refused:
+        protective = self._protective_for(rows, titles)
+        if not process_writer.is_available():
+            return  # no skill installed: the project's own store is all there is to write
+        if not self._round_id and self._capture_version is None:
+            # Nothing to open a round AT. Rather than invent a version, leave the ledger alone and
+            # keep the measurements where they already are.
+            return
+        worker = self._replace_worker("_ledger_worker", _LedgerWriteWorker(
+            project_dir=config.project_dir(),
+            round_id=self._round_id,
+            version=self._capture_version,
+            expected=list(self._expected),
+            titles=taken,
+            protective=protective,
+        ))
+        worker.done.connect(self._on_ledger_written)
+        worker.start()
+
+    def _protective_for(self, rows: list, titles: dict) -> dict:
+        """What was in the chain, for every channel coming in — typed legs, or `"OFF"`.
+
+        `"OFF"` for a row whose two cells were left empty, rather than nothing at all: an empty
+        cell IS the answer "there was no protective filter here, read the curve as measured"
+        (user, 2026-09-06). Written down, it is also what keeps a BASELINE round out of the one
+        state the method still wants a person for — a baseline capture carrying no record, which
+        `core/protective.should_de_embed` answers with `"check"`.
+        """
+        out = dict(self._protective)
+        for row in rows:
+            if not row.identified:
+                continue
+            channel = capture_import.channel_of(
+                row, str((titles or {}).get(row.uuid) or ""), config.project_dir())
+            if channel and channel not in out:
+                out[channel] = "OFF"
+        return out
+
+    def _on_ledger_written(self, result: dict) -> None:
+        """What the ledger accepted, in the status line — refusals named one by one."""
+        self._round_id = str(result.get("round_id") or self._round_id)
+        if result.get("opened"):
+            self._add_status("capRoundOpened", round=result["opened"])
+        if result.get("recorded"):
+            self._add_status("capRoundRecorded", n=len(result["recorded"]))
+        for why in result.get("refused") or []:
+            self._add_status("capRoundRefused", why=why)
+        if result.get("prot_done"):
+            self._add_status("capImportProtSaved", channels=", ".join(result["prot_done"]))
+        for sentence in result.get("prot_refused") or []:
             self._add_status("capImportProtRefusedLine", line=sentence)
+        # The round is a fact about the checklist too: what it recorded as taken is what the grid
+        # colours, and the Protection dialog now has a pass to write into.
+        self.titlesChanged.emit()
 
     def _on_import_renamed(self, renamed: list) -> None:
         self._finish_import(dict(renamed))
@@ -915,7 +1132,14 @@ class MeasurementPanel(QWidget):
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
         self._set_status("capImportRenameFail", n=len(renamed), error=message, taken=written)
         self.titlesChanged.emit()
+        # Half a batch is still a pass: what did come in is recorded, under the names it answers
+        # to now. What did not is untouched and comes back on the next ⤓.
+        self._write_ledger(rows, titles)
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)
         self._set_status("measReadFail", error=message)
+        # The dot goes out with it. This signal only ever carried the good news, so a REW that was
+        # reachable at launch and has since been closed left a green dot over a failed read
+        # (user, 2026-09-06).
+        self.rewStatusChanged.emit(False)

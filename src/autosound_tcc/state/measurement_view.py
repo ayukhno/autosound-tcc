@@ -83,8 +83,16 @@ def build_session(
     version,
     titles: list[str],
     project_dir: Optional[Path] = None,
+    taken: Optional[list[str]] = None,
 ) -> Optional[MeasSession]:
     """One capture task: what `phase` expects at `version`, checked against `titles` from REW.
+
+    `titles` is what REW is SHOWING; `taken` is what this project has actually taken in (the
+    import store). They used to be one list, and that is what made a slot go green the moment REW
+    held a title like it — the tuner opened the read window, took nothing, and the whole checklist
+    was already done (user, 2026-09-06). REW's list decides what can be OFFERED; only a record of
+    taking decides what is done. `taken` left out means "the same list", which is the old
+    behaviour and is what the mock and the tests that predate the split rely on.
 
     `titles` is passed in rather than fetched here so the caller controls when REW is talked to —
     the panel already owns a worker for that, and a view module that blocks on HTTP is a view
@@ -124,6 +132,13 @@ def build_session(
         entry = naming.parse_name(title, glossary)
         if entry:
             parsed[naming.name_key(entry)] = entry
+    # The same reading over what the PROJECT took in, which is a different question from what REW
+    # is showing (see the docstring). This is the one that colours a row.
+    taken_keys = set()
+    for title in (titles if taken is None else taken):
+        entry = naming.parse_name(title, glossary)
+        if entry:
+            taken_keys.add(naming.name_key(entry))
 
     # SCR-014: a capture whose channel was invalidated by a `config_change` is not "done" -- the
     # graph exists and is unusable, which is a different thing from missing, and the panel has a
@@ -154,7 +169,10 @@ def build_session(
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is.
             return STATUS_STALE
-        if naming.name_key(entry) not in parsed and name not in recorded_taken:
+        if naming.name_key(entry) not in taken_keys and name not in recorded_taken:
+            # Waiting, even when REW is showing a curve by that name: a title in another
+            # application's list is not this project taking a measurement in (user, 2026-09-06).
+            # The read window opens on it ticked, and the tick is what makes it done.
             return STATUS_WAIT
         # Both names a renamed channel answers to (SCR-039): a `config_change` names whichever the
         # session was using, and the capture's title carries whichever it was typed under. Either
@@ -175,7 +193,7 @@ def build_session(
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
 
-    extras = _extras(naming, glossary, parsed, groups_spec, version)
+    extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys)
     if extras:
         # Ours, at this version, but not on the checklist -- an experiment tag, a channel the
         # phase doesn't ask for. Shown, flagged blue, never silently dropped.
@@ -203,6 +221,7 @@ def build_sessions(
     version,
     titles: list[str],
     project_dir: Optional[Path] = None,
+    taken: Optional[list[str]] = None,
 ) -> Optional[tuple[MeasSession, ...]]:
     """The live capture task, followed by every past round, newest first.
 
@@ -212,7 +231,7 @@ def build_sessions(
     time, in the journal.
     """
     project = Path(project_dir or config.project_dir())
-    live = build_session(phase, version, titles, project)
+    live = build_session(phase, version, titles, project, taken)
     if live is None:
         return None
     state = process_view.load_state(project)
@@ -285,7 +304,8 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
     )
 
 
-def _extras(naming, glossary, parsed: dict, groups_spec: list, version) -> tuple[MeasItem, ...]:
+def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
+            taken_keys: Optional[set] = None) -> tuple[MeasItem, ...]:
     wanted = {
         naming.name_key(naming.parse_name(name, glossary))
         for spec in groups_spec
@@ -302,7 +322,9 @@ def _extras(naming, glossary, parsed: dict, groups_spec: list, version) -> tuple
         out.append(
             MeasItem(
                 name=entry["title"],
-                status=STATUS_DONE,
+                # Ours, at this version, off the checklist — and green only once it was taken in.
+                # A curve REW is holding is an offer, not a capture (see `build_session`).
+                status=STATUS_DONE if taken_keys is None or key in taken_keys else STATUS_WAIT,
                 extra=entry["modifier"],
                 additional=True,
             )

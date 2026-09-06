@@ -211,14 +211,18 @@ def test_the_view_leads_and_the_project_fills_in_what_it_left_out(tmp_path):
 
 
 def test_the_dialog_opens_on_what_the_round_already_says(tmp_path):
-    """Re-opening it is a review, not a blank form — and the three answers stay three."""
+    """Re-opening it is a review, not a blank form.
+
+    Two answers now, not three (user, 2026-09-06): a row with filters, and an empty row — which
+    says there was no PROTECTIVE filter, i.e. read the curve as measured. `None` (nothing recorded
+    yet) and `"OFF"` (recorded as none) are the same instruction downstream, so they render alike.
+    """
     import os
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.core import process_writer
-    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, STATE_OFF, STATE_UNSET
     from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
 
     project = _round(tmp_path)
@@ -229,13 +233,38 @@ def test_the_dialog_opens_on_what_the_round_already_says(tmp_path):
     dialog = ProtectiveDialog(project, ["m-L", "w-L", "tw-L"])
 
     by_code = {row.code: row for row in dialog._rows}
-    assert by_code["m-L"].state.currentData() == STATE_FILTER
+    assert by_code["m-L"].hp_f.text() == "100"
     assert by_code["m-L"].answer() == {"hp": {"f": 100.0, "type": "LR", "slope": 24}}
-    assert by_code["w-L"].state.currentData() == STATE_OFF
+    assert by_code["w-L"].hp_f.text() == ""
     assert by_code["w-L"].answer() == "OFF"
-    # Nobody said, and closing the dialog must not turn that into OFF.
-    assert by_code["tw-L"].state.currentData() == STATE_UNSET
-    assert by_code["tw-L"].answer() is None
+    # Never asked about, and never asked ABOUT either: an empty row is an answer now.
+    assert by_code["tw-L"].hp_f.text() == ""
+    assert by_code["tw-L"].answer() == "OFF"
+
+
+def test_every_channel_of_the_pass_is_written_including_the_empty_ones(tmp_path):
+    """"Якщо не має захисного фільтру — то це признак БЕЗ ЗАХИСНОГО ФІЛЬТРУ, і це означає, що не
+    треба його знімати математикою при аналізі" (user, 2026-09-06). So Record writes every row."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import protective as core
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
+
+    project = _round(tmp_path)
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L", "w-L"])
+    dialog._rows[0].hp_quick.click()
+    dialog._rows[0].hp_f.setText("100")
+
+    dialog._on_save()
+
+    assert dialog.written == ["m-L", "w-L"]
+    record = core.record_for(project)
+    assert core.legs_of(record, "m-L")["hp"] == {"f": 100.0, "type": "LR", "slope": 24}
+    assert core.legs_of(record, "w-L") == {"hp": "OFF", "lp": "OFF"}
 
 
 def test_the_gate_refuses_a_half_given_leg_and_the_dialog_shows_its_words(tmp_path):
@@ -247,13 +276,12 @@ def test_the_gate_refuses_a_half_given_leg_and_the_dialog_shows_its_words(tmp_pa
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
 
-    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, ProtectiveDialog
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
 
     project = _round(tmp_path)
     QApplication.instance() or QApplication([])
     dialog = ProtectiveDialog(project, ["m-L"])
     row = dialog._rows[0]
-    row.state.setCurrentIndex(row.state.findData(STATE_FILTER))
     row.hp_f.setText("100")  # no type, no slope
 
     dialog._on_save()
@@ -277,25 +305,24 @@ def test_one_press_makes_the_leg_the_filter_it_almost_always_is(tmp_path):
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
 
-    from autosound_tcc.ui.tcc.protective_dialog import STATE_FILTER, STATE_UNSET, ProtectiveDialog
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
 
     project = _round(tmp_path)
     QApplication.instance() or QApplication([])
     dialog = ProtectiveDialog(project, ["m-L"])
     row = dialog._rows[0]
-    assert row.state.currentData() == STATE_UNSET
+    assert row.answer() == "OFF", "an untouched row says there was no protective filter"
 
     row.hp_quick.click()
 
-    assert row.state.currentData() == STATE_FILTER, "a press is the statement that there was one"
     assert (row.hp_type.currentData(), row.hp_slope.currentData()) == ("LR", 24)
     row.hp_f.setText("80")
     assert row.answer() == {"hp": {"f": 80.0, "type": "LR", "slope": 24}}
 
 
-def test_the_quick_button_works_before_the_row_has_been_switched_on(tmp_path):
-    """A button that only works once you have already said "filters" is a button for a thing you
-    no longer need."""
+def test_every_widget_in_a_row_is_live_from_the_start(tmp_path):
+    """There is nothing to switch on any more: the row is the answer, and the fields are how it is
+    given. A field disabled until a dropdown said "filters" was the last trace of the flag."""
     import os
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -309,7 +336,7 @@ def test_the_quick_button_works_before_the_row_has_been_switched_on(tmp_path):
     row = dialog._rows[0]
 
     assert row.hp_quick.isEnabled() and row.lp_quick.isEnabled()
-    assert not row.hp_f.isEnabled(), "the fields themselves are still off until it is pressed"
+    assert row.hp_f.isEnabled() and row.lp_f.isEnabled()
 
 
 def test_the_method_decides_whether_to_de_embed_and_its_default_is_no(tmp_path):

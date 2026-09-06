@@ -12,6 +12,11 @@ without a tick.
 **No HTTP here.** The measurements arrive as an argument. The panel owns the worker that fetched
 them, and a widget that blocks on a network call is a window that stops repainting while somebody
 is in the car.
+
+**What opens ticked is decided by NAME** (`capture_import.preselect`, 2026-09-06): a row whose
+title already answers to one of the names the round is waiting for. It used to be the newest N
+rows, which is a guess about position — and on the user's own list the measurements the round
+wanted were not the newest ones. A name two rows answer to ticks neither of them.
 """
 
 from __future__ import annotations
@@ -33,13 +38,18 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import capture_import
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, sizing
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps
 
 #: Where a row's uuid rides on its checkbox item, so a tick survives a re-render.
 _UUID = Qt.ItemDataRole.UserRole
+
+#: The table's columns, by name rather than by number: the REW number was added between the tick
+#: and the title (user, 2026-09-06), and every `item(row, 3)` in here would otherwise have had to
+#: be re-counted by hand.
+_COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_HP, _COL_LP = range(7)
 
 
 class CaptureImportDialog(QDialog):
@@ -50,6 +60,7 @@ class CaptureImportDialog(QDialog):
         measurements: dict,
         *,
         waiting: int = 0,
+        expected: Optional[list] = None,
         round_id: str = "",
         has_task: bool = True,
         name_sets: Optional[dict] = None,
@@ -60,8 +71,14 @@ class CaptureImportDialog(QDialog):
         self.setModal(True)
         self.setWindowTitle(i18n.t("capImportTitle"))
         self.setMinimumWidth(640)
+        # 80% of the main window (user, 2026-09-06). This is a table of a hundred rows that people
+        # read and tick in; at its old size it opened showing eleven of them.
+        sizing.fit_to_parent(self, 0.8)
         self._measurements = measurements or {}
-        self._waiting = int(waiting or 0)
+        #: The names this round is still waiting for. The count alone used to be enough, because
+        #: the tick was positional; the names are what makes it a match instead of a guess.
+        self._expected = [str(name) for name in (expected or []) if str(name).strip()]
+        self._waiting = int(waiting or 0) or len(self._expected)
         self._round_id = str(round_id or "")
         self._project_dir = project_dir
         self._pages = 0
@@ -85,14 +102,26 @@ class CaptureImportDialog(QDialog):
         #: underneath the tuner, and a tick that survives only until the next redraw is a tick
         #: nobody can trust.
         #:
-        #: Opens on exactly as many as the round is waiting for — NOT on everything the window
-        #: shows. The window is deliberately wider than the round (see `capture_import.MIN_WINDOW`:
-        #: a window of three hides the measurement taken just before the three), and those extra
-        #: rows are context. Ticking them by default would take measurements into the round that
-        #: nobody captured for it, and the tuner would have to notice and untick. With no round to
-        #: be waiting for, nothing is pre-ticked: there is no batch to guess at.
-        newest = capture_import.unprocessed(self._all)[-self._waiting:] if self._waiting else []
-        self._ticked = {row.uuid for row in newest if row.identified}
+        #: Opens on the measurements that already ANSWER TO a name the round is waiting for
+        #: (`capture_import.preselect`, 2026-09-06). It used to open on the last N unprocessed
+        #: rows, which is a positional guess: the ones worth taking are not always the newest, and
+        #: on the user's own list they were not. With no round to be waiting for, nothing is
+        #: pre-ticked: there is no batch to match against.
+        picked = capture_import.preselect(self._all, self._expected, project_dir)
+        self._ticked = set(picked.ticked)
+        #: How many the DIALOG ticked, kept apart from `_ticked`, which the tuner then edits. The
+        #: line under the table is about what was decided for them, not about the running total.
+        self._picked = len(picked.ticked)
+        #: Rows that answer to an expected name TOGETHER with another row. Never pre-ticked, always
+        #: on screen: which of two graphs with one name is the one that came out is the person's
+        #: question, not a rule's.
+        self._ambiguous = set(picked.ambiguous)
+        #: Every uuid whose title is not unique in REW's current answer — marked in the row, so a
+        #: tick on one of a pair is made knowing there is a pair.
+        self._repeated = capture_import.repeated_titles(self._all)
+        #: The table is scrolled to the first pre-ticked row ONCE, when it opens. Re-rendering
+        #: (a filter, +10, a typed name) must not yank the view back while somebody is working.
+        self._scrolled_to_pick = False
         #: Rows whose capture time runs backwards against the row above — a sweep taken again
         #: because the first attempt did not come out. Marked, never refused: the user's own
         #: instruction (2026-09-02). In capture order this set is empty by construction; it fills
@@ -109,11 +138,12 @@ class CaptureImportDialog(QDialog):
         head.setWordWrap(True)
         layout.addWidget(head)
 
-        self._table = QTableWidget(0, 6)
+        self._table = QTableWidget(0, 7)
         self._table.setProperty("class", "ptable")
         self._table.setHorizontalHeaderLabels(
-            [i18n.t("capImportColTake"), i18n.t("capImportColTitle"), i18n.t("capImportColWhen"),
-             i18n.t("capImportColName"), i18n.t("capImportColHp"), i18n.t("capImportColLp")])
+            [i18n.t("capImportColTake"), i18n.t("capImportColNum"), i18n.t("capImportColTitle"),
+             i18n.t("capImportColWhen"), i18n.t("capImportColName"), i18n.t("capImportColHp"),
+             i18n.t("capImportColLp")])
         # Only the name column is typed into; `_render` gives exactly that column the flag.
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
@@ -122,15 +152,18 @@ class CaptureImportDialog(QDialog):
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_COL_TAKE, QHeaderView.ResizeMode.ResizeToContents)
+        # REW's own number, for finding the row in REW's window and nothing else — see
+        # `_render_note` for why it is never written down.
+        header.setSectionResizeMode(_COL_NUM, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
         # The date sits BESIDE the proposed name on purpose: they are read together. A re-take
         # lands out of time order, and the name about to be written on it is the thing that goes
         # wrong when it does.
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_WHEN, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_COL_HP, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_LP, QHeaderView.ResizeMode.ResizeToContents)
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._table, stretch=1)
@@ -185,9 +218,13 @@ class CaptureImportDialog(QDialog):
         Windowing first and filtering after gives a window of ten that shows three: the tuner asked
         for as many as the round is waiting for, and they mean ten they can act on, not ten of
         which seven are already in.
+
+        Whatever was ticked by name comes along wherever it sits (`keep`): a row this dialog has
+        decided for the person has to be a row the person can see.
         """
         rows = self._all if not self._only_new.isChecked() else capture_import.unprocessed(self._all)
-        return capture_import.window(rows, self._waiting, self._pages)
+        keep = (self._ticked | self._ambiguous) & {row.uuid for row in rows}
+        return capture_import.window(rows, self._waiting, self._pages, keep=keep)
 
     def ticked_rows(self) -> list[capture_import.Candidate]:
         return [row for row in self._all if row.uuid in self._ticked and row.identified]
@@ -203,14 +240,26 @@ class CaptureImportDialog(QDialog):
             take.setCheckState(Qt.CheckState.Checked if row.uuid in self._ticked
                                else Qt.CheckState.Unchecked)
             take.setData(_UUID, row.uuid)
-            self._table.setItem(index, 0, take)
+            self._table.setItem(index, _COL_TAKE, take)
+
+            # REW's number as REW is showing it NOW. Navigation only: it is the index of a view
+            # (a filter renumbers it, a drag moves it), so nothing here stores or resolves by it.
+            number = QTableWidgetItem(row.ordinal)
+            number.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            number.setToolTip(i18n.t("capImportNumTip"))
+            self._table.setItem(index, _COL_NUM, number)
 
             title = QTableWidgetItem(row.title)
             if row.imported:
                 # Shown only because the tuner asked to see them; saying WHY beats a row that
                 # looks the same as the ones being offered.
                 title.setToolTip(i18n.t("capImportAlready"))
-            self._table.setItem(index, 1, title)
+            if row.uuid in self._repeated:
+                # Two graphs, one name. Marked rather than resolved: REW holds both, and which one
+                # came out is the person's call (user, 2026-09-06).
+                title.setText(f"{row.title} ⧉")
+                title.setToolTip(i18n.t("capImportDupTip"))
+            self._table.setItem(index, _COL_TITLE, title)
 
             # REW's own string, verbatim. It is a display date formatted by REW's locale, and
             # printing our own reformatting of something we could not fully parse would be
@@ -219,7 +268,7 @@ class CaptureImportDialog(QDialog):
             if row.uuid in self._retakes:
                 when.setText(f"↻ {row.date}")
                 when.setToolTip(i18n.t("capImportRetake"))
-            self._table.setItem(index, 2, when)
+            self._table.setItem(index, _COL_WHEN, when)
 
             name = QTableWidgetItem(self._names.get(row.uuid, ""))
             if row.identified:
@@ -228,12 +277,12 @@ class CaptureImportDialog(QDialog):
             else:
                 name.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 name.setToolTip(i18n.t("capImportNoUuid"))
-            self._table.setItem(index, 3, name)
+            self._table.setItem(index, _COL_NAME, name)
 
             # The protective chain, in the row and nothing but the row (user, 2026-09-02: "все в
             # строчці без форм"). A frequency here IS the statement, and the statement is an LR24
             # — whoever ran something else opens `Protection`, where both dropdowns live.
-            for column, key in ((4, "hp"), (5, "lp")):
+            for column, key in ((_COL_HP, "hp"), (_COL_LP, "lp")):
                 cell = QTableWidgetItem(self._legs.get(row.uuid, {}).get(key, ""))
                 if row.identified:
                     cell.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
@@ -244,10 +293,35 @@ class CaptureImportDialog(QDialog):
                 self._table.setItem(index, column, cell)
         self._table.blockSignals(False)
         self._render_note(len(rows))
+        self._scroll_to_pick(rows)
+
+    def _scroll_to_pick(self, rows: list) -> None:
+        """Put the first pre-ticked row in view, once, when the dialog opens.
+
+        A tick nobody scrolled to is a decision made off screen — and the whole reason the tick is
+        by name rather than by position is that the right rows can be anywhere in the list.
+        """
+        if self._scrolled_to_pick:
+            return
+        picked = self._ticked | self._ambiguous
+        index = next((i for i, row in enumerate(rows) if row.uuid in picked), None)
+        if index is None:
+            return
+        item = self._table.item(index, _COL_TITLE)
+        if item is not None:
+            self._table.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+        self._scrolled_to_pick = True
 
     def _render_note(self, shown: int) -> None:
         lines = [self._plan_note] if self._plan_note else []
         lines.append(i18n.t("capImportShowing"))
+        if self._picked:
+            lines.append(i18n.t("capImportPicked").format(n=self._picked))
+        if self._ambiguous:
+            # Named, not counted: the person is about to choose between rows that read alike, and
+            # the name is what tells them which pair they are looking at.
+            names = sorted({row.title for row in self._all if row.uuid in self._ambiguous})
+            lines.append(i18n.t("capImportDupNote").format(names=", ".join(names)))
         if not capture_import.ordered_by_date(self._all) and self._all:
             lines.append(i18n.t("capImportRewOrder"))
         missing = capture_import.missing_imported(self._measurements, self._project_dir)
@@ -262,16 +336,16 @@ class CaptureImportDialog(QDialog):
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         row = item.row()
-        take = self._table.item(row, 0)
+        take = self._table.item(row, _COL_TAKE)
         uuid = str(take.data(_UUID) or "") if take is not None else ""
         if not uuid:
             return
-        if item.column() == 0:
+        if item.column() == _COL_TAKE:
             if item.checkState() == Qt.CheckState.Checked:
                 self._ticked.add(uuid)
             else:
                 self._ticked.discard(uuid)
-        elif item.column() == 3:
+        elif item.column() == _COL_NAME:
             typed = item.text().strip()
             if typed:
                 self._names[uuid] = typed
@@ -280,8 +354,8 @@ class CaptureImportDialog(QDialog):
                 self._ticked.add(uuid)
             else:
                 self._names.pop(uuid, None)
-        elif item.column() in (4, 5):
-            key = "hp" if item.column() == 4 else "lp"
+        elif item.column() in (_COL_HP, _COL_LP):
+            key = "hp" if item.column() == _COL_HP else "lp"
             typed = item.text().strip()
             legs = self._legs.setdefault(uuid, {})
             if typed:

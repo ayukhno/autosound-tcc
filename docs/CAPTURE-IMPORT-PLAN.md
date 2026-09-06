@@ -114,7 +114,8 @@ Opened by ⤓ (which stops folding anything in by itself).
 
 | column | what it is |
 |---|---|
-| ☑ | take this one. Pre-ticked for every row the default window shows |
+| ☑ | take this one. Pre-ticked for every row whose title already ANSWERS TO a name the round is waiting for (see «What the first live run changed») |
+| № in REW | REW's own number for the row RIGHT NOW — for finding it in REW's window. Never stored, never resolved by: it is the index of a view |
 | REW title | what REW calls it now |
 | when | `date`, so the sequence is visible and arguable |
 | new name | empty = leave the title alone. Filled by hand or by **"Give names"** |
@@ -403,3 +404,34 @@ Each step: its own commits, full suite green, TODO/plan updated in the same comm
   says so in the mark's text.
 - **The REW filter.** Known and unfixable from here; the dialog says what it shows and counts what
   it cannot see.
+
+## What the first live run changed (2026-09-06)
+
+The dialog met a real project and three of its rules turned out to be the wrong ones. All three are
+in the code and its tests; this is the record of why.
+
+**The tick follows the NAME, not the position.** It was "the last N unprocessed rows", N being what
+the round is waiting for. On the user's own list the measurements the round wanted were not the
+newest — a re-take, an earlier sitting, a filter in REW — so the tail held somebody else's curves
+while the right ones sat further up, outside the window. `capture_import.preselect` matches the
+title against the round's outstanding names through the grammar (`key_reader`, so `c_01 (rta)` and
+`c_1 (rta)` are one name), and `window(..., keep=…)` brings a matched row onto the screen wherever
+it sits. **Two rows answering to one name tick neither**: which of two graphs with one name came out
+is the person's question, and the pair is marked (`⧉`) and named under the table.
+
+**Green means TAKEN, not "REW is showing a title like that".** `measurement_view.build_session` now
+takes what REW holds and what the project took in as two arguments. Folded together, opening ⤓ was
+enough to turn a whole checklist green off another build's REW session — and then Protection, which
+writes to the round, refused over seven green rows (autosound-tcc#12).
+
+**Taking measurements in IS the pass.** Nothing in the window could open a capture round; only a
+session could, through MCP `start_capture`. So a tuner working alone captured measurements the
+ledger never heard of. `measurement_panel._LedgerWriteWorker` opens the round when there is none,
+records each capture under the name REW has for it after any rename, and writes the protective
+record — all off the GUI thread, because each of those is a subprocess.
+
+**The protective record has two states, not three.** "Not recorded" is gone: an empty row says
+there was no protective filter, which is the same instruction to the analysis that `"OFF"` is —
+process the curve as measured (`core/protective.py` said so already; the dialog had not caught up).
+Every channel of the pass is written, including the empty ones, which is also what keeps a baseline
+round out of `should_de_embed`'s `"check"`.

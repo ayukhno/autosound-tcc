@@ -41,7 +41,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from autosound_tcc.core import app_log, config
 
@@ -233,15 +233,27 @@ def unprocessed(rows: Iterable[Candidate]) -> list[Candidate]:
     return [row for row in rows if not row.imported]
 
 
-def window(rows: list[Candidate], waiting: int = 0, pages: int = 0) -> list[Candidate]:
+def window(rows: list[Candidate], waiting: int = 0, pages: int = 0,
+           keep: Iterable[str] = ()) -> list[Candidate]:
     """The tail of the list: as many as the round is waiting for, plus `pages` portions of ten.
 
     The tail rather than the head because a capture round ends at the newest measurement, and the
     tuner opens this having just taken some. `waiting` is the round's own count, so the default
     window is "what I am here for" rather than a number somebody guessed.
+
+    `keep` is added to the tail wherever those rows actually sit: a measurement the dialog has
+    ticked by name must be visible, and the ones worth ticking are not always the newest ("не
+    завжди вони останні, як у мене" — user, 2026-09-06). Order is the list's own either way.
     """
     size = max(int(waiting or 0), MIN_WINDOW) + max(int(pages or 0), 0) * PAGE
-    return rows[-size:] if size < len(rows) else list(rows)
+    tail = rows[-size:] if size < len(rows) else list(rows)
+    wanted = {str(uuid) for uuid in keep if uuid}
+    if not wanted:
+        return tail
+    shown = {row.uuid for row in tail}
+    if wanted <= shown:
+        return tail
+    return [row for row in rows if row.uuid in shown or row.uuid in wanted]
 
 
 # ---- the two things worth saying out loud -------------------------------------------------
@@ -279,6 +291,92 @@ def out_of_sequence(rows: list[Candidate]) -> set[str]:
             marked.add(row.uuid)
         previous = max(previous, row.when) if previous else row.when
     return marked
+
+
+def key_reader(project_dir: Optional[Path] = None) -> Callable[[str], str]:
+    """`title -> the identity the grammar gives it`, built once for a whole list.
+
+    The glossary is read once here rather than per title: matching a hundred REW titles against a
+    round's expected names is the one place in this module that asks the question in bulk. Without
+    the skill it falls back to the plain casefolded title, which is right for every name the
+    grammar itself would have built and merely strict about zero-padding.
+    """
+    try:
+        from autosound_tcc.core import config as _config, vendor_loader
+
+        naming = vendor_loader.load_naming()
+        glossary = naming.Glossary.for_project(str(project_dir or _config.project_dir()))
+    except Exception:  # noqa: BLE001 — no skill, no glossary: read names as written
+        return lambda title: str(title or "").strip().casefold()
+
+    def read(title: str) -> str:
+        text = str(title or "").strip()
+        try:
+            parsed = naming.parse_name(text, glossary)
+        except Exception:  # noqa: BLE001 — one unreadable title is not a broken list
+            parsed = None
+        return str(naming.name_key(parsed)) if parsed else text.casefold()
+
+    return read
+
+
+def repeated_titles(rows: Iterable[Candidate]) -> set[str]:
+    """Uuids whose title is not unique in what REW is showing right now.
+
+    Two graphs with one name is a normal state of REW and a question only the person can settle
+    (user, 2026-09-06). Nothing here refuses or picks: it marks, so the row can say so and the
+    tick can be made deliberately.
+    """
+    counts: dict[str, int] = {}
+    rows = list(rows)
+    for row in rows:
+        counts[row.title] = counts.get(row.title, 0) + 1
+    return {row.uuid for row in rows if row.uuid and counts.get(row.title, 0) > 1}
+
+
+@dataclass(frozen=True)
+class Preselect:
+    """Which rows the dialog opens ticked, and which ones it refuses to guess between."""
+
+    ticked: frozenset
+    ambiguous: frozenset
+
+    @property
+    def shown(self) -> frozenset:
+        """Everything the window must put on screen even if it falls outside the tail."""
+        return self.ticked | self.ambiguous
+
+
+def preselect(rows: Iterable[Candidate], expected: Iterable[str],
+              project_dir: Optional[Path] = None) -> Preselect:
+    """Tick the measurements that already answer to a name the round is waiting for.
+
+    This replaces "the last N unprocessed rows" (2026-09-06). That guess was positional, and the
+    user's own list is the counter-example: the measurements a round is waiting for are not always
+    the newest ones — a re-take, an import from another sitting, a filter in REW, and the tail
+    holds somebody else's curves while the right ones sit further up.
+
+    Names are compared through the grammar (`key_reader`), so `c_01 (rta)` and `c_1 (rta)` are one
+    name. **Two rows answering to the same expected name tick NEITHER**: which of the two is the
+    one that came out is exactly what the person is looking at the list to decide.
+    """
+    read = key_reader(project_dir)
+    wanted = {read(name) for name in expected if str(name).strip()}
+    wanted.discard("")
+    by_key: dict[str, list[Candidate]] = {}
+    for row in rows:
+        if not row.identified or row.imported:
+            continue
+        key = read(row.title)
+        if key in wanted:
+            by_key.setdefault(key, []).append(row)
+    ticked, ambiguous = set(), set()
+    for group in by_key.values():
+        if len(group) == 1:
+            ticked.add(group[0].uuid)
+        else:
+            ambiguous.update(row.uuid for row in group)
+    return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous))
 
 
 @dataclass(frozen=True)

@@ -142,6 +142,60 @@ def test_plus_ten_reaches_further_back_a_portion_at_a_time(tmp_path):
     assert len(ci.window(rows, waiting=14, pages=99)) == 40, "and never past what REW gave"
 
 
+def test_a_row_that_was_ticked_by_name_is_kept_in_the_window(tmp_path):
+    """The tail is where a round usually ends — but a measurement matched by name can be anywhere,
+    and one the dialog decided for the person has to be one the person can see."""
+    rows = ci.candidates(_rew(*[(f"m_{n}", f"u{n}", f"2026-Aug-25 20:{n:02d}:00")
+                                for n in range(1, 41)]), tmp_path)
+
+    shown = ci.window(rows, waiting=3, keep={"u2"})
+
+    assert [row.uuid for row in shown][0] == "u2", "in its own place in the list, not appended"
+    assert len(shown) == ci.MIN_WINDOW + 1
+
+
+# ---- which rows open ticked --------------------------------------------------------------
+
+
+def test_the_tick_follows_the_name_the_round_is_waiting_for(tmp_path):
+    rows = ci.candidates(_rew(*[("w-L_1 (sw)", "u1", "2026-Aug-25 20:01:00"),
+                                ("stray", "u2", "2026-Aug-25 20:02:00"),
+                                ("w-R_1 (sw)", "u3", "2026-Aug-25 20:03:00")]), tmp_path)
+
+    picked = ci.preselect(rows, ["w-L_1 (sw)", "w-R_1 (sw)"], tmp_path)
+
+    assert picked.ticked == {"u1", "u3"}
+    assert picked.ambiguous == frozenset()
+
+
+def test_one_name_on_two_measurements_ticks_neither(tmp_path):
+    """Which of the two came out is the person's question — and a rule that picks one of them
+    silently takes the wrong graph into the round half the time."""
+    rows = ci.candidates(_rew(*[("w-L_1 (sw)", "u1", "2026-Aug-25 20:01:00"),
+                                ("w-L_1 (sw)", "u2", "2026-Aug-25 20:02:00")]), tmp_path)
+
+    picked = ci.preselect(rows, ["w-L_1 (sw)"], tmp_path)
+
+    assert picked.ticked == frozenset()
+    assert picked.ambiguous == {"u1", "u2"}
+    assert ci.repeated_titles(rows) == {"u1", "u2"}
+
+
+def test_what_this_project_already_took_is_not_offered_again(tmp_path):
+    rows = ci.candidates(_rew(*[("w-L_1 (sw)", "u1", "2026-Aug-25 20:01:00")]), tmp_path)
+    ci.record_imported(rows, round_id="cap_001", project_dir=tmp_path)
+
+    again = ci.candidates(_rew(*[("w-L_1 (sw)", "u1", "2026-Aug-25 20:01:00")]), tmp_path)
+
+    assert ci.preselect(again, ["w-L_1 (sw)"], tmp_path).ticked == frozenset()
+
+
+def test_nothing_is_ticked_when_the_round_waits_for_nothing(tmp_path):
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+
+    assert ci.preselect(rows, [], tmp_path).ticked == frozenset()
+
+
 def test_what_this_project_already_imported_is_marked_and_can_be_filtered(tmp_path):
     rows = ci.candidates(_rew(*_LIVE), tmp_path)
     ci.record_imported(rows[:2], round_id="cap_001", project_dir=tmp_path)

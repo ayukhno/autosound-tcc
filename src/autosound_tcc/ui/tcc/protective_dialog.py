@@ -11,10 +11,16 @@ the chain, and the fact that this round was captured with protection is then der
 record. A tick that could be set without the filters behind it would be an assertion that drifts
 from the data it claims to describe.
 
-**Three answers, and the middle one is the point.** A channel can be recorded with filters, or
-recorded as `OFF` — swept with nothing in the chain, which is an ANSWER — or left alone, which
-means nobody said. The de-embed refuses that third state rather than treating it as clean, so this
-dialog offers it as a first-class choice ("not recorded") and never fills it in for you.
+**Two answers, and empty is one of them** (user, 2026-09-06). A row with no filter in it says
+there was no PROTECTIVE filter, and that is an instruction to the analysis: process this curve as
+measured, take nothing out. Whether a working crossover was in the chain is a different question
+and not this record's — it belongs there and must not be removed either way. A row with a filter
+says: take this one out before reading the curve.
+
+There used to be a third state here, a per-row "not recorded", and it was the leftover of a reading
+`core/protective.py` had already corrected: the record is an INSTRUCTION, not a description of the
+chain. A flag whose absence and whose "off" mean the same thing to every reader downstream is a
+question that costs the person a click per channel and buys nothing.
 
 **This dialog collects; it does not validate.** The skill refuses a leg missing its frequency,
 type or slope at write time, and that refusal is shown here verbatim. A UI that quietly fixes what
@@ -58,11 +64,6 @@ SLOPES = (6, 12, 18, 24, 30, 36, 42, 48)
 QUICK_TYPE, QUICK_SLOPE = "LR", 24
 QUICK_LABEL = f"{QUICK_TYPE}{QUICK_SLOPE}"
 
-#: What a channel row says about itself. Three states, because there are three answers.
-STATE_UNSET = "unset"
-STATE_OFF = "off"
-STATE_FILTER = "filter"
-
 
 class _ChannelRow:
     """One channel's answer, and the widgets that collect it."""
@@ -75,25 +76,20 @@ class _ChannelRow:
         name.setProperty("class", "kv-val")
         grid.addWidget(name, row, 0)
 
-        self.state = mini_combo()
-        self.state.addItem(i18n.t("protUnset"), STATE_UNSET)
-        self.state.addItem(i18n.t("protOff"), STATE_OFF)
-        self.state.addItem(i18n.t("protFilter"), STATE_FILTER)
-        self.state.currentIndexChanged.connect(self._sync)
-        grid.addWidget(self.state, row, 1)
-
         self.hp_f, self.hp_type, self.hp_slope, self.hp_quick = self._leg_widgets(
-            grid, row, 2, "protHp")
+            grid, row, 1, "protHp")
         self.lp_f, self.lp_type, self.lp_slope, self.lp_quick = self._leg_widgets(
-            grid, row, 6, "protLp")
+            grid, row, 5, "protLp")
 
         self._fill_from(legs)
-        self._sync()
 
     def _leg_widgets(self, grid: QGridLayout, row: int, col: int, label_key: str):
         freq = QLineEdit()
         freq.setPlaceholderText(i18n.t(label_key))
-        freq.setMaximumWidth(90)
+        # Wide enough for the placeholder that names it ("ФВЧ Гц" was reaching the user as
+        # "ФВЧ …"), and no wider: eight rows of these share the dialog with two combos each.
+        freq.setMinimumWidth(freq.fontMetrics().horizontalAdvance(i18n.t(label_key)) + 20)
+        freq.setMaximumWidth(120)
         grid.addWidget(freq, row, col)
         kind = mini_combo()
         kind.addItem("—", "")
@@ -115,30 +111,33 @@ class _ChannelRow:
         quick = QPushButton(QUICK_LABEL)
         quick.setProperty("class", "reason-btn")
         quick.setCursor(Qt.CursorShape.PointingHandCursor)
-        quick.setFixedWidth(46)
+        # Measured off the text, not a fixed 46 px: Qt's `sizeHint` for a QPushButton leaves out
+        # the horizontal padding the stylesheet adds (`.reason-btn` is `padding: 4px 12px`), so a
+        # hard width cuts the label — "LR24" reached the user as ".R24" (2026-09-06), the same way
+        # "Protection" once reached them as "Protectior" (`measurement_panel._fit_fact_buttons`).
+        # A minimum rather than a fixed size, so a zoomed-in font still fits.
+        quick.setMinimumWidth(quick.fontMetrics().horizontalAdvance(QUICK_LABEL) + 34)
         attach_tip(quick, i18n.t("protQuickTip"))
         quick.clicked.connect(lambda: self._quick_fill(kind, slope))
         grid.addWidget(quick, row, col + 3)
         return freq, kind, slope, quick
 
     def _quick_fill(self, kind: QComboBox, slope: QComboBox) -> None:
-        """LR24 into this leg, and the row into "filters" — a press on a disabled row otherwise
-        fills boxes nobody can see and answers `None`."""
-        if self.state.currentData() != STATE_FILTER:
-            self.state.setCurrentIndex(self.state.findData(STATE_FILTER))
+        """LR24 into this leg — the type and slope nearly every protective filter actually is."""
         kind.setCurrentIndex(max(0, kind.findData(QUICK_TYPE)))
         slope.setCurrentIndex(max(0, slope.findData(QUICK_SLOPE)))
 
     def _fill_from(self, legs) -> None:
-        """Show what the round already says about this channel, unchanged."""
-        if legs is None:
-            self.state.setCurrentIndex(self.state.findData(STATE_UNSET))
-            return
-        live = {kind: leg for kind, leg in legs.items() if isinstance(leg, dict)}
+        """Show what the round already says about this channel, unchanged.
+
+        `None` (nothing recorded) and `"OFF"` (recorded as no protective filter) both come up as an
+        empty row, because they are the same instruction to the analysis — see the module
+        docstring and `core/protective.py`.
+        """
+        live = {kind: leg for kind, leg in (legs or {}).items() if isinstance(leg, dict)} \
+            if isinstance(legs, dict) else {}
         if not live:
-            self.state.setCurrentIndex(self.state.findData(STATE_OFF))
             return
-        self.state.setCurrentIndex(self.state.findData(STATE_FILTER))
         for kind, (freq, typ, slope) in (
             ("hp", (self.hp_f, self.hp_type, self.hp_slope)),
             ("lp", (self.lp_f, self.lp_type, self.lp_slope)),
@@ -150,15 +149,6 @@ class _ChannelRow:
             freq.setText(f"{value:g}" if isinstance(value, (int, float)) else str(value or ""))
             typ.setCurrentIndex(max(0, typ.findData(leg.get("type"))))
             slope.setCurrentIndex(max(0, slope.findData(leg.get("slope"))))
-
-    def _sync(self) -> None:
-        editing = self.state.currentData() == STATE_FILTER
-        for widget in (self.hp_f, self.hp_type, self.hp_slope,
-                       self.lp_f, self.lp_type, self.lp_slope):
-            widget.setEnabled(editing)
-        # The LR24 buttons stay live in every state: pressing one IS the statement that this
-        # channel had a filter, and a button that only works once you have already said so is a
-        # button for a thing you no longer need.
 
     def _leg(self, freq: QLineEdit, typ: QComboBox, slope: QComboBox):
         """One leg as the ledger states it, or None when the row is empty.
@@ -177,12 +167,13 @@ class _ChannelRow:
         return {"f": value, "type": typ.currentData() or "", "slope": slope.currentData() or ""}
 
     def answer(self):
-        """`"OFF"`, a `{hp, lp}` dict, or None for "nobody said" — which writes nothing at all."""
-        state = self.state.currentData()
-        if state == STATE_UNSET:
-            return None
-        if state == STATE_OFF:
-            return "OFF"
+        """`"OFF"` for an empty row, or a `{hp, lp}` dict for a row with filters in it.
+
+        Never "nobody said": an empty row IS the answer "no protective filter here, read the curve
+        as measured" (user, 2026-09-06). Every channel of the pass is therefore written, which is
+        also what makes a baseline round's record complete — the one case the method still asks a
+        person about (`core/protective.should_de_embed`, the `"check"` answer).
+        """
         legs = {}
         hp, lp = (self._leg(self.hp_f, self.hp_type, self.hp_slope),
                   self._leg(self.lp_f, self.lp_type, self.lp_slope))
@@ -197,8 +188,8 @@ class ProtectiveDialog(QDialog):
     """The round's protective record, entered per channel.
 
     Opens on what the round already says, so re-opening it is a review rather than a blank form.
-    A channel nobody has answered for stays unanswered unless somebody chooses one of the other
-    two — closing this dialog does not turn silence into `OFF`.
+    Record writes EVERY row of the pass: a row with filters as those filters, an empty row as
+    `"OFF"` — which is the same instruction to the analysis, spelled out. Cancel writes nothing.
     """
 
     def __init__(self, project_dir: Path, channels, parent=None) -> None:
@@ -273,8 +264,6 @@ class ProtectiveDialog(QDialog):
         self.written = []
         for row in self._rows:
             answer = row.answer()
-            if answer is None:
-                continue  # nobody said, and that stays said by nobody
             try:
                 process_writer.set_protective(self._project_dir, row.code, answer)
             except Exception as exc:  # noqa: BLE001 — the gate's words, not ours

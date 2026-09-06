@@ -96,6 +96,37 @@ def test_captured_measurements_are_marked_done(project):
     assert statuses["w-L_1 (sw)"] == "wait"
 
 
+def test_a_title_rew_is_showing_is_not_a_capture_this_project_took(project):
+    """User, 2026-09-06: "я ще нічого не зробив, тільки відкрив вікно, а криві замірів вже зелені".
+
+    REW's open list is another application's window — it decides what can be OFFERED. What this
+    project took in is what colours a row, and the two are passed in separately for that reason.
+    """
+    showing = ["sw_1 (sw)", "w-L_1 (sw)"]
+
+    nothing_taken = mv.build_session("0", 1, showing, project, taken=[])
+    statuses = {item.name: item.status for g in nothing_taken.groups for item in g.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_WAIT
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT
+
+    one_taken = mv.build_session("0", 1, showing, project, taken=["sw_1 (sw)"])
+    statuses = {item.name: item.status for g in one_taken.groups for item in g.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT
+
+
+def test_an_extra_rew_holds_is_green_only_once_it_was_taken(project):
+    """The same rule for the off-checklist column: a graph REW is holding is an offer."""
+    session = mv.build_session("0", 1, ["w-L INV_1 (sw)"], project, taken=[])
+
+    extras = [item for g in session.groups for item in g.items if item.additional]
+    assert extras and extras[0].status == mv.STATUS_WAIT
+
+    session = mv.build_session("0", 1, ["w-L INV_1 (sw)"], project, taken=["w-L INV_1 (sw)"])
+    extras = [item for g in session.groups for item in g.items if item.additional]
+    assert extras and extras[0].status == mv.STATUS_DONE
+
+
 def test_zero_padded_versions_count_as_captured(project):
     """REW titles are hand-typed; `sw_01` and `sw_1` are the same DSP config version, and
     reporting the first as missing is the checker crying wolf."""

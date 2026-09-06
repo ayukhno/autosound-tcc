@@ -48,6 +48,66 @@ autosound-tcc: the graphical window is not installed.
 Missing: {error}"""
 
 
+def _make_splash(QtCore, QtGui, QtWidgets):
+    """The window that says the app is starting, before there is a window to say it in.
+
+    Between a double-click and the first pixel of TCC there is about a second and a half of import
+    on a warm cache — `mcp`, `pyqtgraph`, PySide6, numpy — and then a `MainWindow.__init__` that
+    reads the project, runs git and binds the MCP server. The first start after an update is
+    longer still: `uv tool install --upgrade` rewrites the whole tool environment, so every one of
+    those modules is byte-compiled again on the way in. Nothing was on screen for any of it (user,
+    2026-09-06: "після оновлення довгий старт — добре показати щось").
+
+    Drawn here rather than loaded from a file: the artwork we ship is a 1024-pixel icon, and a
+    splash is a small dark card with a line of text under the app's name.
+    """
+    scale = QtWidgets.QApplication.primaryScreen().devicePixelRatio() if \
+        QtWidgets.QApplication.primaryScreen() else 1.0
+    width, height = 420, 160
+    pixmap = QtGui.QPixmap(int(width * scale), int(height * scale))
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(QtGui.QColor("#14181d"))
+    painter = QtGui.QPainter(pixmap)
+    try:
+        if APP_ICON.is_file():
+            icon = QtGui.QPixmap(str(APP_ICON)).scaled(
+                int(48 * scale), int(48 * scale),
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
+            icon.setDevicePixelRatio(scale)
+            painter.drawPixmap(28, 34, icon)
+        painter.setPen(QtGui.QColor("#e8eaed"))
+        font = painter.font()
+        font.setPointSizeF(font.pointSizeF() + 4)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(92, 66, APP_DISPLAY_NAME)
+    finally:
+        painter.end()
+    splash = QtWidgets.QSplashScreen(pixmap)
+    splash.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, False)
+    return splash
+
+
+def _say(app, splash, text: str) -> None:
+    """Put a line on the splash and let Qt actually paint it.
+
+    `processEvents` is the point: everything after this call is a synchronous import or a blocking
+    read, so without it the splash is a grey rectangle for the whole start.
+    """
+    if splash is None:
+        return
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+
+    splash.showMessage(
+        f"  {text}",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft,
+        QColor("#9aa4af"),
+    )
+    app.processEvents()
+
+
 def _parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="autosound-tcc", description=__doc__)
     parser.add_argument(
@@ -125,13 +185,17 @@ def main() -> int:
         return 0 if result.ok else 1
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
+    # Split in two on purpose (2026-09-06): the toolkit first, so there can be a window on screen
+    # saying "starting" while the expensive half — `main_window`, and through it mcp, pyqtgraph
+    # and numpy — is still being imported. Both halves answer a missing PySide6 with the same
+    # sentence, because a light install fails at the first one.
     try:
+        from PySide6 import QtCore, QtGui, QtWidgets
         from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
 
-        from autosound_tcc.ui.tcc import qt_shutdown
-        from autosound_tcc.ui.tcc.main_window import MainWindow
-        from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
+        from autosound_tcc.ui.tcc import i18n
+        from autosound_tcc.ui.tcc.app_settings import get_settings
     except ImportError as exc:
         print(_NO_GUI.format(error=exc), file=sys.stderr)
         return 2
@@ -175,12 +239,42 @@ def main() -> int:
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))
     app_log.install_qt_handler()  # Qt's own warnings, into the same file
+    # The same language the window will come up in — read from the same store `MainWindow` reads
+    # it from, so the three lines below are not in English on a Ukrainian install.
+    try:
+        i18n.set_language(get_settings().value("ui/lang", "en"))
+    except Exception:  # noqa: BLE001 — an unreadable setting is not a reason not to start
+        pass
+    splash = None
+    if os.environ.get("AUTOSOUND_TCC_SPLASH", "1") != "0":
+        try:
+            splash = _make_splash(QtCore, QtGui, QtWidgets)
+            splash.show()
+        except Exception:  # noqa: BLE001 — a splash that cannot be drawn must not stop the app
+            splash = None
+    _say(app, splash, i18n.t("splashStarting"))
+    try:
+        from autosound_tcc.ui.tcc import qt_shutdown
+        from autosound_tcc.ui.tcc.main_window import MainWindow
+        from autosound_tcc.ui.tcc.project_gate_dialog import ensure_project_chosen
+    except ImportError as exc:
+        if splash is not None:
+            splash.close()
+        print(_NO_GUI.format(error=exc), file=sys.stderr)
+        return 2
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build
     # until that folder is known. Backing out of the gate exits rather than falling through to a
     # folder nobody picked -- which is what used to happen, silently, on every fresh install.
+    _say(app, splash, i18n.t("splashProject"))
+    if splash is not None:
+        # The gate is a modal somebody has to answer; a splash floating over it is in the way.
+        splash.hide()
     if not ensure_project_chosen(force=args.choose_project):
         return 0
+    if splash is not None:
+        splash.show()
+    _say(app, splash, i18n.t("splashWindow"))
     window = MainWindow()
     # AFTER the window exists, and a different question from `claim()` above. That one told
     # Windows which application this PROCESS is; this tells it what to put in a pin of this
@@ -191,6 +285,10 @@ def main() -> int:
     if os.name == "nt":
         windows_identity.stamp_window(int(window.winId()))
     window.show()
+    if splash is not None:
+        # `finish`, not `close`: it waits for the window it is handed to be up, so there is no
+        # frame with neither of them on screen.
+        splash.finish(window)
     code = app.exec()
     # Qt ends HERE rather than in whatever is left of the interpreter. Returning straight out of
     # `exec()` leaves the window and the QApplication alive, so `~QApplication` runs from inside

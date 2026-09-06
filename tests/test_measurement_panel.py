@@ -124,7 +124,9 @@ def test_read_offers_the_list_instead_of_folding_it_into_the_card(tmp_path, monk
 
 
 def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch):
-    """"As many as we expect" is the round's own count, not a number somebody guessed."""
+    """The NAMES it is waiting for, not a count: the dialog ticks by match now, and a count can
+    only be spent on the newest N — which is not where the right measurements always are (user,
+    2026-09-06)."""
     from autosound_tcc.core import config
     from autosound_tcc.ui.tcc import measurement_panel as mp
 
@@ -144,7 +146,9 @@ def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch)
     monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
     panel._on_import_offer({"1": {"title": "x", "uuid": "z", "date": ""}})
 
-    assert seen["waiting"] == sum(1 for row in panel._rows if row.status == "wait")
+    assert seen["expected"] == panel.outstanding_titles()
+    assert len(seen["expected"]) == sum(
+        1 for row in panel._rows if row.status == "wait" and not row.additional)
     assert seen["has_task"] is True
 
 
@@ -193,7 +197,9 @@ def test_row_shows_full_name_with_method_suffix():
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     row = next(r for r in panel._rows if r.item_name == "sw_10" and r.method_suffix == "sw")
-    assert row._name_label.text() == "sw_10 (sw) · 2"  # the mock's own capture count, unrelated
+    # `full_text`, not `text`: the label elides to whatever width the column gave it (2026-09-06),
+    # and what the row is ABOUT is the whole name.
+    assert row._name_label.full_text() == "sw_10 (sw) · 2"  # the mock's capture count, unrelated
     group_row = next(r for r in panel._rows if r.item_name == "SW+Ws_10")
     assert group_row.method_suffix == "rta"  # RTA-GROUP is still "(rta)", not a third suffix
 
@@ -658,3 +664,171 @@ def test_every_string_the_app_asks_for_exists_in_both_languages():
 
     assert not en - uk, f"no Ukrainian for: {sorted(en - uk)}"
     assert not uk - en, f"Ukrainian-only keys: {sorted(uk - en)}"
+
+
+# ---- the pass the ledger hears about ---------------------------------------------------------
+
+
+def _ledger_calls(monkeypatch):
+    """Stand in for the skill's CLI, recording what it was asked to write."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    calls: list = []
+    monkeypatch.setattr(mp.process_writer, "start_capture",
+                        lambda d, v, e: calls.append(("start", v, tuple(e))))
+    monkeypatch.setattr(mp.process_writer, "record_capture",
+                        lambda d, t: calls.append(("taken", t)))
+    monkeypatch.setattr(mp.process_writer, "set_protective",
+                        lambda d, c, legs: calls.append(("protective", c, legs)))
+    monkeypatch.setattr(mp.process_view, "capture_round", lambda *_a, **_k: {"id": "cap_003"})
+    return calls
+
+
+def test_taking_measurements_in_opens_the_pass_when_no_session_did(tmp_path, monkeypatch):
+    """Until 2026-09-06 only a model could open a capture round (MCP `start_capture`), so a tuner
+    working alone took measurements the ledger never heard of — and Protection then refused with
+    "no capture round is open" over a card full of green rows."""
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="", version=6,
+        expected=["w-L_6 (sw)", "w-R_6 (sw)"], titles=["w-L_6 (sw)"],
+        protective={"w-L": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert calls[0] == ("start", "6", ("w-L_6 (sw)", "w-R_6 (sw)"))
+    assert ("taken", "w-L_6 (sw)") in calls
+    assert ("protective", "w-L", "OFF") in calls
+    assert seen["opened"] == "cap_003" and seen["round_id"] == "cap_003"
+
+
+def test_an_open_pass_is_written_into_rather_than_a_second_one_opened(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="cap_001", version=6,
+        expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"], protective={},
+    )
+    worker.run()
+
+    assert not any(call[0] == "start" for call in calls)
+    assert calls == [("taken", "w-L_6 (sw)")]
+
+
+def test_a_refused_capture_does_not_silence_the_protective_record(tmp_path, monkeypatch):
+    """Each write is its own statement — the rule the protective half already followed."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+
+    def _refuse(_dir, title):
+        raise RuntimeError("gate said:\nno such measurement in REW")
+
+    monkeypatch.setattr(mp.process_writer, "record_capture", _refuse)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="cap_001", version=6,
+        expected=[], titles=["w-L_6 (sw)"], protective={"w-L": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert seen["refused"] == ["no such measurement in REW"], "the gate's own last line"
+    assert ("protective", "w-L", "OFF") in calls
+
+
+def test_a_failed_read_puts_the_rew_dot_out(tmp_path, monkeypatch):
+    """The signal only ever carried the good news, so a REW closed since launch left a green dot
+    over a failed read — and only a restart of TCC put it right (user, 2026-09-06)."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    seen: list = []
+    panel.rewStatusChanged.connect(seen.append)
+
+    panel._on_read_failed("ConnectionRefusedError: no REW")
+
+    assert seen == [False]
+
+
+def _fake_ledger(monkeypatch) -> dict:
+    """Catch what the panel would hand the ledger writer, without starting a thread."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    captured: dict = {}
+
+    class _Signal:
+        def connect(self, _slot):
+            pass
+
+    class _Worker:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.done = _Signal()
+
+        def isRunning(self):
+            return False
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(mp, "_LedgerWriteWorker", _Worker)
+    monkeypatch.setattr(mp.process_writer, "is_available", lambda: True)
+    return captured
+
+
+def test_the_round_is_opened_for_what_the_pass_asked_for_not_the_leftovers(tmp_path, monkeypatch):
+    """`record_imported` runs first and the grid rebuilds off it, so asking the panel again at
+    write time answers with what is STILL outstanding — and would open a round expecting the
+    measurements that did not come in."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    captured = _fake_ledger(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS, version=6)
+    rows = capture_import.candidates(
+        {"1": {"title": "w-L_06 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:11:31"}}, tmp_path)
+    panel._taking = rows
+    panel._expected = ["w-L_06 (sw)", "w-R_06 (sw)"]
+    panel._protective = {}
+
+    panel._finish_import({})
+
+    assert captured["expected"] == ["w-L_06 (sw)", "w-R_06 (sw)"]
+    assert captured["titles"] == ["w-L_06 (sw)"]
+    assert captured["version"] == 6
+
+
+def test_a_row_with_empty_filter_cells_is_recorded_as_no_protective_filter(tmp_path, monkeypatch):
+    """User, 2026-09-06: no filter written IS the statement "no protective filter" — so the pass
+    carries an answer for every channel that came in, and the analysis never has to guess."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    captured = _fake_ledger(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS, version=6)
+    panel._taking = capture_import.candidates(
+        {"1": {"title": "w-L_06 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:11:31"},
+         "2": {"title": "m-L_06 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:12:31"}}, tmp_path)
+    panel._expected = []
+    panel._protective = {"m-L": {"hp": {"f": 100.0, "type": "LR", "slope": 24}}}
+
+    panel._finish_import({})
+
+    assert captured["protective"]["w-L"] == "OFF"
+    assert captured["protective"]["m-L"] == {"hp": {"f": 100.0, "type": "LR", "slope": 24}}

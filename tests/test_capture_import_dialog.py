@@ -42,7 +42,7 @@ def _dialog(measurements, tmp_path, **kwargs) -> CaptureImportDialog:
 
 
 def _titles(dialog) -> list[str]:
-    return [dialog._table.item(row, 1).text() for row in range(dialog._table.rowCount())]
+    return [dialog._table.item(row, 2).text() for row in range(dialog._table.rowCount())]
 
 
 def cid_uuid():
@@ -55,14 +55,46 @@ def _tick_state(dialog, row: int) -> bool:
     return dialog._table.item(row, 0).checkState() == Qt.CheckState.Checked
 
 
-def test_it_opens_on_what_the_round_is_waiting_for_and_ticks_that_much(tmp_path):
+def test_it_ticks_what_answers_to_a_name_the_round_is_waiting_for(tmp_path):
+    """Not the newest N. The measurements a round waits for are not always the last ones taken —
+    on the user's own list they were not (2026-09-06), and a positional guess ticks the wrong ones
+    while the right ones sit further up, out of the window."""
+    dialog = _dialog(_rew(30), tmp_path, expected=["m_3 (sw)", "m_27 (sw)"])
+
+    assert [row.uuid for row in dialog.ticked_rows()] == ["u3", "u27"]
+    assert "m_3 (sw)" in _titles(dialog), "a ticked row outside the tail is still put on screen"
+    assert i18n.t("capImportPicked").format(n=2) in dialog._note.text()
+
+
+def test_the_window_is_still_wider_than_the_round_and_ticks_nothing_by_position(tmp_path):
+    """The window is deliberately wider than the round (a window of six hides what was taken just
+    before the six) — but width is context, not a tick."""
     dialog = _dialog(_rew(30), tmp_path, waiting=6)
 
-    assert len(_titles(dialog)) == 10, "a window of six would hide what was taken just before six"
-    ticked = dialog.ticked_rows()
-    assert len(ticked) == 6, "and only the batch the round is waiting for is pre-ticked"
-    assert [row.uuid for row in ticked] == [f"u{n}" for n in range(25, 31)], "the newest six"
-    assert not any(_tick_state(dialog, index) for index in range(4)), "the older four are context"
+    assert len(_titles(dialog)) == 10
+    assert dialog.ticked_rows() == [], "with no names to match against, nothing is guessed at"
+
+
+def test_two_measurements_under_one_name_tick_neither(tmp_path):
+    """Which of two graphs with one name is the one that came out is the person's question. The
+    dialog marks the pair, says so, and ticks neither (user, 2026-09-06)."""
+    answer = _rew(3)
+    answer["2"]["title"] = "m_3 (sw)"
+
+    dialog = _dialog(answer, tmp_path, expected=["m_3 (sw)"])
+
+    assert dialog.ticked_rows() == [], "neither of the two is chosen for the tuner"
+    assert dialog._ambiguous == {"u2", "u3"}
+    assert "⧉" in dialog._table.item(1, 2).text(), "and both are marked in the row"
+    assert i18n.t("capImportDupNote").format(names="m_3 (sw)") in dialog._note.text()
+
+
+def test_the_row_carries_rews_own_number(tmp_path):
+    """For finding the row in REW's own window — navigation, never an identity (`capture_import`
+    module docstring: the ordinal is the index of a view)."""
+    dialog = _dialog(_rew(3), tmp_path, waiting=3)
+
+    assert [dialog._table.item(row, 1).text() for row in range(3)] == ["1", "2", "3"]
 
 
 def test_the_filter_runs_before_the_window(tmp_path):
@@ -95,7 +127,7 @@ def test_already_taken_rows_come_back_when_asked_for_and_come_back_unticked(tmp_
 def test_plus_ten_reaches_back_without_losing_a_tick(tmp_path):
     """`+10` and the filter both redraw the table underneath the tuner. A tick that survives only
     until the next redraw is a tick nobody can trust."""
-    dialog = _dialog(_rew(40), tmp_path, waiting=10)
+    dialog = _dialog(_rew(40), tmp_path, expected=[f"m_{n} (sw)" for n in range(31, 41)])
     assert len(dialog.ticked_rows()) == 10
     dialog._table.item(9, 0).setCheckState(Qt.CheckState.Unchecked)
     kept = {row.uuid for row in dialog.ticked_rows()}
@@ -123,7 +155,8 @@ def test_plus_ten_is_an_action_not_a_switch(tmp_path):
 
 
 def test_apply_hands_over_exactly_what_was_ticked(tmp_path):
-    dialog = _dialog(_rew(12), tmp_path, waiting=3, round_id="cap_007")
+    dialog = _dialog(_rew(12), tmp_path, round_id="cap_007",
+                     expected=["m_10 (sw)", "m_11 (sw)", "m_12 (sw)"])
     assert len(dialog.ticked_rows()) == 3
     dialog._table.item(9, 0).setCheckState(Qt.CheckState.Unchecked)  # the newest of the three
 
@@ -169,7 +202,7 @@ def test_names_are_filled_downwards_from_the_row_that_is_selected(tmp_path, monk
 
     assert dialog.renames() == [("u3", "w-L_02 (sw)"), ("u4", "w-R_02 (sw)"),
                                 ("u5", "m-L_02 (sw)")]
-    assert dialog._table.item(2, 3).text() == "w-L_02 (sw)"
+    assert dialog._table.item(2, 4).text() == "w-L_02 (sw)"
 
 
 def test_a_count_that_does_not_line_up_is_said_before_anything_is_sent(tmp_path, monkeypatch):
@@ -191,7 +224,7 @@ def test_typing_a_name_takes_the_row_with_it(tmp_path):
     uuid = dialog._table.item(row, 0).data(cid_uuid())
     assert uuid not in dialog._ticked
 
-    dialog._table.item(row, 3).setText("m-L_02 (sw)")
+    dialog._table.item(row, 4).setText("m-L_02 (sw)")
 
     assert uuid in dialog._ticked
     assert (uuid, "m-L_02 (sw)") in dialog.renames()
@@ -200,7 +233,7 @@ def test_typing_a_name_takes_the_row_with_it(tmp_path):
 def test_a_name_that_is_already_the_title_is_not_a_rename(tmp_path):
     dialog = _dialog(_rew(3), tmp_path, waiting=3)
 
-    dialog._table.item(0, 3).setText("m_1 (sw)")
+    dialog._table.item(0, 4).setText("m_1 (sw)")
 
     assert dialog.renames() == [], "REW is not asked to rename a measurement to what it is called"
 
@@ -209,8 +242,8 @@ def test_two_rows_asking_for_one_name_stop_apply(tmp_path):
     """Caught where the names were typed, before anything is sent: the method's identity model
     rests on a title being one measurement's name."""
     dialog = _dialog(_rew(3), tmp_path, waiting=3)
-    dialog._table.item(0, 3).setText("w-L_02 (sw)")
-    dialog._table.item(1, 3).setText("w-L_02 (sw)")
+    dialog._table.item(0, 4).setText("w-L_02 (sw)")
+    dialog._table.item(1, 4).setText("w-L_02 (sw)")
 
     dialog._on_apply()
 
@@ -229,8 +262,8 @@ def test_a_retake_out_of_time_order_is_marked_when_the_list_is_rews_own(tmp_path
 
     dialog = _dialog(answer, tmp_path, waiting=3)
 
-    assert "↻" in dialog._table.item(1, 2).text()
-    assert "↻" not in dialog._table.item(0, 2).text()
+    assert "↻" in dialog._table.item(1, 3).text()
+    assert "↻" not in dialog._table.item(0, 3).text()
 
 
 def test_the_dialog_does_not_claim_to_show_everything_rew_holds(tmp_path):
@@ -268,7 +301,7 @@ def test_a_measurement_with_no_uuid_is_listed_and_cannot_be_ticked(tmp_path):
     answer = _rew(2)
     answer["1"]["uuid"] = ""
 
-    dialog = _dialog(answer, tmp_path, waiting=2)
+    dialog = _dialog(answer, tmp_path, expected=["m_1 (sw)", "m_2 (sw)"])
 
     assert len(_titles(dialog)) == 2
     assert not (dialog._table.item(0, 0).flags() & Qt.ItemFlag.ItemIsUserCheckable)
@@ -298,19 +331,19 @@ def test_a_frequency_on_the_row_is_the_whole_statement(tmp_path):
     все однозначно". So a frequency IS the statement, and the statement is an LR24 — the dropdowns
     stay in the Protection dialog for whoever ran something else."""
     dialog = _dialog(_rew(2), tmp_path, waiting=2)
-    dialog._table.item(0, 3).setText("w-L_02 (sw)")
+    dialog._table.item(0, 4).setText("w-L_02 (sw)")
 
-    dialog._table.item(0, 4).setText("80")
+    dialog._table.item(0, 5).setText("80")
 
     assert dialog.protective() == {"w-L": {"hp": {"f": 80.0, "type": "LR", "slope": 24}}}
 
 
 def test_both_legs_ride_on_the_same_row(tmp_path):
     dialog = _dialog(_rew(1), tmp_path, waiting=1)
-    dialog._table.item(0, 3).setText("m-L_02 (sw)")
+    dialog._table.item(0, 4).setText("m-L_02 (sw)")
 
-    dialog._table.item(0, 4).setText("80")
-    dialog._table.item(0, 5).setText("3500")
+    dialog._table.item(0, 5).setText("80")
+    dialog._table.item(0, 6).setText("3500")
 
     assert dialog.protective() == {"m-L": {
         "hp": {"f": 80.0, "type": "LR", "slope": 24},
@@ -332,7 +365,7 @@ def test_the_channel_comes_from_the_name_the_row_is_being_given(tmp_path):
     answer["1"]["title"] = "tw-R_02 (sw)"  # already named in REW
     dialog = _dialog(answer, tmp_path, waiting=1)
 
-    dialog._table.item(0, 4).setText("2500")
+    dialog._table.item(0, 5).setText("2500")
 
     assert list(dialog.protective()) == ["tw-R"]
 
@@ -342,7 +375,7 @@ def test_typing_a_filter_takes_the_row_with_it(tmp_path):
     uuid = dialog._table.item(0, 0).data(cid_uuid())
     assert uuid not in dialog._ticked
 
-    dialog._table.item(0, 4).setText("80")
+    dialog._table.item(0, 5).setText("80")
 
     assert uuid in dialog._ticked
 
@@ -351,10 +384,10 @@ def test_one_channel_described_two_ways_is_a_question_not_a_merge(tmp_path):
     """The same channel captured with two methods is two rows and one signal path. Two rows that
     disagree are not silently merged — that is a question for the person."""
     dialog = _dialog(_rew(2), tmp_path, waiting=2)
-    dialog._table.item(0, 3).setText("w-L_02 (sw)")
-    dialog._table.item(1, 3).setText("w-L_02 (rta)")
-    dialog._table.item(0, 4).setText("80")
-    dialog._table.item(1, 4).setText("100")
+    dialog._table.item(0, 4).setText("w-L_02 (sw)")
+    dialog._table.item(1, 4).setText("w-L_02 (rta)")
+    dialog._table.item(0, 5).setText("80")
+    dialog._table.item(1, 5).setText("100")
 
     dialog._on_apply()
 
@@ -364,10 +397,10 @@ def test_one_channel_described_two_ways_is_a_question_not_a_merge(tmp_path):
 
 def test_the_same_chain_on_two_rows_of_one_channel_is_fine(tmp_path):
     dialog = _dialog(_rew(2), tmp_path, waiting=2)
-    dialog._table.item(0, 3).setText("w-L_02 (sw)")
-    dialog._table.item(1, 3).setText("w-L_02 (rta)")
-    dialog._table.item(0, 4).setText("80")
-    dialog._table.item(1, 4).setText("80")
+    dialog._table.item(0, 4).setText("w-L_02 (sw)")
+    dialog._table.item(1, 4).setText("w-L_02 (rta)")
+    dialog._table.item(0, 5).setText("80")
+    dialog._table.item(1, 5).setText("80")
 
     assert list(dialog.protective()) == ["w-L"]
     assert dialog.protective_conflicts == []
