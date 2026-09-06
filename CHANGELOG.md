@@ -6,6 +6,35 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.34] — 2026-09-06 · what cut the two side columns was a path and a subtitle
+
+Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
+**`v3.0.40`**. The pin does not move in this release; it is behind upstream (`v3.0.46`), and
+catching up is the next thing on the list.
+
+Both fixes came from one full-window screenshot of `v0.1.33` and one measurement on a copy of the
+project it showed.
+
+### Fixed
+
+- **The left column was cut through every row — car, DSP, mic, source — at one vertical line.**
+  A side column has a fixed width and, deliberately, no horizontal scrollbar, so the column is
+  laid out at the width of its widest child and only the first 260 px are visible. The widest
+  child was the ledger refusal shown in the DSP section: the method's new wording names two Windows
+  paths, a path has no space in it, and to a word-wrapping label a path is one word — 361 px of
+  minimum width at 100 %, more at 110 % on Windows fonts. That label no longer sets the column's
+  width, and paths are given somewhere to wrap. The plan's step names got the same rule, since
+  the same mine was under them.
+
+- **The right column was cut at the window's edge — the capture card's dot and second button with
+  it.** The widest thing there was the card's header row: title, subtitle, "REW" and a dot, in
+  which the subtitle was a plain label that gives up nothing. It elides now, and the widest row in
+  the column went from 330 px to 272 at 110 %.
+
+### Changed
+
+- **A card's subtitle gives ground before the column does** — the same rule the left column's
+  keys have followed since the panels first grew past the screen.
 ## [v0.1.33] — 2026-09-06 · the server was up all along, and the legend was what cut the card
 
 Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is

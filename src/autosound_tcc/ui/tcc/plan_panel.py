@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -188,6 +189,11 @@ class _PhaseStepRow(QWidget):
         # but only about 190 px of width. Unwrapped, the longest step decided the panel's width,
         # so the whole column scrolled sideways and every other row lost its right-hand end.
         name.setWordWrap(True)
+        # And it never sets the column's width either: wrapping breaks at spaces, so one token
+        # with no space in it — a path, a long REW title — still makes the label's minimum the
+        # token's width, and the whole column follows (the left column learned this from a
+        # ledger refusal naming two Windows paths, 2026-09-06).
+        name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         if done:
             name.setProperty("class", "substep-name-done")
             font = QFont(name.font())

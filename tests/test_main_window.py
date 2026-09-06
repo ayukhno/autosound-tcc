@@ -3250,3 +3250,39 @@ def test_the_ear_button_follows_the_active_phase(tmp_path, monkeypatch):
 
     window._refresh_capture_task({"active_phase": "-1"})
     assert window._dialog._listen_btn.isHidden()
+
+
+def test_a_refusal_naming_a_long_path_does_not_widen_the_left_column(tmp_path, monkeypatch):
+    """A word-wrapping label's minimum is its longest unbreakable token, and an exception's own
+    words are full of Windows paths. The method's refusal for a non-UTF-8 ledger (v3.0.46) named
+    two of them (a plain wrapping label measured 361 px at 100%), the column followed, and every row in it — car, DSP,
+    mic — was cut at the visible edge (user, 2026-09-06, with the picture)."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
+    _app()
+    window = MainWindow()
+    path = r"C:\Users\o.yukhno\_autosound\testTCC8\state\FULL\v_001.json"
+    message = (f"Could not load ledger: SnapshotError: {path}: not UTF-8 -- byte 0xa7 at position "
+               f"2201. `python3 C:\\Users\\o.yukhno\\.claude\\skills\\autosound-tuning\\rew_tool"
+               f"\\state\\state.py --root <project>/state repair-encoding` rewrites it as UTF-8.")
+
+    window._show_left_status(message)
+
+    label = window._left_status
+    token = label.fontMetrics().horizontalAdvance(path)
+    assert label.minimumSizeHint().width() < token / 2, "the path no longer sets the width"
+    assert "\u200b" in label.text(), "and it has somewhere to wrap"
+
+
+def test_a_card_header_gives_up_its_subtitle_before_it_widens_the_column():
+    """The capture card's header — title, subtitle, "REW" and a dot — was the widest thing in the
+    right column at 110% on Windows fonts, and a plain subtitle never shrinks. So the column laid
+    itself out past the window's edge and was cut there, dot and buttons included."""
+    from autosound_tcc.ui.tcc.labels import ElidedLabel
+
+    _app()
+    row, title, sub = main_window._phead("focus", "measSub")
+
+    assert isinstance(sub, ElidedLabel), "the subtitle is the one that gives ground"
+    natural = title.sizeHint().width() + sub.sizeHint().width()
+    assert row.minimumSizeHint().width() < natural, "the row can be narrower than its two texts"

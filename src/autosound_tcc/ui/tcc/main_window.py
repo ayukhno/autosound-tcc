@@ -329,6 +329,16 @@ def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
     return row
 
 
+def _breakable(text: str) -> str:
+    """Give a path somewhere to wrap: a zero-width space after every `\\` and `/`.
+
+    A file path is one token to a word-wrapping label, and an exception's own words are full of
+    them. Without a break opportunity the label's minimum width is the whole path, and the
+    column that holds the label inherits it.
+    """
+    return text.replace("\\", "\\\u200b").replace("/", "/\u200b")
+
+
 def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
     """A small-caps section header row (mirrors the prototype's `.phead`).
 
@@ -348,7 +358,14 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
 
     sub = None
     if sub_key:
-        sub = QLabel(i18n.tx(i18n.t(sub_key)))
+        # The one label in this row that gives ground. Title + subtitle + whatever the caller
+        # appends (the capture card adds "REW" and a dot) was the widest thing in the right column
+        # at 110% on the user's Windows fonts — wider than the column — and a plain QLabel never
+        # shrinks, so the whole column was laid out past the window's edge and cut there, dot,
+        # buttons and all (2026-09-06, with the picture). `Maximum`: it asks for its natural width
+        # and gives it up only when the row would otherwise widen the panel.
+        sub = ElidedLabel(i18n.tx(i18n.t(sub_key)), min_width=40,
+                          policy=QSizePolicy.Policy.Maximum)
         sub.setProperty("class", "phead-sub")
         layout.addWidget(sub)
 
@@ -1870,6 +1887,16 @@ class MainWindow(QMainWindow):
         self._left_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._left_status.setProperty("class", "phead-sub")
         self._left_status.setWordWrap(True)
+        # A word-wrapping QLabel's MINIMUM width is its longest unbreakable token, and this label
+        # shows an exception's own words. The method's new refusal (v3.0.46) names two Windows
+        # paths without a space in them, so this label asked for 361 px at 100% on a Mac and more
+        # at 110% on Windows fonts; the left column laid
+        # itself out at that width, and every row in it — car, DSP, mic — was cut at the column's
+        # visible edge (user, 2026-09-06). `Ignored`: it takes the width the column has, wraps
+        # what can wrap, and never sets the column's width. `_breakable` gives the paths places
+        # to wrap.
+        self._left_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._left_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._left_status.setContentsMargins(12, 16, 12, 16)
         self._dsp_section.body_layout().addWidget(self._left_status)
 
@@ -2298,7 +2325,7 @@ class MainWindow(QMainWindow):
         # can ask for it later. The two branches that have no `again` are the load failures, whose
         # text is an exception's own words and belongs to no language (F-033).
         self._left_status_again = again
-        self._left_status.setText(message)
+        self._left_status.setText(_breakable(message))
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(False)
         self._rebuild_system_params()

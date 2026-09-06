@@ -854,14 +854,13 @@ def test_the_card_fits_the_column_it_lives_in():
     """Measured on the user's project (2026-09-06): the card's minimum was 369 px against the 249
     the right column had, so it was cut at the window's edge with a whole method column gone. The
     legend was 345 of those 369 — four items in a row that could not shrink. It wraps now."""
-    from autosound_tcc.ui.tcc import theme
     from autosound_tcc.ui.tcc.flow_layout import FlowLayout
 
-    app = _app()
-    # Every width here rides on the app-wide stylesheet, and a test that ran earlier leaves the
-    # zoom where it put it. Measuring against whatever that was is how the first version of this
-    # test passed alone and failed in the suite — twice.
-    theme.apply_theme(app, "light", scale=1.0)
+    _app()
+    # No `apply_theme` here, and that is measured, not tidiness: an app-wide stylesheet change
+    # re-polishes every widget of every window the suite keeps alive, and this test cost 26.33 s
+    # with one in it (`--durations`, 2026-09-06). Every width below rides on whatever zoom an
+    # earlier test left — so the assertions are RATIOS, which hold at any zoom.
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)
 
