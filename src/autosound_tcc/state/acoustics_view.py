@@ -84,10 +84,16 @@ class Flaw:
     #: as unearned certainty. Sixteen rows from another processor's project read as fact that way.
     #: This is the difference between "stated as confirmed" and "said nothing at all" (tcc#5).
     status_stated: bool = True
-    #: One short sentence in the owner's language -- what a person HEARS, not what the method
-    #: measured. Written by the skill (SKL-016); empty until it is, and the row then reads as it
-    #: always did. `why` cannot serve: it carries the audit trail as well as the explanation, and
-    #: on the live map its longest was 763 characters with `MMM`, `§26` and `ILL-POSED` in it.
+    #: One short sentence in the OWNER's language -- what a person HEARS, not what the method
+    #: measured. Written by the skill; empty until it is, and the row then reads as it always did.
+    #: `why` cannot serve: it carries the audit trail as well as the explanation, and on the live
+    #: map its longest was 763 characters with `MMM`, `§26` and `ILL-POSED` in it.
+    #:
+    #: The method calls it `symptom` since the schema change that made the owner's line no longer
+    #: optional prose (v3.0.42; it was `plain` before). Both are read here, `symptom` first: a map
+    #: written before that rename still has the old key, and a project does not rewrite its own
+    #: history to suit a reader. Found by moving the pin to v3.0.46 — every fixture in the suite
+    #: writes `plain`, because the same hand wrote them, so nothing here could have noticed.
     plain: str = ""
 
     @property
@@ -193,7 +199,7 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
                     q=float(row["q"]) if row.get("q") else None,
                     bw_oct=float(row["bw_oct"]) if row.get("bw_oct") else None,
                     why=str(row.get("why") or ""),
-                    plain=str(row.get("plain") or ""),
+                    plain=str(row.get("symptom") or row.get("plain") or ""),
                     evidence=tuple(str(e) for e in row.get("evidence") or ()),
                 )
             )

@@ -254,3 +254,22 @@ def test_a_row_that_never_said_its_status_is_not_the_same_as_one_that_said_confi
 
     assert (stated.status, stated.status_stated, stated.is_unstated) == ("confirmed", True, False)
     assert (silent.status, silent.status_stated, silent.is_unstated) == ("confirmed", False, True)
+
+
+def test_the_owners_sentence_is_read_under_the_name_the_method_gives_it_now(tmp_path):
+    """The method renamed it `plain` -> `symptom` when the owner's line stopped being optional
+    prose (v3.0.42), and TCC kept reading `plain` — so on a map written by the current method the
+    owner's own words rendered as nothing and the row fell back to the method's vocabulary. Found
+    by moving the pin to v3.0.46; no fixture could have caught it, because every fixture in this
+    suite writes the key TCC was reading."""
+    _write(tmp_path, [
+        {"kind": "modal_peak", "f_hz": 106, "level_db": 5.5, "action": "leave",
+         "symptom": "гуде на низьких, коли грає бас-бочка"},
+        {"kind": "cabin_null", "f_hz": 145, "level_db": -8.0, "action": "no_boost",
+         "plain": "провал, який чути як брак тіла"},
+    ])
+
+    current, legacy = acoustics_view.load_flaws(tmp_path)
+
+    assert current.plain == "гуде на низьких, коли грає бас-бочка", "the name it has now"
+    assert legacy.plain == "провал, який чути як брак тіла", "and the one older maps carry"
