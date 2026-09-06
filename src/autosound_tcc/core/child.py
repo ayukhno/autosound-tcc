@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import os
 import subprocess
 import sys
 from typing import Optional
@@ -94,7 +95,16 @@ def hidden_console() -> dict:
     definition. The corner cases are real — a child that calls `AllocConsole` itself, a
     non-console binary in the chain — and this note stays until somebody watches it on the machine
     that has the problem.
+
+    **Which is why it has a switch.** `AUTOSOUND_TCC_AGENT_CONSOLE=0` puts the old behaviour back
+    (no console at all for the agent either). The failure mode this can have is worse than the one
+    it fixes: `SW_HIDE` is exactly the kind of hint that may quietly not take, and then the console
+    is VISIBLE for the whole session instead of blinking for a moment. A person who meets that must
+    be able to turn it off where they are, not wait for a build — the same escape hatch the MCP
+    server and the splash already carry.
     """
+    if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "1") == "0":
+        return {}
     new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
     if not sys.platform.startswith("win") or new_console is None:
         return {}

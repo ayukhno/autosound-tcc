@@ -114,7 +114,10 @@ an afternoon, and every one of them is named where it is fixed.
 - **Console windows on Windows.** The one module that spawned without the app's own quiet flags
   now uses them, and the agent's CLI is given a single hidden console for the `python`, `git` and
   `gh` it runs to inherit rather than each opening its own. **The second half is unverified**: it
-  is written from documented behaviour and has run on nothing but a Mac, where none of it applies.
+  is written from documented behaviour and has run on nothing but a Mac, where none of it applies
+  — so it has a switch. `AUTOSOUND_TCC_AGENT_CONSOLE=0` puts the old behaviour back, because the
+  way this can fail (a console that is shown instead of hidden, for the whole session) is worse
+  than the blinking it replaces, and nobody should have to wait for a build to stop it.
 
 ## [v0.1.31] — 2026-09-03 · what the owner sees, and what a report can carry
 

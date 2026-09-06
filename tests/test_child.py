@@ -140,3 +140,36 @@ def test_the_sdk_gives_the_agent_the_hidden_console_and_everyone_else_no_window(
     agent, other = seen
     assert agent["creationflags"] & 0x00000010 and "startupinfo" in agent
     assert other["creationflags"] & 0x08000000 and "startupinfo" not in other
+
+
+def test_the_hidden_console_can_be_turned_off_where_the_person_is(monkeypatch):
+    """`SW_HIDE` is exactly the kind of hint that may quietly not take, and then the console is
+    VISIBLE for the whole session instead of blinking for a moment — worse than what it fixes.
+    Somebody who meets that must be able to switch it off on the spot, not wait for a build."""
+    _as_windows(monkeypatch)
+    assert child.hidden_console(), "on by default"
+
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "0")
+
+    assert child.hidden_console() == {}, "and the agent goes back to no console at all"
+
+
+def test_with_the_switch_off_the_agent_is_treated_like_every_other_child(monkeypatch):
+    import anyio
+    from anyio._core import _subprocesses
+
+    seen: list = []
+
+    async def fake_open_process(*args, **kwargs):
+        seen.append(kwargs)
+        return "process"
+
+    monkeypatch.setattr(_subprocesses, "open_process", fake_open_process)
+    monkeypatch.setattr(anyio, "open_process", fake_open_process)
+    _as_windows(monkeypatch)
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "0")
+
+    child.hide_console_windows()
+    asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
+
+    assert seen[0]["creationflags"] & 0x08000000 and "startupinfo" not in seen[0]
