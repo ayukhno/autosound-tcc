@@ -6,6 +6,18 @@ failures) and `#18` (two machine-dependent tests).
 
 **Goal:** every platform green — Windows 26 → 0, Linux 2 → 0, macOS stays at 0.
 
+> **Done 2026-09-07, same day.** Windows 26 → 1, Linux 2 → 0, macOS 1687 → 1691 passed. The
+> one left is the skill's own selftest (bus ticket `hub#108`), not ours. Two things were found
+> that this plan did not know about when it was written: `#18` (tests reading the developer's
+> PATH, fixed) and `#19` (the Windows crash, open — and now the only thing keeping the full
+> Windows job red).
+>
+> The sorting below into five causes was right about the count and wrong about which pile
+> several tests belonged to. Kept as written rather than tidied: what it got wrong is the
+> useful part — the piles were named from a Mac, and five "POSIX-only" tests turned out to be
+> simply incorrect, while one "separator" test was a real product bug writing two spellings of
+> one path into a project's record.
+
 **Approach:** fix by cause, not by test. The 28 failures are five causes, and the order below
 is by ratio of harm removed to risk taken: the guard that makes any result trustworthy first,
 then the one that loses a tuner's own words, then the noise that hides the next real thing.
