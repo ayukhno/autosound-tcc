@@ -49,7 +49,6 @@ Nothing on this surface writes project data any more.
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import os
 import secrets
@@ -66,7 +65,6 @@ from typing import Any, Optional, Protocol
 from mcp.server.fastmcp import FastMCP
 
 from autosound_tcc.core import (
-    agent_session,
     app_log,
     car_library,
     config,

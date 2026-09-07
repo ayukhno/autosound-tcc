@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from PySide6.QtCore import QPoint, QRect, QSize, QThread, Qt, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLayout,
     QMenu,
     QPushButton,
     QSizePolicy,

@@ -945,7 +945,7 @@ def test_call_critic_defaults_to_the_model_the_footer_is_set_to(tmp_path, monkey
 
 
 def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
-    from autosound_tcc.core import config, critic, mcp_server, project_settings
+    from autosound_tcc.core import config, critic, project_settings
 
     project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
     seen = {}
@@ -963,7 +963,7 @@ def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
 
 def test_no_configured_critic_leaves_the_scripts_own_default_alone(tmp_path, monkeypatch):
     """Empty means "nothing chosen", not "choose for them"."""
-    from autosound_tcc.core import critic, mcp_server
+    from autosound_tcc.core import critic
 
     seen = {}
 

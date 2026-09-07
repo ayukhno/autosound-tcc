@@ -9,7 +9,7 @@ earlier this session) is separate, later work.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from autosound_tcc.core import model_choices
 

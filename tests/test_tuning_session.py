@@ -443,7 +443,6 @@ def test_a_write_still_stops_for_the_arbiter(tmp_path):
     import asyncio
     from concurrent.futures import Future
 
-    from autosound_tcc.core.mcp_server import ConfirmRequest
     from autosound_tcc.core.tuning_session import TuningSession
 
     class Bridge:

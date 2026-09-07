@@ -517,7 +517,6 @@ def test_the_rig_can_be_drawn_before_the_first_ledger_snapshot():
     for any channel the ledger has no row for, which is how spare slots appear. An EMPTY ledger
     asks for identity alone.
     """
-    from autosound_tcc.state.dsp_state import rig_view
 
     profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
         {"id": "virtual_channels", "label": "Virtual", "fields": ["gain_db"]},

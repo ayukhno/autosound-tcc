@@ -108,3 +108,20 @@ packages = ["src/autosound_tcc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Лінтер. `select` виписано явно, хоч це і дефолт ruff: дефолт — властивість ВЕРСІЇ, і
+# оновлення ruff змогло б додати класів у CI мовчки. Ширші набори (I, B, UP) свідомо не
+# ввімкнені: цей конфіг заводиться, щоб крок ruff у CI стартував з нуля, а не щоб змінити
+# стиль дерева.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Імена Claude Agent SDK не імпортуються — їх вставляє в globals() `claude_sdk.bind()` на
+# першому виклику, бо SDK це EXTRA: без цього вікно не відкривалось би в того, хто тюнить
+# через Gemini (див. шапку `core/claude_sdk.py`). Для ruff вони невизначені, і це правда:
+# у момент читання файлу їх справді нема. Що вони існують у рантаймі, стереже не лінтер, а
+# `tests/test_packaging.py::test_the_declared_sdk_names_match_the_ones_the_code_uses` — він
+# звіряє вжиті в модулі імена з `SDK_NAMES` і з тим, що SDK насправді експортує.
+"src/autosound_tcc/core/agent_session.py" = ["F821"]
+"src/autosound_tcc/core/tuning_session.py" = ["F821"]

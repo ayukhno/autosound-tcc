@@ -39,13 +39,13 @@ from autosound_tcc.ui.tcc import i18n, qt_shutdown
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
+from autosound_tcc.ui.tcc.mock_data import MeasItem, MeasSession, MEAS_SESSIONS, PLAN
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme
 
 # measurement_panel.py -> tcc -> ui -> autosound_tcc -> assets/icons (Lucide, ISC license -- see
 # NOTICE.md at the repo root).
 _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
-from autosound_tcc.ui.tcc.mock_data import MeasItem, MeasSession, MEAS_SESSIONS, PLAN
 
 #: How long a closing panel waits for a REW worker before handing it to `qt_shutdown` (F-027).
 #: Six seconds was the old wait; it is the grace for a normal in-flight call, not a fix for a hung
@@ -443,7 +443,7 @@ class MeasurementPanel(QWidget):
         is kept per-preset; defaults to None for headless/no-project use."""
         super().__init__()
         self._bridge = RewBridge()
-        self._worker: "_RewReadWorker | None" = None
+        self._worker: "_RewScanWorker | None" = None
         # Every title this panel has seen REW hold, this session. There was no such collection at
         # all: `known_titles()` was called by the checklist and by the supervisor's own audit, and
         # the panel never defined it, so both silently ran on "REW holds nothing" -- a checklist

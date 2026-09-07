@@ -18,6 +18,7 @@ import sys
 import time
 import weakref
 from pathlib import Path
+from typing import Callable, Optional
 
 from PySide6.QtCore import (
     QEvent,
@@ -1024,7 +1025,7 @@ class MainWindow(QMainWindow):
             action = lang_menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(i18n.current_language() == code)
-            action.triggered.connect(lambda _c=False, l=code: self._on_language_selected(l))
+            action.triggered.connect(lambda _c=False, lang=code: self._on_language_selected(lang))
         zoom_in_action = menu.addAction(i18n.t("menuZoomIn"))
         zoom_in_action.triggered.connect(self._zoom_in)
         zoom_out_action = menu.addAction(i18n.t("menuZoomOut"))

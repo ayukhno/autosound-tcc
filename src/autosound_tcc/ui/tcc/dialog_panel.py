@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -47,7 +46,7 @@ from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.chat_text import ComposerInput
 from autosound_tcc.ui.tcc import copy_menu
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar
-from autosound_tcc.ui.tcc.mock_data import DIALOG, CURRENT_GENERATOR_MODEL, DialogMessage
+from autosound_tcc.ui.tcc.mock_data import DIALOG, CURRENT_GENERATOR_MODEL
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps
 

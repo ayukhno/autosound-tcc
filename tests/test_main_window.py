@@ -2708,7 +2708,6 @@ def test_the_title_bar_carries_both_versions():
 def test_the_title_says_when_something_newer_exists(monkeypatch):
     """The versions are already in the title, so that is where "there is a newer one" belongs —
     it is the line a person reads without being asked to (user, 2026-08-19)."""
-    from autosound_tcc.core import updates
 
     _app()
     window = MainWindow()
@@ -2856,7 +2855,7 @@ def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, 
     also says the harness (`sdk:claude-opus-5`). Writing the bare id stored something nothing
     could resolve, and the window met it as a RETIRED model — "there is nothing on this machine to
     run it with" — on the first copy that carried a model at all (user, 2026-08-23)."""
-    from autosound_tcc.core import model_choices, project_settings
+    from autosound_tcc.core import model_choices
     from autosound_tcc.ui.tcc.mock_data import AI_MODEL_IDS
 
     _app()
@@ -2878,7 +2877,6 @@ def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, 
 
 def test_a_terminal_model_name_is_not_written_as_a_registry_key(monkeypatch):
     """A CLI was handed its own `--model`, in that CLI's vocabulary. It is not a key here."""
-    from autosound_tcc.core import project_settings
 
     _app()
     window = MainWindow()

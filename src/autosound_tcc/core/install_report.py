@@ -36,7 +36,6 @@ from typing import Optional
 
 from autosound_tcc.core import app_log, child, config, model_overrides, vendor_loader
 
-from autosound_tcc.core import child
 
 #: How long a `--version` may take before it is written off. These are local binaries printing a
 #: string; three seconds is already generous, and a hung one must not hang the panel.

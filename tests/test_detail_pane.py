@@ -49,9 +49,9 @@ def test_gain_mismatch_flags_the_gain_value_only():
     from PySide6.QtWidgets import QLabel
 
     labels = card.findChildren(QLabel)
-    fv_labels = [l for l in labels if "band-fv" in (l.property("class") or "")]
+    fv_labels = [lab for lab in labels if "band-fv" in (lab.property("class") or "")]
     # 3 value rows (Freq/Q/Gain) -- only Gain's gets the mismatch class.
-    mismatch_labels = [l for l in fv_labels if l.property("class") == "band-fv-mismatch"]
+    mismatch_labels = [lab for lab in fv_labels if lab.property("class") == "band-fv-mismatch"]
     assert len(mismatch_labels) == 1
     assert "1.0" in mismatch_labels[0].text()
 
@@ -63,7 +63,7 @@ def test_no_mismatch_uses_plain_gain_class():
     from PySide6.QtWidgets import QLabel
 
     assert not any(
-        l.property("class") == "band-fv-mismatch" for l in card.findChildren(QLabel)
+        lab.property("class") == "band-fv-mismatch" for lab in card.findChildren(QLabel)
     )
 
 

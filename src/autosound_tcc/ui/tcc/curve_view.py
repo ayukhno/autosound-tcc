@@ -1238,7 +1238,6 @@ class CurveView(QWidget):
         """The right-hand axis wears the sum's own colour, so the eye pairs scale with curve."""
         if self._sum_vb is None:
             return
-        theme = current_theme()
         axis = self._plot.getPlotItem().getAxis("right")
         axis.setPen(pg.mkPen(_grid_colour()))
         axis.setTextPen(pg.mkPen(self._sum_colour()))

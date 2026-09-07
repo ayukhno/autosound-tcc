@@ -52,7 +52,7 @@ def test_get_post_put_pass_a_timeout():
     unreachable call hang a QThread forever, which crashed the whole app on shutdown ("QThread:
     Destroyed while thread is still running"). Guard against the timeout getting silently dropped
     in a future edit -- `_get`/`_post`/`_put` must always pass one."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     api = vendor_loader.load_rew_api()
     with patch.object(api.urllib.request, "urlopen") as mock_urlopen:

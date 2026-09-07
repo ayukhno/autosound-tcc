@@ -1308,7 +1308,6 @@ def test_with_no_ledger_the_lines_are_readings_alone():
 def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
     """The window is open across a whole pass; a snapshot taken when it opened would be checking
     tonight's proposal against an hour-old ledger."""
-    from autosound_tcc.core import delay_bank
 
     ledger = {"w-L": 1.0}
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())

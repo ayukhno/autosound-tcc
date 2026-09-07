@@ -25,6 +25,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Sequence
 
 from autosound_tcc.core import claude_sdk, config, model_choices, signal_bus, vendor_loader
+from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
+from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
+from autosound_tcc.core.session_registry import SessionRegistry
 
 #: See `core/claude_sdk.py`. Bound in `TuningSession.__init__`, not imported here: `main_window`
 #: imports this module on its first line, so an import at the top made the Claude SDK a
@@ -37,9 +40,6 @@ SDK_NAMES = (
     "ResultMessage",
     "UserMessage",
 )
-from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
-from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
-from autosound_tcc.core.session_registry import SessionRegistry
 
 DEFAULT_MODEL = model_choices.DEFAULT_SDK_MODEL
 SKILL_NAME = "autosound-tuning"

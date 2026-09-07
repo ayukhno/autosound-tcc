@@ -11,7 +11,6 @@ import asyncio
 import json
 from concurrent.futures import Future
 
-import pytest
 
 from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest

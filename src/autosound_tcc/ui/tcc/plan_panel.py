@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -34,7 +33,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
-from autosound_tcc.ui.tcc.mock_data import PLAN, PlanPhase, PlanStep, sessions_for_step
+from autosound_tcc.ui.tcc.mock_data import PlanPhase, PlanStep, sessions_for_step
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 _PROGRESS_KEY = "ui/plan_progress"

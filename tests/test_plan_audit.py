@@ -8,7 +8,6 @@ cannot read it.
 
 from __future__ import annotations
 
-import json
 
 from autosound_tcc.state import plan_audit
 

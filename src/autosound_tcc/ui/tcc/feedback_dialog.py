@@ -15,7 +15,7 @@ import urllib.parse
 
 from pathlib import Path
 
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextCursor, QTextListFormat
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextListFormat
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (
     QDialog,

@@ -43,7 +43,7 @@ def _render(event: AgentEvent) -> None:
 
 async def _run(project_dir: Path, prompt: str | None, once: bool) -> None:
     server = TccMcpServer(project_dir=project_dir)
-    port = server.start()
+    server.start()
     print(f"--- TCC MCP server on {server.url} ---")
     print(f"--- project: {project_dir} ---")
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -96,10 +94,8 @@ def test_backing_out_of_the_gate_stops_the_launch(monkeypatch):
 def test_a_terminal_launch_from_another_folder_asks_which_project(tmp_path, monkeypatch):
     """`cd testTCC-5 && python -m autosound_tcc.app` opened testTCC-3 and said nothing, so the
     window and the person disagreed about which car they were tuning."""
-    from pathlib import Path
 
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import project_gate_dialog
 
     monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path / "remembered")
     monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: tmp_path / "here")
@@ -114,7 +110,6 @@ def test_a_terminal_launch_from_another_folder_asks_which_project(tmp_path, monk
 
 def test_the_remembered_project_still_wins_when_you_are_standing_in_it(tmp_path, monkeypatch):
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import project_gate_dialog
 
     monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
     monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: tmp_path)
@@ -126,7 +121,6 @@ def test_a_bundle_with_no_terminal_never_gets_gated(tmp_path, monkeypatch):
     """A double-clicked bundle has `cwd` of `/` or home and no tty; gating that would ask about a
     folder nobody chose, on every launch."""
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import project_gate_dialog
 
     monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
     monkeypatch.setattr(project_gate_dialog, "_launched_from", lambda: None)
@@ -151,7 +145,6 @@ def test_standing_in_a_project_opens_it_without_asking(tmp_path, monkeypatch):
     on a folder nobody picked, which this is not.
     """
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import project_gate_dialog
 
     elsewhere = tmp_path / "other-car"
     elsewhere.mkdir()
@@ -176,7 +169,6 @@ def test_standing_in_an_empty_folder_still_asks(tmp_path, monkeypatch):
     """The shortcut only fires on a folder that already holds a project. An empty one is exactly
     the case the gate exists for: nothing says the person meant to start a car here."""
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import project_gate_dialog
 
     remembered = tmp_path / "remembered"
     remembered.mkdir()

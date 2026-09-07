@@ -5,7 +5,6 @@ real QThread."""
 
 from __future__ import annotations
 
-import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog  # noqa: E402
 from autosound_tcc.ui.tcc.mock_data import MEAS_SESSIONS  # noqa: E402
-from autosound_tcc.state import measurement_view  # noqa: E402
 from autosound_tcc.core import capture_import  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import (  # noqa: E402
     MeasurementPanel,
