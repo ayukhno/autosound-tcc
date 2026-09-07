@@ -82,8 +82,13 @@ def test_the_installation_travels_and_the_tune_stays_behind(seeder, tmp_path):
 
     assert report.ok, report.problem
     assert report.channels == 2 and report.amps == 1
+    # `.gitignore` since the method's `0cc96f6` (skill, 2026-09-07): their `project_seed` writes
+    # it now, because the docs had claimed for months that the critic key was gitignored while
+    # nothing wrote one. The list is theirs to decide — this test pins that we report what was
+    # actually written, not a list we keep in our head.
     assert report.written == [
-        "project.json", "dsp_profile.json", "autosound_context.md", "preference-profile.md",
+        "project.json", ".gitignore", "dsp_profile.json", "autosound_context.md",
+        "preference-profile.md",
     ]
     seeded = json.loads((target / "project.json").read_text(encoding="utf-8"))
     original = json.loads((source / "project.json").read_text(encoding="utf-8"))

@@ -120,7 +120,12 @@ _SAFE_REW_SCRIPTS = frozenset(
         "dsp_math.py",
         "eq_gate.py",
         "spot_check.py",
-        "verify_measurements.py",
+        # `verify.py`, not `verify_measurements.py`: the latter was the Passat session's one-off
+        # script and the method deleted it (skill 2026-09-07, SKL-001). `verify.py` answers the
+        # question the checklist actually asks — does this measurement exist, and is it usable —
+        # and keeps those two apart, which is two different colours of row and two different
+        # conversations with the tuner.
+        "verify.py",
         "level_offsets.py",
         "xover_select.py",
         "equal_loudness.py",

@@ -477,6 +477,31 @@ def test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it(tmp_path
     assert vendor_loader.skill_dir() == good
 
 
+def test_every_script_the_allowlist_names_exists_in_the_method():
+    """A name in `_SAFE_REW_SCRIPTS` that the method does not have is a permission for nothing.
+
+    Bought on 2026-09-07 (SKL-001): the method deleted `verify_measurements.py`, and the entry
+    sat here unnoticed — while `verify.py`, the script that answers the question TCC's checklist
+    actually asks, was NOT on the list, so the model was not allowed to run it. Neither half was
+    visible from either side: they do not see our tree, and we do not watch theirs.
+    """
+    from autosound_tcc.core import tuning_session, vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("the vendored skill is not checked out")
+
+    rew_tool = vendor_loader.skill_dir() / "rew_tool"
+    missing = sorted(
+        name for name in tuning_session._SAFE_REW_SCRIPTS
+        if not (rew_tool / name).is_file()
+    )
+
+    assert not missing, (
+        f"named in _SAFE_REW_SCRIPTS but not in {rew_tool}: {missing}. Either the method removed "
+        "them, or they were never called that."
+    )
+
+
 def test_no_subprocess_decodes_its_child_with_the_machines_locale():
     """The same law as the test below, on the other kind of text handle.
 
