@@ -6,6 +6,39 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.35] — 2026-09-07 · the pin caught up six tags, and the first thing it moved was the owner's own words
+
+Paired with method `dcf5a68cb7318be575ca39a1fd181c62893b340c` — the tag on that commit is
+**`v3.0.46`**. The previous release said catching up was next on the list; this is it, six tags in
+one step (`v3.0.41` … `v3.0.46`).
+
+The suite against the new pin: 1652 passed, 1 skipped — two more than before, because the method's
+own selftests are parameterised over its modules and it grew some. Nothing the method reworded broke
+a test here: the refusal texts the diagnostics show are nowhere pinned word for word.
+
+### Fixed
+
+- **The owner's panel showed the method's vocabulary instead of the owner's words on every map
+  written by a method newer than `v3.0.42`.** The line is called `symptom` there, capped at 200
+  characters, and the schema separately forbids backfilling it from `why`. Both keys are read now,
+  `symptom` first, so a map written before the rename does not lose the old one.
+
+  The suite could not have seen this: every fixture wrote `plain`, because the same head wrote the
+  fixture and the reader. What caught it was the pin, not a test — the lesson from that day is in
+  `TESTING.md`.
+
+### Changed
+
+- **The pin moved from `v3.0.40` to `v3.0.46`**, and two of the six tags answer questions this app
+  had filed upstream:
+  - `v3.0.46` — a file valid only on the machine that wrote it no longer kills the check, and there
+    is a repair path for the encoding (this closed hub#74, which had been filed against a fault
+    already fixed upstream — the submodule was what was being read, not the source);
+  - `v3.0.45` — two answers about protection, OFF by default, citing TCC-005 in the docstring
+    itself (hub#71);
+  - `v3.0.41`…`v3.0.44` — phase control became a filter, the loss-sum port, the stop as an event,
+    the schema reaching the cars, and the residual carrying its band, mask and grid.
+
 ## [v0.1.34] — 2026-09-06 · what cut the two side columns was a path and a subtitle
 
 Paired with method `dbf3f1ef8aded57210b6b4ee2121e854ceeed7e7` — the tag on that commit is
