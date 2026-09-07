@@ -367,3 +367,42 @@ def test_a_batch_that_shuffles_names_among_its_own_members_is_not_a_clash(tmp_pa
                   ("m-R_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
 
     assert ci.duplicate_targets([("u1", "m-R_02 (sw)"), ("u2", "m-L_02 (sw)")], answer) == []
+
+
+def test_a_sweep_is_told_from_an_rta_by_rews_data_and_not_by_its_title():
+    """The title says `(sw)`, and the title is a convention a person types at 1 a.m. in a car park.
+
+    REW's own listing answers structurally instead: a swept capture carries `timeOfIRPeakSeconds`,
+    `delay` and `signalToNoisedB`; an RTA capture does not carry them at all. Measured on a live
+    REW (V5.40 beta 132, 2026-09-07): 18 of 18 sweeps, 0 of 72 RTA captures.
+    """
+    rta = {"title": "ALL_60 (rta)", "uuid": "u1",
+           "notes": "65536-point 1/48 octave RTA using Hann window"}
+    sweep = {"title": "w-L_60 (sw)", "uuid": "u2", "notes": "DELAY 11.5702 ms (3.969 m)",
+             "timeOfIRPeakSeconds": 0.0116, "delay": 0.0115, "signalToNoisedB": 51.2}
+
+    assert ci.is_swept(sweep) is True
+    assert ci.is_swept(rta) is False
+
+
+def test_a_mistyped_title_does_not_change_what_gets_checked():
+    """The convention broken both ways: an RTA named like a sweep and a sweep named like an RTA.
+    A check skipped because of a typo is a measurement the tuner discovers at home."""
+    lying_rta = {"title": "w-L_60 (sw)", "uuid": "u3", "notes": "RTA, 150 averages"}
+    lying_sweep = {"title": "ALL_60 (rta)", "uuid": "u4", "notes": "DELAY 6.1 ms",
+                   "timeOfIRPeakSeconds": 0.0061}
+
+    assert ci.is_swept(lying_rta) is False
+    assert ci.is_swept(lying_sweep) is True
+
+
+def test_the_rows_carry_whether_there_is_anything_to_check():
+    rows = ci.candidates({
+        "1": {"title": "ALL (rta)", "uuid": "a", "date": "2026-Sep-04 11:11:07"},
+        "2": {"title": "w-L (sw)", "uuid": "b", "date": "2026-Sep-04 11:12:07",
+              "timeOfIRPeakSeconds": 0.01},
+    }, imported={})
+
+    assert [(row.title, row.swept) for row in rows] == [
+        ("ALL (rta)", False), ("w-L (sw)", True),
+    ]
