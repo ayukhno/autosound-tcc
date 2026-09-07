@@ -182,7 +182,9 @@ def test_the_reviewer_vendor_is_read_off_the_model_name():
     assert model_choices.critic_vendor(unknown) == "google"
 
 
-def test_reachability_is_the_vendors_key_or_cli_not_the_vendors_name(monkeypatch):
+def test_reachability_is_the_vendors_key_or_cli_not_the_vendors_name(
+    monkeypatch, real_critic_reaches
+):
     """Before SCR-033 this answered "is it Gemini" and marked everything else clipboard-only.
     Now the reviewer script speaks three transports, so the question is whether THIS machine has
     the one the chosen model needs."""
@@ -555,7 +557,7 @@ def test_a_vendor_we_cannot_name_is_not_a_vendor_we_can_reach():
     assert model_choices.critic_reaches(kimi) is False, "but the promise is not made"
 
 
-def test_a_named_vendor_still_reaches_when_its_cli_is_there(monkeypatch):
+def test_a_named_vendor_still_reaches_when_its_cli_is_there(monkeypatch, real_critic_reaches):
     from autosound_tcc.core import model_choices
 
     gemini = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",

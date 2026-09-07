@@ -15,6 +15,12 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Captured at import, before any fixture can patch it: `real_critic_reaches` hands this back to
+# the tests that examine the probe rather than live with its answer.
+from autosound_tcc.core import model_choices as _model_choices_at_import
+
+_REAL_CRITIC_REACHES = _model_choices_at_import.critic_reaches
+
 import sys  # noqa: E402
 import traceback  # noqa: E402
 
@@ -54,6 +60,22 @@ def _an_exception_in_a_qt_slot_fails_the_test():
             f"belong to a widget an earlier test left alive:\n\n" + "\n".join(caught),
             pytrace=False,
         )
+
+
+@pytest.fixture
+def real_critic_reaches(monkeypatch):
+    """The unguarded `critic_reaches`, for the tests whose subject IS the probe.
+
+    The autouse fixture above answers False for everyone, so the developer's PATH cannot decide a
+    result. That is right for every test about badges, footers and state — and wrong for the four
+    that check the probe itself, which would otherwise assert against their own guard. Asking for
+    this fixture is how a test says "I am testing the machine question, not depending on the
+    answer"; it still controls what the probe sees through `shutil.which` and the environment.
+    """
+    monkeypatch.setattr(
+        _model_choices_at_import, "critic_reaches", _REAL_CRITIC_REACHES, raising=False
+    )
+    return _REAL_CRITIC_REACHES
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -171,6 +193,12 @@ def _isolated_machine_config(tmp_path, monkeypatch):
 
     monkeypatch.setattr(model_choices, "_CLI_CACHE", {}, raising=False)
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: False, raising=False)
+    # ...and the same probe wearing another name. `critic_reaches` does NOT go through
+    # `cli_available`: it asks `os.environ` and `shutil.which` itself, so the patch above never
+    # sees it. Two tests were therefore decided by what the developer happened to have installed,
+    # and nobody could tell until there was a second machine (CI, 2026-09-07). Tests that need a
+    # reachable critic patch it back themselves; their patch runs later and wins.
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: False, raising=False)
     # ...and off the network. Opening the diagnostics dialog's Installation tab asks GitHub what
     # the newest TCC and method are; a suite that does that is slow when the network is there and
     # red when it is not. Tests about the update rows patch this themselves.

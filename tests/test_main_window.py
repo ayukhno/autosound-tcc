@@ -726,7 +726,7 @@ def test_every_entry_says_which_route_it_takes(monkeypatch):
     assert any(font is not None and font.bold() for font in fonts)
 
 
-def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch):
+def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch, real_critic_reaches):
     """The same Claude entry, on a machine that has the key — the label follows the transport."""
     from autosound_tcc.core import model_choices as mc
 
@@ -740,7 +740,7 @@ def test_a_reviewer_whose_vendor_is_configured_is_not_marked(monkeypatch):
     assert "clipboard" not in window._ai_critic_combo.itemText(claude).lower()
 
 
-def test_a_gemini_reviewer_is_not_marked(monkeypatch):
+def test_a_gemini_reviewer_is_not_marked(monkeypatch, real_critic_reaches):
     from autosound_tcc.core import model_choices as mc
 
     _catalogue(monkeypatch, [{
@@ -2265,6 +2265,10 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     # This test needs a SECOND vendor to exist, so it says so rather than depending on what the
     # developer happens to have installed (conftest forces the probe off for exactly that reason).
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+    # ...and a reviewer this machine CAN reach, for the same reason: the subject here is a
+    # substituted model, and an unreachable one would raise its own warning and hide the one under
+    # test. `conftest` says no by default so the answer never comes from the developer's PATH.
+    monkeypatch.setattr(mc, "critic_reaches", lambda choice: True)
     _app()
     window = MainWindow()
 
@@ -2459,7 +2463,7 @@ def test_the_red_field_clears_when_a_real_model_is_picked(tmp_path):
     assert "is-missing" not in str(combo.property("class"))
 
 
-def test_no_row_repeats_what_the_row_already_says():
+def test_no_row_repeats_what_the_row_already_says(monkeypatch):
     """Bold says "recommended"; the label already ends in "(Low)". Both badges were dropped —
     "там є Low і хто знає на скільки він лоу" (user, 2026-08-12): a note that neither adds a fact
     nor quantifies one is width spent on nothing."""
@@ -2467,6 +2471,10 @@ def test_no_row_repeats_what_the_row_already_says():
     from PySide6.QtWidgets import QComboBox
     from autosound_tcc.core import model_choices as mc
 
+    # The subject is which badges a row carries. "Clipboard only" is a badge that DOES add a fact,
+    # so it is not one of the two under test — but it appears whenever the machine cannot reach the
+    # reviewer, which on CI is always. Said out loud here rather than inherited from a PATH.
+    monkeypatch.setattr(mc, "critic_reaches", lambda choice: True)
     _app()
     combo = QComboBox()
     entries = [

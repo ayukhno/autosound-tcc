@@ -686,7 +686,9 @@ def test_finish_step_without_evidence_is_refused_by_the_skill(tmp_path):
 # ---- what TCC already knows and must not ask twice --------------------------
 
 
-def test_the_state_carries_the_reviewer_the_arbiter_picked(tmp_path, monkeypatch):
+def test_the_state_carries_the_reviewer_the_arbiter_picked(
+    tmp_path, monkeypatch, real_critic_reaches
+):
     """Intake opened every session with "how would you like to set up the Reviewer channel?" —
     about a channel already configured in TCC's footer and one `call_critic` away. A GUI that
     knows something and asks anyway is a chat window with more buttons."""
@@ -1042,7 +1044,9 @@ def test_the_server_starts_in_a_process_with_no_stdout(monkeypatch, tmp_path):
         server.stop(timeout=2.0)
 
 
-def test_a_clipboard_fallback_says_why_it_was_always_going_to_be_one(tmp_path, monkeypatch):
+def test_a_clipboard_fallback_says_why_it_was_always_going_to_be_one(
+    tmp_path, monkeypatch, real_critic_reaches
+):
     """The tool answered `mode: clipboard` with an empty `detail`, twice in a row, and the model
     reported "the critic returned clipboard, no review" with nothing to act on (user,
     2026-08-23). A designed fallback that cannot explain itself is indistinguishable from a
