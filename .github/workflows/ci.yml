@@ -56,6 +56,43 @@ jobs:
       # pyproject.toml names the classes; this names the ruff that reads them (HUB-047).
       - run: uvx ruff@0.12.0 check src tests scripts --statistics
 
+  # The short loop. `tests/cross-platform-suspects.txt` lists exactly what the first CI runs
+  # found failing off macOS; running only those takes about a minute where the full suite takes
+  # nine, so a fix can be checked while it is still in the author's head. Delete a line from the
+  # file when it is fixed — an empty list is the goal, and this job going green is what says so.
+  #
+  # It does NOT replace the full jobs below: this list says where to look, never that the rest is
+  # fine. Red here is not a blinking check — it is a count of work left, and it points at a file.
+  suspects:
+    name: suspects (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libdbus-1-3
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # `shell: bash` on both: the Windows runner has it, and one command beats maintaining a
+      # PowerShell twin of the same line.
+      - shell: bash
+        run: |
+          mapfile -t ids < <(grep -vE '^[[:space:]]*(#|$)' tests/cross-platform-suspects.txt)
+          if [ ${#ids[@]} -eq 0 ]; then
+            echo "the list is empty — nothing left to suspect"
+            exit 0
+          fi
+          printf 'running %s entries\n' "${#ids[@]}"
+          uv run --extra dev --python 3.12 python -m pytest "${ids[@]}" -q
+
   # How many Linux runs this workflow was asked for, as a matrix. One on a push; whatever the
   # dispatch input says when a person is chasing the abort.
   linux-plan:

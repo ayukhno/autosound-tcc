@@ -13,8 +13,17 @@ then the one that loses a tuner's own words, then the noise that hides the next 
 ## Global constraints
 
 - **Windows and Linux cannot be checked locally.** macOS is the only machine here. Every task's
-  real verification is a CI run: push, then `gh run view <id>`. Budget ~10 min per cycle
-  (Windows job is 9 min). `make test` on macOS is the pre-check, never the proof.
+  real verification is a CI run: push, then `gh run view <id>`. `make test` on macOS is the
+  pre-check, never the proof.
+- **The short loop is `tests/cross-platform-suspects.txt`.** It holds exactly the node ids that
+  fail off macOS, and the `suspects` job runs only those on Windows and Linux — about a minute
+  against the full suite's nine. Delete a line when it is fixed; the file is the progress count.
+  On a Windows VM the same list runs by hand:
+
+      uv run --extra dev --python 3.12 python -m pytest $(grep -vE '^\s*(#|$)' tests/cross-platform-suspects.txt)
+
+  It narrows the loop, it does not replace it: the full jobs still run, because a fix for one
+  platform can break another test anywhere.
 - **`make test` must stay at `1687 passed, 1 skipped`** — a fix for another platform that costs
   a macOS test is a regression, not a fix.
 - **`vendor/autosound-tuning-skill` is not ours.** A cause that lands inside it goes to the

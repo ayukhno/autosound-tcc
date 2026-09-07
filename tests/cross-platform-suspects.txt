@@ -1,0 +1,50 @@
+# What the first CI runs found failing off macOS (2026-09-07). One node id per line.
+#
+# The point of this file is the CYCLE: the whole suite takes 9 minutes on Windows, these take
+# about one, so a fix can be checked while it is still in your head. `ci.yml` has a `suspects`
+# job that runs exactly this list on Windows and Linux, on every push and on demand.
+#
+# Run it yourself, on any machine (a Windows VM is the interesting one):
+#
+#   uv run --extra dev --python 3.12 python -m pytest $(grep -vE '^\s*(#|$)' tests/cross-platform-suspects.txt)
+#
+# Delete a line when it is fixed. An empty file (no lines but these comments) is the goal, and
+# the full suite is still what proves it — this list only says where to look, never that the
+# rest is fine.
+#
+# Sources: ayukhno/autosound-tcc#17 (26 on Windows), #18 (2 of them also fail on Linux).
+
+# --- probe of the developer's machine (#18) — also red on Linux
+tests/test_main_window.py::test_no_row_repeats_what_the_row_already_says
+tests/test_main_window.py::test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be
+
+# --- decoded with the locale instead of UTF-8 (#17, pile 3)
+tests/test_attach_image.py::test_pasting_then_accepting_writes_the_file_and_returns_its_line
+tests/test_attach_image.py::test_the_composer_line_is_relative_to_the_project
+tests/test_attach_image.py::test_the_line_is_just_the_path_when_no_caption_was_given
+tests/test_diagnostics_panel.py::test_the_report_is_read_only_when_the_tab_is_opened
+tests/test_listening.py::test_a_verdict_reaches_the_journal_and_reads_back
+
+# --- an assertion that hard-codes `/` (#17, pile 2)
+tests/test_model_choices.py::test_a_model_id_is_written_in_exactly_one_module
+tests/test_packaging.py::test_a_2x_skill_is_told_apart_from_no_skill_at_all
+tests/test_packaging.py::test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it
+tests/test_packaging.py::test_a_plugin_installed_skill_is_found
+tests/test_packaging.py::test_an_installed_tcc_finds_the_skill_where_claude_code_put_it
+tests/test_desktop_entry.py::test_windows_shortcut_script_points_at_the_installed_launcher
+tests/test_desktop_entry.py::test_windows_shortcut_script_uses_the_packaged_icon
+
+# --- written for POSIX, cannot pass on Windows as they stand (#17, pile 1)
+tests/test_desktop_entry.py::test_a_launcher_path_with_a_space_stays_one_word
+tests/test_desktop_entry.py::test_a_platform_with_no_desktop_entry_says_how_to_start_it
+tests/test_desktop_entry.py::test_launcher_is_executable_and_execs_the_installed_binary
+tests/test_desktop_entry.py::test_the_launcher_is_found_beside_this_interpreter_first
+tests/test_project_gate.py::test_an_unwritable_path_does_not_accept
+tests/test_target_curve.py::test_a_platform_with_no_select_form_opens_the_folder
+tests/test_terminal_launcher.py::test_macos_builds_an_applescript_that_cds_then_runs_the_cli
+tests/test_terminal_launcher.py::test_macos_quotes_a_path_that_would_break_applescript
+
+# --- not sorted yet; may belong to the skill, not to us (#17, task 5)
+tests/test_contract_check.py::test_a_caller_can_end_the_check_early
+tests/test_skill_selftests.py::test_skill_selftest_passes
+tests/test_main_window.py::test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own
