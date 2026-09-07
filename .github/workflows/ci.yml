@@ -97,6 +97,11 @@ jobs:
           # Without it `vendor/autosound-tuning-skill` is empty, the REW client does not import,
           # and the suite does not collect at all.
           submodules: true
+      # Qt links against these even for the offscreen platform, and the GitHub image does not
+      # ship them: without this the suite does not COLLECT (`ImportError: libEGL.so.1`, run
+      # 34135331995), so the job would report a red that has nothing to do with the abort it is
+      # here to catch. macOS and Windows carry their own.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libdbus-1-3
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
