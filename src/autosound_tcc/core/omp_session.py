@@ -62,7 +62,7 @@ from autosound_tcc.core.agent_events import (
     TurnEnd,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
-from autosound_tcc.core.tuning_session import SKILL_NAME, bash_is_read_only
+from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, bash_is_read_only
 
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 
@@ -580,7 +580,7 @@ class OmpSession:
             return True
         if tool == "bash":
             command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            if bash_is_read_only(command):
+            if bash_is_read_only(command, _read_roots_for(self.project_dir)):
                 return True
             # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
             # about it teaches the Arbiter to click through the ones that matter.
