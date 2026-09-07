@@ -77,7 +77,7 @@ def _run(argv: list[str]) -> str:
     """First line of a command's output, or "" — never an exception, never a traceback."""
     try:
         done = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8", timeout=_PROBE_TIMEOUT, check=False, **child.quiet())
+            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_PROBE_TIMEOUT, check=False, **child.quiet())
     except Exception:  # noqa: BLE001 — a probe that fails is a finding, not a crash
         return ""
     out = (done.stdout or done.stderr or "").strip().splitlines()

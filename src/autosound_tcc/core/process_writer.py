@@ -135,6 +135,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
                 # 2026-09-07). The tuner's own words about what they heard are the one thing here
                 # that has to survive the trip verbatim.
                 encoding="utf-8",
+                errors="replace",
                 timeout=timeout_s,
                 env=vendor_loader.child_env(),
                 **child.quiet(),

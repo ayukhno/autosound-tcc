@@ -312,6 +312,7 @@ def _git(project: Path, *args: str) -> Optional[str]:
             ["git", "-C", str(project), *args],
             capture_output=True, text=True, timeout=_GIT_TIMEOUT_S, **child.quiet(),
             encoding="utf-8",
+            errors="replace",
         )
     except (OSError, subprocess.SubprocessError):
         return None

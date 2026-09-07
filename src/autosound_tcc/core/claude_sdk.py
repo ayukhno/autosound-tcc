@@ -120,6 +120,7 @@ def probe_signed_in() -> Optional[bool]:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=_AUTH_TIMEOUT_S, **child.quiet())
     except (OSError, subprocess.SubprocessError):
         _SIGNED_IN = None

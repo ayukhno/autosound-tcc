@@ -401,7 +401,7 @@ def _fetch_agy_choices() -> list[Choice]:
     for _ in range(2):
         try:
             proc = subprocess.run(
-                ["agy", "models"], capture_output=True, text=True, encoding="utf-8", timeout=CLI_TIMEOUT_S, **child.quiet())
+                ["agy", "models"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CLI_TIMEOUT_S, **child.quiet())
         except (subprocess.TimeoutExpired, OSError):
             return []
         if proc.returncode == 0 and (proc.stdout or "").strip():
@@ -459,6 +459,7 @@ def omp_catalogue() -> list[Choice]:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=CATALOGUE_TIMEOUT_S, **child.quiet())
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise OmpCatalogueError(str(exc)) from None

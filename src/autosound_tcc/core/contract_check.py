@@ -166,6 +166,7 @@ def run(
         # variable `child` — the process — as it was.
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         encoding="utf-8",
+        errors="replace",
                                 env=vendor_loader.child_env(), **child_process.quiet())
     except OSError as exc:
         return failed(str(exc))

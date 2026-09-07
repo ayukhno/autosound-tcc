@@ -244,7 +244,23 @@ def child_env(**extra: str) -> dict[str, str]:
     noise that hides real drift and invites committing build output by accident. We are the ones
     spawning the interpreter, so we are the ones who say don't.
     """
-    return {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", **extra}
+    return {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        # And the child prints UTF-8 whatever the machine's locale is. Without this its stdout is
+        # opened with the Windows ANSI page, and the skill's own console fallback — correctly, for
+        # a console — folds every character that page cannot draw: a listening verdict came back
+        # as `stsena trokhy pravoruch` instead of «сцена трохи праворуч» (first Windows CI run,
+        # 2026-09-07). Reading the pipe as UTF-8 on our side cannot undo that; the transliteration
+        # happens before the bytes reach us.
+        #
+        # This does not fight the skill's design, it tells it the truth: folding is for a terminal
+        # a person is looking at, and this is a pipe. `PYTHONIOENCODING` covers stdio,
+        # `PYTHONUTF8` the rest of that interpreter's text handling.
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        **extra,
+    }
 
 
 def _load_file(path: Path, module_name: str) -> ModuleType:
