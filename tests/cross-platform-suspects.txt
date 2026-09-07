@@ -15,6 +15,8 @@
 # Sources: ayukhno/autosound-tcc#17 (26 on Windows), #18 (2 of them also fail on Linux).
 
 # --- not sorted yet; may belong to the skill, not to us (#17, task 5)
-tests/test_contract_check.py::test_a_caller_can_end_the_check_early
+# Waiting on the skill, not on us: `contract.py::_selftest` compares a path it built against a
+# literal with forward slashes, so it fails on Windows and our runner of their selftests reports
+# it. Bus ticket hub#108 (TCC-007). Kept here so the count stays honest — it is red, and we are
+# not the ones who can turn it green.
 tests/test_skill_selftests.py::test_skill_selftest_passes
-tests/test_main_window.py::test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own
