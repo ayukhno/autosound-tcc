@@ -32,6 +32,20 @@ on:
         description: "How many times to run the Linux suite (HUB-049 needs a series, not one run)"
         default: "1"
         required: false
+      # Same instrument, other platform. The Windows crash (#19) shows in roughly one full run in
+      # three, so a single job neither confirms it nor clears it — and a fix for a 1-in-3 fault
+      # cannot be judged by one green run either.
+      windows_runs:
+        description: "How many times to run the Windows suite (#19 shows in about 1 run in 3)"
+        default: "1"
+        required: false
+      # Narrow the series to part of the suite, e.g. `tests/test_dialog_live.py
+      # tests/test_diagnostics_panel.py` — nine minutes becomes one, once it is known that the
+      # narrow set still reproduces. Empty means the whole suite.
+      pytest_args:
+        description: "What to run in the series (default: the whole suite)"
+        default: ""
+        required: false
 
 concurrency:
   # A manual series gets its own group: it is the answer to a question somebody asked, and a push
@@ -152,10 +166,33 @@ jobs:
         env:
           PYTHONFAULTHANDLER: "1"
 
+  # How many Windows runs were asked for. One on a push; a series when somebody is chasing #19.
+  windows-plan:
+    name: windows plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.count.outputs.runs }}
+    steps:
+      - id: count
+        env:
+          WINDOWS_RUNS: ${{ github.event.inputs.windows_runs }}
+        run: |
+          n="$WINDOWS_RUNS"
+          [[ "$n" =~ ^[0-9]+$ ]] || n=1
+          (( n >= 1 )) || n=1
+          (( n <= 20 )) || n=20
+          echo "runs=$(seq 1 "$n" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
   windows:
-    name: windows
+    name: windows (run ${{ matrix.run }})
+    needs: windows-plan
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(needs.windows-plan.outputs.runs) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -165,8 +202,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       # Same command as `make test`, deliberately: CI running something the author cannot run by
-      # hand is how a green tick stops meaning anything.
-      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -q
+      # hand is how a green tick stops meaning anything. `pytest_args` narrows it only when a
+      # person asked for a narrower series.
+      #
+      # `-p no:cacheprovider`: the matrix runs share nothing, and a cache write is one more thing
+      # that can differ between run 3 and run 7 of a fault we are trying to measure.
+      - shell: bash
+        env:
+          PYTEST_ARGS: ${{ github.event.inputs.pytest_args }}
+        run: |
+          args="${PYTEST_ARGS:-tests/}"
+          echo "running: $args"
+          uv run --extra dev --python 3.12 python -m pytest $args -q -p no:cacheprovider
 
   macos:
     name: macos
