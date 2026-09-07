@@ -120,17 +120,13 @@ def test_the_windows_form_has_no_space_after_the_comma(monkeypatch):
 def test_a_platform_with_no_select_form_opens_the_folder(monkeypatch, tmp_path):
     """Linux has no portable "select this file", and opening the folder is the best that exists —
     but it must be the FOLDER, not the .txt, which xdg-open would hand to a text editor."""
+    # Only `sys.platform`. Patching `os.name` used to be needed too, and it was the bug: pathlib
+    # reads `os.name` to choose its Path class, so the disguise broke `path.parent` inside the
+    # function under test. `reveal_command` now asks the platform one way, so the test can too.
     monkeypatch.setattr(target_curve.sys, "platform", "linux")
-    # `os.name` is patched on the module's own reference and pathlib is given the real one back
-    # immediately: `Path()` picks its class from `os.name` AT CONSTRUCTION, so a global patch made
-    # every later `Path(...)` in this test raise `cannot instantiate 'PosixPath' on your system`
-    # on Windows — the test failing for a reason that had nothing to do with what it asserts.
     folder = tmp_path / "curves"
-    target = folder / "EPY.txt"
-    expected = ["xdg-open", str(folder)]
-    monkeypatch.setattr(target_curve.os, "name", "posix")
 
-    assert target_curve.reveal_command(target) == expected
+    assert target_curve.reveal_command(folder / "EPY.txt") == ["xdg-open", str(folder)]
 
 
 # ------------------------------------------- the copy of the tool with the curve in it

@@ -20,3 +20,9 @@
 # it. Bus ticket hub#108 (TCC-007). Kept here so the count stays honest — it is red, and we are
 # not the ones who can turn it green.
 tests/test_skill_selftests.py::test_skill_selftest_passes
+
+# Back on the list after being taken off it too early: the fix in a137398 removed the symptom
+# from the test and left the cause in the code, and the short loop stopped running it, so the
+# full suite kept failing while the count said otherwise. Comes off again when a Windows run
+# says so — not when macOS does.
+tests/test_target_curve.py::test_a_platform_with_no_select_form_opens_the_folder

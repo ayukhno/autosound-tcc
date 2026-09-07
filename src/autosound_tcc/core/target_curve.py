@@ -268,7 +268,12 @@ def reveal_command(path: Path) -> list[str]:
     path = Path(path)
     if sys.platform == "darwin":
         return ["open", "-R", str(path)]
-    if os.name == "nt":
+    # `sys.platform`, like the darwin branch above and not `os.name`: this function is reached in
+    # tests that pretend to be another platform, and `os.name` is what PATHLIB reads to decide
+    # which Path class to build. Patching it made `path.parent` on the last line raise
+    # `NotImplementedError: cannot instantiate 'PosixPath'` — the code under test broken by the
+    # test's own disguise (Windows CI, 2026-09-07). One way of asking the platform, not two.
+    if sys.platform.startswith("win"):
         # One string, comma, no space: `explorer /select,C:\x\y.txt`. With a space it opens the
         # user's Documents folder instead and reports success.
         return ["explorer", f"/select,{path}"]
