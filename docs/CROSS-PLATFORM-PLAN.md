@@ -302,5 +302,17 @@ simple:
   only one on this list that might be a product bug rather than a test bug. Investigate before
   touching: `systematic-debugging`, not a guess.
 
+## Not in this plan: the Windows crash (`#19`)
+
+Found while checking the `suspects` job, 2026-09-07: the Windows suite dies with
+`Windows fatal exception: access violation` in
+`test_dialog_live.py::test_shutdown_ends_a_worker_stuck_mid_turn`, about one run in three. It is
+the process dying, not a test asserting, so it is not one of the 26 and no task here addresses it.
+
+It does change how the results of this plan are read: while `#19` is open, a red `windows` job may
+mean "26 known failures" or may mean "the suite never finished" — check which before concluding
+anything. The `suspects` job is unaffected (it does not run `test_dialog_live.py`), which is the
+second reason the short loop is worth having.
+
 **Done means:** a CI run where Windows, Linux and macOS are all green, linked in `#17` and `#18`
 when closing them.
