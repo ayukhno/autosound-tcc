@@ -95,6 +95,34 @@ out by a person and one the arithmetic called unusable were both lost to a zero.
 worth running when one happens to be at hand; it must never become a gate, because the supply of
 live projects shrinks as the app stops being tested and starts being used.
 
+## A green run could hide an exception, and did (2026-09-07)
+
+An exception raised inside a Qt slot cannot travel back into C++. PySide6 hands it to
+`sys.excepthook`, which prints it to stderr and lets the program carry on — and pytest captures
+stderr on a passing test. So the traceback was not merely easy to miss: on `pytest` it was never
+printed at all. `pytest -s` showed three of them in `test_main_window.py` while the file reported
+"134 passed" (HUB-046).
+
+What they were hiding:
+
+* two hand-written `class Bus` doubles that stopped short of the protocol. `SignalBus` grew
+  `pending_count`, `main_window` began reading it from a two-second timer, the doubles never
+  followed. The tests were exercising an object the production code could no longer use.
+* an actual defect in the window: `_on_effort_changed` read `self._agent_worker` while the model
+  combos were still being filled, before anything had set it. Every start of the app raised there.
+
+Two mechanisms came out of it, and both are cheap to keep:
+
+* **`tests/conftest.py` fails the test when a slot raises.** Read the frames, not the heading:
+  timers belong to windows earlier tests left alive, so they fire during whoever is running.
+* **`tests/test_doubles.py` checks that anything standing in the `bus` slot answers every name the
+  production code asks of a bus** — the protocol is read out of `src/` rather than listed, and the
+  file carries its own red case so a broken scan cannot pass quietly.
+
+The rule under both: **prefer the real object to a double when the real one is cheap.** `SignalBus`
+needs a directory and starts no threads, so both tests now use it — a real bus with nothing acked
+IS "the model has not answered yet", and it cannot fall behind itself.
+
 ## After a defect: the two questions, out loud
 
 1. **Does this get a regression test?** Not automatically — a test that pins a typo is noise. It

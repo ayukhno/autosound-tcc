@@ -15,8 +15,45 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import sys  # noqa: E402
+import traceback  # noqa: E402
+
 import pytest  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _an_exception_in_a_qt_slot_fails_the_test():
+    """A slot that raises must not leave the run green.
+
+    Qt cannot let a Python exception cross back into C++, so it hands it to `sys.excepthook` and
+    carries on -- and pytest captures stderr on a passing test, so the traceback is not even
+    printed. Measured on 2026-09-07: `main_window`'s two-second nudge timer hit a test double
+    with no `pending_count` twice per run of `test_main_window.py`, and the file reported
+    "134 passed" both times. Only `pytest -s` showed anything (HUB-046).
+
+    The traceback names the culprit; the test name does not necessarily. A window one test left
+    alive keeps its timers, and they fire during whatever test is running when they go off -- so
+    read the frames, not the heading.
+    """
+    caught: list[str] = []
+    previous = sys.excepthook
+
+    def _record(kind, value, tb):
+        caught.append("".join(traceback.format_exception(kind, value, tb)))
+
+    sys.excepthook = _record
+    try:
+        yield
+    finally:
+        sys.excepthook = previous
+    if caught:
+        pytest.fail(
+            f"{len(caught)} exception(s) escaped from a Qt slot during this test -- Qt printed "
+            f"them to stderr and carried on. The frames below are the real location, and may "
+            f"belong to a widget an earlier test left alive:\n\n" + "\n".join(caught),
+            pytrace=False,
+        )
 
 
 @pytest.fixture(scope="session", autouse=True)

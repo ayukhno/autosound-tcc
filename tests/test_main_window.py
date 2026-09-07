@@ -1577,22 +1577,13 @@ def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypat
 
     _app()
     window = MainWindow()
-    pushed: list[tuple] = []
-
-    class Bus:
-        open_ids: set = set()
-
-        def push(self, kind, **payload):
-            pushed.append((kind, payload))
-            signal = signal_bus.Signal(kind=kind, payload=payload)
-            self.open_ids.add(signal.id)
-            return signal
-
-        def is_open(self, signal_id):
-            return signal_id in self.open_ids
 
     class Server:
-        bus = Bus()
+        # The real bus, not a hand-written stand-in. A double is a second copy of the protocol and
+        # it drifts in silence: `SignalBus` grew `pending_count`, the double here did not, and the
+        # AttributeError died inside a Qt slot with the run still green (HUB-046, 2026-09-07). The
+        # real one needs a directory and nothing else.
+        bus = signal_bus.SignalBus(tmp_path)
 
         def stop(self, timeout: float = 5.0) -> None:
             """A stand-in for the real server has to answer what the real one is asked. Since
@@ -1603,23 +1594,26 @@ def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypat
 
     window._on_channel_toggle("virtual", "VRR", True)
 
-    assert pushed == [(signal_bus.CHANNEL_TOGGLE,
-                       {"group": "virtual", "channel": "VRR", "on": True})]
+    # `deliver()` is how the model reads the queue, and reading does not close anything -- so it
+    # is also how a test sees what was raised.
+    assert [(s.kind, s.payload) for s in server.bus.deliver()] == [
+        (signal_bus.CHANNEL_TOGGLE, {"group": "virtual", "channel": "VRR", "on": True})
+    ]
 
     # The row is now waiting on an answer, and asking again while it waits must not raise a
     # second signal -- four of them piled up that way (F-009 point 4, 2026-08-21).
     assert ("virtual", "VRR") in window._pending_toggles
     window._on_channel_toggle("virtual", "VRR", True)
-    assert len(pushed) == 1, "the same request twice is one request"
+    assert len(server.bus.deliver()) == 1, "the same request twice is one request"
 
     # The opposite request IS a new one: the Arbiter changed their mind, and the model has to
     # hear the thing they now want.
     window._on_channel_toggle("virtual", "VRR", False)
-    assert len(pushed) == 2
+    assert len(server.bus.deliver()) == 2
     assert window._pending_toggles[("virtual", "VRR")]["on"] is False
 
     # Closed on the bus -- acknowledged, however it was answered -- and the wait is over.
-    server.bus.open_ids.clear()
+    server.bus.ack([s.id for s in server.bus.deliver()], signal_bus.ACK_APPLIED)
     window._tick_pending_toggles()
     assert window._pending_toggles == {}
     assert not window._pending_timer.isActive()
@@ -1637,15 +1631,11 @@ def test_a_waiting_channel_row_says_it_is_waiting_and_then_says_it_is_late(tmp_p
     _app()
     window = MainWindow()
 
-    class Bus:
-        def push(self, kind, **payload):
-            return signal_bus.Signal(kind=kind, payload=payload)
-
-        def is_open(self, signal_id):
-            return True
-
     class Server:
-        bus = Bus()
+        # A real bus with nothing acked is exactly "the model has not answered yet", which is the
+        # state this test is about -- and it cannot fall behind the protocol the way a hand-written
+        # double did (HUB-046).
+        bus = signal_bus.SignalBus(tmp_path)
 
         def stop(self, timeout: float = 5.0) -> None:
             pass

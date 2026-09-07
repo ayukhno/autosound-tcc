@@ -619,6 +619,12 @@ class MainWindow(QMainWindow):
         self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
+        # Here, and not where a session starts it: filling the model combos below fires
+        # `currentIndexChanged`, so `_on_effort_changed` runs while the window is still being
+        # built and reads this. Without the line it read an attribute that did not exist yet, and
+        # the AttributeError went the way every exception in a Qt slot goes -- printed to stderr,
+        # swallowed by the run (HUB-046, 2026-09-07).
+        self._agent_worker: Optional[AgentWorker] = None
         # What the Arbiter asked of a channel and has not been answered about yet: the wait
         # `_on_channel_toggle` writes onto the row, keyed by (group, channel). Here, at the top,
         # because the first `_rebuild_system_params()` runs while the window is still being built
