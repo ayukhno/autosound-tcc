@@ -14,10 +14,6 @@
 #
 # Sources: ayukhno/autosound-tcc#17 (26 on Windows), #18 (2 of them also fail on Linux).
 
-# --- probe of the developer's machine (#18) — also red on Linux
-tests/test_main_window.py::test_no_row_repeats_what_the_row_already_says
-tests/test_main_window.py::test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be
-
 # --- decoded with the locale instead of UTF-8 (#17, pile 3)
 tests/test_attach_image.py::test_pasting_then_accepting_writes_the_file_and_returns_its_line
 tests/test_attach_image.py::test_the_composer_line_is_relative_to_the_project
