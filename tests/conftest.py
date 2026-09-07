@@ -11,6 +11,7 @@ a per-test-session tmp .ini file makes every test's settings writes disappear wi
 
 from __future__ import annotations
 
+import gc
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -60,6 +61,23 @@ def _an_exception_in_a_qt_slot_fails_the_test():
             f"belong to a widget an earlier test left alive:\n\n" + "\n".join(caught),
             pytrace=False,
         )
+
+
+@pytest.fixture(autouse=True)
+def _collect_qt_leftovers():
+    """Free the test's discarded Qt objects HERE, between tests, not at a moment Python picks.
+
+    A `QThread` with no parent lives until the garbage collector takes it, and the tests make
+    plenty of those — `AgentWorker(...).shutdown()` on one line builds a thread and drops it. On
+    Windows the collection landing inside the next `QThread(...)` constructor is an access
+    violation that kills the whole run: 4 of 10 full runs, always in `agent_worker.py:46`
+    (2026-09-07, `#19`). A cycle collected between tests costs microseconds and lands nowhere.
+
+    Not a fix for the product: there every worker has a parent widget that owns it. This is the
+    suite being tidy about what it throws away.
+    """
+    yield
+    gc.collect()
 
 
 @pytest.fixture
