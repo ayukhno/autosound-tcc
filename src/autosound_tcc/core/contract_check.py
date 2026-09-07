@@ -113,6 +113,25 @@ def is_available() -> bool:
     return script_path().is_file()
 
 
+class _Cancellable(subprocess.Popen):
+    """A `Popen` that remembers it was killed on purpose.
+
+    Whoever holds the handle (`register`) cancels by calling `kill()`, and the only trace of that
+    on POSIX is a negative return code. Windows does not do negative codes at all, so the fact has
+    to be kept rather than deduced.
+    """
+
+    cancelled = False
+
+    def kill(self) -> None:
+        self.cancelled = True
+        super().kill()
+
+    def terminate(self) -> None:
+        self.cancelled = True
+        super().terminate()
+
+
 def run(
     project_dir: Optional[Path] = None,
     skip_rew: bool = False,
@@ -164,10 +183,9 @@ def run(
         # `child_process.quiet()`: no stdin to wait on, and no console window flashed on Windows
         # every time the checker runs (see `core/child.py`). Named on import to keep the local
         # variable `child` — the process — as it was.
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        encoding="utf-8",
-        errors="replace",
-                                env=vendor_loader.child_env(), **child_process.quiet())
+        proc = _Cancellable(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace",
+                            env=vendor_loader.child_env(), **child_process.quiet())
     except OSError as exc:
         return failed(str(exc))
     if register is not None:
@@ -178,10 +196,18 @@ def run(
         proc.kill()
         proc.communicate()
         return failed(f"contract.py timed out after {timeout_s:.0f}s")
+    cancelled = proc.cancelled
     proc = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
-    if proc.returncode is not None and proc.returncode < 0:
+    if cancelled or (proc.returncode is not None and proc.returncode < 0):
         # Killed rather than finished -- a cancel from `register`'s owner. Not an error the user
         # needs told about; the caller that cancelled is on its way out.
+        #
+        # A negative code is not enough to know that: it is the POSIX way of saying "died by
+        # signal", and Windows has no such convention -- `TerminateProcess` sets an ordinary exit
+        # code of 1. So a window closing mid-check told the user "contract.py produced no report
+        # (exit 1)", which is an error message for something that is not an error (found on the
+        # first Windows CI run, 2026-09-07). The intent is recorded where it is known -- in the
+        # kill itself -- instead of being inferred afterwards from a number.
         return failed("contract.py was cancelled")
 
     # Exit code 1 is the checker's "issues found", not a run failure — the report on stdout is the

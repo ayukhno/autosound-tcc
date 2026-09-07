@@ -1222,8 +1222,12 @@ def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_pa
 
     from autosound_tcc.ui.tcc.dsp_tree import TreeGroupSection
 
+    # Enough rows that the column MUST scroll on any platform's metrics. Eleven was enough on
+    # macOS and not on Windows, where the same rows are shorter — so the first assertion below
+    # ("the column is what scrolls") failed for having nothing to scroll, which says nothing about
+    # the behaviour under test (Windows CI, 2026-09-07).
     channels = {f"ch_{i}": {"slot": chr(65 + i), "hp": {"f": 80}, "lp": {"f": 4000}}
-                for i in range(11)}
+                for i in range(24)}
     (tmp_path / "dsp_profile.json").write_text(json.dumps({"dsp_profile": {
         "name": "M6V4", "vendor": "Musway",
         "groups": [{"id": "physical_outputs", "label": "Output channels",
