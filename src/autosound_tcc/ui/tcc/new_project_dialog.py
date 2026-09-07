@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, terminal_launcher, vendor_loader
+from autosound_tcc.core import config, model_choices, terminal_launcher, vendor_loader
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
 from autosound_tcc.ui.tcc.profile_interview_dialog import ProfileInterviewDialog
@@ -249,7 +249,11 @@ class NewProjectDialog(QDialog):
         self._terminal_model_label = _field_label(i18n.t("npTerminalModel"))
         layout.addWidget(self._terminal_model_label)
         self._terminal_model_edit = QLineEdit()
-        self._terminal_model_edit.setPlaceholderText(i18n.t("npTerminalModelPlaceholder"))
+        # The examples are model names, so they live in the catalogue, not in the sentence:
+        # spelled out here they were four translations to edit every generation (HUB-052).
+        self._terminal_model_edit.setPlaceholderText(
+            i18n.t("npTerminalModelPlaceholder").format(
+                models=", ".join(model_choices.TERMINAL_MODEL_EXAMPLES)))
         layout.addWidget(self._terminal_model_edit)
 
         actions = QHBoxLayout()

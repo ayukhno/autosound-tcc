@@ -86,3 +86,16 @@ def test_language_choices_are_named_in_the_current_language():
 
 def test_language_badges_are_the_header_combos_items():
     assert i18n.language_badges() == [("en", "EN"), ("uk", "УК"), ("pl", "PL"), ("de", "DE")]
+
+
+#: Model names TCC writes into ARGUMENTS, not into sentences. A UI string that spells one out is a
+#: translation job every time a generation ships: `gemini-2.5-pro` stood in four languages, and
+#: three of them are read by nobody working here.
+_MODEL_NAMES = ("gemini-2.5-pro", "claude-opus-5", "gemini-3.1-pro-preview")
+
+
+@pytest.mark.parametrize("lang", _LANGS)
+def test_no_ui_string_spells_out_a_model_name(lang):
+    named = {key: value for key, value in i18n.T[lang].items()
+             if any(name in value for name in _MODEL_NAMES)}
+    assert not named, named

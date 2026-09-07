@@ -53,11 +53,25 @@ ROUTES: dict[str, tuple[str, str]] = {
 #: When this list was last checked against what Anthropic actually serves. It is a floor for
 #: installs that cannot ask (no API key), and it is expected to age — see `sdk_choices`.
 SDK_MODELS_VERIFIED = "2026-08"
+
+#: What a session runs when nothing picked a model, per route. Written HERE, once, and imported by
+#: `tuning_session` and `omp_session` — both of them used to hold their own copy, and a generation
+#: bump is a regular event, so "the two defaults disagree" was a matter of which file got edited.
+DEFAULT_SDK_MODEL = "claude-opus-5"
+DEFAULT_OMP_MODEL = "gemini-3.1-pro-preview"
+
 SDK_MODELS: tuple[tuple[str, str], ...] = (
-    ("Claude Opus 5", "claude-opus-5"),
+    ("Claude Opus 5", DEFAULT_SDK_MODEL),
     ("Claude Sonnet 5", "claude-sonnet-5"),
     ("Claude Fable 5", "claude-fable-5"),
 )
+
+#: Examples for the terminal path's free-text `--model` box (`new_project_dialog`). Model names,
+#: not TCC's catalogue: each CLI has its own vocabulary and TCC does not validate it — `opus` is
+#: what `claude` answers to, `gemini-2.5-pro` what `gemini` does. They live here anyway, because
+#: the alternative was writing them into a UI sentence translated into four languages, where a
+#: generation bump turns into a translation job.
+TERMINAL_MODEL_EXAMPLES: tuple[str, ...] = ("opus", "gemini-2.5-pro")
 
 # The pair that is worth running today — named as a CLASS, not as two model names.
 #

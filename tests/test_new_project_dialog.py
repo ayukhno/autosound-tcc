@@ -360,3 +360,16 @@ def test_prefilling_the_dsp_from_the_source_does_not_loop(tmp_path, monkeypatch)
     # is another seed into a temp folder. A number that creeps up here is the loop coming back
     # slowly instead of all at once.
     assert len(seeder.seeded_into) <= 4, seeder.seeded_into
+
+
+def test_the_terminal_model_hint_takes_its_examples_from_the_catalogue(monkeypatch):
+    """The hint says what to type into a free-text `--model` field, so it has to name real models
+    — but naming them IN the string made a model bump a translation job in four languages."""
+    _app()
+    monkeypatch.setattr(npd.model_choices, "TERMINAL_MODEL_EXAMPLES", ("zeta-9", "omega-2"))
+
+    dlg = npd.NewProjectDialog()
+    hint = dlg._terminal_model_edit.placeholderText()
+
+    assert "zeta-9" in hint and "omega-2" in hint, hint
+    assert "{" not in hint, f"placeholder left unformatted: {hint}"

@@ -41,7 +41,7 @@ from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, Too
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.session_registry import SessionRegistry
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = model_choices.DEFAULT_SDK_MODEL
 SKILL_NAME = "autosound-tuning"
 
 # Pre-approved, i.e. NOT gated. Keep this list tiny.

@@ -225,7 +225,7 @@ answers the first five questions anybody would ask.",
         "npRunInApp": "In-app (Claude)",
         "npAiModel": "AI model",
         "npTerminalModel": "Model (optional)",
-        "npTerminalModelPlaceholder": "e.g. opus, gemini-2.5-pro — blank = CLI default",
+        "npTerminalModelPlaceholder": "e.g. {models} — blank = CLI default",
         "npOnboardingHint": "Use the autosound-tuning skill for DSP-profile onboarding. Connect "
                             "to this project's 'tcc' MCP server (see .mcp.json) and call its "
                             "check_existing_profile tool first, for vendor={vendor} model={model}. "
@@ -1149,7 +1149,7 @@ Choose sweeps (sw) above to read this.",
         "npRunInApp": "У додатку (Claude)",
         "npAiModel": "Модель ШІ",
         "npTerminalModel": "Модель (необовʼязково)",
-        "npTerminalModelPlaceholder": "напр. opus, gemini-2.5-pro — пусто = дефолт CLI",
+        "npTerminalModelPlaceholder": "напр. {models} — пусто = дефолт CLI",
         "npOnboardingHint": "Скористайся скілом autosound-tuning для onboarding DSP-профілю. "
                             "Підключись до MCP-сервера 'tcc' цього проєкту (див. .mcp.json) і "
                             "виклич його тул check_existing_profile першим, для vendor={vendor} "
@@ -2021,7 +2021,7 @@ Choose sweeps (sw) above to read this.",
         "npRunInApp": 'W aplikacji (Claude)',
         "npAiModel": 'Model AI',
         "npTerminalModel": 'Model (opcjonalnie)',
-        "npTerminalModelPlaceholder": 'np. opus, gemini-2.5-pro — puste = domyślny CLI',
+        "npTerminalModelPlaceholder": 'np. {models} — puste = domyślny CLI',
         "npOnboardingHint": 'Skorzystaj ze skilla autosound-tuning do onboardingu profilu DSP. Podłącz się do serwera MCP '
                             "'tcc' tego projektu (zob. .mcp.json) i wywołaj najpierw jego narzędzie "
                             'check_existing_profile, dla vendor={vendor} model={model}. Prowadź wywiad {language}.',
@@ -2955,7 +2955,7 @@ Choose sweeps (sw) above to read this.",
         "npRunInApp": 'In der App (Claude)',
         "npAiModel": 'KI-Modell',
         "npTerminalModel": 'Modell (optional)',
-        "npTerminalModelPlaceholder": 'z. B. opus, gemini-2.5-pro — leer = Standard des CLI',
+        "npTerminalModelPlaceholder": 'z. B. {models} — leer = Standard des CLI',
         "npOnboardingHint": 'Nutze den Skill autosound-tuning für das Onboarding des DSP-Profils. Verbinde dich mit dem '
                             "'tcc'-MCP-Server dieses Projekts (siehe .mcp.json) und rufe zuerst dessen Werkzeug "
                             'check_existing_profile auf, für vendor={vendor} model={model}. Führe das Interview '

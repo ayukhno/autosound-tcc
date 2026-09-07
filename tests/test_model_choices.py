@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -564,3 +565,45 @@ def test_a_named_vendor_still_reaches_when_its_cli_is_there(monkeypatch):
 
     assert model_choices.critic_reaches(gemini) is True
 
+
+# --- Where a model IDENTIFIER is allowed to be written ----------------------------------------
+#
+# A model generation lasts months, so every one of these strings gets edited again — and the cost
+# is not the edit, it is remembering all the places. `mock_data` and `tuning_session` each held
+# their own copy of "claude-opus-5" and nothing said they had to agree.
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+
+#: Written with the quotes so PROSE about a model does not count. The comments in `self_check` and
+#: `main_window` say `claude-opus-5` in backticks on purpose — they explain why the id and
+#: `sdk:claude-opus-5` are one model said twice, and that knowledge was bought by an incident.
+_LIVE_IDS = ('"claude-opus-5"', '"gemini-3.1-pro-preview"')
+
+
+def _sites(needle: str) -> list[str]:
+    found = []
+    for path in sorted(_SRC.rglob("*.py")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if needle in line:
+                found.append(f"{path.relative_to(_SRC)}:{lineno}")
+    return found
+
+
+@pytest.mark.parametrize("needle", _LIVE_IDS)
+def test_a_model_id_is_written_in_exactly_one_module(needle):
+    """The catalogue is the definition site; everything else imports the name."""
+    sites = _sites(needle)
+    modules = {site.split(":")[0] for site in sites}
+    assert modules == {"autosound_tcc/core/model_choices.py"}, sites
+
+
+def test_the_defaults_the_rest_of_the_app_imports_are_models_the_catalogue_knows():
+    assert model_choices.DEFAULT_SDK_MODEL in dict(model_choices.SDK_MODELS).values()
+    assert model_choices.DEFAULT_OMP_MODEL
+
+
+def test_tuning_and_omp_sessions_default_to_the_catalogue_name():
+    from autosound_tcc.core import omp_session, tuning_session
+
+    assert tuning_session.DEFAULT_MODEL == model_choices.DEFAULT_SDK_MODEL
+    assert omp_session.DEFAULT_MODEL == model_choices.DEFAULT_OMP_MODEL

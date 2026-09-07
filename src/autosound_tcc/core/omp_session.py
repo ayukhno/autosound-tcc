@@ -64,7 +64,7 @@ from autosound_tcc.core.agent_events import (
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, bash_is_read_only
 
-DEFAULT_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
 
 # The omp profile TCC runs sessions in. Named rather than default so a tuning session cannot pick
 # up the user's own MCP servers -- see `_argv`.

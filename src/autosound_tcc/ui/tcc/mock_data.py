@@ -11,23 +11,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from autosound_tcc.core import model_choices
+
 # Current-generation model display names for the AI main/critic header/footer pickers
 # (main_window.py) and this mock dialog's own role labels -- one place to edit instead of a grep
 # across the UI, since these go stale every few months as new models ship (user request
 # 2026-07-28: Opus 4.8 was already superseded by Opus 5 by the time this was first wired up).
 CURRENT_GENERATOR_MODEL = "Claude Opus 5"
-AI_MAIN_MODELS = ["Claude Opus 5", "Claude Sonnet 5", "Claude Fable 5"]
+AI_MAIN_MODELS = [name for name, _id in model_choices.SDK_MODELS]
 AI_CRITIC_MODELS = ["Gemini 3.1 Pro", "Gemini 3.5 Flash", "Claude Opus 5"]
 
 # Display name -> real Claude Agent SDK model id, for the one place today that actually threads a
 # picked model into `ClaudeAgentOptions` (the DSP-profile onboarding interview, `new_project_dialog.py`
 # -> `agent_session.OnboardingSession`) -- the footer's own AI-main picker above doesn't wire its
 # selection through to `TuningSession` yet, a separate, pre-existing gap this doesn't fix.
-AI_MODEL_IDS = {
-    "Claude Opus 5": "claude-opus-5",
-    "Claude Sonnet 5": "claude-sonnet-5",
-    "Claude Fable 5": "claude-fable-5",
-}
+#
+# The ids come from `model_choices.SDK_MODELS`, which is where a model identifier is written in
+# this project (HUB-052). The display list above is that same catalogue read for its names: two
+# hand-kept lists meant the picker could offer a name `AI_MODEL_IDS` had no id for, and the miss
+# is silent -- `in_app_model` just comes out None.
+AI_MODEL_IDS = dict(model_choices.SDK_MODELS)
 
 
 @dataclass(frozen=True)
