@@ -311,6 +311,7 @@ def _git(project: Path, *args: str) -> Optional[str]:
         done = subprocess.run(
             ["git", "-C", str(project), *args],
             capture_output=True, text=True, timeout=_GIT_TIMEOUT_S, **child.quiet(),
+            encoding="utf-8",
         )
     except (OSError, subprocess.SubprocessError):
         return None

@@ -467,6 +467,50 @@ def test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it(tmp_path
     assert vendor_loader.skill_dir() == good
 
 
+def test_no_subprocess_decodes_its_child_with_the_machines_locale():
+    """The same law as the test below, on the other kind of text handle.
+
+    `subprocess.run(..., text=True)` with no `encoding` decodes the child's output with the
+    PARENT's locale. Every one of these has been right by accident, because macOS's locale
+    encoding is UTF-8; the first Windows CI run (2026-09-07) showed what they do elsewhere — a
+    listening verdict came back through `process_writer` mojibake, and the diagnostics report
+    carried a broken character mid-word.
+
+    Worth separating from the file test: the skill this app drives writes UTF-8 to disk on every
+    platform and folds only what a CONSOLE cannot draw, so its bytes are always UTF-8 and it is
+    our side of the pipe that has to say so. `universal_newlines` is the same argument under its
+    old name.
+    """
+    import ast
+
+    offenders = []
+    for file in sorted((ROOT / "src").rglob("*.py")):
+        tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Only the subprocess constructors. `text=` is an ordinary argument name elsewhere —
+            # `Bank(text=...)`, a dialog carrying what the tuner typed — and a scan that does not
+            # look at WHAT is being called will happily put an `encoding` into a dataclass.
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name not in ("run", "Popen", "check_output", "call", "check_call"):
+                continue
+            if isinstance(func, ast.Attribute) and not (
+                isinstance(func.value, ast.Name) and func.value.id == "subprocess"
+            ):
+                continue
+            named = {kw.arg for kw in node.keywords if kw.arg}
+            if not named & {"text", "universal_newlines"} or "encoding" in named:
+                continue
+            offenders.append(f"{file.relative_to(ROOT)}:{node.lineno}")
+
+    assert not offenders, (
+        "text=True without encoding= decodes with the machine's locale, not UTF-8:\n"
+        + "\n".join(offenders)
+    )
+
+
 def test_every_file_this_app_reads_or_writes_names_its_encoding():
     """A text handle with no `encoding` uses the MACHINE's locale encoding, and that is a bug that
     only exists on somebody else's computer.

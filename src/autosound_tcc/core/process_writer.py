@@ -128,6 +128,13 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
                 [sys.executable, str(script), str(_process_dir(project_dir)), *args],
                 capture_output=True,
                 text=True,
+                # NOT the locale's, which is what `text=True` alone means. The skill writes UTF-8
+                # to disk on every platform and folds only what a CONSOLE cannot draw, so its
+                # bytes are always UTF-8 — and decoding them with a Windows ANSI page turned a
+                # listening verdict into mojibake on the way back (first Windows CI run,
+                # 2026-09-07). The tuner's own words about what they heard are the one thing here
+                # that has to survive the trip verbatim.
+                encoding="utf-8",
                 timeout=timeout_s,
                 env=vendor_loader.child_env(),
                 **child.quiet(),

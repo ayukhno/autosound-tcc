@@ -196,6 +196,7 @@ def run(
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout_s, **child.quiet())
     except subprocess.TimeoutExpired:
         return CriticResult(
@@ -289,6 +290,7 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
             cwd=str(project_dir),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             env=vendor_loader.child_env(),
             **child.quiet(),

@@ -149,6 +149,7 @@ def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
     try:
         done = subprocess.run(
             ["git", *args], capture_output=True, text=True, timeout=_ASK_TIMEOUT,
+            encoding="utf-8",
             check=False, cwd=str(cwd) if cwd else None, **child.quiet())
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
         return False, f"{type(exc).__name__}: {exc}"

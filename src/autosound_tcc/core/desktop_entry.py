@@ -413,6 +413,7 @@ def _install_windows(launcher: Path) -> Result:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         **child.quiet(),
     )
     if proc.returncode != 0:
@@ -448,6 +449,7 @@ def _stamp_windows(targets: list[Path], result: Result) -> None:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         **child.quiet(),
     )
     if proc.returncode == 0:
@@ -567,7 +569,7 @@ def _windows_target_of(shortcut: Path) -> str:
     try:
         proc = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            check=False, capture_output=True, text=True, **child.quiet())
+            check=False, capture_output=True, text=True, encoding="utf-8", **child.quiet())
     except OSError:
         return ""
     return (proc.stdout or "").strip() if proc.returncode == 0 else ""

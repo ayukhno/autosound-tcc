@@ -59,6 +59,7 @@ def _run(args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
             [sys.executable, str(script), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout_s,
             env=vendor_loader.child_env(), **child.quiet())
     except subprocess.TimeoutExpired:
