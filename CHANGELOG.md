@@ -12,9 +12,10 @@ Paired with method `dcf5a68cb7318be575ca39a1fd181c62893b340c` — the tag on tha
 **`v3.0.46`**. The previous release said catching up was next on the list; this is it, six tags in
 one step (`v3.0.41` … `v3.0.46`).
 
-The suite against the new pin: 1652 passed, 1 skipped — two more than before, because the method's
-own selftests are parameterised over its modules and it grew some. Nothing the method reworded broke
-a test here: the refusal texts the diagnostics show are nowhere pinned word for word.
+The suite at the release: 1653 passed, 1 skipped, 354 s. Moving the pin alone took it from 1650 to
+1652 — the method's own selftests are parameterised over its modules and it grew some — and the
+owner's-line test below is the third. Nothing the method reworded broke a test here: the refusal
+texts the diagnostics show are nowhere pinned word for word.
 
 ### Fixed
 
