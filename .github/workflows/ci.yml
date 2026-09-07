@@ -213,7 +213,30 @@ jobs:
         run: |
           args="${PYTEST_ARGS:-tests/}"
           echo "running: $args"
-          uv run --extra dev --python 3.12 python -m pytest $args -q -p no:cacheprovider
+
+          # Retry ONLY on the known crash, never on a test that failed. #19 kills the process
+          # with `Windows fatal exception: access violation` in about 4 runs of 10, and a job that
+          # is red 40% of the time for a reason unrelated to the commit is a job people stop
+          # reading — the same argument that put Linux under `continue-on-error`.
+          #
+          # Deliberately NOT `continue-on-error` here: that would swallow real failures too. This
+          # swallows one named fault and nothing else, and it says so in the run summary every
+          # time, so the frequency stays in sight while #19 is deferred rather than fixed.
+          attempts=3
+          for i in $(seq 1 $attempts); do
+            set +e
+            uv run --extra dev --python 3.12 python -m pytest $args -q -p no:cacheprovider \
+              2>&1 | tee /tmp/pytest-out.txt
+            code=${PIPESTATUS[0]}
+            set -e
+            if ! grep -q "Windows fatal exception" /tmp/pytest-out.txt; then
+              exit $code
+            fi
+            echo "::warning title=#19::attempt $i died with an access violation, not a test failure"
+            echo "- \`#19\` crashed the suite on attempt **$i** of $attempts" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "::error title=#19::the suite crashed $attempts times in a row — that is not the usual 40%"
+          exit 1
 
   macos:
     name: macos

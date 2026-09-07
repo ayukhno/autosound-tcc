@@ -321,10 +321,23 @@ Found while checking the `suspects` job, 2026-09-07: the Windows suite dies with
 `test_dialog_live.py::test_shutdown_ends_a_worker_stuck_mid_turn`, about one run in three. It is
 the process dying, not a test asserting, so it is not one of the 26 and no task here addresses it.
 
-It does change how the results of this plan are read: while `#19` is open, a red `windows` job may
-mean "26 known failures" or may mean "the suite never finished" — check which before concluding
-anything. The `suspects` job is unaffected (it does not run `test_dialog_live.py`), which is the
-second reason the short loop is worth having.
+**Deferred by decision, 2026-09-07**, after three hypotheses were tested and all three failed:
+the neighbouring diagnostics thread (it crashes without it), the moment of garbage collection
+(`gc.collect()` between tests gave the same 4-in-20), and a missing QApplication (there was never
+one missing — `_app` is an autouse module fixture, and that one was a misreading, not an
+experiment).
+
+What was bought before stopping, and it stays bought: a one-minute reproduction instead of nine
+(`windows_runs` + `pytest_args` against `test_dialog_live.py` alone), a measured frequency — 20%
+narrow, 40% on the full suite — and three directions nobody needs to try again.
+
+The `windows` job now RETRIES on this one crash, up to three times, and on nothing else: a test
+that fails still fails the job. Every retry writes a line into the run summary, so the frequency
+stays visible rather than becoming the kind of quiet flake that gets forgotten. Three crashes in
+a row is an error, because that is no longer 40%.
+
+It also changes how the rest of this plan reads: the `suspects` job is unaffected (it does not
+run `test_dialog_live.py`), which is the second reason the short loop is worth having.
 
 ## The last step, after the last task: drop `continue-on-error` from Linux
 
