@@ -310,6 +310,11 @@ def test_shutdown_ends_a_worker_stuck_mid_turn():
     This session ignores interrupts entirely, so it also pins the last-resort path: cancelling the
     coroutine. That must still run the session's `close()`, and must not use QThread.terminate(),
     which wedges the interpreter."""
+    # `_app()` first: this file's earlier tests never build one, so run on its own the very
+    # first QThread here was constructed with no QApplication in the process at all. Qt is
+    # undefined territory there, and Windows answered with an access violation in the QThread
+    # constructor — 4 runs in 10 of the full suite, 2 in 10 of this file alone (#19).
+    _app()
     session = StuckSession()
     worker = AgentWorker(session_factory=lambda: session)
     worker.start()
@@ -323,12 +328,14 @@ def test_shutdown_ends_a_worker_stuck_mid_turn():
 
 
 def test_shutdown_on_a_worker_that_never_started_is_a_noop():
+    _app()
     assert AgentWorker(session_factory=lambda: FakeSession()).shutdown() is True
 
 
 def test_worker_streams_a_turn_and_closes_the_session(qtbot_timeout=5.0):
     from PySide6.QtCore import QEventLoop, QTimer
 
+    _app()
     session = FakeSession()
     worker = AgentWorker(session_factory=lambda: session)
     received: list[object] = []
