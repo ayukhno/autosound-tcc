@@ -323,11 +323,55 @@ def report(
     return sections
 
 
+def _home() -> str:
+    """The home directory as a string, or "" when masking by it would maim the report.
+
+    Read at CALL time and never cached: the value is what the running machine says now, and a
+    module-level constant would answer for the machine that imported this file.
+
+    "" for a home that is the root of its drive — `/` or `C:\\`. Masking by that would turn every
+    absolute path in the report into `~…`, which hides the report rather than one name.
+    """
+    try:
+        home = str(Path.home())
+    except Exception:  # noqa: BLE001 — a machine with no home is still a machine to report on
+        return ""
+    return "" if len(home) <= len(Path(home).anchor) else home
+
+
+def _mask_home(text: str) -> str:
+    """`/Users/kate/dev/x` → `~/dev/x`, and `C:\\Users\\kate\\dev\\x` with it.
+
+    This block is composed TO BE PASTED — into an issue in a public repository, a chat, a
+    screenshot — and on macOS and Windows every path in it opens with the account name of the
+    person pasting (autosound-hub HUB-054). WHICH python and WHERE the log sits relative to home
+    are the facts a reader needs; whose machine it is is not one of them, and the person pressing
+    "copy" is not thinking about it.
+
+    Applied to the finished text and not to each path, so a home directory that turns up inside a
+    version string, a tool's location or `extra` is covered by the same one rule.
+    """
+    home = _home()
+    if not home:
+        return text
+    # Both separators: a path built by `Path` uses the native one, but a URL or a `as_posix()`
+    # anywhere in the report carries forward slashes on Windows too. Longest first, so the more
+    # specific form wins where the two overlap.
+    forms = sorted({home, home.replace("\\", "/")}, key=len, reverse=True)
+    # Case-insensitive only where the filesystem is: on Linux `/home/Kate` and `/home/kate` are
+    # two people, and masking one as the other would hide the wrong name.
+    flags = re.IGNORECASE if sys.platform.startswith("win") else 0
+    return re.sub("|".join(re.escape(form) for form in forms), "~", text, flags=flags)
+
+
 def as_text(sections: Optional[list] = None) -> str:
     """The whole report as one block, ready to paste into a message.
 
     Plain text and aligned by spaces: it ends up in a chat, an issue or a screenshot, and every one
     of those keeps a monospace block readable and mangles a table.
+
+    The home directory comes out as `~` — see `_mask_home` for why that is done here, at the
+    one place the report becomes text somebody sends onward.
     """
     lines: list[str] = []
     for section in sections if sections is not None else report():
@@ -339,4 +383,4 @@ def as_text(sections: Optional[list] = None) -> str:
                 line += f"   ({item.detail})"
             lines.append(line)
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    return _mask_home("\n".join(lines).rstrip() + "\n")

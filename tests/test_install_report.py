@@ -164,3 +164,41 @@ def test_an_installed_build_keeps_its_metadata_version(monkeypatch):
     monkeypatch.setattr(install_report, "_package_version", lambda name: "0.1.6")
 
     assert install_report.app_version() == "0.1.6"
+
+
+def test_the_pasteable_block_carries_no_account_name(tmp_path, monkeypatch):
+    """The report is composed to be pasted into a public issue, and on macOS and Windows every
+    path in it opens with the account name of the person pasting (autosound-hub HUB-054).
+
+    The home directory is substituted rather than the paths inspected: what is being checked is
+    that the mask reads the home of the machine the report is made ON, at the moment it is made.
+    """
+    from pathlib import Path
+
+    home = tmp_path / "beta-tester-account"
+    (home / ".config").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(home))   # Windows
+    monkeypatch.setattr(install_report.app_log, "log_path",
+                        lambda: home / "Library" / "Logs" / "tcc.log")
+    monkeypatch.setattr(install_report.model_overrides, "config_dir", lambda: home / ".config")
+
+    text = install_report.as_text(install_report.report(
+        project_dir=home / "projects" / "golf",
+        with_tools=False,
+        extra={"python": str(home / ".venv" / "bin" / "python")},
+    ))
+
+    assert "beta-tester-account" not in text
+    # The diagnostic value is untouched: WHERE things are relative to home is still there, and
+    # `str(Path(...))` so the separators are the ones this platform actually prints.
+    assert str(Path("~/projects/golf")) in text
+    assert str(Path("~/Library/Logs/tcc.log")) in text
+    assert str(Path("~/.venv/bin/python")) in text
+
+
+def test_a_home_that_is_the_root_masks_nothing(monkeypatch):
+    """`/` as a home would turn every absolute path into `~…` — that hides the report, not a name."""
+    monkeypatch.setattr(install_report.Path, "home", classmethod(lambda _cls: install_report.Path("/")))
+
+    assert install_report._mask_home("/usr/bin/python") == "/usr/bin/python"
