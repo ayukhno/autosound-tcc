@@ -587,7 +587,9 @@ def _sites(needle: str) -> list[str]:
     for path in sorted(_SRC.rglob("*.py")):
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if needle in line:
-                found.append(f"{path.relative_to(_SRC)}:{lineno}")
+                # `as_posix`: the assertion below names modules with forward slashes, and this
+                # is a report about source, not a path anyone opens.
+                found.append(f"{path.relative_to(_SRC).as_posix()}:{lineno}")
     return found
 
 

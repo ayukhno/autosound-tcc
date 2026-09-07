@@ -83,13 +83,18 @@ def message_line(path: Path, caption: str, project_dir: Path) -> str:
     Relative, because that is how every other reference in this project is written — a step's
     evidence, the reviewer's saved text — and because an absolute path from one machine is noise
     in a record another machine will read.
+
+    Forward slashes for the same reason, and it is not cosmetic: this line goes into the record.
+    A project written on Windows would otherwise carry `process\\attachments\\...` while every
+    other reference in it, and the same project opened on a Mac, says `process/attachments/...`
+    — one project, two spellings of one file (found by the first Windows CI run, 2026-09-07).
     """
     try:
         shown = path.relative_to(Path(project_dir))
     except ValueError:
         shown = path
     caption = (caption or "").strip()
-    return f"{caption} — {shown}" if caption else str(shown)
+    return f"{caption} — {shown.as_posix()}" if caption else shown.as_posix()
 
 
 def capture_hint_key() -> str:

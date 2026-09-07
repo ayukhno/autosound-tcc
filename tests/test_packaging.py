@@ -264,7 +264,9 @@ def test_an_installed_tcc_finds_the_skill_where_claude_code_put_it(tmp_path, mon
 
     installed = _fake_skill(tmp_path / "home" / ".claude")
     monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout-here")
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))   # Windows: `Path.home()` reads
+    # this one, so setting only HOME left the search looking at the real profile
     monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
 
     assert vendor_loader.is_available()
@@ -281,7 +283,9 @@ def test_a_plugin_installed_skill_is_found(tmp_path, monkeypatch):
     home = tmp_path / "home"
     installed = _fake_skill(home / ".claude" / "plugins" / "marketplaces" / "autosound-tuning-skill")
     monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout-here")
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HOME", str(home))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(home))   # Windows: `Path.home()` reads
+    # this one, so setting only HOME left the search looking at the real profile
     monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
 
     assert vendor_loader.skill_dir() == installed
@@ -307,7 +311,9 @@ def test_the_missing_skill_message_fits_both_readers(tmp_path, monkeypatch):
     from autosound_tcc.core import vendor_loader
 
     monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "nope")
-    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "empty-home"))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "empty-home"))   # Windows: `Path.home()` reads
+    # this one, so setting only HOME left the search looking at the real profile
     monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
 
     with pytest.raises(vendor_loader.VendorNotInitializedError) as caught:
@@ -437,7 +443,9 @@ def test_a_2x_skill_is_told_apart_from_no_skill_at_all(tmp_path, monkeypatch):
 
     old = _fake_skill(tmp_path / "home" / ".claude", line="2.x")
     monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout")
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))   # Windows: `Path.home()` reads
+    # this one, so setting only HOME left the search looking at the real profile
     monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
 
     assert not vendor_loader.is_available(), "a 2.x skill is not a skill TCC can drive"
@@ -459,7 +467,9 @@ def test_a_3x_skill_further_down_the_search_wins_over_a_2x_one_above_it(tmp_path
     _fake_skill(tmp_path / "old", line="2.x")
     good = _fake_skill(tmp_path / "home" / ".claude", line="3.x")
     monkeypatch.setattr(vendor_loader, "_SUBMODULE_DIR", tmp_path / "no-checkout")
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))          # macOS, Linux
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))   # Windows: `Path.home()` reads
+    # this one, so setting only HOME left the search looking at the real profile
     monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV,
                        str(tmp_path / "old" / "skills" / "autosound-tuning"))
 

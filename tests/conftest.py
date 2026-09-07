@@ -139,6 +139,7 @@ def _end_qt_before_python_finalises():
 def _isolated_qsettings(tmp_path, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     monkeypatch.setenv("HOME", str(tmp_path))  # IniFormat UserScope resolves under $HOME
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # ...and under this one on Windows
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
     yield
 

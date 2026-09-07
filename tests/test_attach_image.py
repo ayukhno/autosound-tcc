@@ -95,6 +95,19 @@ def test_the_line_is_just_the_path_when_no_caption_was_given(tmp_path):
     assert attach_image.message_line(path, "", tmp_path).startswith("process/attachments/")
 
 
+def test_the_line_spells_the_path_the_same_way_on_every_platform(tmp_path):
+    """The composer line is a RECORD, and a record with two spellings is two records. On Windows
+    `str(Path)` gives backslashes, so the same screenshot in the same project read as
+    `process\\attachments\\...` there and `process/attachments/...` everywhere else."""
+    _app()
+    path = attach_image.save(_image(600), "імпульс", tmp_path)
+
+    line = attach_image.message_line(path, "імпульс", tmp_path)
+
+    assert "\\" not in line, line
+    assert "process/attachments/" in line, line
+
+
 def test_an_empty_clipboard_leaves_the_dialog_unable_to_accept(tmp_path):
     """"Nothing pasted yet" is the normal state on opening, not an error."""
     app = _app()
