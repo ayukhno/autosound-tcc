@@ -155,8 +155,9 @@ def test_the_environment_running_this_suite_is_the_one_an_install_produces():
 
 
 def test_the_python_floor_is_one_that_has_actually_been_run():
-    """`>=3.10` was declared and never exercised — no CI, and every run on this project has been
-    3.12 or newer. A floor nobody tests is a claim, not support."""
+    """`>=3.10` was declared and never exercised: every run on this project has been 3.12 or
+    newer, and CI (added 2026-09-07) runs 3.12 too, on all three platforms. A floor nobody tests
+    is a claim, not support."""
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     floor = data["project"]["requires-python"]
 

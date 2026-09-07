@@ -7,9 +7,11 @@ name = "autosound-tcc"
 version = "0.1.35"
 description = "Read-only Tuning Command Center for car-audio DSP tuning (macOS + Windows)."
 readme = "README.md"
-# 3.11, not 3.10. The old floor was a promise nobody kept: there is no CI, nothing has ever run
-# on 3.10, and `uv` installs the interpreter itself — so the floor costs a user nothing and an
-# untested claim costs them an evening. Raised deliberately (2026-08-12).
+# 3.11, not 3.10. The old floor was a promise nobody kept: nothing had ever run on 3.10, and `uv`
+# installs the interpreter itself — so the floor costs a user nothing and an untested claim costs
+# them an evening. Raised deliberately (2026-08-12). Still a floor rather than a tested range:
+# CI exists now (`.github/workflows/ci.yml`, 2026-09-07) but runs 3.12 on all three platforms,
+# the same interpreter `make test` uses. A version matrix would be a separate decision.
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "ayukhno" }]
@@ -109,19 +111,19 @@ packages = ["src/autosound_tcc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# Лінтер. `select` виписано явно, хоч це і дефолт ruff: дефолт — властивість ВЕРСІЇ, і
-# оновлення ruff змогло б додати класів у CI мовчки. Ширші набори (I, B, UP) свідомо не
-# ввімкнені: цей конфіг заводиться, щоб крок ruff у CI стартував з нуля, а не щоб змінити
-# стиль дерева.
+# The linter. `select` is written out even though it is ruff's default: the default is a property
+# of the VERSION, and a ruff upgrade would otherwise add rule classes to CI silently. Wider sets
+# (I, B, UP) are deliberately off — this config exists so the CI step can start from zero, not to
+# restyle the tree.
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
-# Імена Claude Agent SDK не імпортуються — їх вставляє в globals() `claude_sdk.bind()` на
-# першому виклику, бо SDK це EXTRA: без цього вікно не відкривалось би в того, хто тюнить
-# через Gemini (див. шапку `core/claude_sdk.py`). Для ruff вони невизначені, і це правда:
-# у момент читання файлу їх справді нема. Що вони існують у рантаймі, стереже не лінтер, а
-# `tests/test_packaging.py::test_the_declared_sdk_names_match_the_ones_the_code_uses` — він
-# звіряє вжиті в модулі імена з `SDK_NAMES` і з тим, що SDK насправді експортує.
+# The Claude Agent SDK names are not imported: `claude_sdk.bind()` puts them into globals() at
+# first use, because the SDK is an EXTRA — without that the window would not open for someone
+# tuning through Gemini (see the header of `core/claude_sdk.py`). To ruff they are undefined, and
+# that is true: at the moment the file is read they really are not there. What guards them is not
+# the linter but `tests/test_packaging.py::test_the_declared_sdk_names_match_the_ones_the_code_uses`,
+# which checks the names used in the module against `SDK_NAMES` and against what the SDK exports.
 "src/autosound_tcc/core/agent_session.py" = ["F821"]
 "src/autosound_tcc/core/tuning_session.py" = ["F821"]

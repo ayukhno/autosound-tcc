@@ -1,0 +1,145 @@
+# What this buys, and what it deliberately does not.
+#
+# The suite already runs on every release: `scripts/ship.py` runs `pytest tests/ -q` whole before
+# it will cut a tag. So CI is not here to run the tests -- it is here to run them where this
+# machine cannot look: Windows, whose installer half is checked by hand on the author's VM, and
+# Linux offscreen, where the suite aborts with exit 134 in roughly one run out of two and which
+# macOS does not reproduce at all (checked three times, 2026-09-06).
+#
+# NOT a release gate. `ship.py` is untouched: nothing here can hold a tag back. That is a decision
+# (HUB-045), not an omission -- the 6-10 minutes are already paid locally, and a gate would add
+# waiting to the release path for no new information.
+#
+# The path filter below is safe FOR THAT REASON. A skipped job reports nothing at all, so on a
+# repo where these checks were required, a docs-only pull request would sit forever in "Expected"
+# with no way to merge. Whoever makes this a gate has to drop `paths-ignore` in the same change.
+name: checks
+
+on:
+  push:
+    # Prose does not warm three runners. Narrow on purpose: `pyproject.toml`, `uv.lock` and
+    # `.github/**` are NOT ignored, so a dependency bump or an edit to this file still runs.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+  # The Linux abort (HUB-049) shows in about half of runs, and a push gives exactly one. A series
+  # on demand is what turns "no repro" into evidence: run this with `linux_runs: 20` and read the
+  # matrix. Without it, "N runs with no exit 134" would be collected by accident, over weeks.
+  workflow_dispatch:
+    inputs:
+      linux_runs:
+        description: "How many times to run the Linux suite (HUB-049 needs a series, not one run)"
+        default: "1"
+        required: false
+
+concurrency:
+  # A manual series gets its own group: it is the answer to a question somebody asked, and a push
+  # landing mid-series must neither kill it nor be killed by it.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # No submodule: the linter reads `src tests scripts`, and `vendor/` is not ours to lint.
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # Pinned, and pinned on purpose: ruff's default rule set is a property of its VERSION, so an
+      # unpinned run would add rule classes to this repo silently. `[tool.ruff.lint]` in
+      # pyproject.toml names the classes; this names the ruff that reads them (HUB-047).
+      - run: uvx ruff@0.12.0 check src tests scripts --statistics
+
+  # How many Linux runs this workflow was asked for, as a matrix. One on a push; whatever the
+  # dispatch input says when a person is chasing the abort.
+  linux-plan:
+    name: linux plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runs: ${{ steps.count.outputs.runs }}
+    steps:
+      - id: count
+        # Through `env`, not interpolated into the script: an input is text a person typed, and
+        # text typed into a shell line is a shell line.
+        env:
+          LINUX_RUNS: ${{ github.event.inputs.linux_runs }}
+        run: |
+          n="$LINUX_RUNS"
+          # Anything but a plain number is a typo, and a typo must not be a failed workflow.
+          [[ "$n" =~ ^[0-9]+$ ]] || n=1
+          (( n >= 1 )) || n=1
+          (( n <= 50 )) || n=50
+          echo "runs=$(seq 1 "$n" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: linux (run ${{ matrix.run }})
+    needs: linux-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Red here does not mean the build is broken -- it means the abort happened again. A check
+    # that blinks is ignored within a week, and an ignored CI is worse than none, so this one
+    # reports instead of blocking. The flag comes off when HUB-049 is closed.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        run: ${{ fromJSON(needs.linux-plan.outputs.runs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Without it `vendor/autosound-tuning-skill` is empty, the REW client does not import,
+          # and the suite does not collect at all.
+          submodules: true
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # `-v`, not the `-q` the other two use. SIGABRT kills the process where it stands: with `-q`
+      # the log ends on a row of dots and the culprit is unnamed, and naming it is the entire
+      # reason Linux is in this file. PYTHONFAULTHANDLER prints the C-level stack with it.
+      #
+      # QT_QPA_PLATFORM is not set here -- `tests/conftest.py` already does it for every platform.
+      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -v
+        env:
+          PYTHONFAULTHANDLER: "1"
+
+  windows:
+    name: windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # Same command as `make test`, deliberately: CI running something the author cannot run by
+      # hand is how a green tick stops meaning anything.
+      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -q
+
+  macos:
+    name: macos
+    # The control: it is the machine the author already runs, so it earns nothing on a push. On a
+    # tag and a pull request it is worth knowing whether a failure elsewhere is platform-specific
+    # or simply a broken commit.
+    if: github.event_name == 'pull_request' || github.ref_type == 'tag'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -q
