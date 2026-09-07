@@ -9,6 +9,7 @@ not run on the machine that changes the code.
 
 from __future__ import annotations
 
+import os
 import plistlib
 import stat
 from pathlib import Path
@@ -65,6 +66,7 @@ def test_no_icon_in_the_package_means_no_icon_key(tmp_path, monkeypatch):
     assert "CFBundleIconFile" not in info
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a macOS .app bundle: shell launcher, execute bit")
 def test_launcher_is_executable_and_execs_the_installed_binary(tmp_path):
     bundle, _ = _bundle(tmp_path)
     script = bundle / "Contents" / "MacOS" / "autosound-tcc"
@@ -78,6 +80,7 @@ def test_launcher_is_executable_and_execs_the_installed_binary(tmp_path):
     assert body.rstrip().endswith('exec "$BIN" "$@"')
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a macOS .app bundle: shell quoting in its launcher")
 def test_a_launcher_path_with_a_space_stays_one_word(tmp_path):
     """uv honours `UV_TOOL_BIN_DIR`, and people put it in folders with spaces."""
     bundle, _ = _bundle(tmp_path, "/Users/o'brien/My Apps/autosound-tcc")
@@ -128,11 +131,14 @@ def test_somebody_elses_file_on_the_desktop_is_left_alone(tmp_path):
 
 def test_windows_shortcut_script_points_at_the_installed_launcher(tmp_path):
     targets = [tmp_path / "Desktop" / "Autosound TCC.lnk", tmp_path / "Menu" / "Autosound TCC.lnk"]
-    script = desktop_entry._shortcut_script(targets, Path("C:/bin/autosound-tcc-gui.exe"), None)
+    exe = Path("C:/bin/autosound-tcc-gui.exe")
+    script = desktop_entry._shortcut_script(targets, exe, None)
 
     for target in targets:
         assert str(target) in script
-    assert 'TargetPath = "C:/bin/autosound-tcc-gui.exe"' in script
+    # Built from the same Path the call got: a shortcut carries the platform's own spelling, and
+    # hard-coding one side of that made a Mac-written test fail on the machine the .lnk is FOR.
+    assert f'TargetPath = "{exe}"' in script
     # No icon given, so no IconLocation at all -- pointing at a file that is not there gets the
     # shortcut drawn blank rather than generic.
     assert "IconLocation" not in script
@@ -142,7 +148,7 @@ def test_windows_shortcut_script_uses_the_packaged_icon(tmp_path):
     script = desktop_entry._shortcut_script(
         [tmp_path / "Autosound TCC.lnk"], Path("C:/bin/x.exe"), Path("C:/pkg/app-icon.ico")
     )
-    assert 'IconLocation = "C:/pkg/app-icon.ico,0"' in script
+    assert f'IconLocation = "{Path("C:/pkg/app-icon.ico")},0"' in script
 
 
 def test_the_shortcuts_are_stamped_with_the_same_id_the_window_claims(tmp_path):
@@ -216,18 +222,21 @@ def test_a_platform_with_no_desktop_entry_says_how_to_start_it(monkeypatch):
     result = desktop_entry.install_desktop()
 
     assert not result.ok
-    assert any("/usr/bin/autosound-tcc" in line for line in result.lines)
+    # The sentence carries the path as the platform spells it, so the expectation is built the
+    # same way rather than assuming the developer's separator.
+    assert any(str(Path("/usr/bin/autosound-tcc")) in line for line in result.lines)
 
 
 def test_the_launcher_is_found_beside_this_interpreter_first(tmp_path, monkeypatch):
     """`UV_TOOL_BIN_DIR` moves the copy on PATH; the one beside our interpreter is always ours."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    (fake_bin / "autosound-tcc").write_text("#!/bin/sh\n")
+    suffix = ".exe" if os.name == "nt" else ""
+    (fake_bin / f"autosound-tcc{suffix}").write_text("#!/bin/sh\n")
     monkeypatch.setattr(desktop_entry.sys, "executable", str(fake_bin / "python"))
     monkeypatch.setattr(desktop_entry.shutil, "which", lambda name: "/somewhere/else")
 
-    assert desktop_entry.resolve_launcher() == fake_bin / "autosound-tcc"
+    assert desktop_entry.resolve_launcher() == fake_bin / f"autosound-tcc{suffix}"
 
 
 def test_the_cli_carries_the_flag():

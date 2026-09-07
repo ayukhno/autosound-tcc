@@ -73,8 +73,15 @@ def test_the_gate_will_not_open_without_a_folder():
 def test_an_unwritable_path_does_not_accept(tmp_path, monkeypatch):
     """Refusing to accept leaves the typed path on screen to be fixed, which is more use than a
     dialog stacked on a dialog."""
+    # A path whose PARENT is a file: unwritable on every platform, and for the same reason on
+    # each. `/proc/...` was unwritable only on Linux — on Windows it is an ordinary relative path
+    # that creates happily, so the dialog accepted it and the test failed for being wrong rather
+    # than for finding something.
+    blocker = tmp_path / "this-is-a-file"
+    blocker.write_text("", encoding="utf-8")
+
     dialog = ProjectGateDialog()
-    dialog._folder_edit.setText("/proc/definitely-not-writable/car")
+    dialog._folder_edit.setText(str(blocker / "car"))
 
     dialog._accept()
 

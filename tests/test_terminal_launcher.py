@@ -7,6 +7,7 @@ path the user chose is the realistic failure, not whether Terminal.app opens.
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -24,6 +25,7 @@ def recorded(monkeypatch):
     return calls
 
 
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript: the command this builds exists only on macOS")
 def test_macos_builds_an_applescript_that_cds_then_runs_the_cli(recorded, monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
 
@@ -35,6 +37,10 @@ def test_macos_builds_an_applescript_that_cds_then_runs_the_cli(recorded, monkey
     assert "exec claude" in script
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="AppleScript, and the fixture path it quotes is not a legal Windows filename",
+)
 def test_macos_quotes_a_path_that_would_break_applescript(recorded, monkeypatch, tmp_path):
     """A real project folder is named `--MyCar_Jul26`; a quote or backslash in a path must not end
     the AppleScript string early."""
