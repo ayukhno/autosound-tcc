@@ -299,13 +299,21 @@ def test_the_report_is_read_only_when_the_tab_is_opened():
     assert "[Autosound TCC]" in dialog._install_text.toPlainText()
     probe = dialog._install_worker
     assert probe is not None
-    for _ in range(200):
+    # 30 s, not 10. The probes are up to eight `--version` subprocesses, and on a CI runner
+    # already running the rest of the suite they take longer than on a laptop running nothing:
+    # this passed alone and failed inside the full suite on Windows (2026-09-07). A wait that is
+    # long enough only on an idle machine is a clock, not a condition.
+    for _ in range(600):
         if not probe.running:
             break
         QTest.qWait(50)
     dialog._poll_tools()
     text = dialog._install_text.toPlainText()
-    assert "[Command-line tools]" in text
+    # ...and if it still is not there, say WHICH of the two things happened. "not in text" cannot
+    # tell a slow probe from a section that is never written, and those need different fixes.
+    assert "[Command-line tools]" in text, (
+        f"probe still running: {probe.running}\n{text}"
+    )
 
 
 def test_the_window_hands_it_the_facts_only_the_window_knows():
