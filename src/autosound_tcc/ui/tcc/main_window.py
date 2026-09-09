@@ -120,6 +120,21 @@ from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 
 _THEME_KEY = "ui/theme"
 _ZOOM_KEY = "ui/zoom"
+
+
+def _sane_zoom(stored: object) -> float:
+    """A usable font scale out of whatever the settings store hands back.
+
+    Unreadable is 1.0, not an exception and not a zero: a person whose settings carry a bad value
+    should get a normal window, not a crash on launch and not an application drawn at zero.
+    """
+    try:
+        value = float(stored)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1.0
+    if value != value or value <= 0:  # NaN, zero, negative
+        return 1.0
+    return round(min(_ZOOM_MAX, max(_ZOOM_MIN, value)), 2)
 #: The phase the ear works in — `core/listening.py`: "Phase 4 is the ear's phase: play a track,
 #: decide whether one thing about the sound is right or wrong, write it down." A string because
 #: that is what `process-state.json` carries, and phase `-1` exists.
@@ -638,7 +653,14 @@ class MainWindow(QMainWindow):
 
         self._settings = get_settings()
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
-        self._zoom = float(self._settings.value(_ZOOM_KEY, 1.0))
+        # Clamped on the way IN, not only in `_set_zoom`. A stored value goes through QSettings,
+        # which on Windows is the registry and hands back strings — so anything that ever wrote a
+        # 0, a negative, or a word lands here unchecked. The cost is not a slightly wrong size:
+        # `theme._scale_font_sizes` multiplies EVERY `font-size` in the stylesheet by this, so a
+        # zoom of 0 makes the whole application `font-size: 0.0px`, which is what Qt reports as
+        # "QFont::setPointSize: Point size <= 0 (-1)" — a line that IS in the user's Windows log,
+        # twice on 2026-09-09 — and what would collapse every panel into a narrow strip.
+        self._zoom = _sane_zoom(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
         # Here, and not where a session starts it: filling the model combos below fires
@@ -1621,6 +1643,11 @@ class MainWindow(QMainWindow):
         # And REW, which is the other half of "what changed since I looked": it is a separate
         # application, and the answer used to survive only a restart of this one.
         self._ping_rew()
+        # And a third half, for the same reason: a login happens in a terminal, and TCC asked
+        # `claude auth status` once at startup. The Arbiter logged in, pressed this, and nothing
+        # moved (user, 2026-09-09). `force`, because a press is not an alt-tab: the quiet period
+        # exists to stop window switching from spawning probes, not to make a button do nothing.
+        self._refresh_cli_catalogue(force=True)
 
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
@@ -2952,6 +2979,34 @@ class MainWindow(QMainWindow):
             return
         self._dialog._add_system_message(proposal_view.to_html(delta))
 
+    #: How long after one probe the next activation is allowed to start another. `claude auth
+    #: status` is a subprocess: somebody moving between two windows would otherwise spawn one per
+    #: switch, which is a console flash on Windows and a pointless load everywhere.
+    _CLI_REFRESH_QUIET_S = 20.0
+
+    def _refresh_cli_catalogue(self, force: bool = False) -> None:
+        """Ask the local CLIs again — off the GUI thread, and not more than once in a while.
+
+        `force` skips the quiet period. It is for a deliberate press: somebody who just pressed ↻
+        is telling TCC that something changed, and answering that with silence because they were
+        here twenty seconds ago is the bug this was written to fix, not a feature of it.
+
+        The worker is rebuilt rather than restarted: a `QThread` that has finished cannot be
+        started again, and one that has NOT finished must not be, which is the same rule the REW
+        ping follows.
+        """
+        now = time.monotonic()
+        last = getattr(self, "_cli_refreshed_at", None)
+        if not force and last is not None and now - last < self._CLI_REFRESH_QUIET_S:
+            return
+        running = getattr(self, "_cli_catalogue", None)
+        if running is not None and running.isRunning():
+            return
+        self._cli_refreshed_at = now
+        self._cli_catalogue = _CliCatalogueWorker()
+        self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
+        self._cli_catalogue.start()
+
     def _on_cli_catalogue_ready(self) -> None:
         """Fold the local CLIs into the pickers, and say so when one answered with nothing.
 
@@ -4034,12 +4089,17 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(i18n.t("gateAskTitle"))
         box.setText(i18n.t("gateAskBody"))
+        # SHORT labels, not the menu's. The menu entries read as sentences because a menu row
+        # grows to fit one; a QMessageBox button does not, and on Windows it simply CLIPS —
+        # "on't ask at all (aut", "nly what the skill does not ow" (user's screenshot,
+        # 2026-09-09, on the first build that showed this dialog). The sentence belongs in the
+        # body above, which is where it already is; a button gets a verb.
         buttons = {
-            box.addButton(i18n.t("gateAuto"), QMessageBox.ButtonRole.AcceptRole):
+            box.addButton(i18n.t("gateAskNever"), QMessageBox.ButtonRole.AcceptRole):
                 omp_session.GATE_AUTO,
-            box.addButton(i18n.t("gateForeign"), QMessageBox.ButtonRole.ActionRole):
+            box.addButton(i18n.t("gateAskForeign"), QMessageBox.ButtonRole.ActionRole):
                 omp_session.GATE_FOREIGN,
-            box.addButton(i18n.t("gateWrites"), QMessageBox.ButtonRole.ActionRole):
+            box.addButton(i18n.t("gateAskWrites"), QMessageBox.ButtonRole.ActionRole):
                 omp_session.GATE_WRITES,
         }
         default = next(iter(buttons))
@@ -4267,6 +4327,12 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
             self._ping_rew()
+            # And which models answer. A login happens where logins happen — in a terminal — and
+            # the answer was asked once, at startup, and cached: the Arbiter came back to a window
+            # still saying the model was unreachable, with a red border and (!) on both pickers,
+            # and the only cure was restarting the app (user, 2026-09-09). Same reasoning as the
+            # REW ping directly above: the other application is the one being alt-tabbed to.
+            self._refresh_cli_catalogue()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # A live session holds things only the model can write down. Quitting used to shut it down

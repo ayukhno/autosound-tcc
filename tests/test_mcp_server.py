@@ -1217,6 +1217,44 @@ def test_the_advice_never_tells_anyone_to_export_the_key(tmp_path, monkeypatch):
     assert "critic-env" in how, "the advice has to name where the key actually goes"
 
 
+def test_a_reviewer_that_cannot_run_yet_does_not_report_a_green_light(tmp_path, monkeypatch):
+    """Found by the Generator itself, on a real Windows session (2026-09-09): `get_tcc_state` said
+    `reviewer.reachable: true` and `call_critic` came straight back with
+    `mode: not_ready, detail: autosound_context.md not found`. Its own words: "reachable is a
+    config-level check — not end-to-end. Don't read that green light as 'the Critic works'."
+
+    It is right, and the fix is not to weaken `reachable` — a transport IS configured — but to
+    stop the payload implying more than it knows. `critic.preflight` already lists exactly what is
+    missing; the state now carries it, so a model reads "configured, and here is why it cannot run
+    yet" instead of a green light it has to discover is hollow."""
+    from autosound_tcc.core import config, critic, mcp_server, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: True)
+    monkeypatch.setattr(
+        critic, "preflight", lambda project_dir=None: ["autosound_context.md not found"]
+    )
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    state = mcp_server._reviewer_state(tmp_path)
+
+    assert state["configured"] is True
+    assert state["ready"] is False
+    assert any("autosound_context.md" in line for line in state["not_ready_because"])
+
+
+def test_a_reviewer_with_nothing_missing_says_it_is_ready(tmp_path, monkeypatch):
+    from autosound_tcc.core import config, critic, mcp_server, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: True)
+    monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    state = mcp_server._reviewer_state(tmp_path)
+
+    assert state["ready"] is True
+    assert state["not_ready_because"] == []
+
+
 def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
     from autosound_tcc.core import config, critic, project_settings
 

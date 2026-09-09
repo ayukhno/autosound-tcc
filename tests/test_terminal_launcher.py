@@ -88,11 +88,11 @@ def test_windows_falls_back_to_cmd_when_wt_is_missing(recorded, monkeypatch, tmp
 
     launch(tmp_path, "claude")
 
-    assert recorded[0].startswith('start "" cmd /k')
+    assert recorded[0][:2] == ["cmd", "/k"], recorded[0]
     # The folder is NOT in the line: `cmd` splits on `&` before it looks at quotes, so a path
     # travelling as text is a path that breaks on an ordinary folder name (HUB-053).
     assert recorded.kwargs["cwd"] == str(tmp_path)
-    assert str(tmp_path) not in recorded[0]
+    assert str(tmp_path) not in " ".join(recorded[0])
 
 
 def test_linux_uses_the_first_terminal_on_path(recorded, monkeypatch, tmp_path):
@@ -315,3 +315,36 @@ def test_a_project_path_with_a_quote_does_not_reach_the_shell(monkeypatch, tmp_p
 
     assert '"loud"' not in str(seen["command"]), seen["command"]
     assert seen["cwd"] == str(folder)
+
+
+def test_windows_opens_ONE_console_not_two(recorded, monkeypatch, tmp_path):
+    """TCC-006, the third source. `start "" cmd /k …` run with `shell=True` opens TWO consoles by
+    construction: cmd.exe's own, which exits at once, and the one `start` keeps. `start` was there
+    only to detach the process — and `CREATE_NEW_CONSOLE` does that directly, without a shell in
+    between. The break this catches is a `shell=True` creeping back."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        terminal_launcher.shutil, "which", lambda name: None if name == "wt" else f"C:/{name}"
+    )
+
+    launch(tmp_path, "claude")
+
+    assert recorded[0][:2] == ["cmd", "/k"], recorded[0]
+    assert recorded.kwargs.get("shell") is not True
+    assert recorded.kwargs["cwd"] == str(tmp_path)
+
+
+def test_the_plain_terminal_also_opens_one_console(monkeypatch):
+    """`run_line` is the other door onto the same shape — the update button's."""
+    seen = {}
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        terminal_launcher.subprocess, "Popen",
+        lambda argv, **kw: seen.update(argv=argv, kwargs=kw),
+    )
+
+    terminal_launcher.run_line("echo hi")
+
+    assert seen["argv"][:2] == ["cmd", "/k"], seen["argv"]
+    assert seen["kwargs"].get("shell") is not True

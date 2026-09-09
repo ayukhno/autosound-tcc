@@ -143,13 +143,13 @@ def run_line(line: str) -> None:
             log.info("terminal: windows terminal (wt cmd /k), line=%s", line)
             subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True, **child.wants_a_console())
             return
-        # `shell=True` means cmd.exe /c runs `start`, so there are TWO consoles for a moment: the
-        # shell's own, which exits at once, and the one `start` opens and keeps. That is the
-        # likeliest reading of the two windows reported above, and the log says which path ran.
-        log.info("terminal: start + cmd /k via shell, line=%s", line)
-        subprocess.Popen(
-            f'start "" cmd /k {line}', shell=True, close_fds=True, **child.wants_a_console()
-        )
+        # ONE console, and no shell. `start "" cmd /k …` run with `shell=True` opened TWO by
+        # construction — cmd.exe's own, which exits at once, and the one `start` keeps — and that
+        # is the likeliest reading of the two windows reported on Windows (TCC-006). `start` was
+        # there only to detach the process, which `CREATE_NEW_CONSOLE` does directly; a shell in
+        # between buys nothing and costs a window.
+        log.info("terminal: cmd /k in a new console, line=%s", line)
+        subprocess.Popen(["cmd", "/k", line], close_fds=True, **child.wants_a_console())
         return
     for argv, wants_shell_string in (
         (["x-terminal-emulator", "-e"], True),
@@ -221,8 +221,9 @@ def _launch_windows(
         )
         subprocess.Popen(argv, close_fds=True)
         return
-    # `start` is a cmd builtin, so this needs the shell; the empty "" is the window title `start`
-    # would otherwise eat from the first quoted argument.
+    # ONE console, no shell, no `start`. The old line ran `start "" … cmd /k …` through
+    # `shell=True`, which opens two consoles by construction (TCC-006); `start` was only ever
+    # there to detach, and `CREATE_NEW_CONSOLE` does that on its own.
     #
     # **The folder travels as `cwd`, never inside the line.** `/d "{project_dir}"` used to
     # interpolate it into a string run with `shell=True`, and `cmd` splits on `&` before it looks
@@ -234,7 +235,7 @@ def _launch_windows(
     # `cwd` is not an escaping trick that has to be got right; it is the path not being text.
     inner = _win_cli_invocation(cli, hint, model, extra)
     subprocess.Popen(
-        f'start "" cmd /k {inner}', shell=True, close_fds=True, cwd=str(project_dir)
+        ["cmd", "/k", inner], close_fds=True, cwd=str(project_dir), **child.wants_a_console()
     )
 
 

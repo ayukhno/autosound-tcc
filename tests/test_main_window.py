@@ -3502,3 +3502,81 @@ def test_a_card_header_gives_up_its_subtitle_before_it_widens_the_column():
     assert isinstance(sub, ElidedLabel), "the subtitle is the one that gives ground"
     natural = title.sizeHint().width() + sub.sizeHint().width()
     assert row.minimumSizeHint().width() < natural, "the row can be narrower than its two texts"
+
+
+def test_a_stored_zoom_can_never_make_the_app_font_zero():
+    """`theme._scale_font_sizes` multiplies EVERY `font-size` in the stylesheet by this number, so
+    a zoom of 0 is not "slightly small" — it is the whole application at `font-size: 0.0px`, which
+    Qt reports as "QFont::setPointSize: Point size <= 0 (-1)". That line is in the user's Windows
+    log, twice on 2026-09-09, next to a startup that showed a narrow tall window.
+
+    `_set_zoom` clamped; reading from the store did not, and the store is the registry on Windows,
+    which hands back strings written by any version that ever ran."""
+    from autosound_tcc.ui.tcc.main_window import _ZOOM_MAX, _ZOOM_MIN, _sane_zoom
+
+    for bad in ("", "0", "-1", "abc", None, float("nan"), 0.0, -3.2):
+        assert _sane_zoom(bad) == 1.0, bad
+    assert _sane_zoom("1.2") == 1.2
+    assert _sane_zoom(99) == _ZOOM_MAX
+    assert _sane_zoom(0.1) == _ZOOM_MIN
+
+
+def test_coming_back_to_the_window_re_asks_which_models_are_reachable(monkeypatch):
+    """The Arbiter logs in where a login happens — in a terminal — and comes back to a window that
+    still says the model is unreachable, with a red border and (!) on both pickers. TCC asks
+    `claude auth status` ONCE, while it is starting, and cached the answer; nothing re-asked it,
+    so the only way to see a login was to restart the app (user's screenshot, 2026-09-09).
+
+    Activation is already the moment TCC re-asks REW, for exactly the same reason: the other
+    application is the one being alt-tabbed to. A login is that, with a different program."""
+    from PySide6.QtCore import QEvent
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    asked = []
+    monkeypatch.setattr(MainWindow, "_refresh_cli_catalogue", lambda self: asked.append(True))
+    monkeypatch.setattr(MainWindow, "isActiveWindow", lambda self: True)
+
+    window.changeEvent(QEvent(QEvent.Type.ActivationChange))
+
+    assert asked == [True]
+
+
+def test_alt_tabbing_in_and_out_does_not_start_a_probe_each_time(monkeypatch):
+    """`claude auth status` is a subprocess. Someone moving between windows would otherwise spawn
+    one per switch, which is both the console-flash problem and a pointless load."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    started = []
+    monkeypatch.setattr(
+        main_window._CliCatalogueWorker, "start", lambda self: started.append(True)
+    )
+
+    window._refresh_cli_catalogue()
+    window._refresh_cli_catalogue()
+
+    assert len(started) == 1, "the second one is inside the quiet period"
+
+
+def test_the_reload_button_also_re_asks_which_models_answer(monkeypatch):
+    """The header's ↻ re-read the project, the contract and REW — and not the one thing the person
+    had just changed. They logged in, pressed Reload, and nothing moved (user, 2026-09-09).
+
+    Its own docstring already made this argument once, for REW: "the other half of what changed
+    since I looked". A login in a terminal is a third half."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    asked = []
+    monkeypatch.setattr(
+        MainWindow, "_refresh_cli_catalogue", lambda self, force=False: asked.append(force)
+    )
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_ping_rew", lambda self: None)
+
+    window._reload_from_disk()
+
+    assert asked == [True], "a press means ask NOW — the quiet period is for alt-tabbing"

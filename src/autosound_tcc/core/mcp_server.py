@@ -144,6 +144,7 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
             "reachable": None,
             "how": "ask the Arbiter to pick one in TCC's footer",
         }
+    missing = critic.preflight(project_dir)
     known = model_choices.choices([]) + model_choices.critic_choices([])
     harness, _, model = key.partition(":")
     # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
@@ -174,6 +175,19 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         # independent reviewer?" to the Arbiter. Naming a field `configured` says what the value
         # is; it does not say who decided it. This does.
         "decided_by": "the Arbiter, in TCC's own UI — settled, not a suggestion to confirm",
+        # `reachable` answers "is a transport configured on this machine". It does NOT answer
+        # "would a call work", and a model reading one as the other is not a hypothetical: on a
+        # live Windows session (2026-09-09) this payload said `reachable: true` while
+        # `call_critic` returned `not_ready — autosound_context.md not found`, and the Generator
+        # named the divergence itself: "reachable is a config-level check — not end-to-end. Don't
+        # read that green light as 'the Critic works'."
+        #
+        # It was right, and the answer is not to weaken `reachable` — a transport IS configured.
+        # It is to stop the payload implying more than it knows. `critic.preflight` already lists
+        # exactly what is missing; carrying it here turns a hollow green light into "configured,
+        # and here is why it cannot run yet".
+        "ready": not missing,
+        "not_ready_because": missing,
     }
 
 

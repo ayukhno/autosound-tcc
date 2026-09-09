@@ -113,3 +113,20 @@ def test_every_shipped_language_has_a_name_a_model_understands():
         name = agent_session.language_name(code)
         assert name != code, f"{code!r} has no name — the model would be told to answer in {code!r}"
         assert name.isascii() and name[:1].isupper(), name
+
+
+#: Button labels that must stay SHORT. A menu row grows to fit a sentence; a QMessageBox button
+#: does not — on Windows it clips, and the person is left choosing between "on't ask at all (aut"
+#: and "nly what the skill does not ow" (user's screenshot, 2026-09-09). The limit is generous:
+#: German is the longest of the four and "Außerhalb des Projekts" is 22.
+_BUTTON_KEYS = ("gateAskNever", "gateAskForeign", "gateAskWrites")
+_BUTTON_MAX = 26
+
+
+@pytest.mark.parametrize("key", _BUTTON_KEYS)
+def test_a_button_label_stays_short_in_every_language(key):
+    """The break this catches: somebody reuses a menu string on a button, in any of four
+    languages, and it is only visible on a platform nobody develops on."""
+    for code in _LANGS:
+        label = i18n.T[code].get(key) or i18n.T["en"][key]
+        assert len(label) <= _BUTTON_MAX, f"{code}/{key}: {label!r} is {len(label)} chars"

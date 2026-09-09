@@ -151,6 +151,10 @@ def main() -> int:
     # in the terminal TCC was launched from. On macOS a line arriving there while the window is a
     # full-screen space switches the user out of the app mid-tune (see core/app_log.py).
     app_log.setup()
+    # One line, before anything can spawn a child, saying WHICH build this is and whether this is
+    # the first run of it. Both were missing, and the second is what turns "it flashes after an
+    # update and then stops" (user, 2026-09-09) from a memory into something a log can settle.
+    app_log.note_start()
     # Before anything can start a child: on Windows the Agent SDK's own `claude` process would
     # otherwise open a console window in front of the app at every session (see core/child.py).
     child.hide_console_windows()

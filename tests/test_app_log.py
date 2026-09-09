@@ -117,3 +117,28 @@ def test_an_unwritable_log_directory_still_leaves_a_working_app(tmp_path, monkey
     assert any(isinstance(h, logging.StreamHandler) for h in app_log.logger().handlers)
     for handler in list(app_log.logger().handlers):
         app_log.logger().removeHandler(handler)
+
+
+def test_the_first_start_of_a_new_version_says_so(tmp_path, monkeypatch):
+    """TCC-006. The user's own observation, 2026-09-09: the window sometimes flashes only after an
+    UPDATE, and then stops. That makes the first run of a version a different event from every
+    later one — and nothing in the log said which run it was, so the report could only ever be
+    anecdotal.
+
+    One line, at start, before anything can spawn a child. It also carries the version, which the
+    log never had either: every question about "which build was that" has been answered by
+    guessing until now."""
+    from autosound_tcc.core import app_log
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(app_log, "_log_path", None, raising=False)
+    path = app_log.setup()
+
+    first = app_log.note_start()
+    second = app_log.note_start()
+
+    said = path.read_text(encoding="utf-8")
+    assert first is True, "the first run of this version"
+    assert second is False, "and every run after it"
+    assert said.count("first run of this version") == 1
+    assert "version=" in said

@@ -192,6 +192,32 @@ def hide_console_windows() -> None:
     anyio.open_process = open_process
 
 
+def _note_spawn(command: object) -> None:
+    """Say in the log WHICH program this app just started. Never raises, never blocks.
+
+    Written for one question that reading could not answer: on Windows a window flashes on the
+    FIRST run of a new version and never again (measured, 2026-09-09), and nothing in this code
+    base branches on a version change — so the thing that spawns it is not ours to find by
+    guessing. The next first-run log names it.
+
+    Two words only, the program and its first argument. A full command line carries project paths
+    and model names, and this file is what people paste into an issue.
+    """
+    try:
+        from autosound_tcc.core import app_log  # here, not at module scope: app_log imports late
+
+        if isinstance(command, str):
+            words = command.split()
+        else:
+            words = [str(part) for part in (command or [])]
+        if not words:
+            return
+        name = os.path.basename(words[0])
+        app_log.logger().info("spawn: %s", " ".join([name, *words[1:2]]))
+    except Exception:  # noqa: BLE001 — a diagnostic that can break a spawn is worse than none
+        return
+
+
 def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
     """The same for `subprocess`, as a process-wide default rather than a per-call kwarg.
 
@@ -227,6 +253,7 @@ def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
 
     @functools.wraps(original)
     def __init__(self, *args, **kwargs):  # noqa: N807 (patching a dunder on purpose)
+        _note_spawn(args[0] if args else kwargs.get("args"))
         flag = _no_window()
         if flag and not kwargs.get("creationflags") and len(args) <= positional:
             kwargs["creationflags"] = flag

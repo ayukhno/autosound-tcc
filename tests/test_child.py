@@ -173,3 +173,29 @@ def test_with_the_switch_off_the_agent_is_treated_like_every_other_child(monkeyp
     asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
 
     assert seen[0]["creationflags"] & 0x08000000 and "startupinfo" not in seen[0]
+
+
+def test_every_child_this_app_starts_is_named_in_the_log(tmp_path, monkeypatch):
+    """TCC-006. A window flashes on the FIRST run of a new version and never again — measured on
+    Windows, 2026-09-09 — and nothing in this code base runs once per version, so the thing that
+    spawns it is not ours to find by reading. So stop reading: every child TCC starts says its own
+    name in the log, and the next first-run log names the culprit instead of us guessing at it.
+
+    Truncated to the program and its first argument: the point is WHICH program, and a full
+    command line would put project paths and model names in a file people paste into issues."""
+    from autosound_tcc.core import app_log, child
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(app_log, "_log_path", None, raising=False)
+    path = app_log.setup()
+
+    class _Fake:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    child.hide_subprocess_console_windows(target=_Fake)
+    _Fake(["git", "ls-remote", "--tags", "https://example.invalid/secret-repo.git"])
+
+    said = path.read_text(encoding="utf-8")
+    assert "spawn: git ls-remote" in said, said
+    assert "secret-repo" not in said, "the rest of the line is not the log's business"

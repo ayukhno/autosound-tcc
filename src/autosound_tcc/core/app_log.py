@@ -143,6 +143,57 @@ def logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
 
 
+def note_start() -> bool:
+    """Write the one line the log never had, and say whether this is a NEW version's first run.
+
+    The log was not quiet because INFO is suppressed — it is not, and that was checked — but
+    because nothing on the startup path ever wrote a line. So every question about a Windows
+    machine ("which build was that?", "was that the run right after the update?") has been
+    answered by memory, and TCC-006 stayed unfalsifiable for days on exactly that.
+
+    The first run of a version is a DIFFERENT event from the ones after it (user, 2026-09-09: the
+    window flashes after an update and then stops), and only the app can know which run it is. The
+    marker file sits beside the log rather than in QSettings: this runs before Qt is imported, and
+    a diagnostic that needs the toolkit is a diagnostic that cannot report a failure to start.
+
+    Returns True on the first run of this version. Never raises: an unwritable marker means the
+    answer degrades to "cannot tell", which is said in the line rather than crashing a launch.
+    """
+    version = _version_string()
+    log = logger()
+    directory = log_dir()
+    marker = directory / "last-version.txt"
+    seen = ""
+    try:
+        seen = marker.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    first = seen != version
+    if first:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            marker.write_text(version, encoding="utf-8")
+        except OSError:
+            log.info("started: version=%s platform=%s (cannot tell: marker unwritable)",
+                     version, sys.platform)
+            return True
+    log.info(
+        "started: version=%s platform=%s%s",
+        version, sys.platform, " — first run of this version" if first else "",
+    )
+    return first
+
+
+def _version_string() -> str:
+    """This build's version, or `unknown`. Never raises — a log line must not be a failure point."""
+    try:
+        from importlib.metadata import version as package_version
+
+        return package_version("autosound-tcc")
+    except Exception:  # noqa: BLE001 — running from a checkout, or metadata missing
+        return "unknown"
+
+
 def set_ui_sink(sink: Optional[Callable[[str, Path], None]]) -> None:
     """Register (or clear) the callback that tells the user something was logged."""
     global _ui_sink

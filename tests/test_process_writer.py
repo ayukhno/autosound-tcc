@@ -156,3 +156,25 @@ def test_a_stop_over_open_work_reports_instead_of_recording(project):
     assert recorded is False
     assert "2.3" in report, report
     assert _events(project, "session_closed") == []
+
+
+def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
+    """Measured on the user's Windows VM, 2026-09-09: TCC ran `session_close`, the installed
+    method was **3.0.8**, and `process.py` answered by printing its own usage text. What the model
+    saw was `{"recorded": false, "error": "usage: process.py <process-dir> <comm..."}` — from which
+    it concluded the stopping ritual was broken and started inventing work to close.
+
+    `session-close` landed in the method at v3.0.47. TCC shipping a tool that needs it is fine;
+    TCC failing to say so is not. An old method is a fact about the machine, and a fact has to be
+    reported as itself."""
+    def _usage(project_dir, args, timeout_s=None):
+        return 2, "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]", ""
+
+    monkeypatch.setattr(process_writer, "_spawn", _usage)
+
+    with pytest.raises(process_writer.ProcessWriterError) as stopped:
+        process_writer.close_session(project)
+
+    said = str(stopped.value)
+    assert "session-close" in said
+    assert "3.0.47" in said, "the version that has it, so the answer is actionable"

@@ -380,9 +380,34 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     text; nothing is written to the journal, which is the honest record.
     """
     code, out, err = _spawn(project_dir, ["session-close"])
+    _refuse_if_too_old("session-close", "3.0.47", out, err)
     if code not in (0, 1):
         raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
     return code == 0, out or err
+
+
+def _refuse_if_too_old(command: str, since: str, out: str, err: str) -> None:
+    """Turn "process.py printed its usage" into a sentence about the machine.
+
+    An unknown command makes `process.py` dump its usage text, and that text travels back to the
+    model as the error. Measured on the user's Windows VM (2026-09-09): the installed method was
+    **3.0.8**, `session_close` answered with `usage: process.py <process-dir> <command>`, and the
+    model read the stopping ritual as broken — then started deriving work to close that nobody had
+    opened. A tool that needs a newer method is fine; one that fails without saying so is not.
+
+    Deliberately keyed on the usage text rather than on a version comparison. The version is
+    knowable (`install_report.skill_version`), but the ANSWER is not: a method can be new enough
+    by number and still be a checkout without that command, and the usage dump is the thing that
+    actually happened.
+    """
+    said = f"{out}\n{err}"
+    if "usage: process.py" not in said:
+        return
+    raise ProcessWriterError(
+        f"this project's method does not have `{command}` — it landed in the method at v{since}. "
+        "Update the method (TCC's own update row offers it), or do this step by hand; nothing "
+        "here is broken on TCC's side."
+    )
 
 
 def start_capture(
