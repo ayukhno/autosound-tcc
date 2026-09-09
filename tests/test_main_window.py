@@ -1029,6 +1029,34 @@ def test_quitting_writes_the_stop_once_not_once_per_close(monkeypatch):
     assert len(stops) == 1
 
 
+def test_what_is_still_open_at_a_stop_is_shown_not_swallowed(monkeypatch):
+    """SKL-025: an open capture round after TCC exits is lost state — its status lives in REW's
+    measurement list and goes when REW does. The report exists; the break this catches is TCC
+    reading it and saying nothing, which leaves the person with no idea anything was open."""
+    from autosound_tcc.core import process_writer
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(
+        process_writer,
+        "close_session",
+        lambda project_dir: (False, "OPEN ROUND r3 at v_004: 2 taken, 1 still expected (w-R_2)"),
+    )
+    window._session_open = True
+    before = len(window._dialog._bubbles)
+
+    window._record_session_stop()
+
+    said = " ".join(
+        label.text()
+        for bubble in window._dialog._bubbles[before:]
+        for label in bubble.findChildren(QLabel)
+    )
+    assert "OPEN ROUND r3" in said, "the report has to reach the person, not just the log"
+    assert "w-R_2" in said, "and it must carry WHICH measurement is missing"
+
+
 def test_the_model_choice_belongs_to_the_project_not_the_person(monkeypatch, tmp_path):
     """Remembering it globally means opening a second folder silently re-points the first."""
     from autosound_tcc.core import project_settings

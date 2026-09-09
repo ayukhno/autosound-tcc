@@ -789,7 +789,7 @@ def build_server(
         )
 
     @tool()
-    async def check_captures(titles: list[str] = []) -> str:
+    async def check_captures(titles: list[str] = [], session: bool = False) -> str:
         """Check the open round's captures against REW and record the verdict (SCR-040).
 
         Arithmetic, not judgement: does REW hold each measurement, is it in the band asked for, is
@@ -798,8 +798,68 @@ def build_server(
         step's gate reads what it recorded.
 
         A step that asked for captures will not close until they pass. `titles` defaults to
-        everything the round expects."""
-        return await asyncio.to_thread(_record, process_writer.check_captures, titles or None)
+        everything the round expects.
+
+        `session=True` adds the whole-session probe on top: every level side by side, loudest and
+        quietest, ctl1->ctl3 drift. That reads the shoot as one thing rather than measurement by
+        measurement, and it is step 0.6 of the virtual-first path -- ask for it while the tripod
+        is still standing, not after."""
+        return await asyncio.to_thread(
+            _record, process_writer.check_captures, titles or None, session
+        )
+
+    @tool()
+    async def session_close() -> str:
+        """STOPPING: what is still open, and — when nothing is — the fact that this session ended.
+
+        Reports; closes nothing itself. Which evidence ends a step is a decision, and it is not
+        this call's to make. It names the open capture round and any step left in progress, then
+        the method's own order applies: `capture_skip`/`close_capture` -> `finish_step`/`block_step`
+        -> `record_decision` for anything ruled out loud -> bank the agreed change -> the log.
+
+        `recorded: false` with a report is the normal answer over open work, not a failure. Call
+        it BEFORE saying the session is over: an open round's status lives in REW's measurement
+        list and goes when REW does."""
+        # Deliberately NOT through `_record`: that turns a non-zero exit into `error`, and this
+        # command's non-zero exit is its ANSWER -- the list of what is still open. Reporting it as
+        # an error is how a model learns to retry a call that is working exactly as designed.
+        def _close() -> str:
+            try:
+                recorded, report = process_writer.close_session(project_dir)
+            except process_writer.ProcessWriterError as exc:
+                return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
+            if recorded:
+                bridge.refresh_from_disk()
+            return json.dumps({"recorded": recorded, "said": report}, ensure_ascii=False)
+
+        return await asyncio.to_thread(_close)
+
+    @tool()
+    async def set_target(preset: str, curve: str) -> str:
+        """Record which target curve a preset is being tuned to. `enter_phase("1")` refuses
+        without it -- the desk does not open until the destination is named."""
+        return await asyncio.to_thread(_record, process_writer.set_target, preset, curve)
+
+    @tool()
+    async def capture_knobs(positions: dict) -> str:
+        """The hardware controls as they stood for the OPEN round: `{"SubRC": "4/4",
+        "RealCenter": "ON"}`.
+
+        A fact about the series, not about one measurement, which is what lets two passes taken at
+        different positions be told apart instead of the difference landing in a calibration
+        offset. `verify_prediction --project` refuses (exit 4) while the round has none."""
+        return await asyncio.to_thread(_record, process_writer.capture_knobs, positions)
+
+    @tool()
+    async def show_plan(phase: str = "") -> str:
+        """The plan for a phase, as the skill prints it. Defaults to the active phase."""
+        return await asyncio.to_thread(_record, process_writer.plan, phase or None)
+
+    @tool()
+    async def reconcile_plan() -> str:
+        """The skill's own plan-versus-fact pass: done steps carrying no evidence, and done steps
+        whose evidence resolves to nothing on disk."""
+        return await asyncio.to_thread(_record, process_writer.check)
 
     @tool()
     async def start_capture(version: str, expected: list[str], step: str = "") -> str:
@@ -949,7 +1009,9 @@ def build_server(
         })
 
     @tool()
-    async def call_critic(package: str, trace_path: str = "", model: str = "") -> str:
+    async def call_critic(
+        package: str, trace_path: str = "", model: str = "", step: str = ""
+    ) -> str:
         """Send a proposal package to the Critic (a different vendor's model) and return its reply.
 
         The reviewer is stateless by design — it re-reads state from disk on every call — which is
@@ -986,6 +1048,7 @@ def build_server(
                     project_dir,
                     vendor=_vendor_of(result.model),
                     model=result.model or "?",
+                    step=step,
                     review=result.review or "",
                     mode="clipboard" if result.mode == critic.MODE_CLIPBOARD else "api",
                 )

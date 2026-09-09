@@ -403,20 +403,41 @@ def start_capture(
     return _run(project_dir, args)
 
 
-def check_captures(project_dir: Path, titles: list[str] | None = None) -> str:
+def capture_knobs(project_dir: Path, positions: dict) -> str:
+    """The hardware controls as they stood for THIS round — `SubRC=4/4`, `RealCenter=ON`.
+
+    A fact about the SERIES, not about one measurement: two passes taken at different knob
+    positions can be told apart instead of the difference landing in a calibration offset. Not
+    optional either — `verify_prediction --project` refuses with exit 4 while the open round has
+    no knobs recorded (RES-007).
+    """
+    if not positions:
+        raise ProcessWriterError("capture-knobs needs at least one NAME=POSITION")
+    return _run(
+        project_dir,
+        ["capture-knobs", *[f"{name}={value}" for name, value in positions.items()]],
+    )
+
+
+def check_captures(
+    project_dir: Path, titles: list[str] | None = None, session: bool = False
+) -> str:
     """Run the skill's verdict over the open round and record it (SCR-040).
 
     TCC runs this phase because TCC is what can reach REW and hold a loop — but the arithmetic is
     the skill's, and so is the writing. Nothing here decides whether a curve is usable; it asks.
 
+    `session=True` adds the whole-session probe — every level side by side, loudest and quietest,
+    ctl1→ctl3 drift — which is step 0.6 of the virtual-first path and reads the shoot as one thing
+    rather than measurement by measurement.
+
     Slower than the other writes: it pulls every expected measurement out of REW. Call it off the
     GUI thread.
     """
-    return _run(
-        project_dir,
-        ["capture-check", *[str(t) for t in titles or []]],
-        timeout_s=max(DEFAULT_TIMEOUT_S, 120.0),
-    )
+    args = ["capture-check", *[str(t) for t in titles or []]]
+    if session:
+        args.append("--session")
+    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0))
 
 
 def record_capture(project_dir: Path, title: str) -> str:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 from concurrent.futures import Future
 
@@ -174,6 +175,15 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "record_capture",
         "skip_capture",
         "close_capture",
+        # Stopping, and the four writes the method requires that TCC had no tool for: without
+        # them the model reached `process.py` through Bash, and `process.py` is not in the
+        # read-only allowlist -- so the front-end was DEARER than a bare terminal on exactly the
+        # records the method insists on (SKL-026).
+        "session_close",
+        "set_target",
+        "capture_knobs",
+        "show_plan",
+        "reconcile_plan",
     }
     # No measurement tool: the panel is still mock data, and serving fabricated sweeps to a model
     # invites EQ computed from numbers that were never measured.
@@ -982,6 +992,116 @@ def test_call_critic_defaults_to_the_model_the_footer_is_set_to(tmp_path, monkey
     asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
 
     assert seen["model"] == "gemini-3.1-pro-high", "the Arbiter's pick must reach the call"
+
+
+def test_a_critique_is_recorded_against_the_step_it_was_called_on(tmp_path, monkeypatch):
+    """SKL-026: `record_reviewer` has taken a `step` since it was written, and the tool never
+    passed one — so the journal said a review happened and could not say what it was about, and
+    the step's own gate could not see it. The break this catches is the missing argument."""
+    from autosound_tcc.core import critic, process_writer
+
+    monkeypatch.setattr(
+        critic,
+        "run",
+        lambda package, **kw: critic.CriticResult(
+            critic.MODE_API_OR_CLI, "looks fine", "review.md", "critic", "gemini-3.1-pro", 1.0, "now"
+        ),
+    )
+    seen = {}
+    monkeypatch.setattr(
+        process_writer,
+        "record_reviewer",
+        lambda project_dir, **kw: seen.update(kw) or "recorded",
+    )
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x", "step": "2.1"}))
+
+    assert seen["step"] == "2.1"
+
+
+def test_the_whole_session_probe_can_be_asked_for(tmp_path, monkeypatch):
+    """`capture-check --session` is the only check that reads the whole shoot side by side —
+    levels, loudest/quietest, ctl1→ctl3 drift — and it is step 0.6 of the virtual-first path. The
+    tool could not ask for it, so in TCC that step did not exist."""
+    from autosound_tcc.core import process_writer
+
+    argv = []
+    monkeypatch.setattr(
+        process_writer, "_run", lambda project_dir, args, **kw: argv.append(args) or "ok"
+    )
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("check_captures", {"titles": ["w-L_1 (sw)"], "session": True}))
+
+    assert argv == [["capture-check", "w-L_1 (sw)", "--session"]]
+
+
+def test_stopping_is_reachable_without_a_shell(tmp_path, monkeypatch):
+    """SKL-025: `session-close` existed nowhere in TCC — not as a tool, not in the UI. The model
+    could only reach it through Bash, and `process.py` is not in the read-only allowlist, so
+    saying "we stopped" cost an Arbiter permission dialog. It reports and closes nothing itself."""
+    from autosound_tcc.core import process_writer
+
+    monkeypatch.setattr(
+        process_writer, "close_session", lambda project_dir: (False, "OPEN ROUND r3 at v_004")
+    )
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("session_close", {}))))
+
+    assert said["recorded"] is False
+    assert "OPEN ROUND r3" in said["said"]
+
+
+def test_the_knobs_of_the_round_are_written_as_the_skill_spells_them(tmp_path, monkeypatch):
+    """`capture-knobs NAME=POS` is a fact about the SERIES: without it `verify_prediction
+    --project` refuses with exit 4 (RES-007). The break this catches is a dict serialised any
+    other way than the skill's own `NAME=POS` words."""
+    from autosound_tcc.core import process_writer
+
+    argv = []
+    monkeypatch.setattr(
+        process_writer, "_run", lambda project_dir, args, **kw: argv.append(args) or "ok"
+    )
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(
+        mcp.call_tool("capture_knobs", {"positions": {"SubRC": "4/4", "RealCenter": "ON"}})
+    )
+
+    assert argv == [["capture-knobs", "SubRC=4/4", "RealCenter=ON"]]
+
+
+def test_the_target_curve_is_set_through_a_tool_not_through_bash(tmp_path, monkeypatch):
+    """`enter-phase 1` refuses without a recorded target, so this write is not optional — it is a
+    gate the method puts in front of the desk."""
+    from autosound_tcc.core import process_writer
+
+    argv = []
+    monkeypatch.setattr(
+        process_writer, "_run", lambda project_dir, args, **kw: argv.append(args) or "ok"
+    )
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("set_target", {"preset": "FULL", "curve": "EPY"}))
+
+    assert argv == [["target", "FULL", "EPY"]]
+
+
+def test_the_handoff_prompt_names_only_tools_that_exist(tmp_path):
+    """The prompt TCC sends at a stop tells the model which tools to call. Rename a tool and the
+    prompt goes stale silently — the model then calls something that is not there and the stop
+    half-happens. Not a check on the wording: a check that every backticked name in it is on the
+    surface. `_HANDOFF_PROMPT` is prose for a model and the rest of it earns no test."""
+    from autosound_tcc.ui.tcc.main_window import _HANDOFF_PROMPT
+
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+
+    named = set(re.findall(r"`([a-z_]+)`", _HANDOFF_PROMPT))
+    assert named, "the prompt names no tool at all — the stop has no order to follow"
+    assert named <= names, f"named in the handoff but not on the surface: {sorted(named - names)}"
 
 
 def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):

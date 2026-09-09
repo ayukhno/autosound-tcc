@@ -154,12 +154,24 @@ _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on thi
 # defensible answers -- follow the session language, or keep every system command in English
 # (unambiguous for the model, never mistaken for the user's own words) -- and no reason yet to
 # prefer one. English here is the status quo, not the decision.
+# The order is the method's own stopping order (SKILL.md, Pre-Session step 4), not one invented
+# here: `session_close` first because it NAMES what is open, then the capture round, then the
+# steps, then anything ruled out loud, then the bank, then the log. TCC used to ask for a shorter
+# list — steps, report_phase, the context file — which left the capture round out entirely, and an
+# open round's status lives in REW's measurement list and goes when REW does (SKL-025).
 _HANDOFF_PROMPT = (
     "This session is ending now and a different model will continue this project. Do not "
-    "summarise for me — write the state down where the next session will read it. Close or "
-    "record the current step with its evidence (finish_step / block_step / add_step as they "
-    "apply), make sure report_phase agrees with process-state.json, and put anything you learned "
-    "that is not yet on disk into autosound_context.md. Then say in one line what you wrote."
+    "summarise for me — write the state down where the next session will read it, in this order. "
+    "1) Call `session_close`: it names what is still open. "
+    "2) Close the capture round it names — `skip_capture` for each measurement that is not "
+    "coming, then `close_capture`. "
+    "3) Close or record every step it names, with evidence: `finish_step`, `block_step` or "
+    "`skip_step` as they apply. "
+    "4) Anything the Arbiter ruled out loud that is not yet on disk — `record_decision`. "
+    "5) Any change agreed but not yet banked — bank it, and say so if you cannot. "
+    "6) Put what you learned that is in no file into autosound_context.md, and make sure "
+    "`report_phase` agrees with process-state.json. "
+    "Then call `session_close` once more and say in one line what you wrote and what it reported."
 )
 # An agent that never finishes must not strand the restart: the handoff saves what can be saved,
 # it does not make the swap conditional on saving it.
@@ -3553,7 +3565,12 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(f"journal: {exc}", level="warn")
             return
         if not recorded and report:
+            # Both, and they are not redundant. The strip carries one line because that is what a
+            # strip holds; the dialog carries the WHOLE report, because "1 still expected
+            # (w-R_2)" is the part a person can act on, and an open round that outlives TCC is
+            # not recoverable — its status lives in REW's measurement list and goes when REW does.
             self._status_strip.notify(report.splitlines()[0], level="warn")
+            self._dialog._add_system_message(report)
 
     def _finish_handoff(self, *_args) -> None:
         timer, self._handoff_timer = getattr(self, "_handoff_timer", None), None
