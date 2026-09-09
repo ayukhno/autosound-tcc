@@ -270,6 +270,106 @@ def _git_is_read_only(rest: list[str]) -> bool:
     return True
 
 
+#: Commands that cannot be taken back. NOT "everything that writes" — the gate's whole point is
+#: that ordinary writes are silent, and a classifier that flags `mkdir` teaches the Arbiter to
+#: click through, which is worse protection than asking nothing at all (the 2026-08-21 noise).
+#: What is here either destroys data outside a single named file, overwrites a device, rewrites
+#: published history, or runs something fetched from the network.
+_RUINOUS = frozenset({"mkfs", "fdisk", "shutdown", "reboot", "halt", "diskutil"})
+#: `mkfs.ext4`, `mkfs.vfat` — the family is spelled with a suffix, and matching the bare name
+#: would let every real invocation through.
+_RUINOUS_PREFIXES = ("mkfs.",)
+#: Writing over a path nobody in this project owns. `> /etc/hosts` is not a chain and not a
+#: recursive delete, so nothing above catches it, and it is exactly the quiet kind.
+_PROTECTED_ROOTS = ("/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/Library/", "/var/", "/dev/")
+#: `rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
+_RM_RECURSIVE = re.compile(r"(?:^|\s)-[a-zA-Z]*[rR][a-zA-Z]*(?:\s|$)")
+#: The paths that are somebody's whole machine or whole home. A recursive delete of one of these
+#: is the case this check exists for.
+_WIDE_TARGETS = ("/", "~", "~/", "/*", "$HOME", "${HOME}")
+#: `curl … | sh` and its family: what runs is fetched at that moment and nobody has read it.
+_FETCHERS = frozenset({"curl", "wget", "fetch"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "python", "python3", "ruby", "perl", "node"})
+
+
+def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
+    """Whether this command has to reach the Arbiter even when the gate is set to "don't ask".
+
+    "Don't ask" is the user's decision and it stands (2026-09-06): the noise it removed was
+    ordinary safe commands, and since HUB-027 those are silent. It was never a decision to let
+    something unrecoverable through unseen — and the gate's `auto` branch used to return Allow
+    BEFORE Bash was looked at, so nothing checked a command at all (HUB-028).
+
+    Deliberately narrow, and the narrowness is the point. Everything this flags is destructive
+    beyond one named file, overwrites a device, rewrites published history, or executes something
+    just fetched from the network. Anything else — including ordinary writes and deletes inside
+    the project — passes silently, because a warning that fires on `mkdir` is a warning nobody
+    reads by the third day.
+
+    Unreadable is dangerous. A substitution hides what actually runs, and `bash_is_read_only`
+    degrades the same way: without this, the way past the check is one backtick.
+    """
+    text = command.strip()
+    if not text:
+        return False
+    if _SUBSTITUTION.search(text):
+        return True
+    parts = [part for part in _SEPARATORS.split(text) if part.strip()]
+    piped = "|" in text
+    return any(_single_command_is_dangerous(part, piped) for part in parts)
+
+
+def _single_command_is_dangerous(command: str, piped_into_something: bool) -> bool:
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return True  # unparseable is not safe; it is unknown
+    if not words:
+        return False
+    name = Path(words[0]).name
+    arguments = words[1:]
+    if name == "sudo":
+        return True  # asking for the whole machine is the definition of worth a question
+    if name in _RUINOUS or any(name.startswith(prefix) for prefix in _RUINOUS_PREFIXES):
+        return True
+    # A redirect onto somebody else's system file. Read off the RAW words, because `shlex` keeps
+    # `>` as a word of its own and the target is whatever follows it.
+    for previous, word in zip(words, words[1:]):
+        if previous in (">", ">>") and word.startswith(_PROTECTED_ROOTS):
+            return True
+    if name == "eval":
+        return True
+    if name == "rm":
+        if not _RM_RECURSIVE.search(" " + " ".join(arguments)):
+            return False
+        return any(
+            argument in _WIDE_TARGETS or argument.rstrip("/") in ("", "~", "$HOME")
+            for argument in arguments
+            if not argument.startswith("-")
+        ) or not [a for a in arguments if not a.startswith("-")]
+    if name == "find":
+        joined = " ".join(arguments)
+        return "-delete" in arguments or "-exec" in arguments and (
+            " rm " in f" {joined} " or " rm" in joined
+        )
+    if name == "dd":
+        return any(argument.startswith("of=/dev/") for argument in arguments)
+    if name == "chmod":
+        return bool(_RM_RECURSIVE.search(" " + " ".join(arguments))) and any(
+            argument in _WIDE_TARGETS for argument in arguments
+        )
+    if name == "git":
+        return "push" in arguments and any(
+            argument in ("--force", "-f", "--delete") for argument in arguments
+        )
+    if name in _FETCHERS and piped_into_something:
+        return True
+    if name in _SHELLS and piped_into_something and not arguments:
+        return True  # the receiving end of `curl … | sh`
+    # A redirect that empties a file OUTSIDE the project is the quiet way to lose /etc/hosts.
+    return False
+
+
 def bash_is_read_only(command: str, roots: Sequence[Path]) -> bool:
     """Whether `command` is one of the read-only invocations the skill makes all day.
 
@@ -395,6 +495,19 @@ class TuningSession:
             return PermissionResultAllow()
 
         if self.gate == "auto" or tool_name in self.always_allowed:
+            # "Don't ask" never meant "don't look". The noise this mode removed was ordinary safe
+            # commands, and since HUB-027 those are silent — but this branch returned Allow BEFORE
+            # Bash was examined at all, so nothing checked a command in the DEFAULT mode (HUB-028).
+            # `bash_is_dangerous` is deliberately narrow: what it flags cannot be taken back.
+            if tool_name == "Bash" and bash_is_dangerous(
+                tool_input.get("command", ""), self._read_roots
+            ):
+                return await self._ask(
+                    tool_name,
+                    f"Команда, яку не відкотити: {tool_input.get('command', '')}",
+                    tool_input,
+                    deny_reason="refused as unrecoverable",
+                )
             return PermissionResultAllow()
 
         if tool_name in ("Read", "Grep", "Glob"):
