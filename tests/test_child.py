@@ -100,6 +100,7 @@ def test_the_agent_gets_one_hidden_console_for_its_grandchildren_to_inherit(monk
     with no console gets a NEW one — so every `python`, `git` and `gh` the agent runs opened its
     own window. TCC's correct choice at its level produced the flashing one level down (tcc#13)."""
     _as_windows(monkeypatch)
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")  # off by default since 2026-09-09
 
     kwargs = child.hidden_console()
 
@@ -132,6 +133,7 @@ def test_the_sdk_gives_the_agent_the_hidden_console_and_everyone_else_no_window(
     monkeypatch.setattr(_subprocesses, "open_process", fake_open_process)
     monkeypatch.setattr(anyio, "open_process", fake_open_process)
     _as_windows(monkeypatch)
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")  # the path this test is about
 
     child.hide_console_windows()
     asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
@@ -142,19 +144,21 @@ def test_the_sdk_gives_the_agent_the_hidden_console_and_everyone_else_no_window(
     assert other["creationflags"] & 0x08000000 and "startupinfo" not in other
 
 
-def test_the_hidden_console_can_be_turned_off_where_the_person_is(monkeypatch):
-    """`SW_HIDE` is exactly the kind of hint that may quietly not take, and then the console is
-    VISIBLE for the whole session instead of blinking for a moment — worse than what it fixes.
-    Somebody who meets that must be able to switch it off on the spot, not wait for a build."""
+def test_the_hidden_console_is_off_until_somebody_asks_for_it(monkeypatch):
+    """`SW_HIDE` is a hint, and on the machine that has the problem it does not take: a desktop
+    window watch caught `proc=git class=ConsoleWindowClass 930x516` half a second after the main
+    window (2026-09-09). So the mechanism CREATES the window it was written to prevent, and the
+    default is off — with the switch left in place for anybody testing a newer Windows."""
     _as_windows(monkeypatch)
-    assert child.hidden_console(), "on by default"
 
-    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "0")
+    assert child.hidden_console() == {}, "off by default"
 
-    assert child.hidden_console() == {}, "and the agent goes back to no console at all"
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")
+
+    assert child.hidden_console(), "and on for whoever asks"
 
 
-def test_with_the_switch_off_the_agent_is_treated_like_every_other_child(monkeypatch):
+def test_by_default_the_agent_is_treated_like_every_other_child(monkeypatch):
     import anyio
     from anyio._core import _subprocesses
 
@@ -167,11 +171,11 @@ def test_with_the_switch_off_the_agent_is_treated_like_every_other_child(monkeyp
     monkeypatch.setattr(_subprocesses, "open_process", fake_open_process)
     monkeypatch.setattr(anyio, "open_process", fake_open_process)
     _as_windows(monkeypatch)
-    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "0")
 
     child.hide_console_windows()
     asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
 
+    # No switch set: this IS the default now, and the agent is treated like every other child.
     assert seen[0]["creationflags"] & 0x08000000 and "startupinfo" not in seen[0]
 
 
@@ -199,3 +203,34 @@ def test_every_child_this_app_starts_is_named_in_the_log(tmp_path, monkeypatch):
     said = path.read_text(encoding="utf-8")
     assert "spawn: git ls-remote" in said, said
     assert "secret-repo" not in said, "the rest of the line is not the log's business"
+
+
+def test_an_agent_cli_started_the_ordinary_way_gets_the_hidden_console_too(monkeypatch):
+    """`child.hidden_console` was written for the agent's CLI because those spawn console programs
+    of their own, and a parent with NO console makes each grandchild allocate one. It was wired
+    into the ASYNC path only — and the startup log from the user's Windows machine (2026-09-09)
+    shows the same programs going out the ordinary way: `agy models` twice and `claude.EXE auth`,
+    nine processes in two seconds.
+
+    Same programs, same reason, so the same treatment. Everything else keeps "no console at all",
+    which is right for a child that spawns nothing."""
+    from autosound_tcc.core import child
+
+    monkeypatch.setattr(child, "_no_window", lambda: 0x08000000)
+    monkeypatch.setattr(
+        child, "hidden_console",
+        lambda: {"creationflags": 0x00000010, "startupinfo": "STARTUPINFO"},
+    )
+    seen = []
+
+    class _Fake:
+        def __init__(self, *args, **kwargs):
+            seen.append(kwargs)
+
+    child.hide_subprocess_console_windows(target=_Fake)
+
+    _Fake(["agy", "models"])
+    _Fake(["git", "status"])
+
+    assert seen[0].get("startupinfo") == "STARTUPINFO", "the agent CLI hands a console DOWN"
+    assert seen[1].get("startupinfo") is None, "git spawns nothing; no console at all is right"

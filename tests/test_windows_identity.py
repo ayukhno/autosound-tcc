@@ -112,6 +112,12 @@ def test_startup_stamps_the_window_it_just_built():
 
     from autosound_tcc import app
 
-    source = inspect.getsource(app.main)
+    # Comments stripped first. This reads the SOURCE for an ordering, so any comment that quotes
+    # `window.show()` moves the answer — one did, on 2026-09-09, and the test failed while the
+    # code was right. A check on the order of two calls must look at calls.
+    source = "\n".join(
+        line for line in inspect.getsource(app.main).splitlines()
+        if not line.strip().startswith("#")
+    )
     assert "windows_identity.stamp_window(int(window.winId()))" in source
     assert source.index("stamp_window") < source.index("window.show()")

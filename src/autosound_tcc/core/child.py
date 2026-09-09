@@ -103,7 +103,24 @@ def hidden_console() -> dict:
     be able to turn it off where they are, not wait for a build — the same escape hatch the MCP
     server and the splash already carry.
     """
-    if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "1") == "0":
+    # DEFAULT OFF since 2026-09-09, on measurement rather than argument.
+    #
+    # The mechanism was written from the documented behaviour of console inheritance and run on
+    # nothing but a Mac, where every branch of it is empty. On the machine that has the problem it
+    # does the opposite of its purpose: a desktop-wide window watch caught
+    #
+    #     proc=git class=ConsoleWindowClass size=930x516 layered title='…\Git\cmd\git.exe'
+    #
+    # half a second after the main window — the user's "and once after". `SW_HIDE` is a hint, the
+    # note above always said so, and here it does not take: instead of preventing a window the
+    # hidden console CREATES one.
+    #
+    # The same pair had already been measured and not read: on probe2 the ordinary start showed
+    # ONE window and the same start with this switch off showed NONE.
+    #
+    # So the default is off, and the switch now turns it ON for anybody who wants to test whether
+    # a newer Windows behaves as the documentation says.
+    if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "0") != "1":
         return {}
     new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
     if not sys.platform.startswith("win") or new_console is None:
@@ -253,10 +270,22 @@ def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
 
     @functools.wraps(original)
     def __init__(self, *args, **kwargs):  # noqa: N807 (patching a dunder on purpose)
-        _note_spawn(args[0] if args else kwargs.get("args"))
+        command = args[0] if args else kwargs.get("args")
+        _note_spawn(command)
         flag = _no_window()
         if flag and not kwargs.get("creationflags") and len(args) <= positional:
-            kwargs["creationflags"] = flag
+            # The agent's CLI gets a console of its own to hand DOWN, exactly as in the async
+            # path: those programs spawn `node`, `git` and `gh` themselves, and a parent with NO
+            # console makes each grandchild allocate one — which is a window. This treatment was
+            # wired into `hide_console_windows`'s anyio patch only, while the startup log from the
+            # user's Windows machine (2026-09-09) shows the same programs going out the ordinary
+            # way: `agy models` twice and `claude.EXE auth`, nine processes in two seconds.
+            hidden = hidden_console() if is_agent_command(command) else {}
+            if hidden:
+                kwargs["creationflags"] = hidden["creationflags"]
+                kwargs.setdefault("startupinfo", hidden["startupinfo"])
+            else:
+                kwargs["creationflags"] = flag
         return original(self, *args, **kwargs)
 
     __init__._autosound_quiet = True  # type: ignore[attr-defined]
