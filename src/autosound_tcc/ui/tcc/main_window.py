@@ -54,18 +54,19 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import (
-    install_report,
     app_log,
     claude_sdk,
     config,
-    self_check,
     contract_check,
     critic,
+    install_report,
     model_choices,
     model_overrides,
     omp_session,
     process_writer,
     project_settings,
+    project_trust,
+    self_check,
     target_curve,
     terminal_launcher,
     updates,
@@ -3686,9 +3687,32 @@ class MainWindow(QMainWindow):
                 process_writer.enter_phase(server.project_dir, "-1")
         except process_writer.ProcessWriterError as exc:
             self._status_strip.notify(f"journal: {exc}", level="warn")
+        self._say_what_the_project_applies()
         self._agent_worker.start()
         self._update_session_button()
         self._refresh_project_button()
+
+    def _say_what_the_project_applies(self) -> None:
+        """Name this project folder's own hooks and permissions before the first turn (HUB-050).
+
+        `setting_sources=["project"]` is how the METHOD reaches the model — the project's own
+        `.claude/skills/autosound-tuning` is the only place the skill can come from, and a session
+        without it improvises, which is worse than failing. The same switch hands the session that
+        folder's `.claude/settings.json`: its hooks, its `permissions.allow`. A project is a
+        FOLDER — it arrives from a backup, a stick, a customer, a clone — so it can carry a hook
+        that runs a command here, and a permission nobody in this room granted.
+
+        The SDK has no way to take skills from a source without taking the rest of it, and
+        emptying `setting_sources` would take the method away along with the risk. So TCC does not
+        decide: it says, by name, while there is still time to close the window.
+
+        Silent when the folder applies nothing. A line on every start is noise, and noise is how
+        the one that matters gets scrolled past.
+        """
+        said = project_trust.inherited(self._mcp_server.project_dir
+                                       if self._mcp_server else config.project_dir())
+        if said:
+            self._dialog._add_system_message("\n".join(said))
 
     # ---- which model, and therefore which harness --------------------------
 
