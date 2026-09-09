@@ -609,3 +609,24 @@ def test_a_reviewer_key_file_can_never_be_committed_from_this_repo():
             ["git", "check-ignore", "-q", name], cwd=str(root), capture_output=True
         )
         assert done.returncode == 0, f"{name} is not ignored — a key put there could be committed"
+
+
+def test_the_testing_policy_does_not_carry_a_count_that_will_rot():
+    """HUB-048. `docs/TESTING.md` said "783 tests, ~30 seconds" while the suite was 1653 tests and
+    318 s — twice out on the number, tenfold on the time — and the hub's `probe-number-drift`
+    complained about it daily. A number in a policy sentence has no owner: nobody updates prose
+    when they add a test.
+
+    So the POLICY says how to ask, and the dated MEASUREMENTS below it keep their numbers, which
+    is right — those are records of a moment, not claims about now. This checks only the policy
+    section: the break it catches is a fresh count creeping back into a sentence that is supposed
+    to outlive it."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "docs" / "TESTING.md").read_text(encoding="utf-8")
+    policy = text.split("## ", 2)[1]  # "The policy", up to the next heading
+
+    stale = re.findall(r"\b\d[\d\s,]*\s+tests\b", policy)
+
+    assert not stale, f"a count in the policy will rot: {stale} — say the command instead"

@@ -2,8 +2,20 @@
 
 ## The policy
 
-**Run everything, every time.** `make test` — 1730 tests, ~8 minutes, and that includes the
-skill's own selftests as subprocesses.
+**Run everything, every time:**
+
+```
+make test                                                  # the whole suite, serial, ~8 minutes
+uv run --extra dev --python 3.12 python -m pytest tests/ -q | tail -1    # …and how many that was
+```
+
+**How many tests there are is not written down here** — the run says it, and a count in a
+sentence has nobody to update it. This file used to carry one and it was twice out on the number
+and tenfold out on the time (HUB-048); the hub's `probe-number-drift` complained daily and nobody
+read it. The dated measurements further down DO carry numbers, and should — those are records of
+a moment, not claims about now. `test_packaging.py` fails if a count creeps back up here.
+
+The suite includes the skill's own selftests, run as subprocesses.
 
 There is deliberately no fast/slow split, and it is worth writing down why, because there nearly
 was one. What there IS, since 2026-09-09, is a parallel run — which is not a split: every test
@@ -100,6 +112,22 @@ symptom and would have institutionalised the cause — every future reader would
 window tests are slow, that is how it is" instead of "a window leaks itself into the QApplication".
 That is the general form worth keeping: when a run policy is being designed around a number,
 profile the number first.
+
+## Known flakiness, and what is known about it
+
+Two, and they are different animals. Neither is a reason to re-run until green: a re-run that
+turns a red into a green without an explanation has told you nothing.
+
+| what | where | state |
+|---|---|---|
+| a Qt worker segfaults in `Shiboken::Object::destroy` during widget teardown | parallel runs, macOS | 2 in 15 full parallel runs, **did not reproduce on demand** in 8 consecutive runs after. Real stack, and the ruling-out, in [`tcc#22`](https://github.com/ayukhno/autosound-tcc/issues/22). This is why parallel is not the default. |
+| the suite aborts on Linux under `offscreen` | CI, Linux | **no repro yet** — hub `HUB-049` asks for one first, and explicitly not for a fix before it. Named here because a document about tests that omits the known flake teaches its reader that a red run must be their fault. |
+| an access violation on Windows in `agent_worker.QThread` construction | CI, Windows | about one run in three, [`tcc#19`](https://github.com/ayukhno/autosound-tcc/issues/19). Three hypotheses refuted by series rather than by argument: a neighbouring diagnostics thread, GC timing, a missing QApplication. |
+
+If you hit one, keep the evidence before re-running: on macOS the symbolised stack is in
+`~/Library/Logs/DiagnosticReports/Python-*.ips` and the system rotates it away. `tail` on a
+pytest log throws away the HEAD of a faulthandler dump, which is the only part that names the
+dying frame — that is how the first stack of `tcc#22` was lost.
 
 ## The skill's selftests
 
