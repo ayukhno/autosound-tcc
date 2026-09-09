@@ -16,13 +16,29 @@ and a test that both harnesses still read from it.
 
 from __future__ import annotations
 
+#: Decision, 2026-09-09 (user's, asked as SKL-027's second point): **TCC's own instructions to a
+#: model are always English, and the model answers the Arbiter in the project's language.**
+#:
+#: The other defensible answer was to write these in the session language, since the skill sets
+#: one at intake and writes every project file in it. What settled it: a system command and a
+#: person's own words must not look alike. In one language they eventually do, and the day a model
+#: quotes TCC's handoff text back as something the Arbiter asked for is the day this stops being
+#: a style question.
+#:
+#: Which makes the second half mandatory rather than polite. English instructions with nothing
+#: said about language are how a Ukrainian Arbiter gets answered in English — so the rule travels
+#: IN the opener, where the model reads it, not in a comment where only we do.
+_LANGUAGE_RULE = (
+    " Instructions from TCC are always in English; answer me in the project's language — "
+    "`language` in get_tcc_state is the one the Arbiter chose."
+)
 _FRESH = (
     "Start a tuning session for this project. Read state from disk, call get_tcc_state, then "
-    "tell me where we are and what the next step is."
+    "tell me where we are and what the next step is." + _LANGUAGE_RULE
 )
 _RESUMED = (
     "Resume this tuning project. Read state from disk first, call get_tcc_state and "
-    "get_pending_signals, then tell me where we are and what the next step is."
+    "get_pending_signals, then tell me where we are and what the next step is." + _LANGUAGE_RULE
 )
 
 

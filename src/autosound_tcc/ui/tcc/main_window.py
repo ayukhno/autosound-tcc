@@ -148,12 +148,11 @@ _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on thi
 # model, so it names the tools rather than describing the intent: an agent that "summarises the
 # state" into prose has saved nothing the next session can read.
 #
-# OPEN, and it applies to every string TCC sends *to* a model, not only this one: which language
-# should they be in? The skill sets a session language during intake and writes the project's
-# files in it, so a command in another language is a second voice in the conversation. Two
-# defensible answers -- follow the session language, or keep every system command in English
-# (unambiguous for the model, never mistaken for the user's own words) -- and no reason yet to
-# prefer one. English here is the status quo, not the decision.
+# SETTLED 2026-09-09 (user), and it applies to every string TCC sends *to* a model, not only this
+# one: system text is always ENGLISH, and the model answers the Arbiter in the project's language.
+# The rule itself travels in the opener (`core.openers`), because a rule only we can read is not a
+# rule the model follows. What decided it: a system command and the person's own words must not
+# look alike, and in one language they eventually do.
 # The order is the method's own stopping order (SKILL.md, Pre-Session step 4), not one invented
 # here: `session_close` first because it NAMES what is open, then the capture round, then the
 # steps, then anything ruled out loud, then the bank, then the log. TCC used to ask for a shorter

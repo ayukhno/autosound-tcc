@@ -52,3 +52,15 @@ def test_both_harnesses_open_with_the_same_words():
     assert tuning_session.TuningSession._opener(resumed=True, prompt="") == (
         openers.opening_prompt(resumed=True)
     )
+
+
+def test_the_opener_says_which_language_to_answer_in():
+    """Decision, 2026-09-09 (user): TCC's own instructions are always English — a system command
+    must never be mistakable for the Arbiter's own words — and the model answers the person in the
+    project's language. English text with nothing said about it is how a Ukrainian Arbiter gets
+    answered in English, which is the half of the decision that has to be written down where the
+    model reads it, not in a comment."""
+    for resumed in (True, False):
+        said = openers.opening_prompt(resumed=resumed)
+        assert "language" in said.lower()
+        assert "get_tcc_state" in said
