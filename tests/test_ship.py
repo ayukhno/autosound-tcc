@@ -138,6 +138,11 @@ def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None):
     return ship_mod.ship(repo, release=release, test_command=stub,
                          channel=ask or channel(),
                          read_method_sha=lambda _root: METHOD_SHA,
+                         # The fixture has no submodule at all, so the recorded pin is stood in
+                         # for as well — agreeing with the checkout, which is the state a release
+                         # is allowed to happen in. `test_a_release_refuses_when_the_checkout_is_
+                         # not_the_recorded_pin` covers the disagreement directly.
+                         read_pinned_sha=lambda _root: METHOD_SHA,
                          relock_with=_relock, say=say)
 
 
@@ -495,3 +500,53 @@ def test_no_pytest_caller_carries_its_own_distribution_flags():
                 continue
             assert not re.search(r"(^|\s)-n(\s|=)", line), f"{relative}: {line.strip()}"
             assert "--dist" not in line, f"{relative}: {line.strip()}"
+
+
+# --- the pin the repo RECORDS vs the method actually checked out ---------------------------
+
+
+def test_a_release_refuses_when_the_checkout_is_not_the_recorded_pin():
+    """SKL-028. `Paired with method <sha>` is checked against the WORKING checkout of the
+    submodule — correctly, since that is what the release was built against. But git records a
+    different thing: the gitlink committed in the parent repo. When those two disagree, the
+    release pairs itself with a commit that is written down nowhere, and anyone cloning the tag
+    gets a different method than the one that was tested.
+
+    Bought this morning: the pin sat at `0cc96f6`, seven commits past `v3.0.46` and on no tag."""
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_method_pin(pinned="a" * 40, checked_out="b" * 40)
+
+    assert "a" * 12 in str(stop.value) and "b" * 12 in str(stop.value)
+
+
+def test_a_release_is_fine_when_they_agree():
+    ship_mod.check_method_pin(pinned="c" * 40, checked_out="c" * 40)
+
+
+def test_a_pin_that_cannot_be_read_stops_the_release_rather_than_passing():
+    """Silence here would be the worst answer: it reads as "they agree"."""
+    for pinned, checked_out in (("", "d" * 40), ("d" * 40, "")):
+        with pytest.raises(ship_mod.Stop):
+            ship_mod.check_method_pin(pinned=pinned, checked_out=checked_out)
+
+
+def test_the_recorded_pin_is_read_from_this_repository_for_real():
+    """The stub in `_run` is a stand-in, and a stand-in nobody compares is how a green suite
+    starts lying — this file says so in its own header. So the real reader runs here, against the
+    real repository, where the submodule exists.
+
+    It caught exactly what it was written for: `pinned_method_sha` used an `_SHA` pattern that was
+    never defined in this module, so every real release would have died with a NameError while
+    every test passed on the stub."""
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "vendor" / "autosound-tuning-skill").exists():
+        pytest.skip("submodule not checked out")
+
+    pinned = ship_mod.pinned_method_sha(root)
+
+    said = subprocess.run(
+        ["git", "ls-tree", "HEAD", "vendor/autosound-tuning-skill"],
+        cwd=str(root), capture_output=True, text=True,
+    ).stdout.split()
+    assert pinned == said[2]
+    assert len(pinned) == 40

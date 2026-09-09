@@ -187,8 +187,9 @@ def skill_sha() -> str:
         return ""
 
 
-def _skill() -> Section:
-    """Where the method is, which commit, which version, and whether TCC can actually read it."""
+def _skill(project_dir: Optional[Path] = None) -> Section:
+    """Where the method is, which commit, which version, and whether TCC can actually read it —
+    and, for a project, whether that is the method the SESSION will actually get."""
     items: list[Item] = []
     try:
         path = vendor_loader.skill_dir()
@@ -213,7 +214,35 @@ def _skill() -> Section:
                 items.append(Item("2.x found instead", "yes", str(older)))
     except Exception as exc:  # noqa: BLE001
         items.append(Item("found", "could not be asked", f"{type(exc).__name__}: {exc}"))
+    if project_dir is not None:
+        items.append(_project_link(project_dir))
     return Section("The method", items)
+
+
+def _project_link(project_dir: Path) -> Item:
+    """Which method the SESSION gets, which is not always the one every row above names.
+
+    Both adapters read `<project>/.claude/skills/autosound-tuning` and nothing else, and
+    `vendor_loader.link_skill_into` leaves an existing link alone whatever it points at — on
+    purpose: somebody may have wired a working tree there, and replacing it under them would be
+    worse than the problem that solves. The cost is silence. Set `AUTOSOUND_SKILL_DIR`, or move
+    the checkout, and every row above names the new place while the session keeps running the old
+    one, with nothing anywhere saying so (SKL-028).
+
+    The row is written whether or not anything is wrong. A report that speaks only on trouble
+    teaches its reader that silence means "not checked".
+    """
+    link = Path(project_dir) / ".claude" / "skills" / vendor_loader.SKILL_NAME
+    try:
+        if not link.exists() and not link.is_symlink():
+            return Item("project link", "none", f"{link} — the session will improvise a method")
+        target = link.resolve()
+        shipped = vendor_loader.skill_dir().resolve()
+    except OSError as exc:
+        return Item("project link", "could not be read", f"{type(exc).__name__}: {exc}")
+    if target == shipped:
+        return Item("project link", "this one", str(target))
+    return Item("project link", "ANOTHER method", f"{target} — not {shipped}")
 
 
 def _tools() -> Section:
@@ -313,7 +342,7 @@ def report(
     metadata lookups import as they go. The metadata is milliseconds on the main thread and
     minutes off it; the subprocesses are the opposite. So each runs where it is cheap.
     """
-    sections = [_app(), _skill()]
+    sections = [_app(), _skill(project_dir)]
     if tools_section is not None:
         sections.append(tools_section)
     elif with_tools:

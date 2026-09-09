@@ -538,6 +538,34 @@ def test_write_mcp_config_merges_instead_of_clobbering(tmp_path, monkeypatch):
     assert servers["tcc"]["headers"]["X-TCC-Token"] == "tok"
 
 
+def test_the_advertisement_is_withdrawn_when_the_server_goes_down(tmp_path, monkeypatch):
+    """`.mcp.json` is an advertisement for a server that is LISTENING. After TCC exits it still
+    names a port nothing answers on, so a CLI started in the project folder connects to nothing —
+    or, worse, to whatever took that port next. The entry belongs to the running process, so it
+    goes down with it (SKL-028)."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"theirs": {"type": "http", "url": "http://x/mcp"}}}),
+        encoding="utf-8",
+    )
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    mcp_server.forget_mcp_config(tmp_path)
+
+    servers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+    assert set(servers) == {"theirs"}, "ours goes, theirs stays"
+
+
+def test_withdrawing_an_advertisement_that_is_not_there_is_not_an_error(tmp_path, monkeypatch):
+    """It runs on the way out, where an exception has nowhere useful to go and would be raised
+    while the window is already closing."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    mcp_server.forget_mcp_config(tmp_path)  # no file at all
+    (tmp_path / ".mcp.json").write_text("{ not json", encoding="utf-8")
+    mcp_server.forget_mcp_config(tmp_path)  # and one that cannot be parsed
+
+
 def test_free_port_skips_a_port_already_in_use(tmp_path):
     import socket
 

@@ -202,3 +202,38 @@ def test_a_home_that_is_the_root_masks_nothing(monkeypatch):
     monkeypatch.setattr(install_report.Path, "home", classmethod(lambda _cls: install_report.Path("/")))
 
     assert install_report._mask_home("/usr/bin/python") == "/usr/bin/python"
+
+
+def test_a_project_linked_to_another_skill_says_so(tmp_path, monkeypatch):
+    """SKL-028: both adapters read `<project>/.claude/skills/autosound-tuning`, and
+    `link_skill_into` leaves an existing link alone whatever it points at — deliberately, because
+    a person may have wired a working tree there. The cost of that decision is silence: set
+    AUTOSOUND_SKILL_DIR, and the session still runs the OLD link while every report names the new
+    directory. The break this catches is exactly that mismatch going unmentioned."""
+    from autosound_tcc.core import install_report
+
+    elsewhere = tmp_path / "some-other-checkout"
+    (elsewhere / "skills" / "autosound-tuning").mkdir(parents=True)
+    link = tmp_path / "project" / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(elsewhere / "skills" / "autosound-tuning", target_is_directory=True)
+
+    section = install_report._skill(tmp_path / "project")
+    rows = {item.label: item for item in section.items}
+
+    assert "project link" in rows
+    assert str(elsewhere) in rows["project link"].detail
+
+
+def test_a_project_linked_to_the_shipped_skill_says_nothing_alarming(tmp_path):
+    """The row exists either way — a report that only speaks when something is wrong teaches a
+    reader that silence means "not checked"."""
+    from autosound_tcc.core import install_report, vendor_loader
+
+    link = tmp_path / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(vendor_loader.skill_dir().resolve(), target_is_directory=True)
+
+    rows = {item.label: item for item in install_report._skill(tmp_path).items}
+
+    assert rows["project link"].value == "this one"

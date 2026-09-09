@@ -914,9 +914,15 @@ def build_server(
     ) -> str:
         """Put a proposed DSP change on screen as a card for the Arbiter to read.
 
-        Has no effect on anything — TCC never writes to the DSP. The Arbiter enters accepted
-        values into their own DSP software; this only makes the proposal legible next to the
-        state it refers to.
+        **A card, not a bank.** It shows; it records nothing. TCC never writes to the DSP, and it
+        does not write the ledger either: an agreed change is banked with the method's own
+        `apply.propose`, which writes `v_NNN` and the settings sheet. Calling this and moving on
+        leaves the change on a screen and in no file — and the next session, reading the ledger,
+        will not know it was ever agreed.
+
+        So: show it here, get the Arbiter's answer, and bank the ones they accept. The Arbiter
+        enters the accepted values into their own DSP software; this only makes the proposal
+        legible next to the state it refers to.
         """
         proposal = {
             "channel": channel,
@@ -1186,6 +1192,32 @@ _CONFIG_WRITE_TRIES = 3
 _CONFIG_WRITE_PAUSE_S = 0.3
 
 
+def forget_mcp_config(project_dir: Path) -> None:
+    """Take TCC's entry back out of `.mcp.json` when the server goes down.
+
+    The file is an advertisement for something LISTENING. Left behind, it names a port nothing
+    answers on — so a CLI started in this folder tomorrow connects to nothing, or to whatever took
+    that port in the meantime, and neither failure says what it is (SKL-028).
+
+    Same rule as writing it: the file is the user's, so only our own key is removed and everything
+    else is left exactly as it was. Never raises — this runs on the way out, where an exception
+    has nowhere to go and the window is already closing.
+    """
+    path = config.mcp_config_path(project_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict) or SERVER_NAME not in servers:
+        return
+    servers.pop(SERVER_NAME)
+    try:
+        _write_atomically(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        app_log.warn(f"could not withdraw {SERVER_NAME} from {path}: {exc}")
+
+
 def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     """Advertise this server in the project's `.mcp.json` so any CLI launched there finds it.
 
@@ -1420,3 +1452,5 @@ class TccMcpServer:
             self._thread.join(timeout=timeout)
         self._thread = None
         self._server = None
+        # The advertisement goes down with the thing it advertises.
+        forget_mcp_config(self.project_dir)

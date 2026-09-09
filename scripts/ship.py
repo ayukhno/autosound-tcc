@@ -103,9 +103,15 @@ CARRIER = Path(__file__).resolve().parents[2] / "hub" / "scripts" / "release-pre
 #:
 #: `-n 0` is belt and braces: the default is serial anyway (`pyproject.toml` carries no
 #: `addopts`), but a release must not become parallel because somebody exported PYTEST_ADDOPTS in
-#: the shell it was cut from. Parallel runs kill a Qt worker in about 29% of full runs on this
-#: machine — the same shape as tcc#19 — and a release is the last place to accept that.
+#: the shell it was cut from. Parallel runs killed a Qt worker in 2 of 15 full runs on this
+#: machine and did not reproduce on demand (tcc#22) — a release is the last place to accept that.
 TEST_COMMAND = [sys.executable, "-m", "pytest", "tests/", "-q", "-n", "0"]
+
+
+#: A full git object name. `ls-tree` prints a mode, a type, the sha and the path, and only the
+#: third field is ours — a pattern rather than "take field 3" so a surprise in that output is a
+#: refusal instead of a nonsense sha travelling into a release.
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class Stop(Exception):
@@ -254,6 +260,42 @@ def relock(root: Path) -> None:
                    f"version while the tag says otherwise:\n{done.stderr.strip()}")
 
 
+def pinned_method_sha(root: Path) -> str:
+    """The method commit this repository RECORDS — the gitlink, not the working checkout.
+
+    `git ls-tree` rather than anything inside the submodule: what a person gets when they clone
+    the tag is whatever the parent commit points at, and that is this.
+    """
+    line = run(["git", "ls-tree", "HEAD", "vendor/autosound-tuning-skill"], root, check=False)
+    parts = line.split()
+    return parts[2] if len(parts) > 2 and _SHA.match(parts[2]) else ""
+
+
+def check_method_pin(pinned: str, checked_out: str) -> None:
+    """The recorded pin against the checkout the suite actually ran on.
+
+    `check_paired_method` compares the CHANGELOG with the working checkout, which is right — that
+    is what was tested. Nothing compared it with the gitlink, and those two drift: a submodule
+    left on a detached commit tests one method while the repository records another, so the tag
+    pairs itself with a commit written down nowhere and a fresh clone gets something else.
+
+    Bought 2026-09-09: the pin sat at `0cc96f6`, seven commits past `v3.0.46` and on no tag at
+    all, while everything was tested against that checkout.
+    """
+    if not pinned or not checked_out:
+        raise Stop(
+            "the method's pin could not be read on both sides "
+            f"(recorded: {pinned[:12] or '?'}, checked out: {checked_out[:12] or '?'}) — "
+            "a release cannot say which method it was built against"
+        )
+    if pinned != checked_out:
+        raise Stop(
+            f"the repository records method `{pinned[:12]}` but the checkout is at "
+            f"`{checked_out[:12]}` — commit the submodule move, or check the recorded one out, "
+            "so the tag pairs with a commit that exists in this history"
+        )
+
+
 def method_sha(root: Path) -> str:
     """The commit of the method this build is against, through its one reader (HUB-001).
 
@@ -270,6 +312,7 @@ def method_sha(root: Path) -> str:
 def ship(root: Path, release: bool, test_command=None,
          channel: Callable[[Path], tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
+         read_pinned_sha: Callable[[Path], str] = pinned_method_sha,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print) -> Plan:
     """The whole thing. Reads and decides first; writes only when `release` is true."""
@@ -296,6 +339,7 @@ def ship(root: Path, release: bool, test_command=None,
     changelog = check_changelog(root, plan.tag)
 
     plan.method_sha = read_method_sha(root)
+    check_method_pin(read_pinned_sha(root), plan.method_sha)
     check_paired_method(changelog, plan.method_sha)
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
