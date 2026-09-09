@@ -111,24 +111,22 @@ packages = ["src/autosound_tcc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Parallel by default, and here rather than in the Makefile ON PURPOSE. Four things run this
-# suite -- `make test`, `scripts/ship.py`, and three CI jobs -- and flags kept in one caller are
-# how "green locally" and "green in CI" drift into meaning different things. `addopts` is the one
-# place all four read.
+# NO `addopts` here, and that is the decision — not an omission.
 #
-# Measured 2026-09-09 on an 8-core M1 Pro: 498 s serial -> 65.7 s and 64.2 s on two consecutive
-# `-n auto --dist loadfile` runs, 1715 passed both times, no collisions. CI runners have 4 vCPU
-# (ubuntu, windows) and 3 (macOS), so expect ~2.5-3.5x there, not 7.6x.
+# `-n auto --dist loadfile` makes this suite 498 s -> 65 s, measured, and it was the default for
+# exactly one afternoon. Then seven full parallel runs produced TWO dead workers:
+# `[gw7] node down: Not properly terminated`, a faulthandler dump with shiboken6/PySide6.QtTest in
+# it — the process dying, not a test asserting. Two different tests, so it is not a bad test; it
+# is Qt going down under load, and it is the same shape as tcc#19 (Windows CI, about one run in
+# three). Roughly 29% of parallel runs. A suite whose green means "green four times out of five"
+# is not a suite anybody can rely on, and a release gate least of all.
 #
-# `--dist loadfile`, never the default `load`: these are Qt tests with a session-scoped
-# QApplication and module-level state, and pinning a whole file to one worker is what keeps that
-# safe. It also costs something -- the two biggest files (`test_curve_view.py`, 216 tests;
-# `test_main_window.py`, 138) each sit on one worker, so the run stops improving past ~4 workers.
-# Splitting those files is the next win, if one is wanted.
+# So the default is serial and it stays serial until that crash is understood. Parallel is there
+# when a person wants the minute instead of the eight, and asks for it by name:
 #
-# `-n 0` switches it off for one run: use it to debug a single test, to read output in order, or
-# under a debugger. `scripts/ship.py` uses it too -- see there for why a release is serial.
-addopts = "-n auto --dist loadfile"
+#     PYTEST_ADDOPTS='-n auto --dist loadfile' make test
+#
+# `docs/TESTING.md` carries the numbers and what would have to be true to make it the default.
 
 # The linter. `select` is written out even though it is ruff's default: the default is a property
 # of the VERSION, and a ruff upgrade would otherwise add rule classes to CI silently. Wider sets

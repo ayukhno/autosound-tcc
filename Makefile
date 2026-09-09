@@ -7,8 +7,9 @@ PY ?= uv run --extra dev --python 3.12 python
 .PHONY: help test ship
 
 help:
-	@echo "make test           the whole suite, in parallel (~1 min; there is no fast subset on purpose)"
-	@echo "                    one test, in order, no workers: PYTEST_ADDOPTS='-n 0' make test"
+	@echo "make test           the whole suite (~8 min; there is no fast subset on purpose)"
+	@echo "                    in a hurry, and willing to re-run a dead worker (~1 min):"
+	@echo "                    PYTEST_ADDOPTS='-n auto --dist loadfile' make test"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
 	@echo "make ship REAL=1    the real release — bump, test, commit, tag, push"
 	@echo ""

@@ -101,11 +101,10 @@ CARRIER = Path(__file__).resolve().parents[2] / "hub" / "scripts" / "release-pre
 #: The suite, whole. `docs/TESTING.md`: run everything, every time — there is deliberately no
 #: fast subset, and a release is the last place to invent one.
 #:
-#: `-n 0` turns OFF the parallel run that `pyproject.toml` gives every other invocation. Everyday
-#: runs are fast because eight minutes of waiting changes what a person is willing to check; a
-#: release is the one moment where that trade goes the other way. One process, one order, the
-#: shape this suite's whole history was measured in — and it costs eight minutes, once, on the
-#: day something is published and can never be unpublished.
+#: `-n 0` is belt and braces: the default is serial anyway (`pyproject.toml` carries no
+#: `addopts`), but a release must not become parallel because somebody exported PYTEST_ADDOPTS in
+#: the shell it was cut from. Parallel runs kill a Qt worker in about 29% of full runs on this
+#: machine — the same shape as tcc#19 — and a release is the last place to accept that.
 TEST_COMMAND = [sys.executable, "-m", "pytest", "tests/", "-q", "-n", "0"]
 
 

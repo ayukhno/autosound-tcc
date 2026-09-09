@@ -2,14 +2,14 @@
 
 ## The policy
 
-**Run everything, every time.** `make test` — 1722 tests, ~65 seconds, and that includes the
+**Run everything, every time.** `make test` — 1730 tests, ~8 minutes, and that includes the
 skill's own selftests as subprocesses.
 
 There is deliberately no fast/slow split, and it is worth writing down why, because there nearly
 was one. What there IS, since 2026-09-09, is a parallel run — which is not a split: every test
 still runs, every time.
 
-## Parallel by default; a release is serial (2026-09-09)
+## Parallel is available, and it is NOT the default (2026-09-09)
 
 The suite had grown to 1722 tests and 498 s. The 2026-08-12 question was asked again first — is
 this a leak or is it volume? — and answered by measurement, not by reaching for a policy:
@@ -28,24 +28,46 @@ workers rather than a hunt:
 498 s serial  ->  65.7 s and 64.2 s on two consecutive runs   (-n auto --dist loadfile, 8-core M1 Pro)
 ```
 
-Three things about that, all of them load-bearing:
+**And then it killed workers.** It was the default for one afternoon. Seven full parallel runs
+produced two dead workers:
 
-* **The flags live in `pyproject.toml`'s `addopts`, not in the Makefile.** Four things run this
-  suite — `make test`, `scripts/ship.py`, and three CI jobs. Flags kept in one caller are exactly
-  how "green locally" and "green in CI" drift apart, and a test (`test_ship.py`) now fails if any
-  caller grows its own `-n`.
+```
+[gw7] node down: Not properly terminated
+Extension modules: shiboken6.Shiboken, PySide6.QtCore, ..., PySide6.QtTest
+worker 'gw7' crashed while running tests/test_model_config_dialog.py::test_the_configure_button_...
+```
+
+The process dying, not a test asserting — and on two DIFFERENT tests, so it is not a bad test. Qt
+goes down under load, in about **29% of full parallel runs**, which is the same shape as
+[`tcc#19`](https://github.com/ayukhno/autosound-tcc/issues/19): "Windows: the suite crashes with
+an access violation … about one run in three". Two serial runs the same day were clean.
+
+A suite whose green means "green four times out of five" is worth less than a slow one. So:
+
+> **Serial is the default. Parallel is opt-in, by name, until that crash is understood.**
+>
+> ```
+> PYTEST_ADDOPTS='-n auto --dist loadfile' make test
+> ```
+
+Use it while iterating, where a dead worker costs one re-run and is obvious. Do not use it to
+decide that anything is green. What would make it the default: the crash understood and fixed —
+and it is worth chasing precisely because parallel running is the first thing that reproduces
+`#19`'s family on a machine somebody can attach a debugger to, rather than on Windows CI.
+
+Three things about the parallel run itself, all of them load-bearing:
+
+* **No caller carries its own distribution flags**, and a test (`test_ship.py`) fails if one
+  grows any. Four things run this suite — `make test`, `scripts/ship.py`, and three CI jobs —
+  and flags kept in one caller are exactly how "green locally" and "green in CI" drift apart.
+  `PYTEST_ADDOPTS` in the environment is the single switch, which is why `ship.py` overrides it.
 * **`--dist loadfile`, never the default `load`.** Session-scoped `QApplication` and module-level
   state: a whole file pinned to one worker is what keeps that safe. The cost is a tail — the two
   biggest files each sit on one worker, so the run stops improving past about four of them.
   Splitting `test_curve_view.py` (216 tests) and `test_main_window.py` (138) is the next win.
-* **A release runs serially.** `scripts/ship.py` passes `-n 0`. Everyday runs are fast because
-  eight minutes of waiting changes what a person is willing to check; a release is the one moment
-  where that trade goes the other way — one process, one order, the shape this suite's whole
-  history was measured in, for eight minutes once, on the day something is published and can
-  never be unpublished.
-
-`PYTEST_ADDOPTS='-n 0' make test` is the same switch by hand: use it to debug one test, to read
-output in order, or under a debugger.
+* **A release runs serially, explicitly.** `scripts/ship.py` passes `-n 0` even though serial is
+  already the default: a release must not become parallel because somebody exported
+  `PYTEST_ADDOPTS` in the shell it was cut from.
 
 ## The tiered policy that was designed and then not needed (2026-08-12)
 
