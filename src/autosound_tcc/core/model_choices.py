@@ -30,6 +30,8 @@ from typing import Literal, Optional
 from autosound_tcc.core import child
 from autosound_tcc.core import claude_sdk, model_overrides
 
+from autosound_tcc.core import critic_env
+
 # How a model is reached — and, more to the point, WHOSE BILL it lands on. This is the axis the
 # picker was missing: "Gemini 3.1 Pro" through a desktop subscription and the same model through
 # omp's broker are the same words and two different accounts, and the one that quietly spends API
@@ -651,7 +653,10 @@ def critic_reaches(choice: Choice) -> bool:
     if not vendor:
         return False
     keys, binaries = _CRITIC_TRANSPORTS.get(vendor, ((), ()))
-    if any(os.environ.get(name) for name in keys):
+    # `critic_env.has_key`, not `os.environ` — the method's own instruction is to keep the key in
+    # `~/.config/autosound/critic-env` and OUT of the shell profile, so the environment is the one
+    # place a correctly-stored key is guaranteed NOT to be (SKL-024, HUB-025).
+    if any(critic_env.has_key(name) for name in keys):
         return True
     return any(shutil.which(binary) for binary in binaries)
 

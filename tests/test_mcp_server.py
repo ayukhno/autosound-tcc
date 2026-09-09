@@ -1104,6 +1104,35 @@ def test_the_handoff_prompt_names_only_tools_that_exist(tmp_path):
     assert named <= names, f"named in the handoff but not on the surface: {sorted(named - names)}"
 
 
+def test_no_reviewer_picked_says_so_without_calling_it_unreachable(tmp_path):
+    """Two different facts wore one shape: with nothing picked the field was simply ABSENT, which
+    a model reads as "unreachable" — and then offers to set up a channel the Arbiter may have
+    every intention of picking. `configured: false` with `reachable: null` says the honest thing:
+    nobody chose yet, so reachability is not a question that has an answer."""
+    from autosound_tcc.core import mcp_server
+
+    state = mcp_server._reviewer_state(tmp_path)
+
+    assert state["configured"] is False
+    assert "reachable" in state and state["reachable"] is None
+
+
+def test_the_advice_never_tells_anyone_to_export_the_key(tmp_path, monkeypatch):
+    """HUB-025: the key belongs in `~/.config/autosound/critic-env` and NOT in a shell profile —
+    the project folder is one `git push` from leaking it, and `.gitignore` stops none of `git add
+    -f`, a folder copy, or a backup that is not git. Advice that says "start from a shell that has
+    the key" teaches the exact habit the method forbids."""
+    from autosound_tcc.core import config, mcp_server, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    how = mcp_server._reviewer_state(tmp_path)["how"]
+
+    assert "export" not in how.lower()
+    assert "critic-env" in how, "the advice has to name where the key actually goes"
+
+
 def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
     from autosound_tcc.core import config, critic, project_settings
 

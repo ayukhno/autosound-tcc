@@ -922,11 +922,13 @@ class OmpSession:
             return None
         if any(os.environ.get(name) for name in _GOOGLE_KEY_VARS):
             return None
+        # NOT "start TCC from a shell that has the key". That is advice to keep a key in the
+        # environment, which is the habit HUB-025 was written to end -- and it is unusable anyway
+        # for the bundle a person double-clicks. omp has its own profile login; that is the answer.
         return (
-            f"No {' or '.join(_GOOGLE_KEY_VARS)} in this process's environment. omp will have "
-            f"nothing to authenticate `{self.model}` with, and that failure is silent — the turn "
-            "comes back empty. Start TCC from a shell that has the key, or run "
-            f"`omp --profile {OMP_PROFILE} auth login`."
+            f"No {' or '.join(_GOOGLE_KEY_VARS)} for this process. omp will have nothing to "
+            f"authenticate `{self.model}` with, and that failure is silent — the turn comes back "
+            f"empty. Log the profile in once: `omp --profile {OMP_PROFILE} auth login`."
         )
 
     def skill_warning(self) -> Optional[str]:

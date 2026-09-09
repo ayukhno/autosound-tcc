@@ -138,6 +138,10 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     if not key:
         return {
             "configured": False,
+            # Explicitly null, not absent. An absent field reads as "unreachable" to anything
+            # scanning the payload, and those are different facts: nobody has PICKED a reviewer
+            # yet, so whether one is reachable is not a question with an answer (SKL-024).
+            "reachable": None,
             "how": "ask the Arbiter to pick one in TCC's footer",
         }
     known = model_choices.choices([]) + model_choices.critic_choices([])
@@ -158,8 +162,14 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         "substituted": resolved.note,
         "label": choice.label,
         "reachable": model_choices.critic_reaches(choice),
+        # Where the key GOES, not where it could be exported to: the method keeps it in
+        # `~/.config/autosound/critic-env` precisely so it never enters a shell profile or the
+        # project folder, which is one `git push` from leaking it (HUB-025).
         "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
-               else "call `call_critic`; it will hand you a clipboard package for this model",
+               else ("call `call_critic`; with no key it hands you a clipboard package for this "
+                     "model. To make the channel answer directly, the key goes in this machine's "
+                     "`~/.config/autosound/critic-env` (`%APPDATA%\\autosound\\critic-env` on "
+                     "Windows) — never in a shell profile and never in the project folder"),
         # Reported once and asked back: the model read this, then put "confirm that this is your
         # independent reviewer?" to the Arbiter. Naming a field `configured` says what the value
         # is; it does not say who decided it. This does.

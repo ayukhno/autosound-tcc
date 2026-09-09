@@ -611,3 +611,99 @@ def test_tuning_and_omp_sessions_default_to_the_catalogue_name():
 
     assert tuning_session.DEFAULT_MODEL == model_choices.DEFAULT_SDK_MODEL
     assert omp_session.DEFAULT_MODEL == model_choices.DEFAULT_OMP_MODEL
+
+
+# --- the reviewer's key lives in a FILE, and TCC has to look there too (SKL-024) ------------
+
+
+def test_a_key_in_the_machine_config_counts_as_reachable(tmp_path, monkeypatch, real_critic_reaches):
+    """The method tells the user to keep the reviewer key in `~/.config/autosound/critic-env` and
+    NOT to export it from a shell profile (HUB-025: the project folder is one `git push` from
+    leaking it). TCC judged reachability from the process env and PATH only — so a key stored
+    exactly as documented made the footer say "unreachable" while the call would have gone
+    through, and the Arbiter learned that only after waiting for a clipboard fallback."""
+    from autosound_tcc.core import critic_env, model_choices
+
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(model_choices.shutil, "which", lambda _binary: None)
+    critic_env.forget()
+    config = tmp_path / "autosound" / "critic-env"
+    config.parent.mkdir(parents=True)
+    config.write_text("GEMINI_API_KEY=AIza-not-a-real-key\n", encoding="utf-8")
+
+    choice = model_choices.Choice(
+        harness="agy", model="gemini-3.1-pro-high", label="Gemini", provider="google"
+    )
+
+    assert model_choices.critic_reaches(choice) is True
+
+
+def test_a_line_that_can_run_something_is_not_a_key(tmp_path, monkeypatch):
+    """The method drops any line carrying `$(`, a backtick or `;` — the file is read, never
+    sourced, and `_gemini_common.sh` reads the SAME file, so the two doors must agree about what
+    the config says. TCC is a third door onto it and must drop the same lines."""
+    from autosound_tcc.core import critic_env
+
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    critic_env.forget()
+    config = tmp_path / "autosound" / "critic-env"
+    config.parent.mkdir(parents=True)
+    config.write_text("EVIL=$(touch /tmp/pwned)\nGEMINI_API_KEY=real\n", encoding="utf-8")
+
+    values = critic_env.values()
+
+    assert values.get("GEMINI_API_KEY") == "real"
+    assert "EVIL" not in values
+
+
+def test_tcc_looks_for_the_config_where_the_method_puts_it(tmp_path):
+    """The mirror's whole risk is drift: the method moves the file and TCC keeps looking at the
+    old path, silently. So the path is not compared to a literal here — it is compared to the
+    method's own `machine_config_path()`, run out of the vendored script. Move the file over
+    there and this fails, which is the only way a mirror stays honest."""
+    import subprocess
+    import sys
+
+    from autosound_tcc.core import critic_env, vendor_loader
+
+    script = vendor_loader.skill_dir() / "scripts" / "autosound_ai.py"
+    if not script.is_file():
+        pytest.skip("skill submodule not checked out")
+    theirs = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util,sys;"
+            f"spec=importlib.util.spec_from_file_location('ai', r'{script}');"
+            "m=importlib.util.module_from_spec(spec);"
+            "spec.loader.exec_module(m);"
+            "print(m.machine_config_path())",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert theirs.returncode == 0, theirs.stderr
+
+    assert str(critic_env.machine_config_path()) == theirs.stdout.strip()
+
+
+def test_the_omp_key_warning_points_at_the_profile_not_at_a_shell(monkeypatch):
+    """Same lesson on the generator's side: "start TCC from a shell that has the key" is advice to
+    put a key in the environment, which is what the method spent HUB-025 getting rid of. omp has
+    its own profile login and that is the whole answer."""
+    from autosound_tcc.core import omp_session
+
+    for name in omp_session._GOOGLE_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+    session = omp_session.OmpSession.__new__(omp_session.OmpSession)
+    session.model = "gemini-3.1-pro-high"
+
+    warning = session.credential_warning()
+
+    assert warning is not None
+    assert "shell" not in warning.lower(), warning
+    assert "auth login" in warning

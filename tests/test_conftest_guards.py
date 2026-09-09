@@ -5,6 +5,8 @@ checked rather than assumed. Written after the first CI runs (2026-09-07) found 
 passed on the author's laptop and failed everywhere else — the rule was right and the guard had a
 second door nobody had noticed.
 """
+from pathlib import Path
+
 from autosound_tcc.core import model_choices
 
 
@@ -24,3 +26,25 @@ def test_the_suite_cannot_see_whether_a_critic_is_reachable():
         provider="google",
     )
     assert model_choices.critic_reaches(choice) is False
+
+
+def test_the_suite_cannot_read_this_machines_reviewer_key(monkeypatch, real_critic_reaches):
+    """A third door onto the same machine, opened the day `critic_reaches` learned to look in
+    `~/.config/autosound/critic-env` (SKL-024): a developer with a real key there would get a
+    reachable critic and CI would not, which is the 2026-09-07 failure again wearing a new coat.
+    `real_critic_reaches` deliberately un-stubs the function — so if the isolation is missing,
+    this test reads the actual laptop and says so."""
+    from autosound_tcc.core import critic_env
+
+    # What isolates this is `conftest`'s tmp HOME, and that only works while the path is resolved
+    # through `~` on every call. Hard-code it, or cache it at import time, and the suite silently
+    # starts reading the developer's own key again — so the property under test is that HOME still
+    # decides. `Path.home()` is already the tmp one here, which is the isolation working.
+    assert Path.home() in critic_env.machine_config_path().parents
+
+    other = Path.home().parent / "somewhere-else"
+    monkeypatch.setenv("HOME", str(other))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    assert critic_env.machine_config_path() == other / ".config" / "autosound" / "critic-env"
