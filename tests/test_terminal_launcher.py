@@ -18,9 +18,24 @@ from autosound_tcc.core.terminal_launcher import TerminalLaunchError, launch
 
 @pytest.fixture
 def recorded(monkeypatch):
-    calls: list[list[str]] = []
-    monkeypatch.setattr(terminal_launcher.subprocess, "run", lambda argv, **kw: calls.append(argv))
-    monkeypatch.setattr(terminal_launcher.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
+    class _Calls(list):
+        """The commands, plus the kwargs of the last spawn.
+
+        A test has to be able to ask WHERE a terminal was started, not only WHAT was run: the
+        project folder travels as `cwd` now rather than inside a shell line (HUB-053), and a
+        fixture that records only the line cannot tell the fixed shape from the broken one.
+        """
+
+        kwargs: dict = {}
+
+    calls = _Calls()
+
+    def record(argv, **kw):
+        calls.append(argv)
+        calls.kwargs = kw
+
+    monkeypatch.setattr(terminal_launcher.subprocess, "run", record)
+    monkeypatch.setattr(terminal_launcher.subprocess, "Popen", record)
     monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
     return calls
 
@@ -73,7 +88,11 @@ def test_windows_falls_back_to_cmd_when_wt_is_missing(recorded, monkeypatch, tmp
 
     launch(tmp_path, "claude")
 
-    assert recorded[0].startswith('start "" /d')
+    assert recorded[0].startswith('start "" cmd /k')
+    # The folder is NOT in the line: `cmd` splits on `&` before it looks at quotes, so a path
+    # travelling as text is a path that breaks on an ordinary folder name (HUB-053).
+    assert recorded.kwargs["cwd"] == str(tmp_path)
+    assert str(tmp_path) not in recorded[0]
 
 
 def test_linux_uses_the_first_terminal_on_path(recorded, monkeypatch, tmp_path):
@@ -245,3 +264,54 @@ def test_wants_a_console_is_empty_off_windows(monkeypatch):
 
     monkeypatch.setattr(child.sys, "platform", "darwin")
     assert child.wants_a_console() == {}
+
+
+# --- a project folder is named by a person, and people use `&` (HUB-053) --------------------
+
+
+def test_a_project_path_with_an_ampersand_does_not_reach_the_shell(monkeypatch, tmp_path):
+    """`start "" /d "{project_dir}" cmd /k …` interpolated the path into a line run with
+    `shell=True`. `cmd` splits on `&` before anything else, so a folder called
+    `Golf R & Passat` — an ordinary name for somebody tuning two cars — either opens no terminal
+    or opens one in the wrong place. The user picks the folder, so this is self-harm rather than
+    an attack, and self-harm is the kind that actually happens."""
+    from autosound_tcc.core import terminal_launcher
+
+    seen = {}
+
+    def fake_popen(command, **kwargs):
+        seen["command"] = command
+        seen["cwd"] = kwargs.get("cwd")
+        return object()
+
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(terminal_launcher.subprocess, "Popen", fake_popen)
+    folder = tmp_path / "Golf R & Passat"
+    folder.mkdir()
+
+    terminal_launcher._launch_windows(folder, "claude")
+
+    assert "&" not in str(seen["command"]), seen["command"]
+    assert seen["cwd"] == str(folder), "the folder travels as cwd, not as text in a shell line"
+
+
+def test_a_project_path_with_a_quote_does_not_reach_the_shell(monkeypatch, tmp_path):
+    """The other half of the same hole: a `"` closes `/d "…"` early and the rest of the path
+    becomes arguments to `start`."""
+    from autosound_tcc.core import terminal_launcher
+
+    seen = {}
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(
+        terminal_launcher.subprocess, "Popen",
+        lambda command, **kwargs: seen.update(command=command, cwd=kwargs.get("cwd")),
+    )
+    folder = tmp_path / 'the "loud" car'
+    folder.mkdir()
+
+    terminal_launcher._launch_windows(folder, "claude")
+
+    assert '"loud"' not in str(seen["command"]), seen["command"]
+    assert seen["cwd"] == str(folder)

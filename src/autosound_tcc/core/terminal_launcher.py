@@ -221,11 +221,20 @@ def _launch_windows(
         )
         subprocess.Popen(argv, close_fds=True)
         return
-    # `start` is a cmd builtin, so this needs the shell; `/d` sets the working directory and the
-    # empty "" is the window title `start` would otherwise eat from the first quoted argument.
+    # `start` is a cmd builtin, so this needs the shell; the empty "" is the window title `start`
+    # would otherwise eat from the first quoted argument.
+    #
+    # **The folder travels as `cwd`, never inside the line.** `/d "{project_dir}"` used to
+    # interpolate it into a string run with `shell=True`, and `cmd` splits on `&` before it looks
+    # at quotes — so `Golf R & Passat`, an ordinary name for somebody who tunes two cars, either
+    # opened no terminal or opened one in the wrong place; a `"` in the name closed `/d "…"` early
+    # and the rest became arguments to `start` (HUB-053). The path is chosen by the person, so
+    # this is self-harm rather than an attack — which is the kind that actually happens.
+    #
+    # `cwd` is not an escaping trick that has to be got right; it is the path not being text.
     inner = _win_cli_invocation(cli, hint, model, extra)
     subprocess.Popen(
-        f'start "" /d "{project_dir}" cmd /k {inner}', shell=True, close_fds=True
+        f'start "" cmd /k {inner}', shell=True, close_fds=True, cwd=str(project_dir)
     )
 
 
