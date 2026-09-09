@@ -218,6 +218,44 @@ def test_a_step_cannot_be_closed_against_a_sentence(tmp_path):
     assert "resolves" in said["error"]  # and the reason is the skill's own wording
 
 
+def test_the_step_that_supersedes_is_recorded_as_a_link_not_as_a_sentence(tmp_path):
+    """SKL-029: the tool used to hand the id over positionally, and the CLI reads bare words after
+    the step id as the reason -- so "replaced by b.2" was written as a reason with the text "b.2"
+    and the link nowhere. The break this catches is a positional argument in the tool body: with
+    one, `superseded_by` lands in `reason` and this assertion fails."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "-1"}))
+    asyncio.run(mcp.call_tool("add_step", {"step_id": "b.1", "name": "Baseline"}))
+    asyncio.run(mcp.call_tool("add_step", {"step_id": "b.2", "name": "Baseline, again"}))
+
+    said = json.loads(
+        _text(asyncio.run(mcp.call_tool("skip_step", {"step_id": "b.1", "superseded_by": "b.2"})))
+    )
+
+    assert said["recorded"] is True, said
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    skipped = [e for e in events if e.get("type") == "step_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["superseded_by"] == "b.2"
+    assert not skipped[0].get("reason")
+
+
+def test_a_skip_with_no_why_is_refused_the_way_a_close_with_no_evidence_is(tmp_path):
+    """The model is the one skipping steps here -- there is no button for it -- so the moment the
+    tool is called is the only moment the why still exists."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "-1"}))
+    asyncio.run(mcp.call_tool("add_step", {"step_id": "b.1", "name": "Baseline"}))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("skip_step", {"step_id": "b.1"}))))
+
+    assert said["recorded"] is False
+    assert "reason" in said["error"]
+
+
 def test_the_state_says_which_language_the_arbiter_is_working_in(tmp_path):
     """Intake's first question is "which language?" -- and the app has been speaking the answer
     since before the session started. Top-level, not buried in `ui`: it decides what language every

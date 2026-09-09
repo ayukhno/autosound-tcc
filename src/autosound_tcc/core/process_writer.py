@@ -183,11 +183,31 @@ def finish_step(project_dir: Path, step_id: str, evidence: list[str]) -> str:
     return _run(project_dir, ["done", step_id, *[str(e) for e in evidence]])
 
 
-def skip_step(project_dir: Path, step_id: str, superseded_by: str = "") -> str:
-    """Supersede a step. It stays visible in the plan — steps are never deleted (SCR-004)."""
+def skip_step(
+    project_dir: Path, step_id: str, reason: str = "", superseded_by: str = ""
+) -> str:
+    """Supersede a step. It stays visible in the plan — steps are never deleted (SCR-004).
+
+    One of the two is REQUIRED (SKL-029, skill v3.0.47): the step that replaces this one, or a
+    sentence saying why it is not being done. A skip with neither cannot be told from a step
+    forgotten, and the next session proposes it again — which is what the skill's own live journal
+    showed, nine skips out of nine.
+
+    `superseded_by` travels as `--superseded-by`, never positionally. The CLI reads every bare word
+    after the id as the reason, so the id used to land as a reason whose text happened to be "2.4",
+    with the link written nowhere — and no test saw it, because every other test drives `Process`
+    in-process, where a keyword stays a keyword.
+    """
+    if not superseded_by and not reason.strip():
+        raise ProcessWriterError(
+            f"step {step_id!r} cannot be skipped without a reason "
+            "(the step that supersedes it, or a sentence saying why it is not being done)"
+        )
     args = ["skip", step_id]
+    if reason.strip():
+        args.append(reason.strip())
     if superseded_by:
-        args.append(superseded_by)
+        args += ["--superseded-by", superseded_by]
     return _run(project_dir, args)
 
 

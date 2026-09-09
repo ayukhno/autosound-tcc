@@ -6,6 +6,13 @@ TCC owns: getting one call at a time to it.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
+from autosound_tcc.core import process_writer, vendor_loader
+
+from tests import _intake
 
 
 def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
@@ -53,3 +60,71 @@ def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
     landed = {step["id"] for step in state["plan"]}
     assert landed <= {"a", "b"} and len(landed) == 2 - len(errors)
     assert all(step.get("phase") == "-1" for step in state["plan"]), "no phaseless step written"
+
+
+@pytest.fixture
+def project(tmp_path):
+    """A project that passes the phase −1 gate, with a plan to skip steps out of.
+
+    Built the same way `test_process_view` builds one — through the skill's own writers — because
+    what is under test here is the CLI call, and a fixture that fakes the project would fake the
+    refusal too.
+    """
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    snapshot = tmp_path / "state" / "FULL" / "v_003.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text("{}", encoding="utf-8")
+    module = vendor_loader.load_process()
+    _intake.seed(tmp_path)
+    process = module.Process(str(tmp_path / "process"))
+    _intake.open_phases(process)
+    process.set_target("FULL", "EPY")
+    process.enter_phase("2")
+    process.add_step("2.3", "target-match")
+    process.add_step("2.4", "target-match, second try")
+    process.add_step("2.5", "a step nobody got to")
+    return tmp_path
+
+
+def _skips(project_dir) -> list[dict]:
+    lines = (project_dir / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    return [e for e in (json.loads(line) for line in lines) if e.get("type") == "step_skipped"]
+
+
+def test_a_superseding_step_lands_as_superseded_by_not_as_the_reason(project):
+    """The id went to the CLI positionally, and v3.0.47 reads position 2 onward as a sentence.
+
+    Measured on the pin bump: `skip 2.3 2.4` wrote `{"reason": "2.4"}` and no `superseded_by` at
+    all — the link "replaced by step 2.4" silently became a reason whose text happens to be "2.4".
+    Green tests missed it because every other test drives `Process` in-process, where the keyword
+    still arrives as a keyword; this is the only path the app actually uses.
+    """
+    process_writer.skip_step(project, "2.3", superseded_by="2.4")
+
+    event = _skips(project)[-1]
+    assert event["superseded_by"] == "2.4"
+    assert not event.get("reason"), "the id is a link, not a sentence"
+
+
+def test_a_skip_can_carry_a_sentence_instead_of_a_superseding_step(project):
+    process_writer.skip_step(project, "2.4", reason="the car left before we got to it")
+
+    event = _skips(project)[-1]
+    assert event["reason"] == "the car left before we got to it"
+    assert not event.get("superseded_by")
+
+
+def test_a_skip_with_neither_is_refused_here_rather_than_by_a_subprocess(project, monkeypatch):
+    """Same shape as `finish_step` with no evidence: the skill refuses it, so TCC does not spend a
+    subprocess learning that. The subprocess is stubbed to blow up, which is what makes this a test
+    of TCC's refusal rather than of the skill's — the two are worth telling apart, because only one
+    of them still holds if the pin moves back."""
+    monkeypatch.setattr(
+        process_writer, "_run", lambda *a, **k: pytest.fail("process.py was spawned anyway")
+    )
+
+    with pytest.raises(process_writer.ProcessWriterError):
+        process_writer.skip_step(project, "2.5")
+
+    assert _skips(project) == []

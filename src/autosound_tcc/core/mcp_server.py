@@ -754,10 +754,19 @@ def build_server(
         return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
 
     @tool()
-    async def skip_step(step_id: str, superseded_by: str = "") -> str:
-        """Supersede a step. It stays visible in the plan -- steps are never deleted, and what
-        replaced this one is worth naming."""
-        return await asyncio.to_thread(_record, process_writer.skip_step, step_id, superseded_by)
+    async def skip_step(step_id: str, reason: str = "", superseded_by: str = "") -> str:
+        """Supersede a step. It stays visible in the plan -- steps are never deleted, and why it is
+        not being done is REQUIRED: either `superseded_by`, the id of the step that replaces this
+        one, or `reason`, a sentence. A skip with neither is refused (SKL-029) -- it reads exactly
+        like a step nobody got to, and the next session proposes it again. Say it now: you are the
+        only one who still knows, and there is no screen that asks later."""
+        return await asyncio.to_thread(
+            _record,
+            process_writer.skip_step,
+            step_id,
+            reason=reason,
+            superseded_by=superseded_by,
+        )
 
     @tool()
     async def block_step(step_id: str, reason: str) -> str:
