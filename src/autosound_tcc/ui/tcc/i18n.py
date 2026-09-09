@@ -670,6 +670,7 @@ Start TCC again; if it keeps happening, the reason is here and in the log:",
         "startSession": "▶ Session in TCC",
         "openTerminal": "⧉ Terminal",
         "terminalOpened": "Opened a terminal running <code>{cli}</code> in the project folder. It picks up TCC through <code>.mcp.json</code>; approve the <b>tcc</b> server on first run.",
+        "criticChooseModel": "The reviewer needs a model name: this key can call {models}. Pick one and pin it as <code>AUTOSOUND_CRITIC_MODEL=&lt;model&gt;</code> in <code>~/.config/autosound/critic-env</code> — the channel works, it just does not know which model to use.",
         "criticClipboard": "No reviewer API or CLI was reachable, so the package is on your <b>clipboard</b>. Paste it into any AI chat, then paste the reply back here — the loop still works, it just goes through you.",
         "criticFailed": "Reviewer call failed: {detail}",
         "criticNotReady": "The reviewer has nothing to read yet. It re-reads the project from disk on every call, and this folder has not been through intake — the contract and the car's context are written when a tune starts. The channel itself is fine; start the tune and the reviewer works from the first proposal onward.",
@@ -1566,6 +1567,7 @@ Choose sweeps (sw) above to read this.",
         "startSession": "▶ Сесія в TCC",
         "openTerminal": "⧉ Термінал",
         "terminalOpened": "Відкрито термінал із <code>{cli}</code> у папці проєкту. Він підхопить TCC через <code>.mcp.json</code>; на першому запуску підтвердь сервер <b>tcc</b>.",
+        "criticChooseModel": "Рецензентові бракує імені моделі: цей ключ може викликати {models}. Обери одну і закріпи як <code>AUTOSOUND_CRITIC_MODEL=&lt;модель&gt;</code> у <code>~/.config/autosound/critic-env</code> — канал працює, він лише не знає, яку модель брати.",
         "criticClipboard": "Ні API, ні CLI рецензента недоступні — пакет у <b>буфері обміну</b>. Встав його в будь-який ШІ-чат, а відповідь встав сюди: цикл працює, просто через тебе.",
         "criticFailed": "Виклик рецензента не вдався: {detail}",
         "criticNotReady": "Рецензентові поки нема чого читати. Він щоразу перечитує проєкт із диска, а ця тека ще не проходила інтейк — контракт і контекст авто створюються, коли починається тюн. Сам канал справний; почни тюн, і рецензент працюватиме з першої ж пропозиції.",
@@ -2483,6 +2485,7 @@ Choose sweeps (sw) above to read this.",
         "openTerminal": '⧉ Terminal',
         "terminalOpened": 'Otwarto terminal z <code>{cli}</code> w folderze projektu. Podchwyci TCC przez '
                           '<code>.mcp.json</code>; przy pierwszym uruchomieniu zatwierdź serwer <b>tcc</b>.',
+        "criticChooseModel": 'Recenzent potrzebuje nazwy modelu: ten klucz może wywołać {models}. Wybierz jeden i przypnij go jako <code>AUTOSOUND_CRITIC_MODEL=&lt;model&gt;</code> w <code>~/.config/autosound/critic-env</code> — kanał działa, po prostu nie wie, którego modelu użyć.',
         "criticClipboard": 'Ani API, ani CLI recenzenta nie było osiągalne, więc pakiet jest w <b>schowku</b>. Wklej go '
                            'w dowolny czat AI, a odpowiedź wklej z powrotem tutaj — pętla działa, tylko idzie przez '
                            'ciebie.',
@@ -3444,6 +3447,7 @@ Choose sweeps (sw) above to read this.",
         "openTerminal": '⧉ Terminal',
         "terminalOpened": 'Ein Terminal mit <code>{cli}</code> im Projektordner ist offen. Es findet TCC über '
                           '<code>.mcp.json</code>; bestätige beim ersten Lauf den Server <b>tcc</b>.',
+        "criticChooseModel": 'Der Prüfer braucht einen Modellnamen: dieser Schlüssel kann {models} aufrufen. Wähle eines und trage es als <code>AUTOSOUND_CRITIC_MODEL=&lt;Modell&gt;</code> in <code>~/.config/autosound/critic-env</code> ein — der Kanal funktioniert, er weiß nur nicht, welches Modell er nehmen soll.',
         "criticClipboard": 'Weder die API noch das CLI des Prüfers war erreichbar, also liegt das Paket in deiner '
                            '<b>Zwischenablage</b>. Füge es in einen beliebigen KI-Chat ein und die Antwort hier wieder '
                            'zurück — der Kreis funktioniert weiter, er geht nur durch dich.',

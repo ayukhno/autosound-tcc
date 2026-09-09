@@ -1077,6 +1077,9 @@ def build_server(
                 "model": result.model,
                 "role": result.role,
                 "detail": result.detail,
+                # Empty for every mode but `choose_model`, where it IS the answer: the models this
+                # key can actually call, straight from the reviewer's own list (SKL-023).
+                "models": result.models,
                 # The bubble links the text rather than being the only copy of it.
                 "review": result.review,
             }

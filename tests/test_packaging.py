@@ -591,3 +591,21 @@ def test_every_file_this_app_reads_or_writes_names_its_encoding():
             offenders.append(f"{file.relative_to(ROOT)}:{node.lineno} {node.func.attr}()")
 
     assert not offenders, "text I/O without an explicit encoding:\n" + "\n".join(offenders)
+
+
+def test_a_reviewer_key_file_can_never_be_committed_from_this_repo():
+    """SKL-023. TCC starts the Advisor from the PROJECT folder, and the method's key file is read
+    from there among other places — so a `.critic-env` can land in a working tree that is also a
+    git repository. This one is public.
+
+    `git check-ignore` rather than a string search in `.gitignore`: what matters is what git
+    actually does, and a pattern can be present and shadowed by a later negation."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for name in (".critic-env", "critic-env", "scripts/.critic-env"):
+        done = subprocess.run(
+            ["git", "check-ignore", "-q", name], cwd=str(root), capture_output=True
+        )
+        assert done.returncode == 0, f"{name} is not ignored — a key put there could be committed"

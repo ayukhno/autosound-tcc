@@ -49,7 +49,14 @@ from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 #: where the argument that prompted this happened; the others are the same widget with a different
 #: reader, added when they are actually asked for rather than because a menu looked incomplete.
 KINDS = {
-    "impulse": {"label_x": "ms", "scale_x": 1000.0, "log_x": False, "label_y": ""},
+    # `FS` — a fraction of full scale, which is what the samples now ARE. The method stopped
+    # peak-normalising the IR (skill@8e5e227, RES-005): REW peak-normalises to ±1.0 unless asked
+    # not to, and two channels read that way carry no level relation at all — a subwoofer whose
+    # peak really sits ~18 dB under the woofer comes back the same height, and every sum built on
+    # the pair is built on wrong levels. Now they arrive at their real relative level, so the axis
+    # has to say so: unlabelled, the same picture reads as "shape, peak 1.0", which is what it
+    # used to be. Not dB — these are linear.
+    "impulse": {"label_x": "ms", "scale_x": 1000.0, "log_x": False, "label_y": "FS"},
     "fr": {"label_x": "Hz", "scale_x": 1.0, "log_x": True, "label_y": "dB"},
     # Phase is where a crossover argument actually gets settled (Δφ at the joint, then Δt from
     # it), and reading it off a picture is the thing this window exists to replace. Only a sweep

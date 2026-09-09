@@ -169,3 +169,29 @@ def test_the_composer_grows_for_a_pasted_paragraph_not_only_for_newlines():
     tall = paste("\n".join(f"line {i}" for i in range(40)))
     assert tall <= paste("\n".join(f"line {i}" for i in range(200))), \
         "past the cap the field stops growing and scrolls instead of eating the transcript"
+
+
+def test_being_asked_which_model_is_not_rendered_as_a_failure():
+    """SKL-023: the reviewer exits 3 with the key's OWN list of callable models. Rendering that as
+    "the Critic failed" hides the one thing that fixes it — and sends the Arbiter to the clipboard
+    for a channel that works and is simply missing a name."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._bubbles)
+
+    panel.add_critique({
+        "mode": "choose_model",
+        "models": ["gemini-pro-latest", "gemini-flash-latest"],
+        "detail": ">> Модель рецензента не задано.",
+    })
+
+    said = " ".join(
+        label.text()
+        for bubble in panel._bubbles[before:]
+        for label in bubble.findChildren(QLabel)
+    )
+    assert "gemini-pro-latest" in said
+    assert "gemini-flash-latest" in said
+    assert "critic-env" in said, "the answer has to say WHERE the choice is pinned"

@@ -26,7 +26,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -45,6 +45,15 @@ _REVIEW_MARKER = re.compile(r"^>>\s*REVIEW_FILE:\s*(?P<path>.+?)\s*$", re.MULTIL
 MODE_API_OR_CLI = "answered"
 MODE_CLIPBOARD = "clipboard"
 MODE_ERROR = "error"
+#: The reviewer asking WHICH MODEL, with the key's own list of what it can call. Its own mode
+#: because it is a question, not a fault: the script exits 3 and prints the list on stderr
+#: (skill@af9d7e3), and reading that as "error, fall back to the clipboard" throws away the one
+#: thing that would fix it. Bought on a live key: `gemini-2.5-*` answered 404 while the key
+#: worked (2026-09-08), and the answer was in the list nobody was shown.
+MODE_CHOOSE_MODEL = "choose_model"
+#: Exit code the reviewer uses for that question. A code rather than a phrase in stderr: the text
+#: is Ukrainian prose that will be reworded, the code is a contract.
+_CHOOSE_MODEL_EXIT = 3
 #: The reviewer was not called because the PROJECT is not ready — no contract, no context, which
 #: is the ordinary state of a folder that has not been through intake yet. Distinct from
 #: `MODE_ERROR` because it is not a fault and reporting it as one sends somebody debugging a
@@ -68,10 +77,28 @@ class CriticResult:
     # in the chat stream, so a session rendered from disk knew a review happened and not what it
     # argued. `None` when the script could not write it.
     review: Optional[str] = None
+    #: The models this key can actually call, when the reviewer asked which one to use. Empty for
+    #: every other mode. Names only — nothing here is a key.
+    models: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return self.mode == MODE_API_OR_CLI
+
+
+#: The list lines of the reviewer's question: `>>     <name>`, indented under the `=<модель>`
+#: line. Matched by SHAPE rather than by the sentences around them, which are prose in Ukrainian
+#: and will be reworded; a name is `[a-z0-9.-]` and nothing else.
+_OFFERED = re.compile(r"^>>\s{4,}([a-z0-9][a-z0-9.\-]*)\s*$", re.M)
+
+
+def _models_offered(stderr: str) -> list:
+    """The models the key can call, in the order the reviewer listed them.
+
+    Order is not cosmetic: the script puts the pointer ids (`gemini-pro-latest`) first on purpose,
+    because a dated id stays put until Google retires it and the list lags the retirements.
+    """
+    return [name for name in _OFFERED.findall(stderr or "")]
 
 
 def script_path() -> Path:
@@ -223,6 +250,9 @@ def run(
             MODE_API_OR_CLI, text, match.group("model") if match else None, role, tail,
             duration, called_at, review,
         )
+    if proc.returncode == _CHOOSE_MODEL_EXIT:
+        return CriticResult(MODE_CHOOSE_MODEL, "", None, role, stderr.strip() or tail,
+                            duration, called_at, review, _models_offered(stderr))
     if _CLIPBOARD_MARKER in stderr:
         # The clipboard path writes the compiled PACKAGE to the same place, so a review the Arbiter
         # works by hand is on the record rather than looking like no review at all.

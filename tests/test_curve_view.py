@@ -4262,3 +4262,21 @@ def test_the_toggle_is_off_and_disabled_when_the_round_recorded_nothing():
     assert not dialog._prot_btn.isChecked()
     assert not dialog._prot_btn.isEnabled(), "nothing recorded for this round"
     assert dialog._legs_by_title() == {}
+
+
+def test_the_impulse_axis_says_what_its_numbers_are():
+    """The method stopped peak-normalising the IR (skill@8e5e227, RES-005): `get_impulse_response`
+    now asks REW for `?normalised=false` and returns a FRACTION of full scale, so two channels
+    finally carry their real level relation — a subwoofer 18 dB under the woofer draws 18 dB under
+    it instead of the same height.
+
+    Which makes an unlabelled y axis worse than it was. The numbers used to be "shape, peak 1.0"
+    and are now a level; an axis that says nothing lets them be read as either. Not dB either:
+    these are linear, and labelling them dB would be a wrong unit rather than a missing one
+    (SKL-023)."""
+    from autosound_tcc.ui.tcc.curve_dialog import KINDS
+
+    unit = KINDS["impulse"]["label_y"]
+
+    assert unit, "the impulse axis carries a level now — an unlabelled one can be read as a shape"
+    assert "db" not in unit.lower(), f"{unit!r}: the samples are linear full scale, not decibels"

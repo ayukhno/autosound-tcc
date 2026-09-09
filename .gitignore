@@ -29,3 +29,12 @@ Thumbs.db
 
 # spike renders of real project data — public repo keeps fixtures only
 spike/out-real-*.html
+
+# The reviewer's key, wherever it lands. TCC starts the Advisor from the PROJECT folder and the
+# method reads `.critic-env` from several places, so one can appear in a working tree that is also
+# this repository — which is public. Ignored by NAME rather than by path, because the method looks
+# in `./`, `./scripts/` and the project mirror, and a rule tied to one of them is a rule that
+# misses the other two (SKL-023, HUB-025). Held by `test_packaging.py`, which asks git rather than
+# reading this file.
+.critic-env
+critic-env

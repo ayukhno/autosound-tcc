@@ -1253,6 +1253,15 @@ class DialogPanel(QWidget):
                              str(critique.get("text", "")))
         elif mode == "clipboard":
             self._add_system_message(i18n.t("criticClipboard") + note)
+        elif mode == "choose_model":
+            # A QUESTION, not a failure. The reviewer exits 3 with the key's own list of models it
+            # can call, and rendering that as "the Critic failed" hides the one thing that fixes
+            # it — then sends the Arbiter to the clipboard for a channel that works and is merely
+            # missing a name (SKL-023). The list is the answer, so the list is what is shown.
+            offered = [str(name) for name in critique.get("models") or []]
+            self._add_system_message(
+                i18n.t("criticChooseModel").format(models=", ".join(offered) or "—")
+            )
         elif mode == "not_ready":
             # Not a failure and it must not read like one. The reviewer is stateless: it re-reads
             # the project from disk every call, and a folder that has not been through intake has

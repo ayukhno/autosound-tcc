@@ -229,3 +229,59 @@ def test_calls_are_logged_append_only_and_the_last_one_is_readable(stubbed, tmp_
 
 def test_last_call_is_none_before_any_call(tmp_path):
     assert critic.last_call(tmp_path) is None
+
+
+# --- "choose a model" is a QUESTION, not a failure (SKL-023) --------------------------------
+
+
+_CHOICE_STDERR = """>> Модель рецензента не задано.
+>> Моделі, які цей ключ може викликати (generateContent) -- вибери одну і закріпи її:
+>>   AUTOSOUND_CRITIC_MODEL=<модель>   у ~/.config/autosound/critic-env
+>>     gemini-pro-latest
+>>     gemini-flash-latest
+>>     gemini-3.1-pro-preview
+>> `gemini-pro-latest` / `gemini-flash-latest` -- Google's own pointers to the current Pro / Flash.
+"""
+
+
+def _reviewer_exits(monkeypatch, code, stderr):
+    import subprocess
+
+    from autosound_tcc.core import critic
+
+    # `preflight` also wants the project's own two files; this test is about the exit code, and
+    # a missing contract would answer `not_ready` long before the subprocess is reached.
+    monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0] if a else [], code, "", stderr),
+    )
+    return critic
+
+
+def test_a_key_that_cannot_call_the_named_model_asks_rather_than_fails(monkeypatch, tmp_path):
+    """skill@af9d7e3: with no model named, or one the key cannot call, the reviewer prints the
+    key's OWN list of models and exits 3. TCC read every non-zero exit the same way — "error, use
+    the clipboard" — so the one thing that would fix it, the list, was thrown away and the Arbiter
+    was sent to paste packages by hand instead of picking a model (2026-09-08: gemini-2.5-* went
+    404 under a working key, and that is exactly this)."""
+    critic = _reviewer_exits(monkeypatch, 3, _CHOICE_STDERR)
+
+    result = critic.run("## package", project_dir=tmp_path)
+
+    assert result.mode == critic.MODE_CHOOSE_MODEL
+    assert result.models == [
+        "gemini-pro-latest", "gemini-flash-latest", "gemini-3.1-pro-preview"
+    ]
+    assert result.mode != critic.MODE_ERROR
+
+
+def test_a_real_failure_is_still_a_failure(monkeypatch, tmp_path):
+    """The new branch is keyed on the exit code, so anything else keeps its old meaning."""
+    critic = _reviewer_exits(monkeypatch, 1, ">> something actually broke\n")
+
+    result = critic.run("## package", project_dir=tmp_path)
+
+    assert result.mode == critic.MODE_ERROR
+    assert result.models == []
