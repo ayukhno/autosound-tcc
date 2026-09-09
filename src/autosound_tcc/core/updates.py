@@ -144,6 +144,19 @@ class Status:
     latest_sha: str = ""
 
 
+#: An environment in which git CANNOT stop to ask. This runs in a daemon thread of a GUI app,
+#: polled by a timer, and git's answer to a repository it cannot read is to ask for credentials —
+#: on Windows through Git Credential Manager, which is a WINDOW. Nobody is looking at it: the
+#: person sees a tall dialog appear over their tune, or a check that never returns (TCC-006, and
+#: the user's own "a tall stretched Windows window and then a terminal one", 2026-09-09).
+#:
+#: All three, because they are three different doors: `GIT_TERMINAL_PROMPT` closes git's own
+#: prompt, `GCM_INTERACTIVE` closes the credential manager's dialog, and an empty `GIT_ASKPASS`
+#: stops git reaching for a GUI helper. An update check that cannot be answered is silent, which
+#: is what it is supposed to be when offline anyway.
+_NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_ASKPASS": ""}
+
+
 def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash."""
     try:
@@ -151,7 +164,20 @@ def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
             ["git", *args], capture_output=True, text=True, timeout=_ASK_TIMEOUT,
             encoding="utf-8",
             errors="replace",
-            check=False, cwd=str(cwd) if cwd else None, **child.quiet())
+            env={**os.environ, **_NO_PROMPTING},
+            # `hidden_console`, not `quiet`. `ls-remote` is a NETWORK call, and git does not make
+            # those itself: it spawns `git-remote-https`, a console program. `CREATE_NO_WINDOW`
+            # gives git no console at all, so that grandchild allocates its own — and a new console
+            # is a new window. Exactly the mechanism already written up for the agent CLI
+            # (`child.hidden_console`, tcc#13); `git` was simply never on that list, while being
+            # the one thing TCC runs at startup that reaches the network.
+            #
+            # NOT VERIFIED ON WINDOWS, like the note it borrows from — every branch of it is empty
+            # on a Mac. The bounded risk is the same one stated there: if `SW_HIDE` quietly does
+            # not take, a console is visible instead of flashing. Here it lasts seconds rather
+            # than a session, and `AUTOSOUND_TCC_AGENT_CONSOLE=0` turns it off in place.
+            check=False, cwd=str(cwd) if cwd else None,
+            **{**child.quiet(), **child.hidden_console()})
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
         return False, f"{type(exc).__name__}: {exc}"
     out = (done.stdout or "").strip() or (done.stderr or "").strip()

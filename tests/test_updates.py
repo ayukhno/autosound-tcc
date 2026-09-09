@@ -368,3 +368,32 @@ def test_our_installer_constants_agree_with_the_installers_own(monkeypatch):
 
 def _same_remote(a: str, b: str) -> bool:
     return a.rstrip("/").removesuffix(".git") == b.rstrip("/").removesuffix(".git")
+
+
+def test_the_update_check_can_never_stop_to_ask_for_a_password(monkeypatch):
+    """TCC-006. The update check is a GUI app asking GitHub a question in a background thread.
+    Git's answer to a repository it cannot read is to ask for credentials — on Windows through
+    Git Credential Manager, which is a WINDOW. Nobody is looking at it: the thread is a daemon,
+    the caller polls a timer, and the person sees a tall dialog appear over their tune or a
+    process that never returns.
+
+    The user's own report (2026-09-09) is "a tall stretched Windows window and then a terminal
+    one", and this is the first half of that shape. So the check runs in an environment where
+    asking is not possible: it either answers from what it has, or fails and stays silent."""
+    from autosound_tcc.core import updates
+
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        import subprocess as sp
+
+        return sp.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(updates.subprocess, "run", fake_run)
+
+    updates._git("ls-remote", "--tags", "https://example.invalid/x.git")
+
+    assert seen["env"].get("GIT_TERMINAL_PROMPT") == "0"
+    assert seen["env"].get("GCM_INTERACTIVE") == "never"
+    assert seen["env"].get("GIT_ASKPASS") == ""
