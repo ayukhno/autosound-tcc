@@ -1195,6 +1195,42 @@ _CONFIG_WRITE_TRIES = 3
 _CONFIG_WRITE_PAUSE_S = 0.3
 
 
+#: What must never travel out of a project folder. `.mcp.json` carries the session's token;
+#: `.tcc/` is TCC's own per-project state, including the picked models and the packages sent to
+#: the reviewer.
+_IGNORE_LINES = (".mcp.json", ".tcc/")
+
+
+def _teach_git_to_ignore(project_dir: Path) -> None:
+    """Add our two lines to the project's `.gitignore`, keeping everything already in it.
+
+    The method's README tells the user to back this folder up to a private GitHub, and TCC is what
+    puts a token in it — so TCC is what says it must not travel (HUB-026). Measured on the user's
+    machine 2026-09-06: of 11 such files, 9 were outside git and 2 ignored, by hand.
+
+    Merged, never clobbered — the same rule `.mcp.json` itself follows: the file is the user's.
+    Idempotent, because a server restarts many times in a session and a file that grows a line
+    each time is a file somebody eventually deletes in annoyance. Never raises: a project whose
+    `.gitignore` cannot be written is a project that still deserves a running server.
+    """
+    path = Path(project_dir) / ".gitignore"
+    try:
+        existing = path.read_text(encoding="utf-8")
+    except OSError:
+        existing = ""
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [line for line in _IGNORE_LINES if line not in present]
+    if not missing:
+        return
+    block = "" if not existing or existing.endswith("\n") else "\n"
+    block += "\n# TCC: the session's token and TCC's own project state — neither travels.\n"
+    block += "".join(f"{line}\n" for line in missing)
+    try:
+        path.write_text(existing + block, encoding="utf-8")
+    except OSError as exc:
+        app_log.warn(f"could not add {', '.join(missing)} to {path}: {exc}")
+
+
 def forget_mcp_config(project_dir: Path) -> None:
     """Take TCC's entry back out of `.mcp.json` when the server goes down.
 
@@ -1234,6 +1270,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     honest, and it is logged.
     """
     path = config.mcp_config_path(project_dir)
+    _teach_git_to_ignore(Path(project_dir))
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1314,6 +1351,16 @@ def _write_atomically(path: Path, body: str) -> None:
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as fh:
             fh.write(body)
+        # Owner only, SAID rather than inherited. `mkstemp` happens to create at 0600 and
+        # `os.replace` carries that over, so this file was already private — by accident of a
+        # helper's default, which is not a decision anybody took and not one that survives a
+        # refactor. It carries `X-TCC-Token` in clear text (HUB-026). No-op on Windows, which
+        # keeps its own ACLs.
+        if os.name != "nt":
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError as exc:
+                app_log.warn(f"could not restrict {path}: {exc}")
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)

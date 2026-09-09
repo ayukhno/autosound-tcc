@@ -566,6 +566,62 @@ def test_withdrawing_an_advertisement_that_is_not_there_is_not_an_error(tmp_path
     mcp_server.forget_mcp_config(tmp_path)  # and one that cannot be parsed
 
 
+def test_the_advertisement_is_readable_only_by_its_owner(tmp_path, monkeypatch):
+    """HUB-026: `.mcp.json` carries `X-TCC-Token` in clear text and was written at whatever the
+    umask happened to be — readable by every account on the machine. The token is new on every
+    start, so a leak is cheap; the file is not, because the method's README tells the user to back
+    this folder up to GitHub."""
+    import os
+    import stat
+
+    if os.name == "nt":
+        import pytest as _pytest
+
+        _pytest.skip("POSIX permissions; Windows keeps its ACLs and says so in the log")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_writing_the_advertisement_teaches_the_project_to_ignore_it(tmp_path, monkeypatch):
+    """The same folder is what the method's README says to back up to a private GitHub. TCC is
+    what puts the token there, so TCC is what says it must not travel."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    said = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert ".mcp.json" in said
+    assert ".tcc/" in said
+
+
+def test_an_existing_gitignore_keeps_every_line_it_had(tmp_path, monkeypatch):
+    """The user's file, merged and never clobbered — the same rule `.mcp.json` itself follows."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".gitignore").write_text("*.wav\nmy-notes/\n", encoding="utf-8")
+
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    said = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "*.wav" in said and "my-notes/" in said
+    assert ".mcp.json" in said and ".tcc/" in said
+
+
+def test_the_ignore_lines_are_not_added_twice(tmp_path, monkeypatch):
+    """A server restarts many times in a session; a file that grows a line each time is a file
+    somebody eventually deletes in annoyance."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    write_mcp_config(tmp_path, 8765, "tok")
+    write_mcp_config(tmp_path, 8766, "tok2")
+
+    said = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert said.count(".mcp.json") == 1
+    assert said.count(".tcc/") == 1
+
+
 def test_free_port_skips_a_port_already_in_use(tmp_path):
     import socket
 

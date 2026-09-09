@@ -4,10 +4,16 @@
 
 PY ?= uv run --extra dev --python 3.12 python
 
-.PHONY: help test ship
+.PHONY: help check test lint ship
+
+#: Pinned, and the same version CI installs. A linter that drifts between the two is a linter
+#: that fails on somebody else's machine for reasons this one cannot show.
+RUFF ?= uvx ruff@0.12.0
 
 help:
-	@echo "make test           the whole suite (~8 min; there is no fast subset on purpose)"
+	@echo "make check          the linter AND the whole suite — what CI runs, one verdict"
+	@echo "make test           just the suite (~8 min; there is no fast subset on purpose)"
+	@echo "make lint           just the linter, pinned to the version CI installs"
 	@echo "                    in a hurry, and willing to re-run a dead worker (~1 min):"
 	@echo "                    PYTEST_ADDOPTS='-n auto --dist loadfile' make test"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
@@ -18,6 +24,16 @@ help:
 	@echo "REAL=1 waits for a yes. An irreversible act is not performed on a guess."
 	@echo "There is no hand-rolled version of this. commit + tag + push typed out one by"
 	@echo "one is the same release with the gates missing."
+
+# One target, one verdict. `make test` and the linter used to be two commands with two outputs,
+# and the second is the one that gets scrolled past: on 2026-09-09 two commits went out claiming
+# "ruff код 0" when ruff had been red since the first of them — the tail of the log showed the
+# suite and the linter's line was above it. Anything that has to be green before a commit belongs
+# behind ONE name that fails as a whole.
+check: lint test
+
+lint:
+	$(RUFF) check src tests scripts --statistics
 
 test:
 	$(PY) -m pytest tests/ -q

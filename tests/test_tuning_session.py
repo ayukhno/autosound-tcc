@@ -705,10 +705,7 @@ def test_the_skill_is_asked_for_by_its_plugin_qualified_name(tmp_path):
 # --- "don't ask" must not mean "don't look" (HUB-028 ask 3) ---------------------------------
 
 
-import pytest as _pytest
-
-
-@_pytest.mark.parametrize("command", [
+@pytest.mark.parametrize("command", [
     "rm -rf /",
     "rm -rf ~/",
     "find / -name '*.wav' -exec rm {} ;",
@@ -732,7 +729,7 @@ def test_a_command_that_cannot_be_undone_is_still_put_to_the_arbiter(command, tm
     assert bash_is_dangerous(command, [tmp_path]) is True, command
 
 
-@_pytest.mark.parametrize("command", [
+@pytest.mark.parametrize("command", [
     "ls -la",
     "cat notes.md",
     "python3 rew_tool/state/process.py process show",

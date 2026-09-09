@@ -7,14 +7,18 @@ owner, and this repo has paid for that shape often enough (HUB-048).
 ## The three commands
 
 ```sh
-make test                                     # the whole suite, serial, ~8 min. Run it whole.
-uvx ruff@0.12.0 check src tests scripts       # what CI lints with. `make test` does NOT run it.
+make check                                    # the linter AND the whole suite, ~8 min, ONE verdict
 make ship                                     # dry run: works out the next patch, writes nothing
 ```
 
-**`make test` green is not the same claim as CI green.** CI also runs the linter above, and runs
-the suite on Linux and Windows where this repo has real, open flakiness (`docs/TESTING.md`,
-"Known flakiness"). Run the linter before saying anything is ready.
+**Use `make check`, not `make test`.** They are not the same claim: `make test` does not run the
+linter, CI does, and two commands mean two outputs — the second of which gets scrolled past. That
+is not hypothetical: on 2026-09-09 two commits went out saying "ruff код 0" while ruff had been
+red since the first of them, because the tail of the log showed the suite and the linter's line
+was above it. One name that fails as a whole is the fix; reading more carefully is not.
+
+Even a green `make check` is not CI green — CI runs the suite on Linux and Windows too, where this
+repo has real, open flakiness (`docs/TESTING.md`, "Known flakiness").
 
 Parallel is available and is **not** the default:
 
