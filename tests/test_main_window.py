@@ -1103,6 +1103,71 @@ def test_a_project_that_applies_nothing_is_not_announced(monkeypatch):
     assert len(window._dialog._bubbles) == before
 
 
+def test_the_machine_is_asked_about_agent_commands_once_and_only_once(monkeypatch):
+    """HUB-028, the user's ruling of 2026-09-06: do not ask by default, but ask ONCE after
+    installing and remember the answer. Until now the default was a constant nobody had chosen —
+    a decision made in a source file rather than by the person it protects."""
+    from autosound_tcc.core import omp_session
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._settings.remove(main_window._MACHINE_GATE_KEY)  # a machine nobody has answered on
+    asked = []
+    monkeypatch.setattr(
+        MainWindow, "_ask_machine_gate",
+        lambda self: asked.append(True) or omp_session.GATE_FOREIGN,
+    )
+
+    # Reading never asks — that is the whole reason the two are separate methods.
+    assert window._effective_gate() == omp_session.GATE_DEFAULT
+    assert asked == []
+
+    window._ensure_machine_gate_answered()
+    window._ensure_machine_gate_answered()
+
+    assert len(asked) == 1, "asked once; the answer is remembered, not re-asked"
+    assert window._effective_gate() == omp_session.GATE_FOREIGN
+
+
+def test_the_answer_outlives_the_window(monkeypatch):
+    """QSettings UserScope — the machine, not the project and not this process."""
+    from autosound_tcc.core import omp_session
+    _catalogue(monkeypatch, [])
+    _app()
+    first = MainWindow()
+    first._settings.remove(main_window._MACHINE_GATE_KEY)
+    monkeypatch.setattr(MainWindow, "_ask_machine_gate", lambda self: omp_session.GATE_WRITES)
+    first._ensure_machine_gate_answered()
+
+    second = MainWindow()
+    monkeypatch.setattr(
+        MainWindow, "_ask_machine_gate",
+        lambda self: pytest.fail("a second window must not ask again"),
+    )
+
+    assert second._effective_gate() == omp_session.GATE_WRITES
+
+
+def test_a_project_that_set_its_own_mode_wins_over_the_machine(monkeypatch, tmp_path):
+    """The machine answer is a DEFAULT for new projects. A project that was set deliberately keeps
+    what it was set to — otherwise answering the install question would silently retune every car
+    already in progress."""
+    from autosound_tcc.core import omp_session
+    from autosound_tcc.core import config, project_settings
+
+    _catalogue(monkeypatch, [])
+    _app()
+    _force_project_dir_env(tmp_path)
+    window = MainWindow()
+    window._settings.setValue(main_window._MACHINE_GATE_KEY, omp_session.GATE_AUTO)
+    project_settings.set_value(config.tcc_dir(tmp_path), "gate", omp_session.GATE_WRITES)
+    monkeypatch.setattr(
+        MainWindow, "_ask_machine_gate", lambda self: pytest.fail("nothing to ask: both are set")
+    )
+
+    assert window._effective_gate() == omp_session.GATE_WRITES
+
+
 def test_the_model_choice_belongs_to_the_project_not_the_person(monkeypatch, tmp_path):
     """Remembering it globally means opening a second folder silently re-points the first."""
     from autosound_tcc.core import project_settings

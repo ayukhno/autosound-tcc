@@ -141,6 +141,15 @@ _LANG_KEY = "ui/lang"
 _GENERATOR_KEY = "generator"          # per project: the picked Choice.key
 _CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
 _GATE_KEY = "gate"                    # per project: which writes still ask the Arbiter
+#: The same question, answered once for this MACHINE (QSettings UserScope). It is the DEFAULT a
+#: new project starts from, not an override — a project set deliberately keeps what it was set to,
+#: or answering the install question would silently retune every car already in progress.
+#:
+#: It exists because the default used to be a constant (`GATE_DEFAULT = GATE_AUTO`): a decision
+#: taken in a source file rather than by the person it protects, and one nobody knew had been
+#: taken. The user's ruling (2026-09-06): do not ask by default, but ask ONCE after installing and
+#: remember the answer (HUB-028).
+_MACHINE_GATE_KEY = "gate/machine"
 _EFFORT_KEY = "effort"                # per project: how hard the Generator is asked to think
 _ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
@@ -1556,7 +1565,7 @@ class MainWindow(QMainWindow):
             choice = model_choices.find(entries, key)
             return choice.label if choice else key.split(":", 1)[-1]
 
-        gate = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
+        gate = self._effective_gate()
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
         return [
             (i18n.t("cfgLanguage"), i18n.language_name()),
@@ -3644,7 +3653,7 @@ class MainWindow(QMainWindow):
                 bridge=self._bridge,
                 model=choice.model,
                 resume=resumed,
-                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT,
+                gate=self._effective_gate(),
                 always_allowed=self._always_allowed(),
                 effort=effort,
             )
@@ -3655,7 +3664,7 @@ class MainWindow(QMainWindow):
                 mcp_token=server.token,
                 bridge=self._bridge,
                 model=choice.model,
-                gate=self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT,
+                gate=self._effective_gate(),
                 always_allowed=self._always_allowed(),
                 effort=effort,
             )
@@ -3687,6 +3696,7 @@ class MainWindow(QMainWindow):
                 process_writer.enter_phase(server.project_dir, "-1")
         except process_writer.ProcessWriterError as exc:
             self._status_strip.notify(f"journal: {exc}", level="warn")
+        self._ensure_machine_gate_answered()
         self._say_what_the_project_applies()
         self._agent_worker.start()
         self._update_session_button()
@@ -3751,7 +3761,7 @@ class MainWindow(QMainWindow):
         # Plain attributes on both adapters, read at the moment a permission is judged, so
         # assigning them is the whole of "apply now" -- no restart, no queue, no thread hop.
         if hasattr(session, "gate"):
-            session.gate = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
+            session.gate = self._effective_gate()
         if hasattr(session, "always_allowed"):
             session.always_allowed = self._always_allowed()
 
@@ -3987,6 +3997,56 @@ class MainWindow(QMainWindow):
             return
         popup.show_at(QCursor.pos(), tip)
 
+    def _effective_gate(self) -> str:
+        """Which mode this project runs in: its own choice, else this machine's, else asked once.
+
+        Three layers and they are not interchangeable. The PROJECT wins when it was set — that is
+        somebody deciding about this car. The MACHINE answer is what a new project starts from.
+        And when the machine has never been asked, it is asked here, once, and the answer is kept.
+        """
+        return (
+            self._project_setting(_GATE_KEY)
+            or str(self._settings.value(_MACHINE_GATE_KEY, "") or "")
+            or omp_session.GATE_DEFAULT
+        )
+
+    def _ensure_machine_gate_answered(self) -> None:
+        """Ask the one question, if this machine has never answered it. Called at a session start.
+
+        Deliberately NOT inside `_effective_gate`: that is a read, and a read must never be able
+        to open a modal. It was, for about ten minutes, and the whole suite hung — a window built
+        by any test that never touches the gate sat waiting for a click nobody could give. The
+        same shape would have hit a person on a code path nobody thought asks anything.
+        """
+        if str(self._settings.value(_MACHINE_GATE_KEY, "") or ""):
+            return
+        self._settings.setValue(_MACHINE_GATE_KEY, self._ask_machine_gate())
+
+    def _ask_machine_gate(self) -> str:
+        """The one question, asked once per machine: how much should agent commands interrupt you.
+
+        Worded as the choice it is rather than as a setting name. The default button is "don't
+        ask", because that is the user's own ruling and because the mode that asks about
+        everything is the one a person turns on deliberately, not one they should land in by
+        pressing Enter.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("gateAskTitle"))
+        box.setText(i18n.t("gateAskBody"))
+        buttons = {
+            box.addButton(i18n.t("gateAuto"), QMessageBox.ButtonRole.AcceptRole):
+                omp_session.GATE_AUTO,
+            box.addButton(i18n.t("gateForeign"), QMessageBox.ButtonRole.ActionRole):
+                omp_session.GATE_FOREIGN,
+            box.addButton(i18n.t("gateWrites"), QMessageBox.ButtonRole.ActionRole):
+                omp_session.GATE_WRITES,
+        }
+        default = next(iter(buttons))
+        box.setDefaultButton(default)
+        box.exec()
+        return buttons.get(box.clickedButton(), omp_session.GATE_AUTO)
+
     def _set_gate_mode(self, mode: str) -> None:
         project_settings.set_value(config.tcc_dir(), _GATE_KEY, mode)
         self._refresh_project_button()
@@ -4002,7 +4062,7 @@ class MainWindow(QMainWindow):
         nothing else -- it runs while the header is still being assembled, before the project
         label it would otherwise touch exists.
         """
-        current = self._project_setting(_GATE_KEY) or omp_session.GATE_DEFAULT
+        current = self._effective_gate()
         for mode, action in getattr(self, "_gate_actions", {}).items():
             action.setChecked(mode == current)
         running = getattr(self, "_agent_worker", None) is not None
