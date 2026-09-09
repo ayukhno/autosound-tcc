@@ -2,11 +2,50 @@
 
 ## The policy
 
-**Run everything, every time.** `python3 -m pytest tests/ -q` — 783 tests, ~30 seconds, and that
-includes the skill's own ten selftests as subprocesses.
+**Run everything, every time.** `make test` — 1722 tests, ~65 seconds, and that includes the
+skill's own selftests as subprocesses.
 
 There is deliberately no fast/slow split, and it is worth writing down why, because there nearly
-was one.
+was one. What there IS, since 2026-09-09, is a parallel run — which is not a split: every test
+still runs, every time.
+
+## Parallel by default; a release is serial (2026-09-09)
+
+The suite had grown to 1722 tests and 498 s. The 2026-08-12 question was asked again first — is
+this a leak or is it volume? — and answered by measurement, not by reaching for a policy:
+
+| probe | number |
+|---|---|
+| 25 `MainWindow` builds in one process | window 5 = 0.1146 s, window 25 = 0.1163 s (**1.01x**) |
+| non-Qt tests | 53 tests / 2.22 s = **0.042 s each** — the 2026-08-12 baseline, unchanged |
+| `test_main_window.py` alone | 0.350 s/test against 0.104 s then — the WINDOW grew, not the loop |
+
+No leak. All three 2026-08-12 fixes are still in place (`WeakSet` + a module-level `aboutToQuit`
+handler, memoized `setStyleSheet`, `WeakMethod` i18n listeners). It is volume, so the answer is
+workers rather than a hunt:
+
+```
+498 s serial  ->  65.7 s and 64.2 s on two consecutive runs   (-n auto --dist loadfile, 8-core M1 Pro)
+```
+
+Three things about that, all of them load-bearing:
+
+* **The flags live in `pyproject.toml`'s `addopts`, not in the Makefile.** Four things run this
+  suite — `make test`, `scripts/ship.py`, and three CI jobs. Flags kept in one caller are exactly
+  how "green locally" and "green in CI" drift apart, and a test (`test_ship.py`) now fails if any
+  caller grows its own `-n`.
+* **`--dist loadfile`, never the default `load`.** Session-scoped `QApplication` and module-level
+  state: a whole file pinned to one worker is what keeps that safe. The cost is a tail — the two
+  biggest files each sit on one worker, so the run stops improving past about four of them.
+  Splitting `test_curve_view.py` (216 tests) and `test_main_window.py` (138) is the next win.
+* **A release runs serially.** `scripts/ship.py` passes `-n 0`. Everyday runs are fast because
+  eight minutes of waiting changes what a person is willing to check; a release is the one moment
+  where that trade goes the other way — one process, one order, the shape this suite's whole
+  history was measured in, for eight minutes once, on the day something is published and can
+  never be unpublished.
+
+`PYTEST_ADDOPTS='-n 0' make test` is the same switch by hand: use it to debug one test, to read
+output in order, or under a debugger.
 
 ## The tiered policy that was designed and then not needed (2026-08-12)
 

@@ -457,3 +457,41 @@ def test_a_red_suite_puts_the_lock_back_too(repo):
 
     assert 'version = "0.1.24"' in (repo / "uv.lock").read_text(encoding="utf-8")
     assert git(repo, "status", "--porcelain") == ""
+
+
+# --- fast in development, deterministic at a release (2026-09-09) --------------------------
+
+
+def test_the_release_runs_the_suite_serially():
+    """Everyday runs are parallel — `addopts` in `pyproject.toml` carries `-n auto --dist
+    loadfile`, and that is what makes the suite ~65 s instead of ~500 s. A RELEASE is the one
+    moment where reproducibility is worth more than eight minutes: one process, one order, the
+    same shape the whole history of this suite was measured in.
+
+    The break this catches is somebody speeding the release gate up later. `-n 0` is how xdist is
+    switched off from the command line, and it has to be there explicitly, because `addopts`
+    applies to every invocation including this one."""
+    import scripts.ship as ship
+
+    assert "-n" in ship.TEST_COMMAND
+    assert ship.TEST_COMMAND[ship.TEST_COMMAND.index("-n") + 1] == "0"
+
+
+def test_no_pytest_caller_carries_its_own_distribution_flags():
+    """One source for how the suite is distributed, and it is `pyproject.toml`. Four places invoke
+    pytest — the Makefile, `ship.py`, and three CI jobs — and the moment one of them grows its own
+    `-n`, "green locally" and "green in CI" stop meaning the same thing. That already cost two red
+    CI runs on a green local suite (user, 2026-09-09), which is why this is a test and not a note.
+
+    `ship.py` is the deliberate exception above and is excluded by name."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for relative in ("Makefile", ".github/workflows/ci.yml"):
+        text = (root / relative).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "pytest" not in line or line.lstrip().startswith("#"):
+                continue
+            assert not re.search(r"(^|\s)-n(\s|=)", line), f"{relative}: {line.strip()}"
+            assert "--dist" not in line, f"{relative}: {line.strip()}"

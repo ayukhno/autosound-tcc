@@ -100,7 +100,13 @@ CARRIER = Path(__file__).resolve().parents[2] / "hub" / "scripts" / "release-pre
 
 #: The suite, whole. `docs/TESTING.md`: run everything, every time — there is deliberately no
 #: fast subset, and a release is the last place to invent one.
-TEST_COMMAND = [sys.executable, "-m", "pytest", "tests/", "-q"]
+#:
+#: `-n 0` turns OFF the parallel run that `pyproject.toml` gives every other invocation. Everyday
+#: runs are fast because eight minutes of waiting changes what a person is willing to check; a
+#: release is the one moment where that trade goes the other way. One process, one order, the
+#: shape this suite's whole history was measured in — and it costs eight minutes, once, on the
+#: day something is published and can never be unpublished.
+TEST_COMMAND = [sys.executable, "-m", "pytest", "tests/", "-q", "-n", "0"]
 
 
 class Stop(Exception):
