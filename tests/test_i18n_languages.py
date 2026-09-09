@@ -99,3 +99,17 @@ def test_no_ui_string_spells_out_a_model_name(lang):
     named = {key: value for key, value in i18n.T[lang].items()
              if any(name in value for name in _MODEL_NAMES)}
     assert not named, named
+
+
+def test_every_shipped_language_has_a_name_a_model_understands():
+    """TCC tells the model which language to answer in, and it passes a NAME, not a code. With
+    only `en` and `uk` in the table, `language_name("pl")` answered "pl" — so a Polish Arbiter got
+    a session told to reply in "pl", which is not a language, from a UI that ships Polish
+    (SKL-027). The break this catches is adding a fifth language to the UI and forgetting this
+    table: the codes come from `i18n.LANGS`, so it fails on its own."""
+    from autosound_tcc.core import agent_session
+
+    for code in _LANGS:
+        name = agent_session.language_name(code)
+        assert name != code, f"{code!r} has no name — the model would be told to answer in {code!r}"
+        assert name.isascii() and name[:1].isupper(), name

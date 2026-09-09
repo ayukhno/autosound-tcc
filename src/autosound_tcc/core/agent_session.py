@@ -156,7 +156,11 @@ def system_prompt() -> str:
 
 # Matches ui/tcc/i18n.py's language codes -- kept here rather than importing that module, since
 # core/ shouldn't depend on the ui/ layer. PL/DE are reserved there too (i18n.py: "disabled").
-LANGUAGE_NAMES = {"en": "English", "uk": "Ukrainian"}
+#: A NAME, not a code — this is handed to a model, and "answer in pl" is not an instruction a
+#: model can follow the way "answer in Polish" is. The UI has shipped four languages since
+#: 2026-08-25 and this table had two; `test_i18n_languages` now fails when a fifth is added to
+#: `i18n.LANGS` and forgotten here.
+LANGUAGE_NAMES = {"en": "English", "uk": "Ukrainian", "pl": "Polish", "de": "German"}
 
 
 def language_name(code: str) -> str:

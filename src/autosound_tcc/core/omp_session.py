@@ -49,6 +49,7 @@ import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
+from autosound_tcc.core import openers
 from autosound_tcc.core import child, config, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
@@ -851,7 +852,7 @@ class OmpSession:
             # After the link attempt in `start`, so a skill warning here means it actually failed.
             if warning:
                 yield Notice(warning)
-        async for event in self._prompt(prompt or self._opening()):
+        async for event in self._prompt(self._opening(prompt or "")):
             yield event
 
     async def _drain_stderr(self) -> None:
@@ -901,14 +902,10 @@ class OmpSession:
         if not self._saw_ready:
             raise RuntimeError(self._why("omp exited before reporting ready"))
 
-    def _opening(self) -> str:
-        return (
-            "Resume this tuning project. Read state from disk first, call get_tcc_state and "
-            "get_pending_signals, then tell me where we are and what the next step is."
-            if self.resume
-            else "Start a tuning session for this project. Read state from disk, call "
-            "get_tcc_state, then tell me where we are and what the next step is."
-        )
+    def _opening(self, typed: str = "") -> str:
+        """One text for both harnesses, and what the Arbiter typed rides after it, never instead
+        of it — see `core.openers`."""
+        return openers.opening_prompt(resumed=self.resume, typed=typed)
 
     def credential_warning(self) -> Optional[str]:
         """Whether the model this session runs has anything to authenticate with.

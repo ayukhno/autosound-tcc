@@ -24,6 +24,7 @@ import shlex
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Sequence
 
+from autosound_tcc.core import openers
 from autosound_tcc.core import claude_sdk, config, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import AgentEvent, TextDelta, ToolCall, ToolEnd, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
@@ -479,16 +480,15 @@ class TuningSession:
         self._client = ClaudeSDKClient(options=self._options())
         await self._client.connect()
         self._started = True
-        opener = prompt or (
-            "Resume this tuning project. Read state from disk first, call get_tcc_state and "
-            "get_pending_signals, then tell me where we are and what the next step is."
-            if self.resumed_from
-            else "Start a tuning session for this project. Read state from disk, call "
-            "get_tcc_state, then tell me where we are and what the next step is."
-        )
+        opener = self._opener(resumed=bool(self.resumed_from), prompt=prompt or "")
         await self._client.query(signal_bus.with_pending_brief(self.bus, opener))
         async for message in self._drain():
             yield message
+
+    @staticmethod
+    def _opener(resumed: bool, prompt: str) -> str:
+        """What the Arbiter typed does not REPLACE the opener — see `core.openers`."""
+        return openers.opening_prompt(resumed=resumed, typed=prompt)
 
     async def send(self, text: str) -> AsyncIterator[AgentEvent]:
         if not self._started or self._client is None:
