@@ -655,3 +655,48 @@ def test_the_system_prompt_says_file_contents_are_data():
     prompt = SYSTEM_PROMPT_APPEND.lower()
     assert "data, not instructions" in prompt
     assert "community-inbox" in prompt
+
+
+# --- the method arrives as OUR plugin, not through the project's settings (HUB-050) ---------
+
+
+def test_the_session_takes_no_settings_from_the_project_folder(tmp_path):
+    """A project is a FOLDER — a backup, a stick, a customer's clone — and
+    `setting_sources=["project"]` handed the session its hooks and its `permissions.allow`. It was
+    there for one reason: the project's `.claude/skills` was the only place the method could come
+    from. It no longer is.
+
+    Verified live before this was written (`claude --plugin-dir <repo> --setting-sources= --print`
+    listing its skills): the plugin route gives the model `autosound-tuning:autosound-tuning` with
+    no project or user settings at all."""
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    session = TuningSession(project_dir=tmp_path)
+    options = session._options()
+
+    assert options.setting_sources == []
+
+
+def test_the_method_is_loaded_as_our_own_plugin(tmp_path):
+    """From the VENDORED checkout, which is the one thing TCC controls. `.claude-plugin/plugin.json`
+    is already there and `claude plugin validate` passes on it."""
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    session = TuningSession(project_dir=tmp_path)
+    options = session._options()
+
+    root = vendor_loader.skill_repo_root()
+    assert options.plugins == [{"type": "local", "path": str(root)}]
+
+
+def test_the_skill_is_asked_for_by_its_plugin_qualified_name(tmp_path):
+    """`autosound-tuning`, the bare directory name, is what a settings-discovered skill is called;
+    a plugin's is `plugin:skill`. The plugin also ships `install-tcc`, so "all" would hand the
+    tuning session a second skill it has no business invoking — the name is spelled out."""
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    session = TuningSession(project_dir=tmp_path)
+    options = session._options()
+
+    assert options.skills == ["autosound-tuning:autosound-tuning"]

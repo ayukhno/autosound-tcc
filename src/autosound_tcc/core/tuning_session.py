@@ -448,11 +448,35 @@ class TuningSession:
             # model is picked rather than as a control the Arbiter can reach for mid-conversation.
             effort=self.effort,
             system_prompt={"type": "preset", "preset": "claude_code", "append": SYSTEM_PROMPT_APPEND},
-            # Project scope only: the skill must come from this project's own
-            # `.claude/skills/autosound-tuning` symlink (the TCC worktree branch), not from
-            # whatever the developer happens to have installed globally.
-            setting_sources=["project"],
-            skills=[SKILL_NAME],
+            # NOTHING from the project folder, and the method comes from our own checkout as a
+            # PLUGIN instead (HUB-050).
+            #
+            # `setting_sources=["project"]` used to be here for one reason: the project's own
+            # `.claude/skills/autosound-tuning` was the only place the skill could come from. The
+            # same switch also handed the session that folder's `.claude/settings.json` — its
+            # hooks and its `permissions.allow` — and a project is a FOLDER: it arrives from a
+            # backup, a memory stick, a customer, a clone. So a folder could run a command on this
+            # machine before a question was asked. The SDK has no filter that takes skills from a
+            # source without the rest of it (`_apply_skills_defaults`, sdk 0.2.145).
+            #
+            # `--plugin-dir` does what the filter would have: the vendored checkout already ships
+            # `.claude-plugin/plugin.json`, `claude plugin validate` passes on it, and the CLI
+            # loads its skills without reading anybody's settings. Verified live rather than
+            # reasoned about, because the qualified NAME was the open question:
+            #
+            #   claude --plugin-dir <repo> --setting-sources= --allowedTools Skill --print
+            #       "List every skill you can invoke, by exact name"
+            #   -> autosound-tuning:autosound-tuning
+            #   -> autosound-tuning:install-tcc
+            #
+            # Hence the qualified name, and hence a NAME rather than `skills="all"`: the plugin
+            # ships a second skill (`install-tcc`) that a tuning session has no business invoking.
+            #
+            # The project link stays installed anyway — `omp` reads the project's own skills
+            # folder and has no plugin flag, so `link_skill_into` is still what feeds that half.
+            setting_sources=[],
+            plugins=[{"type": "local", "path": str(vendor_loader.skill_repo_root())}],
+            skills=[f"{SKILL_NAME}:{SKILL_NAME}"],
             allowed_tools=ALLOWED_TOOLS,
             disallowed_tools=DISALLOWED_TOOLS,
             mcp_servers=self._mcp_servers,
