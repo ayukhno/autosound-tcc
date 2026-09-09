@@ -116,7 +116,9 @@ def _exclusive(project_dir: Path, timeout_s: float) -> Iterator[None]:
         handle.close()
 
 
-def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
+def _spawn(
+    project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S
+) -> tuple[int, str, str]:
     script = script_path()
     if not script.is_file():
         raise ProcessWriterError(
@@ -144,10 +146,16 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None
     except OSError as exc:
         raise ProcessWriterError(str(exc)) from None
-    if proc.returncode != 0:
-        message = (proc.stderr or proc.stdout or "").strip()
-        raise ProcessWriterError(message or f"process.py exited {proc.returncode}")
-    return (proc.stdout or "").strip()
+    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+
+
+def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
+    """One call, and a non-zero exit is a failure. Every command here works that way except
+    `session-close`, whose exit code is an ANSWER — see `close_session`."""
+    code, out, err = _spawn(project_dir, args, timeout_s)
+    if code != 0:
+        raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
+    return out
 
 
 def enter_phase(project_dir: Path, phase: str) -> str:
@@ -355,6 +363,26 @@ def record_session(project_dir: Path, harness: str, model: str, resumed: bool = 
     if resumed:
         args.append("resumed")
     return _run(project_dir, args)
+
+
+def close_session(project_dir: Path) -> tuple[bool, str]:
+    """Stopping, said out loud. Returns (recorded, report).
+
+    A session that ended in order used to leave no trace at all, so it read exactly like a process
+    that was killed — the journal ran out of events either way (SKL-029). `session-close` fixes
+    that from the skill's side; calling it is TCC's half, and there is nobody else to call it: the
+    model is gone by then.
+
+    **The exit code is an ANSWER here, not a failure.** `session-close` exits non-zero while a
+    capture round or a step is still open, precisely so "we stopped" cannot be said over open
+    work, and it prints what is open instead. Passing that through `_run` would turn a report into
+    an exception and lose it. `recorded` is False in that case and `report` holds the skill's own
+    text; nothing is written to the journal, which is the honest record.
+    """
+    code, out, err = _spawn(project_dir, ["session-close"])
+    if code not in (0, 1):
+        raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
+    return code == 0, out or err
 
 
 def start_capture(

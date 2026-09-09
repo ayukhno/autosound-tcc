@@ -952,6 +952,83 @@ def test_a_failed_handoff_still_restarts(monkeypatch):
     assert launched == [True]
 
 
+def _record_stops(monkeypatch) -> list:
+    """Spy on the one call under test. The skill's writer is exercised for real in
+    `test_process_writer`; what is worth pinning here is that the window calls it at all, and
+    exactly once — a stop written twice is a lie about the session as much as one never written."""
+    from autosound_tcc.core import process_writer
+
+    stops: list = []
+    monkeypatch.setattr(
+        process_writer,
+        "close_session",
+        lambda project_dir: stops.append(project_dir) or (True, ""),
+    )
+    return stops
+
+
+def test_a_restart_writes_the_stop_before_the_next_session_starts(monkeypatch):
+    """SKL-029: `session_started` had no counterpart, so a session that ended in order and one
+    whose process was killed left the same journal — it just stopped. The break this catches is a
+    handoff that swaps models without saying the old session ended."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    stops = _record_stops(monkeypatch)
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._session_open = True
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: None)
+
+    window._start_tuning_session()
+    worker.turn_done.emit()
+
+    assert len(stops) == 1
+
+
+def test_a_save_is_not_a_stop(monkeypatch):
+    """The plain Save exists to get the project onto disk mid-session; the conversation carries on.
+    Writing `session_closed` there would make the journal say the session ended and then kept
+    recording, which is worse than saying nothing."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    stops = _record_stops(monkeypatch)
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._session_open = True
+
+    window._hand_off(worker, "save")
+    worker.turn_done.emit()
+
+    assert stops == []
+
+
+def test_quitting_writes_the_stop_once_not_once_per_close(monkeypatch):
+    """`_finish_handoff("quit")` closes the window, and `closeEvent` runs again on the way out.
+    Both are on the stop path, so the guard is what keeps the journal from carrying two
+    `session_closed` events for one session."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    stops = _record_stops(monkeypatch)
+    worker = _HandoffWorker()
+    window._agent_worker = worker
+    window._session_open = True
+    # As the real path does: `closeEvent` sets this before handing off, and it is what stops the
+    # close that follows the turn from asking the save question all over again.
+    window._quitting = True
+
+    window._hand_off(worker, "quit")
+    worker.turn_done.emit()
+
+    assert len(stops) == 1
+
+
 def test_the_model_choice_belongs_to_the_project_not_the_person(monkeypatch, tmp_path):
     """Remembering it globally means opening a second folder silently re-points the first."""
     from autosound_tcc.core import project_settings

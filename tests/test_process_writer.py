@@ -128,3 +128,31 @@ def test_a_skip_with_neither_is_refused_here_rather_than_by_a_subprocess(project
         process_writer.skip_step(project, "2.5")
 
     assert _skips(project) == []
+
+
+def _events(project_dir, kind: str) -> list[dict]:
+    lines = (project_dir / "process" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+    return [e for e in (json.loads(line) for line in lines) if e.get("type") == kind]
+
+
+def test_a_clean_stop_is_written_down_as_an_event(project):
+    """SKL-029, third ask: an orderly stop used to leave NO trace, so it read exactly like a killed
+    process. The skill writes `session_closed` on a clean `session-close`; what TCC owns is calling
+    it. The break this catches: a quit path that shuts the window without the call."""
+    recorded, report = process_writer.close_session(project)
+
+    assert recorded is True, report
+    assert len(_events(project, "session_closed")) == 1
+
+
+def test_a_stop_over_open_work_reports_instead_of_recording(project):
+    """`session-close` exits 1 while anything is open — deliberately, so "we stopped" cannot be
+    said over a step still in progress. TCC must read that as a REPORT, not as a failed command:
+    treating exit 1 as an error is how the report ends up in an exception nobody shows."""
+    process_writer.start_step(project, "2.3")
+
+    recorded, report = process_writer.close_session(project)
+
+    assert recorded is False
+    assert "2.3" in report, report
+    assert _events(project, "session_closed") == []

@@ -3528,6 +3528,33 @@ class MainWindow(QMainWindow):
         if tick is not None:
             tick.stop()
 
+    def _record_session_stop(self) -> None:
+        """Write `session_closed` — once per session, on the way out (SKL-029, #126).
+
+        `session_started` had no counterpart, so the journal ended the same way whether the person
+        quit or the process was killed: it just stopped. Only the front-end can tell those apart —
+        by then the model is gone — which is why this is TCC's call to make and not the skill's.
+
+        Two paths end a session and both run on a quit: `_finish_handoff` writes it before the
+        window closes, and `closeEvent` covers the stop that never asked for a handoff (Discard,
+        or a session with nothing to save). The flag is what keeps one stop from being written
+        twice, which would be its own lie about the session.
+
+        `recorded=False` is an ANSWER, not a failure: the skill refuses to call it a clean stop
+        while a capture round or a step is still open, and says what is open. That belongs on the
+        strip, where a restart can still act on it.
+        """
+        if not getattr(self, "_session_open", False):
+            return
+        self._session_open = False
+        try:
+            recorded, report = process_writer.close_session(config.project_dir())
+        except process_writer.ProcessWriterError as exc:
+            self._status_strip.notify(f"journal: {exc}", level="warn")
+            return
+        if not recorded and report:
+            self._status_strip.notify(report.splitlines()[0], level="warn")
+
     def _finish_handoff(self, *_args) -> None:
         timer, self._handoff_timer = getattr(self, "_handoff_timer", None), None
         if timer is None:
@@ -3547,6 +3574,9 @@ class MainWindow(QMainWindow):
             self._dialog._add_system_message(i18n.t("sessionSaved"))
             self._update_session_button()
             return
+        # Past the `save` return above, every remaining mode ends this session — quit, restart,
+        # fresh — so the stop is written once, here, rather than three times in three branches.
+        self._record_session_stop()
         if mode == "quit":
             # The window is already on its way out and only waited for this turn. `_quitting` is
             # what stops the second `close()` asking the same question again.
@@ -3629,6 +3659,9 @@ class MainWindow(QMainWindow):
             process_writer.record_session(
                 server.project_dir, choice.harness, choice.model, resumed=resumed
             )
+            # Paired with `_record_session_stop`: what is opened here is what gets closed there,
+            # and a session that never made it onto the record has no stop to write.
+            self._session_open = True
             # A project with no process state at all starts in intake, and TCC opening it means
             # event one does not depend on which model the user brought (SCR-031: the re-run
             # watched a model read `enter-phase -1` verbatim and ask its questions instead). Only
@@ -4166,6 +4199,10 @@ class MainWindow(QMainWindow):
                 event.ignore()  # `_finish_handoff` closes the window once the turn lands
                 return
         self._flush_own_state()
+        # Discard, or a quit with nothing running to save: no handoff turn happened, so nobody has
+        # written the stop yet. On the Save path this is a no-op — `_finish_handoff` got there
+        # first and cleared the flag.
+        self._record_session_stop()
         self.stop_workers()
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
