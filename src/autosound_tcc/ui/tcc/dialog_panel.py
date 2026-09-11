@@ -511,7 +511,18 @@ class DialogPanel(QWidget):
             self._edit_chip.setText("✎ " + i18n.t("editChipLabel"))
 
     def _bubble_max_width(self) -> int:
-        width = self._chat.width()
+        """The cap, measured against what can actually be SEEN rather than against the content.
+
+        It used to read `self._chat.width()` — the widget the bubbles live in — and that is a
+        ratchet, because `_fit` gives a bubble a FIXED width and a fixed width raises the layout's
+        minimum. So a long message widened `_chat`, the wider `_chat` raised the cap, the next long
+        message took the new cap, and the column crept sideways: the window's horizontal split
+        jumped while the Arbiter was typing (reported 2026-09-11).
+
+        The viewport cannot be pushed by its own contents, so the loop cannot close.
+        """
+        viewport = self._scroll.viewport() if self._scroll is not None else None
+        width = viewport.width() if viewport is not None else 0
         return int(width * 0.9) if width > 0 else 600
 
     def _fit(self, bubble: MessageBubble) -> None:

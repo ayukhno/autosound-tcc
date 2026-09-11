@@ -494,7 +494,18 @@ class TuningSession:
         if tool_name.startswith("mcp__tcc"):
             return PermissionResultAllow()
 
-        if self.gate == "auto" or tool_name in self.always_allowed:
+        if tool_name in self.always_allowed:
+            # An explicit, remembered decision by the Arbiter, and it outranks the guard below.
+            # The tick says "stop asking me about this", and one that keeps asking is a broken
+            # promise — it kept asking for every dangerous command it had ever been ticked for,
+            # so the option read as simply not working (reported 2026-09-11).
+            #
+            # This is a LOOSENING of HUB-028, asked for by name by the person the guard exists to
+            # serve, and it is deliberately narrow: it takes a tick per tool, in this project, and
+            # nothing here weakens the DEFAULT, which still asks (the branch below).
+            return PermissionResultAllow()
+
+        if self.gate == "auto":
             # "Don't ask" never meant "don't look". The noise this mode removed was ordinary safe
             # commands, and since HUB-027 those are silent — but this branch returned Allow BEFORE
             # Bash was examined at all, so nothing checked a command in the DEFAULT mode (HUB-028).

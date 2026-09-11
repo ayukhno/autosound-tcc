@@ -788,3 +788,32 @@ def test_the_gate_set_to_never_ask_still_stops_a_ruinous_command(tmp_path):
 async def _answer(asked, args):
     asked.append(args)
     return "asked"
+
+
+def test_a_remembered_permission_stops_the_asking_even_for_a_dangerous_command(tmp_path):
+    """The tick says "stop asking me about this", and a tick that keeps asking is a broken promise.
+
+    Both dials led into one branch, where a Bash command was re-examined for danger and asked
+    about again — so "Don't ask again for this in this project" never silenced anything it was
+    ticked for, however many times the Arbiter ticked it (reported 2026-09-11).
+
+    This is a deliberate loosening, asked for by the Arbiter and recorded as such: an explicit
+    remembered decision now outranks the irreversible-command guard. The DEFAULT does not change,
+    which is the next test.
+    """
+    session, arbiter = _session(tmp_path, allow=True)
+    session.always_allowed = {"Bash"}
+
+    assert _decide(session, "Bash", {"command": "rm -rf /"}) == "allow"
+    assert arbiter.asked == [], "remembered means remembered"
+
+
+def test_do_not_ask_mode_still_guards_what_cannot_be_undone(tmp_path):
+    """`auto` exists to remove the noise of ordinary safe commands. It was never meant to hand
+    over the irreversible ones (HUB-028), and that half must survive the change above."""
+    session, arbiter = _session(tmp_path, allow=True)
+    session.gate = "auto"
+
+    _decide(session, "Bash", {"command": "rm -rf /"})
+
+    assert [r.tool for r in arbiter.asked] == ["Bash"], "auto alone still asks about this one"

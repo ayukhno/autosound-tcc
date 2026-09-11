@@ -757,6 +757,14 @@ class MainWindow(QMainWindow):
         # three method columns plus the two header buttons were coming out over its edge on the
         # user's screen (2026-09-06). The rows elide, so this is head-room rather than a fix.
         splitter.setSizes([260, 880, 340])
+        # The CENTRE needs the same treatment, and for a sharper reason. The dialog's bubbles take
+        # a FIXED width (`DialogPanel._fit`), a fixed width raises the column's minimum, and a
+        # splitter must honour a minimum — so one long message shoved the whole horizontal split
+        # sideways while the Arbiter was typing, which is what "the window jumps" meant
+        # (reported 2026-09-11). `Ignored` says: take what the stretch gives you, and never demand
+        # width because of what is inside you.
+        self._center.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self._center.setMinimumWidth(320)
         # A side panel is a fixed column with a handle, not something that resizes itself. Without
         # this a single long row grew the panel, the panel grew the window, and a maximised window
         # grew past the screen edge -- reported exactly that way. The handle still works.

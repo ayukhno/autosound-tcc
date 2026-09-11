@@ -1224,8 +1224,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
        to look like every other panel: same background, same border, a hairline apart from the
        transcript. Reported as easy to miss. It gets the accent, a real border and its own tint. */
     QWidget[class~="confirm-bar"] {{
-        background: {t.mix("accent", 0.10, "panel")};
-        border: 2px solid {t.accent};
+        background: {t.mix("inv", 0.18, "panel")};
+        border: 2px solid {t.inv};
         border-radius: 10px;
     }}
     QWidget[class~="confirm-bar"] QLabel[class~="phead-title"] {{
