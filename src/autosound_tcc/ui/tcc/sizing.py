@@ -73,3 +73,26 @@ def open_maximised(window) -> None:
     if room is not None:
         window.setGeometry(room)
     window.show()
+
+
+#: What `QMessageBox QPushButton` reserves around its label in the stylesheet: `padding: 6px 18px`,
+#: plus a few pixels of slack for the focus ring and for `letter-spacing`, which Qt renders but
+#: does not report through `fontMetrics()`.
+_BUTTON_PADDING_PX = 44
+
+
+def fit_to_text(button, padding: int = _BUTTON_PADDING_PX) -> None:
+    """Widen `button` so its OWN label fits, in whatever language wrote it.
+
+    A `QMessageBox` button does not grow to its text: the stylesheet gives it `min-width: 84px`,
+    Qt lays it out for the label it expected, and anything longer is CLIPPED rather than the
+    button widened. The Arbiter met this twice — "on't ask at all (aut" on Windows (2026-09-09)
+    and "Іоза проєктом" on macOS (2026-09-11), the second one on a label of thirteen characters.
+
+    Counting characters cannot catch it, and a guard that did was already in place: the labels are
+    capped at 26, "Поза проєктом" is 13, and it clipped anyway. What clips is RENDERED WIDTH — a
+    font, a platform and a language — so the measurement has to be in pixels.
+    """
+    wanted = button.fontMetrics().horizontalAdvance(button.text()) + padding
+    if wanted > button.minimumWidth():
+        button.setMinimumWidth(wanted)

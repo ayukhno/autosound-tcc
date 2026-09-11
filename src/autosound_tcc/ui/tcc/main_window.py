@@ -4240,6 +4240,14 @@ class MainWindow(QMainWindow):
             box.addButton(i18n.t("gateAskWrites"), QMessageBox.ButtonRole.ActionRole):
                 omp_session.GATE_WRITES,
         }
+        # Each button widened to its own label, then the box to the buttons. The short labels
+        # below were already the SECOND attempt at this — the first was shortening the sentences,
+        # after Windows clipped them (2026-09-09) — and thirteen characters still clipped on macOS
+        # (2026-09-11). Shortening a third time moves the limit to the next language; measuring
+        # the rendered width removes it.
+        for button in buttons:
+            sizing.fit_to_text(button)
+        box.adjustSize()
         default = next(iter(buttons))
         box.setDefaultButton(default)
         box.exec()
@@ -4550,6 +4558,9 @@ class MainWindow(QMainWindow):
         box.setText(i18n.t("quitAbandonBody").format(sec=elapsed))
         close_btn = box.addButton(i18n.t("quitAbandonClose"), QMessageBox.ButtonRole.DestructiveRole)
         wait_btn = box.addButton(i18n.t("quitAbandonWait"), QMessageBox.ButtonRole.RejectRole)
+        for button in (close_btn, wait_btn):
+            sizing.fit_to_text(button)   # same reason as the gate dialog's buttons
+        box.adjustSize()
         box.setDefaultButton(wait_btn)
         box.exec()
         return box.clickedButton() is close_btn

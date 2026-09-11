@@ -144,3 +144,30 @@ def test_every_language_the_window_offers_has_a_name_for_the_model():
     assert sorted(LANGUAGE_NAMES) == sorted(_LANGS)
     for code in _LANGS:
         assert language_name(code) != code, f"{code} reaches the model as a bare code"
+
+
+@pytest.mark.parametrize("key", _BUTTON_KEYS)
+def test_a_button_is_wide_enough_for_its_label_in_every_language(key):
+    """The character guard above was satisfied and the label clipped anyway.
+
+    `_BUTTON_MAX` is 26; "Поза проєктом" is 13 — and it rendered as "Іоза проєктом" on macOS, the
+    first letter eaten (Arbiter's screenshot, 2026-09-11). The same class had already been "fixed"
+    once by shortening the sentences, after Windows clipped them (2026-09-09). Counting characters
+    cannot catch it: what clips is RENDERED WIDTH, which is a font, a platform and a language.
+
+    So this measures pixels, the way the permission bar's test measures colour.
+    """
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from autosound_tcc.ui.tcc import sizing
+
+    QApplication.instance() or QApplication([])
+    for code in _LANGS:
+        label = i18n.T[code].get(key) or i18n.T["en"][key]
+        button = QPushButton(label)
+        sizing.fit_to_text(button)
+
+        needed = button.fontMetrics().horizontalAdvance(label)
+        assert button.minimumWidth() >= needed, (
+            f"{code}/{key}: {label!r} needs {needed}px and the button offers "
+            f"{button.minimumWidth()}px — that is the clipping, not a style choice")
