@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
-from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
+from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
@@ -529,8 +529,7 @@ class DspTreeWidget(QWidget):
                 # setParent(None) removes it from the visual tree immediately; deleteLater()
                 # alone leaves it a visible, un-laid-out child until the next event-loop pass,
                 # which overlaps with the freshly-added replacement widgets on a preset switch.
-                widget.setParent(None)
-                widget.deleteLater()
+                discard.drop(widget)
         if view.features:
             params = ParamsSection("params", i18n.t("params"), view.features, self._settings)
             self._layout.insertWidget(self._layout.count() - 1, params)

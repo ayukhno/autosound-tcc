@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import discard, i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.mock_data import PlanPhase, PlanStep, sessions_for_step
@@ -378,8 +378,7 @@ class PlanPanel(QScrollArea):
                 # setParent(None) first -- deleteLater() alone leaves the old, un-laid-out
                 # widget visibly overlapping the freshly-built replacement until the next
                 # event-loop pass.
-                widget.setParent(None)
-                widget.deleteLater()
+                discard.drop(widget)
         plan = self.plan
         if not plan:
             # Which of the two empty states this is matters: a project with no plan is waiting for

@@ -58,7 +58,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import config, vendor_loader
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import discard, i18n
 from autosound_tcc.ui.tcc.theme import current_theme
 
 
@@ -355,11 +355,7 @@ class ResonalyzeImportDialog(QDialog):
     # ── the answer ────────────────────────────────────────────────────────────────────────
 
     def _rebuild_binders(self) -> None:
-        while self._bind_form.count():
-            item = self._bind_form.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
+        discard.clear(self._bind_form)
         self._binders = {}
 
         unbound = [leg for leg in (self.result or {}).get("legs", []) if not leg.get("channel")]

@@ -12,6 +12,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from autosound_tcc.ui.tcc.labels import ElidedLabel
+from autosound_tcc.ui.tcc import discard
 from autosound_tcc.ui.tcc.theme import apply_caps
 
 
@@ -190,5 +191,4 @@ def clear_layout(layout: QVBoxLayout) -> None:
         item = layout.takeAt(0)
         widget = item.widget()
         if widget:
-            widget.setParent(None)
-            widget.deleteLater()
+            discard.drop(widget)

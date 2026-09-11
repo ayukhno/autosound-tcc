@@ -40,7 +40,7 @@ from autosound_tcc.core.agent_events import (
     ToolCall,
     ToolEnd,
 )
-from autosound_tcc.ui.tcc import chat_text
+from autosound_tcc.ui.tcc import chat_text, discard
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.chat_text import ComposerInput
@@ -859,12 +859,10 @@ class DialogPanel(QWidget):
         # message arriving, and the first real bubble of the next session should be followed.
         self._stick_to_bottom = True
         if self._question_widgets is not None:
-            self._question_widgets.setParent(None)
-            self._question_widgets.deleteLater()
+            discard.drop(self._question_widgets)
             self._question_widgets = None
         for bubble in self._bubbles:
-            bubble.setParent(None)
-            bubble.deleteLater()
+            discard.drop(bubble)
         self._bubbles.clear()
         self._live_bubble = None
         self._live_text = ""
@@ -876,8 +874,7 @@ class DialogPanel(QWidget):
                     child = row.takeAt(0)
                     widget = child.widget()
                     if widget is not None:
-                        widget.setParent(None)
-                        widget.deleteLater()
+                        discard.drop(widget)
 
     def _set_busy(self, busy: bool) -> None:
         # The field is never switched off. A turn is minutes long and the agent asks for things in
@@ -982,8 +979,7 @@ class DialogPanel(QWidget):
         if self._pending_question is not None:
             question_id, self._pending_question = self._pending_question, None
             if self._question_widgets is not None:
-                self._question_widgets.setParent(None)
-                self._question_widgets.deleteLater()
+                discard.drop(self._question_widgets)
                 self._question_widgets = None
             self._refresh_placeholder()
             self._add_system_message(i18n.t("questionCancelled"))
@@ -1076,8 +1072,7 @@ class DialogPanel(QWidget):
 
         # A second question replaces the first: its buttons answer a frame omp has moved past.
         if self._question_widgets is not None:
-            self._question_widgets.setParent(None)
-            self._question_widgets.deleteLater()
+            discard.drop(self._question_widgets)
         self._pending_question = question.id
         self._question_widgets = holder
         self._input.setEnabled(True)
@@ -1100,8 +1095,7 @@ class DialogPanel(QWidget):
             return
         self._pending_question = None
         if self._question_widgets is not None:
-            self._question_widgets.setParent(None)
-            self._question_widgets.deleteLater()
+            discard.drop(self._question_widgets)
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))
@@ -1130,8 +1124,7 @@ class DialogPanel(QWidget):
         if question_id is None:
             return
         if self._question_widgets is not None:
-            self._question_widgets.setParent(None)
-            self._question_widgets.deleteLater()
+            discard.drop(self._question_widgets)
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again

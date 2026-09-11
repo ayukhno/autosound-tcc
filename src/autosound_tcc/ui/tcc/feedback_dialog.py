@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import issue_assets
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import discard, i18n
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
@@ -183,11 +183,7 @@ class FeedbackDialog(QDialog):
         self._rebuild_strip()
 
     def _rebuild_strip(self) -> None:
-        while self._strip.count():
-            item = self._strip.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
+        discard.clear(self._strip)
         unreadable = []
         for path in list(self._shots):
             card = self._shot_card(path)

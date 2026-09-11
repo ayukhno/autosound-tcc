@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import capture_import, config, process_writer
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
-from autosound_tcc.ui.tcc import i18n, qt_shutdown
+from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
@@ -661,8 +661,7 @@ class MeasurementPanel(QWidget):
             item = self._cols_layout.takeAt(0)
             widget = item.widget()
             if widget:
-                widget.setParent(None)
-                widget.deleteLater()
+                discard.drop(widget)
         self._rows = []
         self._no_project_label.setText(message)
         self._no_project_label.setVisible(True)
@@ -787,8 +786,7 @@ class MeasurementPanel(QWidget):
             item = self._cols_layout.takeAt(0)
             widget = item.widget()
             if widget:
-                widget.setParent(None)
-                widget.deleteLater()
+                discard.drop(widget)
         self._rows = []
         # A stretch survives the widgets it was set for, so a session with fewer groups than the
         # last one would keep reserving room for columns that no longer exist.
