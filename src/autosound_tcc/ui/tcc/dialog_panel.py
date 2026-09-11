@@ -100,6 +100,9 @@ class MessageBubble(QFrame):
         self._who_label = who_label
         self._role = role
         self._plain = re.sub(r"<[^>]+>", "", html)
+        # See `natural_width`: the measurement is expensive and asked for on every resize event.
+        self._width_cache = 0
+        self._width_stamp: tuple = ()
         copy_menu.enable_copy(
             self,
             # Selection first: it is the more specific of the two, and it only appears when there
@@ -131,17 +134,33 @@ class MessageBubble(QFrame):
         yet when a widget is built, so `.msg-who`'s `letter-spacing: 1px` was missing from the
         measurement and the role line came out ~13px short -- "ARBITER · YOU" rendered with the U
         cut off. Measuring later, and again after a font-scale change, costs one text advance.
+
+        **Cached, and the stamp is what keeps the sentence above true.** `horizontalAdvance` shapes
+        the WHOLE message as a single line, and `DialogPanel.resizeEvent` asks every bubble for
+        this on every resize event -- so dragging the splitter one pixel re-shaped the entire
+        transcript, and it got worse the longer the session ran. Caching on a stamp rather than on
+        first access is deliberate: the fonts genuinely change under us twice (when the stylesheet
+        is polished, and on A-/A+), and freezing a pre-stylesheet measurement is the very bug the
+        on-demand measurement was introduced to fix.
         """
-        # The role line is measured with an allowance for `.msg-who`'s `letter-spacing: 1px`,
-        # which Qt renders but does not report through `fontMetrics()` -- so the measurement came
-        # out about one pixel per character short and "ARBITER · YOU" lost its U to the border.
-        role_width = self._who_label.fontMetrics().horizontalAdvance(self._role) + len(self._role)
-        return max(self._body.fontMetrics().horizontalAdvance(self._plain), role_width) + 28
+        stamp = (self._body.font().toString(), self._who_label.font().toString())
+        if stamp != self._width_stamp:
+            # The role line is measured with an allowance for `.msg-who`'s `letter-spacing: 1px`,
+            # which Qt renders but does not report through `fontMetrics()` -- so the measurement
+            # came out about a pixel per character short and "ARBITER · YOU" lost its U.
+            role = self._who_label.fontMetrics().horizontalAdvance(self._role) + len(self._role)
+            body = self._body.fontMetrics().horizontalAdvance(self._plain)
+            self._width_cache = max(body, role) + 28
+            self._width_stamp = stamp
+        return self._width_cache
 
     def set_html(self, html: str, source: str = "") -> None:
         """Replace the body text — used while a streamed answer is still growing."""
         self._body.setText(html)
         self._plain = re.sub(r"<[^>]+>", "", html)
+        # The text is what `natural_width` measures, and the stamp only watches the fonts — so a
+        # streamed answer would otherwise keep the width of its first chunk for the whole message.
+        self._width_stamp = ()
         # Copy reads these, and a streamed answer replaces its body on every delta: without them
         # the clipboard would hand back the first chunk of a finished message.
         self._html = html

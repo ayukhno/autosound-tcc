@@ -373,3 +373,25 @@ def test_the_terminal_model_hint_takes_its_examples_from_the_catalogue(monkeypat
 
     assert "zeta-9" in hint and "omega-2" in hint, hint
     assert "{" not in hint, f"placeholder left unformatted: {hint}"
+
+
+def test_typing_a_dsp_name_does_not_run_a_seed_per_character(monkeypatch, tmp_path):
+    """Drawing the seed note is not a lookup: it creates a temp folder, runs the REAL seeder into
+    it (read the source, validate against the schema, write `project.json` and `.gitignore`, copy
+    the profile and the prose), reads the report and deletes the lot — on the GUI thread. It was
+    wired to `textChanged`, so typing "Audiotec-Fischer" did that seventeen times and the dialog
+    resized under the cursor after each one."""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+
+    before = len(seeder.seeded_into)               # the LENGTH: the list itself keeps growing
+    dlg._vendor_edit.setText("Audiotec-Fischer")   # sixteen characters in one go is still one set
+
+    assert len(seeder.seeded_into) == before, "typing arms the timer; it does not seed"
+    assert dlg._seed_note_timer.isActive(), "and the redraw really is pending"
+
+    dlg._refresh_seed_note_now()                   # what the timer would do when typing stops
+    assert len(seeder.seeded_into) == before + 1, "one seed per pause, not per keystroke"

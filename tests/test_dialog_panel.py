@@ -195,3 +195,28 @@ def test_being_asked_which_model_is_not_rendered_as_a_failure():
     assert "gemini-pro-latest" in said
     assert "gemini-flash-latest" in said
     assert "critic-env" in said, "the answer has to say WHERE the choice is pinned"
+
+
+def test_a_bubble_measures_its_text_once_not_once_per_resize_pixel():
+    """`natural_width` shapes the WHOLE message as one line, and `resizeEvent` asks every bubble
+    for it — so dragging the splitter one pixel re-shaped the entire transcript, and it got worse
+    the longer the session ran.
+
+    The cache must not freeze, though: the fonts really do change under it twice (stylesheet
+    polish, and A-/A+), and a frozen pre-stylesheet measurement is the bug the on-demand
+    measurement was introduced to fix in the first place.
+    """
+    _app()
+    bubble = MessageBubble("Arbiter", "ARBITER · YOU", "<p>" + "word " * 400 + "</p>")
+
+    calls: list = []
+    real = bubble._body.fontMetrics
+    bubble._body.fontMetrics = lambda: (calls.append(1), real())[1]
+
+    first = bubble.natural_width
+    for _ in range(50):  # fifty resize events, as one splitter drag
+        assert bubble.natural_width == first
+    assert len(calls) == 1, "measured once, then remembered"
+
+    bubble.set_html("<p>" + "word " * 800 + "</p>")
+    assert bubble.natural_width != first, "a streamed answer must not keep its first width"

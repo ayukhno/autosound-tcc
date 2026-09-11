@@ -44,6 +44,11 @@ def catalogue(monkeypatch):
         "run",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(CATALOGUE), ""),
     )
+    # The picker reads the catalogue as last READ, never the process — `omp models --json` is a
+    # 20-second subprocess and `choices()` runs on the GUI thread on every window activation.
+    # Filling it is the background worker's job, so standing in for the worker belongs here.
+    monkeypatch.setattr(model_choices, "_OMP_CATALOGUE", None, raising=False)
+    model_choices.omp_catalogue()
 
 
 def test_claude_models_run_through_the_sdk(tmp_path):
@@ -861,3 +866,26 @@ def test_a_route_that_answered_with_nothing_is_not_re_asked_every_time(monkeypat
 
     mc.refresh_cli_catalogue(now=lambda: 5000.0)
     assert calls == [1, 1], "much later, it is worth one more try"
+
+
+def test_the_picker_never_launches_omp_itself(monkeypatch):
+    """`choices()` is called on the GUI thread every time the main window becomes active — and
+    twice over, because `critic_choices` calls it too. `omp models --json` has a 20-second
+    timeout, so asking it from there is a window that freezes on an ordinary alt-tab. The picker
+    labels a marked model from what was last read, and falls back to the selector's own name when
+    nothing has been read — which is what it already did for a model the catalogue omits."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setattr(mc, "_OMP_CATALOGUE", None, raising=False)
+    monkeypatch.setattr(mc, "omp_available", lambda: True)
+
+    def explode(*_a, **_k):
+        raise AssertionError("the picker must not launch a process")
+
+    monkeypatch.setattr(mc.subprocess, "run", explode)
+
+    entries = mc.choices(["google/gemini-3.1-pro-preview"])
+
+    omp = [choice for choice in entries if choice.harness == "omp"]
+    assert [choice.model for choice in omp] == ["google/gemini-3.1-pro-preview"]
+    assert omp[0].label == "google/gemini-3.1-pro-preview", "labelled by selector, not by silence"

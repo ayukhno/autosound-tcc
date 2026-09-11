@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -85,6 +85,12 @@ def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
     return pairs
 
 
+#: How long the seed-note redraw waits for typing to stop. Below the threshold where the note
+#: feels laggy, above any typing rhythm — see `NewProjectDialog._refresh_seed_note` for what the
+#: redraw actually costs.
+_SEED_NOTE_DELAY_MS = 250
+
+
 class NewProjectDialog(QDialog):
     """Collects folder + vendor + model + AI model, then constructs (but does not show)
     `ProfileInterviewDialog` -- the caller (`main_window._open_new_project_dialog`) owns showing
@@ -107,6 +113,11 @@ class NewProjectDialog(QDialog):
         #: `_prefill_dsp` writes into the DSP fields, and those fields redraw the note -- without
         #: this the two would call each other. Set while prefilling, cleared after.
         self._prefilling = False
+        #: Drawing the seed note runs a real seed; the fields that ask for it fire per character.
+        #: See `_refresh_seed_note`. Single-shot and restarted, so a run of keystrokes is one run.
+        self._seed_note_timer = QTimer(self)
+        self._seed_note_timer.setSingleShot(True)
+        self._seed_note_timer.timeout.connect(self._refresh_seed_note_now)
         # Set by _on_create() instead when "run via" picks a terminal CLI rather than the in-app
         # chat -- main_window._open_new_project_dialog() branches on whichever ended up non-None.
         self.open_terminal_cli: Optional[str] = None
@@ -183,7 +194,7 @@ class NewProjectDialog(QDialog):
         self._seed_findings = QCheckBox(i18n.t("npSeedFindings"))
         # The tick changes what travels, so it changes the numbers under it: the flag used to be
         # offered blind -- "and what was measured there" with no count of what "what" is (#48).
-        self._seed_findings.toggled.connect(self._refresh_seed_note)
+        self._seed_findings.toggled.connect(self._refresh_seed_note_now)
         layout.addWidget(self._seed_findings)
 
         # Said here rather than discovered afterwards: with the same DSP, the capability interview
@@ -205,7 +216,7 @@ class NewProjectDialog(QDialog):
             self._profile_combo.addItem(f"{vendor} — {name}", (vendor, name))
         self._profile_combo.addItem(i18n.t("npAddNew"), None)
         self._profile_combo.currentIndexChanged.connect(self._on_profile_selected)
-        self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note)
+        self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note_now)
         layout.addWidget(self._profile_combo)
 
         self._vendor_edit = QLineEdit()
@@ -317,7 +328,11 @@ class NewProjectDialog(QDialog):
             self._seed_no_interview.setVisible(False)
             return
         self._prefill_dsp(source)
-        self._refresh_seed_note()
+        # At once, not on the typing delay: picking a folder is one deliberate act, and the note
+        # is the answer to it. `_prefill_dsp` writes into the DSP fields on the way here, so the
+        # debounced path has already been armed by their `textChanged` — this settles it now and
+        # the timer's later firing is a harmless repeat of the same draw.
+        self._refresh_seed_note_now()
 
     def _would_travel(self, source: Path):
         """What the seeder WOULD carry — asked of the seeder rather than predicted.
@@ -353,6 +368,21 @@ class NewProjectDialog(QDialog):
                 return None
 
     def _refresh_seed_note(self, *_args) -> None:
+        """Ask for a redraw — on a short delay, because drawing this note runs a whole seed.
+
+        Two of the four things wired to this are `textChanged` on a line edit, so it fires per
+        CHARACTER. And `_would_travel` is not a lookup: it creates a temporary directory, runs the
+        real seeder into it (read the source project, validate it against the schema, write a new
+        `project.json`, a `.gitignore`, copy the DSP profile and the prose), reads the report and
+        deletes the lot — on the GUI thread. Typing "Audiotec-Fischer" did that seventeen times,
+        and the dialog resized under the cursor after each one.
+
+        A quarter of a second is below the threshold where the note feels laggy and above any
+        typing rhythm, so what runs is one seed per pause rather than one per keystroke.
+        """
+        self._seed_note_timer.start(_SEED_NOTE_DELAY_MS)
+
+    def _refresh_seed_note_now(self) -> None:
         """Redraw the note. Called again whenever the DSP choice changes, because the DSP is what
         decides how much of the source travels."""
         if self._prefilling or self._seed_describes is None:

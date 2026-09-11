@@ -455,6 +455,15 @@ def refresh_cli_catalogue(*, force: bool = False, now=None) -> dict[str, list[Ch
         if fetched:
             # Confirmed by the CLI just now: these stop being "remembered from last time".
             _UNCONFIRMED.difference_update(choice.key for choice in fetched)
+    # And omp, here rather than inside `choices()`. Once per process (or on a press), because
+    # `choices()` is called on the GUI thread every time the window becomes active — and twice per
+    # activation, since `critic_choices` calls it too. A 20-second subprocess in that position is
+    # a window that freezes on an ordinary alt-tab.
+    if force or _OMP_CATALOGUE is None:
+        try:
+            omp_catalogue()
+        except OmpCatalogueError:
+            pass  # not installed, or it failed: the picker labels marked models by selector
     _save_cached_catalogue()
     return dict(_CLI_CACHE)
 
@@ -520,11 +529,31 @@ def codex_choices() -> list[Choice]:
     ]
 
 
+#: The catalogue as last read in this process, so `choices()` can put a label on a model the user
+#: marked without launching anything. `None` means "never read here".
+_OMP_CATALOGUE: Optional[list] = None
+
+
+def omp_catalogue_cached() -> list[Choice]:
+    """The catalogue as last read — and never a subprocess.
+
+    `choices()` wants this only to put a human label on models the user already marked, and
+    `choices()` runs ON THE GUI THREAD every time the main window becomes active — through
+    `_on_cli_catalogue_ready`, and twice over, because `critic_choices` calls `choices` as well.
+    A 20-second subprocess there is a window that freezes on an ordinary alt-tab.
+
+    An empty answer costs nothing that matters: `choices()` already falls back to labelling a
+    selector by its own name, which is exactly what it does for a model the catalogue omits.
+    """
+    return list(_OMP_CATALOGUE or [])
+
+
 def omp_catalogue() -> list[Choice]:
     """Every model omp knows about, for the "which of these do I actually use" dialog.
 
     Several hundred entries. This is the list to *choose from*, never the list to show in the
-    picker -- see `choices`.
+    picker -- see `choices`. It launches `omp`, so it belongs off the GUI thread: the picker reads
+    `omp_catalogue_cached()` instead.
     """
     if not omp_available():
         raise OmpCatalogueError("omp is not installed — brew install can1357/tap/omp")
@@ -562,6 +591,8 @@ def omp_catalogue() -> list[Choice]:
                 free=not (cost.get("input") or cost.get("output")),
             )
         )
+    global _OMP_CATALOGUE
+    _OMP_CATALOGUE = out
     return out
 
 
@@ -575,10 +606,8 @@ def choices(active_omp: list[str]) -> list[Choice]:
     """
     entries = sdk_choices()
     if active_omp:
-        try:
-            catalogue = {choice.model: choice for choice in omp_catalogue()}
-        except OmpCatalogueError:
-            catalogue = {}
+        # Cached, NOT `omp_catalogue()`: this runs on the GUI thread on every window activation.
+        catalogue = {choice.model: choice for choice in omp_catalogue_cached()}
         for selector in active_omp:
             entries.append(
                 catalogue.get(selector)
