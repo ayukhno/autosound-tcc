@@ -203,17 +203,34 @@ def _install_show_tracer(app, QtCore, log) -> None:
     """
     import traceback
 
+    # A filter on the application sees EVERY event, including ones delivered to objects whose C++
+    # half is already gone and ones dispatched on worker threads. Touching either through Shiboken
+    # is not an exception you can catch — it is a crash — so the guards come before the work, and
+    # the cheapest one comes first.
+    try:
+        from shiboken6 import isValid as _alive
+    except Exception:  # noqa: BLE001 — no shiboken: fall back to trusting the try/except
+        def _alive(_obj):
+            return True
+
+    from PySide6.QtWidgets import QWidget as _QWidget
+
     class _ShowTracer(QtCore.QObject):
         def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
             try:
-                if event.type() == QtCore.QEvent.Type.Show and getattr(obj, "isWindow", None):
-                    if obj.isWindow() and id(obj) not in {
-                        id(w) for w in _STRAY["known"] if w is not None
-                    }:
-                        log.info(
-                            "STRAY SHOWN: %s %dx%d %r\n%s",
-                            obj.metaObject().className(), obj.width(), obj.height(),
-                            obj.windowTitle(), "".join(traceback.format_stack()[:-1]))
+                if event.type() != QtCore.QEvent.Type.Show:
+                    return False
+                if not isinstance(obj, _QWidget) or not _alive(obj):
+                    return False
+                if obj.thread() is not QtCore.QThread.currentThread():
+                    return False
+                if obj.isWindow() and id(obj) not in {
+                    id(w) for w in _STRAY["known"] if w is not None
+                }:
+                    log.info(
+                        "STRAY SHOWN: %s %dx%d %r\n%s",
+                        obj.metaObject().className(), obj.width(), obj.height(),
+                        obj.windowTitle(), "".join(traceback.format_stack()[:-1]))
             except Exception:  # noqa: BLE001 — a diagnostic must never break an event
                 pass
             return False

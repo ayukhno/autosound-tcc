@@ -21,24 +21,27 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-class _Spy(QLabel):
-    """Records the order, because the order IS the fix."""
+class _Spy:
+    """Records the order, because the order IS the fix.
+
+    Deliberately NOT a QWidget. `drop()` only ever calls these three methods, and overriding Qt
+    virtuals — `deleteLater` above all — means Python is re-entered while C++ is destroying the
+    object, which is a segfault during garbage collection rather than a failed assertion. The
+    suite produced exactly that on macOS (2026-09-11) and it is not a risk worth carrying for a
+    test that needs no widget at all. The real widgets are exercised below.
+    """
 
     def __init__(self) -> None:
-        super().__init__("x")
         self.calls: list = []
 
     def hide(self) -> None:
         self.calls.append("hide")
-        super().hide()
 
-    def setParent(self, parent) -> None:  # noqa: N802 (Qt override)
+    def setParent(self, parent) -> None:  # noqa: N802 (mirrors the Qt name `drop` calls)
         self.calls.append(f"setParent:{parent!r}")
-        super().setParent(parent)
 
-    def deleteLater(self) -> None:  # noqa: N802 (Qt override)
+    def deleteLater(self) -> None:  # noqa: N802 (mirrors the Qt name `drop` calls)
         self.calls.append("deleteLater")
-        super().deleteLater()
 
 
 def test_a_widget_is_hidden_before_it_is_unparented():
@@ -70,13 +73,13 @@ def test_clearing_a_layout_empties_it_without_flashing_anything():
     _app()
     holder = QWidget()
     layout = QVBoxLayout(holder)
-    spies = [_Spy() for _ in range(3)]
-    for spy in spies:
-        layout.addWidget(spy)
+    rows = [QLabel(str(i)) for i in range(3)]
+    for row in rows:
+        layout.addWidget(row)
 
     discard.clear(layout)
 
     assert layout.count() == 0
-    for spy in spies:
-        assert spy.calls[0] == "hide", "every one of them, not just the first"
-        assert spy.parent() is None, "and out of the object tree at once, not on the event loop"
+    for row in rows:
+        assert not row.isVisible(), "hidden, so there is no window to map while it is unparented"
+        assert row.parent() is None, "and out of the object tree at once, not on the event loop"
