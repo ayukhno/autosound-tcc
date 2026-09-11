@@ -44,7 +44,12 @@ class _Spy(QLabel):
 def test_a_widget_is_hidden_before_it_is_unparented():
     """Hidden FIRST. A hidden widget has no window to map, so the reparent is invisible; the other
     way round is a window on the desktop, caught by class and title on the Arbiter's machine:
-    `class='Qt6112QWindowIcon' title='Autosound TCC' 213x764`, shown and gone in 60 ms."""
+    `class='Qt6112QWindowIcon' title='Autosound TCC'`, shown and gone in 60 ms.
+
+    And `setParent(None)` stays. An outside review argued for removing it (agy, 2026-09-11) and
+    the suite refuted that in one run: it also detaches from the parent's CHILD LIST, immediately,
+    while `deleteLater()` waits for the event loop — so without it `test_plan_panel` counted 14
+    rows where 7 were expected. Hiding a widget does not take it out of the object tree."""
     _app()
     spy = _Spy()
 
@@ -74,4 +79,4 @@ def test_clearing_a_layout_empties_it_without_flashing_anything():
     assert layout.count() == 0
     for spy in spies:
         assert spy.calls[0] == "hide", "every one of them, not just the first"
-        assert spy.parent() is None
+        assert spy.parent() is None, "and out of the object tree at once, not on the event loop"
