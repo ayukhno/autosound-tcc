@@ -824,3 +824,21 @@ def test_do_not_ask_mode_still_guards_what_cannot_be_undone(tmp_path):
     _decide(session, "Bash", {"command": "rm -rf /"})
 
     assert [r.tool for r in arbiter.asked] == ["Bash"], "auto alone still asks about this one"
+
+
+def test_the_language_rule_reaches_the_tuning_session_not_only_the_interview():
+    """The interview has carried this since tcc#8; the tuning session never got it. With the
+    interface, the project language and the question all in Ukrainian, the first line back was
+    "I'll start by loading the tuning skill and reading state from disk and TCC" (2026-09-11).
+
+    `get_tcc_state` did carry the language — so the model could learn it by ASKING, and the first
+    turn answers before it has asked. A fact available on request is not an instruction."""
+    from autosound_tcc.core.tuning_session import system_prompt_append
+
+    uk = system_prompt_append("uk")
+    assert "## Language" in uk
+    assert "EVERY word you emit" in uk
+    assert "Ukrainian" in uk, "the NAME, not the code: 'answer in uk' is not followable"
+
+    assert "German" in system_prompt_append("de")
+    assert "English" in system_prompt_append(), "the default is still a stated language"

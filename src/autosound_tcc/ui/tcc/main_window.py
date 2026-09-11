@@ -3783,6 +3783,10 @@ class MainWindow(QMainWindow):
                 gate=self._effective_gate(),
                 always_allowed=self._always_allowed(),
                 effort=effort,
+                # The project's language, the same one the interview has always been given. It
+                # went into `get_tcc_state` and nowhere else, so the model could only learn it by
+                # asking — and the first turn answers before it has.
+                language=i18n.current_language(),
             )
         else:
             factory = lambda: TuningSession(  # noqa: E731

@@ -130,3 +130,17 @@ def test_a_button_label_stays_short_in_every_language(key):
     for code in _LANGS:
         label = i18n.T[code].get(key) or i18n.T["en"][key]
         assert len(label) <= _BUTTON_MAX, f"{code}/{key}: {label!r} is {len(label)} chars"
+
+
+def test_every_language_the_window_offers_has_a_name_for_the_model():
+    """`agent_session.LANGUAGE_NAMES` claims in its own comment that this test exists and fails
+    when a fifth language is added to `i18n.LANGS` and forgotten there. It did not exist — found
+    while giving the tuning session the same language rule the interview has (2026-09-11).
+
+    A code is not an instruction: the table turns "uk" into "Ukrainian", and a language present in
+    the switch but missing here reaches the model as two letters it cannot act on."""
+    from autosound_tcc.core.agent_session import LANGUAGE_NAMES, language_name
+
+    assert sorted(LANGUAGE_NAMES) == sorted(_LANGS)
+    for code in _LANGS:
+        assert language_name(code) != code, f"{code} reaches the model as a bare code"
