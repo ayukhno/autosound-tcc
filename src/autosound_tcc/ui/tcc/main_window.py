@@ -3043,10 +3043,19 @@ class MainWindow(QMainWindow):
         # puts a console window on screen that nothing can hide, so no automatic path asks it —
         # and telling somebody their login expired when TCC never ran the command sends them to
         # re-authenticate a CLI that works (TCC-006, 2026-09-11).
-        unasked = model_choices.cli_routes_not_asked()
-        if unasked:
+        #
+        # Said ONCE per run, and that is not tidiness. This handler runs on every catalogue
+        # refresh, and a refresh happens every time the window becomes active — so notifying each
+        # time would overwrite whatever the strip was showing on every alt-tab. That is the same
+        # defect this whole change is about: work wired to an event that fires far more often than
+        # its author pictured. The fact is stable, so saying it repeatedly adds nothing.
+        said = getattr(self, "_unasked_said", set())
+        fresh = [route for route in model_choices.cli_routes_not_asked() if route not in said]
+        if fresh:
+            said.update(fresh)
+            self._unasked_said = said
             self._status_strip.notify(
-                i18n.t("cliRouteNotAsked").format(routes=", ".join(unasked)), level="info"
+                i18n.t("cliRouteNotAsked").format(routes=", ".join(fresh)), level="info"
             )
 
     def _on_rew_titles_changed(self) -> None:
