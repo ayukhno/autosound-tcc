@@ -1187,7 +1187,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
        transcript rather than a floating pill over it, so it can never cover a message; accented
        because unlike `.activity` it is asking to be clicked, not just pulsing. */
     QPushButton[class~="new-below"] {{
-        background: {t.mix("accent", 0.10, "panel")};
+        background: {t.mix("accent", 10, "panel")};
         border: none;
         border-top: 1px solid {t.accent_dim};
         color: {t.accent};
@@ -1196,7 +1196,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 3px 12px;
     }}
     QPushButton[class~="new-below"]:hover {{
-        background: {t.mix("accent", 0.18, "panel")};
+        background: {t.mix("accent", 18, "panel")};
     }}
     QPushButton[class~="edit-chip"] {{
         background: {t.panel3};
@@ -1223,8 +1223,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* The confirmation is the one thing in this window that is waiting on a person, and it used
        to look like every other panel: same background, same border, a hairline apart from the
        transcript. Reported as easy to miss. It gets the accent, a real border and its own tint. */
+    /* `mix` takes a PERCENTAGE, 0-100. This said `0.18`, meaning eighteen HUNDREDTHS of one
+       percent, and rendered as `rgb(255, 255, 255)` on light and as the panel colour on dark —
+       so the attention background the Arbiter asked for was never drawn at all, on either theme.
+       It read as a plain panel, they missed the question, and a five-minute wait for an answer
+       looked like the application had hung (2026-09-11). Every other `mix` in this file passes a
+       whole number; this one was written as if it took a fraction. */
     QWidget[class~="confirm-bar"] {{
-        background: {t.mix("inv", 0.18, "panel")};
+        background: {t.mix("inv", 22, "panel")};
         border: 2px solid {t.inv};
         border-radius: 10px;
     }}
@@ -1266,7 +1272,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QToolButton[class~="menu-btn"]:pressed, QToolButton[class~="menu-btn"]:checked,
     QPushButton[class~="menu-btn"]:pressed, QPushButton[class~="menu-btn"]:checked {{
-        background: {t.mix("accent", 0.14, "panel")};
+        background: {t.mix("accent", 14, "panel")};
         border-color: {t.accent};
         color: {t.text};
     }}
@@ -1288,7 +1294,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-weight: 700;
     }}
     QPushButton[class~="chan-toggle-on"] {{
-        background: {t.mix("ok", 0.16, "panel")};
+        background: {t.mix("ok", 16, "panel")};
         border-color: {t.ok};
         color: {t.ok};
     }}
@@ -1300,12 +1306,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     offers an action, it reports a request nobody has answered yet, so it reads as a state and not
     as something to press. `-late` is the same state past a minute, which is a different fact. */
     QPushButton[class~="chan-toggle-wait"] {{
-        background: {t.mix("info", 0.12, "panel")};
-        border-color: {t.mix("info", 0.45, "border")};
+        background: {t.mix("info", 12, "panel")};
+        border-color: {t.mix("info", 45, "border")};
         color: {t.info};
     }}
     QPushButton[class~="chan-toggle-late"] {{
-        background: {t.mix("warn", 0.14, "panel")};
+        background: {t.mix("warn", 14, "panel")};
         border-color: {t.warn};
         color: {t.warn};
     }}
