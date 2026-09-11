@@ -103,10 +103,14 @@ def is_agent_command(args) -> bool:
 #: ours to hide). `core/default_terminal.py` is the half that makes conhost the default.
 CONSOLE_CLASS = "ConsoleWindowClass"
 
-#: How long the keeper stays with a process. conhost shows the window back ONCE, a second or so
-#: after the first hide, so this has to outlive that; it must not outlive the session, because a
-#: thread spinning for hours is worse than a window nobody sees.
-CONSOLE_KEEPER_BUDGET_S = 30.0
+#: How long the keeper fights for the agent's console. conhost shows the window back ONCE, about a
+#: second after the first hide, and then leaves it alone — measured, with the first hide landing at
+#: 172-250 ms — so a few seconds covers it with room to spare.
+#:
+#: The keeper is bounded by THIS and by nothing else, deliberately. The obvious way to ask "is the
+#: agent still alive" is `os.kill(pid, 0)`, and on Windows that is not a question: every signal but
+#: CTRL_C/CTRL_BREAK goes to `TerminateProcess`.
+CONSOLE_KEEPER_BUDGET_S = 8.0
 
 
 def _console_windows_of(pid: int) -> list:
@@ -204,25 +208,32 @@ def agent_console() -> dict:
     return {"creationflags": int(flag)}
 
 
-def hide_agent_console_later(pid: int) -> None:
-    """Start the keeper for a freshly spawned agent. Never raises, never blocks the caller."""
+def _spawn_daemon(target, kwargs: dict) -> None:
+    threading.Thread(target=target, kwargs=kwargs, name="tcc-hide-console", daemon=True).start()
+
+
+def hide_agent_console_later(pid: int, *, spawn=None) -> None:
+    """Start the keeper for a freshly spawned agent. Never raises, never blocks the caller.
+
+    **Deliberately not liveness-checked.** The first version asked `os.kill(pid, 0)` — the POSIX
+    idiom for "is this still alive" — which on Windows does not answer the question but carries it
+    out: every signal except CTRL_C/CTRL_BREAK goes to `TerminateProcess`.
+
+    What that cost is measured, on the user's machine, 2026-09-11. The call raised before it could
+    terminate anything, the keeper read the exception as "already gone" and left on its very first
+    check, and the agent's console was never hidden once in a whole session — while the commands
+    around it had already stopped flashing, so the console itself was doing its job. The agent
+    survived by that accident alone. Bounded by the budget instead, which is all this ever needed.
+    """
     if not sys.platform.startswith("win") or not pid:
         return
-    def still_running() -> bool:
-        try:
-            os.kill(pid, 0)
-            return True
-        except Exception:  # noqa: BLE001 — gone, or not ours to ask about
-            return False
-
+    spawn = spawn or _spawn_daemon
     try:
-        threading.Thread(
-            target=keep_console_hidden,
-            args=(pid,),
-            kwargs={"still_running": still_running},
-            name=f"tcc-hide-console-{pid}",
-            daemon=True,
-        ).start()
+        spawn(keep_console_hidden, {
+            "pid": pid,
+            "still_running": lambda: True,
+            "budget_s": CONSOLE_KEEPER_BUDGET_S,
+        })
     except Exception:  # noqa: BLE001 — a diagnostic thread that cannot start is not a failure
         return
 

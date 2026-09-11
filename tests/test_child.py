@@ -7,6 +7,7 @@ a window in front of the app. They run on any platform: the flag is faked, not t
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 
@@ -361,3 +362,26 @@ def test_an_agent_is_given_a_console_of_its_own_only_on_windows(monkeypatch):
 
     monkeypatch.setattr(sys, "platform", "darwin")
     assert child.agent_console() == {}
+
+
+def test_the_keeper_never_asks_the_os_to_signal_the_agent(monkeypatch):
+    """`os.kill(pid, 0)` is a POSIX liveness idiom and a loaded gun on Windows: every signal but
+    CTRL_C/CTRL_BREAK goes to `TerminateProcess`, so the "probe" kills the agent it was asking
+    about.
+
+    Measured on the user's machine, 2026-09-11: the agent's console was created (its commands
+    stopped flashing, so the shells did inherit it) and then never hidden — zero hide transitions
+    in a whole session. The probe raised before it could terminate anything, the keeper read that
+    as "already gone" and exited on its first check, and the agent survived by that accident
+    alone. So the keeper is bounded by its budget instead of by a signal."""
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    def loaded_gun(*_args, **_kwargs):
+        raise AssertionError("os.kill must never be used as a liveness probe on Windows")
+
+    monkeypatch.setattr(os, "kill", loaded_gun)
+    started: dict = {}
+
+    child.hide_agent_console_later(4242, spawn=lambda target, kwargs: started.update(kwargs))
+
+    assert started["still_running"]() is True, "bounded by the budget, never by signalling"
