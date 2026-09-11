@@ -308,8 +308,11 @@ def test_a_project_path_with_a_quote_does_not_reach_the_shell(monkeypatch, tmp_p
         terminal_launcher.subprocess, "Popen",
         lambda command, **kwargs: seen.update(command=command, cwd=kwargs.get("cwd")),
     )
+    # NOT created on disk, and it cannot be: Windows forbids `"` in a filename, so `mkdir()` here
+    # failed with WinError 123 on the very platform the test is about — it only ever passed on the
+    # developer's Mac. Nothing needs the folder to exist: the launcher passes it straight through
+    # as `cwd`, and `Popen` is stubbed. A path is a path whether or not something is behind it.
     folder = tmp_path / 'the "loud" car'
-    folder.mkdir()
 
     terminal_launcher._launch_windows(folder, "claude")
 

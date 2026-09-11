@@ -36,15 +36,22 @@ def test_the_suite_cannot_read_this_machines_reviewer_key(monkeypatch, real_crit
     this test reads the actual laptop and says so."""
     from autosound_tcc.core import critic_env
 
+    # Both cleared FIRST, and that is the fix rather than a tidy-up. A developer's laptop has
+    # neither set, so the assertion below passed here and failed on every CI runner: GitHub sets
+    # `XDG_CONFIG_HOME` on Linux and `APPDATA` on Windows, and either one takes the resolution
+    # away from HOME before the isolation can be observed. The property being tested is "HOME
+    # still decides"; a test of it has to be the one deciding what else is in the environment.
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
     # What isolates this is `conftest`'s tmp HOME, and that only works while the path is resolved
     # through `~` on every call. Hard-code it, or cache it at import time, and the suite silently
-    # starts reading the developer's own key again — so the property under test is that HOME still
-    # decides. `Path.home()` is already the tmp one here, which is the isolation working.
+    # starts reading the developer's own key again. `Path.home()` is already the tmp one here,
+    # which is the isolation working.
     assert Path.home() in critic_env.machine_config_path().parents
 
     other = Path.home().parent / "somewhere-else"
     monkeypatch.setenv("HOME", str(other))
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(other))  # what `~` follows on Windows
 
     assert critic_env.machine_config_path() == other / ".config" / "autosound" / "critic-env"

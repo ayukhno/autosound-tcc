@@ -3401,7 +3401,18 @@ def test_the_right_column_scrolls_when_the_capture_list_is_long(tmp_path, monkey
     QApplication.processEvents()
 
     area = next(a for a in window._right.findChildren(QScrollArea) if type(a) is QScrollArea)
+
+    # Overflow forced rather than hoped for. Whether 102 rows overrun the column depends on the
+    # platform's font metrics: on the Windows runner the same list FITS, `maximum()` is 0, and the
+    # test failed while the bug it guards had not come back. What is being tested is that the
+    # column scrolls when its content is taller than it — so make the content taller than it.
+    inner = area.widget()
+    inner.setMinimumHeight(area.viewport().height() * 3)
+    QApplication.processEvents()
+
     assert area.verticalScrollBar().maximum() > 0, "the column that overflowed can be scrolled"
+    inner.setMinimumHeight(0)
+    QApplication.processEvents()
     assert window._meas_panel.height() >= window._meas_panel.sizeHint().height(), (
         "and the card is drawn at its full height inside it, not clipped to the viewport")
     assert window._plan_panel.height() >= 160, "the plan card is not crushed by the one below it"
