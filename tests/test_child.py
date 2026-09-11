@@ -384,4 +384,133 @@ def test_the_keeper_never_asks_the_os_to_signal_the_agent(monkeypatch):
 
     child.hide_agent_console_later(4242, spawn=lambda target, kwargs: started.update(kwargs))
 
-    assert started["still_running"]() is True, "bounded by the budget, never by signalling"
+    assert started["pid"] == 4242
+    # The trap above is the real assertion: reaching `os.kill` fails the test outright. This only
+    # says the probe answers rather than raising — `process_is_running` is asked on every pass.
+    assert isinstance(started["still_running"](), bool), "it answers, and never by signalling"
+
+
+# ------------------------------------------ the interpreter a helper SCRIPT is run with (TCC-006)
+# The last source of flashing, and the one that survived three wrong theories. Every visible
+# `proc=git ConsoleWindowClass` in a session followed a `pythonw.exe ... process.py` spawn by
+# 330-500 ms — all seven of them, measured 2026-09-11.
+#
+# `pythonw.exe` is a WINDOWED binary: it has no console at all, and `CREATE_NO_WINDOW` means
+# nothing to it. So the git those scripts call has nothing to inherit and allocates its own — a
+# window. `python.exe` with the same flag DOES have a console, just an invisible one, and
+# everything it starts inherits that instead. Measured both ways in the same probe: the console
+# child opened nothing, the windowed one is what the user saw all week.
+#
+# TCC runs under `pythonw.exe` itself, being a GUI app, so `sys.executable` hands the windowed
+# interpreter to every helper script by default. That default is the bug.
+
+
+def test_a_helper_script_gets_the_console_interpreter_not_the_windowed_one(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    chosen = child.script_interpreter(
+        executable=r"C:\uv\tools\autosound-tcc\Scripts\pythonw.exe", exists=lambda _p: True)
+
+    assert chosen.endswith("python.exe"), "a script needs a console to hand down"
+    assert "pythonw" not in chosen
+
+
+def test_without_a_console_interpreter_beside_it_the_windowed_one_still_runs(monkeypatch):
+    """A flash is worse than nothing happening, but not much worse than a script that cannot run
+    at all. If `python.exe` is not there, the script still gets started."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    windowed = r"C:\uv\tools\autosound-tcc\Scripts\pythonw.exe"
+
+    assert child.script_interpreter(executable=windowed, exists=lambda _p: False) == windowed
+
+
+def test_off_windows_the_interpreter_is_left_exactly_as_it_is(monkeypatch):
+    """There is no windowed/console split anywhere else, and rewriting the path would only be a
+    way to point at something that is not there."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    assert child.script_interpreter(executable="/usr/bin/python3") == "/usr/bin/python3"
+
+
+def test_the_keeper_stays_with_the_agent_for_as_long_as_it_runs(monkeypatch):
+    """Eight seconds was not enough, and the measurement says so: `agy`'s console was hidden, then
+    shown again 420 ms later, and by then the keeper had already left (2026-09-11). It was bounded
+    by time only because the first liveness probe was `os.kill`, which on Windows kills.
+
+    So it asks properly now — `OpenProcess` + `WaitForSingleObject`, which answers without
+    signalling anything — and the budget goes back to being a safety net rather than the rule."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(child, "process_is_running", lambda pid: pid == 4242)
+    started: dict = {}
+
+    child.hide_agent_console_later(4242, spawn=lambda target, kwargs: started.update(kwargs))
+
+    assert started["still_running"]() is True, "alive: keep hiding"
+
+    monkeypatch.setattr(child, "process_is_running", lambda pid: False)
+
+    assert started["still_running"]() is False, "gone: stop"
+
+
+# --------------------------------------------- ONE console for the whole app (TCC-006, the fix)
+# Giving each agent its own console and hiding it works, but it pays the same price every time a
+# session starts: the console is created VISIBLE and cannot be created otherwise (`SW_HIDE` at
+# creation is ignored on Windows 11, measured twice). So the flash moved rather than went.
+#
+# One console for the PROCESS is the way out, and it is measured: allocate it, hide it, and every
+# child and grandchild inherits it instead of making its own — `cmd`, `bash`, `agy` and `git` all
+# ran silently inside one (probe, 2026-09-11). One visible moment for the whole run, at startup,
+# where it can also SAY what it is instead of being an unexplained black rectangle.
+#
+# The other half is that `CREATE_NO_WINDOW` then becomes wrong: it denies a child any console at
+# all, so the child allocates one — exactly the flash we are removing. Once we own a console, the
+# right thing is to let children inherit it.
+
+
+def test_children_inherit_our_console_instead_of_being_denied_one(monkeypatch):
+    """With a console of our own, forcing `CREATE_NO_WINDOW` on a child would defeat the whole
+    point: denied a console, it allocates its own, which is a window."""
+    _as_windows(monkeypatch)
+    monkeypatch.setattr(child, "have_app_console", lambda: True)
+
+    assert "creationflags" not in child.quiet(), "let it inherit ours"
+    assert child.quiet()["stdin"] == subprocess.DEVNULL, "the stdin half still stands"
+    assert child.flags() == {}
+
+
+def test_without_a_console_of_our_own_children_still_get_no_window(monkeypatch):
+    """The fallback has to keep working: a machine where the console could not be allocated is a
+    machine that still must not flash a window per probe."""
+    _as_windows(monkeypatch)
+    monkeypatch.setattr(child, "have_app_console", lambda: False)
+
+    assert child.quiet()["creationflags"] & 0x08000000
+
+
+def test_the_app_console_says_what_it_is_before_it_hides(monkeypatch):
+    """A black rectangle for a third of a second reads as a glitch. The same rectangle with a line
+    in it reads as the application starting, which is what it is."""
+    _as_windows(monkeypatch)
+    order: list = []
+
+    ok = child.open_app_console(
+        "Autosound TCC is starting",
+        alloc=lambda: order.append("alloc") or True,
+        write=lambda text: order.append(f"write:{text}"),
+        hide=lambda: order.append("hide") or 1,
+    )
+
+    assert ok is True
+    assert order == ["alloc", "write:Autosound TCC is starting", "hide"], "say it, THEN hide"
+    assert child.have_app_console() is True
+
+
+def test_a_console_that_cannot_be_allocated_is_not_claimed(monkeypatch):
+    """Claiming one we do not have would turn off `CREATE_NO_WINDOW` for every child and give the
+    machine a window per probe — worse than the flash this replaces."""
+    _as_windows(monkeypatch)
+
+    ok = child.open_app_console("x", alloc=lambda: False, write=lambda _t: None, hide=lambda: 0)
+
+    assert ok is False
+    assert child.have_app_console() is False

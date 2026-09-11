@@ -285,6 +285,13 @@ def main() -> int:
     app_log.note_start()
     # Before anything can start a child: on Windows the Agent SDK's own `claude` process would
     # otherwise open a console window in front of the app at every session (see core/child.py).
+    # ONE console for this process, said out loud and then hidden, before anything can start a
+    # child. Everything TCC runs afterwards inherits it instead of allocating its own — and a
+    # console allocated by a child IS the window people have been seeing (TCC-006). A console
+    # cannot be created already hidden on Windows 11, so this pays that cost once, at startup,
+    # where it can say what it is rather than being an unexplained black rectangle.
+    # Windows only; a no-op on macOS and Linux, where none of this exists.
+    child.open_app_console("Autosound TCC is starting — this window hides itself.")
     child.hide_console_windows()
     # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
     # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -56,7 +55,8 @@ def _run(args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
         )
     try:
         proc = subprocess.run(
-            [sys.executable, str(script), *args],
+            # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
+            [child.script_interpreter(), str(script), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",

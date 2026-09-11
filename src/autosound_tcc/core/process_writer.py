@@ -15,8 +15,10 @@ evidence is refused there, and the refusal comes back verbatim through `ProcessW
 interviewer needs to hear what the gate said, not a generic failure.
 
 Two things this fixes for free, both measured skill defects (SCR-028, SCR-029): the interpreter is
-`sys.executable` — TCC's own venv, never a bare `python` the shell has to guess — and the script is
-located through `vendor_loader`, not through an address only one harness understands.
+our own venv's, never a bare `python` the shell has to guess — `child.script_interpreter()`, which
+is that venv's CONSOLE binary rather than the windowed `pythonw.exe` TCC itself runs under, because
+a script with no console hands none down and the git it calls then opens a window (TCC-006) — and
+the script is located through `vendor_loader`, not through an address only one harness understands.
 
 Reads stay where they were: `mcp_server._load_process_state()` imports the skill's module in-process
 and calls `Process(...).load()`. Writes go out-of-process for the same reason profile writes do —
@@ -26,7 +28,6 @@ one implementation of "record a step" in the world rather than an in-process cop
 from __future__ import annotations
 
 import subprocess
-import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -127,7 +128,10 @@ def _spawn(
     try:
         with _THREAD_LOCK, _exclusive(project_dir, timeout_s):
             proc = subprocess.run(
-                [sys.executable, str(script), str(_process_dir(project_dir)), *args],
+                # The CONSOLE interpreter, not ours. TCC is a GUI app, so `sys.executable` is
+                # `pythonw.exe`, which has no console — and the git this script runs then opens
+                # its own window. Every flash the user saw while saving was this line (TCC-006).
+                [child.script_interpreter(), str(script), str(_process_dir(project_dir)), *args],
                 capture_output=True,
                 text=True,
                 # NOT the locale's, which is what `text=True` alone means. The skill writes UTF-8

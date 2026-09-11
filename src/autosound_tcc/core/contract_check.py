@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -170,7 +169,10 @@ def run(
         )
 
     argv = [
-        python_executable or sys.executable,
+        # The console interpreter rather than TCC's own windowed one — see
+        # `child.script_interpreter`: a script started by `pythonw.exe` has no console to hand
+        # down, so whatever it runs opens a window of its own.
+        python_executable or child_process.script_interpreter(),
         str(script),
         "check",
         str(project_dir),

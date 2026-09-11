@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -190,7 +189,8 @@ def run(
     (`GEMINI_CRITIC_MODEL` / `GEMINI_ADVISOR_MODEL`), so the footer's model picker steers the
     subprocess without this module knowing anything about model names.
     """
-    python_executable = python_executable or sys.executable
+    # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
+    python_executable = python_executable or child.script_interpreter()
     project_dir = Path(project_dir or config.project_dir())
     started = time.monotonic()
     called_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -313,7 +313,8 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
     """The script's own environment check, for a settings/status screen."""
     if not is_available():
         return f"reviewer script not found at {script_path()}"
-    python_executable = python_executable or sys.executable
+    # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
+    python_executable = python_executable or child.script_interpreter()
     project_dir = Path(project_dir or config.project_dir())
     try:
         proc = subprocess.run(

@@ -41,9 +41,83 @@ def _no_window() -> int:
     return 0
 
 
+#: Whether THIS process owns a console we allocated and hid (`open_app_console`). Windows only,
+#: and false everywhere else by construction.
+_APP_CONSOLE = {"ours": False}
+
+
+def have_app_console() -> bool:
+    """Does this process own one hidden console that its children can inherit?"""
+    return bool(_APP_CONSOLE["ours"])
+
+
+def _alloc_console() -> bool:
+    if not ctypes.windll.kernel32.AllocConsole():
+        return False
+    try:
+        ctypes.windll.kernel32.SetConsoleTitleW("Autosound TCC")
+    except Exception:  # noqa: BLE001 — a title is decoration; the console is the point
+        pass
+    return True
+
+
+def _write_to_console(message: str) -> None:
+    """Straight to the console handle, not through `sys.stdout`: a GUI process may not have one."""
+    text = message + "\r\n"
+    written = ctypes.c_ulong(0)
+    handle = ctypes.windll.kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    ctypes.windll.kernel32.WriteConsoleW(handle, text, len(text), ctypes.byref(written), None)
+
+
+def _hide_own_console() -> int:
+    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    return ctypes.windll.user32.ShowWindow(hwnd, 0) if hwnd else 0  # SW_HIDE
+
+
+def open_app_console(message: str, *, alloc=None, write=None, hide=None) -> bool:
+    """Give this process ONE console, say what it is, and hide it. Windows only; False elsewhere.
+
+    Per-agent consoles work, but they pay the same price every time a session starts: a console
+    cannot be created already hidden (`SW_HIDE` at creation is ignored on Windows 11, measured
+    twice), so each one flashes before we can hide it. One console for the PROCESS pays it once,
+    at startup, and every child and grandchild inherits it instead of allocating its own — `cmd`,
+    `bash`, `agy` and `git` all ran silently inside a hidden one (measured 2026-09-11).
+
+    It SAYS something first, on purpose. A black rectangle for a third of a second reads as a
+    glitch; the same rectangle with a line in it reads as the application starting, which is what
+    it is. That was the Arbiter's call, and it is the better one.
+
+    Claimed only when it really was allocated: pretending otherwise would switch off
+    `CREATE_NO_WINDOW` for every child and hand the machine a window per probe, which is worse
+    than the flash this replaces.
+    """
+    _APP_CONSOLE["ours"] = False
+    if not sys.platform.startswith("win"):
+        return False
+    alloc = alloc or _alloc_console
+    write = write or _write_to_console
+    hide = hide or _hide_own_console
+    try:
+        if not alloc():
+            return False
+        write(message)
+        hide()
+    except Exception:  # noqa: BLE001 — no console is the state we were already in
+        return False
+    _APP_CONSOLE["ours"] = True
+    return True
+
+
 def quiet() -> dict:
-    """Keyword arguments for a `subprocess` call that must not wait for input or show a window."""
+    """Keyword arguments for a `subprocess` call that must not wait for input or show a window.
+
+    With a console of our own, the window half is DELIBERATELY absent: `CREATE_NO_WINDOW` denies
+    the child a console, and a child denied one allocates its own — the very flash we removed.
+    Inheriting ours is what keeps it silent.
+    """
     kwargs: dict = {"stdin": subprocess.DEVNULL}
+    if have_app_console():
+        return kwargs
     flag = _no_window()
     if flag:
         kwargs["creationflags"] = flag
@@ -55,9 +129,43 @@ def flags() -> dict:
 
     A long-lived agent process is driven THROUGH its stdin — `asyncio.create_subprocess_exec` with
     a pipe — so it cannot take `DEVNULL`, but it still has no business opening a console.
+
+    Empty once we own one: see `quiet()` for why denying a child a console is what makes it open
+    a window.
     """
+    if have_app_console():
+        return {}
     flag = _no_window()
     return {"creationflags": flag} if flag else {}
+
+
+def script_interpreter(*, executable: Optional[str] = None, exists=None) -> str:
+    """The interpreter a helper SCRIPT is run with: console-subsystem, even though we are not.
+
+    TCC is a GUI application, so `sys.executable` is `pythonw.exe` — a WINDOWED binary with no
+    console at all, and `CREATE_NO_WINDOW` means nothing to it. Anything such a script goes on to
+    run therefore has no console to inherit and allocates its own, which is a window on screen.
+
+    That is the whole of the flashing that outlived three wrong theories. Every visible git console
+    in a session followed a `pythonw.exe … rew_tool\\state\\process.py` spawn by 330-500 ms, all
+    seven of them, and the bursts of them were the saving-and-closing the user kept reporting
+    (measured 2026-09-11). `python.exe` under the same flag DOES have a console, simply one that is
+    never shown, and every child and grandchild inherits it instead of making its own.
+
+    Falls back to whatever it was given: a script that runs with a flash beats one that cannot run.
+    """
+    executable = executable or sys.executable
+    if not sys.platform.startswith("win"):
+        return executable
+    exists = exists or (lambda path: Path(path).exists())
+    # Split by hand rather than with `Path`, for the same reason `is_agent_command` does: these
+    # are WINDOWS paths and the tests that check them run on macOS, where `pathlib` does not treat
+    # a backslash as a separator and hands back the whole string as the file name.
+    name = executable.replace("\\", "/").rsplit("/", 1)[-1]
+    if name.lower() != "pythonw.exe":
+        return executable
+    console = executable[: len(executable) - len(name)] + "python.exe"
+    return console if exists(console) else executable
 
 
 def wants_a_console() -> dict:
@@ -107,10 +215,38 @@ CONSOLE_CLASS = "ConsoleWindowClass"
 #: second after the first hide, and then leaves it alone — measured, with the first hide landing at
 #: 172-250 ms — so a few seconds covers it with room to spare.
 #:
-#: The keeper is bounded by THIS and by nothing else, deliberately. The obvious way to ask "is the
-#: agent still alive" is `os.kill(pid, 0)`, and on Windows that is not a question: every signal but
-#: CTRL_C/CTRL_BREAK goes to `TerminateProcess`.
-CONSOLE_KEEPER_BUDGET_S = 8.0
+#: A safety net now, not the rule: the keeper ends with the process (`process_is_running`). It was
+#: the rule for one build, because the first liveness probe was `os.kill` and that had to go — and
+#: eight seconds turned out to be too short. Measured: `agy`'s console was hidden, then shown again
+#: 420 ms later, by which time the keeper had left, and the window stayed up for the session.
+CONSOLE_KEEPER_BUDGET_S = 600.0
+
+#: Rights enough to ASK about a process and nothing more. Deliberately NOT `PROCESS_TERMINATE`:
+#: the whole reason `process_is_running` exists is that the obvious probe terminates.
+_SYNCHRONIZE = 0x00100000
+_WAIT_TIMEOUT = 0x00000102
+
+
+def process_is_running(pid: int) -> bool:
+    """Is this process still alive? Asks Windows and signals nothing. False everywhere else.
+
+    `os.kill(pid, 0)` is the POSIX way to ask and the Windows way to kill, so it is not used here
+    and a test forbids it. `WaitForSingleObject` with a zero timeout answers immediately: still
+    waiting means still running.
+    """
+    if not sys.platform.startswith("win") or not pid:
+        return False
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(_SYNCHRONIZE, False, int(pid))
+        if not handle:
+            return False
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) == _WAIT_TIMEOUT
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 — a process we cannot ask about is one we stop hiding for
+        return False
 
 
 def _console_windows_of(pid: int) -> list:
@@ -180,10 +316,14 @@ def keep_console_hidden(
     total = 0
     started = now()
     while still_running():
-        if now() - started >= budget_s:
+        elapsed = now() - started
+        if elapsed >= budget_s:
             break
         total += hide_once()
-        sleep(0.05)
+        # Tight while the window is still being fought over, then slow: conhost shows it back
+        # within a second or two, and after that this only has to outlast the process without
+        # spinning a core for the length of a tuning session.
+        sleep(0.05 if elapsed < 5.0 else 0.5)
     return total
 
 
@@ -201,6 +341,10 @@ def agent_console() -> dict:
     place of one per command. `AUTOSOUND_TCC_AGENT_CONSOLE=0` puts the old behaviour back.
     """
     if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "1") == "0":
+        return {}
+    if have_app_console():
+        # Ours is already there and already hidden: the agent inherits it, and asking for a second
+        # one would buy nothing but the flash that creating a console always costs.
         return {}
     flag = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
     if not sys.platform.startswith("win") or flag is None:
@@ -231,7 +375,7 @@ def hide_agent_console_later(pid: int, *, spawn=None) -> None:
     try:
         spawn(keep_console_hidden, {
             "pid": pid,
-            "still_running": lambda: True,
+            "still_running": lambda: process_is_running(pid),
             "budget_s": CONSOLE_KEEPER_BUDGET_S,
         })
     except Exception:  # noqa: BLE001 — a diagnostic thread that cannot start is not a failure
