@@ -396,31 +396,35 @@ EMPTY_ROUTE_RETRY_S = 600.0
 _LAST_ASKED: dict[str, float] = {}
 
 
-def _asking_costs_a_window() -> bool:
-    """Does running `agy models` here put a window on the user's screen.
-
-    On Windows it does, and nothing we can pass stops it: `CREATE_NO_WINDOW` is hosted by Windows
-    Terminal, a hidden `CREATE_NEW_CONSOLE` is ignored by `SW_HIDE`, and agy drags a node child
-    that opens its own (probe12/probe27, 2026-09-11). Everywhere else the command is silent.
-    """
-    return os.name == "nt"
+#: `agy models` on Windows puts a console window on screen and nothing we pass stops it:
+#: `CREATE_NO_WINDOW` is hosted by Windows Terminal, a hidden `CREATE_NEW_CONSOLE` is ignored by
+#: `SW_HIDE`, and `agy` ALLOCATES its own console rather than inheriting ours (probe12/probe27,
+#: 2026-09-11). That is why the ask is paid once per machine instead of per refresh — see
+#: `_skip_agy`. Kept as a note rather than as a platform check: the rule no longer differs by
+#: platform, only the price does.
 
 
 def _skip_agy(now) -> bool:
-    """Leave `agy` alone: asking would cost a window, it has answered already, or it just failed.
+    """Leave `agy` alone: it has answered already, or it was asked recently and said nothing.
 
-    The window clause is the whole of the flashing still reported after the consoles were settled.
     FOUR paths reach this catalogue with nobody pressing anything — startup, the project gate,
-    self-check, and `changeEvent`, which fires every time the main window becomes active. That last
-    one turns every alt-tab and every closing dialog into a run of `agy models`, which is how
-    saving and leaving produced up to ten flashes in a row (user, 2026-09-11). The quiet period
-    below does not cover it: a route that answers with nothing is asked again ten minutes later,
-    and twice each time (the retry inside `_fetch_agy_choices`).
+    self-check, and `changeEvent`, which fires every time the main window becomes active. That
+    last one turned every alt-tab and every closing dialog into a run of `agy models`, and on
+    Windows each run puts a console window on screen that no creation flag can hide: `agy`
+    ALLOCATES its own, so inheriting ours does not help. Saving and leaving produced up to ten
+    flashes in a row (user, 2026-09-11).
 
-    `force` bypasses this entirely, so the ↻ button still asks — a press is not an alt-tab.
+    **Windows used to be refused outright here, and that was worse than the flash.** On a clean
+    machine with `agy` installed and logged in, the picker showed no AGY route at all — while
+    offering `codex`, which was NOT installed, with a "install codex CLI" hint beside it. An
+    installed route that is invisible, next to a missing one that is advertised, is not a
+    trade-off; it is the app being wrong about the machine it is on (user, on a fresh Windows,
+    2026-09-11: "треба виправляти… тому треба читати").
+
+    So the cost is paid ONCE and kept: the answer is written to disk (`_save_cached_catalogue`),
+    so the ask happens on a machine that has never asked and never again — not once per
+    activation, which is what made it unbearable. `force` bypasses this entirely, so ↻ re-asks.
     """
-    if _asking_costs_a_window():
-        return True
     if _CLI_CACHE.get("agy"):
         return True
     asked = _LAST_ASKED.get("agy")
