@@ -323,13 +323,33 @@ def run(
     if _CLIPBOARD_MARKER in stderr:
         # The clipboard path writes the compiled PACKAGE to the same place, so a review the Arbiter
         # works by hand is on the record rather than looking like no review at all.
-        return CriticResult(MODE_CLIPBOARD, "", None, role, tail, duration, called_at, review)
+        return CriticResult(MODE_CLIPBOARD, "", None, role, _why_clipboard(stderr) or tail,
+                            duration, called_at, review)
     return CriticResult(MODE_ERROR, "", None, role, tail or "reviewer produced no output",
                         duration, called_at)
 
 
 def log_path(project_dir: Optional[Path] = None) -> Path:
     return config.tcc_dir(project_dir) / "critic-log.jsonl"
+
+
+def _why_clipboard(stderr: str) -> str:
+    """What the reviewer said BEFORE it gave up, which is the one thing nobody could see.
+
+    `tail` takes the last six lines, and for this mode those are always the same six: the clipboard
+    banner the script prints on its way out ("open any AI chat and press Ctrl+V"). The reason —
+    what the CLI actually answered — is printed just ABOVE it and was pushed off the end every
+    time. Thirteen calls in a row reported "mode: clipboard" with nothing to act on, and the code
+    was dutifully reporting the wrong end of the same string (measured 2026-09-11).
+
+    So: the lines immediately before the banner, minus the decoration the script draws with.
+    """
+    head = stderr.split(_CLIPBOARD_MARKER)[0]
+    lines = [
+        line.strip() for line in head.strip().splitlines()
+        if line.strip() and set(line.strip()) - set("=-─━ ")
+    ]
+    return "\n".join(lines[-8:])
 
 
 def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Optional[Path] = None) -> None:

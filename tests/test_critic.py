@@ -378,3 +378,27 @@ def test_the_call_says_which_binary_it_went_out_with(tmp_path, monkeypatch, capl
     said = "\n".join(r.getMessage() for r in caplog.records)
     assert "critic: bin=agy" in said, f"the binary is named, not inferred: {said}"
     assert "Arbiter's pick" in said, "and who decided it"
+
+
+def test_the_clipboard_answer_says_what_the_cli_actually_replied():
+    """Thirteen calls in a row reported `mode: clipboard` with nothing to act on, and the code was
+    dutifully reporting the WRONG END of the same string: `tail` takes the last six lines, and in
+    this mode those are always the banner the script prints on its way out. The reason is printed
+    just above it and was pushed off the end every time (measured 2026-09-11)."""
+    from autosound_tcc.core import critic
+
+    stderr = (
+        ">> Виклик agy...\n"
+        ">> ⛔ agy повернув помилку: model 'gemini-3.8-flash-low' is not available\n"
+        "==================================================\n"
+        "▶ РУЧНИЙ РЕЖИМ: БУФЕР ОБМІНУ (CLIPBOARD MODE)\n"
+        "==================================================\n"
+        "👉 Тепер просто відкрийте будь-який ШІ-чат\n"
+        " та натисніть Ctrl+V для вставки.\n"
+        "🚀 КРУТО! Промпт скопійовано у буфер обміну!\n"
+    )
+
+    why = critic._why_clipboard(stderr)
+
+    assert "is not available" in why, f"the CLI's own words, not the banner: {why!r}"
+    assert "Ctrl+V" not in why, "and not the instructions that pushed them off the end"
