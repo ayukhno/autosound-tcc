@@ -87,7 +87,16 @@ class _FakeStartupInfo:
 
 def _as_windows(monkeypatch) -> None:
     """Windows, as far as `child` can tell. The flags are faked, not the OS — every case here is a
-    Windows one and none of them can run there."""
+    Windows one and none of them can run there.
+
+    It also puts `_APP_CONSOLE` back afterwards, and that is not tidiness. A test that reaches
+    `open_app_console` leaves "we own a console" set for the whole session, which switches
+    `CREATE_NO_WINDOW` off for every later test in every later FILE — `test_terminal_launcher.py`
+    fails on it when the two run together, and only passes in the full suite because some
+    unrelated file in between happens to reset it. A suite that green only in one order is not
+    telling anybody anything.
+    """
+    monkeypatch.setitem(child._APP_CONSOLE, "ours", child._APP_CONSOLE["ours"])
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010, raising=False)
@@ -645,3 +654,68 @@ def test_the_startup_banner_declares_its_types_too(monkeypatch):
     assert fake.GetStdHandle.restype is ctypes.c_void_p, "a handle must have its type declared"
     assert fake.WriteConsoleW.argtypes is not None, "and so must what receives it"
     assert fake.WriteConsoleW.argtypes[0] is ctypes.c_void_p, "the handle goes back in whole"
+
+
+def test_a_borrowed_console_never_had_a_window_to_flash(monkeypatch):
+    """The answer to the flash itself, rather than to who caused it.
+
+    `AllocConsole` on Windows 11 always produces a VISIBLE console — `SW_HIDE` at creation is
+    ignored — so owning one means letting it appear and hiding it afterwards. That flash is OURS,
+    and no amount of hiding gets in front of it. `CREATE_NO_WINDOW` gives a child a real console
+    with no window at all; joining that one leaves nothing to hide.
+    """
+    _as_windows(monkeypatch)
+
+    class _Holder:
+        pid = 4242
+
+    spawned: list = []
+    attached: list = []
+
+    def spawn():
+        spawned.append(1)
+        return _Holder()
+
+    monkeypatch.setattr(child, "_CONSOLE_HOLDER", {"proc": None}, raising=False)
+    ok = child.borrow_windowless_console(
+        spawn=spawn, attach=lambda pid: attached.append(pid) or 1, free=lambda: 0)
+
+    assert ok is True
+    assert spawned == [1], "one holder, not one per child"
+    assert attached == [4242], "and we join ITS console rather than making our own"
+    assert child._CONSOLE_HOLDER["proc"] is not None, "killing it would take the console with it"
+
+
+def test_a_borrowed_console_that_cannot_be_joined_falls_back(monkeypatch):
+    """False, not an exception: the caller then allocates one the old way and the app still runs
+    with a console to lend. Silence here would switch `CREATE_NO_WINDOW` off for every child and
+    hand the machine a window per probe, which is worse than the flash this replaces."""
+    _as_windows(monkeypatch)
+
+    class _Holder:
+        pid = 7
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(child, "_CONSOLE_HOLDER", {"proc": None}, raising=False)
+
+    ok = child.borrow_windowless_console(
+        spawn=lambda: _Holder(), attach=lambda _pid: 0, free=lambda: 0,
+        sleep=lambda _s: clock.__setitem__("t", clock["t"] + 0.02),
+        now=lambda: clock["t"])
+
+    assert ok is False
+
+
+def test_the_flash_probe_runs_three_times_then_twice(monkeypatch):
+    """A COUNT is a stronger answer than a yes/no, and an eye counting to three has none of the
+    blind spots a polling window watch has — one of those logs carried `proc=Idle`, a window whose
+    process had already died before the poll could name it."""
+    runs: list = []
+
+    assert child.flash_probe("before", run=runs.append, environ={}) == 0, "off unless asked"
+
+    env = {"AUTOSOUND_TCC_FLASH_PROBE": "git"}
+    assert child.flash_probe("before", run=runs.append, environ=env) == 3
+    assert child.flash_probe("after", run=runs.append, environ=env) == 2
+    assert all(argv[0] == "git" for argv in runs)
+    assert len(runs) == 5

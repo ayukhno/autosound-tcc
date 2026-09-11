@@ -474,7 +474,12 @@ def main() -> int:
     if os.name == "nt":
         windows_identity.stamp_window(int(window.winId()))
     known.append(window)
+    # The Arbiter's counting experiment (`AUTOSOUND_TCC_FLASH_PROBE`), off in an ordinary build.
+    # Three before the window and two after: if the count on screen is three then two, the flashes
+    # ARE this command; if it stays one and one, they are not — and no log had to be believed.
+    child.flash_probe("before")
     window.show()
+    child.flash_probe("after")
     if splash is not None:
         # `finish`, not `close`: it waits for the window it is handed to be up, so there is no
         # frame with neither of them on screen.
