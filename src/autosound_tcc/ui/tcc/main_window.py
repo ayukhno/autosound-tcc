@@ -513,6 +513,12 @@ def _detect_system_mode() -> str:
     return "dark"
 
 
+#: How long a file-watch waits for a burst of writes to finish before rebuilding anything. The
+#: skill writes several files in a row and the watcher fires more than once per commit, so every
+#: watcher in this window coalesces on this number rather than on its own.
+_RELOAD_COALESCE_MS = 400
+
+
 class _RewPingWorker(QThread):
     """Connectivity probe for the REW-online dot: one synchronous HTTP call, off the GUI thread.
 
@@ -2690,7 +2696,17 @@ class MainWindow(QMainWindow):
         illustrated 0..6. A project with real state legitimately looks different from the demo.
         """
         self._process_watcher = QFileSystemWatcher(self)
-        self._process_watcher.fileChanged.connect(self._refresh_process)
+        # Coalesced, exactly like `_project_reload` beside it — and this one was not, which is the
+        # difference the Arbiter could see. A redraw here re-reads the state, recomputes the plan
+        # and the stale channels, then DELETES AND REBUILDS the capture grid; the watcher fires
+        # more than once per commit, and the skill records a step mid-turn. So a reload landed in
+        # the middle of a test that had just filled the capture panel and wiped it.
+        self._process_reload = QTimer(self)
+        self._process_reload.setSingleShot(True)
+        self._process_reload.setInterval(_RELOAD_COALESCE_MS)
+        self._process_reload.timeout.connect(self._refresh_process)
+        self._process_watcher.fileChanged.connect(
+            lambda *_args: self._process_reload.start())
         self._refresh_process()
 
 
@@ -2705,7 +2721,7 @@ class MainWindow(QMainWindow):
         # rebuild of the tree.
         self._project_reload = QTimer(self)
         self._project_reload.setSingleShot(True)
-        self._project_reload.setInterval(400)
+        self._project_reload.setInterval(_RELOAD_COALESCE_MS)
         self._project_reload.timeout.connect(self._reload_project_files)
         self._arm_project_watcher()
 

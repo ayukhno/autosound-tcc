@@ -3598,3 +3598,23 @@ def test_the_catalogue_worker_forces_agy_only_when_asked(monkeypatch):
     main_window._CliCatalogueWorker(force=True).run()
 
     assert seen == [False, True]
+
+
+def test_the_capture_panel_is_not_rebuilt_once_per_write(tmp_path, monkeypatch):
+    """A process-state redraw re-reads the state, recomputes the plan, and DELETES AND REBUILDS
+    the capture grid. Its watcher fired straight into that — and the watcher fires more than once
+    per commit, while the skill records steps mid-turn. So a reload landed in the middle of a test
+    that had just filled the capture panel and wiped it. Its sibling `_project_reload` has been
+    coalesced all along; this one was connected raw."""
+    window = _window_with_flaws(tmp_path, monkeypatch, [])
+    drawn: list = []
+    monkeypatch.setattr(window, "_refresh_process", lambda *a: drawn.append(1))
+
+    for _ in range(8):                                 # one commit, several fileChanged
+        window._process_watcher.fileChanged.emit("process-state.json")
+
+    assert drawn == [], "a burst of writes buys no rebuilds while it is still arriving"
+    assert window._process_reload.isActive(), "the redraw is pending, not dropped"
+
+    window._process_reload.timeout.emit()              # what the timer does when the burst ends
+    assert drawn == [1], "one rebuild for the burst"

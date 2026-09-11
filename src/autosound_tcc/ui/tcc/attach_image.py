@@ -209,6 +209,12 @@ class AttachImageDialog(QDialog):
         if image is None:
             self._set_ok_enabled(False)
             return False
+        # Same image, nothing to redo. `changeEvent` calls this on every return to the dialog, so
+        # alt-tabbing away and back three times rescaled and repainted the same screenshot three
+        # times. `cacheKey` changes whenever the pixels do, which is the question being asked.
+        if self._image is not None and image.cacheKey() == self._image.cacheKey():
+            self._set_ok_enabled(True)
+            return True
         self._image = image
         preview = QPixmap.fromImage(scaled(image, 520))
         self._preview.setPixmap(preview)
