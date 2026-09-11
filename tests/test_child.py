@@ -649,6 +649,9 @@ def test_the_startup_banner_declares_its_types_too(monkeypatch):
 
     class _FakeKernel32:
         def __init__(self):
+            # CONOUT$ refused, so this exercises the fallback — which is the path that carries the
+            # truncation risk, since it is the one that returns a handle from `GetStdHandle`.
+            self.CreateFileW = _Call(child._INVALID_HANDLE_VALUE)
             self.GetStdHandle = _Call(0x1_2345_6789)  # wider than 32 bits, like a real handle
             self.WriteConsoleW = _Call(1)
 
@@ -716,3 +719,65 @@ def test_the_console_is_made_here_and_not_borrowed(monkeypatch):
                            defer=lambda target, kwargs: target(sleep=lambda _s: None, **kwargs))
 
     assert made == ["alloc"], "allocated here; borrowing was measured worse and removed"
+
+
+def test_the_startup_line_is_written_to_a_console_handle_that_can_take_it(monkeypatch):
+    """`GetStdHandle` is the obvious call and it is the wrong one, which cost a whole feature in
+    silence. A GUI process (`pythonw.exe`) starts with NO standard handles and `AllocConsole` does
+    not redirect them, so the handle was unusable, nothing was written, and the console appeared
+    and held its moment BLANK — the unexplained black rectangle the message exists to prevent.
+    Caught by an event hook on the Arbiter's machine: `class=ConsoleWindowClass title='' 930x516`,
+    shown with nothing in it (probe32, 2026-09-11). `CONOUT$` is what a GUI process opens.
+    """
+    import ctypes
+
+    class _Call:
+        def __init__(self, result):
+            self.result = result
+            self.restype = None
+            self.argtypes = None
+            self.args: list = []
+
+        def __call__(self, *args):
+            self.args.append(args)
+            return self.result
+
+    class _FakeKernel32:
+        def __init__(self):
+            self.CreateFileW = _Call(0x1_2345_6789)   # wider than 32 bits, like a real handle
+            self.GetStdHandle = _Call(0)              # what pythonw actually has: nothing usable
+            self.WriteConsoleW = _Call(1)
+
+    fake = _FakeKernel32()
+    child._write_to_console("Autosound TCC", kernel32=fake)
+
+    assert fake.CreateFileW.args[0][0] == "CONOUT$", "the console's own device, not a std handle"
+    assert fake.GetStdHandle.args == [], "and no need to fall back when CONOUT$ answered"
+    assert fake.WriteConsoleW.args[0][0] == 0x1_2345_6789, "the whole handle, not a truncated one"
+    assert fake.CreateFileW.restype is ctypes.c_void_p
+
+
+def test_the_startup_line_falls_back_when_the_console_device_will_not_open(monkeypatch):
+    """A build started FROM a console has a perfectly good standard handle; CONOUT$ is the one
+    that covers the windowed case. Neither is allowed to be the only way in."""
+    class _Call:
+        def __init__(self, result):
+            self.result = result
+            self.restype = None
+            self.argtypes = None
+            self.args: list = []
+
+        def __call__(self, *args):
+            self.args.append(args)
+            return self.result
+
+    class _FakeKernel32:
+        def __init__(self):
+            self.CreateFileW = _Call(child._INVALID_HANDLE_VALUE)
+            self.GetStdHandle = _Call(0x777)
+            self.WriteConsoleW = _Call(1)
+
+    fake = _FakeKernel32()
+    child._write_to_console("x", kernel32=fake)
+
+    assert fake.WriteConsoleW.args[0][0] == 0x777, "fell back rather than writing into nothing"

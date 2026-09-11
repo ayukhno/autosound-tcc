@@ -66,6 +66,41 @@ def _alloc_console() -> bool:
 _STD_OUTPUT_HANDLE = -11
 
 
+#: `CreateFileW`, for opening the console we just allocated. Values from `winbase.h`.
+_GENERIC_WRITE = 0x40000000
+_FILE_SHARE_WRITE = 0x00000002
+_OPEN_EXISTING = 3
+_INVALID_HANDLE_VALUE = 0xFFFFFFFFFFFFFFFF
+
+
+def _console_out(kernel32):
+    """A handle that can actually be written to — OPENED, not inherited.
+
+    `GetStdHandle` is the obvious call and it is the wrong one here, which cost a whole feature
+    silently. A GUI process (`pythonw.exe`) starts with NO standard handles, and `AllocConsole`
+    does not redirect them to the console it creates. So the handle came back unusable,
+    `WriteConsoleW` wrote nothing, and the console appeared, held its second and a bit, and was
+    BLANK — an unexplained black rectangle, which is the exact thing the message exists to
+    prevent. Measured on the Arbiter's machine (probe32, 2026-09-11): an event hook caught
+    `class=ConsoleWindowClass title='' 930x516` shown with nothing in it.
+
+    `CONOUT$` is the console's own device name and it is what a GUI process opens to reach it.
+    """
+    kernel32.CreateFileW.argtypes = [
+        ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+    ]
+    kernel32.CreateFileW.restype = ctypes.c_void_p
+    handle = kernel32.CreateFileW(
+        "CONOUT$", _GENERIC_WRITE, _FILE_SHARE_WRITE, None, _OPEN_EXISTING, 0, None)
+    if handle and handle != _INVALID_HANDLE_VALUE:
+        return handle
+    # Whatever the process was given, if it was given anything. Worth trying rather than giving
+    # up: on a build started FROM a console this is the right handle and CONOUT$ was belt-and-brace.
+    kernel32.GetStdHandle.restype = ctypes.c_void_p  # a handle, not a C int
+    return kernel32.GetStdHandle(_STD_OUTPUT_HANDLE)
+
+
 def _write_to_console(message: str, *, kernel32=None) -> None:
     """Straight to the console handle, not through `sys.stdout`: a GUI process may not have one.
 
@@ -80,8 +115,7 @@ def _write_to_console(message: str, *, kernel32=None) -> None:
     kernel32 = kernel32 or ctypes.windll.kernel32
     text = message + "\r\n"
     written = ctypes.c_ulong(0)
-    kernel32.GetStdHandle.restype = ctypes.c_void_p  # a handle, not a C int
-    handle = kernel32.GetStdHandle(_STD_OUTPUT_HANDLE)
+    handle = _console_out(kernel32)
     kernel32.WriteConsoleW.argtypes = [
         ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32,
         ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p,
