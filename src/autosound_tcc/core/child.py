@@ -164,12 +164,16 @@ def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=N
         return False
     # NOT borrowed. The idea was to attach to a console made by a child with `CREATE_NO_WINDOW`,
     # which has no window at all and therefore cannot flash. Measured on the machine that has the
-    # problem (2026-09-11, probe29): it ADDED a flash of its own before startup and removed
-    # neither of the two already there. Disproven, so it is gone rather than left switched off —
-    # a hypothesis nobody can see is a hypothesis nobody can retest.
+    # problem (2026-09-11, probe29) and removed because it BOUGHT NOTHING: both flashes were
+    # exactly where they had been.
     #
-    # What the same run settled, and it is worth more than the idea was: the two flashes did not
-    # move when the console was MADE and did not move when it was BORROWED. So they are not this
+    # It first looked worse than that — a third flash appeared before startup — and that reading
+    # was wrong. The Arbiter ran it again and the extra one was gone: it belonged to the first run
+    # of a NEW VERSION, which this project has measured before, and not to the holder process. The
+    # correction is theirs, and it is the second time an eye has overturned a conclusion here.
+    #
+    # What the same run did settle is worth more than the idea was: the two flashes did not move
+    # when the console was MADE and did not move when it was BORROWED. So they are not this
     # console. See `flash_probe` for the instrument that names what they actually are.
     alloc = alloc or _alloc_console
     write = write or _write_to_console

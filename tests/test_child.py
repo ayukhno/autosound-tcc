@@ -698,9 +698,12 @@ def test_a_console_we_were_forced_to_make_is_readable_before_it_hides(monkeypatc
 
 def test_the_console_is_made_here_and_not_borrowed(monkeypatch):
     """A borrowed console — attach to a child's `CREATE_NO_WINDOW` console, which has no window and
-    so cannot flash — was tried on the machine that has the problem and measured WORSE: it added a
-    flash of its own before startup and removed neither of the two already there (probe29,
-    2026-09-11).
+    so cannot flash — was tried on the machine that has the problem and removed because it bought
+    NOTHING: both flashes stayed exactly where they were (probe29, 2026-09-11).
+
+    It first read as worse than that, and that reading was wrong: a third flash appeared, the
+    Arbiter ran it again, and it was gone — it belonged to the first run of a new version, which
+    this project has measured before, not to the holder.
 
     What the same run settled is worth more than the idea was: the two flashes did not move when
     the console was made, and did not move when it was borrowed. They are not this console.
