@@ -183,6 +183,47 @@ def _note_strays(app) -> None:
         pass
 
 
+#: `AUTOSOUND_TCC_WINDOW_TRACE=1` names the CODE that shows a stray window, by its own stack.
+#: Off by default: an application-wide event filter puts a Python call in front of every Qt event,
+#: which is not a price a GUI should pay for a diagnostic that is normally silent.
+WINDOW_TRACE_ENV = "AUTOSOUND_TCC_WINDOW_TRACE"
+
+
+def _install_show_tracer(app, QtCore, log) -> None:
+    """Log a Python stack the moment a top-level window is SHOWN.
+
+    Every watcher this project has built so far POLLS — the desktop one from PowerShell, and
+    `_watch_for_stray_windows` below at 150 ms. The window being hunted lives about 60 ms, so all
+    of them missed it and reported clean (measured; an event hook on the Arbiter's machine then
+    caught `Qt6112QWindowIcon 653x516 'Autosound TCC'` created and gone inside a single frame).
+
+    An event filter cannot miss it: `QEvent.Show` is delivered to the widget, in our own process,
+    on our own thread — so the stack that created it is still on the stack. That is the whole
+    point. A window watcher can say WHAT appeared; only this can say WHICH LINE did it.
+    """
+    import traceback
+
+    class _ShowTracer(QtCore.QObject):
+        def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+            try:
+                if event.type() == QtCore.QEvent.Type.Show and getattr(obj, "isWindow", None):
+                    if obj.isWindow() and id(obj) not in {
+                        id(w) for w in _STRAY["known"] if w is not None
+                    }:
+                        log.info(
+                            "STRAY SHOWN: %s %dx%d %r\n%s",
+                            obj.metaObject().className(), obj.width(), obj.height(),
+                            obj.windowTitle(), "".join(traceback.format_stack()[:-1]))
+            except Exception:  # noqa: BLE001 — a diagnostic must never break an event
+                pass
+            return False
+
+    tracer = _ShowTracer(app)
+    app.installEventFilter(tracer)
+    _STRAY["tracer"] = tracer  # kept alive for the life of the application
+    log.info("window trace armed (%s=1)", WINDOW_TRACE_ENV)
+
+
 def _watch_for_stray_windows(app, QtCore, known, log) -> None:
     """Sample the top-level widgets a few times over the first seconds and log what should not be.
 
@@ -193,6 +234,8 @@ def _watch_for_stray_windows(app, QtCore, known, log) -> None:
     """
     _STRAY["known"] = known
     _STRAY["log"] = log
+    if os.environ.get(WINDOW_TRACE_ENV) == "1" and "tracer" not in _STRAY:
+        _install_show_tracer(app, QtCore, log)
     checks = {"n": 0}
 
     def look() -> None:
