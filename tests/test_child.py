@@ -660,56 +660,6 @@ def test_the_startup_banner_declares_its_types_too(monkeypatch):
     assert fake.WriteConsoleW.argtypes[0] is ctypes.c_void_p, "the handle goes back in whole"
 
 
-def test_a_borrowed_console_never_had_a_window_to_flash(monkeypatch):
-    """The answer to the flash itself, rather than to who caused it.
-
-    `AllocConsole` on Windows 11 always produces a VISIBLE console — `SW_HIDE` at creation is
-    ignored — so owning one means letting it appear and hiding it afterwards. That flash is OURS,
-    and no amount of hiding gets in front of it. `CREATE_NO_WINDOW` gives a child a real console
-    with no window at all; joining that one leaves nothing to hide.
-    """
-    _as_windows(monkeypatch)
-
-    class _Holder:
-        pid = 4242
-
-    spawned: list = []
-    attached: list = []
-
-    def spawn():
-        spawned.append(1)
-        return _Holder()
-
-    monkeypatch.setattr(child, "_CONSOLE_HOLDER", {"proc": None}, raising=False)
-    ok = child.borrow_windowless_console(
-        spawn=spawn, attach=lambda pid: attached.append(pid) or 1, free=lambda: 0)
-
-    assert ok is True
-    assert spawned == [1], "one holder, not one per child"
-    assert attached == [4242], "and we join ITS console rather than making our own"
-    assert child._CONSOLE_HOLDER["proc"] is not None, "killing it would take the console with it"
-
-
-def test_a_borrowed_console_that_cannot_be_joined_falls_back(monkeypatch):
-    """False, not an exception: the caller then allocates one the old way and the app still runs
-    with a console to lend. Silence here would switch `CREATE_NO_WINDOW` off for every child and
-    hand the machine a window per probe, which is worse than the flash this replaces."""
-    _as_windows(monkeypatch)
-
-    class _Holder:
-        pid = 7
-
-    clock = {"t": 0.0}
-    monkeypatch.setattr(child, "_CONSOLE_HOLDER", {"proc": None}, raising=False)
-
-    ok = child.borrow_windowless_console(
-        spawn=lambda: _Holder(), attach=lambda _pid: 0, free=lambda: 0,
-        sleep=lambda _s: clock.__setitem__("t", clock["t"] + 0.02),
-        now=lambda: clock["t"])
-
-    assert ok is False
-
-
 def test_the_flash_probe_runs_three_times_then_twice(monkeypatch):
     """A COUNT is a stronger answer than a yes/no, and an eye counting to three has none of the
     blind spots a polling window watch has — one of those logs carried `proc=Idle`, a window whose
@@ -744,3 +694,22 @@ def test_a_console_we_were_forced_to_make_is_readable_before_it_hides(monkeypatc
         keeper=lambda pid, **kw: order.append("keeper"))
 
     assert order == ["waited 1.2", "hide", "keeper"], "read it, hide it, then hold it hidden"
+
+
+def test_the_console_is_made_here_and_not_borrowed(monkeypatch):
+    """A borrowed console — attach to a child's `CREATE_NO_WINDOW` console, which has no window and
+    so cannot flash — was tried on the machine that has the problem and measured WORSE: it added a
+    flash of its own before startup and removed neither of the two already there (probe29,
+    2026-09-11).
+
+    What the same run settled is worth more than the idea was: the two flashes did not move when
+    the console was made, and did not move when it was borrowed. They are not this console.
+    """
+    _as_windows(monkeypatch)
+    made: list = []
+
+    child.open_app_console("x", alloc=lambda: made.append("alloc") or True,
+                           write=lambda _t: None, hide=lambda: 1,
+                           defer=lambda target, kwargs: target(sleep=lambda _s: None, **kwargs))
+
+    assert made == ["alloc"], "allocated here; borrowing was measured worse and removed"

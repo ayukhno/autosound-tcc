@@ -142,86 +142,6 @@ def flash_probe(when: str, *, run=None, environ=None) -> int:
     return done
 
 
-#: The child whose console we borrow. Module state because it must outlive this call: kill it and
-#: the console goes with it, taking every inheriting child's output handle along.
-_CONSOLE_HOLDER: dict = {"proc": None}
-
-#: How long to wait for the holder's console to exist. It is created with the process, but
-#: `AttachConsole` can lose a race with a child that has only just been handed its handles.
-_HOLDER_WAIT_S = 2.0
-
-
-def _spawn_console_holder():
-    """A process that exists only to own a console with no window. `None` if it cannot start."""
-    flag = getattr(subprocess, "CREATE_NO_WINDOW", None)
-    if not flag:
-        return None
-    try:
-        # `cmd /k` with its input on a pipe nobody writes to: it waits for a command forever,
-        # costs about a megabyte, and starts instantly. `DEVNULL` would hand it EOF and it would
-        # exit — taking the console we are borrowing with it.
-        return subprocess.Popen(
-            ["cmd.exe", "/k"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, creationflags=int(flag))
-    except OSError:
-        return None
-
-
-def borrow_windowless_console(*, spawn=None, attach=None, free=None, sleep=None, now=None) -> bool:
-    """Join a console that NEVER HAD A WINDOW, instead of making one and hiding it.
-
-    This is the answer to the flash itself rather than to who caused it. `AllocConsole` on
-    Windows 11 always produces a VISIBLE console — `SW_HIDE` at creation is ignored, measured
-    twice — so owning one means letting it appear and hiding it afterwards. That flash is not a
-    child's window. It is ours, and no amount of hiding gets in front of it.
-
-    `CREATE_NO_WINDOW` does not mean what its name suggests: the child gets a real console, and
-    that console has **no window at all**. Nothing is ever shown, so there is nothing to hide.
-    `AttachConsole` lets this process join it, and from then on every child and grandchild
-    inherits a console that cannot flash, because it has no window to flash with.
-
-    Returns False on anything unexpected, and the caller falls back to allocating one.
-    """
-    if not sys.platform.startswith("win"):
-        return False
-    spawn = spawn or _spawn_console_holder
-    now = now or time.monotonic
-    sleep = sleep or time.sleep
-    if attach is None or free is None:
-        # Asked for ONLY when a real one is needed. Reaching for `windll` even when the caller has
-        # handed both in makes the whole function untestable off Windows — the seam is there to be
-        # used, and a seam the code steps around is not a seam.
-        try:
-            kernel32 = ctypes.windll.kernel32
-            if attach is None:
-                # Declared, for the reason this file declares them everywhere: an undeclared call
-                # gets a C int, and a wrong type fails silently — straight back to the flash.
-                kernel32.AttachConsole.argtypes = [ctypes.c_uint32]
-                kernel32.AttachConsole.restype = ctypes.c_int
-                attach = kernel32.AttachConsole
-            free = free or kernel32.FreeConsole
-        except Exception:  # noqa: BLE001 — no windll: nothing to borrow
-            return False
-    proc = spawn()
-    if proc is None:
-        return False
-    _CONSOLE_HOLDER["proc"] = proc
-    try:
-        free()  # we have none under pythonw, but saying so costs nothing and makes the state sure
-    except Exception:  # noqa: BLE001 — already console-less, which is the state we want
-        pass
-    deadline = now() + _HOLDER_WAIT_S
-    while True:
-        try:
-            if attach(int(proc.pid)):
-                return True
-        except Exception:  # noqa: BLE001 — a pid that died, a console that is not ours to join
-            return False
-        if now() >= deadline:
-            return False
-        sleep(0.02)
-
-
 def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=None) -> bool:
     """Give this process ONE console, say what it is, and hide it. Windows only; False elsewhere.
 
@@ -242,12 +162,15 @@ def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=N
     _APP_CONSOLE["ours"] = False
     if not sys.platform.startswith("win"):
         return False
-    # Better than allocating one, when it works: a BORROWED console never had a window, so there
-    # is nothing to hide and nothing to flash. Falls through to the old way when it does not.
-    if borrow_windowless_console():
-        _APP_CONSOLE["ours"] = True
-        hide_agent_console_later(os.getpid(), budget_s=APP_CONSOLE_KEEPER_BUDGET_S)
-        return True
+    # NOT borrowed. The idea was to attach to a console made by a child with `CREATE_NO_WINDOW`,
+    # which has no window at all and therefore cannot flash. Measured on the machine that has the
+    # problem (2026-09-11, probe29): it ADDED a flash of its own before startup and removed
+    # neither of the two already there. Disproven, so it is gone rather than left switched off —
+    # a hypothesis nobody can see is a hypothesis nobody can retest.
+    #
+    # What the same run settled, and it is worth more than the idea was: the two flashes did not
+    # move when the console was MADE and did not move when it was BORROWED. So they are not this
+    # console. See `flash_probe` for the instrument that names what they actually are.
     alloc = alloc or _alloc_console
     write = write or _write_to_console
     hide = hide or _hide_own_console
