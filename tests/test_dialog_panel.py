@@ -220,3 +220,35 @@ def test_a_bubble_measures_its_text_once_not_once_per_resize_pixel():
 
     bubble.set_html("<p>" + "word " * 800 + "</p>")
     assert bubble.natural_width != first, "a streamed answer must not keep its first width"
+
+
+def test_a_turn_that_ends_in_a_dropped_connection_says_what_to_do():
+    """The failure arrives as ordinary assistant TEXT, so nothing upstream marks the turn as
+    failed: the session sits there looking ready, the next message goes nowhere, and the app
+    reads as hung. The Arbiter hit this twice and found the way out by quitting TCC entirely —
+    nothing on screen said so (2026-09-11)."""
+    from autosound_tcc.ui.tcc.dialog_panel import turn_ended_in_a_dropped_connection as dropped
+
+    assert dropped("API Error: The response stopped arriving. The response above may be incomplete.")
+    assert dropped("Failed to authenticate: OAuth session expired and could not be refreshed")
+
+    # And an answer that merely TALKS about errors is still an answer.
+    assert not dropped("Я перевірив лог — там немає жодної помилки, канал справний.")
+    assert not dropped("")
+
+
+def test_the_panel_names_the_way_out_rather_than_only_the_failure():
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._chat.findChildren(MessageBubble))
+
+    panel._live_text = "API Error: The response stopped arriving."
+    panel._on_turn_done()
+
+    bubbles = panel._chat.findChildren(MessageBubble)
+    assert len(bubbles) == before + 1, "the panel said something"
+    said = bubbles[-1]._plain
+    assert i18n.t("sessionNew").lower() in said.lower(), (
+        f"it must name the control that fixes it, not just report the failure: {said!r}")

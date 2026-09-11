@@ -173,6 +173,31 @@ class MessageBubble(QFrame):
         self._body.setStyleSheet(f"QLabel {{ font-size: {_MSG_BODY_BASE_PX * scale:.1f}px; }}")
 
 
+#: What a turn looks like when the TRANSPORT gave up rather than the model answering. These are
+#: the harness's own words, passed through rather than reworded (that pass-through is why the
+#: Arbiter could act on the expired-login one at all). What was missing is what to do next.
+_TRANSPORT_GAVE_UP = (
+    "response stopped arriving",
+    "failed to authenticate",
+    "oauth session expired",
+    "connection error",
+    "api error",
+)
+
+
+def turn_ended_in_a_dropped_connection(text: str) -> bool:
+    """Did this turn end with the transport failing, rather than with an answer.
+
+    Matched on the harness's words because that is the only signal there is: the failure arrives
+    as ordinary assistant TEXT, so nothing upstream marks the turn as failed and the session sits
+    there looking ready. The Arbiter sent the next message into a session that could not carry it,
+    got silence, and concluded the application had hung — twice; leaving TCC and coming back was
+    what fixed it, and nothing on screen said so (2026-09-11).
+    """
+    said = (text or "").lower()
+    return any(phrase in said for phrase in _TRANSPORT_GAVE_UP)
+
+
 class DialogPanel(QWidget):
     """The whole center dialog: message list, composer, and the project-param-edit chip. The
     surrounding `.panel` frame's "editing" border highlight is applied by the caller
@@ -1164,6 +1189,13 @@ class DialogPanel(QWidget):
         self._live_text = ""
 
     def _on_turn_done(self) -> None:
+        # Before the live text is cleared below: a turn that ended in a dropped connection leaves
+        # the session LOOKING ready, and the next message goes nowhere. Say so, and name the way
+        # out — the Arbiter found it by quitting the whole application.
+        if turn_ended_in_a_dropped_connection(self._live_text):
+            self._add_system_message(
+                f"⚠️ {i18n.t('sessionDropped').format(new=i18n.t('sessionNew'))}",
+                role=_SYS_ROLE_TCC)
         self._activity_timer.stop()
         self._activity.setHidden(True)
         self._activity.setText("")
