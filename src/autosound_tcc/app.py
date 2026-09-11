@@ -260,6 +260,15 @@ def _parse(argv: list[str]) -> argparse.Namespace:
              "our launchers. Anything else under those names is left alone and named on stderr. "
              "Never touches a project, an environment or the package itself.",
     )
+    parser.add_argument(
+        "--restore-terminal",
+        action="store_true",
+        help="Put Windows' default terminal back to what it was before TCC changed it. TCC "
+             "switches it to the old console host because that is the only way to hide the "
+             "console the AI's shell commands would otherwise flash on screen (TCC-006). This "
+             "undoes that, writes the same undo out as a .reg file you can read, and exits. "
+             "Safe to run at any time, and run for you by --uninstall-desktop.",
+    )
     known, _ = parser.parse_known_args(argv[1:])  # Qt takes its own flags off the same line
     return known
 
@@ -294,6 +303,20 @@ def main() -> int:
 
         print(install_report.app_version() or "unknown")
         return 0
+    if args.restore_terminal:
+        # Before Qt, like every other flag that answers and leaves: undoing a machine setting must
+        # work on an install whose window will not open at all.
+        from autosound_tcc.core import default_terminal
+
+        was = default_terminal.current()
+        done = default_terminal.restore()
+        written = default_terminal.write_restore_file()
+        print(f"default terminal was: {was}")
+        print("restored" if done else "could NOT restore — see the file below", file=
+              sys.stdout if done else sys.stderr)
+        if written is not None:
+            print(f"the same undo, as a file you can read and run: {written}")
+        return 0 if done else 1
     if args.install_desktop or args.uninstall_desktop:
         from autosound_tcc.core import desktop_entry
 

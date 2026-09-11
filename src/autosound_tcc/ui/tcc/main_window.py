@@ -165,6 +165,12 @@ _GATE_KEY = "gate"                    # per project: which writes still ask the 
 #: taken. The user's ruling (2026-09-06): do not ask by default, but ask ONCE after installing and
 #: remember the answer (HUB-028).
 _MACHINE_GATE_KEY = "gate/machine"
+
+#: Asked once per machine, exactly like the gate above. On Windows the agent's console can only be
+#: hidden when the default terminal is the old conhost (TCC-006, `core/default_terminal.py`), so
+#: TCC offers to switch it. The answer is KEPT: a person who said no is not asked again every
+#: launch, because a question re-asked forever is not a question.
+_TERMINAL_ASKED_KEY = "gate/default-terminal-asked"
 _EFFORT_KEY = "effort"                # per project: how hard the Generator is asked to think
 _ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
@@ -607,8 +613,14 @@ class _CliCatalogueWorker(QThread):
 
     done = Signal()
 
+    def __init__(self, force: bool = False) -> None:
+        super().__init__()
+        # `force` reaches `refresh_cli_catalogue`: an ordinary launch leaves agy cached and unrun
+        # (its window is the startup flash of TCC-006), while the ↻ button forces a re-ask.
+        self._force = force
+
     def run(self) -> None:
-        model_choices.refresh_cli_catalogue()
+        model_choices.refresh_cli_catalogue(force=self._force)
         # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
         # built during construction. Asking there would put a process launch in front of the
         # first paint on every startup.
@@ -3003,7 +3015,7 @@ class MainWindow(QMainWindow):
         if running is not None and running.isRunning():
             return
         self._cli_refreshed_at = now
-        self._cli_catalogue = _CliCatalogueWorker()
+        self._cli_catalogue = _CliCatalogueWorker(force=force)
         self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
         self._cli_catalogue.start()
 
@@ -3752,6 +3764,9 @@ class MainWindow(QMainWindow):
         except process_writer.ProcessWriterError as exc:
             self._status_strip.notify(f"journal: {exc}", level="warn")
         self._ensure_machine_gate_answered()
+        # Beside the gate and for the same reason: both are asked once, before the agent starts
+        # working, because both are about how its commands behave on this machine.
+        self._ensure_default_terminal_answered()
         self._say_what_the_project_applies()
         self._agent_worker.start()
         self._update_session_button()
@@ -4064,6 +4079,65 @@ class MainWindow(QMainWindow):
             or str(self._settings.value(_MACHINE_GATE_KEY, "") or "")
             or omp_session.GATE_DEFAULT
         )
+
+    def _ensure_default_terminal_answered(self) -> None:
+        """Offer, once per machine, to make Windows' default terminal the old console host.
+
+        Why an application asks about a system setting at all: the agent's Bash tool starts a
+        shell per command, and on Windows a shell started by a parent with NO console allocates
+        its own — which is a window, per command, for a whole session. Giving the agent one
+        console and hiding it stops that, because every shell it starts inherits the hidden one
+        (measured 2026-09-11: `cmd`, `bash` and `agy` all ran silently inside one). But it can
+        only be hidden under conhost: under Windows Terminal the console window belongs to
+        `WindowsTerminal.exe`, a search by our pid returns nothing, and there is nothing of ours
+        to hide. That is the whole reason this question exists rather than a setting being applied
+        quietly.
+
+        Asked once and the answer kept, exactly like the machine gate below — a question re-asked
+        every launch is not a question, it is a nag. Said yes, the undo is written beside it as a
+        `.reg` file, `--restore-terminal` runs the same undo, and `--uninstall-desktop` performs
+        it unasked: a machine setting an application changes and cannot take back is one it had no
+        business changing.
+
+        Never opens on macOS or Linux, which is also what keeps it out of the suite's way:
+        `should_offer` answers False off Windows, so no test that builds a window meets a modal.
+        """
+        from autosound_tcc.core import default_terminal
+
+        if not default_terminal.should_offer(
+            already_asked=lambda: bool(self._settings.value(_TERMINAL_ASKED_KEY, "")),
+        ):
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Stop the terminal windows flashing?")
+        box.setText(
+            "Windows opens a console window every time the AI runs a command.\n\n"
+            "TCC can stop that by making the classic Console Host your default terminal "
+            "instead of Windows Terminal. It is the only way to hide those windows."
+        )
+        box.setInformativeText(
+            "This changes a Windows setting for your user account. TCC writes an undo file "
+            "next to its settings, the Repair panel can run it, and uninstalling TCC puts the "
+            "setting back by itself."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.Yes)
+        answer = box.exec()
+        # Recorded whichever way it went: "no" is an answer, and re-asking it is the nag.
+        self._settings.setValue(_TERMINAL_ASKED_KEY, "asked")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not default_terminal.set_conhost():
+            self._status_strip.notify(
+                "could not change the default terminal — the AI's commands will still flash",
+                level="warn")
+            return
+        undo = default_terminal.write_restore_file()
+        self._status_strip.notify(
+            f"default terminal switched; undo: {undo}" if undo
+            else "default terminal switched to the classic Console Host",
+            level="info")
 
     def _ensure_machine_gate_answered(self) -> None:
         """Ask the one question, if this machine has never answered it. Called at a session start.

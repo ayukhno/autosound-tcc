@@ -165,19 +165,15 @@ def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
             encoding="utf-8",
             errors="replace",
             env={**os.environ, **_NO_PROMPTING},
-            # `hidden_console`, not `quiet`. `ls-remote` is a NETWORK call, and git does not make
-            # those itself: it spawns `git-remote-https`, a console program. `CREATE_NO_WINDOW`
-            # gives git no console at all, so that grandchild allocates its own — and a new console
-            # is a new window. Exactly the mechanism already written up for the agent CLI
-            # (`child.hidden_console`, tcc#13); `git` was simply never on that list, while being
-            # the one thing TCC runs at startup that reaches the network.
-            #
-            # NOT VERIFIED ON WINDOWS, like the note it borrows from — every branch of it is empty
-            # on a Mac. The bounded risk is the same one stated there: if `SW_HIDE` quietly does
-            # not take, a console is visible instead of flashing. Here it lasts seconds rather
-            # than a session, and `AUTOSOUND_TCC_AGENT_CONSOLE=0` turns it off in place.
+            # Plain `quiet()`. This used to merge in a console of its own, on the theory that
+            # `ls-remote` spawns `git-remote-https` and a grandchild with no console allocates
+            # one. Watched on the machine that has the problem (2026-09-11), it does not: across
+            # a stepped startup and two window watches, `git ls-remote` produced NO window at all,
+            # while `agy` produced one every time. The startup flash was agy, and it is gone
+            # because agy is no longer asked at startup (`core/model_choices.refresh_cli_catalogue`).
+            # A console handed to git would now be a window we create for nothing.
             check=False, cwd=str(cwd) if cwd else None,
-            **{**child.quiet(), **child.hidden_console()})
+            **child.quiet())
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
         return False, f"{type(exc).__name__}: {exc}"
     out = (done.stdout or "").strip() or (done.stderr or "").strip()

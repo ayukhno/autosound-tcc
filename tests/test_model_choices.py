@@ -708,3 +708,58 @@ def test_the_omp_key_warning_points_at_the_profile_not_at_a_shell(monkeypatch):
     assert "shell" not in warning.lower(), warning
     assert "auth login" in warning
 
+
+
+# ------------------------------------------------------ agy is not relaunched every startup (TCC-006)
+# The startup flash: `agy models` opens a window on Windows that NO creation flag hides (probe12,
+# 2026-09-11 — CREATE_NO_WINDOW is hosted by Windows Terminal; a hidden CREATE_NEW_CONSOLE is
+# ignored by SW_HIDE and shows a console; it also drags a node/playwright child that opens its own).
+# So once the catalogue is cached, an ordinary refresh must read the cache and not launch agy again.
+
+
+def test_agy_is_not_relaunched_on_an_ordinary_refresh_when_already_cached(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    good = [mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")]
+    calls = []
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": list(good)})
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: calls.append(1) or [])
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+
+    assert calls == [], "agy must not be launched when its catalogue is already cached"
+    assert mc.agy_choices() == good
+
+
+def test_agy_is_fetched_on_the_first_ever_refresh_when_nothing_is_cached(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    fresh = [mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")]
+    calls = []
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: calls.append(1) or list(fresh))
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+
+    assert calls == [1], "with nothing cached, agy must be asked once so the route exists at all"
+    assert mc.agy_choices() == fresh
+
+
+def test_a_forced_refresh_relaunches_agy_even_when_cached(monkeypatch):
+    """The re-check button: the user says something changed, so a forced refresh asks agy again."""
+    from autosound_tcc.core import model_choices as mc
+
+    good = [mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")]
+    calls = []
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": list(good)})
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: calls.append(1) or list(good))
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue(force=True)
+
+    assert calls == [1], "a forced refresh asks agy again even when it is cached"

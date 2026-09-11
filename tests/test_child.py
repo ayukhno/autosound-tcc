@@ -95,20 +95,6 @@ def _as_windows(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "SW_HIDE", 0, raising=False)
 
 
-def test_the_agent_gets_one_hidden_console_for_its_grandchildren_to_inherit(monkeypatch):
-    """`CREATE_NO_WINDOW` gives the agent NO console, and a console program started by a parent
-    with no console gets a NEW one — so every `python`, `git` and `gh` the agent runs opened its
-    own window. TCC's correct choice at its level produced the flashing one level down (tcc#13)."""
-    _as_windows(monkeypatch)
-    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")  # off by default since 2026-09-09
-
-    kwargs = child.hidden_console()
-
-    assert kwargs["creationflags"] == 0x00000010, "a console of its own"
-    assert kwargs["startupinfo"].dwFlags & 0x00000001
-    assert kwargs["startupinfo"].wShowWindow == 0, "and it is never shown"
-
-
 def test_only_the_agents_own_cli_is_given_a_console():
     """Narrow on purpose: a child that spawns nothing has no use for a console, and one that is
     handed a console it then shows is the bug this is fixing, backwards."""
@@ -120,7 +106,12 @@ def test_only_the_agents_own_cli_is_given_a_console():
     assert not child.is_agent_command("")
 
 
-def test_the_sdk_gives_the_agent_the_hidden_console_and_everyone_else_no_window(monkeypatch):
+def test_the_sdk_gives_the_agent_a_console_of_its_own_and_everyone_else_no_window(monkeypatch):
+    """The agent gets a REAL console, not the `SW_HIDE` hint this used to pass.
+
+    That hint is ignored on Windows 11 — measured twice, under both terminals — so asking for a
+    console "created hidden" produced a VISIBLE one. The console is created plainly and hidden
+    afterwards by `hide_agent_console_later`, which is the only order that works."""
     import anyio
     from anyio._core import _subprocesses
 
@@ -133,32 +124,24 @@ def test_the_sdk_gives_the_agent_the_hidden_console_and_everyone_else_no_window(
     monkeypatch.setattr(_subprocesses, "open_process", fake_open_process)
     monkeypatch.setattr(anyio, "open_process", fake_open_process)
     _as_windows(monkeypatch)
-    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")  # the path this test is about
 
     child.hide_console_windows()
     asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
     asyncio.run(anyio.open_process(["git", "status"], stdin=-1))
 
     agent, other = seen
-    assert agent["creationflags"] & 0x00000010 and "startupinfo" in agent
+    assert agent["creationflags"] & 0x00000010, "one console, for its shells to inherit"
+    assert "startupinfo" not in agent, "the SW_HIDE hint is gone; it never worked"
     assert other["creationflags"] & 0x08000000 and "startupinfo" not in other
 
 
-def test_the_hidden_console_is_off_until_somebody_asks_for_it(monkeypatch):
-    """`SW_HIDE` is a hint, and on the machine that has the problem it does not take: a desktop
-    window watch caught `proc=git class=ConsoleWindowClass 930x516` half a second after the main
-    window (2026-09-09). So the mechanism CREATES the window it was written to prevent, and the
-    default is off — with the switch left in place for anybody testing a newer Windows."""
-    _as_windows(monkeypatch)
+def test_by_default_the_agent_gets_the_console_and_the_switch_puts_the_old_way_back(monkeypatch):
+    """On by default, because it is the fix rather than an option: without a console of its own,
+    every shell the agent's Bash tool starts allocates one, which is a window per command.
 
-    assert child.hidden_console() == {}, "off by default"
-
-    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")
-
-    assert child.hidden_console(), "and on for whoever asks"
-
-
-def test_by_default_the_agent_is_treated_like_every_other_child(monkeypatch):
+    The switch stays for the machine where this turns out worse than the flash it replaces —
+    under Windows Terminal the console cannot be hidden at all (`core/default_terminal.py`), and
+    somebody meeting that needs a way out where they are, not a new build."""
     import anyio
     from anyio._core import _subprocesses
 
@@ -175,8 +158,12 @@ def test_by_default_the_agent_is_treated_like_every_other_child(monkeypatch):
     child.hide_console_windows()
     asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
 
-    # No switch set: this IS the default now, and the agent is treated like every other child.
-    assert seen[0]["creationflags"] & 0x08000000 and "startupinfo" not in seen[0]
+    assert seen[0]["creationflags"] & 0x00000010, "a console of its own, by default"
+
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "0")
+    asyncio.run(anyio.open_process(["claude", "--print"], stdin=-1))
+
+    assert seen[1]["creationflags"] & 0x08000000, "and the switch puts the old behaviour back"
 
 
 def test_every_child_this_app_starts_is_named_in_the_log(tmp_path, monkeypatch):
@@ -205,22 +192,18 @@ def test_every_child_this_app_starts_is_named_in_the_log(tmp_path, monkeypatch):
     assert "secret-repo" not in said, "the rest of the line is not the log's business"
 
 
-def test_an_agent_cli_started_the_ordinary_way_gets_the_hidden_console_too(monkeypatch):
-    """`child.hidden_console` was written for the agent's CLI because those spawn console programs
-    of their own, and a parent with NO console makes each grandchild allocate one. It was wired
-    into the ASYNC path only — and the startup log from the user's Windows machine (2026-09-09)
-    shows the same programs going out the ordinary way: `agy models` twice and `claude.EXE auth`,
-    nine processes in two seconds.
+def test_an_agent_cli_started_the_ordinary_way_gets_a_console_too(monkeypatch):
+    """The agent's CLIs spawn console programs of their own, and a parent with NO console makes
+    each grandchild allocate one. This was wired into the ASYNC path only — while the startup log
+    from the user's Windows machine (2026-09-09) shows the same programs going out the ordinary
+    way: `agy models` twice and `claude.EXE auth`, nine processes in two seconds.
 
-    Same programs, same reason, so the same treatment. Everything else keeps "no console at all",
-    which is right for a child that spawns nothing."""
+    Same programs, same reason, same treatment. Everything else keeps "no console at all", which
+    is right for a child that spawns nothing."""
     from autosound_tcc.core import child
 
     monkeypatch.setattr(child, "_no_window", lambda: 0x08000000)
-    monkeypatch.setattr(
-        child, "hidden_console",
-        lambda: {"creationflags": 0x00000010, "startupinfo": "STARTUPINFO"},
-    )
+    monkeypatch.setattr(child, "agent_console", lambda: {"creationflags": 0x00000010})
     seen = []
 
     class _Fake:
@@ -232,5 +215,149 @@ def test_an_agent_cli_started_the_ordinary_way_gets_the_hidden_console_too(monke
     _Fake(["agy", "models"])
     _Fake(["git", "status"])
 
-    assert seen[0].get("startupinfo") == "STARTUPINFO", "the agent CLI hands a console DOWN"
-    assert seen[1].get("startupinfo") is None, "git spawns nothing; no console at all is right"
+    assert seen[0]["creationflags"] == 0x00000010, "the agent CLI hands a console DOWN"
+    assert seen[1]["creationflags"] == 0x08000000, "git spawns nothing; no console at all"
+
+
+# ---------------------------------------------------------------- the step gate (TCC-006 probe)
+# A diagnostic that holds each background spawn until a person presses Enter in a control window,
+# so "a window flashed right after STEP 4" names the exact process. Gated by AUTOSOUND_TCC_STEP;
+# off, it must be invisible. Everything is injected because the alternative is a test that needs
+# real threads and a real clock to tell a wait from a hang — the same shape as `_wait_until_painted`.
+
+
+def test_the_step_gate_does_nothing_when_step_mode_is_off(monkeypatch):
+    """Off is the default and the shipped state: it must not even look at the control file."""
+    monkeypatch.delenv("AUTOSOUND_TCC_STEP", raising=False)
+    looked = []
+    child._step_gate("git ls-remote", read_release=lambda: looked.append(1) or 0)
+    assert looked == []
+
+
+def test_the_step_gate_never_holds_the_main_thread(monkeypatch):
+    """Blocking the GUI thread freezes the window into a Windows 'Not Responding' ghost — itself
+    a flash, and the very thing being hunted. Only background spawns are stepped."""
+    monkeypatch.setenv("AUTOSOUND_TCC_STEP", "1")
+    looked = []
+    child._step_gate(
+        "git ls-remote",
+        is_main=lambda: True,
+        read_release=lambda: looked.append(1) or 0,
+    )
+    assert looked == []
+
+
+def test_the_step_gate_holds_a_background_spawn_until_it_is_released(monkeypatch):
+    """A background spawn waits until the control counter reaches its ticket, then proceeds."""
+    monkeypatch.setenv("AUTOSOUND_TCC_STEP", "1")
+    child._reset_step_counter()
+    release = iter([0, 0, 1])  # not yet, not yet, the person pressed Enter
+    slept = []
+    child._step_gate(
+        "git ls-remote",
+        is_main=lambda: False,
+        read_release=lambda: next(release),
+        sleep=lambda s: slept.append(s),
+        now=lambda: 0.0,  # the clock never advances, so the budget can never end the wait
+    )
+    assert slept, "it waited at least once before the release"
+
+
+def test_the_step_gate_gives_up_after_the_budget_so_a_spawn_never_hangs_forever(monkeypatch):
+    """A forgotten Enter must not wedge TCC: past the budget the spawn proceeds on its own."""
+    monkeypatch.setenv("AUTOSOUND_TCC_STEP", "1")
+    child._reset_step_counter()
+    clock = iter([0.0, 0.0, 999.0])
+    child._step_gate(
+        "git ls-remote",
+        is_main=lambda: False,
+        read_release=lambda: 0,  # never released
+        sleep=lambda s: None,
+        now=lambda: next(clock),
+        budget_s=300.0,
+    )
+    # Reaching this line without hanging IS the assertion.
+
+
+# ------------------------------------------------- one hidden console for the agent (TCC-006)
+# The flash during an AI session is `claude`'s Bash tool spawning shells: each is a console
+# program started by a parent with NO console, so each allocates its own — a window. Measured on
+# Windows 11 (probe, 2026-09-11): give the agent ONE console and hide it, and every shell started
+# inside it inherits that console and opens nothing. `cmd`, `bash` and even `agy` all ran silently.
+#
+# Two facts the measurements forced, and both are in the tests:
+#   * conhost shows the window BACK once after the first hide, so hiding once is not enough;
+#   * this works only under conhost — under Windows Terminal the window belongs to
+#     WindowsTerminal.exe and a search by our pid returns nothing at all.
+
+
+def test_only_a_visible_console_window_of_that_process_is_hidden():
+    """A Qt window of the same process is not a console, and one already hidden is not hidden
+    twice — the count is what the keeper reports, so it has to mean something."""
+    hidden = []
+    seen = [(11, "ConsoleWindowClass", True), (22, "Qt6112QWindowIcon", True),
+            (33, "ConsoleWindowClass", False)]
+
+    count = child.hide_console_of(
+        4242, windows_of=lambda pid: seen, hide=lambda hwnd: hidden.append(hwnd))
+
+    assert hidden == [11]
+    assert count == 1
+
+
+def test_the_keeper_hides_again_because_conhost_shows_the_window_back():
+    """Hidden 97 ms after spawn, the console was visible again a second later (measured). Hiding
+    once is the bug; the keeper is the fix."""
+    alive = iter([True, True, False])
+
+    total = child.keep_console_hidden(
+        4242,
+        still_running=lambda: next(alive),
+        hide_once=lambda: 1,
+        sleep=lambda s: None,
+        now=lambda: 0.0,
+    )
+
+    assert total == 2, "it must keep hiding for as long as the process runs"
+
+
+def test_the_keeper_stops_as_soon_as_the_process_is_gone():
+    slept = []
+
+    total = child.keep_console_hidden(
+        4242,
+        still_running=lambda: False,
+        hide_once=lambda: 1,
+        sleep=lambda s: slept.append(s),
+        now=lambda: 0.0,
+    )
+
+    assert (total, slept) == (0, [])
+
+
+def test_the_keeper_gives_up_at_the_budget_rather_than_running_for_the_session():
+    """A process that outlives the budget must not leave a thread spinning for hours."""
+    clock = iter([0.0, 0.0, 999.0])
+
+    total = child.keep_console_hidden(
+        4242,
+        still_running=lambda: True,
+        hide_once=lambda: 1,
+        sleep=lambda s: None,
+        now=lambda: next(clock),
+        budget_s=30.0,
+    )
+
+    assert total == 1, "one pass, then the budget ended it"
+
+
+def test_an_agent_is_given_a_console_of_its_own_only_on_windows(monkeypatch):
+    """`CREATE_NO_WINDOW` is what every other child gets. The agent needs the opposite: a console
+    that EXISTS (so its shells inherit one) and is then hidden."""
+    monkeypatch.setenv("AUTOSOUND_TCC_AGENT_CONSOLE", "1")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010, raising=False)
+    assert child.agent_console()["creationflags"] == 0x00000010
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert child.agent_console() == {}

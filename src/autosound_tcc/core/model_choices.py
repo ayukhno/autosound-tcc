@@ -366,14 +366,24 @@ def cli_routes_without_models() -> list[str]:
     ]
 
 
-def refresh_cli_catalogue() -> dict[str, list[Choice]]:
+def refresh_cli_catalogue(*, force: bool = False) -> dict[str, list[Choice]]:
     """Ask every CLI that needs asking, and cache the answer. **Call this off the GUI thread.**
 
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
     the GUI thread at window construction, so asking there would freeze the window on launch.
+
+    `force` re-asks agy even when it is already cached, for a deliberate re-check (the ↻ button).
+    Without it, an ordinary refresh does NOT relaunch agy once its catalogue is on disk — because
+    on Windows `agy models` opens a window that no creation flag can hide (probe12, 2026-09-11:
+    `CREATE_NO_WINDOW` is hosted by Windows Terminal, and a hidden `CREATE_NEW_CONSOLE` is ignored
+    by `SW_HIDE` and shows a console anyway; it also drags a `node`/playwright child that opens its
+    own). That relaunch on every start was the startup flash of TCC-006. The picker reads the
+    cache (`agy_choices`), so a cached route is fully present without agy being run again.
     """
     _load_cached_catalogue()
     for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
+        if route == "agy" and not force and _CLI_CACHE.get("agy"):
+            continue
         fetched = fetch()
         # A failed refresh keeps the previous answer; only a first-ever failure stores the empty
         # list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`).

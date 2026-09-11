@@ -603,5 +603,18 @@ def uninstall_desktop(apps_dir: Path | None = None) -> Result:
     if system == "Darwin":
         return _uninstall_macos(apps_dir or Path.home() / "Applications")
     if system == "Windows":
-        return _uninstall_windows()
+        result = _uninstall_windows()
+        # The default terminal is the other thing TCC may have changed on this machine: the
+        # agent's console can only be hidden under conhost (TCC-006), so TCC offers to switch it.
+        # An uninstall that leaves it switched is a change nobody can trace back to us. Only a
+        # switch WE made is ours to take back, and the backup file is the proof of that.
+        from autosound_tcc.core import default_terminal
+
+        if default_terminal.switched_by_us():
+            result.note(
+                "default terminal put back to what it was before TCC changed it"
+                if default_terminal.restore()
+                else "could NOT put the default terminal back — run restore-default-terminal.reg"
+            )
+        return result
     return Result(True)

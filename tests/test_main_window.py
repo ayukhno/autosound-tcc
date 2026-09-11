@@ -3580,3 +3580,21 @@ def test_the_reload_button_also_re_asks_which_models_answer(monkeypatch):
     window._reload_from_disk()
 
     assert asked == [True], "a press means ask NOW — the quiet period is for alt-tabbing"
+
+
+def test_the_catalogue_worker_forces_agy_only_when_asked(monkeypatch):
+    """The startup worker must NOT relaunch agy — that is the Windows startup flash (TCC-006). The
+    ↻ worker must, because the user pressing it is saying something changed. `force` tells them
+    apart, and the worker has to carry it down to `refresh_cli_catalogue`."""
+    _app()
+    seen = []
+    monkeypatch.setattr(
+        main_window.model_choices, "refresh_cli_catalogue",
+        lambda *, force=False: seen.append(force) or {},
+    )
+    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in", lambda: None)
+
+    main_window._CliCatalogueWorker().run()
+    main_window._CliCatalogueWorker(force=True).run()
+
+    assert seen == [False, True]

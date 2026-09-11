@@ -21,12 +21,16 @@ the person can see and type in.
 
 from __future__ import annotations
 
+import ctypes
 import functools
 import inspect
 import os
 import subprocess
 import sys
-from typing import Optional
+import threading
+import time
+from pathlib import Path
+from typing import Callable, Optional
 
 
 def _no_window() -> int:
@@ -76,66 +80,6 @@ def wants_a_console() -> dict:
 AGENT_COMMANDS = frozenset({"claude", "omp", "agy", "node"})
 
 
-def hidden_console() -> dict:
-    """A console for the agent process that nobody ever sees — for its GRANDCHILDREN to inherit.
-
-    The problem this is for (tcc#13): `CREATE_NO_WINDOW` gives the agent NO console at all, which
-    is right for a short probe and wrong for a long-running CLI that spawns dozens of console
-    programs itself. A console program started by a parent with no console gets a NEW console, and
-    a new console is a new window — so TCC's own correct choice at its level produced the flashing
-    one level down, on `python`, `git` and `gh` calls TCC never makes. "Blinking with terminal and
-    win windows", continuously, for a whole working session.
-
-    So: one console, created hidden (`CREATE_NEW_CONSOLE` + `STARTUPINFO` with `SW_HIDE`), which
-    every grandchild attaches to instead of allocating its own. Nothing is drawn because the
-    console window is never shown.
-
-    **Not verified on Windows.** It is written from the documented behaviour of console
-    inheritance and has been run on nothing but a Mac, where every branch here is empty by
-    definition. The corner cases are real — a child that calls `AllocConsole` itself, a
-    non-console binary in the chain — and this note stays until somebody watches it on the machine
-    that has the problem.
-
-    **Which is why it has a switch.** `AUTOSOUND_TCC_AGENT_CONSOLE=0` puts the old behaviour back
-    (no console at all for the agent either). The failure mode this can have is worse than the one
-    it fixes: `SW_HIDE` is exactly the kind of hint that may quietly not take, and then the console
-    is VISIBLE for the whole session instead of blinking for a moment. A person who meets that must
-    be able to turn it off where they are, not wait for a build — the same escape hatch the MCP
-    server and the splash already carry.
-    """
-    # DEFAULT OFF since 2026-09-09, on measurement rather than argument.
-    #
-    # The mechanism was written from the documented behaviour of console inheritance and run on
-    # nothing but a Mac, where every branch of it is empty. On the machine that has the problem it
-    # does the opposite of its purpose: a desktop-wide window watch caught
-    #
-    #     proc=git class=ConsoleWindowClass size=930x516 layered title='…\Git\cmd\git.exe'
-    #
-    # half a second after the main window — the user's "and once after". `SW_HIDE` is a hint, the
-    # note above always said so, and here it does not take: instead of preventing a window the
-    # hidden console CREATES one.
-    #
-    # The same pair had already been measured and not read: on probe2 the ordinary start showed
-    # ONE window and the same start with this switch off showed NONE.
-    #
-    # So the default is off, and the switch now turns it ON for anybody who wants to test whether
-    # a newer Windows behaves as the documentation says.
-    if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "0") != "1":
-        return {}
-    new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
-    if not sys.platform.startswith("win") or new_console is None:
-        return {}
-    info_cls = getattr(subprocess, "STARTUPINFO", None)
-    if info_cls is None:
-        # A Windows without the structure is not a Windows this can hide a console on. The console
-        # would be VISIBLE, which is worse than the flashing it is meant to stop.
-        return {}
-    info = info_cls()
-    info.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
-    info.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
-    return {"creationflags": int(new_console), "startupinfo": info}
-
-
 def is_agent_command(args) -> bool:
     """Does this argv start the agent's own CLI? Used to decide who gets the hidden console.
 
@@ -150,6 +94,137 @@ def is_agent_command(args) -> bool:
     except Exception:  # noqa: BLE001 — an argv we cannot read is not the agent
         return False
     return name.split(".", 1)[0] in AGENT_COMMANDS
+
+
+#: What Windows calls a console window. Under **conhost** that window belongs to our own child and
+#: can be found by its pid; under **Windows Terminal** it belongs to `WindowsTerminal.exe` and a
+#: search by our pid returns nothing at all, so none of this can work there (measured on Windows
+#: 11, 2026-09-11 — that is also why `STARTUPINFO`+`SW_HIDE` never worked: there was no window of
+#: ours to hide). `core/default_terminal.py` is the half that makes conhost the default.
+CONSOLE_CLASS = "ConsoleWindowClass"
+
+#: How long the keeper stays with a process. conhost shows the window back ONCE, a second or so
+#: after the first hide, so this has to outlive that; it must not outlive the session, because a
+#: thread spinning for hours is worse than a window nobody sees.
+CONSOLE_KEEPER_BUDGET_S = 30.0
+
+
+def _console_windows_of(pid: int) -> list:
+    """`(hwnd, class, visible)` for every top-level window owned by `pid`. Empty off Windows."""
+    if not sys.platform.startswith("win"):
+        return []
+    try:
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        signature = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        found: list = []
+
+        def visit(hwnd, _lparam):
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value == pid:
+                name = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(hwnd, name, 256)
+                found.append((hwnd, name.value, bool(user32.IsWindowVisible(hwnd))))
+            return True
+
+        user32.EnumWindows(signature(visit), 0)
+        return found
+    except Exception:  # noqa: BLE001 — a window we cannot enumerate is one we cannot hide
+        return []
+
+
+def _hide_window(hwnd: object) -> None:
+    try:
+        ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    except Exception:  # noqa: BLE001 — hiding is cosmetic; failing at it must not stop a spawn
+        return
+
+
+def hide_console_of(pid: int, *, windows_of=None, hide=None) -> int:
+    """Hide every VISIBLE console window owned by `pid`. Returns how many it hid."""
+    windows_of = windows_of or _console_windows_of
+    hide = hide or _hide_window
+    count = 0
+    for hwnd, name, visible in windows_of(pid):
+        if visible and CONSOLE_CLASS in name:
+            hide(hwnd)
+            count += 1
+    return count
+
+
+def keep_console_hidden(
+    pid: int,
+    *,
+    still_running,
+    hide_once=None,
+    sleep=None,
+    now=None,
+    budget_s: float = CONSOLE_KEEPER_BUDGET_S,
+) -> int:
+    """Keep the agent's console hidden for as long as it runs. Returns how many windows it hid.
+
+    Hiding once is not enough and that is measured, not assumed: hidden 97 ms after the spawn, the
+    console was visible again a second later, because conhost shows its window after we hid it.
+    Run on a daemon thread by `hide_agent_console_later`; injected here so a test can tell a loop
+    from a hang without a real process or a real second passing.
+    """
+    hide_once = hide_once or (lambda: hide_console_of(pid))
+    sleep = sleep or time.sleep
+    now = now or time.monotonic
+    total = 0
+    started = now()
+    while still_running():
+        if now() - started >= budget_s:
+            break
+        total += hide_once()
+        sleep(0.05)
+    return total
+
+
+def agent_console() -> dict:
+    """One console OF ITS OWN for the agent — the opposite of what every other child gets.
+
+    `CREATE_NO_WINDOW` is right for a probe that spawns nothing, and it is exactly wrong here: a
+    console program started by a parent with no console allocates its own, so `claude`'s Bash tool
+    opened a window per command (the flash during a session). Given one console, every shell it
+    starts inherits that console and opens nothing — `cmd`, `bash` and `agy` all ran silently
+    inside a hidden one (measured, 2026-09-11).
+
+    The console is created VISIBLE and hidden immediately afterwards, because `SW_HIDE` at
+    creation is ignored on Windows 11. That leaves one short flash at the start of a session in
+    place of one per command. `AUTOSOUND_TCC_AGENT_CONSOLE=0` puts the old behaviour back.
+    """
+    if os.environ.get("AUTOSOUND_TCC_AGENT_CONSOLE", "1") == "0":
+        return {}
+    flag = getattr(subprocess, "CREATE_NEW_CONSOLE", None)
+    if not sys.platform.startswith("win") or flag is None:
+        return {}
+    return {"creationflags": int(flag)}
+
+
+def hide_agent_console_later(pid: int) -> None:
+    """Start the keeper for a freshly spawned agent. Never raises, never blocks the caller."""
+    if not sys.platform.startswith("win") or not pid:
+        return
+    def still_running() -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except Exception:  # noqa: BLE001 — gone, or not ours to ask about
+            return False
+
+    try:
+        threading.Thread(
+            target=keep_console_hidden,
+            args=(pid,),
+            kwargs={"still_running": still_running},
+            name=f"tcc-hide-console-{pid}",
+            daemon=True,
+        ).start()
+    except Exception:  # noqa: BLE001 — a diagnostic thread that cannot start is not a failure
+        return
 
 
 def hide_console_windows() -> None:
@@ -189,24 +264,42 @@ def hide_console_windows() -> None:
     if original is None or getattr(original, "_autosound_quiet", False):
         return
 
-    hidden = hidden_console()
-
     @functools.wraps(original)
     async def open_process(*args, **kwargs):
-        # The agent's CLI gets a hidden console of its own to hand DOWN to the `python`, `git` and
-        # `gh` it runs (tcc#13); everything else keeps "no console at all", which is right for a
-        # child that spawns nothing.
-        if hidden and is_agent_command(args[0] if args else kwargs.get("command")):
-            kwargs.setdefault("startupinfo", hidden["startupinfo"])
+        # This path had NO spawn log, while the user's Windows startup showed the same programs
+        # going out here — so a session-time flash left no trace of who opened it (2026-09-09).
+        # Logged, not stepped: a blocking gate here would freeze the SDK's own event loop.
+        command = args[0] if args else kwargs.get("command")
+        _note_spawn(command)
+        # THE agent, on the path that actually runs a tuning session. It gets one console of its
+        # own so the shells its Bash tool starts inherit one instead of each allocating a window;
+        # the console is hidden the moment it exists (`agent_console`). Everything else keeps "no
+        # console at all", which is right for a child that spawns nothing.
+        console = agent_console() if is_agent_command(command) else {}
+        if console:
             kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) \
-                | hidden["creationflags"]
-            return await original(*args, **kwargs)
+                | console["creationflags"]
+            process = await original(*args, **kwargs)
+            hide_agent_console_later(getattr(process, "pid", 0))
+            return process
         kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) | flag
         return await original(*args, **kwargs)
 
     open_process._autosound_quiet = True  # type: ignore[attr-defined]
     _subprocesses.open_process = open_process
     anyio.open_process = open_process
+
+
+def _spawn_label(command: object) -> str:
+    """The program and its first argument, no more. A full command line carries project paths and
+    model names, and the log is what people paste into an issue."""
+    if isinstance(command, str):
+        words = command.split()
+    else:
+        words = [str(part) for part in (command or [])]
+    if not words:
+        return ""
+    return " ".join([os.path.basename(words[0]), *words[1:2]])
 
 
 def _note_spawn(command: object) -> None:
@@ -216,23 +309,99 @@ def _note_spawn(command: object) -> None:
     FIRST run of a new version and never again (measured, 2026-09-09), and nothing in this code
     base branches on a version change — so the thing that spawns it is not ours to find by
     guessing. The next first-run log names it.
-
-    Two words only, the program and its first argument. A full command line carries project paths
-    and model names, and this file is what people paste into an issue.
     """
     try:
         from autosound_tcc.core import app_log  # here, not at module scope: app_log imports late
 
-        if isinstance(command, str):
-            words = command.split()
-        else:
-            words = [str(part) for part in (command or [])]
-        if not words:
+        label = _spawn_label(command)
+        if not label:
             return
-        name = os.path.basename(words[0])
-        app_log.logger().info("spawn: %s", " ".join([name, *words[1:2]]))
+        app_log.logger().info("spawn: %s", label)
     except Exception:  # noqa: BLE001 — a diagnostic that can break a spawn is worse than none
         return
+
+
+#: Where the control window writes how many steps it has released. The launcher script sets the
+#: env var; the default keeps script and app agreeing without one. Off unless AUTOSOUND_TCC_STEP=1.
+_STEP_LOCK = threading.Lock()
+_STEP_STATE = {"served": 0}
+
+
+def _reset_step_counter() -> None:
+    """Back to zero — for a fresh process, and for a test that wants ticket 1 to mean the first."""
+    _STEP_STATE["served"] = 0
+
+
+def _step_file() -> Path:
+    env = os.environ.get("AUTOSOUND_TCC_STEP_FILE")
+    if env:
+        return Path(env)
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "autosound-tcc" / "step.control"
+
+
+def _read_step_release() -> int:
+    """How many steps the person has allowed so far. Unreadable or absent counts as zero."""
+    try:
+        return int(_step_file().read_text(encoding="utf-8").strip() or "0")
+    except Exception:  # noqa: BLE001 — a missing or half-written file just means "not yet"
+        return 0
+
+
+def _log_step(message: str) -> None:
+    try:
+        from autosound_tcc.core import app_log
+
+        app_log.logger().info("%s", message)
+    except Exception:  # noqa: BLE001 — a diagnostic must never be able to stop a spawn
+        return
+
+
+def _step_gate(
+    name: object,
+    *,
+    is_main: Optional[Callable[[], bool]] = None,
+    read_release: Optional[Callable[[], int]] = None,
+    sleep: Optional[Callable[[float], None]] = None,
+    now: Optional[Callable[[], float]] = None,
+    budget_s: float = 300.0,
+) -> None:
+    """When AUTOSOUND_TCC_STEP=1, hold this spawn until a person releases it in the control window.
+
+    The point is attribution: with each background spawn waiting for its own Enter, "a window
+    flashed right after STEP 4" names the exact process, instead of a dozen going out in two
+    seconds while the eye tries to keep up (the user's Windows log, 2026-09-09).
+
+    The MAIN thread is never held. Blocking the GUI thread freezes the window, and a frozen
+    top-level window is what Windows redraws as a grey "Not Responding" ghost — itself a flash,
+    and the very thing being hunted. So only the background spawns (the update check, the CLI
+    catalogue, the reviewer) are stepped; the few main-thread probes are logged and go straight
+    through, named in the instructions so their windows are not mistaken for a finding.
+
+    Everything is injected for the same reason `_wait_until_painted` injects its clock: so a test
+    can tell a wait from a hang without a real thread or a real second passing. A forgotten Enter
+    is not a hang — past `budget_s` the spawn proceeds on its own and says so.
+    """
+    if os.environ.get("AUTOSOUND_TCC_STEP") != "1":
+        return
+    is_main = is_main or (lambda: threading.current_thread() is threading.main_thread())
+    if is_main():
+        return
+    read_release = read_release or _read_step_release
+    sleep = sleep or time.sleep
+    now = now or time.monotonic
+    label = _spawn_label(name) or str(name)
+    with _STEP_LOCK:  # one spawn waits at a time, so tickets match the order they arrive
+        _STEP_STATE["served"] += 1
+        ticket = _STEP_STATE["served"]
+        _log_step(f"STEP {ticket}: waiting to spawn {label} — press Enter to allow")
+        started = now()
+        while read_release() < ticket:
+            if now() - started >= budget_s:
+                _log_step(f"STEP {ticket}: no Enter in {budget_s:.0f}s — proceeding with {label}")
+                return
+            sleep(0.05)
+        _log_step(f"STEP {ticket}: allowed {label}")
 
 
 def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
@@ -272,21 +441,20 @@ def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
     def __init__(self, *args, **kwargs):  # noqa: N807 (patching a dunder on purpose)
         command = args[0] if args else kwargs.get("args")
         _note_spawn(command)
+        _step_gate(command)  # held here, before the child exists, when AUTOSOUND_TCC_STEP=1
         flag = _no_window()
+        # The agent's CLI gets a console of its own to hand DOWN, exactly as in the async path:
+        # those programs spawn `node`, `git` and `gh` themselves, and a parent with NO console
+        # makes each grandchild allocate one — which is a window. The startup log from the user's
+        # Windows machine (2026-09-09) shows them going out this ordinary way too: `agy models`
+        # twice and `claude.EXE auth`, nine processes in two seconds.
+        console = agent_console() if is_agent_command(command) else {}
         if flag and not kwargs.get("creationflags") and len(args) <= positional:
-            # The agent's CLI gets a console of its own to hand DOWN, exactly as in the async
-            # path: those programs spawn `node`, `git` and `gh` themselves, and a parent with NO
-            # console makes each grandchild allocate one — which is a window. This treatment was
-            # wired into `hide_console_windows`'s anyio patch only, while the startup log from the
-            # user's Windows machine (2026-09-09) shows the same programs going out the ordinary
-            # way: `agy models` twice and `claude.EXE auth`, nine processes in two seconds.
-            hidden = hidden_console() if is_agent_command(command) else {}
-            if hidden:
-                kwargs["creationflags"] = hidden["creationflags"]
-                kwargs.setdefault("startupinfo", hidden["startupinfo"])
-            else:
-                kwargs["creationflags"] = flag
-        return original(self, *args, **kwargs)
+            kwargs["creationflags"] = console["creationflags"] if console else flag
+        started = original(self, *args, **kwargs)
+        if console:
+            hide_agent_console_later(getattr(self, "pid", 0))
+        return started
 
     __init__._autosound_quiet = True  # type: ignore[attr-defined]
     cls.__init__ = __init__  # type: ignore[method-assign]
