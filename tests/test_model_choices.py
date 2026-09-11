@@ -264,6 +264,70 @@ def test_an_installed_cli_that_never_answered_is_named_rather_than_hidden(monkey
     assert mc.cli_routes_without_models() == ["agy"]
 
 
+def test_windows_never_asks_agy_on_its_own_because_asking_shows_a_window(monkeypatch):
+    """The one measured cause of TCC-006's remaining flashes.
+
+    `agy models` opens a console window Windows will not let us hide, and FOUR paths reach the
+    catalogue without anybody pressing anything — startup, the project gate, self-check, and
+    `changeEvent`, which fires every time the main window becomes active. The last one turns each
+    alt-tab and each closing dialog into a flash, which is why a save-and-exit produced up to ten
+    (user, 2026-09-11). The quiet period did not cover it: a route that answers with nothing is
+    asked again 10 minutes later, and twice each time (the retry inside `_fetch_agy_choices`).
+    """
+    from autosound_tcc.core import model_choices as mc
+
+    asked: list[str] = []
+    monkeypatch.setattr(mc, "_asking_costs_a_window", lambda: True)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: asked.append("agy") or [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+    mc.refresh_cli_catalogue()
+
+    assert asked == []
+
+
+def test_a_press_still_asks_agy_on_windows(monkeypatch):
+    """`force` is the ↻ button, and a press is not an alt-tab: the rule above exists to stop window
+    switching from spawning probes, not to make a button do nothing."""
+    from autosound_tcc.core import model_choices as mc
+
+    asked: list[str] = []
+    monkeypatch.setattr(mc, "_asking_costs_a_window", lambda: True)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: asked.append("agy") or [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue(force=True)
+
+    assert asked == ["agy"]
+
+
+def test_a_route_nobody_asked_is_not_reported_as_one_that_answered_with_nothing(monkeypatch):
+    """Two different facts, and the warning text is only true for one of them. "listed no models —
+    its own login may have expired" sends somebody to re-authenticate a CLI that works fine; on
+    Windows TCC simply never ran the command."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setattr(mc, "_asking_costs_a_window", lambda: True)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+
+    mc.refresh_cli_catalogue()
+
+    assert mc.cli_routes_without_models() == []
+    assert mc.cli_routes_not_asked() == ["agy"]
+
+    mc.refresh_cli_catalogue(force=True)  # the press: now it really did answer with nothing
+    assert mc.cli_routes_without_models() == ["agy"]
+    assert mc.cli_routes_not_asked() == []
+
+
 def test_a_retired_key_resolves_through_the_local_alias(tmp_path, monkeypatch):
     """The name in a project's settings outlives the model. One indirection reaches every place
     that name was written down — other projects, journal entries, whatever the skill prescribed."""

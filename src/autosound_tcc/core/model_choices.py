@@ -363,7 +363,22 @@ def cli_routes_without_models() -> list[str]:
     return [
         harness
         for harness in ("agy",)
-        if cli_available(harness) and not _CLI_CACHE.get(harness)
+        if cli_available(harness) and not _CLI_CACHE.get(harness) and harness in _LAST_ASKED
+    ]
+
+
+def cli_routes_not_asked() -> list[str]:
+    """CLIs that are installed and that this machine does not ask on its own.
+
+    A different fact from the one above, and the warning text only fits one of them: "listed no
+    models — its own login may have expired" is a lie when nobody ran the command, and it sends
+    somebody to re-authenticate a CLI that works. On Windows asking costs a visible window, so
+    nothing automatic asks; the ↻ button does.
+    """
+    return [
+        harness
+        for harness in ("agy",)
+        if cli_available(harness) and not _CLI_CACHE.get(harness) and harness not in _LAST_ASKED
     ]
 
 
@@ -381,8 +396,31 @@ EMPTY_ROUTE_RETRY_S = 600.0
 _LAST_ASKED: dict[str, float] = {}
 
 
+def _asking_costs_a_window() -> bool:
+    """Does running `agy models` here put a window on the user's screen.
+
+    On Windows it does, and nothing we can pass stops it: `CREATE_NO_WINDOW` is hosted by Windows
+    Terminal, a hidden `CREATE_NEW_CONSOLE` is ignored by `SW_HIDE`, and agy drags a node child
+    that opens its own (probe12/probe27, 2026-09-11). Everywhere else the command is silent.
+    """
+    return os.name == "nt"
+
+
 def _skip_agy(now) -> bool:
-    """Leave `agy` alone: either it has answered and the cache serves, or it just failed."""
+    """Leave `agy` alone: asking would cost a window, it has answered already, or it just failed.
+
+    The window clause is the whole of the flashing still reported after the consoles were settled.
+    FOUR paths reach this catalogue with nobody pressing anything — startup, the project gate,
+    self-check, and `changeEvent`, which fires every time the main window becomes active. That last
+    one turns every alt-tab and every closing dialog into a run of `agy models`, which is how
+    saving and leaving produced up to ten flashes in a row (user, 2026-09-11). The quiet period
+    below does not cover it: a route that answers with nothing is asked again ten minutes later,
+    and twice each time (the retry inside `_fetch_agy_choices`).
+
+    `force` bypasses this entirely, so the ↻ button still asks — a press is not an alt-tab.
+    """
+    if _asking_costs_a_window():
+        return True
     if _CLI_CACHE.get("agy"):
         return True
     asked = _LAST_ASKED.get("agy")

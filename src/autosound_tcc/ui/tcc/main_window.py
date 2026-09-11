@@ -3039,6 +3039,15 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(
                 i18n.t("cliRouteQuiet").format(routes=", ".join(quiet)), level="warn"
             )
+        # Not the same sentence, because it is not the same fact. On Windows asking `agy models`
+        # puts a console window on screen that nothing can hide, so no automatic path asks it —
+        # and telling somebody their login expired when TCC never ran the command sends them to
+        # re-authenticate a CLI that works (TCC-006, 2026-09-11).
+        unasked = model_choices.cli_routes_not_asked()
+        if unasked:
+            self._status_strip.notify(
+                i18n.t("cliRouteNotAsked").format(routes=", ".join(unasked)), level="info"
+            )
 
     def _on_rew_titles_changed(self) -> None:
         """REW's list changed — redraw the checklist, and check what the round asked for (SCR-040).
