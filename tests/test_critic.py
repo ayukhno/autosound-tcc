@@ -402,3 +402,41 @@ def test_the_clipboard_answer_says_what_the_cli_actually_replied():
 
     assert "is not available" in why, f"the CLI's own words, not the banner: {why!r}"
     assert "Ctrl+V" not in why, "and not the instructions that pushed them off the end"
+
+
+def test_a_permission_refusal_names_the_file_the_key_and_the_value():
+    """The reviewer's own words are precise enough to act on — but only to somebody who already
+    knows where that CLI keeps its settings, and nobody did. A session on the machine looked in
+    `~/.agy` and `%APPDATA%\\agy`, found nothing, and advised `--dangerously-skip-permissions`:
+    a bigger hammer than the situation needs, and one that leaves no record of a decision.
+
+    The real path was read out of the binary: `~/.gemini/antigravity-cli/settings.json`."""
+    from autosound_tcc.core import critic
+
+    fix = critic.remedy(
+        ">> agy: permission required for read_file(project.json)",
+        harness="agy", project_dir="/cars/golf-r")
+
+    assert critic.AGY_SETTINGS in fix, "which file"
+    assert "trustedWorkspaces" in fix, "which key"
+    assert "/cars/golf-r" in fix, "which value"
+    assert "always-proceed" in fix, "and the wider answer, named as wider"
+
+
+def test_a_rejected_key_says_it_is_tried_first_and_costs_the_time():
+    """It is not just wrong — it is wrong FIRST. Every call spends the API attempt before falling
+    back to the CLI, which is the path that works on a subscription login."""
+    from autosound_tcc.core import critic
+
+    fix = critic.remedy("Gemini API: HTTP 400 Bad Request", harness="agy")
+
+    assert "GEMINI_API_KEY" in fix and "BEFORE" in fix
+
+
+def test_nothing_is_invented_when_the_words_are_not_recognised():
+    """A CLI is free to reword its errors. A miss must degrade to "here is what it said" rather
+    than to a confident instruction about the wrong thing."""
+    from autosound_tcc.core import critic
+
+    assert critic.remedy("something nobody has seen before", harness="agy") == ""
+    assert critic.remedy("", harness="agy") == ""

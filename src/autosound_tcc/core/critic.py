@@ -352,6 +352,61 @@ def _why_clipboard(stderr: str) -> str:
     return "\n".join(lines[-8:])
 
 
+#: Where the Antigravity CLI keeps its settings. Read out of the binary itself (2026-09-11),
+#: because the obvious guesses are all wrong: not `~/.agy`, not `%APPDATA%\agy`. A session on the
+#: Arbiter's machine looked in both, found nothing, and concluded the file had to be created.
+AGY_SETTINGS = "~/.gemini/antigravity-cli/settings.json"
+
+#: What the reviewer's own words look like when it is one of the three things we can act on. Matched
+#: loosely and case-insensitively: these come from a CLI that is free to reword them, so a miss must
+#: degrade to "here is what it said" rather than to a wrong instruction.
+_PERMISSION_WORDS = ("permission", "not allowed", "trust", "дозвіл", "settings.json")
+_BAD_KEY_WORDS = ("http 400", "400 bad request", "api key", "api_key", "invalid key")
+_BAD_MODEL_WORDS = ("model", "not available", "unknown model", "не підтримується")
+
+
+def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
+    """ONE concrete thing to do, or "" when we cannot name one honestly.
+
+    The reviewer's own words are now carried out (`_why_clipboard`), and they are precise enough to
+    act on — but only to somebody who already knows where that CLI keeps its settings. Nobody did:
+    a session on the machine advised `--dangerously-skip-permissions`, which is a bigger hammer
+    than the situation needs and leaves no trace of a decision.
+
+    So this turns a diagnosis into an instruction: which file, which key, which value. A message
+    that explains a failure without naming the next action is the same dead end as `mode:
+    clipboard` with nothing in it — one step further along, and still nowhere.
+    """
+    said = (detail or "").lower()
+    if not said:
+        return ""
+    if any(word in said for word in _PERMISSION_WORDS):
+        where = project_dir or config.project_dir()
+        return (
+            f"the reviewer CLI is asking permission it has no standing answer for. Put this "
+            f"project in its trusted list: open `{AGY_SETTINGS}` and add \"{where}\" to "
+            f"`trustedWorkspaces`. `\"toolPermission\": \"always-proceed\"` in the same file "
+            f"answers it for every folder at once — a wider choice, and one to make on purpose."
+        ) if (harness or "").lower() == "agy" else (
+            f"the reviewer CLI is asking permission it has no standing answer for. It needs that "
+            f"answer in its own settings; this project is at {where}."
+        )
+    if any(word in said for word in _BAD_KEY_WORDS):
+        return (
+            "`GEMINI_API_KEY` is set and the API rejected it. It is tried BEFORE the CLI, so every "
+            "call spends that time first and then falls back. Replace the key or remove the "
+            "variable — with it gone the call goes straight to the CLI, which is the path that "
+            "works on a subscription login."
+        )
+    if any(word in said for word in _BAD_MODEL_WORDS):
+        return (
+            "the reviewer CLI refused the model it was given. Model names drift and the CLI prints "
+            "its own list; pick another Critic in TCC's footer, or press ↻ beside it to re-read "
+            "what this machine can actually run."
+        )
+    return ""
+
+
 def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Optional[Path] = None) -> None:
     """Append one reviewer call to an append-only log.
 

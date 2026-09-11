@@ -8,8 +8,9 @@ differ, and the newer of them is the fresh install.
 
 ## [v0.1.36] — 2026-09-11 · the flash was never a subprocess, and every watcher that polled said it was gone
 
-Paired with method `c4ca8928518ff446a92274eb211d50de617fff15` — the tag on that commit is
-**`v3.0.47`**.
+Paired with method `c4c8e08344c6c78d76abd4aa00359376c3bd9fbf` — the tag on that commit is
+**`v3.0.48`**, and one of its two commits answers a ticket filed from here: `TCC-009`, the
+`Upgrading` flag now reads the shape of the note rather than looking for a colon.
 
 The suite at the release: 1874 passed, 1 skipped (1653 at `v0.1.35`).
 
@@ -96,6 +97,16 @@ our thread, so the Python stack that created the window is still on the stack wh
 - **`AUTOSOUND_TCC_FLASH_PROBE`** runs a chosen program three times before the main window and
   twice after, so a person can COUNT. Also the Arbiter's idea, and a better instrument than either
   watcher: an eye counting to three has none of the blind spots a poll has.
+
+- **A failure now names the one thing to do about it.** The reviewer's own words are precise
+  enough to act on, but only to somebody who already knows where that CLI keeps its settings —
+  and nobody did: a session on the machine looked in `~/.agy` and `%APPDATA%\agy`, found nothing,
+  and advised `--dangerously-skip-permissions`. The path was read out of the binary instead:
+  `~/.gemini/antigravity-cli/settings.json`. Three answers TCC can now give by name — the project
+  is not in `trustedWorkspaces`; `GEMINI_API_KEY` is set and rejected and is tried FIRST, so every
+  call pays for it before falling back; the CLI refused the model it was given. Anything it does
+  not recognise degrades to the CLI's own words rather than to a confident instruction about the
+  wrong thing.
 
 ### Known, and not ours to fix
 
