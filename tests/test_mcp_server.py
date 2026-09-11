@@ -11,6 +11,7 @@ import json
 import re
 import sys
 from concurrent.futures import Future
+from pathlib import Path
 
 import pytest
 
@@ -1508,3 +1509,35 @@ def test_a_read_only_advertisement_is_written_anyway(tmp_path, monkeypatch):
     written = mod.write_mcp_config(tmp_path, 8765, "token")
 
     assert json.loads(written.read_text(encoding="utf-8"))["mcpServers"]["tcc"]["type"] == "http"
+
+
+def test_an_unreadable_file_is_not_reported_as_hidden(monkeypatch):
+    """`GetFileAttributesW` returns a DWORD, and undeclared ctypes makes its error value unreachable.
+
+    All-ones — `INVALID_FILE_ATTRIBUTES`, what the API returns when it cannot read the file at all
+    — arrives as a signed `-1` and never equals the `0xFFFFFFFF` it is compared against. The error
+    branch is dead, and `-1 & FILE_ATTRIBUTE_HIDDEN` is truthy, so a file that could not be read
+    reports back as hidden — and `_rehide` then ORs a bit into a number that is not an attribute
+    set. Same class as the truncated handle in `core/child.py`, found by sweeping for it.
+    """
+    import ctypes
+
+    from autosound_tcc.core import mcp_server
+
+    class _Call:
+        def __init__(self, result):
+            self.result = result
+            self.restype = None
+            self.argtypes = None
+
+        def __call__(self, *_args):
+            return self.result
+
+    class _FakeKernel32:
+        def __init__(self):
+            self.GetFileAttributesW = _Call(0xFFFFFFFF)  # "I could not read this"
+
+    fake = _FakeKernel32()
+
+    assert mcp_server._hidden(Path("nowhere.json"), kernel32=fake) is False
+    assert fake.GetFileAttributesW.restype is ctypes.c_uint32, "a DWORD is not a signed int"

@@ -61,12 +61,32 @@ def _alloc_console() -> bool:
     return True
 
 
-def _write_to_console(message: str) -> None:
-    """Straight to the console handle, not through `sys.stdout`: a GUI process may not have one."""
+#: `GetStdHandle`'s argument for standard output. Named rather than spelled `-11` at the call,
+#: because a bare negative literal next to a handle is the kind of thing a reader silently "fixes".
+_STD_OUTPUT_HANDLE = -11
+
+
+def _write_to_console(message: str, *, kernel32=None) -> None:
+    """Straight to the console handle, not through `sys.stdout`: a GUI process may not have one.
+
+    The types are declared for exactly the reason they are declared around `OpenProcess` below,
+    and this call site was missed when that one was fixed: a HANDLE is pointer-sized, ctypes
+    defaults a return to a C int, and a 64-bit handle comes back with its top half gone. Passing
+    an undeclared one back IN truncates it a second time.
+
+    What it would cost here is one line of startup banner going missing, with no exception and no
+    log — which is precisely why nobody would ever have found it. Same class, smaller blast.
+    """
+    kernel32 = kernel32 or ctypes.windll.kernel32
     text = message + "\r\n"
     written = ctypes.c_ulong(0)
-    handle = ctypes.windll.kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
-    ctypes.windll.kernel32.WriteConsoleW(handle, text, len(text), ctypes.byref(written), None)
+    kernel32.GetStdHandle.restype = ctypes.c_void_p  # a handle, not a C int
+    handle = kernel32.GetStdHandle(_STD_OUTPUT_HANDLE)
+    kernel32.WriteConsoleW.argtypes = [
+        ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p,
+    ]
+    kernel32.WriteConsoleW(handle, text, len(text), ctypes.byref(written), None)
 
 
 def _hide_own_console() -> int:

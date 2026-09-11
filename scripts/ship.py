@@ -130,7 +130,13 @@ class Plan:
 
 
 def run(argv, cwd: Path, check: bool = True) -> str:
-    done = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True)
+    # `encoding` spelled out, because `text=True` alone decodes with the machine's locale code
+    # page — cp1251/cp866 on the Windows box this project is released from. Every subprocess call
+    # in `src/` was hardened for that after a Cyrillic answer came back as mojibake
+    # (`core/process_writer.py` carries the story); this helper, which runs every `git` and `gh`
+    # command in the release, was missed. A Cyrillic commit subject is enough to trip it.
+    done = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     if check and done.returncode != 0:
         raise Stop(f"{' '.join(argv)} -> {done.returncode}\n{done.stderr.strip()}")
     return (done.stdout or "").strip()
@@ -254,7 +260,7 @@ def relock(root: Path) -> None:
     if not tracked(root, "uv.lock"):
         return
     done = subprocess.run(["uv", "lock", "--quiet"], cwd=str(root),
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
     if done.returncode != 0:
         raise Stop("uv.lock is tracked and `uv lock` failed, so the lock would keep the old "
                    f"version while the tag says otherwise:\n{done.stderr.strip()}")

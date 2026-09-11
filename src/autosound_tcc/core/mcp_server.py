@@ -49,6 +49,7 @@ Nothing on this surface writes project data any more.
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import os
 import secrets
@@ -1319,14 +1320,27 @@ _FILE_ATTRIBUTE_HIDDEN = 0x02
 _INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
 
 
-def _hidden(path: Path) -> bool:
+def _file_attributes(path: Path, kernel32) -> int:
+    """`GetFileAttributesW` with its types declared, which is what makes the error path readable.
+
+    The return is a DWORD. Undeclared, ctypes hands it back as a signed C int, so the API's
+    "I could not read this" value — `INVALID_FILE_ATTRIBUTES`, all ones — arrives as `-1` and
+    never equals the `0xFFFFFFFF` it is compared against. The error branch is then dead, and
+    `-1 & FILE_ATTRIBUTE_HIDDEN` is truthy: a file that could not be read at all reports back as
+    hidden. Silent, and wrong in the direction that makes `_rehide` act on a number that is not
+    an attribute set. Same class as the truncated handle in `core/child.py`.
+    """
+    kernel32.GetFileAttributesW.restype = ctypes.c_uint32  # DWORD, not a signed int
+    kernel32.GetFileAttributesW.argtypes = [ctypes.c_wchar_p]
+    return kernel32.GetFileAttributesW(str(path))
+
+
+def _hidden(path: Path, *, kernel32=None) -> bool:
     """Does this file carry Windows' HIDDEN attribute? False everywhere else, and on any error."""
-    if os.name != "nt":
+    if os.name != "nt" and kernel32 is None:
         return False
     try:
-        import ctypes
-
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
+        attrs = _file_attributes(path, kernel32 or ctypes.windll.kernel32)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 — no ctypes, no windll: treat it as not hidden
         return False
     return attrs != _INVALID_FILE_ATTRIBUTES and bool(attrs & _FILE_ATTRIBUTE_HIDDEN)
@@ -1337,12 +1351,11 @@ def _rehide(path: Path) -> None:
     if os.name != "nt":
         return
     try:
-        import ctypes
-
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        attrs = _file_attributes(path, kernel32)
         if attrs != _INVALID_FILE_ATTRIBUTES:
-            ctypes.windll.kernel32.SetFileAttributesW(  # type: ignore[attr-defined]
-                str(path), attrs | _FILE_ATTRIBUTE_HIDDEN)
+            kernel32.SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+            kernel32.SetFileAttributesW(str(path), attrs | _FILE_ATTRIBUTE_HIDDEN)
     except Exception:  # noqa: BLE001 — the file is written; its attribute is cosmetic beside that
         pass
 

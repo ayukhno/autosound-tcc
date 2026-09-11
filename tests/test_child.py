@@ -613,3 +613,35 @@ def test_our_own_console_is_kept_hidden_not_just_hidden_once(monkeypatch):
     child.open_app_console("x", alloc=lambda: True, write=lambda _t: None, hide=lambda: 1)
 
     assert watched == [os.getpid()], "our own console needs the keeper too"
+
+
+def test_the_startup_banner_declares_its_types_too(monkeypatch):
+    """The same truncation, at the call site that was missed when `OpenProcess` was fixed.
+
+    `GetStdHandle` returns a HANDLE. Undeclared, ctypes hands it back as a C int and the top half
+    is gone; passing it back into `WriteConsoleW` undeclared truncates it a second time. The cost
+    is only the startup line going missing — no exception, no log — which is exactly why it would
+    have sat there. A handle is pointer-sized everywhere it travels, in or out.
+    """
+    import ctypes
+
+    class _Call:
+        def __init__(self, result):
+            self.result = result
+            self.restype = None
+            self.argtypes = None
+
+        def __call__(self, *_args):
+            return self.result
+
+    class _FakeKernel32:
+        def __init__(self):
+            self.GetStdHandle = _Call(0x1_2345_6789)  # wider than 32 bits, like a real handle
+            self.WriteConsoleW = _Call(1)
+
+    fake = _FakeKernel32()
+    child._write_to_console("Autosound TCC is starting", kernel32=fake)
+
+    assert fake.GetStdHandle.restype is ctypes.c_void_p, "a handle must have its type declared"
+    assert fake.WriteConsoleW.argtypes is not None, "and so must what receives it"
+    assert fake.WriteConsoleW.argtypes[0] is ctypes.c_void_p, "the handle goes back in whole"
