@@ -11,7 +11,7 @@ differ, and the newer of them is the fresh install.
 Paired with method `c4ca8928518ff446a92274eb211d50de617fff15` — the tag on that commit is
 **`v3.0.47`**.
 
-The suite at the release: 1871 passed, 1 skipped, 519 s (1653 at `v0.1.35`).
+The suite at the release: 1874 passed, 1 skipped (1653 at `v0.1.35`).
 
 A day of TCC-006, most of it spent measuring the wrong thing. Windows flashed on screen once per
 MCP call and twice at startup, and every instrument built to catch them **polled the desktop** —
@@ -64,6 +64,14 @@ our thread, so the Python stack that created the window is still on the stack wh
   `AllocConsole` does not redirect them, so the console appeared, held its moment and was blank —
   the unexplained black rectangle the message exists to prevent. It opens `CONOUT$` now.
 
+- **The clipboard answer reported the wrong end of its own string** (TCC-003). It took the last
+  six lines of the reviewer's stderr, and in that mode those are always the same six: the banner
+  the script prints on its way out ("open any AI chat and press Ctrl+V"). The reason is printed
+  directly above it and was pushed off the end every time — thirteen calls in a row said
+  `mode: clipboard` with nothing to act on. The first call after the fix named the cause in one
+  line, and it was not TCC's: the reviewer CLI wants a permission entry it has no settings file
+  for, and an invalid `GEMINI_API_KEY` is tried first and spends the time before falling back.
+
 - **TCC sent the reviewer's model but not its binary** (TCC-002). The project said
   `critic: agy:…`, the machine exported `GEMINI_BIN=gemini`, and the reviewer script reads the env
   var first — so ten calls went to a CLI nobody picked, down a path Google has closed, and came
@@ -88,6 +96,12 @@ our thread, so the Python stack that created the window is still on the stack wh
 - **`AUTOSOUND_TCC_FLASH_PROBE`** runs a chosen program three times before the main window and
   twice after, so a person can COUNT. Also the Arbiter's idea, and a better instrument than either
   watcher: an eye counting to three has none of the blind spots a poll has.
+
+### Known, and not ours to fix
+
+- **The reviewer CLI opens a terminal of its own when it needs to ask permission.** It is the only
+  window left on a Windows session, and it is `agy` asking, not TCC spawning: a prompt needs a
+  terminal to be typed into. Configuring the CLI's permissions settles it.
 
 ### Disproven, and removed rather than left switched off
 
