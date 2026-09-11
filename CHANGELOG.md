@@ -6,6 +6,87 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.37] — 2026-09-11 · everything that was "checked" and still wrong: a colour never drawn, a guard counting the wrong thing, a language nobody was told
+
+Paired with method `4c89fdc7527ac8d6fb5a80ca526613d585800e06` — the tag on that commit is
+**`v3.0.49`**, and it answers a ticket filed from here the same evening: hub `SKL-032`, the
+Critic and the Advisor merged into one role.
+
+The suite at the release: 1889 passed, 1 skipped.
+
+Eleven findings collected from the Arbiter's own testing, in their words, and worked in waves —
+what unblocks them first, not what is worst. The pattern under most of them is one thing: a check
+that was SATISFIED while the thing it guarded was broken.
+
+### Fixed
+
+- **"Don't ask" asked anyway, about a command that changes nothing.** The gate put
+  `grep -n "A\|B" file | head -25` in front of the Arbiter as "a command you cannot undo", in a
+  mode they had set to never ask. Commands were split on `;|&` by regex, ignoring quotes — so the
+  `|` inside a grep pattern cut the line mid-quote, `shlex` refused the fragments, and
+  "unparseable is not safe" fired. Every alternation was affected: `grep "a\|b"`, `awk -F'|'`,
+  even `echo "a|b"`. A dialog that fires on those is what teaches somebody to click through
+  without reading, which is worse protection than asking nothing.
+
+- **The permission bar had no attention colour at all — and neither did seven other things.**
+  `mix()` takes a percentage; eight calls passed `0.10`…`0.45`, meaning a tenth of one percent.
+  Computed, the bar was `rgb(255, 255, 255)` on light and the panel colour on dark. So the orange
+  background asked for on 2026-09-11 was never drawn, the bar read as an ordinary panel, the
+  Arbiter did not see the question, and a five-minute wait for their answer looked like the
+  application had hung. What else went missing with it was not decoration: `chan-toggle-on` /
+  `-wait` / `-late` are the CHANNEL'S STATE, and all three drew as a plain button.
+
+- **A dropped connection left the session looking ready.** `API Error: The response stopped
+  arriving` arrives as ordinary assistant text, so nothing marks the turn as failed: the next
+  message goes nowhere and the window says nothing. The Arbiter hit it twice and found the way out
+  by quitting TCC. The turn now names what happened and which control fixes it.
+
+- **The interface, the project and the question in Ukrainian; the answer in English.** The
+  language was in `get_tcc_state` and nowhere else — the model could learn it by ASKING, and the
+  first turn answers before it has asked. A fact available on request is not an instruction. The
+  interview route had carried the rule since `tcc#8`; the tuning session never got it.
+
+- **Button labels clipped for the third time.** `Поза проєктом` rendered as `Іоза проєктом`. The
+  guard for this existed and was satisfied: labels are capped at 26 characters and that one is 13.
+  Counting characters cannot catch it — what clips is rendered width, a font and a platform and a
+  language. The remedy was already in this codebase, dated: the quit dialog met the same thing on
+  2026-08-19 and calls `adjustSize()`. The permission dialog never did.
+
+- **An installed, logged-in `agy` was invisible while `codex`, which was not installed, was
+  advertised.** Refusing to ask on Windows removed a console flash and cost the route entirely.
+  Asked once per machine now, written to disk, never again unless ↻ — and the same change turned
+  four red CI tests green, tests that had been saying exactly this for two days.
+
+- **`GEMINI_ADVISOR_MODEL` is no longer written** (hub `SKL-032`). Two model variables for two
+  tasks is what made thirteen reviewer calls come back as clipboard packages with `model: null`:
+  TCC set the critic's, the advisor door looked for its own. Upstream merged the roles in
+  `v3.0.49`; the test that pinned the old contract was inverted with it rather than deleted.
+
+- **Windows CI, red since at least 2026-09-07 with nobody watching.** Of eight failures, none was
+  a product defect: four were the `agy` route above, and four were tests asserting the developer's
+  machine — `XDG_CONFIG_HOME` and `APPDATA` assumed unset, a directory named with a `"` that
+  Windows forbids, 102 rows assumed to overflow a column, and a log directory resolved through
+  `HOME` when Windows uses `LOCALAPPDATA`. `HOME` was enough only because nothing else is set
+  here. The isolation fixture now closes every door, once, instead of ten tests closing one each.
+
+### Changed
+
+- **A failure names the one thing to do about it.** The reviewer's own words were already carried
+  out; they only help somebody who knows where that CLI keeps its settings, and nobody did — a
+  session on the machine advised `--dangerously-skip-permissions`. The path was read out of the
+  binary: `~/.gemini/antigravity-cli/settings.json`, with `trustedWorkspaces` and `toolPermission`.
+
+- **The clipboard answer stopped reporting the wrong end of its own string** (TCC-003). It took
+  the last six lines of stderr, and in that mode those are always the banner the script prints on
+  its way out. The reason sits directly above it and was pushed off the end every time.
+
+- **`cliRouteNotAsked` removed rather than left switched off.** It described behaviour that no
+  longer exists, in four languages, after the `agy` route came back.
+
+### Removed
+
+- The dead "route nobody asked" branch and its four translations.
+
 ## [v0.1.36] — 2026-09-11 · the flash was never a subprocess, and every watcher that polled said it was gone
 
 Paired with method `c4c8e08344c6c78d76abd4aa00359376c3bd9fbf` — the tag on that commit is
