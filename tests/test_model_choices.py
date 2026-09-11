@@ -254,6 +254,7 @@ def test_an_installed_cli_that_never_answered_is_named_rather_than_hidden(monkey
     from autosound_tcc.core import model_choices as mc
 
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
 
@@ -355,6 +356,7 @@ def test_the_models_api_refreshes_the_claude_list_when_a_key_exists(tmp_path, mo
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     payload = json.dumps({"data": [
         {"id": "claude-opus-6", "display_name": "Claude Opus 6"},
         {"id": "claude-opus-5", "display_name": "Claude Opus 5"},
@@ -425,6 +427,7 @@ def test_the_catalogue_survives_a_launch_where_the_cli_says_nothing(tmp_path, mo
     Generator's own vendor."""
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(mc, "_UNCONFIRMED", set())
     real = [mc.Choice(harness="agy", model="gemini-3.1-pro-high",
                       label="Gemini 3.1 Pro (High)", provider="google")]
@@ -437,6 +440,7 @@ def test_the_catalogue_survives_a_launch_where_the_cli_says_nothing(tmp_path, mo
 
     # Next launch: nothing in memory, and the CLI answers nothing at all.
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(mc, "_UNCONFIRMED", set())
     monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
 
@@ -450,6 +454,7 @@ def test_a_malformed_cache_reads_as_no_memory(tmp_path, monkeypatch):
     """This file exists to keep a picker populated; a typo in it must not stop the window."""
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(mc, "_UNCONFIRMED", set())
     mc.catalogue_cache_path().parent.mkdir(parents=True, exist_ok=True)
     mc.catalogue_cache_path().write_text("{not json", encoding="utf-8")
@@ -739,6 +744,7 @@ def test_agy_is_fetched_on_the_first_ever_refresh_when_nothing_is_cached(monkeyp
     fresh = [mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)")]
     calls = []
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: calls.append(1) or list(fresh))
     monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
@@ -763,3 +769,31 @@ def test_a_forced_refresh_relaunches_agy_even_when_cached(monkeypatch):
     mc.refresh_cli_catalogue(force=True)
 
     assert calls == [1], "a forced refresh asks agy again even when it is cached"
+
+
+def test_a_route_that_answered_with_nothing_is_not_re_asked_every_time(monkeypatch):
+    """The catalogue refreshes whenever the window is activated — which is every turn the agent
+    takes — and the skip only covered a route that had ANSWERED. So a route that keeps failing was
+    probed for ever, and on Windows each probe is a visible console: `agy` opens one that no
+    creation flag can hide. Measured by the Arbiter: one `agy.exe` per `report_phase` call.
+
+    Remembering that we ASKED, not just what came back, is the whole fix. A route that has never
+    answered is precisely the one that will go on not answering; re-asking it every twenty seconds
+    buys nothing and costs a window each time."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    calls: list = []
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: calls.append(1) or [])
+
+    mc.refresh_cli_catalogue(now=lambda: 0.0)
+    assert calls == [1], "nothing cached and never asked: ask once"
+
+    mc.refresh_cli_catalogue(now=lambda: 30.0)
+    assert calls == [1], "asked half a minute ago and got nothing: do not ask again"
+
+    mc.refresh_cli_catalogue(now=lambda: 5000.0)
+    assert calls == [1, 1], "much later, it is worth one more try"

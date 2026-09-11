@@ -596,3 +596,20 @@ def test_the_liveness_probe_declares_its_types_so_a_handle_is_not_truncated(monk
     assert child.process_is_running(4242, kernel32=fake) is True
     assert fake.OpenProcess.restype is not None, "a handle must have its type declared"
     assert fake.WaitForSingleObject.argtypes is not None, "and so must what receives it"
+
+
+def test_our_own_console_is_kept_hidden_not_just_hidden_once(monkeypatch):
+    """A child can SHOW the console we lend it, and one did.
+
+    Measured 2026-09-11: a console owned by OUR process, titled `claude` and resized to `990x396`
+    — the agent took the console it inherited, made it its own and made it visible. That is the
+    second flash the Arbiter reported, the one right after the main window. Hiding once at startup
+    is not enough for a console we hand out to everything we start.
+    """
+    _as_windows(monkeypatch)
+    watched: list = []
+    monkeypatch.setattr(child, "hide_agent_console_later", lambda pid, **kw: watched.append(pid))
+
+    child.open_app_console("x", alloc=lambda: True, write=lambda _t: None, hide=lambda: 1)
+
+    assert watched == [os.getpid()], "our own console needs the keeper too"

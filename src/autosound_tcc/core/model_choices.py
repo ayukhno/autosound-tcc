@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -366,7 +367,29 @@ def cli_routes_without_models() -> list[str]:
     ]
 
 
-def refresh_cli_catalogue(*, force: bool = False) -> dict[str, list[Choice]]:
+#: How long a route that answered with NOTHING is left alone before it is asked again.
+#:
+#: The catalogue refreshes on every window activation — which is every turn the agent takes — and
+#: on Windows asking `agy` costs a VISIBLE console that no creation flag can hide. The skip below
+#: used to look only at the answer, so a route that kept failing was probed for ever: the Arbiter
+#: measured one `agy.exe` per `report_phase` call (2026-09-11). A route that has never answered is
+#: precisely the one that will go on not answering, so asking it every twenty seconds buys nothing
+#: and flashes a window each time.
+EMPTY_ROUTE_RETRY_S = 600.0
+
+#: When each route was last ASKED, as opposed to what it answered.
+_LAST_ASKED: dict[str, float] = {}
+
+
+def _skip_agy(now) -> bool:
+    """Leave `agy` alone: either it has answered and the cache serves, or it just failed."""
+    if _CLI_CACHE.get("agy"):
+        return True
+    asked = _LAST_ASKED.get("agy")
+    return asked is not None and (now() - asked) < EMPTY_ROUTE_RETRY_S
+
+
+def refresh_cli_catalogue(*, force: bool = False, now=None) -> dict[str, list[Choice]]:
     """Ask every CLI that needs asking, and cache the answer. **Call this off the GUI thread.**
 
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
@@ -380,10 +403,12 @@ def refresh_cli_catalogue(*, force: bool = False) -> dict[str, list[Choice]]:
     own). That relaunch on every start was the startup flash of TCC-006. The picker reads the
     cache (`agy_choices`), so a cached route is fully present without agy being run again.
     """
+    now = now or time.monotonic
     _load_cached_catalogue()
     for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
-        if route == "agy" and not force and _CLI_CACHE.get("agy"):
+        if route == "agy" and not force and _skip_agy(now):
             continue
+        _LAST_ASKED[route] = now()
         fetched = fetch()
         # A failed refresh keeps the previous answer; only a first-ever failure stores the empty
         # list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`).

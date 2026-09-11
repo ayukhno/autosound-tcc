@@ -110,6 +110,11 @@ def open_app_console(message: str, *, alloc=None, write=None, hide=None) -> bool
     except Exception:  # noqa: BLE001 — no console is the state we were already in
         return False
     _APP_CONSOLE["ours"] = True
+    # And KEEP it hidden. Hiding once is not enough for a console we lend to everything we start:
+    # `claude` takes the console it inherits, retitles it and resizes it to its own buffer, and
+    # that makes it visible again — a console owned by our process, titled `claude`, `990x396`
+    # (measured 2026-09-11). That is the flash that appears just after the main window.
+    hide_agent_console_later(os.getpid(), budget_s=APP_CONSOLE_KEEPER_BUDGET_S)
     return True
 
 
@@ -390,7 +395,13 @@ def _spawn_daemon(target, kwargs: dict) -> None:
     threading.Thread(target=target, kwargs=kwargs, name="tcc-hide-console", daemon=True).start()
 
 
-def hide_agent_console_later(pid: int, *, spawn=None) -> None:
+#: The keeper for OUR OWN console runs as long as the application does, not for a few seconds.
+#: A child can show it back at any point in a session — `claude` retitles the console it inherits
+#: and makes it visible — so this one has to outlast the agent rather than the spawn.
+APP_CONSOLE_KEEPER_BUDGET_S = 43200.0
+
+
+def hide_agent_console_later(pid: int, *, spawn=None, budget_s: Optional[float] = None) -> None:
     """Start the keeper for a freshly spawned agent. Never raises, never blocks the caller.
 
     **Deliberately not liveness-checked.** The first version asked `os.kill(pid, 0)` — the POSIX
@@ -410,7 +421,7 @@ def hide_agent_console_later(pid: int, *, spawn=None) -> None:
         spawn(keep_console_hidden, {
             "pid": pid,
             "still_running": lambda: process_is_running(pid),
-            "budget_s": CONSOLE_KEEPER_BUDGET_S,
+            "budget_s": budget_s or CONSOLE_KEEPER_BUDGET_S,
         })
     except Exception:  # noqa: BLE001 — a diagnostic thread that cannot start is not a failure
         return
