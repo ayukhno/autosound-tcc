@@ -158,6 +158,17 @@ def _isolated_qsettings(tmp_path, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     monkeypatch.setenv("HOME", str(tmp_path))  # IniFormat UserScope resolves under $HOME
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # ...and under this one on Windows
+    # And every OTHER door onto the user's directories. HOME alone is enough on the machine this
+    # was written on, where nothing else is set — and that is exactly why it kept passing here and
+    # failing on CI. GitHub's runners set `LOCALAPPDATA` and `APPDATA` on Windows and
+    # `XDG_CONFIG_HOME` on Linux, and code that reads those (the log directory, the reviewer's
+    # machine key) went straight past the tmp HOME to the runner's real folders. Two of the four
+    # red tests on 11.09 were that, wearing different coats; a third was the same shape a day
+    # earlier. One fixture is the place to answer it, not ten tests.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / ".local" / "state"))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
     yield
 

@@ -130,7 +130,15 @@ def test_the_first_start_of_a_new_version_says_so(tmp_path, monkeypatch):
     guessing until now."""
     from autosound_tcc.core import app_log
 
+    # Every door onto the log directory, not just HOME. `log_dir()` reads `LOCALAPPDATA` on
+    # Windows and `XDG_STATE_HOME` on Linux, and on a laptop neither is set — so setting HOME
+    # alone isolated the test here and left it writing into the RUNNER'S real log on CI, where a
+    # marker from an earlier test in the same session had already been written. Then "the first
+    # run of this version" was false, and the failure said nothing about the code.
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / ".local" / "state"))
     monkeypatch.setattr(app_log, "_log_path", None, raising=False)
     path = app_log.setup()
 
