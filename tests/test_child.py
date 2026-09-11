@@ -514,3 +514,52 @@ def test_a_console_that_cannot_be_allocated_is_not_claimed(monkeypatch):
 
     assert ok is False
     assert child.have_app_console() is False
+
+
+def test_with_a_console_of_our_own_the_patch_lets_children_inherit_it(monkeypatch):
+    """The blanket patch must stop forcing `CREATE_NO_WINDOW` once we own a console.
+
+    Measured 2026-09-11 on probe22: our console was allocated and hidden correctly, `git` and
+    `claude` went silent — and `agy` still opened a VISIBLE one, because the patch was still
+    denying every child a console and a denied child allocates its own."""
+    import anyio
+    from anyio._core import _subprocesses
+
+    seen: list = []
+
+    async def fake_open_process(*args, **kwargs):
+        seen.append(kwargs)
+        return "process"
+
+    monkeypatch.setattr(_subprocesses, "open_process", fake_open_process)
+    monkeypatch.setattr(anyio, "open_process", fake_open_process)
+    _as_windows(monkeypatch)
+    monkeypatch.setattr(child, "have_app_console", lambda: True)
+
+    child.hide_console_windows()
+    asyncio.run(anyio.open_process(["git", "status"], stdin=-1))
+
+    assert not seen[0].get("creationflags"), "inherit ours; denying a console is what opens one"
+
+
+def test_the_keeper_still_watches_an_agent_that_allocates_its_own_console(monkeypatch):
+    """`agy` does not merely inherit — it allocates a console of its own, sometimes, and that one
+    is nobody's to hide but ours. Watching it was tied to HANDING it a console, so the moment the
+    app console made that unnecessary the keeper stopped being started at all (probe22)."""
+    _as_windows(monkeypatch)
+    monkeypatch.setattr(child, "have_app_console", lambda: True)
+    monkeypatch.setattr(child, "agent_console", dict)  # nothing handed out: we already have one
+    watched: list = []
+    monkeypatch.setattr(child, "hide_agent_console_later", lambda pid, **kw: watched.append(pid))
+
+    class _Fake:
+        pid = 4242
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    child.hide_subprocess_console_windows(target=_Fake)
+    _Fake(["agy", "models"])
+    _Fake(["git", "status"])
+
+    assert watched == [4242], "the agent is watched; git has no console of its own to make"

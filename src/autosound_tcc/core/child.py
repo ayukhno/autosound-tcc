@@ -426,19 +426,23 @@ def hide_console_windows() -> None:
         # Logged, not stepped: a blocking gate here would freeze the SDK's own event loop.
         command = args[0] if args else kwargs.get("command")
         _note_spawn(command)
-        # THE agent, on the path that actually runs a tuning session. It gets one console of its
-        # own so the shells its Bash tool starts inherit one instead of each allocating a window;
-        # the console is hidden the moment it exists (`agent_console`). Everything else keeps "no
-        # console at all", which is right for a child that spawns nothing.
         console = agent_console() if is_agent_command(command) else {}
         if console:
+            # No console of ours to inherit, so the agent is given one to hand down.
             kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) \
                 | console["creationflags"]
-            process = await original(*args, **kwargs)
+        elif not have_app_console():
+            # Denied a console, which is right for a child that spawns nothing — but ONLY while we
+            # have none ourselves. With an app console this line is exactly backwards: a child
+            # denied a console allocates its own, and that is the window (measured on probe22,
+            # where `agy` opened one while `git` and `claude` inherited ours and stayed silent).
+            kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) | flag
+        process = await original(*args, **kwargs)
+        if is_agent_command(command):
+            # Watched even when it was handed nothing: `agy` allocates a console of ITS own,
+            # sometimes, and that one is nobody's to hide but ours.
             hide_agent_console_later(getattr(process, "pid", 0))
-            return process
-        kwargs["creationflags"] = int(kwargs.get("creationflags") or 0) | flag
-        return await original(*args, **kwargs)
+        return process
 
     open_process._autosound_quiet = True  # type: ignore[attr-defined]
     _subprocesses.open_process = open_process
@@ -604,10 +608,15 @@ def hide_subprocess_console_windows(target: Optional[type] = None) -> None:
         # Windows machine (2026-09-09) shows them going out this ordinary way too: `agy models`
         # twice and `claude.EXE auth`, nine processes in two seconds.
         console = agent_console() if is_agent_command(command) else {}
-        if flag and not kwargs.get("creationflags") and len(args) <= positional:
-            kwargs["creationflags"] = console["creationflags"] if console else flag
+        if not kwargs.get("creationflags") and len(args) <= positional:
+            if console:
+                kwargs["creationflags"] = console["creationflags"]
+            elif flag and not have_app_console():
+                # Only while we have no console of our own — see the async path for why denying
+                # one is what makes a child open a window.
+                kwargs["creationflags"] = flag
         started = original(self, *args, **kwargs)
-        if console:
+        if is_agent_command(command):
             hide_agent_console_later(getattr(self, "pid", 0))
         return started
 
