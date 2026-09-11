@@ -206,6 +206,36 @@ def _watch_for_stray_windows(app, QtCore, known, log) -> None:
     QtCore.QTimer.singleShot(0, look)
 
 
+def watch_windows_again(reason: str = "closing") -> None:
+    """Re-arm the window watch for a phase it was never armed for: the shutdown.
+
+    The startup watch stops after its rounds, so windows flashing AT CLOSE were never recorded
+    from inside. The desktop-wide watcher outside cannot settle it either: it logs a window when
+    its state CHANGES between passes, so one that appears and goes within a single pass leaves no
+    trace — and a burst at shutdown is exactly that shape. Measured 2026-09-11: nine seconds of
+    closing with not one event recorded, while the user was watching windows flash.
+
+    From inside there is nothing to under-sample: `_note_strays` asks Qt what top-level windows it
+    has, rather than trying to catch them on screen.
+    """
+    log = _STRAY["log"]
+    if log is None:
+        return
+    try:
+        from PySide6 import QtCore
+        from PySide6.QtWidgets import QApplication
+    except Exception:  # noqa: BLE001 — no toolkit here means nothing to watch
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    log.info("window watch re-armed: %s", reason)
+    # Cleared on purpose: a window already reported at startup must be reported again now. The
+    # question has changed from "what is new since we opened" to "what does the close put up".
+    _STRAY["seen"].clear()
+    _watch_for_stray_windows(app, QtCore, _STRAY["known"], log)
+
+
 def _say(app, splash, text: str) -> None:
     """Put a line on the splash and let Qt actually paint it.
 

@@ -4409,6 +4409,18 @@ class MainWindow(QMainWindow):
             self._refresh_cli_catalogue()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # The flashing still reported at CLOSE is native windows, not consoles — that half is
+        # settled (603 spawns in a session, 0 visible console windows, 2026-09-11). Nothing was
+        # recording windows from inside at this point, so the watch is re-armed here and the log
+        # names every top-level window the shutdown puts on screen. Same instrument that named
+        # every culprit so far; guessing has been wrong three times running.
+        try:
+            from autosound_tcc import app as _app  # local: `app` imports this module
+
+            _app.watch_windows_again("closeEvent")
+        except Exception:  # noqa: BLE001 — a diagnostic must never be able to block a close
+            pass
+
         # A live session holds things only the model can write down. Quitting used to shut it down
         # mid-thought without a word (user, 2026-08-07): whatever it had not yet put on disk was
         # gone, and nothing said so. Asking rather than saving on its own is deliberate — the save
