@@ -32,7 +32,7 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QLocale, Qt, Signal
+from PySide6.QtCore import QLocale, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -182,6 +182,9 @@ _ZOOM_FACTOR = 1.6
 #: The FRACTION rather than the two pixel sizes: the window is resized between sessions and
 #: between machines, and pixels restored into a different height are not the same split.
 _SPLIT_KEY = "curve/sumSplitShare"
+#: How long the boundary waits after the hand stops before it is written to the INI.
+#: See `_on_split_moved` — the signal fires once per mouse-move event.
+_SPLIT_BANK_DELAY_MS = 400
 #: The name a trace colour goes by when the palette has no token for it — `trace#N`, resolved
 #: against the CURRENT theme by `colour_of`. A hex string would have done, except that markers
 #: keep their colour name across a theme switch (`apply_theme` re-sets them with the same list),
@@ -712,6 +715,10 @@ class CurveView(QWidget):
         self._split.setHandleWidth(8)
         self._plot.setMinimumHeight(_PLOT_MIN_PX)
         self._split.addWidget(self._plot)
+        #: See `_on_split_moved`: the boundary is banked once the drag settles, not per pixel.
+        self._split_bank_timer = QTimer(self)
+        self._split_bank_timer.setSingleShot(True)
+        self._split_bank_timer.timeout.connect(self._bank_split_share)
         self._split.splitterMoved.connect(self._on_split_moved)
         layout.addWidget(self._split, stretch=1)
         #: What share of the height the strip takes, as the tuner last left it. Read once here:
@@ -873,6 +880,11 @@ class CurveView(QWidget):
         # C locale: everything else in this window prints a dot, and a box that reads "0,198" next
         # to a readout saying "0.198" makes the reader check whether they are the same number.
         self._shift_box.setLocale(QLocale(QLocale.Language.C))
+        # Typing commits ONCE. With keyboard tracking on (Qt's default) a `QDoubleSpinBox`
+        # emits `valueChanged` per character, so typing "1.25" redrew the plot four times —
+        # and a redraw here clears and re-plots every trace over arrays of 262 144 floats.
+        # Arrow steps are unaffected: each of those IS a value the tuner asked for.
+        self._shift_box.setKeyboardTracking(False)
         self._shift_box.valueChanged.connect(self.set_delay)
         attach_tip(self._shift_box, i18n.t("curveShiftTip"))
         settings.addWidget(self._shift_box)
@@ -909,6 +921,11 @@ class CurveView(QWidget):
         # width from the style — see `fit_number_box` (CAR-005)
         # C locale, like the delay box beside it: one window, one decimal separator.
         self._apf_f0.setLocale(QLocale(QLocale.Language.C))
+        # Typing commits ONCE. With keyboard tracking on (Qt's default) a `QDoubleSpinBox`
+        # emits `valueChanged` per character, so typing "1.25" redrew the plot four times —
+        # and a redraw here clears and re-plots every trace over arrays of 262 144 floats.
+        # Arrow steps are unaffected: each of those IS a value the tuner asked for.
+        self._apf_f0.setKeyboardTracking(False)
         self._apf_f0.valueChanged.connect(self._on_apf_control)
         attach_tip(self._apf_f0, tip_html(i18n.t("curveApfF0Tip")))
         settings.addWidget(self._apf_f0)
@@ -924,6 +941,11 @@ class CurveView(QWidget):
         self._apf_q.setValue(allpass_mod.DEFAULT_Q)
         # width from the style — see `fit_number_box` (CAR-005)
         self._apf_q.setLocale(QLocale(QLocale.Language.C))
+        # Typing commits ONCE. With keyboard tracking on (Qt's default) a `QDoubleSpinBox`
+        # emits `valueChanged` per character, so typing "1.25" redrew the plot four times —
+        # and a redraw here clears and re-plots every trace over arrays of 262 144 floats.
+        # Arrow steps are unaffected: each of those IS a value the tuner asked for.
+        self._apf_q.setKeyboardTracking(False)
         self._apf_q.valueChanged.connect(self._on_apf_control)
         attach_tip(self._apf_q, tip_html(i18n.t("curveApfQTip")))
         settings.addWidget(self._apf_q)
@@ -2391,7 +2413,26 @@ class CurveView(QWidget):
         if len(sizes) < 2 or total <= 0:
             return
         self._strip_share = sizes[-1] / total
+        # Banked on a delay, not per mouse-move. `splitterMoved` fires once per mouse event, the
+        # settings store is an INI file, and every `setValue` posts a flush — so a single drag of
+        # the boundary rewrote the file dozens of times. The share is live in memory immediately;
+        # only the write waits for the hand to stop.
+        self._split_bank_timer.start(_SPLIT_BANK_DELAY_MS)
+
+    def _bank_split_share(self) -> None:
         self._settings.setValue(_SPLIT_KEY, self._strip_share)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """A pending boundary is written now rather than lost.
+
+        The delay above is there so a drag does not rewrite the INI per mouse-move; it must not
+        turn "dragged and closed straight away" into "never remembered", which would be a worse
+        bug than the one it fixes.
+        """
+        if self._split_bank_timer.isActive():
+            self._split_bank_timer.stop()
+            self._bank_split_share()
+        super().hideEvent(event)
 
     def split_share(self) -> float:
         """What share of the height the strip has — the number the boundary is remembered as."""

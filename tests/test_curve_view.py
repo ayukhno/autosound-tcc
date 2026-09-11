@@ -4280,3 +4280,31 @@ def test_the_impulse_axis_says_what_its_numbers_are():
 
     assert unit, "the impulse axis carries a level now — an unlabelled one can be read as a shape"
     assert "db" not in unit.lower(), f"{unit!r}: the samples are linear full scale, not decibels"
+
+
+def test_dragging_the_boundary_does_not_rewrite_the_settings_file_per_pixel(monkeypatch):
+    """`splitterMoved` fires once per mouse event and the store is an INI file, so a single drag
+    of the sum-strip boundary rewrote it dozens of times. The share is live in memory at once;
+    only the write waits — and a hide flushes it, so "dragged then closed" is still remembered."""
+    from PySide6.QtGui import QHideEvent
+    from PySide6.QtWidgets import QWidget
+
+    from autosound_tcc.ui.tcc import curve_view
+
+    _app()
+    view = CurveView()
+    writes: list = []
+    monkeypatch.setattr(view._settings, "setValue", lambda key, value: writes.append((key, value)))
+    strip = QWidget()
+    monkeypatch.setattr(strip, "isVisibleTo", lambda _p: True)
+    view._strip = strip
+    monkeypatch.setattr(view._split, "sizes", lambda: [700, 300])
+
+    for _ in range(40):                       # one drag of the handle
+        view._on_split_moved()
+
+    assert writes == [], "the drag banks nothing while the hand is still moving"
+    assert view.split_share() == 0.3, "but the share is live immediately"
+
+    view.hideEvent(QHideEvent())  # closed before the timer could fire
+    assert writes == [(curve_view._SPLIT_KEY, 0.3)], "and a pending boundary is not lost"
