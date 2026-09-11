@@ -321,7 +321,13 @@ def main() -> int:
     # cannot be created already hidden on Windows 11, so this pays that cost once, at startup,
     # where it can say what it is rather than being an unexplained black rectangle.
     # Windows only; a no-op on macOS and Linux, where none of this exists.
-    child.open_app_console("Autosound TCC is starting — this window hides itself.")
+    # Two lines, and they read like a system message on purpose. This console only appears
+    # when one could not be BORROWED and had to be made — and a made one is always seen,
+    # because `SW_HIDE` at creation is ignored on Windows 11. Given that, it is held on
+    # screen long enough to read rather than flickered past (the Arbiter's call, 11.09).
+    child.open_app_console(
+        "Autosound TCC — starting the Python runtime...\r\n"
+        "This window belongs to the launch. It closes itself in a moment.")
     child.hide_console_windows()
     # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
     # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app

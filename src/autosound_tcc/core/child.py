@@ -222,7 +222,7 @@ def borrow_windowless_console(*, spawn=None, attach=None, free=None, sleep=None,
         sleep(0.02)
 
 
-def open_app_console(message: str, *, alloc=None, write=None, hide=None) -> bool:
+def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=None) -> bool:
     """Give this process ONE console, say what it is, and hide it. Windows only; False elsewhere.
 
     Per-agent consoles work, but they pay the same price every time a session starts: a console
@@ -255,16 +255,35 @@ def open_app_console(message: str, *, alloc=None, write=None, hide=None) -> bool
         if not alloc():
             return False
         write(message)
-        hide()
     except Exception:  # noqa: BLE001 — no console is the state we were already in
         return False
     _APP_CONSOLE["ours"] = True
+    # HELD long enough to read, then hidden — and that is the Arbiter's call, not a compromise.
+    # Reaching here means the console could not be borrowed and one had to be made, so it WILL be
+    # seen. A black rectangle for a third of a second reads as a glitch and makes a person doubt
+    # the application; the same rectangle, legible, saying what is starting, reads as a launch.
+    # Given that it cannot be hidden in time, the honest move is to make it worth the glance.
+    #
+    # Hidden from a thread rather than inline: the window is up while the app loads, so the wait
+    # costs the user nothing. The keeper starts after the hide, because starting it first would
+    # hide the console immediately and there would be nothing to read.
+    (defer or _spawn_daemon)(_hide_after_showing,
+                             {"hide": hide, "seconds": APP_CONSOLE_VISIBLE_S})
+    return True
+
+
+def _hide_after_showing(*, hide, seconds: float, sleep=None, keeper=None) -> None:
+    """Leave the console up for a moment, hide it, then keep it hidden for the session."""
+    (sleep or time.sleep)(seconds)
+    try:
+        hide()
+    except Exception:  # noqa: BLE001 — a console that will not hide is still ours to lend
+        pass
     # And KEEP it hidden. Hiding once is not enough for a console we lend to everything we start:
     # `claude` takes the console it inherits, retitles it and resizes it to its own buffer, and
     # that makes it visible again — a console owned by our process, titled `claude`, `990x396`
     # (measured 2026-09-11). That is the flash that appears just after the main window.
-    hide_agent_console_later(os.getpid(), budget_s=APP_CONSOLE_KEEPER_BUDGET_S)
-    return True
+    (keeper or hide_agent_console_later)(os.getpid(), budget_s=APP_CONSOLE_KEEPER_BUDGET_S)
 
 
 def quiet() -> dict:
@@ -543,6 +562,11 @@ def agent_console() -> dict:
 def _spawn_daemon(target, kwargs: dict) -> None:
     threading.Thread(target=target, kwargs=kwargs, name="tcc-hide-console", daemon=True).start()
 
+
+#: How long a console we were FORCED to make stays readable before it is hidden. It is going to
+#: be seen either way — `SW_HIDE` at creation is ignored on Windows 11 — so it is shown on
+#: purpose, long enough to read, instead of flickering past as an unexplained black rectangle.
+APP_CONSOLE_VISIBLE_S = 1.2
 
 #: The keeper for OUR OWN console runs as long as the application does, not for a few seconds.
 #: A child can show it back at any point in a session — `claude` retitles the console it inherits

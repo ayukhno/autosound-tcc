@@ -507,6 +507,9 @@ def test_the_app_console_says_what_it_is_before_it_hides(monkeypatch):
         alloc=lambda: order.append("alloc") or True,
         write=lambda text: order.append(f"write:{text}"),
         hide=lambda: order.append("hide") or 1,
+        # The hide runs on a daemon thread so the wait costs the user nothing; here it runs
+        # inline, with the wait taken out, so the ORDER is what is being checked.
+        defer=lambda target, kwargs: target(sleep=lambda _s: None, **kwargs),
     )
 
     assert ok is True
@@ -619,7 +622,8 @@ def test_our_own_console_is_kept_hidden_not_just_hidden_once(monkeypatch):
     watched: list = []
     monkeypatch.setattr(child, "hide_agent_console_later", lambda pid, **kw: watched.append(pid))
 
-    child.open_app_console("x", alloc=lambda: True, write=lambda _t: None, hide=lambda: 1)
+    child.open_app_console("x", alloc=lambda: True, write=lambda _t: None, hide=lambda: 1,
+                           defer=lambda target, kwargs: target(sleep=lambda _s: None, **kwargs))
 
     assert watched == [os.getpid()], "our own console needs the keeper too"
 
@@ -719,3 +723,24 @@ def test_the_flash_probe_runs_three_times_then_twice(monkeypatch):
     assert child.flash_probe("after", run=runs.append, environ=env) == 2
     assert all(argv[0] == "git" for argv in runs)
     assert len(runs) == 5
+
+
+def test_a_console_we_were_forced_to_make_is_readable_before_it_hides(monkeypatch):
+    """Reaching the fallback means the console could not be borrowed and had to be made — and a
+    made one is always seen, because `SW_HIDE` at creation is ignored on Windows 11. Given that it
+    WILL be looked at, a black rectangle for a third of a second reads as a glitch and makes a
+    person doubt the app; the same rectangle, legible, reads as a launch. The Arbiter's call.
+
+    The keeper must not start before the hide: it would hide the console at once and there would
+    be nothing left to read.
+    """
+    _as_windows(monkeypatch)
+    order: list = []
+
+    child._hide_after_showing(
+        hide=lambda: order.append("hide"),
+        seconds=1.2,
+        sleep=lambda s: order.append(f"waited {s}"),
+        keeper=lambda pid, **kw: order.append("keeper"))
+
+    assert order == ["waited 1.2", "hide", "keeper"], "read it, hide it, then hold it hidden"
