@@ -6,6 +6,96 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.36] — 2026-09-11 · the flash was never a subprocess, and every watcher that polled said it was gone
+
+Paired with method `c4ca8928518ff446a92274eb211d50de617fff15` — the tag on that commit is
+**`v3.0.47`**.
+
+The suite at the release: 1871 passed, 1 skipped, 519 s (1653 at `v0.1.35`).
+
+A day of TCC-006, most of it spent measuring the wrong thing. Windows flashed on screen once per
+MCP call and twice at startup, and every instrument built to catch them **polled the desktop** —
+`EnumWindows` from PowerShell, and TCC's own watch at 150 ms. The window lives about 60 ms. All of
+them reported clean, repeatedly, while the Arbiter watched it happen. One of those logs carries
+`proc=Idle`: a window whose process had already died before the poll got round to naming it.
+
+What finally named it was an event filter inside our own process — `QEvent.Show` is delivered on
+our thread, so the Python stack that created the window is still on the stack when it is logged.
+
+### Fixed
+
+- **The flash on every MCP call was TCC's own Qt window.** `_PhaseRow.__init__` built its steps
+  container with no parent and then called `setHidden(collapsed)`. A widget with no parent IS a
+  top-level window, so for an expanded phase that call put a real 200×728 window titled
+  `Autosound TCC` on the desktop for about 60 ms — once per phase, on every rebuild, which is once
+  per MCP call. It took the foreground on the way past, which is why it was impossible to ignore.
+
+  Measured after: **0 visible windows across three MCP calls**, by event hook and by eye. The
+  regression test builds the panel under the same event filter and fails if anything reaches the
+  desktop — checked by putting the bug back, because a test that has never failed proves nothing.
+
+- **Thirteen places cleared a layout by unparenting a VISIBLE widget** (`setParent(None)` before
+  `deleteLater()`), each one a top-level window for the instant before deletion. One named helper
+  now hides first (`ui/tcc/discard.py`). An outside review argued for dropping `setParent(None)`
+  entirely; the suite refuted that in one run — it also detaches from the parent's child list, and
+  immediately, which `deleteLater()` does not.
+
+- **`agy models` ran on every window activation**, so every alt-tab and every closing dialog
+  opened a console window nothing can hide. Four automatic paths reached that catalogue. Under
+  Windows it is now asked only by the ↻ button.
+
+- **`omp models --json` ran on the GUI thread**, twice per activation, with a 20-second timeout —
+  a window that freezes on an ordinary alt-tab. It is asked once per process now, off the GUI
+  thread, and only when the Arbiter has actually marked an omp model.
+
+- **`claude auth status` ran on every activation** while its own docstring said "once, and remember
+  the answer" — nothing checked what it remembered. `None` is a real answer here, so remembering
+  only the answer meant asking forever.
+
+- **The catalogue refresh started while the window was closing.** Dialogs hand activation back on
+  their way out, `changeEvent` answered that by starting probes, and the app exited underneath
+  them: `QThread: Destroyed while thread is still running`.
+
+- **`GetStdHandle` and `GetFileAttributesW` were called without declared ctypes types.** The first
+  truncated a 64-bit handle; the second made its own error branch unreachable, so a file that
+  could not be READ reported back as hidden. Same class as the handle fixed in `v0.1.35`.
+
+- **The startup console wrote its line into nothing.** A GUI process has no standard handles and
+  `AllocConsole` does not redirect them, so the console appeared, held its moment and was blank —
+  the unexplained black rectangle the message exists to prevent. It opens `CONOUT$` now.
+
+- **TCC sent the reviewer's model but not its binary** (TCC-002). The project said
+  `critic: agy:…`, the machine exported `GEMINI_BIN=gemini`, and the reviewer script reads the env
+  var first — so ten calls went to a CLI nobody picked, down a path Google has closed, and came
+  back as clipboard packages with `model: null`. The Arbiter's pick outranks the inherited name
+  now, and the call says in the log which binary it went out with.
+
+- **Hot paths that did far more than their trigger deserved**: a bubble re-measured the whole
+  transcript on every resize pixel; the new-project note ran a real project seed per keystroke;
+  three spin boxes redrew a 262 144-point plot per character typed; the splitter rewrote its INI
+  per mouse-move; the process watcher rebuilt the capture grid once per write rather than per
+  commit, which is what wiped a panel mid-test.
+
+### Changed
+
+- **A console TCC is forced to make is now shown on purpose**, long enough to read, and hides
+  itself. It is going to be seen either way — `SW_HIDE` at creation is ignored on Windows 11 — so
+  a legible line saying what is starting beats a black rectangle. The Arbiter's call.
+
+- **`AUTOSOUND_TCC_WINDOW_TRACE=1`** logs a Python stack whenever a stray top-level window is
+  shown. Off by default; it is what found this one.
+
+- **`AUTOSOUND_TCC_FLASH_PROBE`** runs a chosen program three times before the main window and
+  twice after, so a person can COUNT. Also the Arbiter's idea, and a better instrument than either
+  watcher: an eye counting to three has none of the blind spots a poll has.
+
+### Disproven, and removed rather than left switched off
+
+- Borrowing a console from a child started with `CREATE_NO_WINDOW` and joining it with
+  `AttachConsole`. It has no window and so cannot flash, which was the appeal. Measured on the
+  machine that has the problem: it removed neither flash. A hypothesis nobody can see is a
+  hypothesis nobody can retest.
+
 ## [v0.1.35] — 2026-09-07 · the pin caught up six tags, and the first thing it moved was the owner's own words
 
 Paired with method `dcf5a68cb7318be575ca39a1fd181c62893b340c` — the tag on that commit is
