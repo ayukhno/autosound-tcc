@@ -3073,24 +3073,6 @@ class MainWindow(QMainWindow):
         # puts a console window on screen that nothing can hide, so no automatic path asks it —
         # and telling somebody their login expired when TCC never ran the command sends them to
         # re-authenticate a CLI that works (TCC-006, 2026-09-11).
-        #
-        # ONLY after a press. This lands about a second after the window opens, and a status line
-        # appearing there does not just say something — it takes up room, and the layout under it
-        # moves. On the Arbiter's machine that reads as a flash right after startup, which is one
-        # of the two things being hunted; adding a new one to the pile while measuring the old one
-        # is how a measurement stops meaning anything.
-        #
-        # A press is the right moment for it anyway: the sentence answers "why did ↻ not bring agy
-        # back", and answering that unprompted at every launch is a nag, not an answer.
-        # Whether THIS answer came from a press. The signal carries nothing, so it is read
-        # off the worker that just finished.
-        force = getattr(getattr(self, "_cli_catalogue", None), "_force", False)
-        if force:
-            unasked = model_choices.cli_routes_not_asked()
-            if unasked:
-                self._status_strip.notify(
-                    i18n.t("cliRouteNotAsked").format(routes=", ".join(unasked)), level="info"
-                )
 
     def _on_rew_titles_changed(self) -> None:
         """REW's list changed — redraw the checklist, and check what the round asked for (SCR-040).

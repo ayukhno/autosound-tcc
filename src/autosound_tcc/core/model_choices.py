@@ -367,21 +367,6 @@ def cli_routes_without_models() -> list[str]:
     ]
 
 
-def cli_routes_not_asked() -> list[str]:
-    """CLIs that are installed and that this machine does not ask on its own.
-
-    A different fact from the one above, and the warning text only fits one of them: "listed no
-    models — its own login may have expired" is a lie when nobody ran the command, and it sends
-    somebody to re-authenticate a CLI that works. On Windows asking costs a visible window, so
-    nothing automatic asks; the ↻ button does.
-    """
-    return [
-        harness
-        for harness in ("agy",)
-        if cli_available(harness) and not _CLI_CACHE.get(harness) and harness not in _LAST_ASKED
-    ]
-
-
 #: How long a route that answered with NOTHING is left alone before it is asked again.
 #:
 #: The catalogue refreshes on every window activation — which is every turn the agent takes — and

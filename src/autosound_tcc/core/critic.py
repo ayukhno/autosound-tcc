@@ -264,7 +264,12 @@ def run(
 
     env_overrides = {"PROJECT_MIRROR": str(_project_mirror(project_dir))}
     if model:
-        env_overrides["GEMINI_CRITIC_MODEL" if role == "critic" else "GEMINI_ADVISOR_MODEL"] = model
+        # ONE variable, for both tasks. The advisor's own model variables are no longer read by
+        # the reviewer (`v3.0.49`, hub SKL-032): a value left in one of them is named on stderr,
+        # not obeyed. And writing one was the whole of #130 — TCC set the critic's model, the
+        # advisor door looked for its own, found none, and the channel answered as a clipboard
+        # package with `model: null` for thirteen calls.
+        env_overrides["GEMINI_CRITIC_MODEL"] = model
 
     # TCC-002: a stale `GEMINI_BIN` inherited from the machine outranks the reviewer's own
     # autodetection and sends every call down a path Google closed. Corrected only when it cannot

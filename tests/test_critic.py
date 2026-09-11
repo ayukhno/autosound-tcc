@@ -179,8 +179,15 @@ def test_model_choice_reaches_the_subprocess_env(stubbed, tmp_path):
     assert result.text.strip() == "Gemini 3.1 Pro"
 
 
-def test_advisor_role_uses_its_own_model_var(stubbed, tmp_path):
-    stubbed("print(os.environ.get('GEMINI_ADVISOR_MODEL', 'unset'))\nprint('— [advisor: m]')\n")
+def test_advisor_reads_the_same_model_var_as_the_critic(stubbed, tmp_path):
+    """This test used to assert the opposite, and it was right until `v3.0.49`.
+
+    Two tasks with two model variables is what made hub SKL-032: TCC set the critic's, the advisor
+    door looked for its own, found none, and thirteen calls came back as clipboard packages with
+    `model: null`. Upstream merged the roles — the advisor's variables are no longer read, and a
+    value left in one is named on stderr rather than obeyed — so the assertion inverts with it.
+    """
+    stubbed("print(os.environ.get('GEMINI_CRITIC_MODEL', 'unset'))\nprint('— [advisor: m]')\n")
     project = _project(tmp_path)
 
     result = critic.run(
@@ -440,3 +447,30 @@ def test_nothing_is_invented_when_the_words_are_not_recognised():
 
     assert critic.remedy("something nobody has seen before", harness="agy") == ""
     assert critic.remedy("", harness="agy") == ""
+
+
+def test_the_reviewer_is_given_one_model_variable_for_both_tasks(tmp_path, monkeypatch):
+    """The advisor's model variables are no longer read (`v3.0.49`, hub SKL-032) — a value left in
+    one is named on stderr, not obeyed. And writing one was the whole of #130: TCC set the
+    critic's model, the advisor door looked for its own, found none, and the channel came back as
+    a clipboard package with `model: null` thirteen times."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+
+    critic.run("a package", project_dir=tmp_path, role="advisor",
+               model="gemini-3.1-pro-high", harness="agy")
+
+    assert seen.get("GEMINI_CRITIC_MODEL") == "gemini-3.1-pro-high", "the one variable, always"
+    for retired in ("GEMINI_ADVISOR_MODEL", "AUTOSOUND_ADVISOR_MODEL"):
+        assert retired not in seen, f"{retired} is retired upstream; setting it teaches a lie"

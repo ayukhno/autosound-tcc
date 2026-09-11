@@ -312,10 +312,13 @@ def test_a_press_still_asks_agy_on_windows(monkeypatch):
     assert asked == ["agy"]
 
 
-def test_a_route_nobody_asked_is_not_reported_as_one_that_answered_with_nothing(monkeypatch):
-    """Two different facts, and the warning text is only true for one of them. "listed no models —
-    its own login may have expired" sends somebody to re-authenticate a CLI that works fine; on
-    Windows TCC simply never ran the command."""
+def test_a_route_is_reported_silent_only_after_it_was_actually_asked(monkeypatch):
+    """"Installed and said nothing" is worth saying; "nobody asked it" was worth saying only while
+    Windows refused to ask at all, and that refusal is gone — it hid an installed, logged-in `agy`
+    from the picker while advertising `codex`, which was not installed (Arbiter, 2026-09-11).
+
+    So the second sentence had nothing left to describe, and it went. What survives is the honest
+    one, and this pins the order: silence is reported AFTER the asking, never before it."""
     from autosound_tcc.core import model_choices as mc
 
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
@@ -323,13 +326,10 @@ def test_a_route_nobody_asked_is_not_reported_as_one_that_answered_with_nothing(
     monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
 
-    assert mc.cli_routes_without_models() == [], "nobody has asked yet"
-    assert mc.cli_routes_not_asked() == ["agy"]
+    assert mc.cli_routes_without_models() == [], "nobody has asked yet — nothing to report"
 
     mc.refresh_cli_catalogue()   # asked, and it said nothing
     assert mc.cli_routes_without_models() == ["agy"]
-    assert mc.cli_routes_not_asked() == []
-
 
 def test_a_retired_key_resolves_through_the_local_alias(tmp_path, monkeypatch):
     """The name in a project's settings outlives the model. One indirection reaches every place
