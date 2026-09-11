@@ -349,3 +349,32 @@ def test_a_binary_the_person_set_themselves_is_never_overridden():
 
     env = {"AUTOSOUND_CRITIC_BIN": "my-own-reviewer", "GEMINI_BIN": "gemini"}
     assert critic.critic_bin_override(harness="agy", environ=env, which=lambda _n: "/x") == {}
+
+
+def test_the_call_says_which_binary_it_went_out_with(tmp_path, monkeypatch, caplog):
+    """Not saying it cost a whole round trip. `AUTOSOUND_CRITIC_BIN` goes into the CHILD's
+    environment and nowhere else, so TCC's own `os.environ` shows `None` on a fixed build exactly
+    as it does on a broken one — and a session on the machine read that as "the fix did not
+    arrive" (2026-09-11). One line settles it: which binary, and who chose it."""
+    import logging
+
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])   # a project with its files
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setenv("GEMINI_BIN", "gemini")
+    monkeypatch.delenv("AUTOSOUND_CRITIC_BIN", raising=False)
+
+    def explode(*_a, **_k):
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", explode)
+
+    with caplog.at_level(logging.INFO):
+        critic.run("a package", project_dir=tmp_path, harness="agy")
+
+    said = "\n".join(r.getMessage() for r in caplog.records)
+    assert "critic: bin=agy" in said, f"the binary is named, not inferred: {said}"
+    assert "Arbiter's pick" in said, "and who decided it"

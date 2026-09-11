@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import child
+from autosound_tcc.core import app_log, child
 from autosound_tcc.core import config, vendor_loader
 
 DEFAULT_TIMEOUT_S = 600.0
@@ -269,9 +269,20 @@ def run(
     # TCC-002: a stale `GEMINI_BIN` inherited from the machine outranks the reviewer's own
     # autodetection and sends every call down a path Google closed. Corrected only when it cannot
     # work and a working CLI is installed — see `critic_bin_override`.
-    env_overrides.update(critic_bin_override(harness=harness))
+    override = critic_bin_override(harness=harness)
+    env_overrides.update(override)
 
     env = vendor_loader.child_env(**env_overrides)
+    # Said out loud, because not saying it cost a whole round trip. `AUTOSOUND_CRITIC_BIN` is put
+    # into the CHILD's environment and nowhere else, so looking at TCC's own `os.environ` shows
+    # `None` on a fixed build exactly as it does on a broken one — and a session on the machine
+    # read that as "the fix did not arrive" (2026-09-11). This line answers the only question that
+    # matters: which binary this call actually went out with, and who decided it.
+    app_log.logger().info(
+        "critic: bin=%s (%s) model=%s harness=%r inherited GEMINI_BIN=%r",
+        env.get("AUTOSOUND_CRITIC_BIN") or env.get("GEMINI_BIN") or "(the script autodetects)",
+        "TCC, from the Arbiter's pick" if override else "not set by TCC",
+        model or "(the script's default)", harness, os.environ.get("GEMINI_BIN"))
     try:
         proc = subprocess.run(
             argv,
