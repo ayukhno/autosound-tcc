@@ -160,8 +160,13 @@ def preflight(project_dir: Optional[Path] = None) -> list[str]:
 #: this was found on; `gemini` stays because a setup that really has it should keep it.
 _CRITIC_CLIS = ("agy", "gemini")
 
+#: The CLI each picker route is actually run with. `sdk` and `omp` are not here on purpose:
+#: neither is a reviewer CLI, and naming one would send the script at a binary that cannot
+#: take a review.
+_HARNESS_CLIS = {"agy": "agy", "codex": "codex", "gemini": "gemini"}
 
-def critic_bin_override(*, environ=None, which=None) -> dict:
+
+def critic_bin_override(*, harness: str = "", environ=None, which=None) -> dict:
     """`{"AUTOSOUND_CRITIC_BIN": <cli>}` when the inherited reviewer binary cannot work, else `{}`.
 
     The skill's reviewer honours `GEMINI_BIN` under its historical name and lets it OUTRANK
@@ -179,6 +184,18 @@ def critic_bin_override(*, environ=None, which=None) -> dict:
     which = which or shutil.which
     if environ.get("AUTOSOUND_CRITIC_BIN"):
         return {}
+    # What the Arbiter PICKED, and it outranks anything inherited. That ordering is the bug the
+    # session finally named: the project said `critic: agy:…`, the machine exported
+    # `GEMINI_BIN=gemini`, and the reviewer reads the env var first — so ten calls in a row went
+    # to a CLI nobody chose, down a path Google has closed, and came back as clipboard packages
+    # with `model: null` (measured 2026-09-11). TCC already sends the picked MODEL; not sending
+    # the binary beside it is what let the two disagree.
+    #
+    # `which`, because a pick naming a CLI this machine does not have is worse than no override:
+    # it would replace one dead name with another.
+    wanted = _HARNESS_CLIS.get((harness or "").strip().lower())
+    if wanted and which(wanted):
+        return {"AUTOSOUND_CRITIC_BIN": wanted}
     inherited = environ.get("GEMINI_BIN")
     if not inherited or which(inherited):
         return {}
@@ -213,6 +230,7 @@ def run(
     trace_path: Optional[str] = None,
     role: str = "critic",
     model: Optional[str] = None,
+    harness: str = "",
     timeout_s: float = DEFAULT_TIMEOUT_S,
     python_executable: Optional[str] = None,
 ) -> CriticResult:
@@ -251,7 +269,7 @@ def run(
     # TCC-002: a stale `GEMINI_BIN` inherited from the machine outranks the reviewer's own
     # autodetection and sends every call down a path Google closed. Corrected only when it cannot
     # work and a working CLI is installed — see `critic_bin_override`.
-    env_overrides.update(critic_bin_override())
+    env_overrides.update(critic_bin_override(harness=harness))
 
     env = vendor_loader.child_env(**env_overrides)
     try:

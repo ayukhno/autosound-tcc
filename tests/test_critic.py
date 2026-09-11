@@ -312,3 +312,40 @@ def test_a_reviewer_binary_that_is_not_installed_does_not_win_over_one_that_is()
         "a choice the person made themselves is never overridden"
 
     assert critic.critic_bin_override(environ={}, which=which) == {}, "nothing inherited, nothing to fix"
+
+
+def test_the_reviewer_pick_outranks_an_inherited_gemini_bin():
+    """TCC-002, and the ordering IS the bug. The project said `critic: agy:gemini-3.1-pro-high`,
+    the machine exported `GEMINI_BIN=gemini`, and the reviewer script reads the env var first — so
+    ten calls in a row went to a CLI nobody chose, down a path Google has closed, and came back as
+    clipboard packages with `model: null` (measured on the Arbiter's machine, 2026-09-11).
+
+    TCC already sent the picked MODEL. Not sending the binary beside it is what let the two point
+    at different reviewers."""
+    from autosound_tcc.core import critic
+
+    env = {"GEMINI_BIN": "gemini"}          # on PATH, and useless
+    here = {"agy", "gemini"}
+
+    picked = critic.critic_bin_override(
+        harness="agy", environ=env, which=lambda name: name if name in here else None)
+    assert picked == {"AUTOSOUND_CRITIC_BIN": "agy"}, "the Arbiter's pick wins"
+
+
+def test_a_pick_this_machine_cannot_run_is_not_forced():
+    """Replacing one dead name with another is worse than leaving it alone: the person would then
+    be debugging a binary they never chose AND never installed."""
+    from autosound_tcc.core import critic
+
+    env = {"GEMINI_BIN": "gemini"}
+    only_gemini = critic.critic_bin_override(
+        harness="codex", environ=env, which=lambda name: name if name == "gemini" else None)
+
+    assert only_gemini == {}, "codex was picked but is not installed — say nothing"
+
+
+def test_a_binary_the_person_set_themselves_is_never_overridden():
+    from autosound_tcc.core import critic
+
+    env = {"AUTOSOUND_CRITIC_BIN": "my-own-reviewer", "GEMINI_BIN": "gemini"}
+    assert critic.critic_bin_override(harness="agy", environ=env, which=lambda _n: "/x") == {}

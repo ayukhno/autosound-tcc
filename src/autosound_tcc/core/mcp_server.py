@@ -207,6 +207,17 @@ def configured_critic_model(project_dir: Path) -> str:
     return resolved.key.partition(":")[2] or resolved.key
 
 
+def configured_critic_harness(project_dir: Path) -> str:
+    """Which ROUTE the footer's reviewer runs through — `agy`, `codex`, `sdk`, `omp` — or "".
+
+    Beside `configured_critic_model` and read from the same key, because the two belong together:
+    a model name without the CLI it runs on is what let TCC's pick and the machine's environment
+    point at different reviewers for ten calls running (TCC-002).
+    """
+    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
+    return key.partition(":")[0] if ":" in key else ""
+
+
 def clipboard_reason(project_dir: Path) -> str:
     """Why a reviewer call would come back as a package rather than as a critique.
 
@@ -1068,6 +1079,10 @@ def build_server(
             project_dir=project_dir,
             trace_path=trace_path or None,
             model=model or configured_critic_model(project_dir) or None,
+            # And the CLI that goes with it. Sending the model without the binary is how the two
+            # came to disagree: the pick said `agy`, the machine's `GEMINI_BIN` said `gemini`, and
+            # the reviewer script reads the env var first (TCC-002).
+            harness=configured_critic_harness(project_dir),
         )
         critic.log_call(result, None, project_dir)
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
