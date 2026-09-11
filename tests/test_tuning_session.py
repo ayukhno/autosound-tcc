@@ -738,6 +738,13 @@ def test_a_command_that_cannot_be_undone_is_still_put_to_the_arbiter(command, tm
     "mkdir -p out && cp a.json out/",
     "grep -rn TODO .",
     "echo hi > out.txt",
+    # A pipe INSIDE QUOTES is part of a string, not a separator between commands. Splitting on it
+    # cut the line mid-quote, `shlex` refused the fragment, and "unparseable is not safe" fired —
+    # so an ordinary read was shown to the Arbiter as "a command you cannot undo", in a mode they
+    # had set to never ask (their screenshot, 2026-09-11).
+    r'grep -n "CRITIC_MODEL\|ADVISOR_MODEL" scripts/_gemini_common.sh | head -25; echo "=== agy"',
+    r"awk -F'|' '{print $2}' table.txt",
+    r'echo "a|b"',
 ])
 def test_an_ordinary_command_stays_silent(command, tmp_path):
     """The other half, and the one that decides whether this is worth having: a classifier that

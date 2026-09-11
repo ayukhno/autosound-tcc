@@ -314,9 +314,72 @@ def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
         return False
     if _SUBSTITUTION.search(text):
         return True
-    parts = [part for part in _SEPARATORS.split(text) if part.strip()]
-    piped = "|" in text
+    parts, piped = _split_on_separators(text)
+    if parts is None:
+        return True  # quoting that never closes is not safe; it is unknown
     return any(_single_command_is_dangerous(part, piped) for part in parts)
+
+
+def _split_on_separators(text: str):
+    r"""`(segments, saw_a_pipe)` — split on shell separators, RESPECTING QUOTES.
+
+    A regex could not do this, and the difference was visible to the Arbiter. `|` inside
+    `grep -n "CRITIC_MODEL\|ADVISOR_MODEL"` is part of a STRING, not a separator between
+    commands; splitting on it cut the line mid-quote, `shlex` refused the fragments, and
+    "unparseable is not safe" fired. So an ordinary read was put in front of them labelled
+    "a command you cannot undo" — in a mode they had set to never ask (2026-09-11).
+
+    Every command with an alternation in it was affected: `grep "a\|b"`, `awk -F'|'`, a plain
+    `echo "a|b"`. Nothing about them is dangerous, and the dialog that fired on them is exactly
+    the one that teaches a person to click through without reading.
+
+    `(None, …)` when the quoting does not close — that stays dangerous, deliberately: an
+    unreadable command is unknown, and unknown is not safe.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    piped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            current.append(ch)
+            # A backslash escapes inside double quotes, not inside single ones — the shell's own
+            # rule, and it decides whether the NEXT character can close the quote.
+            if ch == "\\" and quote == '"' and i + 1 < len(text):
+                current.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            current.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < len(text):
+            current.append(ch)
+            current.append(text[i + 1])
+            i += 2
+            continue
+        if ch in ";|&":
+            if ch == "|":
+                piped = True
+            segments.append("".join(current))
+            current = []
+            if i + 1 < len(text) and text[i + 1] == ch:  # `&&`, `||`
+                i += 1
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    if quote:
+        return None, piped
+    segments.append("".join(current))
+    return [part for part in segments if part.strip()], piped
 
 
 def _single_command_is_dangerous(command: str, piped_into_something: bool) -> bool:
