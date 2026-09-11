@@ -286,7 +286,12 @@ class _PhaseRow(QWidget):
             head_layout.addWidget(count)
         outer.addWidget(header)
 
-        self._steps_container = QWidget()
+        # Parented AT CONSTRUCTION, and that is not style. A widget with no parent IS a
+        # top-level window, so `setHidden(False)` below put a real 200x728 window on the
+        # desktop for ~60 ms — once per phase, on every rebuild, which is once per MCP
+        # call. That was the flash hunted for a day as a console problem; a Qt event
+        # filter finally named this line by its own stack (probe35, 2026-09-11).
+        self._steps_container = QWidget(self)
         steps_layout = QVBoxLayout(self._steps_container)
         steps_layout.setContentsMargins(0, 0, 0, 2)
         steps_layout.setSpacing(0)
@@ -304,8 +309,10 @@ class _PhaseRow(QWidget):
         # journal. Adding a step is `add_step` on the MCP surface; the Arbiter asks for it in the
         # dialog. Gone rather than disabled: a control that cannot work is not a hint.
 
-        self._steps_container.setHidden(collapsed)
+        # In the layout FIRST, shown second. Belt and braces beside the parent above: whichever
+        # of the two a later edit undoes, the other still makes a window impossible.
         outer.addWidget(self._steps_container)
+        self._steps_container.setHidden(collapsed)
 
         header.mousePressEvent = self._toggle  # type: ignore[assignment]
 

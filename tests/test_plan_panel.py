@@ -320,3 +320,40 @@ def test_different_prefixes_do_not_merge():
     assert len(rows) == 2
     assert "0/2" in rows[0].name["en"]  # neither is done; the count is honest either way
     assert rows[1].name["en"] == "Crossover set: tw-L"
+
+
+def test_building_the_plan_puts_no_window_of_its_own_on_the_desktop():
+    """The flash that was hunted for a day as a console problem, and was ours all along.
+
+    `_PhaseRow.__init__` built its steps container with NO PARENT and then called
+    `setHidden(collapsed)`. A widget with no parent IS a top-level window, so for an expanded
+    phase that call put a real 200x728 window on the desktop for about 60 ms — once per phase,
+    on every rebuild, which is once per MCP call. Every window watcher polled and missed it; a Qt
+    event filter named this line by its own stack (probe35, 2026-09-11).
+
+    The filter here is the same instrument, so the test fails the way the bug appeared rather
+    than by checking that one line still reads the way it does today.
+    """
+    from PySide6.QtCore import QEvent, QObject
+
+    app = _app()
+    shown: list = []
+
+    class _Watch(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
+            if event.type() == QEvent.Type.Show and getattr(obj, "isWindow", None):
+                if obj.isWindow():
+                    shown.append(
+                        f"{obj.metaObject().className()} {obj.width()}x{obj.height()}")
+            return False
+
+    watch = _Watch()
+    app.installEventFilter(watch)
+    try:
+        panel = PlanPanel()
+        panel.set_plan(PLAN)
+        panel.retranslate()
+    finally:
+        app.removeEventFilter(watch)
+
+    assert shown == [], f"a panel must build inside its parent, not on the desktop: {shown}"
