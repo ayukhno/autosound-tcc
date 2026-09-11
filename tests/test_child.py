@@ -563,3 +563,36 @@ def test_the_keeper_still_watches_an_agent_that_allocates_its_own_console(monkey
     _Fake(["git", "status"])
 
     assert watched == [4242], "the agent is watched; git has no console of its own to make"
+
+
+def test_the_liveness_probe_declares_its_types_so_a_handle_is_not_truncated(monkeypatch):
+    """Without `restype`, ctypes hands back a C int and a 64-bit handle loses its top half.
+
+    The failure is silent and total, and it was measured: zero hide transitions across four
+    sessions while `agy` kept a console on screen, including the one at shutdown the Arbiter kept
+    reporting. `OpenProcess` came back truncated, `WaitForSingleObject` refused the mangled
+    handle, the probe read that as "already gone", and the keeper left on its first pass. The app
+    console went on hiding correctly the whole time, because that path never opens a handle —
+    which is exactly why this looked like it worked."""
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    class _Call:
+        def __init__(self, result):
+            self.result = result
+            self.restype = None
+            self.argtypes = None
+
+        def __call__(self, *_args):
+            return self.result
+
+    class _FakeKernel32:
+        def __init__(self):
+            self.OpenProcess = _Call(0x1_2345_6789)  # wider than 32 bits, like a real handle
+            self.WaitForSingleObject = _Call(0x00000102)  # WAIT_TIMEOUT — still running
+            self.CloseHandle = _Call(1)
+
+    fake = _FakeKernel32()
+
+    assert child.process_is_running(4242, kernel32=fake) is True
+    assert fake.OpenProcess.restype is not None, "a handle must have its type declared"
+    assert fake.WaitForSingleObject.argtypes is not None, "and so must what receives it"

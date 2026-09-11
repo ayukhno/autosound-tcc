@@ -70,8 +70,13 @@ def _write_to_console(message: str) -> None:
 
 
 def _hide_own_console() -> int:
-    hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    return ctypes.windll.user32.ShowWindow(hwnd, 0) if hwnd else 0  # SW_HIDE
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetConsoleWindow.restype = ctypes.c_void_p  # a handle, not a C int
+    hwnd = kernel32.GetConsoleWindow()
+    if not hwnd:
+        return 0
+    _hide_window(hwnd)
+    return 1
 
 
 def open_app_console(message: str, *, alloc=None, write=None, hide=None) -> bool:
@@ -227,17 +232,34 @@ _SYNCHRONIZE = 0x00100000
 _WAIT_TIMEOUT = 0x00000102
 
 
-def process_is_running(pid: int) -> bool:
+def process_is_running(pid: int, *, kernel32=None) -> bool:
     """Is this process still alive? Asks Windows and signals nothing. False everywhere else.
 
     `os.kill(pid, 0)` is the POSIX way to ask and the Windows way to kill, so it is not used here
     and a test forbids it. `WaitForSingleObject` with a zero timeout answers immediately: still
     waiting means still running.
+
+    **The types are declared, and that is not tidiness.** With no `restype` ctypes hands back a C
+    int, so a 64-bit handle arrives with its top half gone; `WaitForSingleObject` then refuses the
+    mangled handle, this reads the refusal as "already gone", and the keeper it drives leaves on
+    its very first pass. Measured before it was found: four sessions with ZERO hide transitions
+    while `agy` held a console on screen, including the one at shutdown. The app console went on
+    hiding correctly throughout, because that path opens no handle — which is precisely why this
+    looked like it was working.
+
+    `c_void_p` rather than `wintypes.HANDLE` on purpose: `ctypes.wintypes` cannot even be imported
+    off Windows, and these lines have to run in a suite that lives on macOS.
     """
     if not sys.platform.startswith("win") or not pid:
         return False
     try:
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = kernel32 or ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel32.WaitForSingleObject.restype = ctypes.c_ulong
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         handle = kernel32.OpenProcess(_SYNCHRONIZE, False, int(pid))
         if not handle:
             return False
@@ -257,6 +279,13 @@ def _console_windows_of(pid: int) -> list:
         from ctypes import wintypes
 
         user32 = ctypes.windll.user32
+        # Declared, like every other handle call here: undeclared, a 64-bit window handle is passed
+        # as a C int and loses its top half without a word (see `process_is_running`).
+        user32.IsWindowVisible.restype = ctypes.c_int
+        user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+        user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p,
+                                                    ctypes.POINTER(wintypes.DWORD)]
         signature = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         found: list = []
 
@@ -277,7 +306,12 @@ def _console_windows_of(pid: int) -> list:
 
 def _hide_window(hwnd: object) -> None:
     try:
-        ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE
+        user32 = ctypes.windll.user32
+        # Declared for the same reason as in `process_is_running`: an undeclared window handle is
+        # passed as a C int and a 64-bit one loses its top half, silently.
+        user32.ShowWindow.restype = ctypes.c_int
+        user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.ShowWindow(hwnd, 0)  # SW_HIDE
     except Exception:  # noqa: BLE001 — hiding is cosmetic; failing at it must not stop a spawn
         return
 
