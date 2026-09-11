@@ -427,7 +427,8 @@ def _skip_agy(now) -> bool:
     return asked is not None and (now() - asked) < EMPTY_ROUTE_RETRY_S
 
 
-def refresh_cli_catalogue(*, force: bool = False, now=None) -> dict[str, list[Choice]]:
+def refresh_cli_catalogue(*, force: bool = False, now=None,
+                          active_omp: Optional[list] = None) -> dict[str, list[Choice]]:
     """Ask every CLI that needs asking, and cache the answer. **Call this off the GUI thread.**
 
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
@@ -455,15 +456,20 @@ def refresh_cli_catalogue(*, force: bool = False, now=None) -> dict[str, list[Ch
         if fetched:
             # Confirmed by the CLI just now: these stop being "remembered from last time".
             _UNCONFIRMED.difference_update(choice.key for choice in fetched)
-    # And omp, here rather than inside `choices()`. Once per process (or on a press), because
-    # `choices()` is called on the GUI thread every time the window becomes active — and twice per
-    # activation, since `critic_choices` calls it too. A 20-second subprocess in that position is
-    # a window that freezes on an ordinary alt-tab.
-    if force or _OMP_CATALOGUE is None:
+    # And omp — but ONLY when somebody has marked an omp model, and only once. Two holes were
+    # measured on the Arbiter's machine the first time this moved here (probe30, 2026-09-11):
+    #
+    #  * it asked with `active_omp` empty, and `choices()` uses the catalogue only to label models
+    #    the user MARKED. Nobody had marked any, so every launch ran `omp models` to label nothing.
+    #  * a FAILED fetch left the cache unset, so the next refresh asked again, and the next —
+    #    the same hole as the one already fixed for `agy`, which is why a failure is now
+    #    remembered as an empty answer rather than as "not asked yet".
+    global _OMP_CATALOGUE
+    if active_omp and (force or _OMP_CATALOGUE is None):
         try:
             omp_catalogue()
         except OmpCatalogueError:
-            pass  # not installed, or it failed: the picker labels marked models by selector
+            _OMP_CATALOGUE = []  # asked, and it said nothing. Asking again buys the same nothing.
     _save_cached_catalogue()
     return dict(_CLI_CACHE)
 

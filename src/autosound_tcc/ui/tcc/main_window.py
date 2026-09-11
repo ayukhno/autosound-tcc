@@ -619,18 +619,24 @@ class _CliCatalogueWorker(QThread):
 
     done = Signal()
 
-    def __init__(self, force: bool = False) -> None:
+    def __init__(self, force: bool = False, active_omp: list | None = None) -> None:
         super().__init__()
         # `force` reaches `refresh_cli_catalogue`: an ordinary launch leaves agy cached and unrun
         # (its window is the startup flash of TCC-006), while the ↻ button forces a re-ask.
         self._force = force
+        #: Which omp models the user marked. Empty means the omp catalogue is needed for NOTHING,
+        #: and asking for it is a subprocess spent labelling models nobody chose (probe30).
+        self._active_omp = list(active_omp or [])
 
     def run(self) -> None:
-        model_choices.refresh_cli_catalogue(force=self._force)
+        model_choices.refresh_cli_catalogue(force=self._force, active_omp=self._active_omp)
         # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
         # built during construction. Asking there would put a process launch in front of the
         # first paint on every startup.
-        claude_sdk.probe_signed_in()
+        # `force` travels here too: without it the answer is asked once per process, which is the
+        # point — `claude` puts a console window on screen on Windows and upstream has closed that
+        # as not planned. A press means somebody just logged in and wants it re-asked.
+        claude_sdk.probe_signed_in(force=self._force)
         self.done.emit()
 
     quiet = Signal(list)  # routes that are installed and answered with nothing
@@ -3038,8 +3044,16 @@ class MainWindow(QMainWindow):
         running = getattr(self, "_cli_catalogue", None)
         if running is not None and running.isRunning():
             return
+        # Not while the window is going away. Closing raises dialogs, each of which hands
+        # activation back on its way out, and `changeEvent` answered that by starting a probe —
+        # so leaving TCC spawned `claude auth` and `omp models` on the way out, and the app then
+        # exited underneath them: `QThread: Destroyed while thread is still running`, logged on
+        # the Arbiter's machine (probe30, 2026-09-11). Work started during a shutdown has nobody
+        # left to give its answer to.
+        if getattr(self, "_closing", False):
+            return
         self._cli_refreshed_at = now
-        self._cli_catalogue = _CliCatalogueWorker(force=force)
+        self._cli_catalogue = _CliCatalogueWorker(force=force, active_omp=self._active_omp())
         self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
         self._cli_catalogue.start()
 
@@ -4451,6 +4465,10 @@ class MainWindow(QMainWindow):
             self._refresh_cli_catalogue()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # First, before anything here can raise a dialog: a dialog hands activation back on its
+        # way out, `changeEvent` answers activation by starting probes, and the app then exits
+        # underneath them. See `_refresh_cli_catalogue`.
+        self._closing = True
         # The flashing still reported at CLOSE is native windows, not consoles — that half is
         # settled (603 spawns in a session, 0 visible console windows, 2026-09-11). Nothing was
         # recording windows from inside at this point, so the watch is re-armed here and the log

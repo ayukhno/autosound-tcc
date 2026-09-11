@@ -889,3 +889,48 @@ def test_the_picker_never_launches_omp_itself(monkeypatch):
     omp = [choice for choice in entries if choice.harness == "omp"]
     assert [choice.model for choice in omp] == ["google/gemini-3.1-pro-preview"]
     assert omp[0].label == "google/gemini-3.1-pro-preview", "labelled by selector, not by silence"
+
+
+def test_omp_is_not_asked_when_nobody_marked_an_omp_model(monkeypatch):
+    """`choices()` uses the omp catalogue for ONE thing: putting a label on models the user
+    marked. With nothing marked there is nothing to label, and asking is a subprocess spent on
+    nobody — measured on the Arbiter's machine as a fresh `omp models` on every launch (probe30)."""
+    from autosound_tcc.core import model_choices as mc
+
+    asked: list = []
+    monkeypatch.setattr(mc, "_OMP_CATALOGUE", None, raising=False)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "omp_catalogue", lambda: asked.append(1) or [])
+
+    mc.refresh_cli_catalogue()
+    assert asked == [], "nothing marked, nothing to label, nothing to ask"
+
+    mc.refresh_cli_catalogue(active_omp=["google/gemini-3.1-pro-preview"])
+    assert asked == [1], "marked: asked once"
+
+
+def test_an_omp_catalogue_that_failed_is_not_asked_again_every_refresh(monkeypatch):
+    """The same hole that was already fixed for `agy`, reopened here: a FAILED fetch left the
+    cache unset, so it read as "never asked" and ran again on the next refresh — and a refresh
+    happens every time the window becomes active. A failure is remembered as an empty answer."""
+    from autosound_tcc.core import model_choices as mc
+
+    asked: list = []
+
+    def explode():
+        asked.append(1)
+        raise mc.OmpCatalogueError("no credentials")
+
+    monkeypatch.setattr(mc, "_OMP_CATALOGUE", None, raising=False)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "omp_catalogue", explode)
+
+    active = ["google/gemini-3.1-pro-preview"]
+    for _ in range(5):                     # five window activations
+        mc.refresh_cli_catalogue(active_omp=active)
+
+    assert asked == [1], "asked once; the silence is remembered"

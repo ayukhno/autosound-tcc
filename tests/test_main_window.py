@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 from types import SimpleNamespace
 
@@ -3590,14 +3591,18 @@ def test_the_catalogue_worker_forces_agy_only_when_asked(monkeypatch):
     seen = []
     monkeypatch.setattr(
         main_window.model_choices, "refresh_cli_catalogue",
-        lambda *, force=False: seen.append(force) or {},
+        lambda *, force=False, active_omp=None: seen.append((force, active_omp)) or {},
     )
-    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in", lambda: None)
+    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in",
+                        lambda *, force=False: None)
 
     main_window._CliCatalogueWorker().run()
     main_window._CliCatalogueWorker(force=True).run()
+    main_window._CliCatalogueWorker(active_omp=["google/x"]).run()
 
-    assert seen == [False, True]
+    # The marked list travels with it: `omp models` is asked for exactly one purpose, labelling
+    # models the user chose, so with nothing chosen it must not be asked at all (probe30).
+    assert seen == [(False, []), (True, []), (False, ["google/x"])]
 
 
 def test_the_capture_panel_is_not_rebuilt_once_per_write(tmp_path, monkeypatch):
@@ -3618,3 +3623,28 @@ def test_the_capture_panel_is_not_rebuilt_once_per_write(tmp_path, monkeypatch):
 
     window._process_reload.timeout.emit()              # what the timer does when the burst ends
     assert drawn == [1], "one rebuild for the burst"
+
+
+def test_claude_is_asked_for_its_login_once_not_once_per_alt_tab(monkeypatch):
+    """It said "once" in its own docstring and did not do it: nothing checked what it remembered,
+    so every caller ran the CLI again — and the caller runs every time the window becomes active.
+    On Windows that is a console window per alt-tab, and `claude` putting visible consoles on
+    screen is an upstream bug closed as not planned (anthropics/claude-code #58606). Asking less
+    often is the only lever we hold."""
+    from autosound_tcc.core import claude_sdk
+
+    ran: list = []
+    monkeypatch.setattr(claude_sdk, "_ASKED", False, raising=False)
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", None, raising=False)
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: "/usr/bin/claude")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        claude_sdk.subprocess, "run",
+        lambda *a, **k: ran.append(1) or subprocess.CompletedProcess(a, 0, '{"loggedIn": true}', ""))
+
+    for _ in range(6):                       # six alt-tabs
+        assert claude_sdk.probe_signed_in() is True
+    assert ran == [1], "asked once, then remembered"
+
+    claude_sdk.probe_signed_in(force=True)   # the press: somebody just logged in
+    assert len(ran) == 2, "a press re-asks; that is what the press is for"

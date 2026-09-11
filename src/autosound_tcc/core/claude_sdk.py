@@ -42,6 +42,12 @@ _AUTH_TIMEOUT_S = 2.0
 #: Tri-state, cached for the life of the process: True, False, and None for "could not tell".
 _SIGNED_IN: Optional[bool] = None
 
+#: Whether the question has been PUT, as opposed to what it answered. The two are different and
+#: the difference is a bug that shipped: `None` is a real answer here ("a `claude` whose output
+#: we do not recognise"), so remembering only the answer makes a machine that cannot tell ask
+#: again on every window activation — which is a console window per alt-tab on Windows.
+_ASKED = False
+
 
 class ClaudeSdkMissing(ImportError):
     """The Claude route was asked for on an install that does not have the SDK.
@@ -95,8 +101,17 @@ def signed_in() -> Optional[bool]:
     return _SIGNED_IN
 
 
-def probe_signed_in() -> Optional[bool]:
+def probe_signed_in(*, force: bool = False) -> Optional[bool]:
     """Ask `claude auth status` once, off the GUI thread, and remember the answer.
+
+    **Once really means once now.** This said so and did not do it: there was no check of what it
+    remembered, so every caller ran the CLI again — and the caller is `_CliCatalogueWorker`, which
+    runs every time the main window becomes active. On Windows that is a console window per
+    alt-tab, and `claude` spawning visible consoles is a known upstream bug closed as not planned
+    (anthropics/claude-code #58606, #51867, #66540), so the only lever left is asking less often.
+
+    `force` is the ↻ button: somebody logs in while TCC is open, presses it, and is entitled to a
+    fresh answer. That was the whole reason this was being re-asked in the first place.
 
     The SDK route deliberately runs the user's own `claude` session rather than an API key, so
     "installed" and "usable" are different states and only this call can tell them apart —
@@ -106,7 +121,10 @@ def probe_signed_in() -> Optional[bool]:
 
     An `ANTHROPIC_API_KEY` is the other way the route can work, and it needs no CLI at all.
     """
-    global _SIGNED_IN
+    global _SIGNED_IN, _ASKED
+    if _ASKED and not force:
+        return _SIGNED_IN
+    _ASKED = True
     if os.environ.get("ANTHROPIC_API_KEY"):
         _SIGNED_IN = True
         return _SIGNED_IN
