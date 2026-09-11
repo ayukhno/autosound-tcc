@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -155,6 +156,38 @@ def preflight(project_dir: Optional[Path] = None) -> list[str]:
     return problems
 
 
+#: Reviewer CLIs to fall back to, best first. `agy` is the one actually installed on the machine
+#: this was found on; `gemini` stays because a setup that really has it should keep it.
+_CRITIC_CLIS = ("agy", "gemini")
+
+
+def critic_bin_override(*, environ=None, which=None) -> dict:
+    """`{"AUTOSOUND_CRITIC_BIN": <cli>}` when the inherited reviewer binary cannot work, else `{}`.
+
+    The skill's reviewer honours `GEMINI_BIN` under its historical name and lets it OUTRANK
+    autodetection, so a stale value silently decides the channel. On the Arbiter's machine it
+    named `gemini` — a path Google has closed — so every call tried that, failed, and degraded to
+    the clipboard: eight calls, zero critiques, and `agy`, which was installed all along, never
+    tried once (measured 2026-09-11, TCC-002).
+
+    `AUTOSOUND_CRITIC_BIN` is checked FIRST by that same reviewer, so naming a working CLI there
+    settles it without touching anybody's environment. Deliberately narrow: it acts only when the
+    inherited name is not on PATH and a working one is, and it never overrides a choice the person
+    made for themselves.
+    """
+    environ = os.environ if environ is None else environ
+    which = which or shutil.which
+    if environ.get("AUTOSOUND_CRITIC_BIN"):
+        return {}
+    inherited = environ.get("GEMINI_BIN")
+    if not inherited or which(inherited):
+        return {}
+    for candidate in _CRITIC_CLIS:
+        if which(candidate):
+            return {"AUTOSOUND_CRITIC_BIN": candidate}
+    return {}
+
+
 def package_dir(project_dir: Optional[Path] = None) -> Path:
     """Where TCC drops packages it composed itself.
 
@@ -214,6 +247,11 @@ def run(
     env_overrides = {"PROJECT_MIRROR": str(_project_mirror(project_dir))}
     if model:
         env_overrides["GEMINI_CRITIC_MODEL" if role == "critic" else "GEMINI_ADVISOR_MODEL"] = model
+
+    # TCC-002: a stale `GEMINI_BIN` inherited from the machine outranks the reviewer's own
+    # autodetection and sends every call down a path Google closed. Corrected only when it cannot
+    # work and a working CLI is installed — see `critic_bin_override`.
+    env_overrides.update(critic_bin_override())
 
     env = vendor_loader.child_env(**env_overrides)
     try:
@@ -325,7 +363,7 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
             encoding="utf-8",
             errors="replace",
             timeout=60,
-            env=vendor_loader.child_env(),
+            env=vendor_loader.child_env(**critic_bin_override()),  # TCC-002, as above
             **child.quiet(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

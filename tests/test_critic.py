@@ -285,3 +285,30 @@ def test_a_real_failure_is_still_a_failure(monkeypatch, tmp_path):
 
     assert result.mode == critic.MODE_ERROR
     assert result.models == []
+
+
+def test_a_reviewer_binary_that_is_not_installed_does_not_win_over_one_that_is():
+    """`GEMINI_BIN` outranks autodetection in the skill's reviewer, for historical reasons. On this
+    machine it names `gemini` — a path Google closed — so every call tried that, failed, and fell
+    back to the clipboard without ever trying `agy`, which IS installed. Eight calls, zero
+    critiques, and the real reason never surfaced (Arbiter's own tally, 2026-09-11).
+
+    `AUTOSOUND_CRITIC_BIN` is checked first by that same reviewer, so naming a working CLI there
+    is the fix. Deliberately narrow: it acts only when the inherited name cannot work and a
+    working one exists, and it never overrides a choice the person made themselves."""
+    from autosound_tcc.core import critic
+
+    installed = {"agy"}
+    which = lambda name: f"/bin/{name}" if name in installed else None  # noqa: E731
+
+    assert critic.critic_bin_override(
+        environ={"GEMINI_BIN": "gemini"}, which=which) == {"AUTOSOUND_CRITIC_BIN": "agy"}
+
+    assert critic.critic_bin_override(
+        environ={"GEMINI_BIN": "agy"}, which=which) == {}, "an inherited name that works is left"
+
+    assert critic.critic_bin_override(
+        environ={"AUTOSOUND_CRITIC_BIN": "gemini", "GEMINI_BIN": "gemini"}, which=which) == {}, \
+        "a choice the person made themselves is never overridden"
+
+    assert critic.critic_bin_override(environ={}, which=which) == {}, "nothing inherited, nothing to fix"
