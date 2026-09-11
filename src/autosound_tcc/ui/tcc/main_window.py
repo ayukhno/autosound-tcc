@@ -3074,19 +3074,23 @@ class MainWindow(QMainWindow):
         # and telling somebody their login expired when TCC never ran the command sends them to
         # re-authenticate a CLI that works (TCC-006, 2026-09-11).
         #
-        # Said ONCE per run, and that is not tidiness. This handler runs on every catalogue
-        # refresh, and a refresh happens every time the window becomes active — so notifying each
-        # time would overwrite whatever the strip was showing on every alt-tab. That is the same
-        # defect this whole change is about: work wired to an event that fires far more often than
-        # its author pictured. The fact is stable, so saying it repeatedly adds nothing.
-        said = getattr(self, "_unasked_said", set())
-        fresh = [route for route in model_choices.cli_routes_not_asked() if route not in said]
-        if fresh:
-            said.update(fresh)
-            self._unasked_said = said
-            self._status_strip.notify(
-                i18n.t("cliRouteNotAsked").format(routes=", ".join(fresh)), level="info"
-            )
+        # ONLY after a press. This lands about a second after the window opens, and a status line
+        # appearing there does not just say something — it takes up room, and the layout under it
+        # moves. On the Arbiter's machine that reads as a flash right after startup, which is one
+        # of the two things being hunted; adding a new one to the pile while measuring the old one
+        # is how a measurement stops meaning anything.
+        #
+        # A press is the right moment for it anyway: the sentence answers "why did ↻ not bring agy
+        # back", and answering that unprompted at every launch is a nag, not an answer.
+        # Whether THIS answer came from a press. The signal carries nothing, so it is read
+        # off the worker that just finished.
+        force = getattr(getattr(self, "_cli_catalogue", None), "_force", False)
+        if force:
+            unasked = model_choices.cli_routes_not_asked()
+            if unasked:
+                self._status_strip.notify(
+                    i18n.t("cliRouteNotAsked").format(routes=", ".join(unasked)), level="info"
+                )
 
     def _on_rew_titles_changed(self) -> None:
         """REW's list changed — redraw the checklist, and check what the round asked for (SCR-040).
