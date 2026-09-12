@@ -5,6 +5,8 @@ checked rather than assumed. Written after the first CI runs (2026-09-07) found 
 passed on the author's laptop and failed everywhere else — the rule was right and the guard had a
 second door nobody had noticed.
 """
+import gc
+import threading
 from pathlib import Path
 
 from autosound_tcc.core import model_choices
@@ -55,3 +57,33 @@ def test_the_suite_cannot_read_this_machines_reviewer_key(monkeypatch, real_crit
     monkeypatch.setenv("USERPROFILE", str(other))  # what `~` follows on Windows
 
     assert critic_env.machine_config_path() == other / ".config" / "autosound" / "critic-env"
+
+
+def test_the_garbage_collector_never_runs_on_its_own():
+    """Automatic collection runs on whatever thread happens to trip it — an agent worker, a console
+    keeper — and not on the thread that made the garbage. There it destroys Qt objects the main
+    thread built, while the main thread is inside Qt itself: an access violation in the next
+    constructor, which is `#19`.
+
+    Measured on a Mac, 2026-09-12, same objects and one variable: collected only on a side thread,
+    3 runs of 3 died with SIGSEGV; collected only on the main thread, 0 of 3. pyqtgraph ships the
+    same cure for the same reason ("otherwise Qt can crash"). So the suite collects between tests,
+    on the main thread, and nowhere else.
+    """
+    assert gc.isenabled() is False
+
+
+def test_no_test_can_leave_a_console_keeper_running():
+    """A keeper is a daemon thread with a twelve-hour budget, and on a Windows runner the pid it
+    watches is pytest's own — alive until the very end. Two tests reached one without meaning to
+    and left two such threads for the whole run: they sit in every crash dump of 2026-09-11 (run
+    34639559016, three crashes in a row, where one in three was usual).
+
+    `conftest` hands every test a spawn that starts nothing; this checks it is still there.
+    """
+    from autosound_tcc.core import child
+
+    ran = threading.Event()
+    child._spawn_daemon(lambda **_kw: ran.set(), {})
+
+    assert not ran.wait(0.2), "a real thread started — the keeper stub in conftest is gone"
