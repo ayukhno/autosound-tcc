@@ -171,4 +171,8 @@ def test_a_detached_thread_is_still_the_exit_paths_business():
     stop = True
     thread.wait(4000)
     _app().processEvents()  # `finished` is queued back to this thread
-    assert qt_shutdown.detached() == frozenset(), "and it lets go of itself when it ends"
+    # THIS thread, not the whole set. The set is process-wide, and an earlier test that closed a
+    # curve dialog mid-computation hands its `_CurveWorker` over here too — still finishing on a
+    # slower machine when this line runs. Windows CI, 2026-09-12, 2 runs of 10: the set held
+    # exactly one entry, `curve_dialog._CurveWorker`, and this test's own thread had let go.
+    assert thread not in qt_shutdown.detached(), "and it lets go of itself when it ends"
