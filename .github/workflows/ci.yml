@@ -57,6 +57,10 @@ on:
         description: "With native_debug: full page heap, to catch a corruption where it is made"
         default: "false"
         required: false
+      stale_check:
+        description: "With native_debug: walk the wrapper map after every test (PYTHONMALLOC=debug)"
+        default: "false"
+        required: false
 
 concurrency:
   # A manual series gets its own group: it is the answer to a question somebody asked, and a push
@@ -223,6 +227,7 @@ jobs:
           PYTEST_ARGS: ${{ github.event.inputs.pytest_args }}
           NATIVE_DEBUG: ${{ github.event.inputs.native_debug }}
           PAGE_HEAP: ${{ github.event.inputs.page_heap }}
+          STALE_CHECK: ${{ github.event.inputs.stale_check }}
         run: |
           args="${PYTEST_ARGS:-tests/}"
           echo "running: $args"

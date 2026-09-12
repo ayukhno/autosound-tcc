@@ -27,6 +27,16 @@ if [ "${PAGE_HEAP:-false}" = "true" ]; then
   "$dbg/gflags.exe" /p /enable python.exe /full
 fi
 
+# `stale_check: true` — see scripts/pytest_stale_wrappers.py. Freed Python memory gets a marker,
+# and every test ends by walking the wrapper map, so a left-behind entry crashes at the end of
+# the test that left it.
+plugin=()
+if [ "${STALE_CHECK:-false}" = "true" ]; then
+  export PYTHONMALLOC=debug
+  export PYTHONPATH="$(cygpath -w "$PWD/scripts")"
+  plugin=(-p pytest_stale_wrappers)
+fi
+
 on_crash='.echo ===NATIVE CRASH===; |; ~.; .ecxr; kn 80; .echo ===ALL THREADS===; ~*kn 40; .echo ===MODULES===; lmvm Qt6Core; lm m *shiboken*; lm m *pyside*; .echo ===END===; q'
 # -o follows child processes: `.venv\Scripts\python.exe` is a launcher that starts the base
 # interpreter as a child, and the child is the one that crashes.
@@ -44,9 +54,10 @@ EOF
 
 attempts=5
 for i in $(seq 1 $attempts); do
-  "$dbg/cdb.exe" -o -cf 'D:\cdb-19.txt' "$python_exe" -m pytest "$@" -q -p no:cacheprovider \
+  "$dbg/cdb.exe" -o -cf 'D:\cdb-19.txt' "$python_exe" -m pytest "$@" "${plugin[@]}" -q -p no:cacheprovider \
     2>&1 | tee /tmp/native-out.txt
   if grep -q "===NATIVE CRASH===" /tmp/native-out.txt; then
+    grep "\[stale-check\] after" /tmp/native-out.txt | tail -1 | sed "s/^/last test before the crash: /"
     echo "::warning title=#19 native::attempt $i captured a native stack — read from ===NATIVE CRASH=== to ===END==="
     echo "- native stack captured on attempt **$i** of $attempts" >> "$GITHUB_STEP_SUMMARY"
     exit 1
