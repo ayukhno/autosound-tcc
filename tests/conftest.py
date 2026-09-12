@@ -73,36 +73,11 @@ def _collect_qt_leftovers():
     violation that kills the whole run: 4 of 10 full runs, always in `agent_worker.py:46`
     (2026-09-07, `#19`). A cycle collected between tests costs microseconds and lands nowhere.
 
-    Since 2026-09-12 it is the ONLY collection the suite makes: choosing WHEN turned out not
-    to be enough, and `_collect_only_on_the_main_thread` below says why.
-
     Not a fix for the product: there every worker has a parent widget that owns it. This is the
     suite being tidy about what it throws away.
     """
     yield
     gc.collect()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _collect_only_on_the_main_thread():
-    """Automatic garbage collection OFF for the whole run; the collection above is the only one.
-
-    What `#19` was, found 2026-09-12. Automatic collection runs on whatever thread trips it — an
-    agent worker, a console keeper — and collects Qt objects the main thread built on a thread
-    that is not the main one. The main thread then dies in the next Qt constructor, and the dumps
-    show exactly that: the current thread in `QThread.__init__` or `MainWindow.__init__`, and
-    nothing else alive but side threads.
-
-    Collecting between tests (the fixture above, 2026-09-07) chose WHEN and left automatic
-    collection free to choose WHERE, and measured no better: 4 of 20. A Mac reproduction with the
-    same objects and one variable settled where: side thread only, 3 of 3 SIGSEGV; main thread
-    only, 0 of 3. pyqtgraph turns automatic collection off for the same reason.
-
-    Unlike the narrower cures `_end_qt_before_python_finalises` lists as measured worse, nothing
-    here is destroyed sooner: a cycle only waits for the collection between tests.
-    """
-    gc.disable()
-    yield
 
 
 @pytest.fixture(autouse=True)
@@ -111,8 +86,9 @@ def _no_console_keeper_threads(monkeypatch):
 
     A keeper is a daemon thread with a budget of up to twelve hours, and on a Windows runner the
     pid two tests handed one was pytest's own, alive to the end. Those two threads sat in every
-    crash dump of 2026-09-11. They did not cause `#19`; they were the side threads that made it
-    land three times in a row. Tests that examine spawning inject their own `spawn` or `defer`.
+    crash dump of 2026-09-11. They did not cause `#19`: with them gone (2026-09-12) the dumps show
+    no Python thread but the main one, and it still dies in `QThread.__init__`. Tests that examine
+    spawning inject their own `spawn` or `defer`.
     """
     from autosound_tcc.core import child
 
