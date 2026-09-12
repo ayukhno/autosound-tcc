@@ -62,6 +62,30 @@ def _rows_first(panel) -> None:
     panel._bubbles.clear()
 
 
+def _take_out(layout, widget) -> bool:
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item.widget() is widget:
+            layout.takeAt(i)
+            return True
+        inner = item.layout()
+        if inner is not None and _take_out(inner, widget):
+            return True
+    return False
+
+
+def _unlayout_then_drop(widget) -> None:
+    """`discard.drop` as a general fix would be: out of whatever layout holds it, THEN as today."""
+    if widget is None:
+        return
+    parent = widget.parentWidget()
+    if parent is not None and parent.layout() is not None:
+        _take_out(parent.layout(), widget)
+    widget.hide()
+    widget.setParent(None)
+    widget.deleteLater()
+
+
 def _apply(variant: str, monkeypatch) -> None:
     if variant == "as-is":
         return
@@ -77,6 +101,8 @@ def _apply(variant: str, monkeypatch) -> None:
     elif variant == "set-parent-only":
         monkeypatch.setattr(dialog_panel.discard, "drop",
                             lambda w: None if w is None else (w.hide(), w.setParent(None)))
+    elif variant == "unlayout-first":
+        monkeypatch.setattr(dialog_panel.discard, "drop", _unlayout_then_drop)
     elif variant != "no-attach":
         raise ValueError(variant)
 
