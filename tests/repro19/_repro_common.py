@@ -13,6 +13,7 @@ showed. They assert nothing: the only result that matters is whether the process
 """
 from __future__ import annotations
 
+import gc
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
@@ -128,3 +129,23 @@ def make_tests(variant: str):
         _panel(variant, tmp_path, monkeypatch)
 
     return test_1_mock_transcript, test_2_attach_clears, test_3_next_panel
+
+
+def make_stress(variant: str, cycles: int = 150):
+    """The same sequence, looped. Replaying it once was deterministic under cdb only until the code
+    around it changed: v0 crashed 2/2 on eb68d98 and 0/1 on 65a3beb, where nothing but helper
+    functions had been added — the allocation pattern moved, and one reuse of one address is all
+    the crash needs. A hundred and fifty cycles give a variant that leaves a bad entry a hundred
+    and fifty chances; a variant that does not leave one has none, whatever the allocator does."""
+    def test_stress(tmp_path, monkeypatch):
+        QApplication.instance() or QApplication([])
+        _apply(variant, monkeypatch)
+        for _ in range(cycles):
+            DialogPanel()
+            panel = DialogPanel()
+            if variant != "no-attach":
+                panel.attach_agent(FakeWorker(), SignalBus(tmp_path), resumed=True, phase="2")
+            del panel
+            gc.collect()
+
+    return test_stress

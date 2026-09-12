@@ -56,7 +56,10 @@ attempts=5
 for i in $(seq 1 $attempts); do
   "$dbg/cdb.exe" -o -cf 'D:\cdb-19.txt' "$python_exe" -m pytest "$@" "${plugin[@]}" -q -p no:cacheprovider \
     2>&1 | tee /tmp/native-out.txt
-  if grep -q "===NATIVE CRASH===" /tmp/native-out.txt; then
+  # A WHOLE line only: cdb also prints this marker while it reads the command file, at the start
+  # of every attempt, and a substring match read each clean attempt as a crash — so every job
+  # stopped after one attempt and reported failure (2026-09-12). `\r`: cdb writes CRLF.
+  if tr -d '\r' < /tmp/native-out.txt | grep -qx "===NATIVE CRASH==="; then
     grep "\[stale-check\] after" /tmp/native-out.txt | tail -1 | sed "s/^/last test before the crash: /"
     echo "::warning title=#19 native::attempt $i captured a native stack — read from ===NATIVE CRASH=== to ===END==="
     echo "- native stack captured on attempt **$i** of $attempts" >> "$GITHUB_STEP_SUMMARY"
