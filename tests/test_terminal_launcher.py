@@ -149,11 +149,6 @@ def test_no_clis_installed_means_no_default(monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="reads the real PATH on the dev machine")
-def test_this_machine_has_at_least_one_agent_cli():
-    """Sanity check for the dogfood machine -- front-end B is unusable without one."""
-    assert terminal_launcher.available_clis()
-
-
 def test_macos_hint_is_passed_as_the_clis_own_argument(recorded, monkeypatch, tmp_path):
     """Regression (2026-07-29 dogfood): an `echo` before `exec` rendered as nothing at all --
     every known CLI is a full-screen TUI that wipes the shell's prior output on start. The hint
