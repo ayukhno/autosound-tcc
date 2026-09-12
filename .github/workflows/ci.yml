@@ -46,6 +46,17 @@ on:
         description: "What to run in the series (default: the whole suite)"
         default: ""
         required: false
+      # `#19` below the Python frame. The dump stops at `QThread.__init__` with nothing else
+      # alive, so the question is native: run the Windows series under cdb and print the native
+      # stacks when the process dies (`scripts/ci_native_debug.sh`). The retry below is bypassed.
+      native_debug:
+        description: "Windows series under cdb: native stacks on a crash (#19)"
+        default: "false"
+        required: false
+      page_heap:
+        description: "With native_debug: full page heap, to catch a corruption where it is made"
+        default: "false"
+        required: false
 
 concurrency:
   # A manual series gets its own group: it is the answer to a question somebody asked, and a push
@@ -210,9 +221,14 @@ jobs:
       - shell: bash
         env:
           PYTEST_ARGS: ${{ github.event.inputs.pytest_args }}
+          NATIVE_DEBUG: ${{ github.event.inputs.native_debug }}
+          PAGE_HEAP: ${{ github.event.inputs.page_heap }}
         run: |
           args="${PYTEST_ARGS:-tests/}"
           echo "running: $args"
+          if [ "$NATIVE_DEBUG" = "true" ]; then
+            exec bash scripts/ci_native_debug.sh $args
+          fi
 
           # Retry ONLY on the known crash, never on a test that failed. #19 kills the process
           # with `Windows fatal exception: access violation` in about 4 runs of 10, and a job that
