@@ -3687,3 +3687,28 @@ def test_a_model_that_cannot_run_is_red_with_one_word_and_the_rest_stay_plain():
     assert combo.itemData(1, Qt.ItemDataRole.ForegroundRole) == QColor(current_theme().warn)
     assert i18n.t("availLocation") in combo.itemText(1)
     assert combo.model().item(1).isEnabled() is True, "a refused model can still be chosen"
+
+
+def test_a_red_reviewer_says_why_in_the_footer_and_the_reload_button_forgets_it(monkeypatch):
+    """"A short answer, so the person understands at once" (the Arbiter, 2026-09-13)."""
+    from autosound_tcc.core import availability, model_choices
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    chosen = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    window._critic_choices = [chosen]
+    MainWindow._fill_combo(window._ai_critic_combo, [chosen], chosen.key, critic=True)
+    monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
+    monkeypatch.setattr(window, "_ping_rew", lambda: None)
+    availability.reset()
+    availability.refused(chosen.key, availability.LOCATION, "not supported in the selected location")
+    try:
+        window._refresh_critic_status()
+        assert i18n.t("availPhraseLocation") in window._critic_status.text()
+        assert "selected location" in window._critic_status.toolTip()
+
+        window._reload_from_disk()
+        assert availability.status(chosen).ready
+    finally:
+        availability.reset()

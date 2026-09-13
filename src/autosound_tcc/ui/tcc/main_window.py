@@ -1680,6 +1680,8 @@ class MainWindow(QMainWindow):
         # `claude auth status` once at startup. The Arbiter logged in, pressed this, and nothing
         # moved (user, 2026-09-09). `force`, because a press is not an alt-tab: the quiet period
         # exists to stop window switching from spawning probes, not to make a button do nothing.
+        # ↻ is the explicit re-check: what refused earlier in this launch gets another chance.
+        availability.forget_refusals()
         self._refresh_cli_catalogue(force=True)
 
     def _safe_load_project(self) -> None:
@@ -3532,6 +3534,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
+        key = str(self._ai_critic_combo.currentData() or "")
+        chosen = model_choices.resolve(self._critic_choices, key).choice if key else None
+        if chosen is not None:
+            state = availability.status(chosen)
+            if not state.ready:
+                self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
+                self._critic_status.setToolTip(state.detail or availability_view.phrase(state))
+                return
+        self._critic_status.setToolTip("")
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
