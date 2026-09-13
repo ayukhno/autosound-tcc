@@ -762,6 +762,19 @@ def test_ci_runs_on_every_push_so_the_release_gate_has_a_run_to_read():
     assert "NOT a release gate" not in text, "the header still says CI holds no tag back"
 
 
+def test_each_commit_runs_ci_once_main_by_push_a_branch_by_its_pull_request():
+    """A push to a PR branch started two identical runs, `push` and `pull_request` — three commits
+    ran twice on 2026-09-13, twenty minutes of Windows each. Pushes run for `main` only: the release
+    gate reads main's HEAD, so it still always has a run, and a branch is checked through its PR."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    triggers = text.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
+
+    push = re.search(r"^  push:\n    branches: \[([^\]]*)\]\n", triggers, re.M)
+    assert push, f"push is not limited to named branches:\n{triggers}"
+    assert [name.strip() for name in push.group(1).split(",")] == ["main"]
+    assert re.search(r"^  pull_request:", triggers, re.M), "a branch would then run no CI at all"
+
+
 # --- the pin the repo RECORDS vs the method actually checked out ---------------------------
 
 
