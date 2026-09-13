@@ -7,6 +7,10 @@ is checked out (`test_contract_check.py` covers the real checker).
 from __future__ import annotations
 
 import os
+import sys
+import threading
+import time
+import traceback
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -292,6 +296,7 @@ def test_the_report_is_read_only_when_the_tab_is_opened():
 
     assert dialog._install_read is False
 
+    started = time.monotonic()
     dialog._tabs.setCurrentIndex(1)
 
     assert dialog._install_read is True
@@ -312,8 +317,29 @@ def test_the_report_is_read_only_when_the_tab_is_opened():
     # ...and if it still is not there, say WHICH of the two things happened. "not in text" cannot
     # tell a slow probe from a section that is never written, and those need different fixes.
     assert "[Command-line tools]" in text, (
-        f"probe still running: {probe.running}\n{text}"
+        f"probe still running: {probe.running} after {time.monotonic() - started:.1f} s\n{text}\n"
+        + (_thread_stacks() if probe.running else "")
     )
+
+
+def _thread_stacks() -> str:
+    """Where every other live thread is right now — the question a stuck probe leaves open.
+
+    "probe still running" says THAT the probe is stuck, not WHERE. Each `--version` is capped at
+    3 s, so a probe alive after 30 s is past that cap: in `communicate()` after a kill, which on
+    Windows waits without a timeout for a grandchild holding the pipe, or starved while this thread
+    waits, or somewhere nobody has thought of. Only the run that fails can say, so it prints the
+    stacks (tcc#31).
+    """
+    frames = sys._current_frames()
+    lines = []
+    for thread in threading.enumerate():
+        frame = frames.get(thread.ident)
+        if thread is threading.current_thread() or frame is None:
+            continue
+        lines.append(f"--- thread {thread.name}")
+        lines.extend(line.rstrip() for line in traceback.format_stack(frame))
+    return "\n".join(lines)
 
 
 def test_the_window_hands_it_the_facts_only_the_window_knows():

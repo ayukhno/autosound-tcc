@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+import pytest
+
 from autosound_tcc.core import install_report
 
 
@@ -14,15 +23,108 @@ def test_every_section_is_present_and_the_text_is_pasteable():
     assert "\t" not in text, "aligned with spaces, so it survives a chat and a screenshot"
 
 
-def test_a_tool_that_is_not_there_is_a_line_and_not_a_crash(monkeypatch):
+def test_a_tool_that_is_not_there_is_a_line_and_not_a_crash(tmp_path, monkeypatch):
     """A report that dies on one missing tool reports nothing at all — and "not found" IS the
     finding, most of the time."""
-    monkeypatch.setattr(install_report.shutil, "which", lambda _name: None)
+    # An empty PATH rather than a stubbed `shutil.which`: the lookup runs in a child process, where
+    # a stub in this one does not reach (tcc#31).
+    monkeypatch.setenv("PATH", str(tmp_path))
 
     text = install_report.as_text()
 
     assert "not found" in text
     assert "[Command-line tools]" in text
+
+
+def _executable(directory, name):
+    """A file a lookup can find: executable on POSIX, a PATHEXT name on Windows."""
+    path = directory / name
+    path.write_text("#!/bin/sh\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_the_tool_lookup_is_not_starved_by_a_busy_main_thread(tmp_path, monkeypatch):
+    """tcc#31. The tools section runs on a worker thread, and `shutil.which` there hands the GIL
+    over on every file check: 4989 checks for 8 tools on the Windows runner, 56.7 s while the main
+    thread ran Python and 0.047 s while it did not. Listing each directory once still took 15.7 s.
+
+    The same shape — a long PATH where most tools are not found — made long enough to show on any
+    platform, with the main thread spinning the whole time. The section must come back in seconds.
+    """
+    # About 8000 file checks either way: a check per directory per tool, times PATHEXT on Windows.
+    # Relative entries, resolved against the working directory the way `shutil.which` does, because
+    # absolute temp paths this many run past 32767 characters and Windows refuses such a variable.
+    monkeypatch.chdir(tmp_path)
+    directories = []
+    for index in range(90 if sys.platform == "win32" else 1000):
+        directory = tmp_path / f"b{index}"
+        directory.mkdir()
+        directories.append(directory.name)
+    monkeypatch.setenv("PATH", os.pathsep.join(directories))
+    result = {}
+
+    def work():
+        started = time.monotonic()
+        result["section"] = install_report.tools()
+        result["took"] = time.monotonic() - started
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 60
+    spins = 0
+    while worker.is_alive() and time.monotonic() < deadline:
+        spins += 1  # Python bytecode on this thread: what a busy GUI thread does to the worker
+
+    assert not worker.is_alive(), "the lookup did not finish within a minute"
+    assert result["took"] < 5, f"the lookup took {result['took']:.1f} s with the main thread busy"
+    assert {item.value for item in result["section"].items} == {"not found"}
+
+
+def test_the_child_finds_exactly_what_shutil_which_finds(tmp_path, monkeypatch):
+    """Moving the lookup must not change its answer: PATH order, PATHEXT order on Windows, a
+    directory named like a tool, a file that is not executable, a directory that is not there."""
+    first, second, empty, plain = (tmp_path / name for name in ("first", "second", "empty", "plain"))
+    for directory in (first, second, empty, plain):
+        directory.mkdir()
+    for directory in (first, second):
+        _executable(directory, "uv")
+        _executable(directory, "uv.exe")
+    _executable(second, "gh")
+    _executable(second, "gh.cmd")
+    (plain / "git").write_text("not a program", encoding="utf-8")
+    (plain / "git").chmod(0o644)
+    (first / "claude").mkdir()
+    (first / "claude.exe").mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join(
+        str(directory) for directory in (empty, tmp_path / "missing", first, plain, second)))
+    names = [exe for exe, _what in install_report._TOOLS]
+
+    expected = {name: shutil.which(name) for name in names}
+
+    assert expected["uv"] and expected["gh"], "the fixture must give shutil.which something to find"
+    assert install_report._which_all(names) == expected
+
+
+def _child_that_cannot_run(*_args, **_kwargs):
+    raise OSError("no interpreter")
+
+
+def _child_that_says_nonsense(*args, **_kwargs):
+    return subprocess.CompletedProcess(args, 0, "not json", "")
+
+
+@pytest.mark.parametrize("child", [_child_that_cannot_run, _child_that_says_nonsense])
+def test_when_the_child_cannot_answer_the_lookup_is_done_here(tmp_path, monkeypatch, child):
+    """Slow under load beats no answer: the section still says where each tool is."""
+    _executable(tmp_path, "uv")
+    _executable(tmp_path, "uv.exe")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    expected = shutil.which("uv")
+    monkeypatch.setattr(install_report.subprocess, "run", child)
+
+    assert expected
+    assert install_report._which_all(["uv"]) == {"uv": expected}
 
 
 def test_a_probe_that_hangs_or_explodes_is_swallowed(monkeypatch):
