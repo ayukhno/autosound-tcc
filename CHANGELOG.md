@@ -6,6 +6,32 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [Unreleased]
+
+### Changed
+
+- **Models are re-read on every start.** A CLI installed since the last start — codex, or a new agy
+  model — is on the list the next time TCC opens. On Windows the reading happens inside the first
+  console window (`Autosound TCC: reading models...`), waiting up to 8 seconds.
+- **A model that cannot run is red, with one word for why** — not installed, sign in, region,
+  refused, not checked. The reviewer footer says it in one short phrase, and the agent sees the same
+  reason in `get_tcc_state`. The reload button re-checks and forgets earlier refusals.
+- **The chosen reviewer is probed at session start** with one short question, so a model refused
+  for this region is red before the first review. The probe runs in a throwaway folder — nothing
+  lands in the project — and when the method's reviewer falls back to the clipboard, TCC puts back
+  what was on the clipboard before.
+- **The first console window on Windows is one short English line**, so the eye can catch it.
+- **The queue row's button says what it does: "Interrupt and send".** Pressing it ends the running
+  turn; a message left in the queue goes out when the turn ends.
+- **Right-clicking a message's text offers "Copy all", with "Copy selected" above it when text is
+  selected**, instead of Qt's "Copy / Select All".
+- **A reviewer refused for this region** ("not supported in the selected location") is answered with
+  "pick a different Critic model in the footer — ↻ will not help", not with the advice for a drifted
+  model name.
+- **The method is pinned at `v3.0.50`** (7c3a751). A commit-msg hook from that tag refuses commit
+  messages in Cyrillic; it is installed per checkout with
+  `python3 vendor/autosound-tuning-skill/scripts/commit-lang.py --install-hook .`.
+
 ## [v0.1.38] — 2026-09-13 · the Windows crash that killed CI runs was ours: how a widget leaves a panel
 
 Paired with method `4c89fdc7527ac8d6fb5a80ca526613d585800e06` — the tag on that commit is
