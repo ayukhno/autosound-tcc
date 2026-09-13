@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -51,11 +52,15 @@ def test_the_tool_lookup_is_not_starved_by_a_busy_main_thread(tmp_path, monkeypa
     The same shape — a long PATH where most tools are not found — made long enough to show on any
     platform, with the main thread spinning the whole time. The section must come back in seconds.
     """
+    # About 8000 file checks either way: a check per directory per tool, times PATHEXT on Windows.
+    # Relative entries, resolved against the working directory the way `shutil.which` does, because
+    # absolute temp paths this many run past 32767 characters and Windows refuses such a variable.
+    monkeypatch.chdir(tmp_path)
     directories = []
-    for index in range(400):
-        directory = tmp_path / f"bin{index}"
+    for index in range(90 if sys.platform == "win32" else 1000):
+        directory = tmp_path / f"b{index}"
         directory.mkdir()
-        directories.append(str(directory))
+        directories.append(directory.name)
     monkeypatch.setenv("PATH", os.pathsep.join(directories))
     result = {}
 
