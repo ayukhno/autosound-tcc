@@ -6,6 +6,37 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+## [v0.1.38] — 2026-09-13 · the Windows crash that killed CI runs was ours: how a widget leaves a panel
+
+Paired with method `4c89fdc7527ac8d6fb5a80ca526613d585800e06` — the tag on that commit is
+**`v3.0.49`**, the same method as v0.1.37.
+
+The suite at the release: 1891 passed, 1 skipped.
+
+### Fixed
+
+- **Removing a widget from a panel could take the whole app down on Windows.** A widget still
+  inside a layout was unparented with `setParent(None)`; Qt then deleted the layout's item for it
+  in C++, while PySide kept a Python wrapper for that item in its address table. The next Qt object
+  built at the same address was handed the stale wrapper, and the process died with an access
+  violation in `SignalManager::retrieveMetaObject`. That is how the Windows CI suite crashed in
+  about one run in three since its very first run (#19) — and the same code removes rows in seven
+  panels of the app, clearing the chat when an agent attaches among them. A widget now leaves its
+  layout first. Measured on the Windows runner: full suite ×10, 7 crashes → 0;
+  `test_dialog_live.py` ×20, 11 → 0; a 150-cycle stress under cdb, a crash on the first attempt →
+  none in 1500 cycles. macOS never showed it. Clearing a 500-message transcript still takes 24 ms.
+
+### Tests and CI
+
+- Tests no longer start real console keepers — daemon threads with a twelve-hour budget — on
+  Windows; two of them sat in every crash dump of the previous release day.
+- Two tests that checked the machine rather than a property: "this machine has an agent CLI"
+  (removed; the property is covered by its own test) and a detached-thread test that asserted on a
+  process-wide set another test had written to (it now checks its own thread).
+- Manual CI inputs for the next native crash on Windows: `native_debug` (the suite under cdb,
+  native stacks of every thread), `page_heap`, and `stale_check` (a walk of PySide's wrapper table
+  after every test).
+
 ## [v0.1.37] — 2026-09-11 · everything that was "checked" and still wrong: a colour never drawn, a guard counting the wrong thing, a language nobody was told
 
 Paired with method `4c89fdc7527ac8d6fb5a80ca526613d585800e06` — the tag on that commit is
