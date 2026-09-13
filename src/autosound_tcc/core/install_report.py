@@ -41,6 +41,15 @@ from autosound_tcc.core import app_log, child, config, model_overrides, vendor_l
 #: string; three seconds is already generous, and a hung one must not hang the panel.
 _PROBE_TIMEOUT = 3.0
 
+#: How long the lookup child may take before its answer is given up for the in-process one.
+#: Measured at 0.11 s on the Windows CI runner, and 0.25 s with this process's main thread busy.
+_LOOKUP_TIMEOUT = 10.0
+
+#: The lookup as the child runs it: the standard library and nothing of ours, so it starts fast,
+#: imports nothing through PySide6's hook, and starts no process of its own.
+_LOOKUP_CODE = ("import json, shutil, sys; "
+                "print(json.dumps({n: shutil.which(n) for n in json.loads(sys.argv[1])}))")
+
 #: What a commit looks like, so that a git error message cannot be mistaken for one.
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -82,6 +91,33 @@ def _run(argv: list[str]) -> str:
         return ""
     out = (done.stdout or done.stderr or "").strip().splitlines()
     return out[0].strip() if out else ""
+
+
+def _which_all(names: list[str]) -> dict[str, Optional[str]]:
+    """`shutil.which` for every name, asked of a child Python instead of done on this thread.
+
+    `shutil.which` hands the GIL over on every file it checks, and on Windows it checks one file per
+    PATH directory per PATHEXT extension: 4989 for the eight tools on the CI runner. On a worker
+    thread while the GUI thread ran Python, every hand-over waited its turn — 56.7 s against 0.047 s
+    uncontended — and the tools section never arrived (tcc#31). Listing each directory once still
+    took 15.7 s: `os.listdir` hands the GIL over per entry, and there were 9067. A child process has
+    a GIL of its own: 0.25 s under the same load.
+
+    Falls back to the lookup in this process when the child cannot answer. Slow under load beats
+    no answer, and nothing here is allowed to raise.
+    """
+    try:
+        done = subprocess.run(
+            [child.script_interpreter(), "-I", "-c", _LOOKUP_CODE, json.dumps(names)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_LOOKUP_TIMEOUT, check=False, **child.quiet())
+        answer = json.loads(done.stdout)
+        if (done.returncode == 0 and isinstance(answer, dict) and set(answer) == set(names)
+                and all(value is None or isinstance(value, str) for value in answer.values())):
+            return {name: answer[name] for name in names}
+    except Exception:  # noqa: BLE001 — a child that cannot answer is a reason to look here instead
+        pass
+    return {name: shutil.which(name) for name in names}
 
 
 def _package_version(name: str) -> str:
@@ -252,7 +288,8 @@ def _tools() -> Section:
     measured at about twelve seconds on a laptop where each one is fine. They do not depend on
     each other, so they go in a pool and the section costs about as long as its slowest member.
     """
-    found = [(exe, what, shutil.which(exe)) for exe, what in _TOOLS]
+    where = _which_all([exe for exe, _what in _TOOLS])
+    found = [(exe, what, where[exe]) for exe, what in _TOOLS]
     versions: dict[str, str] = {}
     live = [exe for exe, _what, where in found if where]
     if live:
