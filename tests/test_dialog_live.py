@@ -1331,3 +1331,23 @@ def test_the_ear_gets_a_button_in_the_composer_and_only_in_its_own_phase(tmp_pat
 
     panel.set_listening_available(False)
     assert panel._listen_btn.isHidden()
+
+
+def test_the_queue_rows_button_says_it_interrupts_the_turn(tmp_path):
+    """The Arbiter, 2026-09-13: the row's button read "Send now", and pressing it ENDS the turn that
+    is running (`_on_send_queued_now`) — it does not slip the message in beside it. Claude's own
+    terminal does not interrupt when you type mid-turn, so "send now" read as that, and the button
+    was saying something other than what it did.
+
+    Waiting is already what happens without the button — the row says so. The button is the
+    interrupt, and now its label says it, with the tooltip saying what happens if it is left alone."""
+    panel, worker, _ = _attached(tmp_path)
+    panel._input.setText("the sub is out of phase")
+    panel._on_send()
+
+    button = panel._queue_now_btn
+    assert not panel._queue_row.isHidden()
+    assert button.text() == i18n.t("queueSendNow")
+    assert i18n.T["en"]["queueSendNow"] == "Interrupt and send"
+    assert button.toolTip() == i18n.t("queueSendNowTip")
+    assert "when" in i18n.T["en"]["queueSendNowTip"], "says the message goes out on its own otherwise"

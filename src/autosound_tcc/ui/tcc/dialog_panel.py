@@ -439,6 +439,10 @@ class DialogPanel(QWidget):
         self._queue_label.setProperty("class", "activity")
         queue_layout.addWidget(self._queue_label)
         self._queue_now_btn = QPushButton(i18n.t("queueSendNow"))
+        # The label says it INTERRUPTS, and the tooltip says what leaving it alone does: the message
+        # already goes out by itself at the turn boundary. "Send now" read as a follow-up that slips in
+        # beside the running turn, which is not what it does (the Arbiter, 2026-09-13).
+        self._queue_now_btn.setToolTip(i18n.t("queueSendNowTip"))
         self._queue_now_btn.setProperty("class", "reason-btn")
         self._queue_now_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._queue_now_btn.clicked.connect(self._on_send_queued_now)
@@ -543,6 +547,7 @@ class DialogPanel(QWidget):
         self._reason_btns["manual"].setText(i18n.t("reasonManual"))
         self._refresh_placeholder()
         self._queue_now_btn.setText(i18n.t("queueSendNow"))
+        self._queue_now_btn.setToolTip(i18n.t("queueSendNowTip"))
         self._show_queue_row()
         self._new_below_btn.setToolTip(i18n.t("newBelowTip"))
         self._show_new_below()  # a no-op unless it is up; then the count line follows the language
