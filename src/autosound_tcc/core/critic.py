@@ -367,6 +367,10 @@ AGY_SETTINGS = "~/.gemini/antigravity-cli/settings.json"
 #: degrade to "here is what it said" rather than to a wrong instruction.
 _PERMISSION_WORDS = ("permission", "not allowed", "trust", "дозвіл", "settings.json")
 _BAD_KEY_WORDS = ("http 400", "400 bad request", "api key", "api_key", "invalid key")
+#: Checked BEFORE the model words: "Selected model is not supported in the selected location" also
+#: says "model", and the model advice (names drift, press ↻) is wrong for it — the CLI still lists
+#: the model, so ↻ brings it straight back (Windows session, 2026-09-13).
+_LOCATION_WORDS = ("selected location", "your location", "your region", "not available in your country")
 _BAD_MODEL_WORDS = ("model", "not available", "unknown model", "не підтримується")
 
 
@@ -402,6 +406,12 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
             "call spends that time first and then falls back. Replace the key or remove the "
             "variable — with it gone the call goes straight to the CLI, which is the path that "
             "works on a subscription login."
+        )
+    if any(word in said for word in _LOCATION_WORDS):
+        return (
+            "the reviewer's vendor does not offer this model from where this machine is — the CLI "
+            "refused it by location, before the model ran. ↻ will not help: the CLI still lists it. "
+            "Pick a different Critic model in TCC's footer."
         )
     if any(word in said for word in _BAD_MODEL_WORDS):
         return (

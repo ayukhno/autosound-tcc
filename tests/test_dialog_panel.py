@@ -252,3 +252,30 @@ def test_the_panel_names_the_way_out_rather_than_only_the_failure():
     said = bubbles[-1]._plain
     assert i18n.t("sessionNew").lower() in said.lower(), (
         f"it must name the control that fixes it, not just report the failure: {said!r}")
+
+
+def test_right_clicking_a_bubbles_text_opens_our_copy_menu_not_qts():
+    """The Arbiter, 2026-09-13, with a screenshot: right-clicking the text of a message showed Qt's
+    own "Copy / Select All". The bubble's menu hung on the frame, and the selectable label on top of
+    it answered the click first — so "copy the whole message" was one menu nobody could reach.
+
+    Wanted, in their words: one line that copies everything, and "copy selected" when something is
+    selected."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    bubble = MessageBubble("Agent", "AGENT", "<p>alpha beta gamma</p>")
+
+    assert bubble._body.contextMenuPolicy() == Qt.ContextMenuPolicy.NoContextMenu, \
+        "the text hands the right-click to the bubble"
+    assert [label for label, _ in bubble.copy_items()] == [i18n.t("copyMessage")], \
+        "nothing selected: one line, copy everything"
+
+    bubble._body.setSelection(0, 5)
+    items = bubble.copy_items()
+    assert [label for label, _ in items] == [i18n.t("copySelection"), i18n.t("copyMessage")]
+    assert items[0][1] == "alpha"
+    assert i18n.T["en"]["copyMessage"] == "Copy all"
+    assert i18n.T["en"]["copySelection"] == "Copy selected"

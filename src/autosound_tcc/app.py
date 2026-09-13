@@ -186,6 +186,12 @@ def _note_strays(app) -> None:
 #: `AUTOSOUND_TCC_WINDOW_TRACE=1` names the CODE that shows a stray window, by its own stack.
 #: Off by default: an application-wide event filter puts a Python call in front of every Qt event,
 #: which is not a price a GUI should pay for a diagnostic that is normally silent.
+#: The one line the console Windows forces on the launch shows before it hides. English whatever
+#: the interface language, and short: it is on screen for about a second, and the Arbiter asked
+#: for something the eye can catch in that time (2026-09-13) — the two sentences it replaced, one
+#: Ukrainian and one English, could not be read before they were gone.
+STARTUP_CONSOLE_TEXT = "Autosound TCC: starting..."
+
 WINDOW_TRACE_ENV = "AUTOSOUND_TCC_WINDOW_TRACE"
 
 
@@ -385,10 +391,7 @@ def main() -> int:
     # when one could not be BORROWED and had to be made — and a made one is always seen,
     # because `SW_HIDE` at creation is ignored on Windows 11. Given that, it is held on
     # screen long enough to read rather than flickered past (the Arbiter's call, 11.09).
-    child.open_app_console(
-        "Autosound TCC\r\n"
-        "Запускається середовище. Це вікно належить запуску і зараз сховається.\r\n"
-        "Starting up. This window belongs to the launch and hides itself in a moment.")
+    child.open_app_console(STARTUP_CONSOLE_TEXT)
     child.hide_console_windows()
     # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
     # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app

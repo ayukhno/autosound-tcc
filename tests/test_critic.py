@@ -474,3 +474,18 @@ def test_the_reviewer_is_given_one_model_variable_for_both_tasks(tmp_path, monke
     assert seen.get("GEMINI_CRITIC_MODEL") == "gemini-3.1-pro-high", "the one variable, always"
     for retired in ("GEMINI_ADVISOR_MODEL", "AUTOSOUND_ADVISOR_MODEL"):
         assert retired not in seen, f"{retired} is retired upstream; setting it teaches a lie"
+
+
+def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift():
+    """A Windows session, 2026-09-13: agy answered `error: Selected model is not supported in the
+    selected location.` The remedy matched the word "model" and said model names drift and that ↻
+    re-reads the list — but the CLI still lists that model, so ↻ changes nothing and the advice sends
+    somebody round in a circle. What helps is a different model, and saying why."""
+    from autosound_tcc.core import critic
+
+    fix = critic.remedy("error: Selected model is not supported in the selected location.",
+                        harness="agy")
+
+    assert "location" in fix, "names the actual reason"
+    assert "footer" in fix, "and the one thing to do"
+    assert "drift" not in fix, "not the wrong reason"

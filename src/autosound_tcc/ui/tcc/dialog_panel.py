@@ -86,6 +86,10 @@ class MessageBubble(QFrame):
         # a bubble has nothing under it to capture them from. On a channel row it would eat the
         # click that opens the detail pane.
         self._body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # The right-click goes to the bubble, not to the label. A selectable label answers it with
+        # Qt's own "Copy / Select All", which is what the Arbiter got on 2026-09-13 — so the
+        # bubble's menu below, the one with "copy all", could not be reached from the text at all.
+        self._body.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         layout.addWidget(self._body)
         self._html = html
         # What the message was BEFORE it was rendered, when the caller has it. Copying goes
