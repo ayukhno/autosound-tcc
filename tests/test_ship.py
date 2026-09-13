@@ -752,6 +752,16 @@ def test_no_pytest_caller_carries_its_own_distribution_flags():
             assert "--dist" not in line, f"{relative}: {line.strip()}"
 
 
+def test_ci_runs_on_every_push_so_the_release_gate_has_a_run_to_read():
+    """HUB-057 made green CI on HEAD a condition of every tag, and the commit a release starts from
+    is a CHANGELOG commit by construction — a path filter would leave it with no run (hub #136)."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    triggers = text.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
+
+    assert "paths-ignore" not in triggers and "paths:" not in triggers
+    assert "NOT a release gate" not in text, "the header still says CI holds no tag back"
+
+
 # --- the pin the repo RECORDS vs the method actually checked out ---------------------------
 
 

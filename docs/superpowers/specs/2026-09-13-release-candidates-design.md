@@ -44,8 +44,9 @@ Date: 2026-09-13 · Status: design approved by the Arbiter · Tickets: hub #140 
 | `make ship VERSION=vX.Y.Z [REAL=1]` | preflight `tag=` | the same as a patch | the same as a patch; the hub's `rule` and `promotes` checks decide whether it may be cut |
 
 - **Role:** `os.environ["HUB_ROLE"]` when it is set, else `tcc`. Passed to the preflight.
-- **Arguments:** `CANDIDATE` and `VERSION` exclude each other, and each must look like `vX.Y.Z`.
-  `ship.py` refuses a malformed value before asking the hub.
+- **Arguments:** `CANDIDATE` and `VERSION` exclude each other, and only a value given on the
+  command line counts. A malformed value is refused by the carrier's own `tag` check: ship keeps no
+  copy of the version pattern (HUB-003).
 - **Commands:** in every mode the three lines are the carrier's own: `git tag <tag>`,
   `git push origin main`, `git push origin <tag>`. For a candidate, `push origin main` changes
   nothing, because the hub already refuses an unpublished HEAD. The tag is pushed by name, never
