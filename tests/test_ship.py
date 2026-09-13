@@ -40,6 +40,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import itertools
+import os
 import re
 import shutil
 import subprocess
@@ -99,7 +100,7 @@ def checks(*pairs):
 
 def channel(tag="v0.1.25", answers=(("clean-tree", OK), ("rule", OK))):
     """A stand-in for `ship.channel_checks`: the carrier, without the carrier."""
-    return lambda _root: (tag, checks(*answers))
+    return lambda _root, **_asked: (tag, checks(*answers))
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -147,7 +148,7 @@ def _relock(root):
                            lock.read_text(), flags=re.M), encoding="utf-8")
 
 
-def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None):
+def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, **mode):
     """Ship on the fixture, with the suite stubbed and the channel half stood in for."""
     stub = [sys.executable, "-c", f"import sys; sys.exit({test_exit})"]
     return ship_mod.ship(repo, release=release, test_command=stub,
@@ -158,7 +159,7 @@ def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None):
                          # is allowed to happen in. `test_a_release_refuses_when_the_checkout_is_
                          # not_the_recorded_pin` covers the disagreement directly.
                          read_pinned_sha=lambda _root: METHOD_SHA,
-                         relock_with=_relock, say=say)
+                         relock_with=_relock, say=say, **mode)
 
 
 # ---------------------------------------------------------------- what the fixture proves
@@ -391,15 +392,181 @@ def test_ship_asks_the_carrier_as_tcc_and_for_the_next_patch(monkeypatch, tmp_pa
     seen = {}
 
     class Recorder:
-        def preflight(self, root, role, tag=None, want_next=False):
-            seen.update(root=root, role=role, tag=tag, want_next=want_next)
+        def preflight(self, root, role, tag=None, want_next=False, candidate=None):
+            seen.update(root=root, role=role, tag=tag, want_next=want_next, candidate=candidate)
             return "v0.1.25", []
 
     monkeypatch.setattr(ship_mod, "load_carrier", lambda *_a, **_k: Recorder())
+    monkeypatch.delenv("HUB_ROLE", raising=False)
     ship_mod.channel_checks(tmp_path)
 
     assert seen["role"] == "tcc"
     assert seen["want_next"] is True and seen["tag"] is None, "ship names no tag; it asks for next"
+    assert seen["candidate"] is None
+
+
+class _Recorder:
+    def __init__(self):
+        self.seen = {}
+
+    def preflight(self, root, role, tag=None, want_next=False, candidate=None):
+        self.seen.update(root=root, role=role, tag=tag, want_next=want_next, candidate=candidate)
+        return "v0.2.0", []
+
+
+@pytest.mark.parametrize("asked, expect", [
+    ({"candidate": "v0.2.0"}, {"candidate": "v0.2.0", "tag": None, "want_next": False}),
+    ({"version": "v0.2.0"}, {"candidate": None, "tag": "v0.2.0", "want_next": False}),
+    ({}, {"candidate": None, "tag": None, "want_next": True}),
+])
+def test_each_mode_asks_the_carrier_its_own_question(monkeypatch, tmp_path, asked, expect):
+    recorder = _Recorder()
+    monkeypatch.setattr(ship_mod, "load_carrier", lambda *_a, **_k: recorder)
+    monkeypatch.delenv("HUB_ROLE", raising=False)
+
+    ship_mod.channel_checks(tmp_path, **asked)
+
+    assert {key: recorder.seen[key] for key in expect} == expect
+    assert recorder.seen["role"] == "tcc"
+
+
+def test_the_role_comes_from_the_session_so_release_can_cut_a_minor(monkeypatch, tmp_path):
+    """ship does not restate who may cut what: it passes the session's role, and the hook decides."""
+    recorder = _Recorder()
+    monkeypatch.setattr(ship_mod, "load_carrier", lambda *_a, **_k: recorder)
+    monkeypatch.setenv("HUB_ROLE", "release")
+
+    ship_mod.channel_checks(tmp_path, version="v0.2.0")
+
+    assert recorder.seen["role"] == "release"
+
+
+def _write_changelog(repo, text):
+    """Commit and publish a CHANGELOG — the state a release is cut from."""
+    (repo / "CHANGELOG.md").write_text(text, encoding="utf-8")
+    git(repo, "commit", "--quiet", "-am", "changelog")
+    git(repo, "push", "--quiet", "origin", "main")
+
+
+def test_a_candidate_dry_run_names_the_beta_tag_and_writes_nothing(repo):
+    _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA))
+    before = git(repo, "rev-parse", "HEAD")
+
+    plan = _run(repo, release=False, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0")
+
+    assert (plan.mode, plan.tag) == ("candidate", "beta-v0.2.0-rc1")
+    assert plan.commands == ["git tag beta-v0.2.0-rc1", "git push origin main",
+                             "git push origin beta-v0.2.0-rc1"]
+    assert git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "tag", "--list", "beta-v0.2.0-rc1") == ""
+
+
+def test_a_candidate_tags_head_pushes_the_tag_and_writes_nothing_else(repo):
+    _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA))
+    before = git(repo, "rev-parse", "HEAD")
+    lock = (repo / "uv.lock").read_text(encoding="utf-8")
+
+    # A red suite stops a release; here it proves that no suite runs for a candidate at all.
+    _run(repo, test_exit=1, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0")
+
+    assert git(repo, "rev-parse", "HEAD") == before, "no commit"
+    assert git(repo, "rev-parse", "beta-v0.2.0-rc1^{commit}") == before, "the tag is on HEAD"
+    assert "refs/tags/beta-v0.2.0-rc1" in git(repo, "ls-remote", "--tags", "origin"), "published"
+    assert 'version = "0.1.24"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert (repo / "uv.lock").read_text(encoding="utf-8") == lock
+
+
+def test_a_candidate_without_notes_stops_before_the_tag(repo):
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0")
+
+    assert "nothing says what the candidate carries" in str(stop.value)
+    assert git(repo, "tag", "--list", "beta-v0.2.0-rc1") == ""
+
+
+def test_a_patch_with_unreleased_on_top_stops_before_anything_is_written(repo):
+    _write_changelog(repo, CHANGELOG.format(tag="v0.1.25", sha=METHOD_SHA).replace(
+        "# Changelog\n", "# Changelog\n\n## [Unreleased]\n\n- not renamed yet\n"))
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    assert "rename it to" in str(stop.value)
+    assert 'version = "0.1.24"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+
+
+def test_an_explicit_version_releases_like_a_patch(repo):
+    seen = {}
+
+    def ask(_root, **asked):
+        seen.update(asked)
+        return "v0.1.25", checks(("clean-tree", OK), ("rule", OK))
+
+    plan = _run(repo, ask=ask, version="v0.1.25")
+
+    assert seen == {"candidate": None, "version": "v0.1.25"}
+    assert plan.mode == "version"
+    assert git(repo, "tag", "--list", "v0.1.25") == "v0.1.25"
+    assert 'version = "0.1.25"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_candidate_and_version_exclude_each_other(repo):
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, candidate="v0.2.0", version="v0.2.0")
+
+    assert "exclude each other" in str(stop.value)
+
+
+def test_the_command_line_takes_one_mode(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(ship_mod, "ship", lambda root, **kw: seen.update(kw))
+
+    assert ship_mod.main(["--root", str(tmp_path), "--candidate", "v0.2.0"]) == 0
+    assert (seen["candidate"], seen["version"], seen["release"]) == ("v0.2.0", "", False)
+
+    with pytest.raises(SystemExit) as usage:
+        ship_mod.main(["--candidate", "v0.2.0", "--tag", "v0.2.0"])
+    assert usage.value.code == 2
+
+
+def _make_n(*args, env=None):
+    """`make -n` on this repository, deaf to any make that launched the suite.
+
+    A variable typed after a PARENT make reaches every child make through `MAKEFLAGS`
+    (`s -- REAL=1 VERSION=v0.2.0`, GNU Make 3.81) with the origin `command line`, exactly as if it
+    had been typed there. `make ship VERSION=vX.Y.Z REAL=1` runs this suite, so without this the
+    environment case below would go red inside that release and refuse it. Measured 2026-09-13.
+    """
+    inherited = {name: value for name, value in (env or os.environ).items()
+                 if name not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    return subprocess.run(["make", "-n", *args], cwd=str(ROOT), capture_output=True, text=True,
+                          env=inherited)
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="no make on this machine")
+@pytest.mark.parametrize("assignment, flag", [
+    ("CANDIDATE=v0.2.0", "--candidate v0.2.0"),
+    ("VERSION=v0.2.0", "--tag v0.2.0"),
+])
+def test_make_ship_passes_the_mode_to_the_script(assignment, flag):
+    for extra in ([], ["REAL=1"]):
+        done = _make_n("ship", assignment, *extra)
+        assert done.returncode == 0, done.stderr
+        assert flag in done.stdout, done.stdout
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="no make on this machine")
+def test_a_version_in_the_environment_does_not_change_the_mode(monkeypatch):
+    """`VERSION` is a common enough variable name that a shell may carry one; only a word typed
+    after `make ship` may turn a patch into a named release.
+
+    Run as it would be inside `make ship VERSION=v0.2.0 REAL=1`, with that make's `MAKEFLAGS` in
+    the environment: the release's own suite must not read its mode as this make's."""
+    monkeypatch.setenv("MAKEFLAGS", "s -- REAL=1 VERSION=v0.2.0")
+    done = _make_n("ship", env={**os.environ, "VERSION": "v9.9.9", "CANDIDATE": "v9.9.9"})
+    assert done.returncode == 0, done.stderr
+    assert "--tag" not in done.stdout and "--candidate" not in done.stdout, done.stdout
 
 
 def test_the_stand_in_has_the_carriers_shape():
@@ -421,6 +588,9 @@ def test_the_stand_in_has_the_carriers_shape():
     parameters = inspect.signature(carrier.preflight).parameters
     assert {"root", "role", "tag", "want_next"} <= set(parameters), (
         f"ship calls preflight by these names: {list(parameters)}")
+    asks = inspect.signature(carrier.preflight).parameters
+    assert {"tag", "want_next", "candidate"} <= set(asks), (
+        "ship asks the carrier for a patch, a candidate or a named tag; one of those questions is gone")
 
     real = carrier.Check(name="n", verdict=FAIL, line="l")
     stand_in = checks(("n", FAIL))[0]
