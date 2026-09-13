@@ -499,6 +499,32 @@ def test_extra_env_reaches_the_subprocess(tmp_path, monkeypatch):
     assert seen.get("AUTOSOUND_PROJECT_DIR") == "/scratch/probe"
 
 
+def test_extra_env_outranks_the_mirror_project_dir_implies(tmp_path, monkeypatch):
+    """The reviewer probe runs from the real project and sends the script's writes elsewhere: the
+    `PROJECT_MIRROR` it passes must win over the one `project_dir` implies (final review,
+    Important 4), or the clipboard package and the audit line land in the project."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        seen["cwd"] = kwargs.get("cwd")
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+
+    critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
+               extra_env={"PROJECT_MIRROR": "/scratch/probe/rew_analitic"})
+
+    assert seen["PROJECT_MIRROR"] == "/scratch/probe/rew_analitic"
+    assert seen["cwd"] == str(tmp_path), "the cwd is still the project"
+
+
 def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift():
     """A Windows session, 2026-09-13: agy answered `error: Selected model is not supported in the
     selected location.` The remedy matched the word "model" and said model names drift and that ↻

@@ -147,15 +147,10 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
             "how": "ask the Arbiter to pick one in TCC's footer",
         }
     missing = critic.preflight(project_dir)
-    known = model_choices.choices([]) + model_choices.critic_choices([])
-    harness, _, model = key.partition(":")
     # The catalogue only lists the models the Arbiter marked as theirs, so a perfectly valid
     # choice is often not in it. Judge the key itself rather than reporting "unreachable" for a
-    # reviewer that works.
-    resolved = model_choices.resolve(known, key)
-    choice = resolved.choice or model_choices.Choice(
-        harness=harness or "omp", model=model or key, label=key, provider=""
-    )
+    # reviewer that works. Resolved alias and all: that is the key a call's refusal is filed under.
+    resolved, choice = model_choices.resolve_critic(key)
     state = availability.status(choice)
     because = list(missing) + ([availability.PHRASES[state.reason]] if not state.ready else [])
     return {
@@ -201,27 +196,24 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
 def configured_critic_model(project_dir: Path) -> str:
     """The reviewer this project's footer is set to, in the CLI's own vocabulary — or "".
 
-    Through `model_choices.resolve`, so a machine-level alias is honoured here exactly as it is in
-    the picker; two answers to "which model" is how they came to disagree in the first place.
+    Through `model_choices.resolve_critic`, so a machine-level alias is honoured here exactly as it
+    is in the picker; two answers to "which model" is how they came to disagree in the first place.
     """
-    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
-    if not key:
-        return ""
-    resolved = model_choices.resolve(model_choices.critic_choices([]), key)
-    if resolved.choice is not None:
-        return resolved.choice.model
-    return resolved.key.partition(":")[2] or resolved.key
+    _, choice = model_choices.resolve_critic(
+        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
+    return choice.model if choice is not None else ""
 
 
 def configured_critic_harness(project_dir: Path) -> str:
     """Which ROUTE the footer's reviewer runs through — `agy`, `codex`, `sdk`, `omp` — or "".
 
-    Beside `configured_critic_model` and read from the same key, because the two belong together:
-    a model name without the CLI it runs on is what let TCC's pick and the machine's environment
-    point at different reviewers for ten calls running (TCC-002).
+    Beside `configured_critic_model` and resolved from the same key, alias and all, because the two
+    belong together: a model name without the CLI it runs on is what let TCC's pick and the
+    machine's environment point at different reviewers for ten calls running (TCC-002).
     """
-    key = project_settings.get(config.tcc_dir(project_dir), "critic", "") or ""
-    return key.partition(":")[0] if ":" in key else ""
+    resolved, _ = model_choices.resolve_critic(
+        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
+    return resolved.key.partition(":")[0] if ":" in resolved.key else ""
 
 
 def clipboard_reason(project_dir: Path) -> str:
@@ -1092,8 +1084,11 @@ def build_server(
         )
         critic.log_call(result, None, project_dir)
         try:
-            availability.record_reviewer_outcome(
-                project_settings.get(config.tcc_dir(project_dir), "critic", "") or "", result)
+            # Under the key the call went to — the alias target, as for `model` above — which is
+            # the key the footer, the pickers and `get_tcc_state` look a refusal up under.
+            _, reviewer = model_choices.resolve_critic(
+                project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
+            availability.record_reviewer_outcome(reviewer.key if reviewer else "", result)
         except Exception:  # noqa: BLE001 — a critique that ran must not fail over its own bookkeeping
             app_log.logger().exception("record_reviewer_outcome failed")
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The

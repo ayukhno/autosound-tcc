@@ -133,11 +133,29 @@ def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
     the previous folder while the person who typed the flag believes otherwise."""
     import os
     import sys
+    import threading
 
     from autosound_tcc import app
-    from autosound_tcc.core import config
+    from autosound_tcc.core import availability, config
     from autosound_tcc.ui.tcc import project_gate_dialog
 
+    # The path that goes on to build the window reads the model catalogues. A stub records that,
+    # rather than a real reading thread writing process-wide state while later tests run.
+    readings: list = []
+
+    class _Reading:
+        def __init__(self) -> None:
+            self.done = threading.Event()
+
+        def start(self):
+            readings.append("start")
+            return self
+
+        def wait(self, _cap):
+            return True
+
+    monkeypatch.setattr(availability, "start_startup_reading",
+                        lambda *a, **k: readings.append("created") or _Reading())
     remembered: list = []
     monkeypatch.setattr(config, "set_project_dir", remembered.append)
     monkeypatch.setattr(sys, "argv", ["autosound-tcc", "--project-dir", str(tmp_path)])
@@ -153,3 +171,4 @@ def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
 
     assert [str(p) for p in remembered] == [str(tmp_path.resolve())]
     assert os.environ["AUTOSOUND_PROJECT_DIR"] == str(tmp_path.resolve())
+    assert readings == ["created", "start"], "the start that builds the window reads models"

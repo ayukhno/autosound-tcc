@@ -1563,6 +1563,51 @@ def test_a_refused_reviewer_is_not_ready_and_says_why_in_one_phrase(tmp_path, mo
     assert availability.PHRASES[availability.LOCATION] in state["not_ready_because"]
 
 
+@pytest.mark.parametrize("listed", [True, False], ids=["target-in-catalogue", "target-not-listed"])
+def test_a_refusal_under_an_aliased_reviewer_is_where_the_reviewer_is_reported(
+        tmp_path, monkeypatch, listed):
+    """The call goes to the alias target, and its refusal was filed under the STORED key while
+    `get_tcc_state` looks it up under the resolved one — so a refused reviewer read as ready (final
+    review, Important 2). `_offer_replacement` writes such an alias whenever a model retires."""
+    from autosound_tcc.core import (
+        availability, config, critic, mcp_server, model_choices, model_overrides, process_writer,
+        project_settings,
+    )
+
+    old, new = "agy:gemini-3.0-pro", "agy:gemini-3.1-pro-high"
+    if listed:
+        monkeypatch.setattr(model_choices, "_CLI_CACHE",
+                            {"agy": [model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
+                                                          label="Gemini 3.1 Pro (High)",
+                                                          provider="google")]})
+        monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", old)
+    model_overrides.set_alias(old, new)
+    sent = {}
+
+    def _fake_run(package, **kw):
+        sent.update(kw)
+        return critic.CriticResult(
+            critic.MODE_CLIPBOARD, "", None, "critic",
+            "error: Selected model is not supported in the selected location.", 1.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
+    monkeypatch.setattr(process_writer, "record_reviewer", lambda project_dir, **kw: "recorded")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    availability.reset()
+    try:
+        asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))
+        state = mcp_server._reviewer_state(tmp_path)
+    finally:
+        availability.reset()
+
+    assert (sent["model"], sent["harness"]) == ("gemini-3.1-pro-high", "agy")
+    assert state["ready"] is False
+    assert availability.PHRASES[availability.LOCATION] in state["not_ready_because"]
+
+
 def test_a_bookkeeping_failure_does_not_lose_the_critique(tmp_path, monkeypatch):
     """The line right after this one, `process_writer.record_reviewer`, is guarded with exactly
     this reasoning: "a critique that ran must not fail over its own bookkeeping." A raise out of

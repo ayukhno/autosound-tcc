@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from autosound_tcc.core import app_log, child, config, macos_identity, windows_identity
+from autosound_tcc.core import app_log, availability, child, config, macos_identity, windows_identity
 
 #: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
 #: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
@@ -191,6 +191,9 @@ def _note_strays(app) -> None:
 #: for something the eye can catch in that time (2026-09-13) — the two sentences it replaced, one
 #: Ukrainian and one English, could not be read before they were gone.
 STARTUP_CONSOLE_TEXT = "Autosound TCC: reading models..."
+#: The same console for a flag that answers and leaves (`--version`, `--install-desktop`, ...): it
+#: reads no models, so it does not say it does.
+ANSWERING_CONSOLE_TEXT = "Autosound TCC: starting..."
 
 WINDOW_TRACE_ENV = "AUTOSOUND_TCC_WINDOW_TRACE"
 
@@ -379,6 +382,20 @@ def main() -> int:
     # the first run of it. Both were missing, and the second is what turns "it flashes after an
     # update and then stops" (user, 2026-09-09) from a memory into something a log can settle.
     app_log.note_start()
+    # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
+    # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app
+    # on the Dock once the extras arrive. This used to be a shell script in the method's
+    # repository that the installer had to find by guessing a path (F-026).
+    # Parsed first: it starts nothing, and the command line decides whether this start reads the
+    # model catalogues at all.
+    args = _parse(sys.argv)
+    # Only a start that goes on to build the window reads them. Every flag below answers and
+    # leaves, and `--version` is what the installer runs: a reading there put `agy models` and
+    # `claude auth status` -- and on Windows up to STARTUP_MODELS_CAP_S of waiting -- in front of
+    # a one-line answer (final review, 2026-09-13).
+    answers_and_leaves = (args.version or args.restore_terminal or args.install_desktop
+                          or args.uninstall_desktop)
+    reading = None if answers_and_leaves else availability.start_startup_reading()
     # Before anything can start a child: on Windows the Agent SDK's own `claude` process would
     # otherwise open a console window in front of the app at every session (see core/child.py).
     # ONE console for this process, said out loud and then hidden, before anything can start a
@@ -391,26 +408,16 @@ def main() -> int:
     # when one could not be BORROWED and had to be made — and a made one is always seen,
     # because `SW_HIDE` at creation is ignored on Windows 11. Given that, it is held on
     # screen long enough to read rather than flickered past (the Arbiter's call, 11.09).
-    try:
-        from autosound_tcc.core import availability
-        reading = availability.start_startup_reading()
-    except ImportError:  # a light install without the GUI extras reads nothing at start
-        availability, reading = None, None
     console = child.open_app_console(
-        STARTUP_CONSOLE_TEXT,
-        ready=reading.done if reading else None,
-        cap=availability.STARTUP_MODELS_CAP_S if reading else None)
+        STARTUP_CONSOLE_TEXT if reading is not None else ANSWERING_CONSOLE_TEXT,
+        ready=reading.done if reading is not None else None,
+        cap=availability.STARTUP_MODELS_CAP_S if reading is not None else None)
     child.hide_console_windows()
     if reading is not None:
         reading.start()
         if console:
             # Windows: the start waits inside the console for what the machine can run.
             reading.wait(availability.STARTUP_MODELS_CAP_S)
-    # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
-    # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app
-    # on the Dock once the extras arrive. This used to be a shell script in the method's
-    # repository that the installer had to find by guessing a path (F-026).
-    args = _parse(sys.argv)
     # Before anything else can start: asking a program its version must not RUN the program. It
     # used to -- there was no such flag, and `parse_known_args` (which exists so Qt can take its
     # own flags off the same line) swallowed it silently, so `autosound-tcc --version` launched the

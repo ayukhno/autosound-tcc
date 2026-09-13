@@ -126,26 +126,32 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
         return
     reason = critic.refusal_reason(result.detail)
     if reason:
-        refused(key, reason, result.detail)
+        # The detail is what a tooltip shows: the one thing to do when it can be named, the CLI's
+        # own words when it cannot.
+        refused(key, reason, critic.remedy(result.detail, harness=harness) or result.detail)
 
 
 #: How long a Windows start waits inside its console for the catalogues (the Arbiter, 2026-09-13).
 STARTUP_MODELS_CAP_S = 8.0
-_STARTUP_HARNESSES = ("agy", "sdk", "codex")
+#: What the start's read asks. Not codex: it is found through PATH when a picker is filled, and a
+#: harness marked as being read that the read never asks stays "not checked" until it is over.
+_STARTUP_HARNESSES = ("agy", "sdk")
 _startup: "Optional[StartupReading]" = None
 
 
 def read_catalogues() -> None:
-    """Ask every CLI now, forced: a CLI installed since the last start is noticed on this one."""
+    """Ask every CLI now, forced: a CLI installed since the last start is noticed on this one.
+
+    A harness is finished only once its own read came back. One that raises stays NOT_CHECKED —
+    nothing answered for it — and the exception goes up to `StartupReading`, which logs it; a
+    successful ↻ read settles it later (spec: Error handling)."""
     from autosound_tcc.core import claude_sdk, model_choices
 
     begin_reading(_STARTUP_HARNESSES)
-    try:
-        model_choices.refresh_cli_catalogue(force=True)
-        claude_sdk.probe_signed_in(force=True)
-    finally:
-        for harness in _STARTUP_HARNESSES:
-            finish_reading(harness)
+    model_choices.refresh_cli_catalogue(force=True)
+    finish_reading("agy")
+    claude_sdk.probe_signed_in(force=True)
+    finish_reading("sdk")
 
 
 class StartupReading:

@@ -3617,6 +3617,106 @@ def test_the_catalogue_worker_forces_agy_only_when_asked(monkeypatch):
     assert seen == [(False, []), (True, []), (False, ["google/x"])]
 
 
+def test_a_catalogue_worker_waiting_on_the_start_stops_when_asked(monkeypatch):
+    """Quitting during the start's read left this worker in an unbounded wait, and `stop_workers`
+    waited five seconds and then left a RUNNING QThread for Qt to destroy — `qFatal` (final review,
+    Important 5)."""
+    import threading
+    import time
+
+    _app()
+    asked = []
+    monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue",
+                        lambda **kw: asked.append(kw) or {})
+    never = SimpleNamespace(done=threading.Event())
+    worker = main_window._CliCatalogueWorker(wait_for=never)
+    worker.start()
+    try:
+        started = time.monotonic()
+        worker.requestInterruption()
+        stopped = worker.wait(2000)
+        took = time.monotonic() - started
+    finally:
+        never.done.set()  # releases a worker that did not listen, so no thread outlives the test
+        worker.wait(5000)
+
+    assert stopped, "it returns once asked, though the start's reading never finished"
+    assert took < 1.5
+    assert asked == [], "an interrupted wait asks nothing afterwards"
+
+
+def test_the_reload_press_settles_what_a_failed_start_left_unchecked(monkeypatch):
+    """A start whose read raised leaves agy and Claude "not checked" — red, and rightly: nothing
+    answered. The ↻ press is a read too, and when it succeeds nothing may stay red for the rest of
+    the launch (final review, Important 6)."""
+    from autosound_tcc.core import availability, model_choices
+
+    _app()
+
+    def boom(**_kw):
+        raise RuntimeError("agy exploded")
+
+    monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue", boom)
+    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in", lambda *, force=False: None)
+    assert availability.StartupReading().start().wait(2.0)
+    agy = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="x")
+    sdk = model_choices.Choice(harness="sdk", model="claude-opus-5", label="y")
+
+    def state(choice):
+        return availability.status(choice, signed_in=lambda: None, unconfirmed=lambda _c: False)
+
+    assert state(agy).reason == state(sdk).reason == availability.NOT_CHECKED
+
+    monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue", lambda **kw: {})
+    main_window._CliCatalogueWorker(force=True).run()
+
+    assert state(agy).ready and state(sdk).ready
+
+
+def test_quitting_lets_go_of_a_worker_that_will_not_stop_and_cuts_its_signal(monkeypatch):
+    """A probe is a real model call and the catalogue can be mid-read. `stop_workers` must hand a
+    still-running one to `qt_shutdown` rather than let Qt destroy it, and cut its `done` first — a
+    probe finishing after the window closed called `_on_reviewer_probed` on it (final review,
+    Important 5 and Minor 1)."""
+    from PySide6.QtCore import QObject, Signal
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    class _Stuck(QObject):
+        done = Signal(str)
+        finished = Signal()
+
+        def isRunning(self) -> bool:  # noqa: N802 (QThread's name)
+            return True
+
+        def requestInterruption(self) -> None:  # noqa: N802 (QThread's name)
+            pass
+
+        def wait(self, _ms: int = 0) -> bool:
+            return False
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    probe, catalogue = _Stuck(), _Stuck()
+    arrived: list = []
+    probe.done.connect(arrived.append)
+    catalogue.done.connect(arrived.append)
+    window._reviewer_probe, window._cli_catalogue = probe, catalogue
+    try:
+        window.stop_workers()
+        detached = qt_shutdown.detached()
+        probe.done.emit("clipboard")
+        catalogue.done.emit("")
+    finally:
+        window._reviewer_probe = window._cli_catalogue = None
+        qt_shutdown._DETACHED.discard(probe)
+        qt_shutdown._DETACHED.discard(catalogue)
+
+    assert probe in detached and catalogue in detached, "let go of, not destroyed running"
+    assert arrived == [], "nothing a let-go worker says reaches the window"
+
+
 def test_the_capture_panel_is_not_rebuilt_once_per_write(tmp_path, monkeypatch):
     """A process-state redraw re-reads the state, recomputes the plan, and DELETES AND REBUILDS
     the capture grid. Its watcher fired straight into that — and the watcher fires more than once
@@ -3710,6 +3810,46 @@ def test_a_red_reviewer_says_why_in_the_footer_and_the_reload_button_forgets_it(
 
         window._reload_from_disk()
         assert availability.status(chosen).ready
+
+        # The re-read lands: the footer must follow it, not keep the phrase until the next critique
+        # (final review, Important 1 — it only refreshed at construction, critique, probe, retranslate).
+        monkeypatch.setattr(window, "_project_setting", _reviewer_only)
+        monkeypatch.setattr(model_choices, "choices", lambda _active: [])
+        monkeypatch.setattr(model_choices, "critic_choices", lambda _active: [chosen])
+        window._on_cli_catalogue_ready()
+        assert window._critic_status.text() == i18n.t("criticNever")
+        assert window._critic_status.toolTip() == ""
+    finally:
+        availability.reset()
+
+
+def test_picking_another_reviewer_repaints_the_footer_for_it(monkeypatch):
+    """The footer kept the OLD reviewer in red after the picker moved to a ready one: changing the
+    reviewer refreshed only the warning mark, never the footer (final review, Important 1)."""
+    from autosound_tcc.core import availability, critic, model_choices
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    refused = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    ready = model_choices.Choice(harness="agy", model="gemini-3.1-flash", label="Gemini 3.1 Flash")
+    window._critic_choices = [refused, ready]
+    MainWindow._fill_combo(window._ai_critic_combo, [refused, ready], refused.key, critic=True)
+    # A real call on record, so the plain footer has a model to name.
+    critic.log_call(critic.CriticResult(critic.MODE_API_OR_CLI, "ok", ready.model, "critic", "",
+                                        1.0, "2026-09-13T00:00:00+00:00"), None)
+    availability.refused(refused.key, availability.LOCATION, "not supported in the selected location")
+    try:
+        window._refresh_critic_status()
+        assert refused.label in window._critic_status.text()
+
+        window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(ready.key))
+
+        text = window._critic_status.text()
+        assert ready.model in text
+        assert refused.label not in text
+        assert i18n.t("availPhraseLocation") not in text
+        assert window._critic_status.toolTip() == ""
     finally:
         availability.reset()
 
@@ -3726,7 +3866,7 @@ def test_the_reviewer_probe_turns_a_refused_model_red(monkeypatch):
     monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
     availability.reset()
     try:
-        _ReviewerProbeWorker(key).run()
+        _ReviewerProbeWorker(key, config.project_dir()).run()
         state = availability.status(model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
                                                          label="x"))
     finally:
@@ -3734,6 +3874,32 @@ def test_the_reviewer_probe_turns_a_refused_model_red(monkeypatch):
 
     assert calls and calls[0]["role"] == "ask" and calls[0]["model"] == "gemini-3.1-pro-high"
     assert state.reason == availability.LOCATION
+
+
+def test_the_probe_asks_the_model_an_alias_sends_to_and_files_its_refusal_there(monkeypatch):
+    """A real call goes to the alias target and every reader looks a refusal up under it; the probe
+    read the stored key, sent ITS model, and filed the answer where nobody looks (final review,
+    Important 2)."""
+    from autosound_tcc.core import availability, critic, model_choices, model_overrides
+    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
+
+    _app()
+    old, new = "agy:gemini-3.0-pro", "agy:gemini-3.1-pro-high"
+    model_overrides.set_alias(old, new)
+    calls = []
+    monkeypatch.setattr(critic, "run", lambda package, **kw: calls.append(kw) or critic.CriticResult(
+        critic.MODE_CLIPBOARD, "", None, "ask", "not supported in the selected location", 1.0, "t"))
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
+    availability.reset()
+    try:
+        _ReviewerProbeWorker(old, config.project_dir()).run()
+        resolved = availability.status(
+            model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="x"))
+    finally:
+        availability.reset()
+
+    assert calls and (calls[0]["model"], calls[0]["harness"]) == ("gemini-3.1-pro-high", "agy")
+    assert resolved.reason == availability.LOCATION
 
 
 def test_no_reviewer_chosen_means_no_probe(monkeypatch):
@@ -3751,48 +3917,81 @@ def test_no_reviewer_chosen_means_no_probe(monkeypatch):
     assert started == []
 
 
+def test_a_reviewer_no_transport_reaches_is_not_probed(monkeypatch):
+    """With no key and no CLI for its vendor the method script can only compile a clipboard
+    package: nothing to record, and a prompt on the clipboard at session start (final review,
+    Minor 3). What is asked is whether the RESOLVED reviewer can be reached."""
+    from autosound_tcc.core import model_choices, model_overrides
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
+    monkeypatch.setattr(window, "_project_setting", _reviewer_only)
+    started = []
+    monkeypatch.setattr("autosound_tcc.ui.tcc.main_window._ReviewerProbeWorker.start",
+                        lambda self: started.append(self))
+    asked = []
+    monkeypatch.setattr(model_choices, "critic_reaches",
+                        lambda choice: asked.append(choice.key) or False)
+
+    window._probe_reviewer()
+    assert started == [], "no transport, no probe"
+
+    model_overrides.set_alias("agy:gemini-3.1-pro-high", "agy:gemini-3.5-pro")
+    monkeypatch.setattr(model_choices, "critic_reaches",
+                        lambda choice: asked.append(choice.key) or True)
+    window._probe_reviewer()
+
+    assert len(started) == 1, "a reviewer that can be reached is probed"
+    assert asked == ["agy:gemini-3.1-pro-high", "agy:gemini-3.5-pro"]
+
+
 def test_the_probe_writes_nothing_into_the_project(tmp_path, monkeypatch):
-    """The probe used to hand the method script the REAL project (`AUTOSOUND_PROJECT_DIR`, the
-    real `project_dir`), and that script files every `ask` answer under the project and writes its
-    clipboard package into `rew_analitic/`. A probe at session start must leave the project exactly
-    as it found it."""
+    """The probe runs FROM the real project — the cwd a real review has, so a CLI that checks folder
+    trust against its cwd answers the probe as it answers a review (final review, Important 4) — and
+    every write the method script makes goes to a throwaway folder: its answer under
+    AUTOSOUND_PROJECT_DIR, its clipboard package and audit trail under PROJECT_MIRROR. A probe at
+    session start must leave the project exactly as it found it."""
     from pathlib import Path
 
-    from autosound_tcc.core import availability, critic
+    from autosound_tcc.core import critic
+    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
 
     # `tests/conftest.py`'s autouse `_isolated_project_dir` already made this the real project
     # (AUTOSOUND_PROJECT_DIR) and it starts empty -- exactly the folder a probe must not touch.
     real_project = tmp_path / "project"
-
-    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
-
     recorded = {}
 
-    def fake_run(_package, project_dir=None, extra_env=None, **_kw):
-        recorded["project_dir"] = project_dir
-        recorded["extra_env"] = extra_env
-        assert (project_dir / "rew_analitic" / "autosound_context.md").is_file()
-        problems = critic.preflight(project_dir)
-        assert not any("autosound_context.md" in p for p in problems), problems
-        assert not any("data-contract-template.md" in p for p in problems), problems
-        # Imitate what the method script itself does with a real answer — files it under the
-        # project it was told about, and writes its clipboard package under the mirror.
-        reviews = Path(extra_env["AUTOSOUND_PROJECT_DIR"]) / "process" / "reviews"
+    # Recorded here and asserted below: an assertion raised INSIDE the probe is caught by its own
+    # guard and logged, and the test would pass over it.
+    def fake_run(package, project_dir=None, extra_env=None, timeout_s=None, **_kw):
+        env = dict(extra_env or {})
+        scratch = Path(env["AUTOSOUND_PROJECT_DIR"])
+        mirror = Path(env["PROJECT_MIRROR"])
+        recorded.update(project_dir=Path(project_dir), scratch=scratch, mirror=mirror,
+                        timeout_s=timeout_s, package=Path(package),
+                        stub_context=(mirror / "autosound_context.md").is_file())
+        # Imitate what the method script itself does: file the answer under the project it was
+        # told about, and write the clipboard package and the audit line under the mirror.
+        reviews = scratch / "process" / "reviews"
         reviews.mkdir(parents=True)
         (reviews / "x-ask.md").write_text("answer", encoding="utf-8")
-        (project_dir / "rew_analitic" / "combined_prompt.md").write_text("pkg", encoding="utf-8")
+        (mirror / "combined_prompt.md").write_text("pkg", encoding="utf-8")
+        (mirror / "audit-trail.md").write_text("line", encoding="utf-8")
         return critic.CriticResult(critic.MODE_CLIPBOARD, "", None, "ask", "", 0.1, "t")
 
     monkeypatch.setattr(critic, "run", fake_run)
-    availability.reset()
-    try:
-        _ReviewerProbeWorker("agy:gemini-3.1-pro-high").run()
-    finally:
-        availability.reset()
 
-    assert not recorded["project_dir"].exists(), "the throwaway folder is gone with the probe"
-    assert recorded["extra_env"]["AUTOSOUND_PROJECT_DIR"] == str(recorded["project_dir"])
-    assert recorded["project_dir"] != real_project
+    _ReviewerProbeWorker("agy:gemini-3.1-pro-high", real_project).run()
+
+    assert recorded, "the probe called the reviewer"
+    assert recorded["project_dir"] == real_project, "cwd stays the project, as for a real review"
+    assert recorded["mirror"] == recorded["scratch"] / "rew_analitic"
+    assert recorded["stub_context"], "the stub context is where the script looks first"
+    assert recorded["package"].parent == recorded["scratch"]
+    assert recorded["timeout_s"] == 180.0
+    assert not recorded["scratch"].exists(), "the throwaway folder is gone with the probe"
     assert list(real_project.iterdir()) == [], "the real project is untouched"
 
 
@@ -3808,7 +4007,7 @@ def test_a_launch_failure_is_logged_and_still_reports_done(monkeypatch, caplog):
             critic.MODE_ERROR, "", None, "ask", "reviewer script not found", 0.0, "t"))
     availability.reset()
     done = []
-    worker = _ReviewerProbeWorker("agy:gemini-3.1-pro-high")
+    worker = _ReviewerProbeWorker("agy:gemini-3.1-pro-high", config.project_dir())
     worker.done.connect(done.append)
     try:
         with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
@@ -3834,7 +4033,7 @@ def test_an_exception_inside_the_probe_is_logged_and_done_still_emits_empty(monk
     monkeypatch.setattr(critic, "run", blow_up)
     availability.reset()
     done = []
-    worker = _ReviewerProbeWorker("agy:gemini-3.1-pro-high")
+    worker = _ReviewerProbeWorker("agy:gemini-3.1-pro-high", config.project_dir())
     worker.done.connect(done.append)
     try:
         with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
@@ -3894,6 +4093,8 @@ def test_the_clipboard_comes_back_after_a_clipboard_mode_probe(monkeypatch):
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
     monkeypatch.setattr(window, "_project_setting", _reviewer_only)
     _stub_resolvable_reviewer(monkeypatch)
+    # Reachable, or `_probe_reviewer` starts nothing and takes no snapshot to give back.
+    monkeypatch.setattr("autosound_tcc.core.model_choices.critic_reaches", lambda _c: True)
     monkeypatch.setattr("autosound_tcc.ui.tcc.main_window._ReviewerProbeWorker.start",
                         lambda self: None)
     QGuiApplication.clipboard().setText("mine")
@@ -3917,6 +4118,8 @@ def test_the_clipboard_is_left_alone_otherwise(monkeypatch):
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
     monkeypatch.setattr(window, "_project_setting", _reviewer_only)
     _stub_resolvable_reviewer(monkeypatch)
+    # Reachable, or `_probe_reviewer` starts nothing and takes no snapshot to give back.
+    monkeypatch.setattr("autosound_tcc.core.model_choices.critic_reaches", lambda _c: True)
     monkeypatch.setattr("autosound_tcc.ui.tcc.main_window._ReviewerProbeWorker.start",
                         lambda self: None)
 
@@ -3933,3 +4136,41 @@ def test_the_clipboard_is_left_alone_otherwise(monkeypatch):
     QGuiApplication.clipboard().setText(f"...{_REVIEWER_PROBE_QUESTION}...")
     window._on_reviewer_probed(critic.MODE_API_OR_CLI)
     assert QGuiApplication.clipboard().text() == f"...{_REVIEWER_PROBE_QUESTION}..."
+
+
+def test_giving_the_clipboard_back_does_not_crash_the_interpreter_on_exit(tmp_path):
+    """A QMimeData built in Python and handed to the clipboard is destroyed in QtGui's static
+    teardown after Python has finalised: SIGSEGV at exit, code 139 (macOS crash report, 2026-09-13;
+    a targeted run of this file died on its way out, the full suite only hid it). In a child
+    process, so the crash has a process of its own to take, and through the real helpers: snapshot,
+    the probe's overwrite, the restore, a normal exit."""
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        from types import SimpleNamespace
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication([])
+
+        from autosound_tcc.core import critic
+        from autosound_tcc.ui.tcc import main_window
+
+        clipboard = app.clipboard()
+        clipboard.setText("mine")
+        snapshot = main_window._clipboard_snapshot()
+        clipboard.setText("..." + main_window._REVIEWER_PROBE_QUESTION + "...")
+        owner = SimpleNamespace(_clipboard_before_probe=snapshot,
+                                _reload_model_choices=lambda: None,
+                                _refresh_critic_status=lambda: None)
+        main_window.MainWindow._on_reviewer_probed(owner, critic.MODE_CLIPBOARD)
+        print(clipboard.text())
+    """)
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                          env=env, cwd=str(tmp_path), timeout=120)
+
+    assert done.returncode == 0, f"exit {done.returncode}: {done.stderr[-2000:]}"
+    assert done.stdout.strip().splitlines()[-1] == "mine", "and what was there came back"
