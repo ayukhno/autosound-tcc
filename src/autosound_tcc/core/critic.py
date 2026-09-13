@@ -422,6 +422,21 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     return ""
 
 
+def refusal_reason(detail: str) -> Optional[str]:
+    """The availability reason a failed call's own words point to, or None when there are none.
+
+    A location refusal is named as such — it is the one reason nothing on this machine can fix. Any
+    other words are a refusal too: the call went out and no review came back."""
+    from autosound_tcc.core import availability
+
+    said = (detail or "").lower()
+    if not said.strip():
+        return None
+    if any(word in said for word in _LOCATION_WORDS):
+        return availability.LOCATION
+    return availability.REFUSED
+
+
 def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Optional[Path] = None) -> None:
     """Append one reviewer call to an append-only log.
 

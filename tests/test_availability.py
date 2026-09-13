@@ -100,3 +100,40 @@ def test_concurrent_writers_and_a_reader_do_not_trip_over_each_other():
     for thread in threads:
         thread.join()
     assert _status(choice).ready
+
+
+def _result(mode, detail=""):
+    from autosound_tcc.core import critic
+    return critic.CriticResult(mode, "", None, "critic", detail, 0.0, "2026-09-13T00:00:00+00:00")
+
+
+def test_a_reviewer_refused_by_location_goes_red_and_an_answer_clears_it():
+    from autosound_tcc.core import critic
+
+    key = "agy:gemini-3.1-pro-high"
+    availability.record_reviewer_outcome(
+        key, _result(critic.MODE_CLIPBOARD, "not supported in the selected location"),
+        reaches=lambda _c: True)
+    assert _status(_choice()).reason == availability.LOCATION
+
+    availability.record_reviewer_outcome(key, _result(critic.MODE_API_OR_CLI), reaches=lambda _c: True)
+    assert _status(_choice()).ready
+
+
+def test_clipboard_by_design_is_not_a_refusal():
+    """No key and no CLI for that vendor: clipboard is the designed fallback, not a failure."""
+    from autosound_tcc.core import critic
+
+    availability.record_reviewer_outcome(
+        "agy:gemini-3.1-pro-high", _result(critic.MODE_CLIPBOARD, "no transport"),
+        reaches=lambda _c: False)
+    assert _status(_choice()).ready
+
+
+def test_a_project_that_is_not_ready_changes_nothing():
+    from autosound_tcc.core import critic
+
+    availability.record_reviewer_outcome(
+        "agy:gemini-3.1-pro-high", _result(critic.MODE_NOT_READY, "context missing"),
+        reaches=lambda _c: True)
+    assert _status(_choice()).ready

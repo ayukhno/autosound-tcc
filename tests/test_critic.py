@@ -489,3 +489,12 @@ def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift(
     assert "location" in fix, "names the actual reason"
     assert "footer" in fix, "and the one thing to do"
     assert "drift" not in fix, "not the wrong reason"
+
+
+def test_a_refusal_is_named_by_its_reason_or_not_at_all():
+    from autosound_tcc.core import availability, critic
+
+    assert critic.refusal_reason("error: Selected model is not supported in the selected location.") \
+        == availability.LOCATION
+    assert critic.refusal_reason("Gemini API: HTTP 400 Bad Request") == availability.REFUSED
+    assert critic.refusal_reason("") is None

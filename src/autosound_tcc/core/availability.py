@@ -101,3 +101,26 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
         return Status(True)
     reason, detail = min(found, key=lambda item: PRIORITY.index(item[0]))
     return Status(False, reason, detail)
+
+
+def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
+    """One reviewer call's outcome into the state: an answer clears a refusal, a refusal sets one.
+
+    A clipboard package for a vendor this machine has no transport for is the designed fallback and
+    records nothing; so does a project that is not ready to be reviewed yet."""
+    from autosound_tcc.core import critic, model_choices
+
+    if not key:
+        return
+    if result.ok:
+        succeeded(key)
+        return
+    if result.mode != critic.MODE_CLIPBOARD:
+        return
+    harness, _, model = key.partition(":")
+    choice = model_choices.Choice(harness=harness or "omp", model=model or key, label=key)
+    if not (reaches or model_choices.critic_reaches)(choice):
+        return
+    reason = critic.refusal_reason(result.detail)
+    if reason:
+        refused(key, reason, result.detail)
