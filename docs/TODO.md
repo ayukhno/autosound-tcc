@@ -1699,6 +1699,21 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-052 — Beta channel in the updater (hub #140, ask 1): design waits for two answers
+
+**Статус**: open
+
+Asks 2 and 3 of hub #140 landed on 2026-09-13 (PR #30, PR #29). Ask 1 — a `stable`/`beta` channel
+in `core/updates.py` for the method and TCC, ordered by hub RELEASE-CHANNEL.md §11.2, with the
+self-check pin row reading it — is designed, not implemented:
+`docs/superpowers/specs/2026-09-13-beta-channel-updater-design.md`.
+
+**Due when** the user has answered the spec's two open questions: whether an app installed from a
+`beta-v*` tag starts on beta (precondition: `uv` writes `requested_revision` for a tag), and where
+the switch lives. Then: `superpowers:writing-plans`, test-first. The design's one trap, found while
+reading: a candidate carries the previous version in `pyproject.toml`, so on beta TCC must be
+compared by commit, not by version.
+
 ### F-051 — Resonalyze у дереві: чотири ролі, і наглядач бачить дві з них
 
 **Статус**: назване, віддане `skill` — `hub#75` (TCC-008), 06.09
