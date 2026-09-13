@@ -23,6 +23,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
+    QMimeData,
     QPoint,
     QProcess,
     QThread,
@@ -656,32 +657,60 @@ class _CliCatalogueWorker(QThread):
 
 #: What the probe asks. Short, so the call costs as little as a real call can.
 _REVIEWER_PROBE_QUESTION = "Reply with the single word: ready."
+#: The stub project context the probe hands the method script, so the real project's own
+#: `rew_analitic/autosound_context.md` is never read (or overwritten) for a call that has
+#: nothing to do with it.
+_REVIEWER_PROBE_CONTEXT = "Reviewer probe: there is no project. Answer the question only.\n"
+
+
+def _clipboard_snapshot() -> QMimeData:
+    """A copy of what is on the clipboard now — the probe may overwrite it (see _on_reviewer_probed)."""
+    source = QGuiApplication.clipboard().mimeData()
+    copy = QMimeData()
+    if source is not None:
+        for fmt in source.formats():
+            copy.setData(fmt, source.data(fmt))
+    return copy
 
 
 class _ReviewerProbeWorker(QThread):
     """One short `ask` to the chosen reviewer at session start, so a refusal (region, key) is red
     before the first review instead of being found by it (the Arbiter, 2026-09-13)."""
 
-    done = Signal()
+    done = Signal(str)
 
-    def __init__(self, key: str, project_dir) -> None:
+    def __init__(self, key: str) -> None:
         super().__init__()
         self._key = key
-        self._project_dir = project_dir
 
     def run(self) -> None:
         import tempfile
 
-        harness, _, model = self._key.partition(":")
-        # A package FILE outside the project: `critic.run` writes markdown it is handed into the
-        # project, and a probe must leave nothing behind there.
-        with tempfile.TemporaryDirectory() as folder:
-            package = Path(folder) / "reviewer-probe.md"
-            package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
-            result = critic.run(str(package), project_dir=self._project_dir, role="ask",
-                                model=model or None, harness=harness)
-        availability.record_reviewer_outcome(self._key, result)
-        self.done.emit()
+        mode = ""
+        try:
+            harness, _, model = self._key.partition(":")
+            # A throwaway PROJECT, not only a throwaway package: the method script files every
+            # answer under AUTOSOUND_PROJECT_DIR and writes its clipboard package under
+            # PROJECT_MIRROR, and TCC points both at the real project. A stub context keeps
+            # project data out of a probe; the data contract is found in the skill's own assets.
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+                scratch = Path(folder)
+                (scratch / "rew_analitic").mkdir()
+                (scratch / "rew_analitic" / "autosound_context.md").write_text(
+                    _REVIEWER_PROBE_CONTEXT, encoding="utf-8")
+                package = scratch / "reviewer-probe.md"
+                package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
+                result = critic.run(str(package), project_dir=scratch, role="ask",
+                                    model=model or None, harness=harness,
+                                    extra_env={"AUTOSOUND_PROJECT_DIR": str(scratch)})
+            if result.mode == critic.MODE_ERROR:
+                app_log.logger().warning("reviewer probe could not run: %s", result.detail)
+            availability.record_reviewer_outcome(self._key, result)
+            mode = result.mode
+        except Exception:  # noqa: BLE001 — a probe must never take the window down or go silent
+            app_log.logger().exception("reviewer probe failed")
+        finally:
+            self.done.emit(mode)
 
 
 class _CaptureCheckWorker(QThread):
@@ -761,6 +790,10 @@ class MainWindow(QMainWindow):
         self._contract_report: ContractReport | None = None
         self._contract_worker: _ContractWorker | None = None
         self._diag_dialog: DiagnosticsDialog | None = None
+        #: The reviewer probe's own QThread, and what was on the clipboard just before it started
+        #: (so a clipboard-mode probe's copy can be given back -- see `_on_reviewer_probed`).
+        self._reviewer_probe: _ReviewerProbeWorker | None = None
+        self._clipboard_before_probe: QMimeData | None = None
         #: What the curve window was last plotting, per capture series — see
         #: `_open_curves_from_panel`. In memory only, and deliberately: it is "what am I working on
         #: right now", which is a fact about this sitting rather than about the project, and a
@@ -3876,12 +3909,23 @@ class MainWindow(QMainWindow):
         key = self._project_setting(_CRITIC_KEY)
         if not key or os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
             return
-        worker = _ReviewerProbeWorker(key, config.project_dir())
+        if self._reviewer_probe is not None and self._reviewer_probe.isRunning():
+            return  # one probe at a time; replacing a running QThread is the probe30 crash
+        self._clipboard_before_probe = _clipboard_snapshot()
+        worker = _ReviewerProbeWorker(key)
         worker.done.connect(self._on_reviewer_probed)
         self._reviewer_probe = worker
         worker.start()
 
-    def _on_reviewer_probed(self) -> None:
+    def _on_reviewer_probed(self, mode: str = "") -> None:
+        snapshot, self._clipboard_before_probe = self._clipboard_before_probe, None
+        # The method script copies its prompt to the clipboard when no route answers — which is
+        # what a refused reviewer looks like. Nobody asked for that at session start: give the
+        # clipboard back, unless something else has been copied since.
+        clipboard = QGuiApplication.clipboard()
+        if (mode == critic.MODE_CLIPBOARD and snapshot is not None
+                and _REVIEWER_PROBE_QUESTION in clipboard.text()):
+            clipboard.setMimeData(snapshot)
         self._reload_model_choices()
         self._refresh_critic_status()
 

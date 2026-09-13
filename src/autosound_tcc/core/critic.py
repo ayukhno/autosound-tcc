@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from autosound_tcc.core import app_log, child
 from autosound_tcc.core import config, vendor_loader
@@ -233,12 +233,15 @@ def run(
     harness: str = "",
     timeout_s: float = DEFAULT_TIMEOUT_S,
     python_executable: Optional[str] = None,
+    extra_env: Optional[Mapping[str, str]] = None,
 ) -> CriticResult:
     """Call the reviewer once. `package` is either markdown or a path to an existing package file.
 
     `model` overrides the script's own default through the env var it already reads
     (`GEMINI_CRITIC_MODEL` / `GEMINI_ADVISOR_MODEL`), so the footer's model picker steers the
     subprocess without this module knowing anything about model names.
+
+    `extra_env` carries variables for this call only, applied last.
     """
     # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
     python_executable = python_executable or child.script_interpreter()
@@ -276,6 +279,7 @@ def run(
     # work and a working CLI is installed — see `critic_bin_override`.
     override = critic_bin_override(harness=harness)
     env_overrides.update(override)
+    env_overrides.update(extra_env or {})
 
     env = vendor_loader.child_env(**env_overrides)
     # Said out loud, because not saying it cost a whole round trip. `AUTOSOUND_CRITIC_BIN` is put

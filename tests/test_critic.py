@@ -476,6 +476,29 @@ def test_the_reviewer_is_given_one_model_variable_for_both_tasks(tmp_path, monke
         assert retired not in seen, f"{retired} is retired upstream; setting it teaches a lie"
 
 
+def test_extra_env_reaches_the_subprocess(tmp_path, monkeypatch):
+    """`extra_env` is for one call only, applied last -- the reviewer probe uses it to point
+    `AUTOSOUND_PROJECT_DIR` at a throwaway folder without touching the real project's env."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+
+    critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
+               extra_env={"AUTOSOUND_PROJECT_DIR": "/scratch/probe"})
+
+    assert seen.get("AUTOSOUND_PROJECT_DIR") == "/scratch/probe"
+
+
 def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift():
     """A Windows session, 2026-09-13: agy answered `error: Selected model is not supported in the
     selected location.` The remedy matched the word "model" and said model names drift and that ↻
