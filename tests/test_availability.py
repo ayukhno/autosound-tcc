@@ -172,3 +172,9 @@ def test_the_default_reader_marks_harnesses_not_checked_until_it_is_done(monkeyp
 
     assert seen == [availability.NOT_CHECKED]
     assert _status(_choice()).ready
+
+
+def test_reset_also_clears_a_registered_startup_reading():
+    availability.start_startup_reading(lambda: None)
+    availability.reset()
+    assert availability.startup_reading() is None

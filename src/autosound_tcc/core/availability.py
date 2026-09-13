@@ -72,9 +72,11 @@ def forget_refusals() -> None:
 
 def reset() -> None:
     """Everything back to a fresh launch. For tests."""
+    global _startup
     with _lock:
         _refusals.clear()
         _reading.clear()
+    _startup = None
 
 
 def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
