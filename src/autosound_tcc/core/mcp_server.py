@@ -1091,8 +1091,11 @@ def build_server(
             harness=configured_critic_harness(project_dir),
         )
         critic.log_call(result, None, project_dir)
-        availability.record_reviewer_outcome(
-            project_settings.get(config.tcc_dir(project_dir), "critic", "") or "", result)
+        try:
+            availability.record_reviewer_outcome(
+                project_settings.get(config.tcc_dir(project_dir), "critic", "") or "", result)
+        except Exception:  # noqa: BLE001 — a critique that ran must not fail over its own bookkeeping
+            app_log.logger().exception("record_reviewer_outcome failed")
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
         # local log answers the footer's "last called"; the journal is what a resume and any other
         # front-end read, and until now it recorded that a review happened and lost what it argued.

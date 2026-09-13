@@ -1561,3 +1561,32 @@ def test_a_refused_reviewer_is_not_ready_and_says_why_in_one_phrase(tmp_path, mo
 
     assert state["ready"] is False
     assert availability.PHRASES[availability.LOCATION] in state["not_ready_because"]
+
+
+def test_a_bookkeeping_failure_does_not_lose_the_critique(tmp_path, monkeypatch):
+    """The line right after this one, `process_writer.record_reviewer`, is guarded with exactly
+    this reasoning: "a critique that ran must not fail over its own bookkeeping." A raise out of
+    `availability.record_reviewer_outcome` must not propagate past a critique already obtained
+    and logged via `critic.log_call` -- or `bridge.show_critique` and the returned JSON never see
+    it (review finding, fix round 1)."""
+    from autosound_tcc.core import availability, critic, process_writer
+
+    monkeypatch.setattr(
+        critic,
+        "run",
+        lambda *a, **k: critic.CriticResult(
+            critic.MODE_API_OR_CLI, "the sub is 3 dB hot", "gemini-3.1-pro", "critic", "",
+            1.0, "now",
+        ),
+    )
+    monkeypatch.setattr(process_writer, "record_reviewer", lambda project_dir, **kw: "recorded")
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(availability, "record_reviewer_outcome", _boom)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))))
+
+    assert result["critique"] == "the sub is 3 dB hot"
