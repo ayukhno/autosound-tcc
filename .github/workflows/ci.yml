@@ -8,12 +8,15 @@
 #
 # A release gate since HUB-057. The hub's `release-preflight.py`, which `scripts/ship.py` calls,
 # refuses a tag unless CI on HEAD is green: red, still running, or no run on the sha all refuse.
-# So every push runs, prose included -- the commit a release starts from is a CHANGELOG commit by
-# construction, and a path filter would leave it with no run to read (HUB-058, hub #136).
+# So every push to `main` runs, prose included -- the commit a release starts from is a CHANGELOG
+# commit by construction, and a path filter would leave it with no run to read (HUB-058, hub #136).
+# A branch runs through its pull request only: a push trigger on every branch ran each PR commit
+# twice, `push` and `pull_request`, with nothing new in the second run.
 name: checks
 
 on:
   push:
+    branches: [main]
   pull_request:
   # The Linux abort (HUB-049) shows in about half of runs, and a push gives exactly one. A series
   # on demand is what turns "no repro" into evidence: run this with `linux_runs: 20` and read the
