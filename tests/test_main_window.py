@@ -3712,3 +3712,40 @@ def test_a_red_reviewer_says_why_in_the_footer_and_the_reload_button_forgets_it(
         assert availability.status(chosen).ready
     finally:
         availability.reset()
+
+
+def test_the_reviewer_probe_turns_a_refused_model_red(tmp_path, monkeypatch):
+    from autosound_tcc.core import availability, critic, model_choices
+    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
+
+    _app()
+    key = "agy:gemini-3.1-pro-high"
+    calls = []
+    monkeypatch.setattr(critic, "run", lambda package, **kw: calls.append(kw) or critic.CriticResult(
+        critic.MODE_CLIPBOARD, "", None, "ask", "not supported in the selected location", 1.0, "t"))
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
+    availability.reset()
+    try:
+        _ReviewerProbeWorker(key, tmp_path).run()
+        state = availability.status(model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
+                                                         label="x"))
+    finally:
+        availability.reset()
+
+    assert calls and calls[0]["role"] == "ask" and calls[0]["model"] == "gemini-3.1-pro-high"
+    assert state.reason == availability.LOCATION
+
+
+def test_no_reviewer_chosen_means_no_probe(monkeypatch):
+    """A fresh install has no reviewer — nothing to probe and nothing to turn red (the Arbiter)."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    monkeypatch.setattr(window, "_project_setting", lambda key: "")
+    started = []
+    monkeypatch.setattr("autosound_tcc.ui.tcc.main_window._ReviewerProbeWorker.start",
+                        lambda self: started.append(self))
+
+    window._probe_reviewer()
+
+    assert started == []

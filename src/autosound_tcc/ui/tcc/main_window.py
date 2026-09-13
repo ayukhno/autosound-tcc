@@ -89,6 +89,7 @@ from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_vi
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
+from autosound_tcc.ui.tcc import qt_shutdown
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
@@ -651,6 +652,36 @@ class _CliCatalogueWorker(QThread):
         self.done.emit()
 
     quiet = Signal(list)  # routes that are installed and answered with nothing
+
+
+#: What the probe asks. Short, so the call costs as little as a real call can.
+_REVIEWER_PROBE_QUESTION = "Reply with the single word: ready."
+
+
+class _ReviewerProbeWorker(QThread):
+    """One short `ask` to the chosen reviewer at session start, so a refusal (region, key) is red
+    before the first review instead of being found by it (the Arbiter, 2026-09-13)."""
+
+    done = Signal()
+
+    def __init__(self, key: str, project_dir) -> None:
+        super().__init__()
+        self._key = key
+        self._project_dir = project_dir
+
+    def run(self) -> None:
+        import tempfile
+
+        harness, _, model = self._key.partition(":")
+        # A package FILE outside the project: `critic.run` writes markdown it is handed into the
+        # project, and a probe must leave nothing behind there.
+        with tempfile.TemporaryDirectory() as folder:
+            package = Path(folder) / "reviewer-probe.md"
+            package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
+            result = critic.run(str(package), project_dir=self._project_dir, role="ask",
+                                model=model or None, harness=harness)
+        availability.record_reviewer_outcome(self._key, result)
+        self.done.emit()
 
 
 class _CaptureCheckWorker(QThread):
@@ -3811,6 +3842,7 @@ class MainWindow(QMainWindow):
             phase=server.registry.current_phase(),
             model=choice.label,
         )
+        self._probe_reviewer()
         self._running_model = choice.key
         # On the record before the first token: the journal otherwise starts at whatever the model
         # happens to write first, and a session that ran for an hour and recorded nothing then
@@ -3839,6 +3871,19 @@ class MainWindow(QMainWindow):
         self._agent_worker.start()
         self._update_session_button()
         self._refresh_project_button()
+
+    def _probe_reviewer(self) -> None:
+        key = self._project_setting(_CRITIC_KEY)
+        if not key or os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            return
+        worker = _ReviewerProbeWorker(key, config.project_dir())
+        worker.done.connect(self._on_reviewer_probed)
+        self._reviewer_probe = worker
+        worker.start()
+
+    def _on_reviewer_probed(self) -> None:
+        self._reload_model_choices()
+        self._refresh_critic_status()
 
     def _say_what_the_project_applies(self) -> None:
         """Name this project folder's own hooks and permissions before the first turn (HUB-050).
@@ -4457,6 +4502,13 @@ class MainWindow(QMainWindow):
         catalogue = getattr(self, "_cli_catalogue", None)
         if catalogue is not None and catalogue.isRunning():
             catalogue.wait(5000)
+        probe = getattr(self, "_reviewer_probe", None)
+        if probe is not None and probe.isRunning():
+            probe.wait(5000)
+            if probe.isRunning():
+                # A real model call can outlast any wait worth making at quit; hand it over rather
+                # than let Qt destroy a running thread (F-027, `qt_shutdown.detach`).
+                qt_shutdown.detach(probe)
         # The MCP server is a background thread this window owns, and it used to be stopped ONLY
         # in `closeEvent` — so a quit that does not close a window (Cmd-Q, a signal) left a daemon
         # thread running uvicorn's asyncio loop into interpreter shutdown, and the process died
