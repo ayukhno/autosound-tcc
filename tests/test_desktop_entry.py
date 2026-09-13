@@ -268,8 +268,14 @@ def test_version_flag_prints_and_does_not_start_the_app(capsys, monkeypatch):
     import sys
 
     from autosound_tcc import app as app_module
-    from autosound_tcc.core import app_log, child, install_report
+    from autosound_tcc.core import app_log, availability, child, install_report
 
+    # The installer runs this. A model reading here is `agy models` and `claude auth status` in
+    # front of a one-line answer, and on Windows up to eight seconds of waiting (final review,
+    # Important 3). Recorded rather than run, so no real reading thread outlives the test.
+    readings: list = []
+    monkeypatch.setattr(availability, "start_startup_reading",
+                        lambda *a, **k: readings.append(True))
     monkeypatch.setattr(install_report, "app_version", lambda: "9.9.9")
     monkeypatch.setattr(app_log, "setup", lambda *a, **k: None)
     monkeypatch.setattr(child, "hide_console_windows", lambda *a, **k: None)
@@ -281,6 +287,7 @@ def test_version_flag_prints_and_does_not_start_the_app(capsys, monkeypatch):
 
     assert app_module.main() == 0
     assert capsys.readouterr().out.strip() == "9.9.9"
+    assert readings == [], "a version query reads no model catalogues"
 
 
 def test_every_path_it_creates_is_printed_on_a_line_of_its_own(tmp_path):

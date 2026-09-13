@@ -95,6 +95,20 @@ def _no_console_keeper_threads(monkeypatch):
     monkeypatch.setattr(child, "_spawn_daemon", lambda target, kwargs: None)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_availability():
+    """Every test starts on a fresh launch's availability, and leaves one behind.
+
+    It is process-wide state, written from worker threads: a refusal, a harness still being read or
+    a registered startup reading one test left behind turns rows red in whichever test runs next.
+    """
+    from autosound_tcc.core import availability
+
+    availability.reset()
+    yield
+    availability.reset()
+
+
 @pytest.fixture
 def real_critic_reaches(monkeypatch):
     """The unguarded `critic_reaches`, for the tests whose subject IS the probe.

@@ -176,7 +176,8 @@ def flash_probe(when: str, *, run=None, environ=None) -> int:
     return done
 
 
-def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=None) -> bool:
+def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=None,
+                     ready=None, cap=None) -> bool:
     """Give this process ONE console, say what it is, and hide it. Windows only; False elsewhere.
 
     Per-agent consoles work, but they pay the same price every time a session starts: a console
@@ -229,13 +230,18 @@ def open_app_console(message: str, *, alloc=None, write=None, hide=None, defer=N
     # costs the user nothing. The keeper starts after the hide, because starting it first would
     # hide the console immediately and there would be nothing to read.
     (defer or _spawn_daemon)(_hide_after_showing,
-                             {"hide": hide, "seconds": APP_CONSOLE_VISIBLE_S})
+                             {"hide": hide, "seconds": APP_CONSOLE_VISIBLE_S,
+                              "ready": ready, "cap": cap})
     return True
 
 
-def _hide_after_showing(*, hide, seconds: float, sleep=None, keeper=None) -> None:
+def _hide_after_showing(*, hide, seconds: float, sleep=None, keeper=None,
+                        ready=None, cap=None) -> None:
     """Leave the console up for a moment, hide it, then keep it hidden for the session."""
     (sleep or time.sleep)(seconds)
+    if ready is not None and cap is not None:
+        # Held until the models are read (the Arbiter, 2026-09-13), but never past the cap.
+        ready.wait(max(0.0, cap - seconds))
     try:
         hide()
     except Exception:  # noqa: BLE001 — a console that will not hide is still ours to lend

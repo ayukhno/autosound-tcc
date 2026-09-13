@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import weakref
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -31,7 +32,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QGuiApplication
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QGuiApplication, QImage
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -55,6 +56,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (
     app_log,
+    availability,
     claude_sdk,
     config,
     contract_check,
@@ -85,9 +87,10 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_view
-from autosound_tcc.ui.tcc import copy_menu, i18n, sizing
+from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
+from autosound_tcc.ui.tcc import qt_shutdown
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
@@ -619,7 +622,8 @@ class _CliCatalogueWorker(QThread):
 
     done = Signal()
 
-    def __init__(self, force: bool = False, active_omp: list | None = None) -> None:
+    def __init__(self, force: bool = False, active_omp: list | None = None,
+                wait_for=None) -> None:
         super().__init__()
         # `force` reaches `refresh_cli_catalogue`: an ordinary launch leaves agy cached and unrun
         # (its window is the startup flash of TCC-006), while the ↻ button forces a re-ask.
@@ -627,9 +631,26 @@ class _CliCatalogueWorker(QThread):
         #: Which omp models the user marked. Empty means the omp catalogue is needed for NOTHING,
         #: and asking for it is a subprocess spent labelling models nobody chose (probe30).
         self._active_omp = list(active_omp or [])
+        #: The start's own reading, if there is one. Waited on instead of asked again.
+        self._wait_for = wait_for
 
     def run(self) -> None:
+        if self._wait_for is not None:
+            # The start already asked everything, forced. Wait for it, then only what it skips
+            # (omp for marked models) — asking agy and claude a second time is a second window.
+            # In steps, so a quit during the read is heard: an unbounded wait outlived
+            # `stop_workers`, and Qt destroying a running QThread is `qFatal`.
+            while not self._wait_for.done.wait(0.2):
+                if self.isInterruptionRequested():
+                    return
+            model_choices.refresh_cli_catalogue(force=False, active_omp=self._active_omp)
+            self.done.emit()
+            return
         model_choices.refresh_cli_catalogue(force=self._force, active_omp=self._active_omp)
+        # A forced read that came back settles what a failed start left "not checked" — without
+        # this, a start whose read raised kept those rows red for the whole launch.
+        if self._force:
+            availability.finish_reading("agy")
         # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
         # built during construction. Asking there would put a process launch in front of the
         # first paint on every startup.
@@ -637,9 +658,102 @@ class _CliCatalogueWorker(QThread):
         # point — `claude` puts a console window on screen on Windows and upstream has closed that
         # as not planned. A press means somebody just logged in and wants it re-asked.
         claude_sdk.probe_signed_in(force=self._force)
+        if self._force:
+            availability.finish_reading("sdk")
         self.done.emit()
 
     quiet = Signal(list)  # routes that are installed and answered with nothing
+
+
+#: What the probe asks. Short, so the call costs as little as a real call can.
+_REVIEWER_PROBE_QUESTION = "Reply with the single word: ready."
+#: How long the probe may take: past the script's own CLI timeout (120 s), so the script gives its
+#: answer first, and far short of a real review's ten minutes.
+_REVIEWER_PROBE_TIMEOUT_S = 180.0
+#: The stub project context the probe hands the method script, so the real project's own
+#: `rew_analitic/autosound_context.md` is never read (or overwritten) for a call that has
+#: nothing to do with it.
+_REVIEWER_PROBE_CONTEXT = "Reviewer probe: there is no project. Answer the question only.\n"
+
+
+@dataclass(frozen=True)
+class _ClipboardSnapshot:
+    """What was on the clipboard, as plain values: its text, its image, or nothing."""
+
+    text: Optional[str] = None
+    image: Optional[QImage] = None
+
+
+def _clipboard_snapshot() -> _ClipboardSnapshot:
+    """What is on the clipboard now — the probe may overwrite it (see _on_reviewer_probed).
+
+    Plain values, never a QMimeData built here: one handed back to the clipboard is owned from
+    Python, and QtGui destroys it in its static teardown after the interpreter has finalised — a
+    SIGSEGV on an ordinary exit (macOS crash report, 2026-09-13). Text and an image are what a
+    person copies; other formats are not given back.
+    """
+    clipboard = QGuiApplication.clipboard()
+    source = clipboard.mimeData()
+    if source is None:
+        return _ClipboardSnapshot()
+    return _ClipboardSnapshot(
+        text=source.text() if source.hasText() else None,
+        image=clipboard.image() if source.hasImage() else None,
+    )
+
+
+class _ReviewerProbeWorker(QThread):
+    """One short `ask` to the chosen reviewer at session start, so a refusal (region, key) is red
+    before the first review instead of being found by it (the Arbiter, 2026-09-13)."""
+
+    done = Signal(str)
+
+    def __init__(self, key: str, project_dir: Path) -> None:
+        super().__init__()
+        self._key = key
+        self._project_dir = project_dir
+
+    def run(self) -> None:
+        import tempfile
+
+        mode = ""
+        try:
+            # The reviewer a real call reaches: an alias followed, so the probe asks the same model
+            # and files its answer under the key every reader looks up.
+            _, reviewer = model_choices.resolve_critic(self._key)
+            if reviewer is None:
+                return
+            # The REAL project as cwd, and a throwaway folder for everything the script writes.
+            # The cwd is the one a real review runs in: a CLI that checks folder trust against it
+            # answers the probe as it answers a review, where a temp cwd would be refused on every
+            # probe for somebody who trusted the project — red while reviews work (final review,
+            # 2026-09-13). The writes go elsewhere through the env, applied last so it outranks
+            # the mirror `project_dir` implies: the answer is filed under AUTOSOUND_PROJECT_DIR,
+            # the clipboard package and the audit trail under PROJECT_MIRROR. The stub context
+            # there is found before the project's own, so no project data reaches a probe; the
+            # data contract comes from the skill's assets. A project not yet reviewable (no
+            # context of its own) comes back not ready, and that records nothing.
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+                scratch = Path(folder)
+                mirror = scratch / "rew_analitic"
+                mirror.mkdir()
+                (mirror / "autosound_context.md").write_text(
+                    _REVIEWER_PROBE_CONTEXT, encoding="utf-8")
+                package = scratch / "reviewer-probe.md"
+                package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
+                result = critic.run(str(package), project_dir=self._project_dir, role="ask",
+                                    model=reviewer.model, harness=reviewer.harness,
+                                    timeout_s=_REVIEWER_PROBE_TIMEOUT_S,
+                                    extra_env={"AUTOSOUND_PROJECT_DIR": str(scratch),
+                                               "PROJECT_MIRROR": str(mirror)})
+            if result.mode == critic.MODE_ERROR:
+                app_log.logger().warning("reviewer probe could not run: %s", result.detail)
+            availability.record_reviewer_outcome(reviewer.key, result)
+            mode = result.mode
+        except Exception:  # noqa: BLE001 — a probe must never take the window down or go silent
+            app_log.logger().exception("reviewer probe failed")
+        finally:
+            self.done.emit(mode)
 
 
 class _CaptureCheckWorker(QThread):
@@ -719,6 +833,10 @@ class MainWindow(QMainWindow):
         self._contract_report: ContractReport | None = None
         self._contract_worker: _ContractWorker | None = None
         self._diag_dialog: DiagnosticsDialog | None = None
+        #: The reviewer probe's own QThread, and what was on the clipboard just before it started
+        #: (so a clipboard-mode probe's copy can be given back -- see `_on_reviewer_probed`).
+        self._reviewer_probe: _ReviewerProbeWorker | None = None
+        self._clipboard_before_probe: _ClipboardSnapshot | None = None
         #: What the curve window was last plotting, per capture series — see
         #: `_open_curves_from_panel`. In memory only, and deliberately: it is "what am I working on
         #: right now", which is a fact about this sitting rather than about the project, and a
@@ -817,7 +935,7 @@ class MainWindow(QMainWindow):
 
         # What the local CLIs offer, fetched in the background and folded into the pickers when it
         # lands. Until then those routes are simply absent rather than the window being late.
-        self._cli_catalogue = _CliCatalogueWorker()
+        self._cli_catalogue = _CliCatalogueWorker(wait_for=availability.startup_reading())
         self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
             self._cli_catalogue.start()
@@ -1679,6 +1797,8 @@ class MainWindow(QMainWindow):
         # `claude auth status` once at startup. The Arbiter logged in, pressed this, and nothing
         # moved (user, 2026-09-09). `force`, because a press is not an alt-tab: the quiet period
         # exists to stop window switching from spawning probes, not to make a button do nothing.
+        # ↻ is the explicit re-check: what refused earlier in this launch gets another chance.
+        availability.forget_refusals()
         self._refresh_cli_catalogue(force=True)
 
     def _safe_load_project(self) -> None:
@@ -3069,6 +3189,9 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(
                 i18n.t("cliRouteQuiet").format(routes=", ".join(quiet)), level="warn"
             )
+        # A finished read changes what the footer says — "not checked yet" and a refusal forgotten
+        # by ↻ both end here — and `_reload_model_choices` refreshes only the warning mark.
+        self._refresh_critic_status()
         # Not the same sentence, because it is not the same fact. On Windows asking `agy models`
         # puts a console window on screen that nothing can hide, so no automatic path asks it —
         # and telling somebody their login expired when TCC never ran the command sends them to
@@ -3421,7 +3544,9 @@ class MainWindow(QMainWindow):
     def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
         _mark_missing(self._ai_critic_combo, self._critic_choices)
-        self._refresh_critic_warning()
+        # The status, not only the warning: the footer names the reviewer, and a warning refresh
+        # alone left the previous one there in red.
+        self._refresh_critic_status()
         choice = self._critic_choice()
         if choice is None:
             return
@@ -3531,6 +3656,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
+        key = str(self._ai_critic_combo.currentData() or "")
+        chosen = model_choices.resolve(self._critic_choices, key).choice if key else None
+        if chosen is not None:
+            state = availability.status(chosen)
+            if not state.ready:
+                self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
+                self._critic_status.setToolTip(state.detail or availability_view.phrase(state))
+                return
+        self._critic_status.setToolTip("")
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
@@ -3789,6 +3923,7 @@ class MainWindow(QMainWindow):
             phase=server.registry.current_phase(),
             model=choice.label,
         )
+        self._probe_reviewer()
         self._running_model = choice.key
         # On the record before the first token: the journal otherwise starts at whatever the model
         # happens to write first, and a session that ran for an hour and recorded nothing then
@@ -3817,6 +3952,42 @@ class MainWindow(QMainWindow):
         self._agent_worker.start()
         self._update_session_button()
         self._refresh_project_button()
+
+    def _probe_reviewer(self) -> None:
+        key = self._project_setting(_CRITIC_KEY)
+        if not key or os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            return
+        if self._reviewer_probe is not None and self._reviewer_probe.isRunning():
+            return  # one probe at a time; replacing a running QThread is the probe30 crash
+        # Only a reviewer something can reach — the RESOLVED one, as the probe sends it. Without a
+        # key or a CLI for its vendor the script can only compile a clipboard package: nothing to
+        # record, and a prompt on the clipboard at session start that nobody asked for.
+        _, reviewer = model_choices.resolve_critic(key)
+        if reviewer is None or not model_choices.critic_reaches(reviewer):
+            return
+        self._clipboard_before_probe = _clipboard_snapshot()
+        worker = _ReviewerProbeWorker(key, config.project_dir())
+        worker.done.connect(self._on_reviewer_probed)
+        self._reviewer_probe = worker
+        worker.start()
+
+    def _on_reviewer_probed(self, mode: str = "") -> None:
+        snapshot, self._clipboard_before_probe = self._clipboard_before_probe, None
+        # The method script copies its prompt to the clipboard when no route answers — which is
+        # what a refused reviewer looks like. Nobody asked for that at session start: give the
+        # clipboard back, unless something else has been copied since.
+        clipboard = QGuiApplication.clipboard()
+        if (mode == critic.MODE_CLIPBOARD and snapshot is not None
+                and _REVIEWER_PROBE_QUESTION in clipboard.text()):
+            # As values, so Qt builds mime data it owns (see `_clipboard_snapshot`).
+            if snapshot.image is not None:
+                clipboard.setImage(snapshot.image)
+            elif snapshot.text is not None:
+                clipboard.setText(snapshot.text)
+            else:
+                clipboard.clear()
+        self._reload_model_choices()
+        self._refresh_critic_status()
 
     def _say_what_the_project_applies(self) -> None:
         """Name this project folder's own hooks and permissions before the first turn (HUB-050).
@@ -3958,19 +4129,13 @@ class MainWindow(QMainWindow):
             # is add a fact the row does not carry.
             if choice.free:
                 notes.append(i18n.t("modelFree"))
-            if not choice.available:
-                # A route this machine could have and does not. Shown, greyed, saying what it
-                # needs — see `Choice.available`.
-                notes.append(i18n.t("modelInstallCli").format(cli=choice.harness))
+            # One word for why it cannot run, or nothing (spec 2026-09-13). "Not installed" and
+            # "remembered from last launch" are two of the reasons now, not two separate badges.
+            state = availability.status(choice)
+            if not state.ready:
+                notes.append(availability_view.word(state))
             elif critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
-            if model_choices.unconfirmed(choice):
-                # Remembered from a previous launch, not confirmed by the CLI this time. Shown and
-                # marked rather than dropped (user, 2026-08-11): an option that may not work is a
-                # different thing from one that will, and both are different from an option that
-                # is not in the list — which is how the recommended pair came to report itself
-                # absent while `agy models` was answering perfectly well from a terminal.
-                notes.append(i18n.t("modelUnconfirmed"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             # EVERY route is prefixed, not just the SDK. The same model reached two ways is two
             # different accounts -- a subscription CLI and a metered broker -- and an unlabelled
@@ -3979,7 +4144,13 @@ class MainWindow(QMainWindow):
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
             row = combo.count() - 1
             tip = f"{choice.route_note}\n{choice.model}"
+            if not choice.available:
+                tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
+            if state.detail:
+                tip += "\n" + state.detail
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
+            if not state.ready:
+                combo.setItemData(row, QColor(current_theme().warn), Qt.ItemDataRole.ForegroundRole)
             if not choice.available:
                 # Not selectable, and greyed by the style rather than by a colour written here:
                 # a row nobody can pick has to look like one before it is clicked.
@@ -4432,9 +4603,14 @@ class MainWindow(QMainWindow):
         check = getattr(self, "_capture_check", None)
         if check is not None and check.isRunning():
             check.wait(5000)
-        catalogue = getattr(self, "_cli_catalogue", None)
-        if catalogue is not None and catalogue.isRunning():
-            catalogue.wait(5000)
+        # Both can outlast any wait worth making at quit: a probe is a real model call, and the
+        # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
+        # left for Qt to destroy running (F-027) — with `done` cut first, so a late answer never
+        # reaches a window on its way out.
+        for worker in (getattr(self, "_cli_catalogue", None),
+                       getattr(self, "_reviewer_probe", None)):
+            if worker is not None:
+                qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
         # The MCP server is a background thread this window owns, and it used to be stopped ONLY
         # in `closeEvent` — so a quit that does not close a window (Cmd-Q, a signal) left a daemon
         # thread running uvicorn's asyncio loop into interpreter shutdown, and the process died

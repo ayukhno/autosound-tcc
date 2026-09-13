@@ -690,6 +690,27 @@ def resolve(entries: list[Choice], key: str) -> Resolved:
     return Resolved(key=resolved, choice=find(entries, resolved), alias=alias)
 
 
+def resolve_critic(key: str) -> tuple[Resolved, Optional[Choice]]:
+    """A stored REVIEWER key as this machine sends it: the alias followed, then the entry it names.
+
+    One answer for everything that calls the reviewer, files what it said, or reports on it. They
+    used to disagree: a call went to the alias target while its refusal was filed under the stored
+    key, so the footer and `get_tcc_state` never saw it (final review, 2026-09-13).
+
+    The choice is the catalogue's entry when there is one, and otherwise is built from the resolved
+    key itself — the catalogue lists only the models the Arbiter marked, and a valid reviewer is
+    often not in it. None only for an empty key. `Resolved` rides along for the substitution note.
+    """
+    resolved = resolve(critic_choices([]), key)
+    if not resolved.key:
+        return resolved, None
+    if resolved.choice is not None:
+        return resolved, resolved.choice
+    harness, _, model = resolved.key.partition(":")
+    return resolved, Choice(harness=harness or "omp", model=model or resolved.key,
+                            label=resolved.key, provider="")
+
+
 # What the skill's reviewer script needs per vendor, mirroring its own provider table (SCR-033):
 # an API key in the environment, or one of that vendor's CLIs on PATH. Kept here rather than read
 # out of the script because this runs on the GUI thread while a combo box is being filled — the

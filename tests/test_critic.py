@@ -476,6 +476,55 @@ def test_the_reviewer_is_given_one_model_variable_for_both_tasks(tmp_path, monke
         assert retired not in seen, f"{retired} is retired upstream; setting it teaches a lie"
 
 
+def test_extra_env_reaches_the_subprocess(tmp_path, monkeypatch):
+    """`extra_env` is for one call only, applied last -- the reviewer probe uses it to point
+    `AUTOSOUND_PROJECT_DIR` at a throwaway folder without touching the real project's env."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+
+    critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
+               extra_env={"AUTOSOUND_PROJECT_DIR": "/scratch/probe"})
+
+    assert seen.get("AUTOSOUND_PROJECT_DIR") == "/scratch/probe"
+
+
+def test_extra_env_outranks_the_mirror_project_dir_implies(tmp_path, monkeypatch):
+    """The reviewer probe runs from the real project and sends the script's writes elsewhere: the
+    `PROJECT_MIRROR` it passes must win over the one `project_dir` implies (final review,
+    Important 4), or the clipboard package and the audit line land in the project."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        seen["cwd"] = kwargs.get("cwd")
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+
+    critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
+               extra_env={"PROJECT_MIRROR": "/scratch/probe/rew_analitic"})
+
+    assert seen["PROJECT_MIRROR"] == "/scratch/probe/rew_analitic"
+    assert seen["cwd"] == str(tmp_path), "the cwd is still the project"
+
+
 def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift():
     """A Windows session, 2026-09-13: agy answered `error: Selected model is not supported in the
     selected location.` The remedy matched the word "model" and said model names drift and that ↻
@@ -489,3 +538,12 @@ def test_a_model_refused_for_this_location_says_so_rather_than_that_names_drift(
     assert "location" in fix, "names the actual reason"
     assert "footer" in fix, "and the one thing to do"
     assert "drift" not in fix, "not the wrong reason"
+
+
+def test_a_refusal_is_named_by_its_reason_or_not_at_all():
+    from autosound_tcc.core import availability, critic
+
+    assert critic.refusal_reason("error: Selected model is not supported in the selected location.") \
+        == availability.LOCATION
+    assert critic.refusal_reason("Gemini API: HTTP 400 Bad Request") == availability.REFUSED
+    assert critic.refusal_reason("") is None
