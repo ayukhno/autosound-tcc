@@ -6,22 +6,14 @@
 # Linux offscreen, where the suite aborts with exit 134 in roughly one run out of two and which
 # macOS does not reproduce at all (checked three times, 2026-09-06).
 #
-# NOT a release gate. `ship.py` is untouched: nothing here can hold a tag back. That is a decision
-# (HUB-045), not an omission -- the 6-10 minutes are already paid locally, and a gate would add
-# waiting to the release path for no new information.
-#
-# The path filter below is safe FOR THAT REASON. A skipped job reports nothing at all, so on a
-# repo where these checks were required, a docs-only pull request would sit forever in "Expected"
-# with no way to merge. Whoever makes this a gate has to drop `paths-ignore` in the same change.
+# A release gate since HUB-057. The hub's `release-preflight.py`, which `scripts/ship.py` calls,
+# refuses a tag unless CI on HEAD is green: red, still running, or no run on the sha all refuse.
+# So every push runs, prose included -- the commit a release starts from is a CHANGELOG commit by
+# construction, and a path filter would leave it with no run to read (HUB-058, hub #136).
 name: checks
 
 on:
   push:
-    # Prose does not warm three runners. Narrow on purpose: `pyproject.toml`, `uv.lock` and
-    # `.github/**` are NOT ignored, so a dependency bump or an edit to this file still runs.
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   pull_request:
   # The Linux abort (HUB-049) shows in about half of runs, and a push gives exactly one. A series
   # on demand is what turns "no repro" into evidence: run this with `linux_runs: 20` and read the

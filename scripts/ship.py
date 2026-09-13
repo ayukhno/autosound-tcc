@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -123,6 +124,7 @@ class Plan:
     """What ship worked out before it was allowed to touch anything."""
 
     root: Path
+    mode: str = "patch"
     tag: str = ""
     version: str = ""
     method_sha: str = ""
@@ -167,17 +169,55 @@ def load_carrier(path: Path = CARRIER):
     return module
 
 
-def channel_checks(root: Path, path: Path = CARRIER):
+def channel_checks(root: Path, path: Path = CARRIER, *, candidate: str | None = None,
+                   version: str | None = None):
     """Every channel precondition, asked of the carrier. Returns `(tag, checks)`, writes nothing.
 
-    The role is named HERE and nowhere else: it decides which repository and which release line
-    the carrier reports on, and the hook it consults reads the repository from `cwd`. Ship cuts
-    patches in TCC's line and nothing else, so the one right answer is a constant, not a flag.
+    One question per mode: the next patch, the next candidate for `candidate`, or the named
+    `version`. The carrier names the tag in the first two and judges it in all three — including
+    whether `candidate` or `version` looks like a version at all; ship keeps no copy of that pattern.
+
+    The role is the session's (`HUB_ROLE`), and `tcc` when there is none. It decides which
+    repository and line the carrier reports on and which tags the hook lets this session cut: a
+    minor is the `release` role's. ship does not restate that rule; it passes the role on.
     """
-    return load_carrier(path).preflight(root, role="tcc", want_next=True)
+    role = os.environ.get("HUB_ROLE") or "tcc"
+    carrier = load_carrier(path)
+    if candidate:
+        return carrier.preflight(root, role=role, candidate=candidate)
+    if version:
+        return carrier.preflight(root, role=role, tag=version)
+    return carrier.preflight(root, role=role, want_next=True)
 
 
 # ---------------------------------------------------------------- the inventory, ours alone
+
+
+#: `## [Unreleased]`, in any case — where a line's notes sit between tags (hub RELEASE-CHANNEL.md
+#: §11.5), renamed to the tag in the commit a release is cut from.
+_UNRELEASED = re.compile(r"^## \[unreleased\]", re.I | re.M)
+
+#: A release note shorter than this is a forgotten note. The skill's `tag-check.sh` holds the same
+#: floor; one rule, two doors, and they should not drift apart.
+RELEASE_NOTE_MIN_LINES = 3
+
+
+def section(text: str, heading: str) -> str | None:
+    """The body under `## [heading]`, up to the next `## `; None when there is no such heading."""
+    found = re.search(rf"^## \[{re.escape(heading)}\][^\n]*\n(.*?)(?=^## |\Z)", text,
+                      re.M | re.S | re.I)
+    return found.group(1) if found else None
+
+
+def _filled(body: str) -> int:
+    return sum(1 for line in body.splitlines() if line.strip())
+
+
+def _read_changelog(root: Path) -> str:
+    path = root / "CHANGELOG.md"
+    if not path.is_file():
+        raise Stop("no CHANGELOG.md")
+    return path.read_text(encoding="utf-8")
 
 
 def check_changelog(root: Path, tag: str) -> str:
@@ -186,32 +226,58 @@ def check_changelog(root: Path, tag: str) -> str:
     A gate, not a convenience. The heading is a sentence about what changed — content, and ship
     does not write content. Requiring it here also means the release notes exist BEFORE the tag
     rather than being written afterwards against a published number.
+
+    So `## [Unreleased]` must be gone by then: the notes gathered under it are renamed to this
+    heading, by hand, in the commit the release is cut from — the skill's model (hub
+    RELEASE-CHANNEL.md §11.3, `tag-check.sh`).
     """
-    path = root / "CHANGELOG.md"
-    if not path.is_file():
-        raise Stop("no CHANGELOG.md")
-    text = path.read_text(encoding="utf-8")
+    text = _read_changelog(root)
+    if _UNRELEASED.search(text):
+        raise Stop(f"CHANGELOG.md still has a `## [Unreleased]` heading — rename it to `## [{tag}]` "
+                   "first; the heading is yours to word, not ship's")
     found = re.search(r"^## \[(v\d+\.\d+\.\d+)\]", text, re.M)
     if not found:
         raise Stop("CHANGELOG.md has no `## [vX.Y.Z]` heading to read")
     if found.group(1) != tag:
         raise Stop(f"CHANGELOG.md's top entry is `{found.group(1)}`, and ship is cutting `{tag}` "
                    f"— write the entry first; its heading is yours to word, not ship's")
+    lines = _filled(section(text, tag) or "")
+    if lines < RELEASE_NOTE_MIN_LINES:
+        raise Stop(f"the `## [{tag}]` entry has {lines} non-empty line(s) — an empty note is a "
+                   "forgotten note")
     return text
 
 
-def check_paired_method(changelog: str, method_sha: str) -> None:
+def check_candidate_changelog(root: Path, version: str) -> None:
+    """What a candidate carries: `## [vX.Y.Z]` if the version is already named, else `## [Unreleased]`.
+
+    A candidate writes nothing, so its notes may still sit under `## [Unreleased]`: the release
+    commit renames them (hub RELEASE-CHANNEL.md §11.3, the skill's `tag-check.sh --candidate`). They
+    must say something all the same — an empty note is a forgotten note for a candidate too.
+    """
+    text = _read_changelog(root)
+    for heading in (version, "Unreleased"):
+        body = section(text, heading)
+        if body is None:
+            continue
+        if not _filled(body):
+            raise Stop(f"`## [{heading}]` has no entry — an empty note is a forgotten note")
+        return
+    raise Stop(f"CHANGELOG.md has neither `## [{version}]` nor `## [Unreleased]` — nothing says "
+               "what the candidate carries")
+
+
+def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
     """The "Paired with method" line against the method actually checked out.
 
     This line is written by hand, and hands are exactly where it drifts from reality without a
     sound. The sha is the identifier (HUB-001); the version string beside it is a signature, so
     the version alone cannot carry this check.
     """
-    entry = changelog.split("## [", 2)
-    body = entry[1] if len(entry) > 1 else changelog
+    body = section(changelog, tag) or ""
     found = re.search(r"[Pp]aired with method[^\n]*?`([^`]+)`", body)
     if not found:
-        raise Stop("the top CHANGELOG entry has no `Paired with method` line — a release that "
+        raise Stop(f"the `## [{tag}]` entry has no `Paired with method` line — a release that "
                    "does not say which method it was built against cannot be reproduced")
     said = found.group(1).strip().lstrip("v")
     if not method_sha:
@@ -315,16 +381,35 @@ def method_sha(root: Path) -> str:
     return install_report.skill_sha()
 
 
+def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
+    """Tag HEAD and publish that one tag by name — the last act of every mode."""
+    run(["git", "tag", tag], root)
+    say(f"  tagged {tag} (still local — `git tag -d {tag}` undoes it)")
+    run(["git", "push", "origin", "main"], root)
+    # The one irreversible line in this file. By NAME, never `--tags`: a bulk push has no target
+    # in the command, and a published tag cannot be moved or removed by anybody afterwards.
+    run(["git", "push", "origin", tag], root)
+    say(f"  pushed {tag}")
+
+
 def ship(root: Path, release: bool, test_command=None,
-         channel: Callable[[Path], tuple] = channel_checks,
+         channel: Callable[..., tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
          read_pinned_sha: Callable[[Path], str] = pinned_method_sha,
          relock_with: Callable[[Path], None] = relock,
-         say: Callable[[str], None] = print) -> Plan:
-    """The whole thing. Reads and decides first; writes only when `release` is true."""
-    plan = Plan(root=root)
+         say: Callable[[str], None] = print,
+         candidate: str = "", version: str = "") -> Plan:
+    """The whole thing. Reads and decides first; writes only when `release` is true.
 
-    tag, checks = channel(root)
+    Three modes, the skill's model (hub RELEASE-CHANNEL.md §11): the next patch; a candidate for
+    `candidate`, which writes nothing and tags HEAD `beta-vX.Y.Z-rcN`; a named `version`, released
+    the way a patch is.
+    """
+    if candidate and version:
+        raise Stop("CANDIDATE and VERSION exclude each other — one run cuts one tag")
+    plan = Plan(root=root, mode="candidate" if candidate else "version" if version else "patch")
+
+    tag, checks = channel(root, candidate=candidate or None, version=version or None)
     say("  channel preflight — hub/scripts/release-preflight.py:")
     for check in checks:
         # The carrier's own verdicts and sentences, not a translation of them: rewording somebody
@@ -340,13 +425,17 @@ def ship(root: Path, release: bool, test_command=None,
         raise Stop("the channel preflight worked out no tag and refused nothing — ask it "
                    "directly before shipping")
     plan.tag = tag
-    plan.version = tag.lstrip("v")
 
-    changelog = check_changelog(root, plan.tag)
+    if plan.mode == "candidate":
+        check_candidate_changelog(root, candidate)
+    else:
+        plan.version = tag.lstrip("v")
+        changelog = check_changelog(root, plan.tag)
 
     plan.method_sha = read_method_sha(root)
     check_method_pin(read_pinned_sha(root), plan.method_sha)
-    check_paired_method(changelog, plan.method_sha)
+    if plan.mode != "candidate":
+        check_paired_method(changelog, plan.method_sha, plan.tag)
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
@@ -358,11 +447,19 @@ def ship(root: Path, release: bool, test_command=None,
         f"git push origin {plan.tag}",
     ]
 
-    say(f"  next patch       : {plan.tag}")
+    say(f"  {plan.mode:<17}: {plan.tag}")
     say(f"  method           : {plan.method_sha[:12] or '(unknown)'}")
 
     if not release:
-        say("\n  DRY RUN — nothing was written. Real run: make ship REAL=1")
+        again = {"candidate": f" CANDIDATE={candidate}",
+                 "version": f" VERSION={version}"}.get(plan.mode, "")
+        say(f"\n  DRY RUN — nothing was written. Real run: make ship{again} REAL=1")
+        return plan
+
+    if plan.mode == "candidate":
+        # Nothing to bump and nothing new to test: the tree being tagged is HEAD, and the carrier
+        # has already refused a HEAD that is unpublished or whose CI is not green.
+        publish(root, plan.tag, say)
         return plan
 
     was = bump(root, plan.version)
@@ -381,28 +478,30 @@ def ship(root: Path, release: bool, test_command=None,
         files.append("uv.lock")
     run(["git", "add", *files], root)
     run(["git", "commit", "-m", f"{plan.tag}: paired with method {plan.method_sha[:12]}"], root)
-    run(["git", "tag", plan.tag], root)
-    say(f"  committed and tagged {plan.tag} (still local — `git tag -d {plan.tag}` undoes it)")
-
-    run(["git", "push", "origin", "main"], root)
-    # The one irreversible line in this file. By NAME, never `--tags`: a bulk push has no target
-    # in the command, and a published tag cannot be moved or removed by anybody afterwards.
-    run(["git", "push", "origin", plan.tag], root)
-    say(f"  pushed {plan.tag}")
+    say(f"  committed {plan.tag}")
+    publish(root, plan.tag, say)
     return plan
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Cut the next patch release.")
+    parser = argparse.ArgumentParser(
+        description="Cut a release: the next patch, a beta candidate, or a named version.")
     parser.add_argument("--release", action="store_true",
                         help="actually write, commit, tag and push (default: dry run)")
     parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--candidate", metavar="vX.Y.Z", default="",
+                      help="the next beta candidate for this version (beta-vX.Y.Z-rcN, named by "
+                           "the hub); writes nothing but the tag")
+    mode.add_argument("--tag", metavar="vX.Y.Z", default="",
+                      help="release this version instead of the next patch; the hub decides "
+                           "whether this role may")
     args = parser.parse_args(argv)
 
     root = Path(args.root)
     print(f"ship {'REAL' if args.release else '(dry run)'} — {root}")
     try:
-        ship(root, release=args.release)
+        ship(root, release=args.release, candidate=args.candidate, version=args.tag)
     except Stop as stop:
         # Flushed first, or the refusal overtakes the lines it refers to: `say` goes to stdout,
         # which is block-buffered the moment this is piped anywhere, and stderr is not. Seen on

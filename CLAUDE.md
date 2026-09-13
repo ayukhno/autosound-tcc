@@ -9,6 +9,8 @@ owner, and this repo has paid for that shape often enough (HUB-048).
 ```sh
 make check                                    # the linter AND the whole suite, ~8 min, ONE verdict
 make ship                                     # dry run: works out the next patch, writes nothing
+make ship CANDIDATE=vX.Y.Z                    # dry run of a beta candidate; REAL=1 tags HEAD, writes nothing else
+make ship VERSION=vX.Y.Z                      # dry run of a named release (a minor is the release role's)
 ```
 
 **Use `make check`, not `make test`.** They are not the same claim: `make test` does not run the

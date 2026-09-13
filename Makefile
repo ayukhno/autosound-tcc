@@ -18,6 +18,8 @@ help:
 	@echo "                    PYTEST_ADDOPTS='-n auto --dist loadfile' make test"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
 	@echo "make ship REAL=1    the real release — bump, test, commit, tag, push"
+	@echo "make ship CANDIDATE=vX.Y.Z   dry run of a beta candidate (beta-vX.Y.Z-rcN on HEAD); REAL=1 tags it"
+	@echo "make ship VERSION=vX.Y.Z     dry run of a named release instead of the next patch; REAL=1 cuts it"
 	@echo ""
 	@echo "Asking for a release — \"new tag\", \"ship it\", \"cut a patch\" — means REAL=1,"
 	@echo "but it is never the first thing done: the dry run and its plan come first, and"
@@ -49,9 +51,17 @@ test:
 # `scripts/ship.py`, and the channel half of what it checks is the hub's own
 # `scripts/release-preflight.py` — called, not copied here (HUB-003). No hub on the machine means
 # nothing is checking, so ship refuses rather than carrying on.
+#: The mode, from the command line only — `VERSION` is a common enough name that a shell may carry
+#: one, and an environment variable must not turn a patch into something else.
+#: `CANDIDATE=vX.Y.Z` cuts the next beta candidate for that version and writes nothing but the tag;
+#: `VERSION=vX.Y.Z` releases that version instead of the next patch (a minor is the `release`
+#: role's — the hub decides, from HUB_ROLE).
+SHIP_ARGS = $(if $(filter command line,$(origin CANDIDATE)),--candidate $(CANDIDATE)) \
+            $(if $(filter command line,$(origin VERSION)),--tag $(VERSION))
+
 ship:
 ifeq ($(REAL),1)
-	$(PY) scripts/ship.py --release
+	$(PY) scripts/ship.py --release $(SHIP_ARGS)
 else
-	$(PY) scripts/ship.py
+	$(PY) scripts/ship.py $(SHIP_ARGS)
 endif

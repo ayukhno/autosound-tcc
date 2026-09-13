@@ -6,6 +6,12 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
+Between tags, what has landed is written under `## [Unreleased]` at the top. In the commit a release
+is cut from, that heading is renamed to `## [vX.Y.Z] — date · title`, with its `Paired with method`
+line. The heading is written by hand; `make ship` only checks it. A `### Breaking` section marks a
+change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
+tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
+
 ## [v0.1.38] — 2026-09-13 · the Windows crash that killed CI runs was ours: how a widget leaves a panel
 
 Paired with method `4c89fdc7527ac8d6fb5a80ca526613d585800e06` — the tag on that commit is
