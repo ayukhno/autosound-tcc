@@ -32,11 +32,11 @@ on:
         description: "How many times to run the Linux suite (HUB-049 needs a series, not one run)"
         default: "1"
         required: false
-      # Same instrument, other platform. The Windows crash (#19) shows in roughly one full run in
-      # three, so a single job neither confirms it nor clears it — and a fix for a 1-in-3 fault
-      # cannot be judged by one green run either.
+      # Same instrument, other platform. The Windows crash of #19 showed in roughly one full run in
+      # three until it was fixed (2026-09-12): one job neither confirms a fault like that nor clears
+      # it, and a fix for it cannot be judged by one green run either.
       windows_runs:
-        description: "How many times to run the Windows suite (#19 shows in about 1 run in 3)"
+        description: "How many times to run the Windows suite (a 1-in-3 fault needs a series)"
         default: "1"
         required: false
       # Narrow the series to part of the suite, e.g. `tests/test_dialog_live.py
@@ -46,11 +46,12 @@ on:
         description: "What to run in the series (default: the whole suite)"
         default: ""
         required: false
-      # `#19` below the Python frame. The dump stops at `QThread.__init__` with nothing else
-      # alive, so the question is native: run the Windows series under cdb and print the native
-      # stacks when the process dies (`scripts/ci_native_debug.sh`). The retry below is bypassed.
+      # Below the Python frame. A native crash's Python dump stops wherever Python happened to be —
+      # for #19 that was `QThread.__init__`, and the fault was elsewhere — so the question is native:
+      # run the Windows series under cdb and print the native stacks when the process dies
+      # (`scripts/ci_native_debug.sh`). This is what found #19. The retry below is bypassed.
       native_debug:
-        description: "Windows series under cdb: native stacks on a crash (#19)"
+        description: "Windows series under cdb: native stacks on a crash"
         default: "false"
         required: false
       page_heap:
@@ -181,7 +182,7 @@ jobs:
         env:
           PYTHONFAULTHANDLER: "1"
 
-  # How many Windows runs were asked for. One on a push; a series when somebody is chasing #19.
+  # How many Windows runs were asked for. One on a push; a series when somebody is chasing a crash.
   windows-plan:
     name: windows plan
     runs-on: ubuntu-latest
@@ -235,14 +236,14 @@ jobs:
             exec bash scripts/ci_native_debug.sh $args
           fi
 
-          # Retry ONLY on the known crash, never on a test that failed. #19 kills the process
-          # with `Windows fatal exception: access violation` in about 4 runs of 10, and a job that
-          # is red 40% of the time for a reason unrelated to the commit is a job people stop
-          # reading — the same argument that put Linux under `continue-on-error`.
+          # Retry ONLY on a native crash, never on a test that failed. #19 killed the process with
+          # `Windows fatal exception: access violation` in about 4 runs of 10 until it was fixed on
+          # 2026-09-12, and a job red 40% of the time for a reason unrelated to the commit is a job
+          # people stop reading — the same argument that put Linux under `continue-on-error`.
           #
           # Deliberately NOT `continue-on-error` here: that would swallow real failures too. This
-          # swallows one named fault and nothing else, and it says so in the run summary every
-          # time, so the frequency stays in sight while #19 is deferred rather than fixed.
+          # retries one kind of fault and nothing else, and says so in the run summary every time.
+          # With #19 fixed, a retry here is news: read the dump, do not wave it through.
           attempts=3
           for i in $(seq 1 $attempts); do
             set +e
@@ -253,10 +254,10 @@ jobs:
             if ! grep -q "Windows fatal exception" /tmp/pytest-out.txt; then
               exit $code
             fi
-            echo "::warning title=#19::attempt $i died with an access violation, not a test failure"
-            echo "- \`#19\` crashed the suite on attempt **$i** of $attempts" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=native crash::attempt $i died with an access violation, not a test failure"
+            echo "- a native crash ended attempt **$i** of $attempts — read the dump" >> "$GITHUB_STEP_SUMMARY"
           done
-          echo "::error title=#19::the suite crashed $attempts times in a row — that is not the usual 40%"
+          echo "::error title=native crash::the suite crashed $attempts times in a row"
           exit 1
 
   macos:

@@ -53,6 +53,8 @@ The process dying, not a test asserting — and on two DIFFERENT tests, so it is
 goes down under load, in about **29% of full parallel runs**, which is the same shape as
 [`tcc#19`](https://github.com/ayukhno/autosound-tcc/issues/19): "Windows: the suite crashes with
 an access violation … about one run in three". Two serial runs the same day were clean.
+`#19` has since been found and fixed (2026-09-12, see *Known flakiness* below), and it turned
+out to be Windows-only; whether this parallel crash is the same fault is not established.
 
 A suite whose green means "green four times out of five" is worth less than a slow one. So:
 
@@ -65,7 +67,7 @@ A suite whose green means "green four times out of five" is worth less than a sl
 Use it while iterating, where a dead worker costs one re-run and is obvious. Do not use it to
 decide that anything is green. What would make it the default: the crash understood and fixed —
 and it is worth chasing precisely because parallel running is the first thing that reproduces
-`#19`'s family on a machine somebody can attach a debugger to, rather than on Windows CI.
+a crash of that shape on a machine somebody can attach a debugger to, rather than on CI.
 
 Three things about the parallel run itself, all of them load-bearing:
 
@@ -115,14 +117,24 @@ profile the number first.
 
 ## Known flakiness, and what is known about it
 
-Two, and they are different animals. Neither is a reason to re-run until green: a re-run that
+Three, and they are different animals. Neither is a reason to re-run until green: a re-run that
 turns a red into a green without an explanation has told you nothing.
 
 | what | where | state |
 |---|---|---|
 | a Qt worker segfaults in `Shiboken::Object::destroy` during widget teardown | parallel runs, macOS | 2 in 15 full parallel runs, **did not reproduce on demand** in 8 consecutive runs after. Real stack, and the ruling-out, in [`tcc#22`](https://github.com/ayukhno/autosound-tcc/issues/22). This is why parallel is not the default. |
 | the suite aborts on Linux under `offscreen` | CI, Linux | **no repro yet** — hub `HUB-049` asks for one first, and explicitly not for a fix before it. Named here because a document about tests that omits the known flake teaches its reader that a red run must be their fault. |
-| an access violation on Windows in `agent_worker.QThread` construction | CI, Windows | about one run in three, [`tcc#19`](https://github.com/ayukhno/autosound-tcc/issues/19). Three hypotheses refuted by series rather than by argument: a neighbouring diagnostics thread, GC timing, a missing QApplication. |
+| `test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own` raises "Internal C++ object already deleted" | CI, Windows | about one run in ten, test only: the DSP tree is rebuilt during `settle()` and the test clicks a group that no longer exists. What triggers the rebuild is open — [`tcc#28`](https://github.com/ayukhno/autosound-tcc/issues/28). |
+
+Fixed, and kept here for what it cost: the Windows access violation of
+[`tcc#19`](https://github.com/ayukhno/autosound-tcc/issues/19), about one full run in three since
+the first Windows run. A widget unparented with `setParent(None)` while still inside a layout made
+Qt delete the layout's item, and PySide kept a wrapper for that item in its address table; the
+next Qt object built at the same address was handed it and died in
+`SignalManager::retrieveMetaObject`. Every Python-level hypothesis before that was refuted by a
+series (a diagnostics thread, GC timing and GC thread, a missing QApplication); what found it was
+the native stack, from the `native_debug` input of the `checks` workflow. Fixed in `discard.drop`
+(2026-09-12): full suite ×10 on Windows, 7 crashes → 0.
 
 If you hit one, keep the evidence before re-running: on macOS the symbolised stack is in
 `~/Library/Logs/DiagnosticReports/Python-*.ips` and the system rotates it away. `tail` on a

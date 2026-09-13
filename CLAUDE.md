@@ -29,6 +29,14 @@ PYTEST_ADDOPTS='-n auto --dist loadfile' make test    # ~1 min, kills a Qt worke
 Use it while iterating, where a dead worker costs one re-run and is obvious. Never to decide that
 something is green — see `tcc#22`.
 
+## Everything that reaches GitHub is in English
+
+Commit messages — their subject lines are the run titles in the Actions list — CI job and step
+names, issues and bus tickets, PR bodies, comments, and the files pushed here: docs, changelog,
+code comments. The one exception is the skill's language versions. Talking with the Arbiter stays
+Ukrainian. The Arbiter's rule (2026-09-13), made after Ukrainian commit subjects showed up as CI
+run titles; history already pushed is not rewritten for it.
+
 ## Releases
 
 `make ship` is a dry run and `make ship REAL=1` is the real one, asked for by name. Its last act
