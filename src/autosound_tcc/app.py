@@ -190,7 +190,7 @@ def _note_strays(app) -> None:
 #: the interface language, and short: it is on screen for about a second, and the Arbiter asked
 #: for something the eye can catch in that time (2026-09-13) — the two sentences it replaced, one
 #: Ukrainian and one English, could not be read before they were gone.
-STARTUP_CONSOLE_TEXT = "Autosound TCC: starting..."
+STARTUP_CONSOLE_TEXT = "Autosound TCC: reading models..."
 
 WINDOW_TRACE_ENV = "AUTOSOUND_TCC_WINDOW_TRACE"
 
@@ -391,8 +391,21 @@ def main() -> int:
     # when one could not be BORROWED and had to be made — and a made one is always seen,
     # because `SW_HIDE` at creation is ignored on Windows 11. Given that, it is held on
     # screen long enough to read rather than flickered past (the Arbiter's call, 11.09).
-    child.open_app_console(STARTUP_CONSOLE_TEXT)
+    try:
+        from autosound_tcc.core import availability
+        reading = availability.start_startup_reading()
+    except ImportError:  # a light install without the GUI extras reads nothing at start
+        availability, reading = None, None
+    console = child.open_app_console(
+        STARTUP_CONSOLE_TEXT,
+        ready=reading.done if reading else None,
+        cap=availability.STARTUP_MODELS_CAP_S if reading else None)
     child.hide_console_windows()
+    if reading is not None:
+        reading.start()
+        if console:
+            # Windows: the start waits inside the console for what the machine can run.
+            reading.wait(availability.STARTUP_MODELS_CAP_S)
     # Before the toolkit is even looked for: making a Dock entry needs no window, and a light
     # install -- the one WITHOUT PySide6 -- is exactly the install whose owner will want the app
     # on the Dock once the extras arrive. This used to be a shell script in the method's

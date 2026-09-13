@@ -11,6 +11,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from autosound_tcc.core import child
 
 
@@ -781,3 +783,30 @@ def test_the_startup_line_falls_back_when_the_console_device_will_not_open(monke
     child._write_to_console("x", kernel32=fake)
 
     assert fake.WriteConsoleW.args[0][0] == 0x777, "fell back rather than writing into nothing"
+
+
+def test_the_console_stays_up_until_the_models_are_read_or_the_cap(monkeypatch):
+    """The Arbiter, 2026-09-13: read the models inside the first window. The console hides when the
+    reading is done — never before its readable second, never after the cap."""
+    import threading
+
+    order: list = []
+    ready = threading.Event()
+    waited: list = []
+
+    class _Ready:
+        def wait(self, timeout):
+            waited.append(timeout)
+            return ready.wait(0)
+
+    child._hide_after_showing(
+        hide=lambda: order.append("hide"),
+        seconds=1.2,
+        sleep=lambda s: order.append(f"waited {s}"),
+        keeper=lambda pid, **kw: order.append("keeper"),
+        ready=_Ready(),
+        cap=8.0,
+    )
+
+    assert order == ["waited 1.2", "hide", "keeper"]
+    assert waited == [pytest.approx(6.8)], "the rest of the cap, after the readable second"

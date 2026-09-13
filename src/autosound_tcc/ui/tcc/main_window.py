@@ -620,7 +620,8 @@ class _CliCatalogueWorker(QThread):
 
     done = Signal()
 
-    def __init__(self, force: bool = False, active_omp: list | None = None) -> None:
+    def __init__(self, force: bool = False, active_omp: list | None = None,
+                wait_for=None) -> None:
         super().__init__()
         # `force` reaches `refresh_cli_catalogue`: an ordinary launch leaves agy cached and unrun
         # (its window is the startup flash of TCC-006), while the ↻ button forces a re-ask.
@@ -628,8 +629,17 @@ class _CliCatalogueWorker(QThread):
         #: Which omp models the user marked. Empty means the omp catalogue is needed for NOTHING,
         #: and asking for it is a subprocess spent labelling models nobody chose (probe30).
         self._active_omp = list(active_omp or [])
+        #: The start's own reading, if there is one. Waited on instead of asked again.
+        self._wait_for = wait_for
 
     def run(self) -> None:
+        if self._wait_for is not None:
+            # The start already asked everything, forced. Wait for it, then only what it skips
+            # (omp for marked models) — asking agy and claude a second time is a second window.
+            self._wait_for.done.wait()
+            model_choices.refresh_cli_catalogue(force=False, active_omp=self._active_omp)
+            self.done.emit()
+            return
         model_choices.refresh_cli_catalogue(force=self._force, active_omp=self._active_omp)
         # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
         # built during construction. Asking there would put a process launch in front of the
@@ -818,7 +828,7 @@ class MainWindow(QMainWindow):
 
         # What the local CLIs offer, fetched in the background and folded into the pickers when it
         # lands. Until then those routes are simply absent rather than the window being late.
-        self._cli_catalogue = _CliCatalogueWorker()
+        self._cli_catalogue = _CliCatalogueWorker(wait_for=availability.startup_reading())
         self._cli_catalogue.done.connect(self._on_cli_catalogue_ready)
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
             self._cli_catalogue.start()

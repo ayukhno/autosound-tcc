@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -136,4 +137,38 @@ def test_a_project_that_is_not_ready_changes_nothing():
     availability.record_reviewer_outcome(
         "agy:gemini-3.1-pro-high", _result(critic.MODE_NOT_READY, "context missing"),
         reaches=lambda _c: True)
+    assert _status(_choice()).ready
+
+
+def test_the_start_waits_for_the_reading_only_up_to_the_cap():
+    release = threading.Event()
+    reading = availability.StartupReading(lambda: release.wait(5)).start()
+
+    started = time.monotonic()
+    assert reading.wait(0.1) is False
+    assert time.monotonic() - started < 1.0, "the cap, not the reader, decides how long the start waits"
+
+    release.set()
+    assert reading.wait(2.0) is True
+
+
+def test_a_reader_that_raises_still_finishes_the_reading():
+    def boom():
+        raise RuntimeError("agy exploded")
+
+    assert availability.StartupReading(boom).start().wait(2.0) is True
+
+
+def test_the_default_reader_marks_harnesses_not_checked_until_it_is_done(monkeypatch):
+    from autosound_tcc.core import claude_sdk, model_choices
+
+    seen = []
+    monkeypatch.setattr(model_choices, "refresh_cli_catalogue",
+                        lambda **kw: seen.append(availability.status(_choice(), signed_in=lambda: None,
+                                                                       unconfirmed=lambda _c: False).reason))
+    monkeypatch.setattr(claude_sdk, "probe_signed_in", lambda **kw: None)
+
+    availability.read_catalogues()
+
+    assert seen == [availability.NOT_CHECKED]
     assert _status(_choice()).ready
