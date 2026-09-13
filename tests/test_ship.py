@@ -61,6 +61,21 @@ CHANGELOG = """# Changelog
 Paired with method `{sha}`.
 
 - something changed
+- and something else
+"""
+
+UNRELEASED = """# Changelog
+
+## [Unreleased]
+
+- a candidate carries this
+
+## [v0.1.24] — 2026-08-20 · the one before
+
+Paired with method `{sha}`.
+
+- old
+- older
 """
 
 PYPROJECT = '''[project]
@@ -225,6 +240,71 @@ def test_a_dry_run_writes_nothing_at_all(repo):
     assert git(repo, "rev-parse", "HEAD") == before
     assert git(repo, "tag", "--list", "v0.1.25") == ""
     assert 'version = "0.1.24"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- the CHANGELOG, per mode
+
+
+def test_a_release_refuses_while_unreleased_is_still_there(repo):
+    """The skill's rule (tag-check.sh): the notes are renamed to the tag BEFORE it is cut."""
+    text = CHANGELOG.format(tag="v0.1.25", sha=METHOD_SHA).replace(
+        "# Changelog\n", "# Changelog\n\n## [Unreleased]\n\n- not renamed yet\n")
+    (repo / "CHANGELOG.md").write_text(text, encoding="utf-8")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_changelog(repo, "v0.1.25")
+
+    assert "rename it to `## [v0.1.25]` first" in str(stop.value)
+
+
+def test_a_release_entry_shorter_than_three_lines_is_a_forgotten_note(repo):
+    (repo / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [v0.1.25] — 2026-08-27 · short\n\nPaired with method `x`.\n",
+        encoding="utf-8")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_changelog(repo, "v0.1.25")
+
+    assert "forgotten note" in str(stop.value)
+
+
+def test_a_candidate_reads_its_notes_from_unreleased(repo):
+    (repo / "CHANGELOG.md").write_text(UNRELEASED.format(sha=METHOD_SHA), encoding="utf-8")
+
+    ship_mod.check_candidate_changelog(repo, "v0.2.0")  # no Stop
+
+
+def test_a_candidate_reads_its_own_section_when_the_version_is_already_named(repo):
+    (repo / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [v0.2.0] — 2026-09-20 · named early\n\n- tried\n", encoding="utf-8")
+
+    ship_mod.check_candidate_changelog(repo, "v0.2.0")  # no Stop
+
+
+def test_an_empty_unreleased_is_a_forgotten_note_for_a_candidate_too(repo):
+    (repo / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [Unreleased]\n\n## [v0.1.24] — x\n\n- old\n", encoding="utf-8")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_candidate_changelog(repo, "v0.2.0")
+
+    assert "forgotten note" in str(stop.value)
+
+
+def test_a_candidate_with_no_notes_at_all_is_refused(repo):
+    # The fixture's CHANGELOG has only `## [v0.1.25]`: neither the version nor Unreleased.
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_candidate_changelog(repo, "v0.2.0")
+
+    assert "nothing says what the candidate carries" in str(stop.value)
+
+
+def test_the_paired_line_is_read_from_the_tags_own_section():
+    """Not from whatever block happens to be first: an Unreleased section above has no pairing."""
+    text = ("# Changelog\n\n## [Unreleased]\n\n- no pairing here\n\n"
+            f"## [v0.1.25] — 2026-08-27 · x\n\nPaired with method `{METHOD_SHA}`.\n\n- a\n- b\n")
+
+    ship_mod.check_paired_method(text, METHOD_SHA, "v0.1.25")  # no Stop
 
 
 # ---------------------------------------------------------------- the seam to the hub

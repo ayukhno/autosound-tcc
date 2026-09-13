@@ -180,38 +180,91 @@ def channel_checks(root: Path, path: Path = CARRIER):
 # ---------------------------------------------------------------- the inventory, ours alone
 
 
+#: `## [Unreleased]`, in any case — where a line's notes sit between tags (hub RELEASE-CHANNEL.md
+#: §11.5), renamed to the tag in the commit a release is cut from.
+_UNRELEASED = re.compile(r"^## \[unreleased\]", re.I | re.M)
+
+#: A release note shorter than this is a forgotten note. The skill's `tag-check.sh` holds the same
+#: floor; one rule, two doors, and they should not drift apart.
+RELEASE_NOTE_MIN_LINES = 3
+
+
+def section(text: str, heading: str) -> str | None:
+    """The body under `## [heading]`, up to the next `## `; None when there is no such heading."""
+    found = re.search(rf"^## \[{re.escape(heading)}\][^\n]*\n(.*?)(?=^## |\Z)", text,
+                      re.M | re.S | re.I)
+    return found.group(1) if found else None
+
+
+def _filled(body: str) -> int:
+    return sum(1 for line in body.splitlines() if line.strip())
+
+
+def _read_changelog(root: Path) -> str:
+    path = root / "CHANGELOG.md"
+    if not path.is_file():
+        raise Stop("no CHANGELOG.md")
+    return path.read_text(encoding="utf-8")
+
+
 def check_changelog(root: Path, tag: str) -> str:
     """The top entry must already be this release's.
 
     A gate, not a convenience. The heading is a sentence about what changed — content, and ship
     does not write content. Requiring it here also means the release notes exist BEFORE the tag
     rather than being written afterwards against a published number.
+
+    So `## [Unreleased]` must be gone by then: the notes gathered under it are renamed to this
+    heading, by hand, in the commit the release is cut from — the skill's model (hub
+    RELEASE-CHANNEL.md §11.3, `tag-check.sh`).
     """
-    path = root / "CHANGELOG.md"
-    if not path.is_file():
-        raise Stop("no CHANGELOG.md")
-    text = path.read_text(encoding="utf-8")
+    text = _read_changelog(root)
+    if _UNRELEASED.search(text):
+        raise Stop(f"CHANGELOG.md still has a `## [Unreleased]` heading — rename it to `## [{tag}]` "
+                   "first; the heading is yours to word, not ship's")
     found = re.search(r"^## \[(v\d+\.\d+\.\d+)\]", text, re.M)
     if not found:
         raise Stop("CHANGELOG.md has no `## [vX.Y.Z]` heading to read")
     if found.group(1) != tag:
         raise Stop(f"CHANGELOG.md's top entry is `{found.group(1)}`, and ship is cutting `{tag}` "
                    f"— write the entry first; its heading is yours to word, not ship's")
+    lines = _filled(section(text, tag) or "")
+    if lines < RELEASE_NOTE_MIN_LINES:
+        raise Stop(f"the `## [{tag}]` entry has {lines} non-empty line(s) — an empty note is a "
+                   "forgotten note")
     return text
 
 
-def check_paired_method(changelog: str, method_sha: str) -> None:
+def check_candidate_changelog(root: Path, version: str) -> None:
+    """What a candidate carries: `## [vX.Y.Z]` if the version is already named, else `## [Unreleased]`.
+
+    A candidate writes nothing, so its notes may still sit under `## [Unreleased]`: the release
+    commit renames them (hub RELEASE-CHANNEL.md §11.3, the skill's `tag-check.sh --candidate`). They
+    must say something all the same — an empty note is a forgotten note for a candidate too.
+    """
+    text = _read_changelog(root)
+    for heading in (version, "Unreleased"):
+        body = section(text, heading)
+        if body is None:
+            continue
+        if not _filled(body):
+            raise Stop(f"`## [{heading}]` has no entry — an empty note is a forgotten note")
+        return
+    raise Stop(f"CHANGELOG.md has neither `## [{version}]` nor `## [Unreleased]` — nothing says "
+               "what the candidate carries")
+
+
+def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
     """The "Paired with method" line against the method actually checked out.
 
     This line is written by hand, and hands are exactly where it drifts from reality without a
     sound. The sha is the identifier (HUB-001); the version string beside it is a signature, so
     the version alone cannot carry this check.
     """
-    entry = changelog.split("## [", 2)
-    body = entry[1] if len(entry) > 1 else changelog
+    body = section(changelog, tag) or ""
     found = re.search(r"[Pp]aired with method[^\n]*?`([^`]+)`", body)
     if not found:
-        raise Stop("the top CHANGELOG entry has no `Paired with method` line — a release that "
+        raise Stop(f"the `## [{tag}]` entry has no `Paired with method` line — a release that "
                    "does not say which method it was built against cannot be reproduced")
     said = found.group(1).strip().lstrip("v")
     if not method_sha:
@@ -346,7 +399,7 @@ def ship(root: Path, release: bool, test_command=None,
 
     plan.method_sha = read_method_sha(root)
     check_method_pin(read_pinned_sha(root), plan.method_sha)
-    check_paired_method(changelog, plan.method_sha)
+    check_paired_method(changelog, plan.method_sha, plan.tag)
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
