@@ -67,6 +67,7 @@ from mcp.server.fastmcp import FastMCP
 
 from autosound_tcc.core import (
     app_log,
+    availability,
     car_library,
     config,
     critic,
@@ -155,6 +156,8 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     choice = resolved.choice or model_choices.Choice(
         harness=harness or "omp", model=model or key, label=key, provider=""
     )
+    state = availability.status(choice)
+    because = list(missing) + ([availability.PHRASES[state.reason]] if not state.ready else [])
     return {
         "configured": True,
         "model": choice.model,
@@ -187,8 +190,11 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         # It is to stop the payload implying more than it knows. `critic.preflight` already lists
         # exactly what is missing; carrying it here turns a hollow green light into "configured,
         # and here is why it cannot run yet".
-        "ready": not missing,
-        "not_ready_because": missing,
+        #
+        # And what this launch has LEARNED about it: a refusal (region, key) or a catalogue still
+        # being read. Configured and reachable are not the same as answering (2026-09-13).
+        "ready": not because,
+        "not_ready_because": because,
     }
 
 
@@ -1085,6 +1091,8 @@ def build_server(
             harness=configured_critic_harness(project_dir),
         )
         critic.log_call(result, None, project_dir)
+        availability.record_reviewer_outcome(
+            project_settings.get(config.tcc_dir(project_dir), "critic", "") or "", result)
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
         # local log answers the footer's "last called"; the journal is what a resume and any other
         # front-end read, and until now it recorded that a review happened and lost what it argued.

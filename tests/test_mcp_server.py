@@ -1541,3 +1541,23 @@ def test_an_unreadable_file_is_not_reported_as_hidden(monkeypatch):
 
     assert mcp_server._hidden(Path("nowhere.json"), kernel32=fake) is False
     assert fake.GetFileAttributesW.restype is ctypes.c_uint32, "a DWORD is not a signed int"
+
+
+def test_a_refused_reviewer_is_not_ready_and_says_why_in_one_phrase(tmp_path, monkeypatch):
+    """Windows, 2026-09-13: the payload said `ready: true` and the call failed in two seconds —
+    "Selected model is not supported in the selected location"."""
+    from autosound_tcc.core import availability, config, project_settings
+    from autosound_tcc.core.mcp_server import _reviewer_state
+
+    availability.reset()
+    key = "agy:gemini-3.1-pro-high"
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", key)
+    monkeypatch.setattr("autosound_tcc.core.critic.preflight", lambda _p: [])
+    availability.refused(key, availability.LOCATION, "not supported in the selected location")
+    try:
+        state = _reviewer_state(tmp_path)
+    finally:
+        availability.reset()
+
+    assert state["ready"] is False
+    assert availability.PHRASES[availability.LOCATION] in state["not_ready_because"]
