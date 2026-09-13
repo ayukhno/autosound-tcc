@@ -35,8 +35,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, model_choices, project_settings
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.core import availability, config, model_choices, project_settings
+from autosound_tcc.ui.tcc import availability_view, i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.theme import mini_combo
 
@@ -200,7 +200,7 @@ class ProjectGateDialog(QDialog):
             if choice.free:
                 notes.append(i18n.t("modelFree"))
             if not choice.available:
-                notes.append(i18n.t("modelInstallCli").format(cli=choice.harness))
+                notes.append(availability_view.word(availability.status(choice)))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
             row = combo.count() - 1

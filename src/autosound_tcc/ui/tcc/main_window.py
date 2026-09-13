@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (
     app_log,
+    availability,
     claude_sdk,
     config,
     contract_check,
@@ -85,7 +86,7 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_view
-from autosound_tcc.ui.tcc import copy_menu, i18n, sizing
+from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
@@ -3958,19 +3959,13 @@ class MainWindow(QMainWindow):
             # is add a fact the row does not carry.
             if choice.free:
                 notes.append(i18n.t("modelFree"))
-            if not choice.available:
-                # A route this machine could have and does not. Shown, greyed, saying what it
-                # needs — see `Choice.available`.
-                notes.append(i18n.t("modelInstallCli").format(cli=choice.harness))
+            # One word for why it cannot run, or nothing (spec 2026-09-13). "Not installed" and
+            # "remembered from last launch" are two of the reasons now, not two separate badges.
+            state = availability.status(choice)
+            if not state.ready:
+                notes.append(availability_view.word(state))
             elif critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
-            if model_choices.unconfirmed(choice):
-                # Remembered from a previous launch, not confirmed by the CLI this time. Shown and
-                # marked rather than dropped (user, 2026-08-11): an option that may not work is a
-                # different thing from one that will, and both are different from an option that
-                # is not in the list — which is how the recommended pair came to report itself
-                # absent while `agy models` was answering perfectly well from a terminal.
-                notes.append(i18n.t("modelUnconfirmed"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             # EVERY route is prefixed, not just the SDK. The same model reached two ways is two
             # different accounts -- a subscription CLI and a metered broker -- and an unlabelled
@@ -3979,7 +3974,13 @@ class MainWindow(QMainWindow):
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
             row = combo.count() - 1
             tip = f"{choice.route_note}\n{choice.model}"
+            if not choice.available:
+                tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
+            if state.detail:
+                tip += "\n" + state.detail
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
+            if not state.ready:
+                combo.setItemData(row, QColor(current_theme().warn), Qt.ItemDataRole.ForegroundRole)
             if not choice.available:
                 # Not selectable, and greyed by the style rather than by a colour written here:
                 # a row nobody can pick has to look like one before it is clicked.

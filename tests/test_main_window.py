@@ -2864,7 +2864,8 @@ def test_a_route_whose_cli_is_missing_is_greyed_and_says_what_it_needs():
     rows = [combo.itemText(i) for i in range(combo.count())]
     assert rows[0].startswith("SDK · Claude Opus 5")
     assert "CODEX · gpt-5.2-codex" in rows[1]
-    assert i18n.t("modelInstallCli").format(cli="codex") in rows[1]
+    assert i18n.t("availNotInstalled") in rows[1]
+    assert i18n.t("modelInstallCli").format(cli="codex") in combo.itemData(1, Qt.ItemDataRole.ToolTipRole)
     assert combo.model().item(0).isEnabled() is True
     assert combo.model().item(1).isEnabled() is False, "not selectable, and looks it"
 
@@ -3659,3 +3660,30 @@ def test_claude_is_asked_for_its_login_once_not_once_per_alt_tab(monkeypatch):
 
     claude_sdk.probe_signed_in(force=True)   # the press: somebody just logged in
     assert len(ran) == 2, "a press re-asks; that is what the press is for"
+
+
+def test_a_model_that_cannot_run_is_red_with_one_word_and_the_rest_stay_plain():
+    """The Arbiter, 2026-09-13: "models must be red when they are not available". Two colours:
+    plain is ready, red is everything else, with one word for why."""
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    combo = window._ai_critic_combo
+    fine = model_choices.Choice(harness="agy", model="gemini-3.1-flash", label="Gemini 3.1 Flash")
+    refused = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    availability.reset()
+    availability.refused(refused.key, availability.LOCATION, "selected location")
+    try:
+        MainWindow._fill_combo(combo, [fine, refused], fine.key, critic=True)
+    finally:
+        availability.reset()
+
+    assert combo.itemData(0, Qt.ItemDataRole.ForegroundRole) is None
+    assert combo.itemData(1, Qt.ItemDataRole.ForegroundRole) == QColor(current_theme().warn)
+    assert i18n.t("availLocation") in combo.itemText(1)
+    assert combo.model().item(1).isEnabled() is True, "a refused model can still be chosen"
