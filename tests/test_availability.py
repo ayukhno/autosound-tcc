@@ -1,0 +1,102 @@
+"""What can run on this machine right now, and in one word why not."""
+from __future__ import annotations
+
+import threading
+
+import pytest
+
+from autosound_tcc.core import availability
+from autosound_tcc.core.model_choices import Choice
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    availability.reset()
+    yield
+    availability.reset()
+
+
+def _choice(harness="agy", model="gemini-3.1-pro-high", available=True):
+    return Choice(harness=harness, model=model, label=model, available=available)
+
+
+def _status(choice, signed_in=None, unconfirmed=False):
+    return availability.status(choice, signed_in=lambda: signed_in,
+                               unconfirmed=lambda _c: unconfirmed)
+
+
+def test_a_model_with_nothing_against_it_is_ready():
+    assert _status(_choice()) == availability.Status(True)
+
+
+def test_a_route_without_its_cli_is_not_installed():
+    assert _status(_choice(harness="codex", available=False)).reason == availability.NOT_INSTALLED
+
+
+def test_the_claude_route_without_a_login_asks_to_sign_in():
+    assert _status(_choice(harness="sdk", model="claude-opus-5"), signed_in=False).reason \
+        == availability.SIGN_IN
+    assert _status(_choice(harness="sdk", model="claude-opus-5"), signed_in=None).ready, \
+        "None means the probe could not tell — that is not a reason to go red"
+
+
+def test_a_refusal_is_red_with_its_reason_and_detail_until_it_succeeds():
+    choice = _choice()
+    availability.refused(choice.key, availability.LOCATION, "not supported in the selected location")
+
+    state = _status(choice)
+    assert (state.ready, state.reason) == (False, availability.LOCATION)
+    assert "selected location" in state.detail
+
+    availability.succeeded(choice.key)
+    assert _status(choice).ready
+
+
+def test_forgetting_refusals_is_what_the_reload_button_does():
+    choice = _choice()
+    availability.refused(choice.key, availability.REFUSED, "no")
+    availability.forget_refusals()
+    assert _status(choice).ready
+
+
+def test_a_harness_still_being_read_is_not_checked():
+    availability.begin_reading(["agy"])
+    assert _status(_choice()).reason == availability.NOT_CHECKED
+    availability.finish_reading("agy")
+    assert _status(_choice()).ready
+
+
+def test_an_entry_remembered_from_last_launch_is_not_checked():
+    assert _status(_choice(), unconfirmed=True).reason == availability.NOT_CHECKED
+
+
+def test_the_most_serious_reason_wins():
+    choice = _choice(harness="codex", available=False)
+    availability.refused(choice.key, availability.LOCATION, "x")
+    availability.begin_reading(["codex"])
+    assert _status(choice, unconfirmed=True).reason == availability.NOT_INSTALLED
+    assert list(availability.PRIORITY) == [availability.NOT_INSTALLED, availability.SIGN_IN,
+                                          availability.LOCATION, availability.REFUSED,
+                                          availability.NOT_CHECKED]
+
+
+def test_every_reason_has_a_phrase_for_the_agent():
+    assert set(availability.PHRASES) == set(availability.PRIORITY)
+
+
+def test_concurrent_writers_and_a_reader_do_not_trip_over_each_other():
+    choice = _choice()
+
+    def write():
+        for i in range(500):
+            availability.refused(f"agy:m{i}", availability.REFUSED, "x")
+            availability.succeeded(f"agy:m{i}")
+
+    threads = [threading.Thread(target=write) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for _ in range(500):
+        _status(choice)
+    for thread in threads:
+        thread.join()
+    assert _status(choice).ready
