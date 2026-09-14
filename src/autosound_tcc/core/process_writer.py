@@ -49,6 +49,36 @@ DEFAULT_TIMEOUT_S = 20.0
 _LOCK_NAME = ".process-write.lock"
 _THREAD_LOCK = threading.Lock()
 
+#: Every command TCC sends, and the first method tag whose `process.py` has it — read from the
+#: skill's history (2026-09-14), never guessed. `2.8.0` is the oldest tag with the file at this
+#: path, so for those it means "by then", not "since then". An old method answers an unknown command
+#: with its usage text; `_refuse_if_too_old` turns that into this version (tcc#26).
+LANDED_IN = {
+    "add-step": "2.8.0",
+    "block": "2.8.0",
+    "capture-check": "3.0.0",
+    "capture-close": "3.0.0",
+    "capture-knobs": "3.0.47",
+    "capture-protective": "3.0.20",
+    "capture-skip": "3.0.0",
+    "capture-start": "3.0.0",
+    "capture-taken": "3.0.0",
+    "check": "2.8.0",
+    "decision": "3.0.0",
+    "done": "2.8.0",
+    "enter-phase": "2.8.0",
+    "listening-verdict": "3.0.29",
+    "listening-verdicts": "3.0.29",
+    "plan": "2.8.0",
+    "reviewer": "2.8.0",
+    "session-close": "3.0.43",
+    "session-start": "3.0.0",
+    "show": "2.8.0",
+    "skip": "2.8.0",
+    "start": "2.8.0",
+    "target": "2.8.0",
+}
+
 
 class ProcessWriterError(RuntimeError):
     """The skill's writer refused or could not run. Carries its own message verbatim.
@@ -157,6 +187,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     """One call, and a non-zero exit is a failure. Every command here works that way except
     `session-close`, whose exit code is an ANSWER — see `close_session`."""
     code, out, err = _spawn(project_dir, args, timeout_s)
+    _refuse_if_too_old(args[0], out, err)
     if code != 0:
         raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
     return out
@@ -384,13 +415,13 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     text; nothing is written to the journal, which is the honest record.
     """
     code, out, err = _spawn(project_dir, ["session-close"])
-    _refuse_if_too_old("session-close", "3.0.47", out, err)
+    _refuse_if_too_old("session-close", out, err)
     if code not in (0, 1):
         raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
     return code == 0, out or err
 
 
-def _refuse_if_too_old(command: str, since: str, out: str, err: str) -> None:
+def _refuse_if_too_old(command: str, out: str, err: str) -> None:
     """Turn "process.py printed its usage" into a sentence about the machine.
 
     An unknown command makes `process.py` dump its usage text, and that text travels back to the
@@ -407,8 +438,10 @@ def _refuse_if_too_old(command: str, since: str, out: str, err: str) -> None:
     said = f"{out}\n{err}"
     if "usage: process.py" not in said:
         return
+    since = LANDED_IN.get(command)
+    has_it = f" — the method has it by v{since}" if since else ""
     raise ProcessWriterError(
-        f"this project's method does not have `{command}` — it landed in the method at v{since}. "
+        f"this project's method does not have `{command}`{has_it}. "
         "Update the method (TCC's own update row offers it), or do this step by hand; nothing "
         "here is broken on TCC's side."
     )

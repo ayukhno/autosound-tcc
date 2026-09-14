@@ -164,9 +164,10 @@ def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project
     saw was `{"recorded": false, "error": "usage: process.py <process-dir> <comm..."}` — from which
     it concluded the stopping ritual was broken and started inventing work to close.
 
-    `session-close` landed in the method at v3.0.47. TCC shipping a tool that needs it is fine;
-    TCC failing to say so is not. An old method is a fact about the machine, and a fact has to be
-    reported as itself."""
+    `session-close` is in the method from v3.0.43 (the first tag whose `process.py` has the command;
+    this test said v3.0.47 until 2026-09-14, which was the flag `--superseded-by`, not the command).
+    TCC shipping a tool that needs it is fine; TCC failing to say so is not. An old method is a fact
+    about the machine, and a fact has to be reported as itself."""
     def _usage(project_dir, args, timeout_s=None):
         return 2, "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]", ""
 
@@ -177,4 +178,42 @@ def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project
 
     said = str(stopped.value)
     assert "session-close" in said
-    assert "3.0.47" in said, "the version that has it, so the answer is actionable"
+    assert "3.0.43" in said, "the version that has it, so the answer is actionable"
+
+
+@pytest.mark.parametrize("call, command, since", [
+    (lambda p: process_writer.enter_phase(p, "0"), "enter-phase", "2.8.0"),
+    (lambda p: process_writer.listening_verdicts(p), "listening-verdicts", "3.0.29"),
+    (lambda p: process_writer.start_capture(p, "v_001", ["m-L_0 (sw)"]), "capture-start", "3.0.0"),
+])
+def test_every_command_on_a_method_too_old_for_it_says_so(project, monkeypatch, call, command, since):
+    """tcc#26 covered `session-close` only, and every other command could meet the same old method
+    and hand the model the same usage dump. Each one now names itself and the method version that
+    has it."""
+    def _usage(project_dir, args, timeout_s=None):
+        return 2, "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]", ""
+
+    monkeypatch.setattr(process_writer, "_spawn", _usage)
+
+    with pytest.raises(process_writer.ProcessWriterError) as stopped:
+        call(project)
+
+    said = str(stopped.value)
+    assert f"`{command}`" in said and f"v{since}" in said, said
+    assert "usage: process.py" not in said, "the dump itself is what misled the model"
+
+
+def test_every_command_tcc_sends_has_the_method_version_that_has_it():
+    """A command added to `process_writer` without its version would answer an old method with the
+    usage dump again. The versions are the first method tags whose `process.py` carries the command,
+    read from the skill's history on 2026-09-14 — a guess here would be worse than no version."""
+    import inspect
+    import re
+
+    source = inspect.getsource(process_writer)
+    sent = set(re.findall(r'(?:_run\(project_dir, |_spawn\(project_dir, |args = |^\s*)\["([a-z-]+)"',
+                          source, re.M))
+
+    assert sent, "the pattern found no commands — it no longer matches how they are written"
+    missing = sorted(sent - set(process_writer.LANDED_IN))
+    assert not missing, f"commands with no method version: {missing}"

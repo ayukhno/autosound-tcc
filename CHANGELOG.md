@@ -46,6 +46,10 @@ Paired with method `08f8da756198e1daa1992f569dfcae5c032b6cfd` — the tag on tha
 - **A project whose `.gitignore` or `.mcp.json` cannot be written no longer stops TCC's MCP
   server.** The refusal was meant to go to the log, but through a function that does not exist, so
   it came out as an error instead.
+- **Every step TCC records says so when the project's method is too old for it** — which command
+  is missing and the method version that has it — instead of passing the method's usage text to the
+  model, which read it as a broken ritual (#26). Only closing a session did this before, and it named
+  v3.0.47 where the command has been there since v3.0.43.
 
 ## [v0.1.38] — 2026-09-13 · the Windows crash that killed CI runs was ours: how a widget leaves a panel
 
