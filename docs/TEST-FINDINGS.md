@@ -864,3 +864,24 @@ The one route that works there: the clipboard step, pasted into a web chat by ha
 **Weight.** High on that machine: no review is possible.
 
 **Reproduces.** Every call, by every route tried.
+
+### 26. After a correct session close, quitting TCC still asks "Save before closing?"
+
+**What.** The Arbiter told the session to finish. It wrote everything down and closed in order:
+`session_close` → "nothing open in the process record", `contract exit 0`, notes in
+`autosound_context.md`. Quitting TCC right after still showed "Save before closing? — A session is
+running. What it has learned this turn is not on disk until it writes it — closing now loses that.
+Saving costs one turn." with "Save the turn / Don't save / Stay". Nothing was left to save, and the
+dialog offers to spend a turn on it.
+
+**The Arbiter's proposal.** TCC already hears the close (`session_close` goes through TCC's MCP).
+Let that mark the session saved, so quitting does not ask; clear the mark as soon as the session
+writes or changes anything again after it — or refuse changes after a close.
+
+**Where.** The Arbiter's screenshot, Windows, 0.1.39, method 3.0.52.
+
+**Ours or external.** Ours.
+
+**Weight.** Medium: a question with no right answer at the end of every properly closed session.
+
+**Reproduces.** After every `session_close`, on quit.
