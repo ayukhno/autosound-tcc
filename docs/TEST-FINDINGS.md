@@ -771,3 +771,23 @@ The exact text of the `read_file` refusal is not in the report yet.
 **Weight.** Medium: every route to the reviewer on that machine failed or went around TCC.
 
 **Reproduces.** Two machines show 17; the `read_file` refusal once.
+
+### 22. The protective-filter dialog asks for virtual channels
+
+**What.** Reading from REW, the dialog "Захисні фільтри цього набору замірів" lists a row for every
+channel: the virtual `VFL`, `VFR`, `VRL`, `VRR`, `VC`, `VSW` first, then the outputs `c`, `w-L`,
+`w-R`, `m-L`, `m-R`, `tw-L`, `tw-R`. A protective filter sits in the signal path of an OUTPUT, the
+driver being measured; a virtual channel is not measured through one. The Arbiter: it cannot be
+that virtual channels are asked for — this only applies to the Output drivers.
+
+(In the same dialog the header says the capture set is not open, so there is nothing to write to,
+and "Записати" is disabled.)
+
+**Where.** The Arbiter's screenshot, Windows, 0.1.39, a project with virtual channels (Helix-style).
+
+**Ours or external.** The dialog is TCC's; which channel list it draws from is not checked.
+
+**Weight.** Medium: thirteen rows where seven belong, and six of them ask for something that does
+not exist.
+
+**Reproduces.** On that project.
