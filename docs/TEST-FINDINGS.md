@@ -748,3 +748,26 @@ session's report.
 **Weight.** Medium: the one place that is always on screen does not say the reviewer cannot run.
 
 **Reproduces.** On that machine, every start while that model is chosen.
+
+### 21. Reviewer calls from the session: refused on agy's `read_file` permission, and the model not inherited
+
+**What.** From the session's report on the Windows machine under Parallels (the same run as 20):
+- before the one that went through, calls were refused within 2–5 s: twice by region, once on a
+  permission for `read_file` (agy asking to read a file, in a call that cannot answer);
+- the session again ran the method's script directly (as in 17), and a direct call does not inherit
+  TCC's Critic model: without `AUTOSOUND_CRITIC_MODEL` it refused and printed what `agy` can run —
+  `gemini-3.8/3.7/3.6/3.5-flash-{high,medium,low}`, `gemini-3.1-pro-{low,high}`. `3.1-pro-high` is
+  on that list and still refused by location;
+- with the model passed by hand (`gemini-3.5-flash-medium`, the one chosen in TCC) and the `ask`
+  task, which reads no project files, the call passed region and permissions and was still running
+  after two minutes with no output.
+
+**Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52; the session's report.
+
+**Ours or external.** Not decided. The `read_file` permission is between the method's reviewer
+script and `agy`; the model not reaching a direct call is how the session goes around TCC (17).
+The exact text of the `read_file` refusal is not in the report yet.
+
+**Weight.** Medium: every route to the reviewer on that machine failed or went around TCC.
+
+**Reproduces.** Two machines show 17; the `read_file` refusal once.
