@@ -1699,6 +1699,23 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-056 — Import from REW into TCC: the logic and the implementation
+
+**Статус**: open · the Arbiter, 2026-09-14 (end of the 0.1.39 test day): "a huge problem"; for the next session
+
+Named, not yet described. Seen around it today: the protective-filter dialog asks for virtual channels
+(TEST-FINDINGS 22), reading depends on REW's display smoothing (hub #151), and the session filed
+tcc#37–#39 about the live round (round colour, auto-matching the live round). The next session starts
+by having the Arbiter describe what goes wrong, and records it before anything is changed.
+
+### F-057 — The method's virtual-DSP calculations (skill side)
+
+**Статус**: open · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for the next session
+
+The method's, not TCC's: once the next session has it described with numbers, it goes to the skill as
+a bus ticket (related: skill#29–#35 from the remote run, hub #117 on the Resonalyze readers). Nothing
+is sent before that.
+
 ### F-055 — A separate session: from the session analysis to an intake form
 
 **Статус**: deferred · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
