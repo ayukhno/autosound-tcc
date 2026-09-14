@@ -72,3 +72,30 @@ def test_no_test_can_leave_a_console_keeper_running():
     child._spawn_daemon(lambda **_kw: ran.set(), {})
 
     assert not ran.wait(0.2), "a real thread started — the keeper stub in conftest is gone"
+
+
+def test_what_the_app_writes_for_the_machine_is_not_in_the_tests_own_folder(tmp_path):
+    """Tests use `tmp_path` as a project folder, and a window watches its project folder. With the
+    app's settings and caches in that same folder, a window saw its own writes as a change to the
+    project and rebuilt the DSP tree 400 ms later, in the middle of whatever the test was holding
+    (tcc#28: one Windows run in ten from 2026-09-11, when APPDATA moved into `tmp_path`; on macOS a
+    `cli-catalogue.json` written by the catalogue worker did the same, only after the test ended).
+
+    HOME stays in `tmp_path`: tests read `~/.claude` through it, and a window writes nothing there.
+    """
+    import os
+
+    from autosound_tcc.ui.tcc.app_settings import get_settings
+
+    written_for_the_machine = {
+        "QSettings": get_settings().fileName(),
+        "LOCALAPPDATA": os.environ["LOCALAPPDATA"],
+        "APPDATA": os.environ["APPDATA"],
+        "XDG_CONFIG_HOME": os.environ["XDG_CONFIG_HOME"],
+        "XDG_STATE_HOME": os.environ["XDG_STATE_HOME"],
+        "AUTOSOUND_TCC_CONFIG_DIR": os.environ["AUTOSOUND_TCC_CONFIG_DIR"],
+    }
+
+    inside = {name: path for name, path in written_for_the_machine.items()
+              if tmp_path.resolve() in Path(path).resolve().parents}
+    assert not inside, f"written into the test's own folder: {inside}"

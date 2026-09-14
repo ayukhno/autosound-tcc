@@ -182,11 +182,25 @@ def _end_qt_before_python_finalises():
     qt_shutdown.destroy_application()
 
 
+@pytest.fixture
+def _machine_dir(tmp_path_factory):
+    """Where the app's own settings, logs and caches go during a test — beside `tmp_path`, not in it.
+
+    Tests use `tmp_path` as a project folder, and a window watches its project folder. With the
+    app's writes in the same folder, a window took its own `TCC.ini`, `AppData` or
+    `cli-catalogue.json` for a change to the project and rebuilt the DSP tree 400 ms later, in the
+    middle of whatever the test held: tcc#28, one Windows run in ten from the day APPDATA moved
+    into `tmp_path` (2026-09-11).
+    """
+    return tmp_path_factory.mktemp("machine")
+
+
 @pytest.fixture(autouse=True)
-def _isolated_qsettings(tmp_path, monkeypatch):
+def _isolated_qsettings(tmp_path, _machine_dir, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    monkeypatch.setenv("HOME", str(tmp_path))  # IniFormat UserScope resolves under $HOME
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # ...and under this one on Windows
+    # HOME stays in `tmp_path`: tests read `~/.claude` through it, and a window writes nothing there.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what `~` follows on Windows
     # And every OTHER door onto the user's directories. HOME alone is enough on the machine this
     # was written on, where nothing else is set — and that is exactly why it kept passing here and
     # failing on CI. GitHub's runners set `LOCALAPPDATA` and `APPDATA` on Windows and
@@ -194,11 +208,11 @@ def _isolated_qsettings(tmp_path, monkeypatch):
     # machine key) went straight past the tmp HOME to the runner's real folders. Two of the four
     # red tests on 11.09 were that, wearing different coats; a third was the same shape a day
     # earlier. One fixture is the place to answer it, not ten tests.
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / ".local" / "state"))
-    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(_machine_dir / "AppData" / "Local"))
+    monkeypatch.setenv("APPDATA", str(_machine_dir / "AppData" / "Roaming"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(_machine_dir / ".config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(_machine_dir / ".local" / "state"))
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(_machine_dir))
     yield
 
 
@@ -234,7 +248,7 @@ def _isolated_project_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_machine_config(tmp_path, monkeypatch):
+def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     """Third layer, same lesson: keep tests out of `~/.config/autosound-tcc`.
 
     `model_overrides` lives there, and once diagnostics started reporting on it (2026-08-12) two
@@ -242,7 +256,7 @@ def _isolated_machine_config(tmp_path, monkeypatch):
     developer's own model aliases. A test that passes or fails depending on whose laptop it runs on
     is not a test, and one that could WRITE there would edit a real configuration.
     """
-    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "machine-config"))
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(_machine_dir / "machine-config"))
     # ...and out of the answer to "which agent CLIs does this developer have installed". That is a
     # probe of the machine, so a suite that reads it passes here and fails on the next laptop —
     # `test_ok_report_says_so` started failing the moment diagnostics learned to report an
