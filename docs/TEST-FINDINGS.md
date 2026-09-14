@@ -616,7 +616,7 @@ update is ours.
 **Weight.** High for "Done": somebody starts the old build believing it is the new one, and every
 report after that is about the wrong version.
 
-**Reproduces.** Not tried yet; the Arbiter is re-running the update.
+**Reproduces.** No: the second attempt on that machine (a UTM VM, "Windows 2") went through, 0.1.36 → 0.1.39. The finding is the "Done" after a failure, not the failure.
 
 ### 13. "Update TCC" opens a second, empty console
 
@@ -630,3 +630,69 @@ report after that is about the wrong version.
 **Weight.** Low to medium: confusing, not harmful.
 
 **Reproduces.** Known since 2026-09-06.
+
+### 14. First start after the update: a terminal window blinks behind "Reading models"
+
+**What.** On the first start of 0.1.39, TCC's own console (`Autosound TCC: reading models...`)
+appears and another terminal window blinks behind it. On later starts there is no extra window.
+Apart from that first start, no window blinks at all — during work or on start. That is the check
+hub #73 (TCC-006) was waiting for, and it passes.
+
+**Where.** The Arbiter's Windows VM, 0.1.39, method 3.0.52.
+
+**Ours or external.** Not known.
+
+**Weight.** Low: once, right after an update.
+
+**Reproduces.** Only on the first start after the update so far.
+
+### 15. "Don't ask at all (auto)" is ticked, and TCC still asks "Allow Bash?"
+
+**What.** Menu → "Ask about" shows "Don't ask at all (auto)" ticked. The chat still stops on
+"Allow Bash?" for `mkdir -p /tmp/asq && cat > /tmp/asq/ready.md <<'EOF' …`, labelled "a command
+that cannot be undone".
+
+**Where.** The Arbiter's Windows VM, project testTCC-9, 0.1.39.
+
+**Ours or external.** Ours.
+
+**Weight.** High, and the third time: finding 7 and wave 1.1 ("the choice does not work — the
+second time").
+
+**Reproduces.** Seen once on 0.1.39.
+
+### 16. The permission request has no background, so nothing draws the eye to it
+
+**What.** The "Allow Bash?" block is drawn like the rest of the chat: grey text, no background, the
+buttons at the bottom. The Arbiter: it has NO background that would draw attention to the question.
+
+**Where.** The Arbiter's Windows VM, light theme, 0.1.39.
+
+**Ours or external.** Ours.
+
+**Weight.** High, and recurring: finding 6 and wave 1.2 (an orange background did not show on the
+macOS light theme). A request nobody notices reads as a hang.
+
+**Reproduces.** Seen on 0.1.39.
+
+### 17. The Generator reached the reviewer through Bash, inside its own session
+
+**What.** Asked whether the reviewer is ready, the session wrote the question to `/tmp/asq/ready.md`
+through Bash (the prompt in 15) and ran `autosound_ai.py ask` (local `agy`,
+`gemini-3.7-flash-low`). The reviewer answered: channel live, role accepted, ready once the intake
+writes its files. Reported by the session alongside:
+- two `critic` calls through TCC were refused before the intake: `autosound_context.md not found`
+  (the method's contract; `ask` goes around it);
+- the CLI warned about a deadlock risk — it saw the `CLAUDECODE` marker, i.e. it was run from inside
+  an agent session — and went through after a timeout; the documented path is a separate terminal;
+- `AUTOSOUND_CRITIC_MODEL` was not in that shell's environment; the model was passed explicitly.
+
+**Where.** The Arbiter's Windows VM, project testTCC-9, 0.1.39; the session's own report, pasted by
+the Arbiter.
+
+**Ours or external.** Not decided: the reviewer was reached around TCC's own call rather than
+through it.
+
+**Weight.** Medium: it worked, but by the path the method says not to use.
+
+**Reproduces.** Once.
