@@ -710,3 +710,18 @@ else in the window.
 **Weight.** Low: layout.
 
 **Reproduces.** Always, on that window size.
+
+### 19. Feedback has one way out: GitHub
+
+**What.** The feedback dialog ("Відгук про прототип TCC") offers a single radio button, "GitHub
+issue (маю акаунт)", and "Надіслати в GitHub →". Somebody without a GitHub account, or without
+access to it, has no other path. A radio group of one option is also a choice that is not one.
+
+**Where.** The Arbiter's screenshot, Windows VM, 0.1.39.
+
+**Ours or external.** Ours. Related: TODO F-042 (how to report a defect and hand over settings when
+GitHub is not available).
+
+**Weight.** Medium: a tester without GitHub cannot report from the app.
+
+**Reproduces.** Always.
