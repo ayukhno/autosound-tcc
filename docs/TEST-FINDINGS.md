@@ -696,3 +696,17 @@ through it.
 **Weight.** Medium: it worked, but by the path the method says not to use.
 
 **Reproduces.** Once.
+
+### 18. Too wide a gap between the AI dialog and the right column
+
+**What.** Between the right edge of the AI dialog's working area (the composer with "Send" and the
+transcript's scrollbar) and the border of the right column there is more empty space than anywhere
+else in the window.
+
+**Where.** The Arbiter's screenshot, Windows VM, light theme, 0.1.39.
+
+**Ours or external.** Ours.
+
+**Weight.** Low: layout.
+
+**Reproduces.** Always, on that window size.
