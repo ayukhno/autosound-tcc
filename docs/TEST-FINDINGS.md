@@ -592,3 +592,41 @@ and forgotten here»). Тепер існує.
 2. **Зʼявилась задача `ask`** — будь-яке питання, під контрактом взаємодії, **без файлів
    проєкту**. Саме вона знімає блокування з пункту 1 списку: переформулювати тексти
    інтерфейсу через Критика можна тепер і на теці, що не проходила інтейк.
+
+---
+
+## Test of v0.1.39 — 2026-09-14
+
+Recorded as seen, not diagnosed (hub WAVES.md: while the Arbiter tests, findings are only written
+down). The VM updated 0.1.38 → 0.1.39 and started fine.
+
+### 12. The update on a second Windows machine failed, and the window said "Done" anyway
+
+**What.** "Update TCC" on another Windows machine: `uv` could not fetch v0.1.39 — `git fetch …
++6ad4f82…` exit 128, `fatal: unable to access 'https://github.com/ayukhno/autosound-tcc/': Empty
+reply from server`. The next line in the same window: `Done - start TCC again.` TCC stays on 0.1.38
+while the window says the update is done.
+
+**Where.** The Arbiter's screenshot, a second Windows machine (not the VM, which updated the same
+hour).
+
+**Ours or external.** The failed fetch looks external (network or GitHub). "Done" after a failed
+update is ours.
+
+**Weight.** High for "Done": somebody starts the old build believing it is the new one, and every
+report after that is about the wrong version.
+
+**Reproduces.** Not tried yet; the Arbiter is re-running the update.
+
+### 13. "Update TCC" opens a second, empty console
+
+**What.** Beside `Administrator: cmd`, which runs the update, a second window
+`C:\Windows\System32\cmd.exe` opened, empty, with only a cursor.
+
+**Where.** The same screenshot, the second machine.
+
+**Ours or external.** Ours: F-043 (the second source in hub #73, TCC-006), still in v0.1.39.
+
+**Weight.** Low to medium: confusing, not harmful.
+
+**Reproduces.** Known since 2026-09-06.
