@@ -3,8 +3,8 @@
 Hub ticket #140 (HUB-061), ask 1 of 3. Asks 2 and 3 landed on 2026-09-13: `make ship CANDIDATE=` in
 PR #30, `## [Unreleased]` and the `### Breaking` form in PR #29 and #30.
 
-**Status:** written for review. Nothing is implemented; the two open questions at the end are the
-user's.
+**Status:** answered by the user on 2026-09-14 (see the end). TCC's own half is built first; the
+method half waits for hub #145 (TCC-011).
 
 ## What is asked
 
@@ -141,7 +141,19 @@ Test-first, in the existing files and seams (`_git` faked, `newest_tcc_tag` stoo
 - The method's version display for a candidate (its manifest also lags); the sha is on the row.
 - Changing stable's ordering.
 
-## Open questions for the user
+## The method on beta: waits for the skill (added 2026-09-14)
+
+The user's rule: a Claude session in the terminal takes a released tag of the method; a session TCC
+starts with the checkbox on takes a candidate, chosen by a parameter TCC passes. The method has ONE
+checkout, and the terminal and TCC both read it (`install.sh` links `~/.claude/skills/autosound-tuning`
+to it; TCC finds it through that link). So §5's "`apply_skill` on beta fetches the candidate" would
+put the terminal on the candidate too, and is NOT built. How a candidate reaches TCC's sessions only
+is asked of the skill: hub #145 (TCC-011). Until then the method keeps following released tags on
+both channels, and §6 (the pin row) stays as it is.
+
+## Open questions for the user — answered 2026-09-14
+
+Both recommendations taken; the checkbox is unchecked by default.
 
 1. **Should an app installed from a `beta-v*` tag start on beta?** Recommended: yes, while the
    setting has never been set. Without it, `install.sh --channel beta` puts the app on stable at the
