@@ -817,3 +817,22 @@ say (hub #150, TCC-014).
 hand.
 
 **Reproduces.** Every critic call on that project, per the session.
+
+### 24. A long command pushes the permission buttons out of the window — the test stops
+
+**What.** The session asked "Дозволити Bash?" for a long command: `cd …/.autosound-tuning-src && gh
+issue create --repo ayukhno/autosound-tuning-skill --title … --body "$(cat <<'EOF' …` with the whole
+issue body inline, dozens of lines. The permission block grows with the command until "Дозволити" /
+"Відхилити" are below the bottom of the window. There is no way to answer, so the turn waits and the
+test stops.
+
+The block (`ui/tcc/confirm_bar.py`) is placed in the dialog panel's own layout, outside the
+transcript's scroll area, and its detail is a word-wrapped label with no height limit.
+
+**Where.** The Arbiter's screenshot, the remote Windows machine, 0.1.39, zoom 110%.
+
+**Ours or external.** Ours. The same widget as 15 and 16.
+
+**Weight.** Blocking on that machine.
+
+**Reproduces.** Whenever a command is taller than the space left in the window.
