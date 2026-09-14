@@ -793,13 +793,15 @@ not exist.
 
 **Reproduces.** On that project.
 
-### 23. TCC trusts the project for Claude Code, not for agy
+### 23. TCC's advice for agy's `read_file` refusal names the wrong setting (tcc#36)
 
 **What.** A `critic` call from the project on Windows came back `mode: clipboard`, `model: null`:
-agy auto-denied `read_file`. agy's `settings.json` trusts `C:\Users\o.yukhno`, the project is inside
-it, and the call is still denied; the session proposes naming the project folder in
-`trustedWorkspaces`. TCC already prepares a project for Claude Code (`core/project_trust.py`); for
-agy, the reviewer TCC's own footer picks, nothing does.
+agy auto-denied `read_file` because "headless mode cannot prompt for" it, and printed its own remedy
+— an allow-rule under `permissions.allow`, or `--dangerously-skip-permissions`. TCC's `call_critic`
+advised something else: add the project to `trustedWorkspaces`, or `"toolPermission":
+"always-proceed"` for every folder. The session followed TCC's advice exactly and re-ran the call:
+byte-identical error. The home folder was already trusted, with the project inside it. The session
+filed it as tcc#36. So the narrow advice does nothing, and the wide one is where a person goes next.
 
 Also from the same session: running the method's script after `cd` into the method's folder left
 `combined_prompt.md` in that checkout (removed by the session). A dirty checkout is one TCC's updater
@@ -808,8 +810,8 @@ refuses to move.
 **Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52, project `testTCC8`; the
 session's report.
 
-**Ours or external.** Shared: what agy needs is the method's to say (hub TCC-014); whether TCC
-prepares it, as it does for Claude Code, is ours.
+**Ours or external.** The wrong advice is ours (tcc#36). What agy needs headless is the method's to
+say (hub #150, TCC-014).
 
 **Weight.** High on that machine: no review can happen there until someone edits agy's settings by
 hand.
