@@ -850,6 +850,12 @@ wrote the package to `C:\Users\o.yukhno\.claude\skills\autosound-tuning\rew_anal
 So on that machine there is no working route to the reviewer at all: through TCC (23, tcc#36),
 from the session (17, 21), or from a terminal (this).
 
+Found after, by the session: the file announced as "Текст рецензії збережено" ends with the
+question itself — it is the prompt, not a review — and the next printed line says to record it in
+the journal as one. The wrapper passes no CLI flags through (only `AUTOSOUND_*` variables), so
+agy's per-run `--dangerously-skip-permissions` cannot be given. Both added to hub #150 (asks 4, 5).
+The one route that works there: the clipboard step, pasted into a web chat by hand.
+
 **Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52.
 
 **Ours or external.** The method's (hub #150 asks 1 and 2); TCC's advice follows whatever it settles
