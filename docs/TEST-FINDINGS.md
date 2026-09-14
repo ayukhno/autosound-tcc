@@ -836,3 +836,25 @@ transcript's scroll area, and its detail is a word-wrapped label with no height 
 **Weight.** Blocking on that machine.
 
 **Reproduces.** Whenever a command is taller than the space left in the window.
+
+### 25. From a real terminal the reviewer is refused the same way, and its files follow the current folder
+
+**What.** The Arbiter ran the reviewer by hand from an ordinary PowerShell terminal, as the session
+suggested (the session's command was `cmd` syntax and had to be rewritten for PowerShell):
+`python scripts\autosound_ai.py ask <package>` from the method's folder. agy was again run headless:
+`read_file … headless mode cannot prompt for, so it was auto-denied` → clipboard mode. The fallback
+wrote the package to `C:\Users\o.yukhno\.claude\skills\autosound-tuning\rew_analitic\combined_prompt.md`
+— inside the installed method — and the review text to a relative `process\reviews\…`, although
+`AUTOSOUND_PROJECT_DIR` was set.
+
+So on that machine there is no working route to the reviewer at all: through TCC (23, tcc#36),
+from the session (17, 21), or from a terminal (this).
+
+**Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52.
+
+**Ours or external.** The method's (hub #150 asks 1 and 2); TCC's advice follows whatever it settles
+(tcc#36).
+
+**Weight.** High on that machine: no review is possible.
+
+**Reproduces.** Every call, by every route tried.
