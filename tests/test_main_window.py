@@ -3385,6 +3385,13 @@ def test_the_right_column_scrolls_when_the_capture_list_is_long(tmp_path, monkey
     # the capture card from disk — i.e. empties the one this test just filled by hand.
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    # And no reload reaches the window at all. The empty folder was not enough: windows left alive by
+    # earlier tests still run their deferred work, and with `config` patched module-wide they write
+    # `.tcc/` into THIS folder — seen 2026-09-14: `_drop_model_placeholder` on another of 126 live
+    # windows, then `set_no_project` from this window's `_reload_project_files`, 1 in 3 full-file runs.
+    # Tearing those windows down per test is measured to crash (`qt_shutdown`), so the reload is what
+    # is kept out; the layout under test does not involve one.
+    monkeypatch.setattr(MainWindow, "_reload_project_files", lambda self: None)
 
     _app()
     window = MainWindow()

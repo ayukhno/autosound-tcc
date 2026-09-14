@@ -1699,6 +1699,28 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-053 — Windows left alive by earlier tests write into a later test's project folder
+
+**Статус**: open · found 2026-09-14 in the tcc#22 series; one test guarded, the class is not fixed
+
+A test ends with its `MainWindow` still alive — one full `test_main_window.py` leaves 126 — and that
+window keeps running its deferred work: zero-timers, watchers, workers. Tests patch `config` at
+module level (`config.project_dir` → their `tmp_path`), so a stray window resolves the NEXT test's
+folder and writes into it. Seen: `_drop_model_placeholder` on another window →
+`_on_generator_model_changed` → `project_settings.set_value(config.tcc_dir(), ...)` creates `.tcc/`
+in the running test's project; that window's project watcher reloads 400 ms later and
+`set_no_project` empties a capture card the test filled by hand
+(`test_the_right_column_scrolls_when_the_capture_list_is_long`, 1 in 3 full-file runs, now guarded by
+keeping `_reload_project_files` out).
+
+**Why not the obvious fix.** Closing or `deleteLater()`-ing windows after each test was measured
+twice and made crashes worse (`tests/conftest.py` `_end_qt_before_python_finalises`,
+`ui/tcc/qt_shutdown.py`: 2 in 5 runs; 6 in 6 on the plot files).
+
+**What could close it.** A window that reads its project folder once, at build, instead of calling
+`config` on every write; or a test factory that stops a window's timers and watchers at teardown
+without deleting anything. Either is a design change for after v0.1.39.
+
 ### F-052 — Beta channel in the updater (hub #140, ask 1)
 
 **Статус**: doing · answers 2026-09-14; the method half waits for hub #145 (TCC-011)
