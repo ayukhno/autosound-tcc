@@ -1699,6 +1699,20 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-054 — A button that writes the last N sessions of the dialog into one file
+
+**Статус**: open · the Arbiter, 2026-09-14 (test of 0.1.39); for the wave review
+
+The dialog history exists — Claude Code writes each session TCC runs to
+`~/.claude/projects/<project path with dashes>/<session id>.jsonl`, and `<project>/.tcc/sessions.json`
+maps sessions to phases — but getting it out takes a PowerShell line typed by hand, and on a machine
+with no shared folder there is no easy way at all. The Arbiter wants it for analysing where a session
+spends its words (the intake above all), to make the process shorter and more predictable.
+
+Asked: a button that takes a number of sessions and writes them into one file the person can hand
+over. Not decided: the format (raw JSONL or readable text, tool output included or not) and where the
+file goes.
+
 ### F-053 — Windows left alive by earlier tests write into a later test's project folder
 
 **Статус**: open · found 2026-09-14 in the tcc#22 series; one test guarded, the class is not fixed
