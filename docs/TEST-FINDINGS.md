@@ -759,14 +759,15 @@ session's report.
   `gemini-3.8/3.7/3.6/3.5-flash-{high,medium,low}`, `gemini-3.1-pro-{low,high}`. `3.1-pro-high` is
   on that list and still refused by location;
 - with the model passed by hand (`gemini-3.5-flash-medium`, the one chosen in TCC) and the `ask`
-  task, which reads no project files, the call passed region and permissions and was still running
-  after two minutes with no output.
+  task, the call was silent for over two minutes. Corrected by the session later the same day: it
+  was not thinking but the agent-inside-agent deadlock — the CLI had been run from the session
+  itself — so `ask` was not tested at all.
 
 **Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52; the session's report.
 
 **Ours or external.** Not decided. The `read_file` permission is between the method's reviewer
 script and `agy`; the model not reaching a direct call is how the session goes around TCC (17).
-The exact text of the `read_file` refusal is not in the report yet.
+The `read_file` refusal, reported later: agy auto-denied it with the home folder in its `trustedWorkspaces` and the project inside it. Sent to the skill as hub TCC-014.
 
 **Weight.** Medium: every route to the reviewer on that machine failed or went around TCC.
 
@@ -791,3 +792,26 @@ and "Записати" is disabled.)
 not exist.
 
 **Reproduces.** On that project.
+
+### 23. TCC trusts the project for Claude Code, not for agy
+
+**What.** A `critic` call from the project on Windows came back `mode: clipboard`, `model: null`:
+agy auto-denied `read_file`. agy's `settings.json` trusts `C:\Users\o.yukhno`, the project is inside
+it, and the call is still denied; the session proposes naming the project folder in
+`trustedWorkspaces`. TCC already prepares a project for Claude Code (`core/project_trust.py`); for
+agy, the reviewer TCC's own footer picks, nothing does.
+
+Also from the same session: running the method's script after `cd` into the method's folder left
+`combined_prompt.md` in that checkout (removed by the session). A dirty checkout is one TCC's updater
+refuses to move.
+
+**Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52, project `testTCC8`; the
+session's report.
+
+**Ours or external.** Shared: what agy needs is the method's to say (hub TCC-014); whether TCC
+prepares it, as it does for Claude Code, is ours.
+
+**Weight.** High on that machine: no review can happen there until someone edits agy's settings by
+hand.
+
+**Reproduces.** Every critic call on that project, per the session.
