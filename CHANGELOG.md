@@ -14,8 +14,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
-Paired with method `08f8da756198e1daa1992f569dfcae5c032b6cfd` — the tag on that commit is
-**`v3.0.51`**.
+Paired with method `bc6423ee505b9940c87fdb6cb476888b17245348` — the tag on that commit is
+**`v3.0.52`**.
 
 ### Changed
 
@@ -37,7 +37,7 @@ Paired with method `08f8da756198e1daa1992f569dfcae5c032b6cfd` — the tag on tha
 - **A reviewer refused for this region** ("not supported in the selected location") is answered with
   "pick a different Critic model in the footer — ↻ will not help", not with the advice for a drifted
   model name.
-- **The method is pinned at `v3.0.51`** (08f8da7). A commit-msg hook from `v3.0.50` on refuses
+- **The method is pinned at `v3.0.52`** (bc6423e). A commit-msg hook from `v3.0.50` on refuses
   commit messages in Cyrillic; it is installed per checkout with
   `python3 vendor/autosound-tuning-skill/scripts/commit-lang.py --install-hook .`.
 
