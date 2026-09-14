@@ -27,6 +27,11 @@ from autosound_tcc.core.agent_events import AgentEvent, Question, TextDelta, Too
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
 
+try:  # The saved project choice lives in the window's settings store; a light install has none.
+    from autosound_tcc.ui.tcc import app_settings  # noqa: F401 — hands that store to core.config
+except ImportError:
+    pass
+
 
 def _render(event: AgentEvent) -> None:
     """Print an event the way the dialog panel shows it: prose, and tool calls as events."""

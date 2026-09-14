@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 # config.py -> core -> autosound_tcc -> src -> <repo root>
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -146,12 +146,34 @@ def mcp_config_path(project_dir_: Optional[Path] = None) -> Path:
     return (project_dir_ or project_dir()) / ".mcp.json"
 
 
-def _settings():
-    # Imported lazily so this module stays importable (and the ledger paths stay resolvable)
-    # without a Qt application object having been constructed yet.
-    from autosound_tcc.ui.tcc.app_settings import get_settings
+class _NoSettings:
+    """What `_settings()` answers before anyone has handed in a store: nothing saved, nothing kept."""
 
-    return get_settings()
+    def value(self, _key: str, default: Any = None) -> Any:
+        return default
+
+    def setValue(self, _key: str, _value: Any) -> None:  # noqa: N802 — QSettings' own name
+        pass
+
+
+#: Where the saved project choice lives: anything with QSettings' `value` / `setValue`. It is handed
+#: in by whoever owns the store — `ui/tcc/app_settings.py`, on import — because the core does not
+#: import the window (HUB-051). It used to import `app_settings` itself, lazily, which kept this
+#: module importable without Qt and still made the core depend on the ui. With no store handed in,
+#: the env override and `DEFAULT_STATE_ROOT` still answer.
+_settings_provider: Optional[Callable[[], Any]] = None
+
+
+def use_settings(provider: Callable[[], Any]) -> None:
+    """Hand the core the settings store the saved project choice is read from and written to."""
+    global _settings_provider
+    _settings_provider = provider
+
+
+def _settings():
+    if _settings_provider is None:
+        return _NoSettings()
+    return _settings_provider()
 
 
 def _recent_raw(settings) -> list[str]:

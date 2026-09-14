@@ -24,6 +24,11 @@ def _own_config(tmp_path, monkeypatch):
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+    # The window hands the core its translations (HUB-051); these tests compare against them, so
+    # they hand them in too rather than depend on some earlier test having imported the window.
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setattr(self_check, "_translate", i18n.t)
     yield
 
 

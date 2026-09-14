@@ -22,7 +22,7 @@ from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
 from autosound_tcc.state import project_view
-from autosound_tcc.ui.tcc.mock_data import PlanPhase, PlanStep
+from autosound_tcc.state.models import PlanPhase, PlanStep
 
 # process-state's step status -> the tag chip the panel already styles.
 _STATUS_TAGS = {

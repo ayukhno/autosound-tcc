@@ -67,6 +67,53 @@ def _run(body: str) -> subprocess.CompletedProcess:
     )
 
 
+def _ui_imports(root: Path) -> list[str]:
+    """Every import of `autosound_tcc.ui` under `root`, as `file:line`.
+
+    Read from the source tree rather than from an imported module, and lazy imports inside a
+    function count: a late import is still a dependency, and every one of the four HUB-051 found
+    was written late on purpose, with a comment explaining why it was fine.
+    """
+    import ast
+
+    found = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module] + [f"{node.module}.{alias.name}" for alias in node.names]
+            elif isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            else:
+                continue
+            if any(name == "autosound_tcc.ui" or name.startswith("autosound_tcc.ui.")
+                   for name in names):
+                found.append(f"{path.relative_to(root).as_posix()}:{node.lineno}")
+    return found
+
+
+@pytest.mark.parametrize("layer", ["core", "state"])
+def test_core_and_state_do_not_import_the_ui(layer):
+    """HUB-051: the core is declared free of the window, and four imports had made that untrue —
+    `core/config.py` took QSettings from `ui`, `core/self_check.py` took `i18n`, and two `state/`
+    modules took their domain types from a file called `mock_data`. A border nobody checks moves
+    back with the first convenient import, so it is checked."""
+    found = _ui_imports(ROOT / "src" / "autosound_tcc" / layer)
+
+    assert not found, f"`{layer}` imports the ui: {found}"
+
+
+def test_the_ui_import_guard_goes_red_on_an_import_put_back(tmp_path):
+    """The guard is only worth something if it fails, so it is shown failing: on a late import
+    inside a function, on the package-level form, and not on an import that is fine."""
+    (tmp_path / "late.py").write_text(
+        "def t(key):\n    from autosound_tcc.ui.tcc import i18n\n    return i18n.t(key)\n")
+    (tmp_path / "plain.py").write_text("from autosound_tcc import ui\n")
+    (tmp_path / "clean.py").write_text("from autosound_tcc.core import config\n")
+
+    assert _ui_imports(tmp_path) == ["late.py:2", "plain.py:1"]
+
+
 @pytest.mark.parametrize("module", LIGHT_MODULES)
 def test_the_cli_half_imports_with_no_gui_installed(module):
     proc = _run(f"import {module}")

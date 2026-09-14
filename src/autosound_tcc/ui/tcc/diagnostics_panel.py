@@ -45,6 +45,10 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
 from autosound_tcc.ui.tcc.sidebar_section import clear_layout
 
+# The core's self-check takes its words from the window's table, handed in rather than imported
+# from there (HUB-051).
+self_check.use_translator(i18n.t)
+
 
 def _dot_status(entry: dict) -> str:
     """The `tl-*` class for one file row.

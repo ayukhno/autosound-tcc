@@ -315,9 +315,16 @@ def run() -> list[Check]:
     return sorted(checks, key=lambda c: order.get(c.status, 1))
 
 
-def _t(key: str) -> str:
-    """i18n, imported late. This module is core, not ui, and is imported by tests that never build
-    a QApplication — but the strings belong in one table with the rest of the app's."""
-    from autosound_tcc.ui.tcc import i18n
+#: How a message key becomes words. The strings belong in one table with the rest of the app's, and
+#: that table is the window's — so it is handed in (`use_translator`, from `ui/tcc/diagnostics_panel.py`)
+#: rather than imported: the core does not import the ui (HUB-051). Until then a key reads as itself.
+_translate: Callable[[str], str] = str
 
-    return i18n.t(key)
+
+def use_translator(translate: Callable[[str], str]) -> None:
+    global _translate
+    _translate = translate
+
+
+def _t(key: str) -> str:
+    return _translate(key)

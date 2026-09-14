@@ -214,6 +214,12 @@ def _isolated_qsettings(tmp_path, _machine_dir, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(_machine_dir / ".config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(_machine_dir / ".local" / "state"))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(_machine_dir))
+    # The core reads the saved project choice through the store it is handed (HUB-051). Handed in
+    # here for every test, rather than by whichever test happened to import the window first.
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import app_settings
+
+    monkeypatch.setattr(config, "_settings_provider", app_settings.get_settings, raising=False)
     yield
 
 

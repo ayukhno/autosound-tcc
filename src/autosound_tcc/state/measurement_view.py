@@ -20,7 +20,7 @@ from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
 from autosound_tcc.state import process_view
-from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
+from autosound_tcc.state.models import MeasGroup, MeasItem, MeasSession
 
 STATUS_DONE = "done"
 STATUS_WAIT = "wait"

@@ -15,9 +15,17 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings
 
+from autosound_tcc.core import config
+
 ORG = "autosound-tcc"
 APP = "TCC"
 
 
 def get_settings() -> QSettings:
     return QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, ORG, APP)
+
+
+# The core reads the saved project choice through whatever store it is handed, because it does not
+# import the window (HUB-051). This is that store, handed in by importing this module — which the
+# window, `app.main` and the tuning-session CLI all do before they ask for a project.
+config.use_settings(get_settings)
