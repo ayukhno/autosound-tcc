@@ -733,6 +733,8 @@ open it is red, with `· region`, and the CODEX rows are red with `· not instal
 promises. The closed picker in the footer shows the same model in plain text, and the status beside
 it reads `Critic · ? · just now`: no colour and no reason where the choice is visible all the time.
 
+**Expected (the Arbiter, 2026-09-14):** the closed Critic field itself is red.
+
 Worked as intended in the same run, reported by the session: the start-up probe now answers
 `"ready": false, "not_ready_because": ["not available in your region"]` (on 0.1.38 it said ready);
 a real critic call refused by location answers "↻ will not help … pick a different Critic model in
