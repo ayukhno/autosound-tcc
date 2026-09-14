@@ -198,7 +198,8 @@ def _machine_dir(tmp_path_factory):
 @pytest.fixture(autouse=True)
 def _isolated_qsettings(tmp_path, _machine_dir, monkeypatch):
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    # HOME stays in `tmp_path`: tests read `~/.claude` through it, and a window writes nothing there.
+    # HOME stays in `tmp_path`: tests read `~/.claude` through it, and a window writes nothing there
+    # — the one thing that did was the real `claude` CLI, kept off in `_isolated_machine_config`.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # what `~` follows on Windows
     # And every OTHER door onto the user's directories. HOME alone is enough on the machine this
@@ -265,6 +266,12 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     from autosound_tcc.core import model_choices
 
     monkeypatch.setattr(model_choices, "_CLI_CACHE", {}, raising=False)
+    # ...and when each route was last ASKED, which sits beside the answers and decides whether an
+    # empty answer counts as "installed and silent". Left over from whichever test asked last, it
+    # made `test_an_installed_cli_that_answered_nothing_gets_a_row_and_a_retry` pass after
+    # `test_model_choices.py` and fail on its own or in a parallel worker: 15 of 15 parallel runs,
+    # 2026-09-14.
+    monkeypatch.setattr(model_choices, "_LAST_ASKED", {}, raising=False)
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: False, raising=False)
     # ...and the same probe wearing another name. `critic_reaches` does NOT go through
     # `cli_available`: it asks `os.environ` and `shutil.which` itself, so the patch above never
@@ -272,6 +279,16 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     # and nobody could tell until there was a second machine (CI, 2026-09-07). Tests that need a
     # reachable critic patch it back themselves; their patch runs later and wins.
     monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: False, raising=False)
+    # ...and the same probe for Claude. A window's catalogue worker asks `claude auth status`, and
+    # on a machine with Claude Code that ran the real CLI: with HOME in `tmp_path` it wrote
+    # `.claude.json` there, and the window's project watcher reloaded over the test (2026-09-14).
+    # What it remembered leaked between tests as well, so which test paid for it was down to order.
+    # Tests about the login probe patch these themselves; their patch runs later and wins.
+    from autosound_tcc.core import claude_sdk
+
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: None, raising=False)
+    monkeypatch.setattr(claude_sdk, "_ASKED", False, raising=False)
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", None, raising=False)
     # ...and off the network. Opening the diagnostics dialog's Installation tab asks GitHub what
     # the newest TCC and method are; a suite that does that is slow when the network is there and
     # red when it is not. Tests about the update rows patch this themselves.

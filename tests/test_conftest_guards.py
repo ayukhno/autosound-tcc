@@ -74,6 +74,26 @@ def test_no_test_can_leave_a_console_keeper_running():
     assert not ran.wait(0.2), "a real thread started — the keeper stub in conftest is gone"
 
 
+def test_the_suite_cannot_run_this_machines_claude(monkeypatch):
+    """A window's catalogue worker asks `claude auth status`, and on a machine with Claude Code that
+    was the real CLI. With HOME in `tmp_path` it wrote `.claude.json` there, the window's project
+    watcher took that for a change to the project, and the reload emptied the capture card in the
+    middle of `test_the_right_column_scrolls_when_the_capture_list_is_long` — 2 of 15 parallel
+    runs, 2026-09-14. A CI runner has no `claude`, which is why CI never saw it."""
+    import subprocess
+
+    from autosound_tcc.core import claude_sdk
+
+    spawned: list = []
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(claude_sdk.subprocess, "run",
+                        lambda *a, **k: spawned.append(a) or subprocess.CompletedProcess(a, 1, "", ""))
+
+    claude_sdk.probe_signed_in(force=True)
+
+    assert not spawned, "the real `claude` was asked — the stub in conftest is gone"
+
+
 def test_what_the_app_writes_for_the_machine_is_not_in_the_tests_own_folder(tmp_path):
     """Tests use `tmp_path` as a project folder, and a window watches its project folder. With the
     app's settings and caches in that same folder, a window saw its own writes as a change to the

@@ -91,6 +91,9 @@ def test_an_installed_cli_that_answered_nothing_gets_a_row_and_a_retry(monkeypat
     """The route simply vanishes from the pickers, which reads exactly like "not installed" — and
     that is what wrote the aliases in the first place."""
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    # Asked, and answered nothing: a route never asked is "not checked", not "silent". This used to
+    # come from whichever test had asked last, so it held only after `test_model_choices.py`.
+    monkeypatch.setitem(model_choices._LAST_ASKED, "agy", 0.0)
 
     catalogue = _find(self_check.run(), "catalogue")
 
