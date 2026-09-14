@@ -725,3 +725,24 @@ GitHub is not available).
 **Weight.** Medium: a tester without GitHub cannot report from the app.
 
 **Reproduces.** Always.
+
+### 20. A reviewer refused by region: red in the open list, plain in the closed picker, "?" in the footer
+
+**What.** The chosen Critic, `AGY · Gemini 3.1 Pro (High)`, is refused by location. With the list
+open it is red, with `· region`, and the CODEX rows are red with `· not installed` — as 0.1.39
+promises. The closed picker in the footer shows the same model in plain text, and the status beside
+it reads `Critic · ? · just now`: no colour and no reason where the choice is visible all the time.
+
+Worked as intended in the same run, reported by the session: the start-up probe now answers
+`"ready": false, "not_ready_because": ["not available in your region"]` (on 0.1.38 it said ready);
+a real critic call refused by location answers "↻ will not help … pick a different Critic model in
+TCC's footer" (the 13.09 fix).
+
+**Where.** The Arbiter's Windows under Parallels, 0.1.39, method 3.0.52; two screenshots and the
+session's report.
+
+**Ours or external.** The region refusal is Google's. The closed picker and `?` are ours.
+
+**Weight.** Medium: the one place that is always on screen does not say the reviewer cannot run.
+
+**Reproduces.** On that machine, every start while that model is chosen.
