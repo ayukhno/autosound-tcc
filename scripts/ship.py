@@ -294,6 +294,13 @@ def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
 # ---------------------------------------------------------------- the writing half
 
 
+def current_version(root: Path) -> str:
+    """`pyproject.toml`'s version as it stands, or "" when there is no version line."""
+    found = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(encoding="utf-8"),
+                      re.M)
+    return found.group(1) if found else ""
+
+
 def bump(root: Path, version: str) -> str:
     """`pyproject.toml`'s version, and the old value so a failed suite can put it back."""
     path = root / "pyproject.toml"
@@ -459,6 +466,20 @@ def ship(root: Path, release: bool, test_command=None,
     if plan.mode == "candidate":
         # Nothing to bump and nothing new to test: the tree being tagged is HEAD, and the carrier
         # has already refused a HEAD that is unpublished or whose CI is not green.
+        publish(root, plan.tag, say)
+        return plan
+
+    if current_version(root) == plan.version:
+        # A wave (hub WAVES.md, #148): the version and its CHANGELOG entry were committed on the wave
+        # branch, the pull request ran the full CI on that commit, and `--ff-only` landed it here. A
+        # release commit on top would be one CI never checked — so nothing is written, and the tag
+        # goes on the commit that was checked.
+        say(f"\n  version {plan.version} is already committed — tagging this commit, writing nothing")
+        say("  running the suite…")
+        done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
+        if done.returncode != 0:
+            raise Stop(f"the suite failed ({done.returncode}) — nothing was written and nothing "
+                       "was tagged")
         publish(root, plan.tag, say)
         return plan
 

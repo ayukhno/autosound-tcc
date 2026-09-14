@@ -12,6 +12,12 @@
 # commit by construction, and a path filter would leave it with no run to read (HUB-058, hub #136).
 # A branch runs through its pull request only: a push trigger on every branch ran each PR commit
 # twice, `push` and `pull_request`, with nothing new in the second run.
+#
+# Once per wave (hub WAVES.md, #148): the full run is the pull request's. A push to `main` first
+# asks whether a green pull_request run of this workflow exists on the same commit — a wave merged
+# with `--ff-only` lands exactly that commit — and skips the heavy jobs when it does. Skipped jobs
+# leave the run `success`, so the gate still reads a green run on HEAD. A merge without a PR, or
+# with GitHub's button (a new commit), finds none and runs everything.
 name: checks
 
 on:
@@ -64,9 +70,42 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
   cancel-in-progress: true
 
+# `actions: read` to list this workflow's runs; `contents: read` for the checkouts.
+permissions:
+  contents: read
+  actions: read
+
 jobs:
+  # The question a push to `main` asks before anything heavy runs. Any other event answers "no".
+  pr-green:
+    name: already green on its pull request?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.ask.outputs.skip }}
+    steps:
+      - id: ask
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+        run: |
+          skip=false
+          green=n/a
+          if [ "$EVENT" = "push" ]; then
+            green=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&status=success&per_page=100" \
+              --jq '[.workflow_runs[] | select(.name == $ENV.WORKFLOW)] | length' || echo 0)
+            [ "${green:-0}" -gt 0 ] && skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "$EVENT on ${SHA:0:12}: green pull_request runs of this workflow: $green; heavy jobs skipped: $skip" >> "$GITHUB_STEP_SUMMARY"
+
   ruff:
     name: ruff
+    needs: pr-green
+    if: needs.pr-green.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -90,6 +129,8 @@ jobs:
   # fine. Red here is not a blinking check — it is a count of work left, and it points at a file.
   suspects:
     name: suspects (${{ matrix.os }})
+    needs: pr-green
+    if: needs.pr-green.outputs.skip != 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -122,6 +163,8 @@ jobs:
   # dispatch input says when a person is chasing the abort.
   linux-plan:
     name: linux plan
+    needs: pr-green
+    if: needs.pr-green.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -180,6 +223,8 @@ jobs:
   # How many Windows runs were asked for. One on a push; a series when somebody is chasing a crash.
   windows-plan:
     name: windows plan
+    needs: pr-green
+    if: needs.pr-green.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

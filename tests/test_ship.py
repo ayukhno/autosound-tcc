@@ -688,6 +688,40 @@ def test_ship_never_pushes_in_BULK_and_never_releases(repo):
     assert "gh release" not in body, "releases belong to the `release` role, not to a make target"
 
 
+def test_a_version_committed_on_the_wave_branch_is_tagged_without_a_new_commit(repo):
+    """Hub WAVES.md, #148: the version and its CHANGELOG entry are committed on the wave branch, the
+    pull request runs the full CI on that commit, and it lands on `main` by `--ff-only`. A release
+    commit made by ship on top would be a commit CI never checked — so ship writes nothing and tags
+    the commit it finds."""
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.25"), encoding="utf-8")
+    _relock(repo)
+    git(repo, "commit", "--quiet", "-am", "v0.1.25: version and notes, on the wave branch")
+    git(repo, "push", "--quiet", "origin", "main")
+    head = git(repo, "rev-parse", "HEAD")
+
+    plan = _run(repo)
+
+    assert plan.tag == "v0.1.25"
+    assert git(repo, "rev-parse", "HEAD") == head, "no commit on top of what CI checked"
+    assert git(repo, "rev-parse", "v0.1.25^{commit}") == head
+    assert "refs/tags/v0.1.25" in git(repo, "ls-remote", "--tags", "--refs", "origin")
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_red_suite_on_a_committed_version_leaves_no_tag(repo):
+    """Nothing was written, so nothing is rolled back — but no tag either."""
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.25"), encoding="utf-8")
+    _relock(repo)
+    git(repo, "commit", "--quiet", "-am", "v0.1.25 on the wave branch")
+    git(repo, "push", "--quiet", "origin", "main")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, test_exit=1)
+
+    assert "suite failed" in str(stop.value)
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+
+
 def test_the_lock_file_moves_with_the_version_and_lands_in_the_release_commit(repo):
     """Found by ship's own clean-tree gate, the first time it ran after a release.
 
@@ -773,6 +807,25 @@ def test_each_commit_runs_ci_once_main_by_push_a_branch_by_its_pull_request():
     assert push, f"push is not limited to named branches:\n{triggers}"
     assert [name.strip() for name in push.group(1).split(",")] == ["main"]
     assert re.search(r"^  pull_request:", triggers, re.M), "a branch would then run no CI at all"
+
+
+def test_a_push_to_main_skips_what_its_pull_request_already_ran():
+    """Hub WAVES.md, #148: the full CI runs once per wave, on the pull request. The push that lands
+    it on `main` asks first whether a green pull_request run of this workflow exists on the same
+    commit, and the heavy jobs run only when it does not — a merge without a PR, or with GitHub's
+    button, is still tested. Skipped jobs leave the run `success`, which is what the gate reads."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    head, jobs = text.split("\njobs:\n", 1)
+    blocks = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
+
+    assert re.search(r"^permissions:\n(?:  .*\n)*  actions: read", head + "\n", re.M), \
+        "listing runs needs actions: read"
+    ask = blocks.get("pr-green", "")
+    assert "event=pull_request" in ask and "head_sha" in ask, f"no question asked:\n{ask}"
+    for job in ("ruff", "suspects", "linux-plan", "windows-plan"):
+        block = blocks.get(job, "")
+        assert "needs: pr-green" in block, f"{job} does not wait for the question"
+        assert "needs.pr-green.outputs.skip != 'true'" in block, f"{job} runs regardless"
 
 
 # --- the pin the repo RECORDS vs the method actually checked out ---------------------------
