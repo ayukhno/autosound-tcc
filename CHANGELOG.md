@@ -34,9 +34,15 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A reviewer refused for this region** ("not supported in the selected location") is answered with
   "pick a different Critic model in the footer — ↻ will not help", not with the advice for a drifted
   model name.
-- **The method is pinned at `v3.0.50`** (7c3a751). A commit-msg hook from that tag refuses commit
-  messages in Cyrillic; it is installed per checkout with
+- **The method is pinned at `v3.0.51`** (08f8da7). A commit-msg hook from `v3.0.50` on refuses
+  commit messages in Cyrillic; it is installed per checkout with
   `python3 vendor/autosound-tuning-skill/scripts/commit-lang.py --install-hook .`.
+
+### Fixed
+
+- **A project whose `.gitignore` or `.mcp.json` cannot be written no longer stops TCC's MCP
+  server.** The refusal was meant to go to the log, but through a function that does not exist, so
+  it came out as an error instead.
 
 ## [v0.1.38] — 2026-09-13 · the Windows crash that killed CI runs was ours: how a widget leaves a panel
 

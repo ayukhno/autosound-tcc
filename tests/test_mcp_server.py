@@ -623,6 +623,86 @@ def test_the_ignore_lines_are_not_added_twice(tmp_path, monkeypatch):
     assert said.count(".tcc/") == 1
 
 
+@pytest.fixture
+def app_log_warnings():
+    """What TCC's own logger was warned about. The handler goes on that logger itself: after
+    `app_log.setup()` it does not propagate, so pytest's caplog on the root would hear nothing."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    records: list[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    log = app_log.logger()
+    handler = _Keep(level=logging.WARNING)
+    level = log.level
+    log.addHandler(handler)
+    if level == logging.NOTSET or level > logging.WARNING:
+        log.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
+
+
+def test_a_gitignore_that_cannot_be_written_is_logged_not_raised(
+    tmp_path, monkeypatch, app_log_warnings
+):
+    """A project whose `.gitignore` cannot be written still deserves a running server. The refusal
+    went to `app_log.warn`, which does not exist, so the OSError came out as an AttributeError and
+    took `write_mcp_config` down with it."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / ".gitignore").mkdir()  # a folder by that name: reading and writing both refuse
+
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    assert path.exists()
+    assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
+
+
+def test_an_advertisement_that_cannot_be_withdrawn_is_logged_not_raised(
+    tmp_path, monkeypatch, app_log_warnings
+):
+    """Withdrawing runs on the way out, where an exception has nowhere to go."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    def refuse(path, body):
+        raise PermissionError(13, "refused", str(path))
+
+    monkeypatch.setattr(mcp_server, "_write_atomically", refuse)
+
+    mcp_server.forget_mcp_config(tmp_path)
+
+    assert any(".mcp.json" in r.getMessage() for r in app_log_warnings)
+
+
+def test_an_advertisement_whose_mode_cannot_be_set_is_logged_not_raised(
+    tmp_path, monkeypatch, app_log_warnings
+):
+    """Owner-only is asked for, and a filesystem that refuses the mode still gets the file."""
+    import os
+
+    if os.name == "nt":
+        pytest.skip("POSIX permissions; Windows keeps its ACLs")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    def refuse(path, mode):
+        raise PermissionError(1, "not permitted", str(path))
+
+    monkeypatch.setattr(mcp_server.os, "chmod", refuse)
+
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+    assert any(".mcp.json" in r.getMessage() for r in app_log_warnings)
+
+
 def test_free_port_skips_a_port_already_in_use(tmp_path):
     import socket
 

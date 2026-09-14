@@ -1271,7 +1271,7 @@ def _teach_git_to_ignore(project_dir: Path) -> None:
     try:
         path.write_text(existing + block, encoding="utf-8")
     except OSError as exc:
-        app_log.warn(f"could not add {', '.join(missing)} to {path}: {exc}")
+        app_log.logger().warning("could not add %s to %s: %s", ", ".join(missing), path, exc)
 
 
 def forget_mcp_config(project_dir: Path) -> None:
@@ -1297,7 +1297,7 @@ def forget_mcp_config(project_dir: Path) -> None:
     try:
         _write_atomically(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
-        app_log.warn(f"could not withdraw {SERVER_NAME} from {path}: {exc}")
+        app_log.logger().warning("could not withdraw %s from %s: %s", SERVER_NAME, path, exc)
 
 
 def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
@@ -1415,7 +1415,7 @@ def _write_atomically(path: Path, body: str) -> None:
             try:
                 os.chmod(tmp, 0o600)
             except OSError as exc:
-                app_log.warn(f"could not restrict {path}: {exc}")
+                app_log.logger().warning("could not restrict %s: %s", path, exc)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
