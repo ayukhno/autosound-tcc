@@ -1699,6 +1699,22 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-055 — A separate session: from the session analysis to an intake form
+
+**Статус**: deferred · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
+
+Where it stands: `docs/SESSION-ANALYSIS-2026-09-14.md` — two runs measured (testTCC8 on the local
+Windows, testTCC-9 on the remote one), the fields the intake needed, and four proposals (one intake
+form checked against the method's contract; short answers by default; product problems out of the
+tuning dialogue; the most-run method scripts as TCC tools).
+
+The raw transcripts are NOT in git: `~/Downloads/тест/sessions/` (local run) and
+`hub/scratch/tcc/analysis/remote/` (remote run) on the author's Mac.
+
+The separate session starts from the doc, not from the transcripts; the decision it owes the Arbiter
+is which of the four proposals go into a wave, and what the method is asked for (a machine-readable
+intake field list and a writer).
+
 ### F-054 — A button that writes the last N sessions of the dialog into one file
 
 **Статус**: open · the Arbiter, 2026-09-14 (test of 0.1.39); for the wave review

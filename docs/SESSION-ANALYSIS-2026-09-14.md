@@ -77,6 +77,31 @@ on different inputs and whether their levels match; the answer language.
 - **Long diagnostic answers.** The five longest (431–563 words) are product debugging or inheritance
   tables.
 
+## 4a. A second run: a fresh project on the remote Windows, 14.09
+
+Transcript `2c12b267` (project `testTCC-9`, Helix DSP Ultra S), 14:09 → 16:04, one sitting.
+
+| | Phase −1 (intake) | Phase 0 |
+|---|---|---|
+| Time | 14:09 → 15:23, 1 h 14 min | 15:23 → 16:04 |
+| Arbiter's turns | 18 | 7 |
+| Model's words | 7 370 in 45 blocks (164 per block; the longest 808) | 2 729 |
+| Question marks in the model's text | 74 | 8 |
+| Bash calls | 51 | 20 |
+
+- **The Arbiter already answers like a form.** One pasted block with car, DSP, channel layout; then
+  numbered short answers: "1. yes, 2. two, 3. I have measurements done", "4. кришку багажника. 5. yes,
+  VFR - w-R, m-R, tw-R. 6. center and rear. 7. =4om. 8. 9, 4, 7". The model asks in long numbered
+  batches; the Arbiter replies in a line.
+- **A form would have asked two things at once that the dialogue asked apart:** the reference seat
+  was recorded as "driver only" and revised five minutes later to "driver + front passenger", and the
+  earlier decision had to be marked void.
+- **Friction the Arbiter had to push through:** "don't be in hurry — we are testing TCC and skill", and
+  in Phase 0 "why you can not take ##8-17? just take it".
+- The intake took 13 recorded decisions (`record_decision`) — language, reviewer, purpose, seat, target,
+  where Fs comes from, glossary approval, one or two presets, protective filters, muted channels, slopes
+  — each of them a field or a choice on a form.
+
 ## 5. Proposal for the wave review — not started
 
 1. **One intake form in TCC, before any session.** The fields in §3: the DSP checklist as enumerated
