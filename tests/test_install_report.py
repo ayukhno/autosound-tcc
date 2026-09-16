@@ -339,3 +339,44 @@ def test_a_project_linked_to_the_shipped_skill_says_nothing_alarming(tmp_path):
     rows = {item.label: item for item in install_report._skill(tmp_path).items}
 
     assert rows["project link"].value == "this one"
+
+
+class _Dist:
+    """A stand-in for `importlib.metadata.distribution(...)` holding one `direct_url.json`."""
+
+    def __init__(self, text):
+        self._text = text
+
+    def read_text(self, name):
+        return self._text if name == "direct_url.json" else None
+
+
+def test_the_ref_a_package_was_installed_at_is_read_from_direct_url(monkeypatch):
+    """uv writes the ref beside the commit (uv 0.12.3, measured 2026-09-16, `@v0.1.39`)."""
+    raw = ('{"url":"https://github.com/ayukhno/autosound-tcc","vcs_info":{"vcs":"git",'
+           '"commit_id":"6ad4f82bb4ad694fb333c17cf63a8c0981000034","requested_revision":"v0.1.39"}}')
+    monkeypatch.setattr(install_report, "distribution", lambda name: _Dist(raw))
+
+    assert install_report.requested_revision() == "v0.1.39"
+    assert install_report.install_source() == (
+        "https://github.com/ayukhno/autosound-tcc", "6ad4f82bb4ad694fb333c17cf63a8c0981000034")
+
+    monkeypatch.setattr(install_report, "distribution", lambda name: _Dist(None))
+    assert install_report.requested_revision() == ""
+    assert install_report.install_source() == ("", "")
+
+
+def test_a_candidate_build_says_which_candidate_it_is():
+    assert install_report.shown_version("0.1.38", "beta-v0.2.0-rc1") == "0.1.38 (beta-v0.2.0-rc1)"
+    assert install_report.shown_version("0.1.39", "v0.1.39") == "0.1.39"
+    assert install_report.shown_version("0.1.39", "") == "0.1.39"
+
+
+def test_the_installation_block_names_the_candidate(monkeypatch):
+    monkeypatch.setattr(install_report, "install_source", lambda: ("git+…", "a" * 40))
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "beta-v0.2.0-rc1")
+    monkeypatch.setattr(install_report, "_package_version",
+                        lambda name: "0.1.38" if name == "autosound-tcc" else "")
+
+    assert install_report._app().items[0].value == "0.1.38 (beta-v0.2.0-rc1)"
+

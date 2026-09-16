@@ -439,3 +439,94 @@ def test_stable_still_asks_for_releases_only(monkeypatch):
 
     assert updates.newest_tcc_tag() == "v0.1.39"
     assert calls[-1] == ("ls-remote", "--tags", updates.TCC_REPO, "v*", "v*^{}")
+
+
+_RC1, _RC2, _REL = "1" * 40, "2" * 40, "3" * 40
+
+
+def _tcc_installed(monkeypatch, version: str, commit: str, revision: str = ""):
+    monkeypatch.setattr(install_report, "app_version", lambda: version)
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", commit))
+    monkeypatch.setattr(install_report, "requested_revision", lambda: revision)
+
+
+def _tcc_tags(monkeypatch, *lines: str):
+    _git_answers(monkeypatch, {"ls-remote": (True, "\n".join(lines))})
+
+
+def test_on_beta_the_installed_candidate_is_current(monkeypatch):
+    """A candidate writes nothing, so rc1 can say 0.1.38. By version it would be offered to itself
+    forever; by commit it is what it is."""
+    _tcc_installed(monkeypatch, "0.1.38", _RC1, "beta-v0.2.0-rc1")
+    _tcc_tags(monkeypatch, f"{_HERE}\trefs/tags/v0.1.38", f"{_RC1}\trefs/tags/beta-v0.2.0-rc1")
+
+    status = updates.check_tcc(updates.BETA)
+
+    assert status.newer is False
+    assert status.installed == "0.1.38 (beta-v0.2.0-rc1)"
+    assert status.latest == "0.2.0-rc1"
+
+
+def test_on_beta_the_next_candidate_and_then_the_release_are_newer(monkeypatch):
+    _tcc_installed(monkeypatch, "0.1.38", _RC1, "beta-v0.2.0-rc1")
+    _tcc_tags(monkeypatch, f"{_RC1}\trefs/tags/beta-v0.2.0-rc1",
+              f"{_RC2}\trefs/tags/beta-v0.2.0-rc2")
+    status = updates.check_tcc(updates.BETA)
+    assert status.newer is True and status.latest == "0.2.0-rc2"
+
+    _tcc_tags(monkeypatch, f"{_RC2}\trefs/tags/beta-v0.2.0-rc2", f"{_REL}\trefs/tags/v0.2.0")
+    status = updates.check_tcc(updates.BETA)
+    assert status.newer is True and status.latest == "0.2.0", "the release is cut on its candidates"
+
+
+def test_on_beta_the_release_once_installed_is_current(monkeypatch):
+    _tcc_installed(monkeypatch, "0.2.0", _REL, "v0.2.0")
+    _tcc_tags(monkeypatch, f"{_RC2}\trefs/tags/beta-v0.2.0-rc2", f"{_REL}\trefs/tags/v0.2.0")
+
+    status = updates.check_tcc(updates.BETA)
+
+    assert status.newer is False
+    assert status.installed == "0.2.0", "a release shows its version alone"
+
+
+def test_on_beta_a_build_ahead_of_the_newest_tag_is_not_sent_back(monkeypatch):
+    _tcc_installed(monkeypatch, "0.2.1", "e" * 40)
+    _tcc_tags(monkeypatch, f"{_REL}\trefs/tags/v0.2.0")
+
+    status = updates.check_tcc(updates.BETA)
+
+    assert status.newer is False and status.latest == "0.2.1"
+
+
+def test_on_beta_a_candidate_already_carrying_its_version_is_offered_the_next(monkeypatch):
+    """Waves commit the version before the tag (hub #148), so rc1 can already say 0.2.0 — equal to
+    the newest tag's X.Y.Z is not ahead of it."""
+    _tcc_installed(monkeypatch, "0.2.0", _RC1, "beta-v0.2.0-rc1")
+    _tcc_tags(monkeypatch, f"{_RC1}\trefs/tags/beta-v0.2.0-rc1",
+              f"{_RC2}\trefs/tags/beta-v0.2.0-rc2")
+
+    assert updates.check_tcc(updates.BETA).newer is True
+
+
+def test_on_beta_an_unreachable_github_is_not_up_to_date(monkeypatch):
+    _tcc_installed(monkeypatch, "0.1.38", _RC1)
+    _git_answers(monkeypatch, {"ls-remote": (False, "fatal: unable to access")})
+
+    status = updates.check_tcc(updates.BETA)
+
+    assert (status.newer, status.latest, status.reason) == (False, "", "no_network")
+
+
+#: `conftest.py` stands in for `check_all` in every test, to keep the suite off the network; this
+#: is the real one, captured at import, before any fixture runs.
+_REAL_CHECK_ALL = updates.check_all
+
+
+def test_check_all_hands_the_channel_to_tcc_and_not_to_the_method(monkeypatch):
+    seen = []
+    monkeypatch.setattr(updates, "check_tcc", lambda channel="stable": seen.append(channel) or "t")
+    monkeypatch.setattr(updates, "check_skill", lambda: "s")
+
+    assert _REAL_CHECK_ALL(updates.BETA) == ("t", "s")
+    assert seen == ["beta"]
+

@@ -127,6 +127,16 @@ def _package_version(name: str) -> str:
         return ""
 
 
+def _direct_url() -> dict:
+    """The installed package's `direct_url.json`, `{}` when there is none or it cannot be read."""
+    try:
+        raw = distribution("autosound-tcc").read_text("direct_url.json")
+        data = json.loads(raw) if raw else {}
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001 — a checkout has no direct_url.json, which is itself an answer
+        return {}
+
+
 def install_source() -> tuple[str, str]:
     """`(url, commit)` for a package installed from git, both "" otherwise.
 
@@ -137,14 +147,26 @@ def install_source() -> tuple[str, str]:
     Public for the same reason: `core/updates.py` compares this commit against the head of the
     repository, because the version number cannot tell an old build from a new one.
     """
-    try:
-        raw = distribution("autosound-tcc").read_text("direct_url.json")
-        if not raw:
-            return "", ""
-        data = json.loads(raw)
-        return str(data.get("url") or ""), str((data.get("vcs_info") or {}).get("commit_id") or "")
-    except Exception:  # noqa: BLE001 — a checkout has no direct_url.json, which is itself an answer
-        return "", ""
+    data = _direct_url()
+    return str(data.get("url") or ""), str((data.get("vcs_info") or {}).get("commit_id") or "")
+
+
+def requested_revision() -> str:
+    """The ref the package was installed AT — `v0.1.39`, `beta-v0.2.0-rc1` — or "".
+
+    uv writes it beside the commit when the URL names one (uv 0.12.3, measured 2026-09-16). A
+    candidate is a tag on a commit whose metadata may still carry the release before it (hub
+    RELEASE-CHANNEL.md §11.3), so this is where a candidate build says which candidate it is, and
+    what `updates.channel_for` reads to start an app installed from one on beta.
+    """
+    return str((_direct_url().get("vcs_info") or {}).get("requested_revision") or "")
+
+
+def shown_version(version: str, revision: str) -> str:
+    """`0.1.38 (beta-v0.2.0-rc1)` for a candidate build, the version alone for anything else."""
+    if version and revision.startswith("beta-v"):
+        return f"{version} ({revision})"
+    return version
 
 
 def app_version() -> str:
@@ -307,7 +329,8 @@ def _tools() -> Section:
 
 def _app() -> Section:
     url, commit = install_source()
-    items = [Item("version", _package_version("autosound-tcc") or "unknown")]
+    items = [Item("version", shown_version(
+        _package_version("autosound-tcc") or "unknown", requested_revision()))]
     if commit:
         items.append(Item("commit", commit[:12], url))
     elif url:

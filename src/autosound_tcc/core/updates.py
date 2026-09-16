@@ -340,7 +340,7 @@ def check_skill() -> Status:
 
 
 
-def check_tcc() -> Status:
+def check_tcc(channel: str = STABLE) -> Status:
     """TCC: the version installed against the newest RELEASE, the way the method half works.
 
     Compared by version, because since F-024 both halves follow tags. It used to be compared by
@@ -355,11 +355,15 @@ def check_tcc() -> Status:
 
     A build NEWER than the newest tag is not an update — that is a developer running ahead of the
     releases, and telling them to "update" backwards would be wrong. It reads as up to date.
+
+    On the beta channel the comparison is by commit instead (`_check_tcc_on_beta`).
     """
     version = install_report.app_version()
     _url, commit = install_report.install_source()
     if not commit:
         return Status("tcc", version, "", False, "source_checkout", updatable=False)
+    if channel == BETA:
+        return _check_tcc_on_beta(version, commit)
     tag = newest_tcc_tag()
     if not tag:
         return Status("tcc", version, "", False, "no_network")
@@ -372,9 +376,36 @@ def check_tcc() -> Status:
     return Status("tcc", version, latest, True)
 
 
-def check_all() -> tuple[Status, Status]:
-    """Both halves. Two network calls; run it off the GUI thread."""
-    return check_tcc(), check_skill()
+def _check_tcc_on_beta(version: str, commit: str) -> Status:
+    """On beta TCC is compared by COMMIT, the way the method always is.
+
+    A candidate writes nothing — `make ship CANDIDATE=` tags HEAD — so an app built from
+    `beta-v0.2.0-rc1` may carry the version of the release before it, and a version compare would
+    offer rc1 to an installation that already is rc1, forever. So: the commit of the newest tag on
+    the channel is current; a version above that tag's X.Y.Z is a build ahead of the releases,
+    current too (the rule `check_tcc` keeps on stable); anything else is newer — rc2 over rc1, and
+    the release cut on top of its candidates. Equal X.Y.Z is NOT ahead: under waves the version is
+    committed before the tag (hub #148), so rc1 can already say 0.2.0.
+    """
+    tag, sha = _newest_tag_in(TCC_REPO, TCC_TAG_GLOB, TCC_BETA_GLOB, key=channel_key)
+    if not tag:
+        return Status("tcc", version, "", False, "no_network")
+    installed = install_report.shown_version(version, install_report.requested_revision())
+    latest = tag.removeprefix("beta-").removeprefix("v")
+    if sha == commit:
+        return Status("tcc", installed, latest, False, installed_sha=commit, latest_sha=sha)
+    if version and _version_key(version)[:3] > channel_key(tag)[:3]:
+        return Status("tcc", installed, version, False, installed_sha=commit, latest_sha=sha)
+    return Status("tcc", installed, latest, True, installed_sha=commit, latest_sha=sha)
+
+
+def check_all(channel: str = STABLE) -> tuple[Status, Status]:
+    """Both halves. Two network calls; run it off the GUI thread.
+
+    The channel reaches TCC's half only: the method follows released tags on both channels until
+    its beta copy is wired (hub #145 answer, `installation.md` "Two channels on one machine").
+    """
+    return check_tcc(channel), check_skill()
 
 
 def apply_skill(tag: str = "") -> tuple[bool, str, str]:
