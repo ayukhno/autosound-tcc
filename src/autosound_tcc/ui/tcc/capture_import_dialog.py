@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import capture_import
 from autosound_tcc.ui.tcc import i18n, sizing
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
+from autosound_tcc.ui.tcc.protective_dialog import ProtectiveLegsDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps
 
@@ -49,7 +50,23 @@ _UUID = Qt.ItemDataRole.UserRole
 #: The table's columns, by name rather than by number: the REW number was added between the tick
 #: and the title (user, 2026-09-06), and every `item(row, 3)` in here would otherwise have had to
 #: be re-counted by hand.
-_COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_HP, _COL_LP = range(7)
+_COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_PROT = range(6)
+
+
+def legs_summary(legs) -> str:
+    """`HP LR24 80 · LP —` for a row, `—` when nothing was in its chain."""
+    if not legs:
+        return "—"
+    parts = []
+    for kind, key in (("hp", "capImportHp"), ("lp", "capImportLp")):
+        leg = legs.get(kind)
+        if not leg:
+            parts.append(f"{i18n.t(key)} —")
+            continue
+        value = leg.get("f")
+        freq = f"{value:g}" if isinstance(value, (int, float)) else str(value or "?")
+        parts.append(f"{i18n.t(key)} {leg.get('type') or ''}{leg.get('slope') or ''} {freq}")
+    return " · ".join(parts)
 
 
 class CaptureImportDialog(QDialog):
@@ -87,9 +104,9 @@ class CaptureImportDialog(QDialog):
         self._name_sets = dict(name_sets or {})
         #: Proposed names, by uuid. Empty means "leave the title alone".
         self._names: dict[str, str] = {}
-        #: `{uuid: {"hp": "80", "lp": ""}}` — what was typed into the two protective cells, as
-        #: typed. Empty means "read this curve as measured", which is not a claim that the chain
-        #: was empty; see `core/protective.py` for why those are different things.
+        #: `{uuid: {"hp": {f, type, slope}, "lp": {…}}}` — what was in each row's chain, as the
+        #: Protection form's fields gave it. No entry means "read this curve as measured", which is
+        #: not a claim that the chain was empty; see `core/protective.py`.
         self._legs: dict[str, dict] = {}
         #: What the last "Give names" or Apply had to say about the names themselves — a count that
         #: did not line up, or a clash. Cleared by the next successful fill.
@@ -138,12 +155,11 @@ class CaptureImportDialog(QDialog):
         head.setWordWrap(True)
         layout.addWidget(head)
 
-        self._table = QTableWidget(0, 7)
+        self._table = QTableWidget(0, 6)
         self._table.setProperty("class", "ptable")
         self._table.setHorizontalHeaderLabels(
             [i18n.t("capImportColTake"), i18n.t("capImportColNum"), i18n.t("capImportColTitle"),
-             i18n.t("capImportColWhen"), i18n.t("capImportColName"), i18n.t("capImportColHp"),
-             i18n.t("capImportColLp")])
+             i18n.t("capImportColWhen"), i18n.t("capImportColName"), i18n.t("capImportColProt")])
         # Only the name column is typed into; `_render` gives exactly that column the flag.
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
@@ -162,10 +178,11 @@ class CaptureImportDialog(QDialog):
         # wrong when it does.
         header.setSectionResizeMode(_COL_WHEN, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(_COL_HP, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_COL_LP, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_PROT, QHeaderView.ResizeMode.ResizeToContents)
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
+        self._table.cellClicked.connect(self._on_cell_clicked)
+        self._table.cellActivated.connect(self._on_cell_clicked)
         layout.addWidget(self._table, stretch=1)
 
         # What this list is and is not. Measured 2026-09-02: a filter switched on in REW's own
@@ -229,6 +246,31 @@ class CaptureImportDialog(QDialog):
     def ticked_rows(self) -> list[capture_import.Candidate]:
         return [row for row in self._all if row.uuid in self._ticked and row.identified]
 
+    def uuid_at(self, row: int) -> str:
+        """The uuid of the measurement on table row `row`, or ""."""
+        take = self._table.item(row, _COL_TAKE)
+        return str(take.data(_UUID) or "") if take is not None else ""
+
+    def set_legs(self, uuid: str, legs) -> None:
+        """What was in this row's chain: a `{hp, lp}` dict, or None for "read it as measured"."""
+        if legs:
+            self._legs[uuid] = dict(legs)
+            self._ticked.add(uuid)  # a record nobody takes in is none
+        else:
+            self._legs.pop(uuid, None)
+        self._render()
+
+    def _on_cell_clicked(self, row: int, column: int) -> None:
+        """The protective cell opens the Protection form's own fields for this one row (F-056)."""
+        if column != _COL_PROT:
+            return
+        uuid = self.uuid_at(row)
+        if not any(candidate.uuid == uuid and candidate.identified for candidate in self._all):
+            return
+        form = ProtectiveLegsDialog(self._legs.get(uuid), parent=self)
+        if form.exec() == QDialog.DialogCode.Accepted:
+            self.set_legs(uuid, form.legs())
+
     def _render(self) -> None:
         rows = self.visible_rows()
         self._table.blockSignals(True)  # filling cells emits itemChanged, which would edit `_ticked`
@@ -279,18 +321,13 @@ class CaptureImportDialog(QDialog):
                 name.setToolTip(i18n.t("capImportNoUuid"))
             self._table.setItem(index, _COL_NAME, name)
 
-            # The protective chain, in the row and nothing but the row (user, 2026-09-02: "все в
-            # строчці без форм"). A frequency here IS the statement, and the statement is an LR24
-            # — whoever ran something else opens `Protection`, where both dropdowns live.
-            for column, key in ((_COL_HP, "hp"), (_COL_LP, "lp")):
-                cell = QTableWidgetItem(self._legs.get(row.uuid, {}).get(key, ""))
-                if row.identified:
-                    cell.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsEditable
-                                  | Qt.ItemFlag.ItemIsSelectable)
-                else:
-                    cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                cell.setToolTip(i18n.t("capImportProtTip"))
-                self._table.setItem(index, column, cell)
+            # What was in the chain, as one line; a click opens the Protection form's own fields
+            # for this row (F-056, the Arbiter 2026-09-16 — it used to be two typed frequencies).
+            prot = QTableWidgetItem(legs_summary(self._legs.get(row.uuid)))
+            prot.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            prot.setToolTip(i18n.t("capImportProtTip") if row.identified
+                            else i18n.t("capImportNoUuid"))
+            self._table.setItem(index, _COL_PROT, prot)
         self._table.blockSignals(False)
         self._render_note(len(rows))
         self._scroll_to_pick(rows)
@@ -354,17 +391,6 @@ class CaptureImportDialog(QDialog):
                 self._ticked.add(uuid)
             else:
                 self._names.pop(uuid, None)
-        elif item.column() in (_COL_HP, _COL_LP):
-            key = "hp" if item.column() == _COL_HP else "lp"
-            typed = item.text().strip()
-            legs = self._legs.setdefault(uuid, {})
-            if typed:
-                legs[key] = typed
-                self._ticked.add(uuid)  # same reason as a name: a record nobody takes in is none
-            else:
-                legs.pop(key, None)
-            if not legs:
-                self._legs.pop(uuid, None)
 
     def _on_give_names(self) -> None:
         """Fill names downwards from the selected row, out of a set the tuner picks.
@@ -437,9 +463,8 @@ class CaptureImportDialog(QDialog):
         out: dict[str, dict] = {}
         self.protective_conflicts = []
         for row in self.ticked_rows():
-            legs = capture_import.legs_from(*(self._legs.get(row.uuid, {}).get(k, "")
-                                              for k in ("hp", "lp")))
-            if legs is None:
+            legs = self._legs.get(row.uuid)
+            if not legs:
                 continue
             channel = capture_import.channel_of(
                 row, self._names.get(row.uuid, ""), self._project_dir)

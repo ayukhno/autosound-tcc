@@ -36,6 +36,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **The series `_N` is no longer taken from the ledger version.** It comes from the open round, then
   the plan, then the highest series among the rounds; with none of them the capture card says the
   series is not known yet (hub #153).
+- **The import row's protective filters are entered with the Protection form's fields** — type,
+  slope, frequency and the LR24 button, for the high-pass and the low-pass — from one cell that says
+  what is in the chain (F-056). It used to be two typed frequencies with LR24 implied.
 
 ### Fixed
 

@@ -465,13 +465,6 @@ def duplicate_targets(pairs: Iterable[tuple[str, str]], measurements: dict) -> l
     return sorted(set(clashes))
 
 
-#: The protective filter a frequency typed into the import table means. The user's own decision
-#: (2026-09-02): the dropdowns are worth having for whoever needs them, but they live in the
-#: `Protection` dialog — in the table a frequency IS the statement, and the statement is an LR24,
-#: because nearly every protective filter in a measuring chain is one.
-QUICK_LEG = {"type": "LR", "slope": 24}
-
-
 def channel_of(row: "Candidate", proposed: str = "", project_dir: Optional[Path] = None) -> str:
     """Which channel this row is about: from the name it is being GIVEN, or the one it has.
 
@@ -505,29 +498,6 @@ def channel_from_title(title: str, project_dir: Optional[Path] = None) -> str:
     except Exception:  # noqa: BLE001 — no skill, no glossary: read the name as written
         pass
     return title.split("_", 1)[0].split(" ", 1)[0].strip()
-
-
-def legs_from(hp_hz: str, lp_hz: str):
-    """The two frequencies as the ledger's crossover vocabulary, or None for "take nothing out".
-
-    None rather than `"OFF"`, and that is the corrected model rather than an omission: an empty
-    cell says "read this curve as measured", which is not the same as claiming the chain was
-    empty. There is nearly always something in it — the DSP's own working crossovers — and they
-    belong there (`core/protective.py`).
-    """
-    legs = {}
-    for kind, raw in (("hp", hp_hz), ("lp", lp_hz)):
-        text = str(raw or "").strip().replace(",", ".")
-        if not text:
-            continue
-        try:
-            value = float(text)
-        except ValueError:
-            # Left as typed: the skill's writer refuses it in its own words, and a window that
-            # quietly repairs what a gate would refuse teaches people to trust the window.
-            value = text
-        legs[kind] = {"f": value, **QUICK_LEG}
-    return legs or None
 
 
 def resolve_ordinals(measurements: dict, uuids: Iterable[str]) -> dict[str, str]:
