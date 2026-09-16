@@ -355,6 +355,7 @@ def test_our_installer_constants_agree_with_the_installers_own(monkeypatch):
 
     assert theirs.get("SKILL_TAG_GLOB") == updates.SKILL_TAG_GLOB
     assert theirs.get("TCC_TAG_GLOB") == updates.TCC_TAG_GLOB
+    assert theirs.get("TCC_BETA_GLOB") == updates.TCC_BETA_GLOB
     assert _same_remote(theirs.get("SKILL_REPO", ""), updates.SKILL_REPO)
     assert _same_remote(theirs.get("TCC_REPO", ""), updates.TCC_REPO)
 
@@ -397,3 +398,44 @@ def test_the_update_check_can_never_stop_to_ask_for_a_password(monkeypatch):
     assert seen["env"].get("GIT_TERMINAL_PROMPT") == "0"
     assert seen["env"].get("GCM_INTERACTIVE") == "never"
     assert seen["env"].get("GIT_ASKPASS") == ""
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("v3.1.0", (3, 1, 0, 1, 0)),
+    ("beta-v3.1.0-rc2", (3, 1, 0, 0, 2)),
+    ("v3.1.1-foo", None),
+    ("beta-v3.1.0", None),
+    ("3.1.0", None),
+])
+def test_channel_keys(name, expected):
+    assert updates.channel_key(name) == expected
+
+
+def test_the_beta_order_is_the_installers_own():
+    """Hub RELEASE-CHANNEL.md §11.2 — the cases the method's `newest_on_channel` is held to."""
+    key = updates.channel_key
+    assert key("v3.1.0") > key("beta-v3.1.0-rc2"), "a release above its own candidates"
+    assert key("beta-v3.1.0-rc10") > key("beta-v3.1.0-rc2"), "rc10 above rc2"
+    assert key("beta-v3.1.0-rc1") > key("v3.0.49"), "a candidate for 3.1.0 above 3.0.49"
+
+
+def test_beta_lists_releases_and_candidates_each_with_its_own_peel(monkeypatch):
+    calls = _git_answers(monkeypatch, {"ls-remote": (True, "\n".join([
+        f"{_HERE}\trefs/tags/v0.1.39",
+        f"{_THERE}\trefs/tags/beta-v0.1.40-rc2",
+        f"{'c' * 40}\trefs/tags/beta-v0.1.40-rc10",
+        f"{'d' * 40}\trefs/tags/beta-v0.1.40-rc10^{{}}",
+    ]))})
+
+    assert updates._newest_tag_in(
+        updates.TCC_REPO, updates.TCC_TAG_GLOB, updates.TCC_BETA_GLOB, key=updates.channel_key,
+    ) == ("beta-v0.1.40-rc10", "d" * 40), "the newest by the key, and the peeled commit wins"
+    assert calls[-1][-4:] == ("v*", "v*^{}", "beta-v*", "beta-v*^{}")
+    assert updates.newest_tcc_tag(updates.BETA) == "beta-v0.1.40-rc10"
+
+
+def test_stable_still_asks_for_releases_only(monkeypatch):
+    calls = _git_answers(monkeypatch, {"ls-remote": (True, f"{_HERE}\trefs/tags/v0.1.39")})
+
+    assert updates.newest_tcc_tag() == "v0.1.39"
+    assert calls[-1] == ("ls-remote", "--tags", updates.TCC_REPO, "v*", "v*^{}")

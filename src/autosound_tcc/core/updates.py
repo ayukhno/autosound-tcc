@@ -54,6 +54,15 @@ SKILL_TAG_GLOB = "v3.*"
 #: and a major bump should not silently stop updates; `_version_key` does the ordering.
 TCC_TAG_GLOB = "v*"
 
+#: The beta channel's own tags (hub RELEASE-CHANNEL.md §11.1). The first letter keeps them out of
+#: `v*`, so a stable installation never sees one; the method's installers carry the same value
+#: (`installer-consistency.py --print TCC_BETA_GLOB`).
+TCC_BETA_GLOB = "beta-v*"
+
+#: The two channels (§11.2). Anything else a setting could hold reads as stable.
+STABLE = "stable"
+BETA = "beta"
+
 #: A network round trip to GitHub, on a machine that may be tethered in a car park.
 _ASK_TIMEOUT = 12.0
 
@@ -185,8 +194,28 @@ def _version_key(text: str) -> tuple:
     return tuple(int(part) for part in re.findall(r"\d+", text)) or (0,)
 
 
-def _newest_tag_in(repo: str, glob: str) -> tuple[str, str]:
-    """The newest tag matching `glob` in `repo`, and the COMMIT it names. `("", "")` if unaskable.
+_RELEASE_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+_CANDIDATE_RE = re.compile(r"beta-v(\d+)\.(\d+)\.(\d+)-rc(\d+)")
+
+
+def channel_key(name: str) -> Optional[tuple[int, int, int, int, int]]:
+    """The order on the beta channel (hub RELEASE-CHANNEL.md §11.2); None for a name of neither shape.
+
+    A release `vX.Y.Z` is `(X, Y, Z, 1, 0)` and a candidate `beta-vX.Y.Z-rcN` is `(X, Y, Z, 0, N)`:
+    a release above its own candidates, candidates of one version by N — `rc10` above `rc2`, which
+    a string compare gets wrong — and a candidate for 3.1.0 above 3.0.49. The same key as the
+    method's installers (`newest_on_channel`, HUB-060), so the app and `install.sh --channel beta`
+    agree on what "newest" is.
+    """
+    if match := _RELEASE_RE.fullmatch(name):
+        return (int(match[1]), int(match[2]), int(match[3]), 1, 0)
+    if match := _CANDIDATE_RE.fullmatch(name):
+        return (int(match[1]), int(match[2]), int(match[3]), 0, int(match[4]))
+    return None
+
+
+def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
+    """The newest tag matching any of `globs` in `repo`, and the COMMIT it names. `("", "")` if unaskable.
 
     **No `--refs`, and that is the whole point of this function.** `--refs` drops the peeled `^{}`
     lines, and for an ANNOTATED tag the line that survives carries the sha of the TAG OBJECT, not
@@ -201,8 +230,13 @@ def _newest_tag_in(repo: str, glob: str) -> tuple[str, str]:
     either way today, because both globs here end in `*` and so match `…^{}` by accident — and an
     accident is a bad thing to hang this on: narrowing a glob to an exact tag would drop the peel
     again, silently, and bring back the very bug above.
+
+    Several globs are one `ls-remote`, each with its own peel pattern, for the same reason. `key`
+    orders the names and drops the ones it answers None for — the beta channel passes
+    `channel_key`; stable keeps `_version_key`, which drops nothing.
     """
-    ok, out = _git("ls-remote", "--tags", repo, glob, f"{glob}^{{}}")
+    patterns = [pattern for glob in globs for pattern in (glob, f"{glob}^{{}}")]
+    ok, out = _git("ls-remote", "--tags", repo, *patterns)
     if not ok or not out:
         return "", ""
     shas: dict[str, str] = {}
@@ -215,10 +249,11 @@ def _newest_tag_in(repo: str, glob: str) -> tuple[str, str]:
         name = name[:-3] if peeled else name
         if peeled or name not in shas:
             shas[name] = sha.strip()
-    if not shas:
+    ranked = {name: sha for name, sha in shas.items() if key(name) is not None}
+    if not ranked:
         return "", ""
-    newest = max(shas, key=_version_key)
-    return newest, shas[newest]
+    newest = max(ranked, key=key)
+    return newest, ranked[newest]
 
 
 def newest_tag() -> str:
@@ -226,8 +261,10 @@ def newest_tag() -> str:
     return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)[0]
 
 
-def newest_tcc_tag() -> str:
-    """The newest release tag of TCC itself, or "" if it cannot be asked."""
+def newest_tcc_tag(channel: str = STABLE) -> str:
+    """The newest tag of TCC itself on `channel` — a release, or on beta possibly a candidate — or ""."""
+    if channel == BETA:
+        return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB, TCC_BETA_GLOB, key=channel_key)[0]
     return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB)[0]
 
 
