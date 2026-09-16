@@ -26,6 +26,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   the installation block.
 - **The import window's new name is a list** of the names the round still waits for, without the
   ones other rows already took; a name nobody planned can still be typed (F-056).
+- **A driver's Fs carried in from another project says so** in the DSP tree's tooltip — the method's
+  pre-sweep gate holds a fragile driver on it until it is confirmed here or measured (hub #154).
 
 ### Changed
 

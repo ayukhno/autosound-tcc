@@ -232,6 +232,11 @@ class GroupRow:
         return value if isinstance(value, (int, float)) else None
 
     @property
+    def fs_inherited(self) -> bool:
+        """The Fs was carried in from another project and not yet confirmed here (hub #154 §4)."""
+        return project_view.fact_inherited(self.identity.get("fs_hz"))
+
+    @property
     def impedance_ohm(self) -> Optional[float]:
         value = project_view.fact_value(self.identity.get("impedance_ohm"))
         return value if isinstance(value, (int, float)) else None

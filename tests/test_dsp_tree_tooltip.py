@@ -63,3 +63,17 @@ def test_a_fact_wrapper_never_leaks_into_the_markup():
 
     assert "datasheet" not in html
     assert "'value'" not in html
+
+
+def test_an_fs_carried_in_from_another_project_says_so():
+    """hub #154 §4 (method v3.0.53): `project_seed.py`, which TCC's new-project window calls, marks
+    every copied fact `origin: inherited`, and the pre-sweep gate holds a fragile driver's inherited
+    Fs until the Arbiter confirms or measures it. The tooltip showed the number alone."""
+    from autosound_tcc.ui.tcc import i18n
+
+    carried = {**_IDENTITY, "fs_hz": {"value": 1800, "source": "datasheet",
+                                      "origin": "inherited", "inherited_from": "/cars/old"}}
+
+    assert f"Fs&nbsp;1800&nbsp;Hz&nbsp;({i18n.t('factInherited')})" in _html(carried)
+    assert i18n.t("factInherited") not in _html(_IDENTITY), "a fact established here is not marked"
+

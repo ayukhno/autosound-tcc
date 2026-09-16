@@ -54,6 +54,16 @@ def fact_value(x: Any) -> Any:
     return x.get("value") if isinstance(x, dict) and "value" in x else x
 
 
+def fact_inherited(x: Any) -> bool:
+    """Whether a fact was carried in from another project rather than established on this build.
+
+    `origin: inherited` since the method's v3.0.53 (hub #154 §4): `project_seed.py` marks what it
+    copies, and the pre-sweep gate holds a fragile driver's inherited Fs until the Arbiter confirms
+    or measures it. Absent means `here`, as every fact written before.
+    """
+    return isinstance(x, dict) and x.get("origin") == "inherited"
+
+
 def has_project(project_dir_: Optional[Path] = None) -> bool:
     return config.project_path(project_dir_).is_file()
 

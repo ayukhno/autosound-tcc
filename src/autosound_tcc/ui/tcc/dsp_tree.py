@@ -265,7 +265,10 @@ class ChannelRow(QWidget):
             if row.role:
                 meta.append(str(row.role))
             if row.fs_hz is not None:
-                meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz")
+                # Said when it was carried in from another project (hub #154 §4): the pre-sweep
+                # gate holds a fragile driver on it until it is confirmed here or measured.
+                inherited = f"&nbsp;({i18n.t('factInherited')})" if row.fs_inherited else ""
+                meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz{inherited}")
             if meta:
                 html.append(c(" · ".join(meta), t.muted))
             hp = CrossoverLeg.from_raw(raw.get("hp")).label
