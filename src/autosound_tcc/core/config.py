@@ -112,6 +112,21 @@ def set_project_dir(path: Path) -> None:
     settings.setValue(_RECENT_PROJECTS_KEY, recent[:MAX_RECENT_PROJECTS])
 
 
+#: Which tags the update rows follow (hub #140): "stable" or "beta", "" while never chosen. What an
+#: unset or unknown value MEANS is `updates.channel_for`'s call — it reads how the app was installed,
+#: which this module cannot import without a cycle (`install_report` imports it).
+_UPDATE_CHANNEL_KEY = "updates/channel"
+
+
+def update_channel() -> str:
+    """The saved update channel, "" when it was never set."""
+    return str(_settings().value(_UPDATE_CHANNEL_KEY, "") or "")
+
+
+def set_update_channel(value: str) -> None:
+    _settings().setValue(_UPDATE_CHANNEL_KEY, value)
+
+
 def recent_projects() -> list[Path]:
     """Recently opened project folders, newest first, filtered to ones that still exist."""
     return [Path(p) for p in _recent_raw(_settings()) if Path(p).is_dir()]

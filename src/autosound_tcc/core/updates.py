@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import child, install_report, vendor_loader
+from autosound_tcc.core import child, config, install_report, vendor_loader
 
 #: Where each half comes from. The installer's own constants, kept identical on purpose: an update
 #: that pulled from a different place than the install did would be a second source of truth.
@@ -406,6 +406,25 @@ def check_all(channel: str = STABLE) -> tuple[Status, Status]:
     its beta copy is wired (hub #145 answer, `installation.md` "Two channels on one machine").
     """
     return check_tcc(channel), check_skill()
+
+
+def channel_for(saved: str, revision: str) -> str:
+    """The channel to follow: the saved choice, or — never chosen — what the app was installed from.
+
+    Installed from a `beta-v*` tag and never set → beta: `install.sh --channel beta` put a candidate
+    here, and moving its tester to stable at the first update check, without a word, would undo
+    that (the Arbiter, 2026-09-14). An unknown saved value reads as stable.
+    """
+    if saved in (STABLE, BETA):
+        return saved
+    if not saved and revision.startswith("beta-v"):
+        return BETA
+    return STABLE
+
+
+def current_channel() -> str:
+    """`channel_for` on this installation. Reads QSettings: call it on the GUI thread, pass the value."""
+    return channel_for(config.update_channel(), install_report.requested_revision())
 
 
 def apply_skill(tag: str = "") -> tuple[bool, str, str]:

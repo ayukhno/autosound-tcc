@@ -530,3 +530,28 @@ def test_check_all_hands_the_channel_to_tcc_and_not_to_the_method(monkeypatch):
     assert _REAL_CHECK_ALL(updates.BETA) == ("t", "s")
     assert seen == ["beta"]
 
+
+@pytest.mark.parametrize("saved, revision, expected", [
+    ("", "", "stable"),
+    ("", "v0.1.39", "stable"),
+    ("", "beta-v0.2.0-rc1", "beta"),
+    ("stable", "beta-v0.2.0-rc1", "stable"),
+    ("beta", "", "beta"),
+    ("nightly", "beta-v0.2.0-rc1", "stable"),
+])
+def test_the_channel_is_the_choice_else_what_the_app_was_installed_from(saved, revision, expected):
+    assert updates.channel_for(saved, revision) == expected
+
+
+def test_the_channel_setting_round_trips(monkeypatch):
+    from autosound_tcc.core import config
+
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "")
+    assert config.update_channel() == ""
+    assert updates.current_channel() == "stable"
+
+    config.set_update_channel("beta")
+
+    assert config.update_channel() == "beta"
+    assert updates.current_channel() == "beta"
+
