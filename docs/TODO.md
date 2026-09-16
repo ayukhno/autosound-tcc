@@ -1729,6 +1729,9 @@ Named, not yet described. Seen around it today: the protective-filter dialog ask
 tcc#37–#39 about the live round (round colour, auto-matching the live round). The next session starts
 by having the Arbiter describe what goes wrong, and records it before anything is changed.
 
+**Added 2026-09-16:** tcc#37–#39 are fixed on `wave-0.1.40` (`7f95284`, `215964c`). tcc#21 (capture
+quality while the microphone is still in hand) waits for this conversation, by the Arbiter's word.
+
 ### F-057 — The method's virtual-DSP calculations (skill side)
 
 **Статус**: open · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for the next session
