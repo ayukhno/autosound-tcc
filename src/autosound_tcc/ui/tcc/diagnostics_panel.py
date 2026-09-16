@@ -22,6 +22,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (
     app_log,
+    config,
     install_report,
     self_check,
     terminal_launcher,
@@ -260,14 +262,15 @@ class _UpdateProbe:
     `_ToolsProbe`: nothing of Qt's, so it may outlive the dialog that started it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, channel: str = "stable") -> None:
         self.result = None
+        self._channel = channel
         self._thread = threading.Thread(target=self._run, name="tcc-updates", daemon=True)
         self._thread.start()
 
     def _run(self) -> None:
         try:
-            self.result = updates.check_all()
+            self.result = updates.check_all(self._channel)
         except Exception:  # noqa: BLE001 — an unanswered question is a row that says so
             self.result = None
 
@@ -440,6 +443,12 @@ class DiagnosticsDialog(QDialog):
             row.addWidget(button)
             grid.addLayout(row)
             self._update_rows[name] = (label, button)
+        # Under the rows it changes (the Arbiter, 2026-09-14). The method is not on it yet: it keeps
+        # following released tags on both channels, and the label says TCC for that reason.
+        self._beta_box = QCheckBox(i18n.t("updBetaChannel"))
+        self._beta_box.setChecked(updates.current_channel() == updates.BETA)
+        self._beta_box.toggled.connect(self._on_beta_toggled)
+        grid.addWidget(self._beta_box)
         self._update_probe: Optional[_UpdateProbe] = None
         self._update_tries = 0
         self._update_timer = QTimer(self)
@@ -498,6 +507,16 @@ class DiagnosticsDialog(QDialog):
         else:
             label.setText(i18n.t("updCurrent").format(what=title, here=here))
 
+    def _on_beta_toggled(self, checked: bool) -> None:
+        """The channel is a setting, and the rows above must answer for the one just chosen.
+
+        A probe still running asks for the OLD channel; it is let go rather than waited for — a
+        daemon thread holding no Qt object — and a new one starts.
+        """
+        config.set_update_channel(updates.BETA if checked else updates.STABLE)
+        self._update_probe = None
+        self._start_update_check()
+
     def _update_skill(self) -> None:
         """Done here, in the app: it is another folder's git checkout and takes about a second."""
         label, button = self._update_rows["skill"]
@@ -528,7 +547,8 @@ class DiagnosticsDialog(QDialog):
         try:
             # Pinned to the release the row is offering, not to whatever `main` holds by
             # the time the terminal opens (F-024).
-            terminal_launcher.run_line(updates.tcc_install_line(tag=updates.newest_tcc_tag()))
+            terminal_launcher.run_line(updates.tcc_install_line(
+                tag=updates.newest_tcc_tag(updates.current_channel())))
         except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
             label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
             return
@@ -636,7 +656,7 @@ class DiagnosticsDialog(QDialog):
         for label, button in self._update_rows.values():
             label.setText(i18n.t("updChecking"))
             button.setEnabled(False)
-        self._update_probe = _UpdateProbe()
+        self._update_probe = _UpdateProbe(updates.current_channel())
         self._update_tries = 0
         self._update_timer.start()
 
@@ -749,6 +769,7 @@ class DiagnosticsDialog(QDialog):
         self._tabs.setTabText(2, i18n.t("diagTabLog"))
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
+        self._beta_box.setText(i18n.t("updBetaChannel"))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._report_btn.setText(i18n.t("diagReport"))
         self._report_hint.setText(i18n.t("diagReportShot"))

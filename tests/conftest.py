@@ -302,8 +302,9 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
 
     monkeypatch.setattr(
         updates, "check_all",
-        lambda: (updates.Status("tcc", "0.0.0", "", False, "offline in tests", updatable=False),
-                 updates.Status("skill", "0.0.0", "", False, "offline in tests", updatable=False)),
+        lambda channel="stable": (
+            updates.Status("tcc", "0.0.0", "", False, "offline in tests", updatable=False),
+            updates.Status("skill", "0.0.0", "", False, "offline in tests", updatable=False)),
         raising=False,
     )
     yield

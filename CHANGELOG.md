@@ -12,6 +12,19 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+### Added
+
+- **A beta channel for TCC's own updates.** Diagnostics → Installation has a checkbox under the
+  update rows: "Beta channel: also offer TCC release candidates". Ticked, the TCC row also offers
+  `beta-vX.Y.Z-rcN` tags, in the hub's order (a release above its own candidates), and the button
+  installs the one on offer. An installed candidate reads as up to date by its commit, whatever
+  version its metadata carries. Unticked by default; an app installed from a `beta-v*` tag opens
+  ticked until the box is used. The method keeps following released tags on both channels.
+- **A candidate build says which one it is**: `0.1.38 (beta-v0.2.0-rc1)` on the update row and in
+  the installation block.
+
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
 Paired with method `bc6423ee505b9940c87fdb6cb476888b17245348` — the tag on that commit is

@@ -3290,10 +3290,12 @@ class MainWindow(QMainWindow):
         nothing happened.
         """
         holder: dict = {}
+        # Read here, on the GUI thread: the channel lives in QSettings.
+        channel = updates.current_channel()
 
         def ask() -> None:
             try:
-                holder["result"] = updates.check_all()
+                holder["result"] = updates.check_all(channel)
             except Exception:  # noqa: BLE001 — a question nobody answered changes nothing on screen
                 holder["result"] = ()
 

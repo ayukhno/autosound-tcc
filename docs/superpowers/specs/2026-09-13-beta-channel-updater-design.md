@@ -6,6 +6,8 @@ PR #30, `## [Unreleased]` and the `### Breaking` form in PR #29 and #30.
 **Status:** answered by the user on 2026-09-14 (see the end). TCC's own half is built first; the
 method half waits for hub #145 (TCC-011).
 
+**Built 2026-09-16** (TCC's half, on `wave-0.1.40`): plan `docs/superpowers/plans/2026-09-16-beta-channel-updater.md`. Hub #145 is closed (skill v3.0.52); the method half waits for the Arbiter's call on the project link.
+
 ## What is asked
 
 > `updates.py`: a channel setting — stable (default, unchanged) and beta, which also lists

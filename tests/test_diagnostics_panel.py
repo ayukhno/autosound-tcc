@@ -467,7 +467,7 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch):
     dialog._show_update(updates.Status("tcc", "0.1.1", "0.9.9", True))
     seen = []
     monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
-    monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.9.9")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.9.9")
 
     dialog._update_tcc()
 
@@ -490,7 +490,7 @@ def test_re_check_asks_about_updates_again(monkeypatch):
     dialog._tabs.setCurrentIndex(1)
     dialog._show_update(updates.Status("skill", "3.0.7", "3.0.8", True))
     asked = []
-    monkeypatch.setattr(updates, "check_all", lambda: asked.append(1) or (
+    monkeypatch.setattr(updates, "check_all", lambda channel="stable": asked.append(1) or (
         updates.Status("tcc", "0.1.3", "", False), updates.Status("skill", "3.0.8", "3.0.8", False)))
 
     dialog._on_refresh()
@@ -691,3 +691,51 @@ def test_the_screenshot_is_named_where_the_person_still_has_it():
                 / ".github" / "ISSUE_TEMPLATE" / "beta-report.yml").read_text()
     assert "id: screenshot" in template, "and the form has a box to drop it into"
     assert "autosound-tuning-skill" in template, "and says which reports do not belong here"
+
+
+def test_the_beta_box_is_unticked_by_default_and_ticking_it_asks_again_on_beta(monkeypatch):
+    """The Arbiter's answers of 2026-09-14: unticked unless the app came from a candidate, next to
+    the rows it changes — and those rows answer again, for the channel just chosen."""
+    from autosound_tcc.core import config, install_report, updates
+
+    _app()
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "")
+    asked = []
+    monkeypatch.setattr(updates, "check_all", lambda channel="stable": asked.append(channel) or (
+        updates.Status("tcc", "0.1.3", "", False), updates.Status("skill", "3.0.8", "3.0.8", False)))
+    dialog = DiagnosticsDialog()
+    assert dialog._beta_box.isChecked() is False
+
+    dialog._beta_box.setChecked(True)
+
+    assert config.update_channel() == "beta"
+    assert dialog._update_rows["tcc"][0].text() == i18n.t("updChecking")
+    dialog._update_probe._thread.join(timeout=5)
+    assert asked[-1] == "beta"
+
+
+def test_an_app_installed_from_a_candidate_opens_with_the_box_ticked(monkeypatch):
+    from autosound_tcc.core import install_report
+
+    _app()
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "beta-v0.2.0-rc1")
+
+    assert DiagnosticsDialog()._beta_box.isChecked() is True
+
+
+def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch):
+    from autosound_tcc.core import config, terminal_launcher, updates
+
+    _app()
+    config.set_update_channel("beta")
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.38", "0.2.0-rc2", True))
+    seen = []
+    monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
+    monkeypatch.setattr(updates, "newest_tcc_tag",
+                        lambda channel="stable": "beta-v0.2.0-rc2" if channel == "beta" else "v0.1.39")
+
+    dialog._update_tcc()
+
+    assert "@beta-v0.2.0-rc2" in seen[0]
+
