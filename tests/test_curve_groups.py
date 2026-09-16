@@ -161,3 +161,12 @@ def test_without_the_skill_there_is_nothing_to_ask_and_that_is_not_an_error(monk
     assert groups.available is False
     assert groups.facts("w-L_02 (sw)") is None
     assert groups.title_for("sw", "02") == "sw_02 (sw)", "a name can still be spelled"
+
+
+def test_a_ledger_version_is_not_spelled_into_a_title(groups):
+    """hub #153 F. Since the method's v3.0.53 `generate_name` refuses `v_001` for `_N` — the two are
+    different counters — and the fallback here rebuilt the very title that refusal exists to stop:
+    `sw_v_001 (sw)`. A refused version names the channel, not an invented measurement."""
+    assert groups.title_for("sw", "v_001") == "sw"
+    assert groups.title_for("sw", "02") == "sw_02 (sw)", "a DSP state number is still spelled"
+

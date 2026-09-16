@@ -158,6 +158,11 @@ class GlossaryGroups:
         try:
             return str(self._naming.generate_name(code, version, METHOD))
         except Exception:  # noqa: BLE001 — a code the grammar rejects still has to be nameable
+            # ...but a VERSION it rejects is not spelled into one (hub #153 F): since the method's
+            # v3.0.53 a ledger version (`v_001`) is refused for `_N`, and building
+            # `sw_v_001 (sw)` here would invent the very title that refusal exists to stop.
+            if not str(version).isdigit() and str(version) != "final":
+                return code
             return f"{code}_{version} ({METHOD})"
 
     def versions_in(self, titles: Sequence[str], codes: Sequence[str] = ()) -> tuple[str, ...]:
