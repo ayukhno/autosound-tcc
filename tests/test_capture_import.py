@@ -439,3 +439,18 @@ def test_the_rows_carry_whether_there_is_anything_to_check():
     assert [(row.title, row.swept) for row in rows] == [
         ("ALL (rta)", False), ("w-L (sw)", True),
     ]
+
+
+@needs_the_method
+def test_a_renamed_channel_s_old_titles_answer_to_its_current_code(tmp_path):
+    """hub #153 B. `channel_from_title` asked the grammar for a key it never returned (`channel`),
+    so every title fell through to the string split: `m-L_2 (sw)`, taken before `m-L` was renamed
+    `w-L` (SCR-039), read as `m-L` and missed the channel's protective record."""
+    (tmp_path / "glossary.json").write_text(json.dumps({
+        "schema_version": 1,
+        "channels": [{"code": "w-L", "active": True, "previous_names": ["m-L"]}],
+        "pairs": {}, "combos": {}, "joints": {}, "sides": {},
+    }), encoding="utf-8")
+
+    assert ci.channel_from_title("m-L_2 (sw)", tmp_path) == "w-L"
+

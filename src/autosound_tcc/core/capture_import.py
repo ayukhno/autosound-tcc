@@ -496,8 +496,12 @@ def channel_from_title(title: str, project_dir: Optional[Path] = None) -> str:
         naming = vendor_loader.load_naming()
         glossary = naming.Glossary.for_project(str(project_dir or _config.project_dir()))
         parsed = naming.parse_name(title, glossary)
-        if parsed and parsed.get("channel"):
-            return str(parsed["channel"])
+        # `code_current`, then `code` (hub #153 B): the record has never had a `channel` key, so
+        # this used to fall through to the split below for every title, and a renamed channel's
+        # old titles (SCR-039) missed its protective record.
+        code = (parsed or {}).get("code_current") or (parsed or {}).get("code")
+        if code:
+            return str(code)
     except Exception:  # noqa: BLE001 — no skill, no glossary: read the name as written
         pass
     return title.split("_", 1)[0].split(" ", 1)[0].strip()

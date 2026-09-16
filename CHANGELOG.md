@@ -50,6 +50,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **The acoustic flaw map says "7 of 8 shown" in its header** when it withholds tuning-plan rows
   (#37). The line saying so was inside a section that opens collapsed, under the rows, and was
   missed.
+- **A renamed channel's earlier captures find its protective record**: a title's channel is the
+  grammar's current code (hub #153).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
