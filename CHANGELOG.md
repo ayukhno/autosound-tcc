@@ -25,6 +25,13 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A candidate build says which one it is**: `0.1.38 (beta-v0.2.0-rc1)` on the update row and in
   the installation block.
 
+### Fixed
+
+- **A new capture round no longer starts out finished** (#38, #39). A round that asks for a capture
+  an earlier round already took now waits for it to be taken again in this round. Before, it
+  borrowed the earlier take: the import window said the round expected nothing and offered no
+  names, and an empty round read green. A capture the new round does not ask for still counts.
+
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
 Paired with method `bc6423ee505b9940c87fdb6cb476888b17245348` — the tag on that commit is

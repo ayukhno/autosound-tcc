@@ -219,6 +219,16 @@ def build_session(
     verdicts_by_key = {
         _key(title): verdict for title, verdict in verdicts.items() if _key(title) is not None
     }
+    # What an OPEN round asks for, it asks for again (tcc#38, #39). The rounds loop above credits
+    # every pass at this version, and that is right for a checklist nobody re-opened — but a new
+    # round that expects `tw-L_1 (sw)` is a new pass at it, and crediting the old take read an empty
+    # round as finished: the import window expected nothing and offered no names, and the round
+    # list painted it green (live project, 2026-09-14). For those names only a take recorded in
+    # THIS round answers; the import store is history here too, so it does not either.
+    asked_again = set()
+    if not round_.get("closed"):
+        asked_again = {_key(t) for t in (round_.get("expected") or [])} - {None}
+    taken_here = {_key(t) for t in recorded_taken} - {None}
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
@@ -230,7 +240,10 @@ def build_session(
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is.
             return STATUS_STALE
-        if key not in taken_keys and name not in recorded_taken:
+        if key is not None and key in asked_again:
+            if key not in taken_here and name not in recorded_taken:
+                return STATUS_WAIT  # asked for again by the open round, not taken in it yet
+        elif key not in taken_keys and name not in recorded_taken:
             # Waiting, even when REW is showing a curve by that name: a title in another
             # application's list is not this project taking a measurement in (user, 2026-09-06).
             # The read window opens on it ticked, and the tick is what makes it done.

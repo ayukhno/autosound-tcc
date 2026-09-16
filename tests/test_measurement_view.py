@@ -546,3 +546,32 @@ def test_the_round_fixture_writes_titles_the_way_a_person_types_them(project):
     statuses = {item.name: item.status for g in session.groups for item in g.items}
     assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
     assert statuses["w-L_1 (sw)"] == mv.STATUS_SKIPPED
+
+
+def test_a_new_round_does_not_inherit_what_an_earlier_round_took(project):
+    """tcc#39 (and #38), on a live project 2026-09-14: `cap_002` closed with fourteen taken, a new
+    round opened expecting the same fourteen — and read fourteen `done` before anything was taken,
+    so the import window said the round expected nothing and offered no names, and the round list
+    painted an empty pass green. A round that asks for a capture asks for it AGAIN: what an earlier
+    pass took is history, not this pass's progress. The import store is history too — it holds the
+    earlier pass's titles, and the window hands them in as `taken`."""
+    process = _round(project, version=1, expected=["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"],
+                     taken=["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"])
+    process.close_capture("done")
+    process.start_capture(1, expected=[_as_typed("w-L_1 (sw)"), _as_typed("w-R_1 (sw)")])
+    store = [_as_typed("w-L_1 (sw)"), _as_typed("w-R_1 (sw)"), _as_typed("sw_1 (sw)")]
+
+    session = mv.build_session("0", 1, [], project, taken=store)
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT, "asked for again, not taken again yet"
+    assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT
+    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE, "not asked for by this pass: the earlier take stands"
+
+    process.record_capture(_as_typed("w-L_1 (sw)"))
+
+    session = mv.build_session("0", 1, [], project, taken=store)
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_DONE, "taken in this pass"
+    assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT
+
