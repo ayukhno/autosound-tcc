@@ -1,6 +1,9 @@
 # Private brief — strategy/context, not for the public repo
 gui-app-kickoff-brief.md
 
+# Ukrainian working copy of the product-paths record — the Arbiter reads it here, GitHub gets the English one
+docs/PRODUCT-PATHS-2026-09-16.uk.md
+
 # Private data (never publish)
 data/private/
 captures/
