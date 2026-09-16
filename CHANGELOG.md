@@ -25,6 +25,12 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A candidate build says which one it is**: `0.1.38 (beta-v0.2.0-rc1)` on the update row and in
   the installation block.
 
+### Changed
+
+- **Whether a REW capture can be checked is the method's answer now** (#20): `rew_api.is_swept`,
+  from REW's notes, instead of TCC's own reading of the listing. A capture that cannot be told apart
+  is checked rather than skipped. A method older than `v3.0.47` leaves every row checked.
+
 ### Fixed
 
 - **A new capture round no longer starts out finished** (#38, #39). A round that asks for a capture

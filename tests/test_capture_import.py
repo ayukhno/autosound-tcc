@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import pytest
+
 from autosound_tcc.core import capture_import as ci
+from autosound_tcc.core import vendor_loader
 
 
 def _rew(*rows) -> dict:
@@ -369,22 +372,33 @@ def test_a_batch_that_shuffles_names_among_its_own_members_is_not_a_clash(tmp_pa
     assert ci.duplicate_targets([("u1", "m-R_02 (sw)"), ("u2", "m-L_02 (sw)")], answer) == []
 
 
+def _swept(*records) -> list[bool]:
+    """What the import rows say about each record, in order — the answer the dialog acts on."""
+    rows = ci.candidates({str(i): r for i, r in enumerate(records, start=1)}, imported={})
+    return [row.swept for row in rows]
+
+
+needs_the_method = pytest.mark.skipif(
+    not vendor_loader.is_available(), reason="rew_tool submodule not checked out")
+
+
+@needs_the_method
 def test_a_sweep_is_told_from_an_rta_by_rews_data_and_not_by_its_title():
     """The title says `(sw)`, and the title is a convention a person types at 1 a.m. in a car park.
 
-    REW's own listing answers structurally instead: a swept capture carries `timeOfIRPeakSeconds`,
-    `delay` and `signalToNoisedB`; an RTA capture does not carry them at all. Measured on a live
-    REW (V5.40 beta 132, 2026-09-07): 18 of 18 sweeps, 0 of 72 RTA captures.
+    Whether a capture is swept is knowledge about REW, so it is the method's answer
+    (`rew_api.is_swept`, autosound-hub#110, method v3.0.47) and no longer a guess of ours (tcc#20).
+    What these two tests pin survives the change of owner: a title cannot decide it.
     """
     rta = {"title": "ALL_60 (rta)", "uuid": "u1",
            "notes": "65536-point 1/48 octave RTA using Hann window"}
     sweep = {"title": "w-L_60 (sw)", "uuid": "u2", "notes": "DELAY 11.5702 ms (3.969 m)",
              "timeOfIRPeakSeconds": 0.0116, "delay": 0.0115, "signalToNoisedB": 51.2}
 
-    assert ci.is_swept(sweep) is True
-    assert ci.is_swept(rta) is False
+    assert _swept(rta, sweep) == [False, True]
 
 
+@needs_the_method
 def test_a_mistyped_title_does_not_change_what_gets_checked():
     """The convention broken both ways: an RTA named like a sweep and a sweep named like an RTA.
     A check skipped because of a typo is a measurement the tuner discovers at home."""
@@ -392,15 +406,34 @@ def test_a_mistyped_title_does_not_change_what_gets_checked():
     lying_sweep = {"title": "ALL_60 (rta)", "uuid": "u4", "notes": "DELAY 6.1 ms",
                    "timeOfIRPeakSeconds": 0.0061}
 
-    assert ci.is_swept(lying_rta) is False
-    assert ci.is_swept(lying_sweep) is True
+    assert _swept(lying_rta, lying_sweep) == [False, True]
 
 
+@needs_the_method
+def test_a_capture_nothing_can_tell_apart_is_still_checked():
+    """The method's direction, and the reason it owns this now: a record that says nothing either
+    way is CHECKED. A missed verdict is the tuner finding out at home; a wrongly included RTA is
+    one confusing row. Ours answered the other way — no impulse fields, no check."""
+    silent = {"title": "w-L_60 (sw)", "uuid": "u5", "notes": ""}
+
+    assert _swept(silent) == [True]
+
+
+def test_a_method_too_old_to_answer_leaves_every_row_checked(monkeypatch):
+    """`is_swept` arrived in the method's v3.0.47. An older one on the machine must not take the
+    import window down; it degrades to the same safe direction."""
+    monkeypatch.setattr(vendor_loader, "load_rew_api", lambda: object())
+
+    assert _swept({"title": "ALL (rta)", "uuid": "a", "notes": "1/48 octave RTA"}) == [True]
+
+
+@needs_the_method
 def test_the_rows_carry_whether_there_is_anything_to_check():
     rows = ci.candidates({
-        "1": {"title": "ALL (rta)", "uuid": "a", "date": "2026-Sep-04 11:11:07"},
+        "1": {"title": "ALL (rta)", "uuid": "a", "date": "2026-Sep-04 11:11:07",
+              "notes": "65536-point 1/48 octave RTA using Hann window"},
         "2": {"title": "w-L (sw)", "uuid": "b", "date": "2026-Sep-04 11:12:07",
-              "timeOfIRPeakSeconds": 0.01},
+              "notes": "DELAY 11.5702 ms (3.969 m)", "timeOfIRPeakSeconds": 0.01},
     }, imported={})
 
     assert [(row.title, row.swept) for row in rows] == [

@@ -43,7 +43,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from autosound_tcc.core import app_log, config
+from autosound_tcc.core import app_log, config, vendor_loader
 
 #: The store's own schema, in its own file. Not `tcc-project.json`: that one is settings a person
 #: chose, this is a log of what happened, and a reader of either should not have to skip the other.
@@ -86,7 +86,8 @@ class Candidate:
     when: Optional[datetime]
     imported: bool
     #: Whether REW holds an impulse for this one. False for an RTA capture: importable like any
-    #: other, but there is no capture check that could say anything about it (see `is_swept`).
+    #: other, but there is no capture check that could say anything about it (the method's
+    #: `rew_api.is_swept`).
     swept: bool = True
 
     @property
@@ -198,29 +199,20 @@ def parse_date(raw: Any) -> Optional[datetime]:
     return None
 
 
-#: Fields REW's own API documents on a measurement that HAS an impulse response (`MeasurementSummary`
-#: in its Swagger spec, served at the REW API root). They are absent, not empty, on captures that
-#: have none.
-_IMPULSE_FIELDS = ("timeOfIRPeakSeconds", "delay", "signalToNoisedB")
+def _swept_by_the_method() -> Callable[[dict], bool]:
+    """The method's `rew_api.is_swept` (autosound-hub#110, method v3.0.47), which replaced ours (tcc#20).
 
-
-def is_swept(raw: dict) -> bool:
-    """Whether this measurement has an impulse response — i.e. whether there is anything to check.
-
-    Answered from REW's own data, and structurally: a swept capture's listing entry carries
-    `timeOfIRPeakSeconds`, `delay` and `signalToNoisedB`; an RTA capture's does not carry them at
-    all. Measured against a live REW (V5.40 beta 132, 2026-09-07): present in 18 of 18 sweeps,
-    0 of 72 RTA captures. Corroborated by REW answering HTTP 400 for
-    `/measurements/<id>/impulse-response` on the same RTA rows and 200 on the swept ones.
-
-    NOT the title. `(sw)` and `(rta)` are a naming convention this project asks for, and a
-    convention is exactly what gets broken at 1 a.m. in a car park — after which a mistyped title
-    would silently skip the check on a real measurement. NOT `notes` either: that is prose REW
-    composes, and it changes shape between versions. A field is either there or it is not.
-
-    Costs nothing extra: these fields come in the same listing the dialog already fetches.
+    Whether a capture is swept is knowledge about REW, and front ends guessing it separately guess
+    it differently: ours asked for impulse fields in the listing and skipped the check without
+    them, the method reads REW's notes and checks whatever it cannot rule out. A method too old to
+    have it, or none at all, answers "check it" for every row — the method's own direction: a
+    wrongly included RTA is one confusing row, a skipped sweep is a verdict the tuner never gets.
     """
-    return any(field in (raw or {}) for field in _IMPULSE_FIELDS)
+    try:
+        answer = getattr(vendor_loader.load_rew_api(), "is_swept", None)
+    except Exception:  # noqa: BLE001 — no method on this machine: nothing to ask, nothing skipped
+        answer = None
+    return answer if callable(answer) else (lambda _record: True)
 
 
 def candidates(measurements: dict, project_dir: Optional[Path] = None,
@@ -232,6 +224,7 @@ def candidates(measurements: dict, project_dir: Optional[Path] = None,
     end, is the shape that looks ordered and is not.
     """
     seen = load_imported(project_dir) if imported is None else imported
+    is_swept = _swept_by_the_method()
     rows: list[tuple[int, Candidate]] = []
     for ordinal, raw in (measurements or {}).items():
         raw = raw or {}
@@ -244,7 +237,7 @@ def candidates(measurements: dict, project_dir: Optional[Path] = None,
             date=str(raw.get("date") or ""),
             when=parse_date(raw.get("date")),
             imported=bool(uuid) and uuid in seen,
-            swept=is_swept(raw),
+            swept=bool(is_swept(raw)),
         )))
     rows.sort(key=lambda pair: pair[0])
     ordered = [row for _position, row in rows]
