@@ -68,6 +68,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A reviewer with no answer says why** — the method exits 4 since `v3.0.53`, and TCC shows its
   reasons and the package for the clipboard step instead of "the Critic failed" with the package
   lines as the reason (hub #154).
+- **A distortion spike recorded in percent stays on the flaw map** and reads "THD 2.6 %"; it used to
+  vanish when its level was null. A level tilt between a pair has its own label (hub #154).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

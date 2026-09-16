@@ -273,3 +273,36 @@ def test_the_owners_sentence_is_read_under_the_name_the_method_gives_it_now(tmp_
 
     assert current.plain == "гуде на низьких, коли грає бас-бочка", "the name it has now"
     assert legacy.plain == "провал, який чути як брак тіла", "and the one older maps carry"
+
+
+def test_a_thd_row_with_no_level_is_kept_and_reads_in_percent(project):
+    """hub #154 §2 (method v3.0.53): a new `thd_spike` row carries `thd_pct` and `level_db: null`.
+    `float(None)` dropped it off the map without a word."""
+    _write(project, [
+        {"f_hz": 56, "level_db": None, "thd_pct": 2.6, "fundamental_db": 88.0,
+         "kind": "thd_spike", "action": "crossover", "channels": ["w-L"]},
+        {"f_hz": 73, "level_db": 9, "kind": "driver_resonance", "action": "notch"},
+    ])
+
+    flaws = acoustics_view.load_flaws(project)
+
+    assert [f.headline for f in flaws] == ["56 Hz · THD 2.6 %", "73 Hz · +9 dB"]
+
+
+def test_a_thd_row_written_before_the_field_still_reads_in_db(project):
+    _write(project, [{"f_hz": 56, "level_db": 0, "kind": "thd_spike", "action": "crossover"}])
+
+    assert [f.headline for f in acoustics_view.load_flaws(project)] == ["56 Hz · +0 dB"]
+
+
+def test_a_level_tilt_is_kept_and_is_not_the_owners(project):
+    """hub #154 §2: kind `level_tilt` with action `level` — "cut the hotter side, never boost the
+    colder one". The method does not list `level` as owner-facing, and neither does TCC."""
+    _write(project, [{"f_hz": 1000, "bw_oct": 2, "level_db": 3.1, "kind": "level_tilt",
+                      "action": "level", "channels": ["tw-L", "tw-R"]}])
+
+    (flaw,) = acoustics_view.load_flaws(project)
+
+    assert flaw.headline == "1000 Hz · 2 oct · +3.1 dB"
+    assert not flaw.is_owner_fact
+

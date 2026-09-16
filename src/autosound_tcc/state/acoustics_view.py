@@ -31,6 +31,8 @@ _ACTION_TONE = {
     "geometry": "info",
     "delay": "info",
     "crossover": "info",
+    # Cut the hotter side of a pair, never boost the colder one (the method's v3.0.53, hub #154).
+    "level": "info",
 }
 
 #: What the OWNER's panel shows: the part of the map that is still true after the tune.
@@ -69,6 +71,9 @@ class Flaw:
     #: neither. Optional here rather than required, since v3.0.17.
     f_hz: Optional[float] = None
     level_db: Optional[float] = None
+    #: A distortion spike's size, in percent (the method's v3.0.53): its `level_db` is null then,
+    #: because a THD is not a level. Rows written before carry `level_db` and no percentage.
+    thd_pct: Optional[float] = None
     t_ms: Optional[float] = None
     channels: tuple[str, ...] = ()
     q: Optional[float] = None
@@ -157,6 +162,8 @@ class Flaw:
             parts.append(self.width)
         if self.level_db is not None:
             parts.append(f"{self.level_db:+g} dB")
+        if self.thd_pct is not None:
+            parts.append(f"THD {self.thd_pct:g} %")
         if self.t_ms is not None:
             parts.append(f"{self.t_ms:+g} ms")
         return " · ".join(parts)
@@ -181,15 +188,19 @@ def load_flaws(project_dir: Optional[Path] = None) -> tuple[Flaw, ...]:
         try:
             kind = str(row.get("kind", ""))
             timed = row.get("t_ms") is not None or kind in _TIME_DOMAIN_KINDS
+            # A THD row since the method's v3.0.53 carries its size in percent and `level_db: null`
+            # (hub #154 §2); `float(None)` dropped it off the map without a word.
+            in_percent = row.get("thd_pct") is not None
             out.append(
                 Flaw(
                     # A frequency row still has to bring both numbers; a time-domain one has to
                     # bring `t_ms` and nothing else is required of it.
                     f_hz=float(row["f_hz"]) if not timed else _optional_float(row.get("f_hz")),
                     level_db=(
-                        _optional_float(row.get("level_db")) if timed
+                        _optional_float(row.get("level_db")) if timed or in_percent
                         else float(row["level_db"])
                     ),
+                    thd_pct=_optional_float(row.get("thd_pct")),
                     t_ms=float(row["t_ms"]) if timed else None,
                     kind=kind,
                     action=str(row.get("action", "")),
