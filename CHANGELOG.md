@@ -62,6 +62,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   grammar's current code (hub #153).
 - **The Protection form offers output channels only** when no round is open — not the virtual
   channels, which are not measured through a protective filter (TEST-FINDINGS 22).
+- **An RTA capture is no longer shown as "taken, unusable"** — the capture check does not apply to it,
+  and the method says so since `v3.0.53`. It reads as taken, and TCC stops re-checking it
+  (hub #154).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

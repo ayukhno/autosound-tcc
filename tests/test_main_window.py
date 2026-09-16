@@ -4244,3 +4244,25 @@ def test_giving_the_clipboard_back_does_not_crash_the_interpreter_on_exit(tmp_pa
 
     assert done.returncode == 0, f"exit {done.returncode}: {done.stderr[-2000:]}"
     assert done.stdout.strip().splitlines()[-1] == "mine", "and what was there came back"
+
+
+def test_an_rta_the_check_does_not_apply_to_is_not_checked_again(monkeypatch):
+    """hub #154 §1: its verdict is `ok: false, applicable: false` for good, so treating it as
+    unchecked started a capture check on every scan of REW."""
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_001", "expected": ["sw_1 (rta)"],
+        "taken": {"sw_1 (rta)": {"verified": {"ok": False, "applicable": False}}}})
+    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: ["sw_1 (rta)"])
+    started = []
+    monkeypatch.setattr(mw, "_CaptureCheckWorker", lambda *a, **k: started.append(1))
+
+    window._on_rew_titles_changed()
+
+    assert started == []
+

@@ -621,3 +621,40 @@ def test_the_highest_series_among_the_rounds(project):
 
     assert mv.highest_series(project) == 3
 
+
+def test_an_rta_the_check_does_not_apply_to_is_taken_not_unusable(project):
+    """hub #154 §1 (method v3.0.53, skill #29): the capture check keeps `applicable`, false for a
+    non-swept capture. Reading `ok` alone put every RTA of a phase-0 round in "taken, unusable"."""
+    from autosound_tcc.state import process_view
+
+    module = vendor_loader.load_process()
+    _intake.seed(project)
+    process = module.Process(str(process_view.process_dir(project)))
+    process.enter_phase("0")
+    process.start_capture(1, expected=["sw_1 (rta)"], step="0.1")
+    process.record_capture("sw_1 (rta)")
+    state = process.load()
+    state["capture"]["taken"]["sw_1 (rta)"]["verified"] = {
+        "ok": False, "applicable": False, "exists": True}
+    process._write(state)
+
+    session = mv.build_session("0", 1, ["sw_1 (rta)"], project)
+
+    item = next(i for g in session.groups for i in g.items if i.name == "sw_1 (rta)")
+    assert item.status == mv.STATUS_DONE
+
+
+def test_a_past_round_folds_not_applicable_captures_as_taken(tmp_path):
+    """The journal's `capture_verified` lists an RTA under `not_applicable` now, and no longer under
+    `bad` (hub #154 §1)."""
+    events = _round_events()
+    events[4] = {**events[4], "ok": ["w-L_01 (sw)"], "bad": [], "not_applicable": ["w-L_01 (rta)"]}
+    _journal(tmp_path, events)
+
+    round_ = process_view.capture_rounds(tmp_path)[0]
+    assert round_["taken"]["w-L_01 (rta)"]["verified"] == {"ok": False, "applicable": False}
+
+    session = measurement_view._session_for_round(round_, None)
+    by_name = {i.name: i for g in session.groups for i in g.items}
+    assert by_name["w-L_01 (rta)"].status == measurement_view.STATUS_DONE
+

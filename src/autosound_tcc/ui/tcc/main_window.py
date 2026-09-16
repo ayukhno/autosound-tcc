@@ -3032,11 +3032,15 @@ class MainWindow(QMainWindow):
         if not round_ or round_.get("closed"):
             return
         titles = set(self._meas_panel.known_titles())
+        def settled(title: str) -> bool:
+            """Checked and fine, or a capture the check does not apply to (hub #154 §1)."""
+            verdict = ((round_.get("taken") or {}).get(title) or {}).get("verified") or {}
+            return bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
+
         outstanding = [
             title
             for title in round_.get("expected", [])
-            if title in titles
-            and not (((round_.get("taken") or {}).get(title) or {}).get("verified") or {}).get("ok")
+            if title in titles and not settled(title)
         ]
         if not outstanding:
             return

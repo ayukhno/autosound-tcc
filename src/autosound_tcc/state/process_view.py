@@ -150,6 +150,11 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
                 round_["taken"].setdefault(str(title), {})["verified"] = {"ok": True}
             for title in event.get("bad") or []:
                 round_["taken"].setdefault(str(title), {})["verified"] = {"ok": False}
+            # Since the method's v3.0.53 a capture the check does not apply to (an RTA) is listed
+            # here and no longer under `bad` (hub #154 §1): taken, and not unusable.
+            for title in event.get("not_applicable") or []:
+                round_["taken"].setdefault(str(title), {})["verified"] = {
+                    "ok": False, "applicable": False}
         elif kind == "capture_protective":
             # What was in the signal path while this pass was measured, per channel. The fold was
             # missing entirely, so a past round came back with no `protective` at all and the

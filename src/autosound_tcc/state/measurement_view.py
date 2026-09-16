@@ -156,6 +156,17 @@ def protective_phrase(legs) -> str:
     return " · ".join(parts)
 
 
+def applicable(verdict: dict) -> bool:
+    """Whether the capture check says anything about this capture (hub #154 §1).
+
+    False for a capture the check does not apply to — an RTA, which has no impulse. Since the
+    method's v3.0.53 its verdict keeps `applicable: false` next to `ok: false`, and reading `ok`
+    alone put every RTA of a phase-0 round in "taken, unusable". Absent means it applies, as every
+    verdict written before did.
+    """
+    return (verdict or {}).get("applicable", True) is not False
+
+
 def _round_is_at(round_: dict, version, naming, glossary) -> bool:
     """Whether a round was captured at series `version`: by its own `version`, or by the `_N` its
     titles carry (hub #153 C).
@@ -309,7 +320,7 @@ def build_session(
         if name in recorded_skipped or (key is not None and key in skipped_keys):
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
         verdict = verdicts.get(name) or verdicts_by_key.get(key)
-        if verdict and not verdict.get("ok"):
+        if verdict and not verdict.get("ok") and applicable(verdict):
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is.
             return STATUS_STALE
@@ -431,7 +442,7 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         if entry is None:
             return STATUS_WAIT  # asked for, never taken, and the round closed anyway
         verdict = entry.get("verified") or {}
-        return STATUS_DONE if verdict.get("ok", True) else STATUS_STALE
+        return STATUS_DONE if verdict.get("ok", True) or not applicable(verdict) else STATUS_STALE
 
     def issues_for(name: str) -> Optional[str]:
         # The skip reason comes first, and the order is the point: a skipped capture is ALSO
