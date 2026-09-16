@@ -212,6 +212,7 @@ answers the first five questions anybody would ask.",
         "recordTargetCurveWhy": "phase 0 chooses it and every later phase is measured against it, "
                                 "so nothing on disk says which curve was picked",
         "measNoTask": "No capture task yet. It is derived from the phase, the naming glossary and the current ledger version — so it appears once the intake has settled the channel names.",
+        "measSeriesUnknown": "The series is not known yet: no open round, plan step or earlier round names it. Take measurements in with ⤓ — the first round asks for its number.",
         "measPhaseNoCapture": "This phase takes no measurements — it works on the series already captured. The next capture task appears with the phase that needs one.",
         "noProjectMeas": "No project — nothing to capture yet.",
         "npTitle": "New project",
@@ -1157,6 +1158,7 @@ Choose sweeps (sw) above to read this.",
         "recordTargetCurveWhy": "фаза 0 її обирає, і всі наступні фази міряються проти неї, "
                                 "тож на диску не лишилось, яку саме криву взяли",
         "measNoTask": "Завдання на зняття ще немає. Воно виводиться з фази, глосарія імен і поточної версії леджера — тож з'явиться, коли інтейк закріпить назви каналів.",
+        "measSeriesUnknown": "Серія ще не відома: її не називає ні відкритий раунд, ні крок плану, ні попередній раунд. Візьми заміри через ⤓ — перший раунд спитає номер.",
         "measPhaseNoCapture": "Ця фаза не робить замірів — вона працює з уже знятою серією. Наступне завдання на зняття зʼявиться разом із фазою, якій воно потрібне.",
         "noProjectMeas": "Немає проєкту — знімати поки нічого.",
         "npTitle": "Новий проєкт",
@@ -2049,6 +2051,7 @@ Choose sweeps (sw) above to read this.",
                                 'którą krzywą wzięto',
         "measNoTask": 'Zadania zdjęcia jeszcze nie ma. Wynika ono z fazy, słownika nazw i bieżącej wersji ledgera — '
                       'więc pojawi się, gdy intake ustali nazwy kanałów.',
+        "measSeriesUnknown": 'Seria nie jest jeszcze znana: nie podaje jej ani otwarta runda, ani krok planu, ani wcześniejsza runda. Pobierz pomiary przez ⤓ — pierwsza runda zapyta o numer.',
         "measPhaseNoCapture": 'Ta faza nie robi pomiarów — pracuje na już zdjętej serii. Następne zadanie zdjęcia pojawi '
                               'się razem z fazą, która go potrzebuje.',
         "noProjectMeas": 'Brak projektu — nie ma czego zdejmować.',
@@ -3004,6 +3007,7 @@ Choose sweeps (sw) above to read this.",
                                 'nirgends, welche Kurve genommen wurde',
         "measNoTask": 'Noch keine Messaufgabe. Sie ergibt sich aus der Phase, dem Namensglossar und der aktuellen '
                       'Ledger-Version — sie erscheint also, sobald der Intake die Kanalnamen festgelegt hat.',
+        "measSeriesUnknown": 'Die Serie ist noch nicht bekannt: weder eine offene Runde noch ein Planschritt noch eine frühere Runde nennt sie. Messungen mit ⤓ übernehmen — die erste Runde fragt nach der Nummer.',
         "measPhaseNoCapture": 'Diese Phase misst nicht — sie arbeitet mit der bereits erfassten Serie. Die nächste '
                               'Messaufgabe erscheint mit der Phase, die eine braucht.',
         "noProjectMeas": 'Kein Projekt — noch nichts zu messen.',

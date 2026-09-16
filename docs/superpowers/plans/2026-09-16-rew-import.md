@@ -32,7 +32,12 @@ p = Path("src/autosound_tcc/ui/tcc/i18n.py")
 lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
 at = [i for i, line in enumerate(lines) if ANCHOR in line]
 assert len(at) == 4, at
-for index, text in sorted(zip(at, KEYS), reverse=True):
+ends = []
+for index in at:  # an entry can span lines (implicit concatenation): insert after its last line
+    while not lines[index].rstrip().endswith(","):
+        index += 1
+    ends.append(index)
+for index, text in sorted(zip(ends, KEYS), reverse=True):
     lines.insert(index + 1, text)
 p.write_text("".join(lines), encoding="utf-8")
 ```

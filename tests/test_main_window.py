@@ -1981,10 +1981,13 @@ def test_switching_a_channel_asks_first(tmp_path, monkeypatch):
     assert sent == [("virtual", "VRR", True)]
 
 
-def test_the_capture_series_comes_from_the_plan_not_the_ledger():
+def test_the_capture_series_comes_from_the_plan_not_the_ledger(monkeypatch):
     """Naming the virtual-channel tier bumped the ledger `v_001 → v_002`, and the checklist jumped
     to series 2 before series 1 had been captured — watched twice, on two projects. The skill's own
     phase-0 steps say which round they mean: "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"."""
+    from autosound_tcc.state import process_view
+
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
     _app()
     window = MainWindow()
     window._view = None
@@ -1998,7 +2001,12 @@ def test_the_capture_series_comes_from_the_plan_not_the_ledger():
     assert window._capture_version(state) == 1
 
 
-def test_a_plan_that_names_no_series_falls_back_to_the_ledger():
+def test_the_ledger_version_never_becomes_the_series(monkeypatch):
+    """hub #153 A. The ledger's `v_NNN` also moves for changes that are not DSP changes, and a
+    project can start with the two apart (`v_001` measured as `_49`). With no round and no plan
+    step naming a series, the answer is "not known", not the ledger."""
+    from autosound_tcc.state import process_view
+
     _app()
     window = MainWindow()
 
@@ -2006,8 +2014,40 @@ def test_a_plan_that_names_no_series_falls_back_to_the_ledger():
         version = "v_003"
 
     window._view = View()
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [])
 
-    assert window._capture_version({"active_phase": "0", "plan": []}) == 3
+    assert window._capture_version({"active_phase": "0", "plan": []}) is None
+
+
+def test_the_open_round_names_the_series_before_the_plan(monkeypatch):
+    """A pass taken again after a DSP change is the round's series, whatever the plan said first."""
+    from autosound_tcc.state import process_view
+
+    _app()
+    window = MainWindow()
+    window._view = None
+    monkeypatch.setattr(process_view, "capture_round",
+                        lambda *a, **k: {"id": "cap_002", "expected": ["w-L_07 (sw)"]})
+    state = {"active_phase": "0",
+             "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: tw-L_1 (sw)"}]}
+
+    assert window._capture_version(state) == 7
+
+
+def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):
+    from autosound_tcc.state import process_view
+
+    _app()
+    window = MainWindow()
+    window._view = None
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {"closed": True})
+    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [
+        {"id": "cap_001", "expected": ["w-L_48 (sw)"], "taken": {}},
+        {"id": "cap_002", "expected": ["w-L_49 (sw)"], "taken": {"w-L_49 (sw)": {}}},
+    ])
+
+    assert window._capture_version({"active_phase": "0", "plan": []}) == 49
 
 
 def test_a_project_that_cannot_be_drawn_does_not_end_the_session(monkeypatch):

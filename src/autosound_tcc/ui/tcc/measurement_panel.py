@@ -668,6 +668,16 @@ class MeasurementPanel(QWidget):
         self._no_project_label.setText(message)
         self._no_project_label.setVisible(True)
 
+    def set_series_unknown(self) -> None:
+        """No series to derive a checklist at (hub #153 A) — said, with ⤓ still there to press.
+
+        Unlike `set_no_project`, the read button stays: taking measurements in is how a first round
+        gets its number, and the import asks for it.
+        """
+        self.set_no_project(i18n.t("measSeriesUnknown"))
+        self._capture_version = None
+        self._read_btn.setVisible(True)
+
     def _show_content(self) -> None:
         for widget in (
             self._session_combo,
@@ -1034,8 +1044,8 @@ class MeasurementPanel(QWidget):
             measurements,
             expected=self._expected,
             round_id=self._round_id,
-            has_task=bool(self._sessions and self._sessions[0].groups),
-            name_sets=self._method_channel_pairs() if self._sessions else {},
+            has_task=bool(self._has_real_sessions and self._sessions and self._sessions[0].groups),
+            name_sets=self._method_channel_pairs() if self._has_real_sessions else {},
             project_dir=config.project_dir(),
             parent=self,
         )

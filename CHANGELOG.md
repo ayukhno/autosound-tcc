@@ -33,6 +33,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A capture REW holds but nobody took in is blue, not yellow** — "it is there, import it". Green
   stays for what was taken in. An old round opened with the ledger version (`v_001`) now counts for
   the series its titles carry (`_49`).
+- **The series `_N` is no longer taken from the ledger version.** It comes from the open round, then
+  the plan, then the highest series among the rounds; with none of them the capture card says the
+  series is not known yet (hub #153).
 
 ### Fixed
 

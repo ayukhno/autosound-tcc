@@ -603,3 +603,17 @@ def test_an_old_round_opened_with_the_ledger_version_counts_by_the_series_of_its
 
     assert statuses["w-L_49 (sw)"] == mv.STATUS_DONE
 
+
+def test_the_series_is_read_by_the_grammar(project):
+    """hub #153 A: one reader of a title. Padding is the grammar's business too."""
+    assert mv.series_of(["Baseline solo", " w-L_07 (sw) "], project) == 7
+    assert mv.series_of(["not a title"], project) is None
+
+
+def test_the_highest_series_among_the_rounds(project):
+    process = _round(project, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    process.close_capture("done")
+    process.start_capture(3, expected=[_as_typed("w-L_3 (sw)")])
+
+    assert mv.highest_series(project) == 3
+

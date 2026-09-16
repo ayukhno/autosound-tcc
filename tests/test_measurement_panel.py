@@ -892,3 +892,17 @@ def test_a_capture_in_rew_that_nobody_took_in_is_still_outstanding():
 
     assert panel.outstanding_titles() == ["w-L_1 (sw)", "w-R_1 (sw)"]
 
+
+def test_an_unknown_series_says_so_and_leaves_the_read_button():
+    """hub #153 A: nothing names the series, so there is no checklist to derive — but taking
+    measurements in is how a first round gets its number, so ⤓ stays."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS, version=6)
+
+    panel.set_series_unknown()
+
+    assert panel._no_project_label.text() == i18n.t("measSeriesUnknown")
+    assert panel._read_btn.isVisibleTo(panel)
+    assert panel._capture_version is None
+

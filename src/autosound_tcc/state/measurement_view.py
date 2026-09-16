@@ -60,6 +60,52 @@ _METHOD_BY_SUFFIX = (("(sw)", "sw"), ("(rta)", "rta"))
 _METHOD_LABELS = {"sw": "sweep (sw)", "rta": "MMM RTA (rta)"}
 
 
+def _series_reader(project_dir: Optional[Path] = None):
+    """`title -> _N or None`, through the method's grammar with this project's glossary.
+
+    Built once per question: reading the glossary per title is a file read per title, and a
+    project has rounds of sixteen. No method on the machine answers None for every title.
+    """
+    project = Path(project_dir or config.project_dir())
+    try:
+        naming = vendor_loader.load_naming()
+        glossary = naming.Glossary.for_project(str(project)) if has_glossary(project) else None
+    except Exception:  # noqa: BLE001 — no method, no glossary: nothing here can read a title
+        return lambda _title: None
+
+    def read(title) -> Optional[int]:
+        entry = naming.parse_name(str(title).strip(), glossary)
+        value = entry.get("version_n") if entry else None
+        return value if isinstance(value, int) else None
+
+    return read
+
+
+def series_of(titles, project_dir: Optional[Path] = None) -> Optional[int]:
+    """The `_N` of the first of `titles` the method's grammar reads with one, or None (hub #153 A).
+
+    Through `naming.parse_name` and nothing of our own: a second reader of the grammar is the defect
+    the method's #34 was.
+    """
+    read = _series_reader(project_dir)
+    for title in titles:
+        found = read(title)
+        if found is not None:
+            return found
+    return None
+
+
+def highest_series(project_dir: Optional[Path] = None) -> Optional[int]:
+    """The highest `_N` among every round's titles, or None when no round names one."""
+    read = _series_reader(project_dir)
+    found = [
+        read(title)
+        for round_ in process_view.capture_rounds(project_dir)
+        for title in list(round_.get("expected") or []) + list(round_.get("taken") or {})
+    ]
+    found = [n for n in found if n is not None]
+    return max(found) if found else None
+
 def groups_from_titles(titles) -> list[dict]:
     """A flat list of REW titles, split into the column groups the panel renders.
 

@@ -3146,6 +3146,11 @@ class MainWindow(QMainWindow):
         # together, opening the read window was enough to turn the whole checklist green.
         taken = getattr(self._meas_panel, "taken_titles", lambda: titles)()
         version = self._capture_version(state)
+        if version is None:
+            # Nothing names the series and the ledger version is not it (hub #153 A). Said, with ⤓
+            # left working: an import with no round open asks for the number.
+            self._meas_panel.set_series_unknown()
+            return
         sessions = measurement_view.build_sessions(phase, version, titles, taken=taken)
         if sessions:
             self._meas_panel.set_sessions(sessions, version=version)
@@ -3153,34 +3158,35 @@ class MainWindow(QMainWindow):
             # round's captures are named in its evidence (SCR-035 makes sure they are).
             self._plan_panel.set_sessions(sessions)
 
-    _CAPTURE_SERIES = re.compile(r"_(\d+)\s*\((?:sw|rta)\)", re.IGNORECASE)
+    def _capture_version(self, state: Optional[dict] = None) -> Optional[int]:
+        """The series `_N` the current captures are named with, or None when nothing says (hub #153 A).
 
-    def _capture_version(self, state: Optional[dict] = None) -> int:
-        """The series the current phase's captures are named with.
+        `_N` is the DSP state the measurements were taken on. The ledger's `v_NNN` is a different
+        counter — it also moves for changes that are not DSP changes, and a project can start with
+        the two apart (`v_001` measured as `_49`) — so the ledger is not read here. In order:
 
-        `_N` is the config a measurement was taken under (naming-and-structure §3), so this used to
-        read the ledger's HEAD. That is wrong whenever the ledger moves for a reason that is not a
-        config change: naming the virtual-channel tier bumped `v_001 → v_002`, and the checklist
-        jumped to series 2 before series 1 had been captured. Watched twice, on two projects.
-
-        The plan already carries the answer. The skill writes its phase-0 steps as
-        "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)" — the round it means, in its own words — so
-        when a step in the active phase names a series, that wins. The ledger stays the fallback
-        for a plan that names none.
+        1. the open round: its titles are the pass being taken now;
+        2. the active phase's plan steps ("Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"), each piece
+           read by the method's grammar;
+        3. the highest `_N` among all rounds (the Arbiter, 2026-09-16);
+        4. None: the checklist says the series is not known yet, and an import with no round open
+           asks for it.
         """
+        round_ = process_view.capture_round() or {}
+        if round_ and not round_.get("closed"):
+            found = measurement_view.series_of(
+                list(round_.get("expected") or []) + list(round_.get("taken") or {}))
+            if found is not None:
+                return found
         for step in (state or {}).get("plan") or []:
             if not isinstance(step, dict) or str(step.get("phase")) != str(
                 (state or {}).get("active_phase")
             ):
                 continue
-            found = self._CAPTURE_SERIES.search(str(step.get("name") or ""))
-            if found:
-                return int(found.group(1))
-        head = getattr(self._view, "version", None) if self._view else None
-        try:
-            return int(str(head).lstrip("v_") or 1)
-        except (TypeError, ValueError):
-            return 1
+            found = measurement_view.series_of(re.split(r"[+,;:]", str(step.get("name") or "")))
+            if found is not None:
+                return found
+        return measurement_view.highest_series()
 
     # ---- AI backends --------------------------------------------------------
 
