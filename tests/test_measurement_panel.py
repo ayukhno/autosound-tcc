@@ -146,7 +146,7 @@ def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch)
 
     assert seen["expected"] == panel.outstanding_titles()
     assert len(seen["expected"]) == sum(
-        1 for row in panel._rows if row.status == "wait" and not row.additional)
+        1 for row in panel._rows if row.status in ("wait", "found") and not row.additional)
     assert seen["has_task"] is True
 
 
@@ -872,3 +872,23 @@ def test_the_card_fits_the_column_it_lives_in():
         "the legend must be able to shrink far below its one-row width")
     assert legend.minimumSizeHint().width() * 2 < panel.minimumSizeHint().width(), (
         "and it is no longer the widest thing in the card — it was 345 of the card's 369")
+
+
+def test_a_capture_in_rew_that_nobody_took_in_is_still_outstanding():
+    """Blue is not done (F-056): the import window has to offer its name like any yellow one."""
+    from autosound_tcc.state.models import MeasGroup, MeasItem
+    from autosound_tcc.ui.tcc.mock_data import MeasSession
+
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions([MeasSession(
+        id="cap_001", version={"en": "Series 1", "uk": "Серія 1"},
+        groups=(MeasGroup(type="sw", method="sw", items=(
+            MeasItem(name="w-L_1 (sw)", status="found"),
+            MeasItem(name="w-R_1 (sw)", status="wait"),
+            MeasItem(name="sw_1 (sw)", status="done"),
+        )),),
+    )], version=1)
+
+    assert panel.outstanding_titles() == ["w-L_1 (sw)", "w-R_1 (sw)"]
+

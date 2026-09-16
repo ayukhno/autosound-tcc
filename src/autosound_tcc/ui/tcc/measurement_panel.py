@@ -100,6 +100,8 @@ def with_method(name: str, suffix: str) -> str:
 #: translation sitting unused in the table while the legend showed English (2026-08-12).
 _LEGEND = (
     ("wait", "legWait"),
+    # In REW under its name, not taken in yet (F-056, the Arbiter 2026-09-16).
+    ("found", "legFound"),
     ("done", "legDone"),
     ("bad", "legBad"),
     # Recorded as decided against, with a reason (SCR-034) -- not the same as outstanding, which is
@@ -932,7 +934,7 @@ class MeasurementPanel(QWidget):
         REW holds that this checklist never asked for.
         """
         return [with_method(row.item_name, row.method_suffix) for row in self._rows
-                if row.status == "wait" and not row.additional]
+                if row.status in ("wait", "found") and not row.additional]
 
     def _remember_titles(self, titles) -> None:
         before = len(self._known_titles)

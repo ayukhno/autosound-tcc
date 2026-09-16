@@ -1026,6 +1026,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="meas-legend-label"] {{ color: {t.muted}; font-size: 10px; }}
     QLabel[class~="tl"] {{ border-radius: 4px; }}
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
+    QLabel[class~="tl-found"] {{ background: {t.info}; }}
     QLabel[class~="tl-done"] {{ background: {t.ok}; }}
     QLabel[class~="tl-bad"] {{ background: {t.warn}; }}
     /* A capture somebody decided against (SCR-034). Grey, not yellow: waiting is work outstanding,
