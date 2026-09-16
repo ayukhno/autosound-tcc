@@ -2255,6 +2255,29 @@ def test_the_flaw_map_shows_the_owner_only_what_outlives_the_tune(tmp_path, monk
     assert i18n.t("acousticsPlanHidden").format(n=2) in texts, "said, not silently dropped"
 
 
+def test_the_flaw_map_header_says_how_many_of_how_many_it_shows(tmp_path, monkeypatch):
+    """tcc#37. The line saying rows were withheld sits INSIDE a section that opens collapsed, under
+    the rows: a tuner who had just recorded eight rows counted seven and asked where the eighth
+    went. "7 of 8" in the header is seen without opening anything, and "all of them" reads
+    differently from "the owner's view"."""
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 73, "level_db": 9, "kind": "driver_resonance", "action": "notch"},
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry"},
+        {"f_hz": 400, "level_db": -5, "kind": "pair_suckout", "action": "crossover"},
+        {"f_hz": 5500, "level_db": -6, "kind": "driver_resonance", "action": "leave"},
+    ])
+
+    assert window._audio_section.sub_text() == i18n.t("acousticsShownOf").format(shown=2, total=4)
+
+
+def test_a_flaw_map_that_withholds_nothing_does_not_count_in_the_header(tmp_path, monkeypatch):
+    window = _window_with_flaws(tmp_path, monkeypatch, [
+        {"f_hz": 160, "level_db": -12, "kind": "sbir", "action": "geometry"},
+    ])
+
+    assert window._audio_section.sub_text() == ""
+
+
 def test_a_map_that_is_all_tuning_plan_does_not_claim_there_is_no_map(tmp_path, monkeypatch):
     """"No flaw map yet" would be false, and a panel that lies about the state of the work is
     worse than one that shows too much. Phase 0 has run; what it recorded is simply all plan."""

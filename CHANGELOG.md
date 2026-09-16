@@ -35,6 +35,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   allow-rule under `permissions.allow`, for the tool it named, and the clipboard step as the route
   that works meanwhile. It used to name `trustedWorkspaces`, which changed nothing when followed,
   and then offered `toolPermission: always-proceed` for every folder.
+- **The acoustic flaw map says "7 of 8 shown" in its header** when it withholds tuning-plan rows
+  (#37). The line saying so was inside a section that opens collapsed, under the rows, and was
+  missed.
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

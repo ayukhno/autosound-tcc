@@ -1317,6 +1317,12 @@ class MainWindow(QMainWindow):
         clear_layout(self._audio_section.body_layout())
         flaws = acoustics_view.load_flaws()
         shown, hidden = acoustics_view.split_for_owner(flaws)
+        # In the header, because the line below the rows is inside a section that opens collapsed:
+        # a tuner who had just recorded eight rows counted seven and asked where the eighth went
+        # (tcc#37). Nothing withheld, nothing to count — the header stays quiet.
+        self._audio_section.set_sub(
+            i18n.t("acousticsShownOf").format(shown=len(shown), total=len(flaws)) if hidden else ""
+        )
         if not flaws:
             # Before phase 0 there is nothing measured, and that is the ordinary state of a new
             # project rather than a fault: the intake fills this in.
