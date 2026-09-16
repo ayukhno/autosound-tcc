@@ -203,10 +203,14 @@ def test_phase_2_adds_the_group_pass(project):
 
 
 def test_off_convention_titles_are_reported_separately(project):
-    """No analysis will ever find these by name -- they're invisible, not merely uncaptured."""
-    titles = ["sw_1 (sw)", "Room EQ result", "c_01 (sw) noXO"]
+    """No analysis will ever find these by name -- they're invisible, not merely uncaptured.
 
-    assert mv.off_convention(titles, project) == ["Room EQ result", "c_01 (sw) noXO"]
+    Since the method's v3.0.53 a clarification after the method is in the grammar: `c_01 (sw) noXO`
+    is another measurement of series 1 (hub #153), no longer off-convention. A sweep with no `_N`
+    still is."""
+    titles = ["sw_1 (sw)", "Room EQ result", "c_01 (sw) noXO", "w-L (sw)"]
+
+    assert mv.off_convention(titles, project) == ["Room EQ result", "w-L (sw)"]
 
 
 def test_off_convention_is_empty_without_a_glossary(tmp_path, monkeypatch):
