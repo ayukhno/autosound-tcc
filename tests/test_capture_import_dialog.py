@@ -474,3 +474,19 @@ def test_a_name_nobody_planned_can_still_be_typed(tmp_path):
 
     assert (uuid, "r-L_17 (sw) noXO") in dialog.renames()
 
+
+def test_a_typed_name_outside_the_grammar_says_why_under_the_table(tmp_path):
+    """hub #153 E: a name the analysis will never find by its title is said at the moment it is
+    typed, in the method's own words — not refused: the person may know better."""
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        import pytest
+
+        pytest.skip("rew_tool submodule not checked out")
+    dialog = _dialog(_rew(1), tmp_path, expected=["w-L_02 (sw)"])
+
+    dialog._table.item(0, 4).setText("w-L (sw)")
+
+    assert "w-L (sw)" in dialog._note.text() and "_N" in dialog._note.text()
+

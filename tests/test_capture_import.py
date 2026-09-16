@@ -454,3 +454,24 @@ def test_a_renamed_channel_s_old_titles_answer_to_its_current_code(tmp_path):
 
     assert ci.channel_from_title("m-L_2 (sw)", tmp_path) == "w-L"
 
+
+@needs_the_method
+def test_a_name_outside_the_grammar_comes_with_the_method_s_reason(tmp_path):
+    """hub #153 E: `explain_name` says why a title is not in the grammar (method v3.0.53)."""
+    explain = ci.name_explainer(tmp_path)
+
+    assert "_N" in explain("w-L (sw)"), "no `_N` before `(sw)`"
+    assert explain("w-L_2 (sw) noXO") == "", "a clarification after the method is in the grammar"
+    assert explain("w-L (imp)") == "", "and so is an impedance sweep without `_N`"
+
+
+def test_a_method_without_explain_name_explains_nothing(monkeypatch, tmp_path):
+    from autosound_tcc.core import vendor_loader
+
+    class _Old:
+        pass
+
+    monkeypatch.setattr(vendor_loader, "load_naming", lambda: _Old())
+
+    assert ci.name_explainer(tmp_path)("w-L (sw)") == ""
+

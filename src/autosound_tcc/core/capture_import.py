@@ -500,6 +500,37 @@ def channel_from_title(title: str, project_dir: Optional[Path] = None) -> str:
     return title.split("_", 1)[0].split(" ", 1)[0].strip()
 
 
+def name_explainer(project_dir: Optional[Path] = None) -> Callable[[str], str]:
+    """`title -> why it is not in the naming grammar`, "" for a title that is (hub #153 E).
+
+    The method's own `explain_name` (v3.0.53), built once with this project's glossary: a dialog asks
+    it on every typed name. A method too old to have it, or none at all, explains nothing rather
+    than guessing — the grammar is the method's to read.
+    """
+    try:
+        from autosound_tcc.core import config as _config, vendor_loader
+
+        naming = vendor_loader.load_naming()
+        explain = getattr(naming, "explain_name", None)
+        if explain is None:
+            return lambda _title: ""
+        project = Path(project_dir or _config.project_dir())
+        glossary = (naming.Glossary.for_project(str(project))
+                    if (project / "glossary.json").is_file() or (project / "project.json").is_file()
+                    else None)
+    except Exception:  # noqa: BLE001 — no method, no glossary: nothing here can read a title
+        return lambda _title: ""
+
+    def why(title: str) -> str:
+        try:
+            _record, reason = explain(str(title).strip(), glossary)
+        except Exception:  # noqa: BLE001 — a reader that fails explains nothing
+            return ""
+        return str(reason or "")
+
+    return why
+
+
 def resolve_ordinals(measurements: dict, uuids: Iterable[str]) -> dict[str, str]:
     """`uuid -> REW's ordinal RIGHT NOW`, from a freshly fetched answer.
 

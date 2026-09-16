@@ -28,6 +28,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   ones other rows already took; a name nobody planned can still be typed (F-056).
 - **A driver's Fs carried in from another project says so** in the DSP tree's tooltip — the method's
   pre-sweep gate holds a fragile driver on it until it is confirmed here or measured (hub #154).
+- **A name typed in the import window that is outside the naming grammar says why**, in the method's
+  own words, under the table — without refusing it (hub #153).
 
 ### Changed
 

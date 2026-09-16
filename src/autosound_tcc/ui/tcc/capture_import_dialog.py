@@ -151,6 +151,8 @@ class CaptureImportDialog(QDialog):
         self.protective_conflicts: list[str] = []
 
         self._all = capture_import.candidates(self._measurements, project_dir)
+        #: Why a typed name is not in the naming grammar, in the method's words (hub #153 E).
+        self._explain_name = capture_import.name_explainer(project_dir)
         #: Ticked by uuid rather than by row, because +10 and the filter both re-render the table
         #: underneath the tuner, and a tick that survives only until the next redraw is a tick
         #: nobody can trust.
@@ -419,6 +421,12 @@ class CaptureImportDialog(QDialog):
             lines.append(i18n.t("capImportMissing").format(n=len(missing)))
         if not shown:
             lines.append(i18n.t("capImportEmpty"))
+        # A name the analysis will never find by its title, said when it is typed (hub #153 E) —
+        # not refused: an extra measurement may be named on purpose, and the person may know better.
+        for name in sorted(set(self._names.values())):
+            why = self._explain_name(name)
+            if why:
+                lines.append(i18n.t("capImportOffGrammar").format(name=name, why=why))
         self._note.setText(" ".join(lines))
         self._more_btn.setEnabled(len(self.visible_rows()) < len(self._all))
 
@@ -448,6 +456,7 @@ class CaptureImportDialog(QDialog):
             # while it is still emitting is not something to do under Qt.
             # Bound to this dialog, so a timer outliving a closed window does nothing.
             QTimer.singleShot(0, self, self._refresh_name_lists)
+            self._render_note(self._table.rowCount())
 
     def _on_give_names(self) -> None:
         """Fill names downwards from the selected row, out of a set the tuner picks.
