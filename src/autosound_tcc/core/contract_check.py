@@ -53,6 +53,11 @@ class ContractReport:
     error: str = ""
     checked_at: str = ""
     duration_s: float = 0.0
+    #: Facts carried in from another project, `{path, value, from, from_exists}` each, and the
+    #: source paths that no longer exist (the method's v3.0.53, hub #154 §3). Reported, never
+    #: gated: not issues, and not in `ok`.
+    inherited: tuple[dict, ...] = ()
+    sources_gone: tuple[str, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -220,6 +225,11 @@ def run(
         tail = "\n".join((proc.stderr or "").strip().splitlines()[-6:])
         return failed(tail or f"contract.py produced no report (exit {proc.returncode})")
 
+    return report_from_json(report, project_dir, checked_at, time.monotonic() - started)
+
+
+def report_from_json(report: dict, project_dir, checked_at: str, duration_s: float) -> ContractReport:
+    """`contract.py check --json`'s answer as a `ContractReport`."""
     files = report.get("files") or []
     return ContractReport(
         ok=bool(report.get("ok")),
@@ -227,5 +237,7 @@ def run(
         files=tuple(f for f in files if isinstance(f, dict)),
         cross_checks=report.get("cross_checks") or {},
         checked_at=checked_at,
-        duration_s=time.monotonic() - started,
+        duration_s=duration_s,
+        inherited=tuple(row for row in report.get("inherited") or [] if isinstance(row, dict)),
+        sources_gone=tuple(str(path) for path in report.get("sources_gone") or []),
     )

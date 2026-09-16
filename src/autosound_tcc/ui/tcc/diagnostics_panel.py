@@ -836,6 +836,18 @@ class DiagnosticsDialog(QDialog):
             self._body_layout.addWidget(_note(i18n.t("diagNoIssues")))
         self._body_layout.addWidget(_note(_rew_line(report)))
 
+        # Facts carried in from another project, and sources that are gone (hub #154 §3/§4).
+        # Reported, never gated — so not counted in the headline — but named: a fragile driver's
+        # inherited Fs holds the pre-sweep gate until the Arbiter confirms or measures it.
+        if report.inherited or report.sources_gone:
+            self._body_layout.addWidget(_section_title(i18n.t("diagInherited")))
+            for row in report.inherited:
+                self._body_layout.addWidget(_note(
+                    f"{row.get('path')} = {row.get('value')!r} "
+                    f"({i18n.t('diagInheritedFrom').format(path=row.get('from') or '?')})"))
+            for path in report.sources_gone:
+                self._body_layout.addWidget(_note(i18n.t("diagSourceGone").format(path=path)))
+
         # TCC's own setup, after the project's. Separate section because it is a different
         # question with a different owner: these are things TCC did to itself, and the ones it may
         # undo carry a button (see `core/self_check.py` for where that line is drawn).
@@ -880,21 +892,26 @@ def _rew_line(report: ContractReport) -> str:
         return f"{prefix}REW: {rew['note']}" if prefix else f"REW: {rew['note']}"
     if "expected" in rew:
         found, expected = len(rew.get("found") or []), len(rew.get("expected") or [])
+        skipped = rew.get("skipped") or {}
         where = f"round {rew['round']}, " if rew.get("round") else ""
         line = (
-            f"REW ({where}phase {rew.get('phase')}, v{rew.get('version')}): "
-            f"{found}/{expected} captured"
+            f"REW ({where}phase {rew.get('phase')}, {_round_label(rew.get('version'))}): "
+            f"{found}/{expected} captured" + (f", {len(skipped)} skipped" if skipped else "")
         )
         if not rew.get("complete"):
             line = f"{line} — missing {rew.get('missing')}"
+        # A skip is a decision with a reason, not work still owed (hub #154 §3) — said apart.
+        for title, reason in skipped.items():
+            line = f"{line}\n    skipped: {title} — {reason or 'no reason on record'}"
         return f"{prefix}{line}" if prefix else line
     return f"{prefix}REW: —" if prefix else "REW: —"
-    if rew.get("note"):
-        return f"REW: {rew['note']}"
-    if "expected" in rew:
-        found, expected = len(rew.get("found") or []), len(rew.get("expected") or [])
-        line = (
-            f"REW (phase {rew.get('phase')}, v{rew.get('version')}): {found}/{expected} captured"
-        )
-        return line if rew.get("complete") else f"{line} — missing {rew.get('missing')}"
-    return "REW: —"
+
+
+def _round_label(version) -> str:
+    """How a round's key reads: `v_001` as recorded, a bare `_N` as `_17` — never `vv_001`.
+
+    The method's own `contract.round_label` rule (v3.0.53, hub #154 §3), for a line this panel
+    composes itself.
+    """
+    text = str(version if version is not None else "?")
+    return text if text.startswith("v") or text == "?" else f"_{text}"

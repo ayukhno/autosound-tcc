@@ -148,3 +148,17 @@ def test_a_2x_project_is_reported_as_the_wrong_format(tmp_path):
 
     assert not report.ok
     assert any("migrate.py" in issue for issue in report.issues()), report.issues()
+
+
+def test_the_report_carries_inherited_facts_and_gone_sources():
+    """hub #154 §3: top-level `inherited` and `sources_gone` since the method's v3.0.53."""
+    report = contract_check.report_from_json({
+        "ok": True, "project_dir": "/p", "files": [], "cross_checks": {},
+        "inherited": [{"path": "car.body", "value": "sedan", "from": "/old", "from_exists": False}],
+        "sources_gone": ["/old"],
+    }, "/p", "2026-09-17T00:00:00+00:00", 0.5)
+
+    assert report.inherited == ({"path": "car.body", "value": "sedan", "from": "/old",
+                                 "from_exists": False},)
+    assert report.sources_gone == ("/old",)
+

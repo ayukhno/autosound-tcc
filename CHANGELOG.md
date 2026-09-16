@@ -70,6 +70,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   lines as the reason (hub #154).
 - **A distortion spike recorded in percent stays on the flaw map** and reads "THD 2.6 %"; it used to
   vanish when its level was null. A level tilt between a pair has its own label (hub #154).
+- **Diagnostics name skipped captures with their reasons**, apart from the missing ones, and a round
+  keyed by a ledger version reads `v_001`, not `vv_001`. Facts carried in from another project, and
+  sources that no longer exist, are listed (hub #154).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

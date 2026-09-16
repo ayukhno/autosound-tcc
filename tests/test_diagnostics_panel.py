@@ -739,3 +739,47 @@ def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch):
 
     assert "@beta-v0.2.0-rc2" in seen[0]
 
+
+def test_the_rew_line_names_skipped_captures_with_their_reasons_and_no_doubled_v():
+    """hub #154 §3 (method v3.0.53): `skipped` is `{title: reason}` apart from `missing`, and the
+    round's key reads `v_001` as recorded or `_17` for a bare series — it printed `vv_001`."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _rew_line
+
+    counted = _report(cross_checks={"rew": {
+        "reachable": True, "round": "cap_004", "phase": 0, "version": "v_001",
+        "expected": ["w-L_1 (sw)", "w-R_1 (sw)", "r-L_1 (sw)"], "found": ["w-L_1 (sw)"],
+        "missing": ["w-R_1 (sw)"], "skipped": {"r-L_1 (sw)": "rear deferred"}, "complete": False,
+    }})
+    line = _rew_line(counted)
+    assert "vv_001" not in line and "v_001" in line
+    assert "1 skipped" in line and "r-L_1 (sw) — rear deferred" in line
+    assert "missing ['w-R_1 (sw)']" in line
+
+    bare = _report(cross_checks={"rew": {
+        "reachable": True, "round": "cap_005", "phase": 0, "version": 17,
+        "expected": ["w-L_17 (sw)"], "found": ["w-L_17 (sw)"], "missing": [], "complete": True,
+    }})
+    assert ", _17)" in _rew_line(bare)
+
+
+def test_facts_carried_in_from_another_project_are_named_and_not_counted_as_issues(monkeypatch):
+    """hub #154 §3/§4: `inherited` and `sources_gone` are reported, never gated — a front-end is to
+    show them rather than parse the checker's prose."""
+    from PySide6.QtWidgets import QLabel
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog.set_report(_report(
+        ok=True, files=(), cross_checks={},
+        inherited=({"path": "channels.tw-L.fs_hz", "value": 1800, "from": "/cars/old",
+                    "from_exists": False},),
+        sources_gone=("/cars/old",),
+    ))
+
+    said = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert i18n.t("diagInherited") in said
+    assert "channels.tw-L.fs_hz = 1800" in said and "/cars/old" in said
+    assert i18n.t("diagSourceGone").format(path="/cars/old") in said
+    assert i18n.t("diagOk") in said, "reported, not an issue"
+
