@@ -411,23 +411,38 @@ def test_the_clipboard_answer_says_what_the_cli_actually_replied():
     assert "Ctrl+V" not in why, "and not the instructions that pushed them off the end"
 
 
-def test_a_permission_refusal_names_the_file_the_key_and_the_value():
-    """The reviewer's own words are precise enough to act on — but only to somebody who already
-    knows where that CLI keeps its settings, and nobody did. A session on the machine looked in
-    `~/.agy` and `%APPDATA%\\agy`, found nothing, and advised `--dangerously-skip-permissions`:
-    a bigger hammer than the situation needs, and one that leaves no record of a decision.
+def test_a_headless_refusal_names_the_rule_agy_asked_for_and_the_route_that_works():
+    """tcc#36. The advice named `trustedWorkspaces`, and following it changed nothing: the project
+    was added, the JSON checked, the same call re-run — a byte-identical refusal (Windows,
+    2026-09-14). agy says what it wants in the same breath: an allow-rule under `permissions.allow`,
+    because a headless run cannot ask. And the wide answer (`toolPermission: always-proceed`) must
+    not come next after a narrow one that did nothing: that walks a person to "every folder" by
+    elimination. What does work on that machine today is the clipboard step.
 
-    The real path was read out of the binary: `~/.gemini/antigravity-cli/settings.json`."""
+    The settings path was read out of the binary: `~/.gemini/antigravity-cli/settings.json`."""
     from autosound_tcc.core import critic
 
-    fix = critic.remedy(
-        ">> agy: permission required for read_file(project.json)",
-        harness="agy", project_dir="/cars/golf-r")
+    said = ('jetski: no output produced — a tool required the "read_file" permission that headless '
+            'mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow '
+            'in settings.json (e.g. read_file(<target>)). Alternatively, re-run with '
+            '--dangerously-skip-permissions to auto-approve all tools.')
+    fix = critic.remedy(said, harness="agy", project_dir="/cars/golf-r")
 
     assert critic.AGY_SETTINGS in fix, "which file"
-    assert "trustedWorkspaces" in fix, "which key"
-    assert "/cars/golf-r" in fix, "which value"
-    assert "always-proceed" in fix, "and the wider answer, named as wider"
+    assert "permissions.allow" in fix, "the key agy asked for"
+    assert "read_file(" in fix, "for the tool it named"
+    assert "/cars/golf-r" in fix, "and where the project is"
+    assert "trustedWorkspaces" not in fix, "the key that was followed and changed nothing"
+    assert "always-proceed" not in fix, "no wide answer after a narrow one"
+    assert "clipboard" in fix, "and the route that works meanwhile"
+
+
+def test_the_refused_tool_is_named_as_agy_spelled_it():
+    from autosound_tcc.core import critic
+
+    fix = critic.remedy(">> agy: permission required for list_dir(project.json)", harness="agy")
+
+    assert "list_dir(" in fix and "read_file" not in fix
 
 
 def test_a_rejected_key_says_it_is_tried_first_and_costs_the_time():

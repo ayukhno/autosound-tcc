@@ -31,6 +31,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   an earlier round already took now waits for it to be taken again in this round. Before, it
   borrowed the earlier take: the import window said the round expected nothing and offered no
   names, and an empty round read green. A capture the new round does not ask for still counts.
+- **The advice for a reviewer refused a permission by agy names what agy asked for** (#36): an
+  allow-rule under `permissions.allow`, for the tool it named, and the clipboard step as the route
+  that works meanwhile. It used to name `trustedWorkspaces`, which changed nothing when followed,
+  and then offered `toolPermission: always-proceed` for every folder.
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

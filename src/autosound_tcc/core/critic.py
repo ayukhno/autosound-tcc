@@ -378,6 +378,12 @@ _LOCATION_WORDS = ("selected location", "your location", "your region", "not ava
 _BAD_MODEL_WORDS = ("model", "not available", "unknown model", "не підтримується")
 
 
+def _refused_tool(said: str) -> str:
+    """The tool agy says it refused, spelled as agy spells it (`read_file`), or ""."""
+    match = re.search(r'"([a-z_]+)"\s+permission', said) or re.search(r"\b([a-z_]+)\(", said)
+    return match.group(1) if match else ""
+
+
 def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
     """ONE concrete thing to do, or "" when we cannot name one honestly.
 
@@ -395,11 +401,19 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
         return ""
     if any(word in said for word in _PERMISSION_WORDS):
         where = project_dir or config.project_dir()
+        # agy's own words, not a guess about its settings (tcc#36). This used to name
+        # `trustedWorkspaces`; the Arbiter followed it on Windows and the refusal came back
+        # byte-identical — the project folder was never the gate. It also offered
+        # `toolPermission: always-proceed` next, which after a narrow fix that did nothing walks a
+        # person to "every folder" by elimination. How narrow the rule should be is the method's
+        # call (autosound-hub#150); until it says, the clipboard step is the route that works.
+        tool = _refused_tool(said) or "read_file"
         return (
-            f"the reviewer CLI is asking permission it has no standing answer for. Put this "
-            f"project in its trusted list: open `{AGY_SETTINGS}` and add \"{where}\" to "
-            f"`trustedWorkspaces`. `\"toolPermission\": \"always-proceed\"` in the same file "
-            f"answers it for every folder at once — a wider choice, and one to make on purpose."
+            f"agy runs the reviewer headless, so it cannot ask for the `{tool}` permission and "
+            f"refuses it. Its own answer is an allow-rule under `permissions.allow` in "
+            f"`{AGY_SETTINGS}`, in the form it prints: `{tool}(<target>)`; this project is at "
+            f"{where}. Until that rule is there, the route that works is the clipboard step: paste "
+            f"the package into a web chat and bring the answer back."
         ) if (harness or "").lower() == "agy" else (
             f"the reviewer CLI is asking permission it has no standing answer for. It needs that "
             f"answer in its own settings; this project is at {where}."
