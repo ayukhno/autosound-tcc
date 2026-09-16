@@ -1701,7 +1701,7 @@ ERROR the MCP server did not start:
 
 ### F-058 — The method on the beta channel (hub #140, ask 1, the method half)
 
-**Статус**: open · split off by the Arbiter, 2026-09-16; after the trial run
+**Статус**: dropped 2026-09-16 · the Arbiter: "I don't need beta — it was proposed to protect updates; taking a tag is enough." TCC's half stays (the Arbiter's choice the same day: harmless, unticked by default)
 
 TCC's own half of the beta channel is built (F-052). The method half is not: the rule of 2026-09-14
 ("the terminal takes a released tag, a session TCC starts with the box ticked takes a candidate")
