@@ -425,3 +425,52 @@ def test_the_same_chain_on_two_rows_of_one_channel_is_fine(tmp_path):
 
     assert list(dialog.protective()) == ["w-L"]
     assert dialog.protective_conflicts == []
+
+
+# ---- the new name, chosen from what the round still waits for -----------------------------------
+
+def _name_editor(dialog, row: int):
+    return dialog._table.indexWidget(dialog._table.model().index(row, 4))
+
+
+def test_the_new_name_offers_what_the_round_still_waits_for(tmp_path):
+    """F-056, the Arbiter 2026-09-16: the import window lacked a field chosen from the list of what
+    still has to be captured."""
+    dialog = _dialog(_rew(2), tmp_path, expected=["w-L_02 (sw)", "w-R_02 (sw)"])
+
+    assert dialog.name_choices(dialog.uuid_at(0)) == ["w-L_02 (sw)", "w-R_02 (sw)"]
+    editor = _name_editor(dialog, 0)
+    assert [editor.itemText(i) for i in range(editor.count())] == ["w-L_02 (sw)", "w-R_02 (sw)"]
+
+
+def test_a_name_chosen_in_one_row_leaves_the_other_rows_lists(tmp_path):
+    dialog = _dialog(_rew(2), tmp_path, expected=["w-L_02 (sw)", "w-R_02 (sw)"])
+    first, second = dialog.uuid_at(0), dialog.uuid_at(1)
+
+    dialog._table.item(0, 4).setText("w-L_02 (sw)")
+
+    assert dialog.name_choices(second) == ["w-R_02 (sw)"]
+    assert dialog.name_choices(first) == ["w-L_02 (sw)", "w-R_02 (sw)"], "a row keeps its own"
+
+
+def test_choosing_from_the_list_takes_the_row_and_renames_it(tmp_path):
+    dialog = _dialog(_rew(1), tmp_path, expected=["w-L_02 (sw)"])
+    uuid = dialog.uuid_at(0)
+    editor = _name_editor(dialog, 0)
+
+    editor.setCurrentIndex(0)
+    editor.activated.emit(0)
+
+    assert uuid in dialog._ticked
+    assert (uuid, "w-L_02 (sw)") in dialog.renames()
+
+
+def test_a_name_nobody_planned_can_still_be_typed(tmp_path):
+    """An extra measurement names itself — what it is and what it is for (hub #153)."""
+    dialog = _dialog(_rew(1), tmp_path, expected=["w-L_02 (sw)"])
+    uuid = dialog.uuid_at(0)
+
+    dialog._table.item(0, 4).setText("r-L_17 (sw) noXO")
+
+    assert (uuid, "r-L_17 (sw) noXO") in dialog.renames()
+

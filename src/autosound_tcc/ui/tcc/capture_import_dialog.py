@@ -24,14 +24,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -67,6 +69,40 @@ def legs_summary(legs) -> str:
         freq = f"{value:g}" if isinstance(value, (int, float)) else str(value or "?")
         parts.append(f"{i18n.t(key)} {leg.get('type') or ''}{leg.get('slope') or ''} {freq}")
     return " · ".join(parts)
+
+
+class _NameDelegate(QStyledItemDelegate):
+    """The new-name cell as a list of what the round still waits for, with room to type (F-056).
+
+    A delegate over the cell's own item, not a widget beside it: the item stays the one place the
+    name lives, so "Give names", a typed name and the clash check keep working on the item.
+    """
+
+    def __init__(self, dialog: "CaptureImportDialog") -> None:
+        super().__init__(dialog)
+        self._dialog = dialog
+
+    def createEditor(self, parent, option, index):  # noqa: N802 — Qt's name
+        combo = QComboBox(parent)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.lineEdit().setPlaceholderText(i18n.t("capImportNamePick"))
+        # Every choice lands at once: a persistent editor otherwise commits only when focus leaves.
+        combo.activated.connect(lambda _index, c=combo: self.commitData.emit(c))
+        combo.lineEdit().editingFinished.connect(lambda c=combo: self.commitData.emit(c))
+        return combo
+
+    def setEditorData(self, editor, index):  # noqa: N802
+        editor.blockSignals(True)
+        editor.clear()
+        editor.addItems(self._dialog.name_choices(self._dialog.uuid_at(index.row())))
+        editor.setCurrentText(str(index.data() or ""))
+        editor.blockSignals(False)
+
+    def setModelData(self, editor, model, index):  # noqa: N802
+        text = editor.currentText().strip()
+        if text != str(index.data() or ""):
+            model.setData(index, text)
 
 
 class CaptureImportDialog(QDialog):
@@ -164,6 +200,7 @@ class CaptureImportDialog(QDialog):
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
                                     | QTableWidget.EditTrigger.AnyKeyPressed)
+        self._table.setItemDelegateForColumn(_COL_NAME, _NameDelegate(self))
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
@@ -260,6 +297,20 @@ class CaptureImportDialog(QDialog):
             self._legs.pop(uuid, None)
         self._render()
 
+    def name_choices(self, uuid: str) -> list[str]:
+        """What the round still waits for, minus the names other rows have already chosen."""
+        chosen_elsewhere = {name for other, name in self._names.items() if other != uuid}
+        return [name for name in self._expected if name not in chosen_elsewhere]
+
+    def _refresh_name_lists(self) -> None:
+        """Re-offer every row's list once a name was chosen or cleared somewhere else."""
+        delegate = self._table.itemDelegateForColumn(_COL_NAME)
+        for row in range(self._table.rowCount()):
+            index = self._table.model().index(row, _COL_NAME)
+            editor = self._table.indexWidget(index)
+            if editor is not None:
+                delegate.setEditorData(editor, index)
+
     def _on_cell_clicked(self, row: int, column: int) -> None:
         """The protective cell opens the Protection form's own fields for this one row (F-056)."""
         if column != _COL_PROT:
@@ -320,6 +371,8 @@ class CaptureImportDialog(QDialog):
                 name.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 name.setToolTip(i18n.t("capImportNoUuid"))
             self._table.setItem(index, _COL_NAME, name)
+            if row.identified:
+                self._table.openPersistentEditor(name)
 
             # What was in the chain, as one line; a click opens the Protection form's own fields
             # for this row (F-056, the Arbiter 2026-09-16 — it used to be two typed frequencies).
@@ -391,6 +444,10 @@ class CaptureImportDialog(QDialog):
                 self._ticked.add(uuid)
             else:
                 self._names.pop(uuid, None)
+            # Deferred: this runs inside the editor's own commit, and repopulating that editor
+            # while it is still emitting is not something to do under Qt.
+            # Bound to this dialog, so a timer outliving a closed window does nothing.
+            QTimer.singleShot(0, self, self._refresh_name_lists)
 
     def _on_give_names(self) -> None:
         """Fill names downwards from the selected row, out of a set the tuner picks.

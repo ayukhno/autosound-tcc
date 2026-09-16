@@ -24,6 +24,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   ticked until the box is used. The method keeps following released tags on both channels.
 - **A candidate build says which one it is**: `0.1.38 (beta-v0.2.0-rc1)` on the update row and in
   the installation block.
+- **The import window's new name is a list** of the names the round still waits for, without the
+  ones other rows already took; a name nobody planned can still be typed (F-056).
 
 ### Changed
 
