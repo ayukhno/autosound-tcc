@@ -1722,7 +1722,7 @@ starts; and whether TCC's own panels load the method's modules from the same cop
 
 ### F-056 — Import from REW into TCC: the logic and the implementation
 
-**Статус**: open · the Arbiter, 2026-09-14 (end of the 0.1.39 test day): "a huge problem"; for the next session
+**Статус**: doing · the three points and hub #153 A–C, E, F built on `wave-0.1.40` (2026-09-16/17), waiting for the Arbiter's test; hub #153 D (a clarification as what an extra is for, where `(imp)` belongs) is the Arbiter's call
 
 Named, not yet described. Seen around it today: the protective-filter dialog asks for virtual channels
 (TEST-FINDINGS 22), reading depends on REW's display smoothing (hub #151), and the session filed
