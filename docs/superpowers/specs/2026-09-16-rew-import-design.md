@@ -91,8 +91,10 @@ Columns: take · # · REW title · when · **new name** · **protective**.
 
 **The channel of a title** (hub #153 B; `core/capture_import.py`)
 - `channel_from_title` reads the parsed record's `code_current`, then `code`. The string split stays
-  only for a title the grammar does not read. `L w+m_3 (sw)` no longer reads as `L`, and a renamed
-  channel's titles find its protective record.
+  only for a title the grammar does not read. A renamed channel's titles resolve to its current code
+  (`m-L_2 (sw)` → `w-L` with `previous_names: ["m-L"]`) and find its protective record. Measured at the
+  `v3.0.52` pin: the grammar itself reads `L w+m_3 (sw)` as code `L`, so that example from hub #153 does
+  not change here.
 
 **Old rounds** (hub #153 C; `state/measurement_view.py`)
 - In `build_session`'s rounds loop, a round counts for series N when its `version` (without `v_` and
@@ -115,8 +117,7 @@ Test-first, in the existing files:
   `found`; an old round `v_001` with `_49` titles counts for 49.
 - `tests/test_main_window.py` — `_capture_version`: the open round wins over the plan; the plan read by
   the grammar; the highest among rounds; `None` with none of them; a ledger at `v_007` never becomes 7.
-- `tests/test_capture_import.py` — `channel_from_title` on a joint title and on a renamed channel, with
-  literal expectations taken from one run of the parser at the pinned method.
+- `tests/test_capture_import.py` — `channel_from_title` on a renamed channel (`m-L_2 (sw)` → `w-L`).
 - `tests/test_capture_import_dialog.py` — the name list is the outstanding names minus those chosen
   elsewhere; free text; choosing ticks the row; the protective cell's summary; the legs dialog
   round-trips; `protective()` per channel with a conflict.
