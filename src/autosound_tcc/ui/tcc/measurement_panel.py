@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QPushButton,
     QVBoxLayout,
@@ -1102,9 +1103,13 @@ class MeasurementPanel(QWidget):
         if not process_writer.is_available():
             return  # no skill installed: the project's own store is all there is to write
         if not self._round_id and self._capture_version is None:
-            # Nothing to open a round AT. Rather than invent a version, leave the ledger alone and
-            # keep the measurements where they already are.
-            return
+            # No round and no series (hub #153 A). The number is asked rather than invented — the
+            # ledger version is a different counter — and Cancel leaves the ledger alone, as it
+            # always did when there was nothing to open a round AT.
+            asked = self._ask_series()
+            if asked is None:
+                return
+            self._capture_version = asked
         worker = self._replace_worker("_ledger_worker", _LedgerWriteWorker(
             project_dir=config.project_dir(),
             round_id=self._round_id,
@@ -1115,6 +1120,12 @@ class MeasurementPanel(QWidget):
         ))
         worker.done.connect(self._on_ledger_written)
         worker.start()
+
+    def _ask_series(self) -> Optional[int]:
+        """The series number for a first round, asked because nothing else says it (hub #153 A)."""
+        value, ok = QInputDialog.getInt(
+            self, i18n.t("askSeriesTitle"), i18n.t("askSeriesLabel"), 1, 1, 9999, 1)
+        return int(value) if ok else None
 
     def _protective_for(self, rows: list, titles: dict) -> dict:
         """What was in the chain, for every channel coming in — typed legs, or `"OFF"`.

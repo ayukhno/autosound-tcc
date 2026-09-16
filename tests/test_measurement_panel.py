@@ -906,3 +906,45 @@ def test_an_unknown_series_says_so_and_leaves_the_read_button():
     assert panel._read_btn.isVisibleTo(panel)
     assert panel._capture_version is None
 
+
+def _first_pass(panel, tmp_path) -> None:
+    panel._taking = capture_import.candidates(
+        {"1": {"title": "w-L_49 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:11:31"}}, tmp_path)
+    panel._expected = []
+    panel._protective = {}
+
+
+def test_a_first_round_with_no_series_asks_for_the_number(tmp_path, monkeypatch):
+    """hub #153 A: nothing names the series, so the number is asked rather than invented."""
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    captured = _fake_ledger(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_series_unknown()
+    _first_pass(panel, tmp_path)
+    monkeypatch.setattr(mp.QInputDialog, "getInt", lambda *a, **k: (49, True))
+
+    panel._finish_import({})
+
+    assert captured["version"] == 49
+
+
+def test_cancelling_the_series_question_opens_no_round(tmp_path, monkeypatch):
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    captured = _fake_ledger(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_series_unknown()
+    _first_pass(panel, tmp_path)
+    monkeypatch.setattr(mp.QInputDialog, "getInt", lambda *a, **k: (1, False))
+
+    panel._finish_import({})
+
+    assert captured == {}, "the ledger is left alone"
+

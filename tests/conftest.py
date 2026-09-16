@@ -307,4 +307,11 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
             updates.Status("skill", "0.0.0", "", False, "offline in tests", updatable=False)),
         raising=False,
     )
+    # ...and no modal question waits for a person who is not there. A first capture round with no
+    # series asks for its number (hub #153 A); in a test nobody answers, and a real QInputDialog
+    # holds the whole run — it did, for five minutes, on the first try. Cancel is the answer here;
+    # tests about that question patch this themselves, later, and win.
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getInt", staticmethod(lambda *_a, **_k: (0, False)))
     yield
