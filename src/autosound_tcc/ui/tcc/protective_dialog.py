@@ -65,6 +65,88 @@ QUICK_TYPE, QUICK_SLOPE = "LR", 24
 QUICK_LABEL = f"{QUICK_TYPE}{QUICK_SLOPE}"
 
 
+#: The one tier a protective filter can sit in (TEST-FINDINGS 22): the outputs, the drivers being
+#: measured. `physical_outputs` is the group id every DSP profile has; in `project.json` the same
+#: tier is `channels` (the method's `dsp_profile.ledger_tier_key`).
+OUTPUT_TIER = "physical_outputs"
+
+
+def leg_widgets(grid: QGridLayout, row: int, col: int, label_key: str):
+    """Frequency, type, slope and the LR24 button for one leg, placed in `grid` from `col`.
+
+    Shared by the Protection form's channel rows and the import row's form (F-056): one set of
+    fields in both places.
+    """
+    freq = QLineEdit()
+    freq.setPlaceholderText(i18n.t(label_key))
+    # Wide enough for the placeholder that names it ("ФВЧ Гц" was reaching the user as
+    # "ФВЧ …"), and no wider: eight rows of these share the dialog with two combos each.
+    freq.setMinimumWidth(freq.fontMetrics().horizontalAdvance(i18n.t(label_key)) + 20)
+    freq.setMaximumWidth(120)
+    grid.addWidget(freq, row, col)
+    kind = mini_combo()
+    kind.addItem("—", "")
+    for name in TYPES:
+        kind.addItem(name, name)
+    grid.addWidget(kind, row, col + 1)
+    slope = mini_combo()
+    slope.addItem("—", "")
+    for value in SLOPES:
+        slope.addItem(str(value), value)
+    grid.addWidget(slope, row, col + 2)
+    # The one press that covers the ordinary case (user, 2026-09-02: "додати маленьку кнопочку
+    # по нажаттю якої фільтр стає LR24"). Two combos are the honest surface — a protective
+    # filter can be anything that was in the chain — but nearly every one of them is an LR24,
+    # and choosing it twice per channel is a toll on the common path.
+    #
+    # It also removes a real trap: the skill's writer refuses a leg with a frequency and no
+    # type or slope, so "type 80 and press Record" is a refusal today. This is the fix for it.
+    quick = QPushButton(QUICK_LABEL)
+    quick.setProperty("class", "reason-btn")
+    quick.setCursor(Qt.CursorShape.PointingHandCursor)
+    # Measured off the text, not a fixed 46 px: Qt's `sizeHint` for a QPushButton leaves out
+    # the horizontal padding the stylesheet adds (`.reason-btn` is `padding: 4px 12px`), so a
+    # hard width cuts the label — "LR24" reached the user as ".R24" (2026-09-06), the same way
+    # "Protection" once reached them as "Protectior" (`measurement_panel._fit_fact_buttons`).
+    # A minimum rather than a fixed size, so a zoomed-in font still fits.
+    quick.setMinimumWidth(quick.fontMetrics().horizontalAdvance(QUICK_LABEL) + 34)
+    attach_tip(quick, i18n.t("protQuickTip"))
+    quick.clicked.connect(lambda: quick_fill(kind, slope))
+    grid.addWidget(quick, row, col + 3)
+    return freq, kind, slope, quick
+
+
+def quick_fill(kind: QComboBox, slope: QComboBox) -> None:
+    """LR24 into this leg — the type and slope nearly every protective filter actually is."""
+    kind.setCurrentIndex(max(0, kind.findData(QUICK_TYPE)))
+    slope.setCurrentIndex(max(0, slope.findData(QUICK_SLOPE)))
+
+
+def fill_leg(freq: QLineEdit, typ: QComboBox, slope: QComboBox, leg: dict) -> None:
+    """Show one recorded leg in its fields, unchanged."""
+    value = leg.get("f")
+    freq.setText(f"{value:g}" if isinstance(value, (int, float)) else str(value or ""))
+    typ.setCurrentIndex(max(0, typ.findData(leg.get("type"))))
+    slope.setCurrentIndex(max(0, slope.findData(leg.get("slope"))))
+
+
+def read_leg(freq: QLineEdit, typ: QComboBox, slope: QComboBox):
+    """One leg as the ledger states it, or None when the fields are empty.
+
+    Empty is passed through as absent rather than as a refusal: a channel with only a high-pass is
+    ordinary. A HALF-filled leg is not repaired here — it goes to the writer as typed, and the
+    writer's refusal is what the person reads.
+    """
+    text = freq.text().strip()
+    if not text and not typ.currentData() and not slope.currentData():
+        return None
+    try:
+        value = float(text.replace(",", "."))
+    except ValueError:
+        value = text  # the gate says what is wrong with it, in its own words
+    return {"f": value, "type": typ.currentData() or "", "slope": slope.currentData() or ""}
+
+
 class _ChannelRow:
     """One channel's answer, and the widgets that collect it."""
 
@@ -76,56 +158,12 @@ class _ChannelRow:
         name.setProperty("class", "kv-val")
         grid.addWidget(name, row, 0)
 
-        self.hp_f, self.hp_type, self.hp_slope, self.hp_quick = self._leg_widgets(
+        self.hp_f, self.hp_type, self.hp_slope, self.hp_quick = leg_widgets(
             grid, row, 1, "protHp")
-        self.lp_f, self.lp_type, self.lp_slope, self.lp_quick = self._leg_widgets(
+        self.lp_f, self.lp_type, self.lp_slope, self.lp_quick = leg_widgets(
             grid, row, 5, "protLp")
 
         self._fill_from(legs)
-
-    def _leg_widgets(self, grid: QGridLayout, row: int, col: int, label_key: str):
-        freq = QLineEdit()
-        freq.setPlaceholderText(i18n.t(label_key))
-        # Wide enough for the placeholder that names it ("ФВЧ Гц" was reaching the user as
-        # "ФВЧ …"), and no wider: eight rows of these share the dialog with two combos each.
-        freq.setMinimumWidth(freq.fontMetrics().horizontalAdvance(i18n.t(label_key)) + 20)
-        freq.setMaximumWidth(120)
-        grid.addWidget(freq, row, col)
-        kind = mini_combo()
-        kind.addItem("—", "")
-        for name in TYPES:
-            kind.addItem(name, name)
-        grid.addWidget(kind, row, col + 1)
-        slope = mini_combo()
-        slope.addItem("—", "")
-        for value in SLOPES:
-            slope.addItem(str(value), value)
-        grid.addWidget(slope, row, col + 2)
-        # The one press that covers the ordinary case (user, 2026-09-02: "додати маленьку кнопочку
-        # по нажаттю якої фільтр стає LR24"). Two combos are the honest surface — a protective
-        # filter can be anything that was in the chain — but nearly every one of them is an LR24,
-        # and choosing it twice per channel is a toll on the common path.
-        #
-        # It also removes a real trap: the skill's writer refuses a leg with a frequency and no
-        # type or slope, so "type 80 and press Record" is a refusal today. This is the fix for it.
-        quick = QPushButton(QUICK_LABEL)
-        quick.setProperty("class", "reason-btn")
-        quick.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Measured off the text, not a fixed 46 px: Qt's `sizeHint` for a QPushButton leaves out
-        # the horizontal padding the stylesheet adds (`.reason-btn` is `padding: 4px 12px`), so a
-        # hard width cuts the label — "LR24" reached the user as ".R24" (2026-09-06), the same way
-        # "Protection" once reached them as "Protectior" (`measurement_panel._fit_fact_buttons`).
-        # A minimum rather than a fixed size, so a zoomed-in font still fits.
-        quick.setMinimumWidth(quick.fontMetrics().horizontalAdvance(QUICK_LABEL) + 34)
-        attach_tip(quick, i18n.t("protQuickTip"))
-        quick.clicked.connect(lambda: self._quick_fill(kind, slope))
-        grid.addWidget(quick, row, col + 3)
-        return freq, kind, slope, quick
-
-    def _quick_fill(self, kind: QComboBox, slope: QComboBox) -> None:
-        """LR24 into this leg — the type and slope nearly every protective filter actually is."""
-        kind.setCurrentIndex(max(0, kind.findData(QUICK_TYPE)))
-        slope.setCurrentIndex(max(0, slope.findData(QUICK_SLOPE)))
 
     def _fill_from(self, legs) -> None:
         """Show what the round already says about this channel, unchanged.
@@ -145,26 +183,7 @@ class _ChannelRow:
             leg = live.get(kind)
             if not leg:
                 continue
-            value = leg.get("f")
-            freq.setText(f"{value:g}" if isinstance(value, (int, float)) else str(value or ""))
-            typ.setCurrentIndex(max(0, typ.findData(leg.get("type"))))
-            slope.setCurrentIndex(max(0, slope.findData(leg.get("slope"))))
-
-    def _leg(self, freq: QLineEdit, typ: QComboBox, slope: QComboBox):
-        """One leg as the ledger states it, or None when the row is empty.
-
-        Empty is passed through as absent rather than as a refusal: a channel with only a
-        high-pass is ordinary. A HALF-filled leg is not repaired here — it goes to the writer as
-        typed, and the writer's refusal is what the person reads.
-        """
-        text = freq.text().strip()
-        if not text and not typ.currentData() and not slope.currentData():
-            return None
-        try:
-            value = float(text.replace(",", "."))
-        except ValueError:
-            value = text  # the gate says what is wrong with it, in its own words
-        return {"f": value, "type": typ.currentData() or "", "slope": slope.currentData() or ""}
+            fill_leg(freq, typ, slope, leg)
 
     def answer(self):
         """`"OFF"` for an empty row, or a `{hp, lp}` dict for a row with filters in it.
@@ -175,8 +194,8 @@ class _ChannelRow:
         person about (`core/protective.should_de_embed`, the `"check"` answer).
         """
         legs = {}
-        hp, lp = (self._leg(self.hp_f, self.hp_type, self.hp_slope),
-                  self._leg(self.lp_f, self.lp_type, self.lp_slope))
+        hp, lp = (read_leg(self.hp_f, self.hp_type, self.hp_slope),
+                  read_leg(self.lp_f, self.lp_type, self.lp_slope))
         if hp:
             legs["hp"] = hp
         if lp:
@@ -276,6 +295,75 @@ class ProtectiveDialog(QDialog):
         self.accept()
 
 
+class ProtectiveLegsDialog(QDialog):
+    """One import row's protective filters, with the Protection form's own fields (F-056).
+
+    The import table took a bare frequency and implied LR24; the Arbiter asked for the form's
+    fields, and for protective filters only (2026-09-16). It collects and does not validate, like
+    the form: a half-filled leg reaches the method's writer as typed.
+    """
+
+    def __init__(self, legs=None, parent=None) -> None:
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle(i18n.t("protFormTitle"))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+        head = QLabel(i18n.t("protFormTitle"))
+        head.setWordWrap(True)
+        head.setProperty("class", "kv-lbl")
+        layout.addWidget(head)
+
+        holder = QWidget()
+        grid = QGridLayout(holder)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        self.hp = leg_widgets(grid, 0, 0, "protHp")
+        self.lp = leg_widgets(grid, 0, 4, "protLp")
+        layout.addWidget(holder)
+
+        live = legs if isinstance(legs, dict) else {}
+        for kind, widgets in (("hp", self.hp), ("lp", self.lp)):
+            if isinstance(live.get(kind), dict):
+                fill_leg(*widgets[:3], live[kind])
+
+        actions = QHBoxLayout()
+        clear = QPushButton(i18n.t("protFormClear"))
+        clear.setProperty("class", "reason-btn")
+        clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear.clicked.connect(self._clear)
+        actions.addWidget(clear)
+        actions.addStretch(1)
+        cancel = QPushButton(i18n.t("npCancel"))
+        cancel.setProperty("class", "reason-btn")
+        cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel.clicked.connect(self.reject)
+        actions.addWidget(cancel)
+        ok = QPushButton(i18n.t("protFormOk"))
+        ok.setProperty("class", "composer-send-ok")
+        ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok.clicked.connect(self.accept)
+        actions.addWidget(ok)
+        layout.addLayout(actions)
+
+    def _clear(self) -> None:
+        for freq, kind, slope, _quick in (self.hp, self.lp):
+            freq.clear()
+            kind.setCurrentIndex(0)
+            slope.setCurrentIndex(0)
+
+    def legs(self):
+        """`{hp, lp}` with what was filled in, or None for "no protective filter"."""
+        out = {}
+        for kind, (freq, typ, slope, _quick) in (("hp", self.hp), ("lp", self.lp)):
+            leg = read_leg(freq, typ, slope)
+            if leg:
+                out[kind] = leg
+        return out or None
+
+
 def _last_line(text: str) -> str:
     """The gate's sentence, without the traceback the CLI wraps it in."""
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
@@ -304,6 +392,10 @@ def project_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
         code = str(entry.get("code") or "")
         # The map is keyed by id, code and every previous name, so one channel arrives up to three
         # times; `code` is the identity and dedupes them.
+        # Outputs only (TEST-FINDINGS 22): a channel on another tier is not measured through a
+        # protective filter. No `tier` is an output, as every project written before SCR-042 is.
+        if entry.get("tier") not in (None, "", "channels"):
+            continue
         if code and code not in codes and not entry.get("hidden"):
             codes.append(code)
     return codes
@@ -326,6 +418,8 @@ def channel_codes(view, project_dir: Optional[Path] = None) -> list[str]:
     """
     codes: list[str] = []
     for group in getattr(view, "groups", ()) or ():
+        if getattr(group, "id", "") != OUTPUT_TIER:
+            continue  # TEST-FINDINGS 22: virtual channels and inputs have no protective filter
         for row in group.rows_visible():
             if row.name not in codes:
                 codes.append(row.name)

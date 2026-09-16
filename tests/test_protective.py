@@ -196,6 +196,8 @@ def test_the_view_leads_and_the_project_fills_in_what_it_left_out(tmp_path):
             self.name = name
 
     class _Group:
+        id = "physical_outputs"
+
         def __init__(self, names):
             self._names = names
 
@@ -399,3 +401,54 @@ def test_with_no_round_open_it_still_shows_the_rig_to_read(tmp_path):
     assert round_channel_codes(project) == []
     QApplication.instance() or QApplication([])
     assert [row.code for row in open_for(project, None)._rows] == ["m-L", "m-R"]
+
+
+def test_with_no_round_open_only_output_channels_are_offered(tmp_path):
+    """TEST-FINDINGS 22: the dialog listed VFL…VSW before the outputs. A protective filter sits in
+    an OUTPUT's signal path, the driver being measured; a virtual channel is not measured through
+    one."""
+    from autosound_tcc.ui.tcc.protective_dialog import channel_codes
+
+    class _Row:
+        def __init__(self, name):
+            self.name = name
+
+    class _Group:
+        def __init__(self, group_id, names):
+            self.id = group_id
+            self._names = names
+
+        def rows_visible(self):
+            return [_Row(name) for name in self._names]
+
+    class _View:
+        groups = (_Group("virtual_channels", ["VFL", "VFR"]),
+                  _Group("physical_outputs", ["w-L", "w-R"]))
+
+    project = _described(tmp_path, [{"code": "w-L"}, {"code": "VC", "tier": "virtual_channels"},
+                                    {"code": "tw-L", "tier": "channels"}])
+
+    assert channel_codes(_View(), project) == ["w-L", "w-R", "tw-L"]
+
+
+def test_the_row_form_has_the_protection_form_s_own_fields():
+    """F-056, the Arbiter 2026-09-16: the import row's filters "done the way the form that sets
+    filters does it". One set of fields, two places."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.protective_dialog import TYPES, ProtectiveLegsDialog
+
+    QApplication.instance() or QApplication([])
+    form = ProtectiveLegsDialog({"hp": {"f": 80.0, "type": "BW", "slope": 12}})
+
+    freq, kind, slope, _quick = form.hp
+    assert (freq.text(), kind.currentData(), slope.currentData()) == ("80", "BW", 12)
+    assert [kind.itemData(i) for i in range(1, kind.count())] == list(TYPES)
+    assert form.legs() == {"hp": {"f": 80.0, "type": "BW", "slope": 12}}
+
+    form._clear()
+    assert form.legs() is None, "cleared is 'read the curve as measured'"
+

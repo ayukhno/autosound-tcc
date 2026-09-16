@@ -52,6 +52,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   missed.
 - **A renamed channel's earlier captures find its protective record**: a title's channel is the
   grammar's current code (hub #153).
+- **The Protection form offers output channels only** when no round is open — not the virtual
+  channels, which are not measured through a protective filter (TEST-FINDINGS 22).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
