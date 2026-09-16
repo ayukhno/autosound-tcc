@@ -102,18 +102,20 @@ def test_a_title_rew_is_showing_is_not_a_capture_this_project_took(project):
 
     REW's open list is another application's window — it decides what can be OFFERED. What this
     project took in is what colours a row, and the two are passed in separately for that reason.
+    Not green, then — but blue, "it is there, load it" (F-056, the Arbiter 2026-09-16).
     """
     showing = ["sw_1 (sw)", "w-L_1 (sw)"]
 
     nothing_taken = mv.build_session("0", 1, showing, project, taken=[])
     statuses = {item.name: item.status for g in nothing_taken.groups for item in g.items}
-    assert statuses["sw_1 (sw)"] == mv.STATUS_WAIT
-    assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT
+    assert statuses["sw_1 (sw)"] == mv.STATUS_FOUND
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_FOUND
+    assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT, "not in REW either: yellow"
 
     one_taken = mv.build_session("0", 1, showing, project, taken=["sw_1 (sw)"])
     statuses = {item.name: item.status for g in one_taken.groups for item in g.items}
     assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
-    assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_FOUND
 
 
 def test_an_extra_rew_holds_is_green_only_once_it_was_taken(project):
@@ -121,7 +123,7 @@ def test_an_extra_rew_holds_is_green_only_once_it_was_taken(project):
     session = mv.build_session("0", 1, ["w-L INV_1 (sw)"], project, taken=[])
 
     extras = [item for g in session.groups for item in g.items if item.additional]
-    assert extras and extras[0].status == mv.STATUS_WAIT
+    assert extras and extras[0].status == mv.STATUS_FOUND
 
     session = mv.build_session("0", 1, ["w-L INV_1 (sw)"], project, taken=["w-L INV_1 (sw)"])
     extras = [item for g in session.groups for item in g.items if item.additional]
@@ -574,4 +576,30 @@ def test_a_new_round_does_not_inherit_what_an_earlier_round_took(project):
     statuses = {item.name: item.status for g in session.groups for item in g.items}
     assert statuses["w-L_1 (sw)"] == mv.STATUS_DONE, "taken in this pass"
     assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT
+
+
+def test_a_capture_the_open_round_asks_for_again_is_blue_while_rew_holds_it(project):
+    process = _round(project, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    process.close_capture("done")
+    process.start_capture(1, expected=[_as_typed("w-L_1 (sw)")])
+
+    session = mv.build_session("0", 1, ["w-L_01 (sw)"], project, taken=[])
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+
+    assert statuses["w-L_1 (sw)"] == mv.STATUS_FOUND
+
+
+def test_an_old_round_opened_with_the_ledger_version_counts_by_the_series_of_its_titles(project):
+    """hub #153 C. A round opened as `capture-start v_001` holding `_49` titles was skipped for
+    series 49, because only its `version` was compared, and its captures read as not taken. The
+    ledger version and `_N` are different counters; the method finds a round by either."""
+    process = _round(project, version="v_001", expected=["w-L_49 (sw)"], taken=["w-L_49 (sw)"])
+    process.close_capture("done")
+    # A later round open, so the old one reaches the checklist only as a past round.
+    process.start_capture("v_002", expected=["w-R_49 (sw)"])
+
+    session = mv.build_session("0", 49, [], project, taken=[])
+    statuses = {item.name: item.status for g in session.groups for item in g.items}
+
+    assert statuses["w-L_49 (sw)"] == mv.STATUS_DONE
 

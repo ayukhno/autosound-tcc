@@ -100,6 +100,8 @@ def test_an_old_round_opened_with_the_ledger_version_counts_by_the_series_of_its
     ledger version and `_N` are different counters; the method finds a round by either."""
     process = _round(project, version="v_001", expected=["w-L_49 (sw)"], taken=["w-L_49 (sw)"])
     process.close_capture("done")
+    # A later round open, so the old one reaches the checklist only as a past round.
+    process.start_capture("v_002", expected=["w-R_49 (sw)"])
 
     session = mv.build_session("0", 49, [], project, taken=[])
     statuses = {item.name: item.status for g in session.groups for item in g.items}

@@ -30,6 +30,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **Whether a REW capture can be checked is the method's answer now** (#20): `rew_api.is_swept`,
   from REW's notes, instead of TCC's own reading of the listing. A capture that cannot be told apart
   is checked rather than skipped. A method older than `v3.0.47` leaves every row checked.
+- **A capture REW holds but nobody took in is blue, not yellow** — "it is there, import it". Green
+  stays for what was taken in. An old round opened with the ledger version (`v_001`) now counts for
+  the series its titles carry (`_49`).
 
 ### Fixed
 

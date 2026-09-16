@@ -31,6 +31,11 @@ STATUS_STALE = "bad"
 # waiting: before the round was recorded these were the same colour, so a capture the tuner had
 # ruled out came back on the checklist every session.
 STATUS_SKIPPED = "skip"
+#: In REW under the name the checklist asks for, and not taken in yet (F-056, the Arbiter
+#: 2026-09-16): "not everything green before the import, even when the measurements were found —
+#: blue for 'it is there, but has to be loaded explicitly'". Yellow stays for what REW does not
+#: hold either.
+STATUS_FOUND = "found"
 
 
 def glossary_path(project_dir: Optional[Path] = None) -> Path:
@@ -103,6 +108,25 @@ def protective_phrase(legs) -> str:
         if shape:
             parts[-1] = f"{parts[-1]} {shape}"
     return " · ".join(parts)
+
+
+def _round_is_at(round_: dict, version, naming, glossary) -> bool:
+    """Whether a round was captured at series `version`: by its own `version`, or by the `_N` its
+    titles carry (hub #153 C).
+
+    The two can differ. A round opened with the ledger version (`capture-start v_001`) holding
+    `_49` titles is at 49: the ledger's `v_NNN` and the DSP state `_N` are different counters (the
+    method's naming-and-structure §3, §5), and its own `protective_record_for` finds a round by
+    either.
+    """
+    wanted = str(version).lstrip("v_").lstrip("0")
+    if str(round_.get("version") or "").lstrip("v_").lstrip("0") in ("", wanted):
+        return True
+    for title in list(round_.get("expected") or []) + list(round_.get("taken") or {}):
+        entry = naming.parse_name(str(title), glossary)
+        if entry and str(entry.get("version_n")) == wanted:
+            return True
+    return False
 
 
 def build_session(
@@ -182,8 +206,7 @@ def build_session(
     # (sw)`) while the checklist derives `tw-L_1 (sw)`, and a raw-string comparison misses that —
     # which is exactly how it missed all fourteen.
     for round_at in process_view.capture_rounds(project):
-        if str(round_at.get("version") or "").lstrip("v_").lstrip("0") not in (
-                "", str(version).lstrip("v_").lstrip("0")):
+        if not _round_is_at(round_at, version, naming, glossary):
             continue
         for title in (round_at.get("taken") or {}):
             key = _key(title)
@@ -230,6 +253,10 @@ def build_session(
         asked_again = {_key(t) for t in (round_.get("expected") or [])} - {None}
     taken_here = {_key(t) for t in recorded_taken} - {None}
 
+    def not_taken(key) -> str:
+        """Blue while REW holds it under this name, yellow while it does not (F-056)."""
+        return STATUS_FOUND if key is not None and key in parsed else STATUS_WAIT
+
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
@@ -242,12 +269,12 @@ def build_session(
             return STATUS_STALE
         if key is not None and key in asked_again:
             if key not in taken_here and name not in recorded_taken:
-                return STATUS_WAIT  # asked for again by the open round, not taken in it yet
+                return not_taken(key)  # asked for again by the open round, not taken in it yet
         elif key not in taken_keys and name not in recorded_taken:
-            # Waiting, even when REW is showing a curve by that name: a title in another
+            # Not done, even when REW is showing a curve by that name: a title in another
             # application's list is not this project taking a measurement in (user, 2026-09-06).
-            # The read window opens on it ticked, and the tick is what makes it done.
-            return STATUS_WAIT
+            # It is blue, though — there to be taken (F-056) — and the tick is what makes it done.
+            return not_taken(key)
         # Both names a renamed channel answers to (SCR-039): a `config_change` names whichever the
         # session was using, and the capture's title carries whichever it was typed under. Either
         # side alone would leave a real invalidation looking like a clean capture.
@@ -424,8 +451,8 @@ def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
             MeasItem(
                 name=entry["title"],
                 # Ours, at this version, off the checklist — and green only once it was taken in.
-                # A curve REW is holding is an offer, not a capture (see `build_session`).
-                status=STATUS_DONE if taken_keys is None or key in taken_keys else STATUS_WAIT,
+                # A curve REW is holding is an offer, not a capture: blue (see `build_session`).
+                status=STATUS_DONE if taken_keys is None or key in taken_keys else STATUS_FOUND,
                 extra=entry["modifier"],
                 additional=True,
             )
