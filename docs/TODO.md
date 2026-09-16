@@ -1732,6 +1732,16 @@ by having the Arbiter describe what goes wrong, and records it before anything i
 **Added 2026-09-16:** tcc#37–#39 are fixed on `wave-0.1.40` (`7f95284`, `215964c`). tcc#21 (capture
 quality while the microphone is still in hand) waits for this conversation, by the Arbiter's word.
 
+**The Arbiter's description, 2026-09-16** (the start of this conversation; hub #153 / SKL-036 arrived the same
+day on the same subject):
+
+1. The import window lacks a field chosen from the list of what still has to be captured — the rename
+   field, for example.
+2. Protective filters at the end of the row are a good idea, but they must be done the way the form
+   that sets filters does it — and they are protective filters, nothing more.
+3. Not everything green before the import, even when the measurements were found: blue for "it is
+   there, but has to be loaded explicitly".
+
 ### F-057 — The method's virtual-DSP calculations (skill side)
 
 **Статус**: open · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for the next session
