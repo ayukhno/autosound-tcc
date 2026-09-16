@@ -1699,6 +1699,27 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-058 — The method on the beta channel (hub #140, ask 1, the method half)
+
+**Статус**: open · split off by the Arbiter, 2026-09-16; after the trial run
+
+TCC's own half of the beta channel is built (F-052). The method half is not: the rule of 2026-09-14
+("the terminal takes a released tag, a session TCC starts with the box ticked takes a candidate")
+cannot hold inside one project folder. The skill's answer to hub #145 (v3.0.52) gives a second
+checkout, `~/.claude/skills/.autosound-tuning-beta`, and `AUTOSOUND_SKILL_ROOT` — but the method
+reads ONE link per project, `<project>/.claude/skills/autosound-tuning`, and `deployment.py`
+requires a beta session's link to be the beta copy. So a project follows one channel, and a terminal
+opened by hand in a beta project is stopped at step 0.
+
+Why after the trial: the trial decides the SDK route's fate (`PRODUCT-PATHS-2026-09-16.md`), and the
+link rule differs for the two routes. Built now, it might be built twice.
+
+What it will need, from reading on 2026-09-16: the beta copy found through
+`installer-consistency.py --print SKILL_BETA_SRC` (or made, when the install was not `--channel
+beta`); `check_skill`/`apply_skill` on that copy; the project link switched only between the two
+known copies, never a hand-made one; `AUTOSOUND_SKILL_ROOT` in the environment of every session TCC
+starts; and whether TCC's own panels load the method's modules from the same copy the session runs.
+
 ### F-056 — Import from REW into TCC: the logic and the implementation
 
 **Статус**: open · the Arbiter, 2026-09-14 (end of the 0.1.39 test day): "a huge problem"; for the next session
@@ -1770,7 +1791,7 @@ without deleting anything. Either is a design change for after v0.1.39.
 
 ### F-052 — Beta channel in the updater (hub #140, ask 1)
 
-**Статус**: doing · answers 2026-09-14; the method half waits for hub #145 (TCC-011)
+**Статус**: done 2026-09-16 · TCC's half, `6f95813`…`2e88ab6` on `wave-0.1.40`; the method half split to F-058 (the Arbiter, 2026-09-16)
 
 Asks 2 and 3 of hub #140 landed on 2026-09-13 (PR #30, PR #29). Ask 1 — a `stable`/`beta` channel
 in `core/updates.py` for the method and TCC, ordered by hub RELEASE-CHANNEL.md §11.2, with the
