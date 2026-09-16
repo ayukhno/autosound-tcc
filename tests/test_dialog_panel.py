@@ -279,3 +279,28 @@ def test_right_clicking_a_bubbles_text_opens_our_copy_menu_not_qts():
     assert items[0][1] == "alpha"
     assert i18n.T["en"]["copyMessage"] == "Copy all"
     assert i18n.T["en"]["copySelection"] == "Copy selected"
+
+
+def test_a_refused_review_says_why_and_where_the_package_is():
+    """hub #154 §5: no answer is not "the Critic failed" with a package tail — it is the reasons,
+    and the package the clipboard step takes."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._bubbles)
+
+    panel.add_critique({
+        "mode": "refused",
+        "detail": "· CLI 'agy': quota exhausted",
+        "package": "process/reviews/x-critic-package.md",
+    })
+
+    said = " ".join(
+        label.text()
+        for bubble in panel._bubbles[before:]
+        for label in bubble.findChildren(QLabel)
+    )
+    assert "quota exhausted" in said
+    assert "process/reviews/x-critic-package.md" in said
+

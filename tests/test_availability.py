@@ -244,3 +244,17 @@ def test_codex_is_not_marked_as_being_read_at_start(monkeypatch):
     availability.read_catalogues()
 
     assert seen == [None]
+
+
+def test_a_refused_reviewer_goes_red_like_a_refused_clipboard_fallback():
+    """hub #154 §5: since the method's v3.0.53 a failed call is its own mode (exit 4), not a
+    clipboard package — the reason it names still marks the model."""
+    from autosound_tcc.core import critic
+
+    key = "agy:gemini-3.1-pro-high"
+    availability.record_reviewer_outcome(
+        key, _result(critic.MODE_REFUSED, "not supported in the selected location"),
+        reaches=lambda _c: True)
+
+    assert _status(_choice()).reason == availability.LOCATION
+

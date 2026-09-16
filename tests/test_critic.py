@@ -562,3 +562,31 @@ def test_a_refusal_is_named_by_its_reason_or_not_at_all():
         == availability.LOCATION
     assert critic.refusal_reason("Gemini API: HTTP 400 Bad Request") == availability.REFUSED
     assert critic.refusal_reason("") is None
+
+
+def test_a_refusal_is_its_own_mode_with_the_reasons_and_the_package(stubbed, tmp_path):
+    """hub #154 §5 (method v3.0.53): a reviewer with no answer exits 4 and prints its reasons under
+    "⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО", then the package for the clipboard rung. Read as an error, the tail
+    was the package lines and the reasons were lost above them."""
+    stubbed(
+        "print('=' * 50, file=sys.stderr)\n"
+        "print('⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО — нічого не збережено як рецензію:', file=sys.stderr)\n"
+        "print(\"   · CLI 'agy': quota exhausted\", file=sys.stderr)\n"
+        "print('     → wait for the reset or pick another model', file=sys.stderr)\n"
+        "print('   Наступна сходинка — буфер обміну (нижче).', file=sys.stderr)\n"
+        "print('=' * 50, file=sys.stderr)\n"
+        "print('✓ Пакет (запит, не рецензія): /p/process/reviews/x-critic-package.md', file=sys.stderr)\n"
+        "print('>> PACKAGE_FILE: process/reviews/x-critic-package.md', file=sys.stderr)\n"
+        "print('=' * 50, file=sys.stderr)\n"
+        "sys.exit(4)\n"
+    )
+    project = _project(tmp_path)
+
+    result = critic.run("package", project_dir=project, python_executable=sys.executable)
+
+    assert result.mode == critic.MODE_REFUSED
+    assert result.ok is False
+    assert "quota exhausted" in result.detail and "pick another model" in result.detail
+    assert "PACKAGE_FILE" not in result.detail
+    assert result.package == "process/reviews/x-critic-package.md"
+

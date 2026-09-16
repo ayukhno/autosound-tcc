@@ -1327,6 +1327,14 @@ class DialogPanel(QWidget):
             self._add_system_message(
                 i18n.t("criticChooseModel").format(models=", ".join(offered) or "—")
             )
+        elif mode == "refused":
+            # No answer, said as one (hub #154 §5): the reviewer's own reasons, and the package the
+            # clipboard step takes — not "the Critic failed" with the package lines as its tail.
+            package = critique.get("package")
+            self._add_system_message(
+                i18n.t("criticRefused").format(detail=critique.get("detail") or "?")
+                + (f"<br><i>{i18n.t('criticPackage').format(path=package)}</i>" if package else "")
+            )
         elif mode == "not_ready":
             # Not a failure and it must not read like one. The reviewer is stateless: it re-reads
             # the project from disk every call, and a folder that has not been through intake has

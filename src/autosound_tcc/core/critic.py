@@ -41,6 +41,8 @@ _CLIPBOARD_MARKER = "CLIPBOARD MODE"
 # The script writes the critique to `process/reviews/<ts>-<role>.md` and says so on stderr in two
 # forms; this is the machine-readable one, so nothing here parses a translated sentence (SCR-027).
 _REVIEW_MARKER = re.compile(r"^>>\s*REVIEW_FILE:\s*(?P<path>.+?)\s*$", re.MULTILINE)
+#: The package the clipboard rung takes, named on stderr the same machine-readable way (v3.0.53).
+_PACKAGE_MARKER = re.compile(r"^>>\s*PACKAGE_FILE:\s*(?P<path>.+?)\s*$", re.MULTILINE)
 
 MODE_API_OR_CLI = "answered"
 MODE_CLIPBOARD = "clipboard"
@@ -54,6 +56,12 @@ MODE_CHOOSE_MODEL = "choose_model"
 #: Exit code the reviewer uses for that question. A code rather than a phrase in stderr: the text
 #: is Ukrainian prose that will be reworded, the code is a contract.
 _CHOOSE_MODEL_EXIT = 3
+#: No answer (hub #154 §5, the method's v3.0.53): the reviewer exits 4, lists every reason under
+#: "⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО" and files nothing as a review; the package is still made ready for the
+#: clipboard rung. Its own mode because read as an error the stderr tail was the package lines and
+#: the reasons were lost above them.
+MODE_REFUSED = "refused"
+_REFUSED_EXIT = 4
 #: The reviewer was not called because the PROJECT is not ready — no contract, no context, which
 #: is the ordinary state of a folder that has not been through intake yet. Distinct from
 #: `MODE_ERROR` because it is not a fault and reporting it as one sends somebody debugging a
@@ -80,6 +88,8 @@ class CriticResult:
     #: The models this key can actually call, when the reviewer asked which one to use. Empty for
     #: every other mode. Names only — nothing here is a key.
     models: list = field(default_factory=list)
+    #: Project-relative path to the package the clipboard step takes, when the reviewer made one.
+    package: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -326,6 +336,11 @@ def run(
             MODE_API_OR_CLI, text, match.group("model") if match else None, role, tail,
             duration, called_at, review,
         )
+    if proc.returncode == _REFUSED_EXIT:
+        package_match = _PACKAGE_MARKER.search(stderr)
+        return CriticResult(MODE_REFUSED, "", None, role, _why_refused(stderr) or tail,
+                            duration, called_at,
+                            package=package_match.group("path") if package_match else None)
     if proc.returncode == _CHOOSE_MODEL_EXIT:
         return CriticResult(MODE_CHOOSE_MODEL, "", None, role, stderr.strip() or tail,
                             duration, called_at, review, _models_offered(stderr))
@@ -340,6 +355,25 @@ def run(
 
 def log_path(project_dir: Optional[Path] = None) -> Path:
     return config.tcc_dir(project_dir) / "critic-log.jsonl"
+
+
+def _why_refused(stderr: str) -> str:
+    """The reasons a refusal lists: the lines after "⛔" up to the rule that closes the block.
+
+    By shape, not by sentence: the heading and the lines are Ukrainian prose the method may reword,
+    the block is the stop sign and the `=` rule after it.
+    """
+    lines = stderr.splitlines()
+    start = next((i for i, line in enumerate(lines) if "⛔" in line), None)
+    if start is None:
+        return ""
+    out = []
+    for line in lines[start + 1:]:
+        if line.strip() and not set(line.strip()) - set("="):
+            break
+        if line.strip():
+            out.append(line.strip())
+    return "\n".join(out)
 
 
 def _why_clipboard(stderr: str) -> str:

@@ -118,7 +118,7 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
     if result.ok:
         succeeded(key)
         return
-    if result.mode != critic.MODE_CLIPBOARD:
+    if result.mode not in (critic.MODE_CLIPBOARD, critic.MODE_REFUSED):
         return
     harness, _, model = key.partition(":")
     choice = model_choices.Choice(harness=harness or "omp", model=model or key, label=key)

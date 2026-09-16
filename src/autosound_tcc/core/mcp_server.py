@@ -1118,6 +1118,8 @@ def build_server(
                 "models": result.models,
                 # The bubble links the text rather than being the only copy of it.
                 "review": result.review,
+                # What the clipboard step takes after a refusal (hub #154 §5).
+                "package": result.package,
             }
         )
         detail = result.detail
@@ -1138,6 +1140,7 @@ def build_server(
                 "critique": result.text,
                 "model": result.model,
                 "detail": detail,
+                "package": result.package,
                 "seconds": round(result.duration_s, 1),
             },
             ensure_ascii=False,
