@@ -4266,3 +4266,35 @@ def test_an_rta_the_check_does_not_apply_to_is_not_checked_again(monkeypatch):
 
     assert started == []
 
+
+def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, tmp_path):
+    """TEST-FINDINGS 26: the session wrote everything and closed in order, and quitting still asked
+    to spend a turn saving. The close marks it saved; a write after the close takes the mark back."""
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    class _Worker:
+        def shutdown(self) -> None:
+            pass
+
+    window._agent_worker = _Worker()
+    asked: list[bool] = []
+    monkeypatch.setattr(window, "_ask_save_before_quit",
+                        lambda: (asked.append(True), QMessageBox.StandardButton.Cancel)[1])
+
+    window._bridge.session_closed()
+    window._bridge.session_changed()
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert asked == [True], "a write after the close: there may be something to save again"
+
+    window._bridge.session_closed()
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert asked == [True], "closed and nothing written since: nothing to ask"
+

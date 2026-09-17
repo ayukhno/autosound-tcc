@@ -79,6 +79,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **Diagnostics name skipped captures with their reasons**, apart from the missing ones, and a round
   keyed by a ledger version reads `v_001`, not `vv_001`. Facts carried in from another project, and
   sources that no longer exist, are listed (hub #154).
+- **Quitting after a session closed itself in order no longer asks "Save before closing?"** — the
+  close TCC hears marks the session saved, and anything written after it takes the mark back
+  (TEST-FINDINGS 26).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

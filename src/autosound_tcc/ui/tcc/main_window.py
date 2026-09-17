@@ -621,6 +621,9 @@ class MainWindow(QMainWindow):
         # the AttributeError went the way every exception in a Qt slot goes -- printed to stderr,
         # swallowed by the run (HUB-046, 2026-09-07).
         self._agent_worker: Optional[AgentWorker] = None
+        #: The session closed itself in order and has written nothing since (TEST-FINDINGS 26):
+        #: quitting has nothing to ask about. Set by `session_close`, cleared by the next write.
+        self._session_saved = False
         # What the Arbiter asked of a channel and has not been answered about yet: the wait
         # `_on_channel_toggle` writes onto the row, keyed by (group, channel). Here, at the top,
         # because the first `_rebuild_system_params()` runs while the window is still being built
@@ -3219,6 +3222,8 @@ class MainWindow(QMainWindow):
         # `_load_process`: a phase move usually comes with a new ledger snapshot and new project
         # facts, which nothing else is watching.
         self._bridge.refreshRequested.connect(self._reload_from_disk)
+        self._bridge.sessionClosed.connect(lambda: setattr(self, "_session_saved", True))
+        self._bridge.sessionChanged.connect(lambda: setattr(self, "_session_saved", False))
         self._publish_snapshot()
         self._refresh_critic_status()
 
@@ -4505,7 +4510,10 @@ class MainWindow(QMainWindow):
             self._handoff_timer = None
 
         worker = getattr(self, "_agent_worker", None)
-        if worker is not None and not getattr(self, "_quitting", False):
+        # Not asked when the session closed itself in order and wrote nothing after (TEST-FINDINGS
+        # 26): "Save the turn" would spend a turn saving nothing.
+        if (worker is not None and not getattr(self, "_quitting", False)
+                and not getattr(self, "_session_saved", False)):
             answer = self._ask_save_before_quit()
             if answer == QMessageBox.StandardButton.Cancel:
                 event.ignore()

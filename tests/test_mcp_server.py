@@ -37,6 +37,7 @@ class RecordingBridge:
         self.requests: list[ConfirmRequest] = []
         self.clipboard: list[str] = []
         self.proposals: list[dict] = []
+        self.events: list[str] = []
 
     def snapshot(self) -> dict:
         return {"preset": "FULL", "selected": "m_L"}
@@ -58,6 +59,12 @@ class RecordingBridge:
 
     def refresh_from_disk(self) -> None:
         self.refreshes += 1
+
+    def session_closed(self) -> None:
+        self.events.append("closed")
+
+    def session_changed(self) -> None:
+        self.events.append("changed")
 
     refreshes = 0
 
@@ -1715,3 +1722,37 @@ def test_a_bookkeeping_failure_does_not_lose_the_critique(tmp_path, monkeypatch)
     result = json.loads(_text(asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))))
 
     assert result["critique"] == "the sub is 3 dB hot"
+
+
+def test_a_recorded_session_close_tells_the_window_and_a_later_write_takes_it_back(
+        tmp_path, monkeypatch):
+    """TEST-FINDINGS 26: after a correct close, quitting still asked "Save before closing?". The
+    Arbiter's proposal: the close TCC already hears marks the session saved, and anything the
+    session writes after it clears the mark."""
+    from autosound_tcc.core import process_writer
+
+    monkeypatch.setattr(process_writer, "close_session",
+                        lambda project_dir: (True, "session closed"))
+    monkeypatch.setattr(process_writer, "_run", lambda project_dir, args, **kw: "ok")
+    bridge = RecordingBridge(allow=True)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    asyncio.run(mcp.call_tool("session_close", {}))
+    assert bridge.events == ["closed"]
+
+    asyncio.run(mcp.call_tool("check_captures", {"titles": ["w-L_1 (sw)"]}))
+    assert bridge.events == ["closed", "changed"]
+
+
+def test_a_close_that_names_open_work_marks_nothing(tmp_path, monkeypatch):
+    from autosound_tcc.core import process_writer
+
+    monkeypatch.setattr(process_writer, "close_session",
+                        lambda project_dir: (False, "OPEN ROUND r3 at v_004"))
+    bridge = RecordingBridge(allow=True)
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    asyncio.run(mcp.call_tool("session_close", {}))
+
+    assert bridge.events == []
+

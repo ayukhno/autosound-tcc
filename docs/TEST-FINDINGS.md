@@ -885,3 +885,5 @@ writes or changes anything again after it — or refuse changes after a close.
 **Weight.** Medium: a question with no right answer at the end of every properly closed session.
 
 **Reproduces.** After every `session_close`, on quit.
+
+**Fixed** on `wave-0.1.40` (2026-09-17), as the Arbiter proposed: a recorded `session_close` marks the session saved and the next write clears it.

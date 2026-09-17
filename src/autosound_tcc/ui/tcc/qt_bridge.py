@@ -36,6 +36,8 @@ class QtUiBridge(QObject):
     curvesReceived = Signal(dict)
     profileReady = Signal()
     refreshRequested = Signal()
+    sessionClosed = Signal()
+    sessionChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -81,3 +83,9 @@ class QtUiBridge(QObject):
 
     def refresh_from_disk(self) -> None:
         self.refreshRequested.emit()
+
+    def session_closed(self) -> None:
+        self.sessionClosed.emit()
+
+    def session_changed(self) -> None:
+        self.sessionChanged.emit()

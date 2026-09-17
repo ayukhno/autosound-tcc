@@ -296,6 +296,13 @@ class UiBridge(Protocol):
         time: this is the ordinary "the tune moved" refresh, and it is a MESSAGE, not data.
         """
 
+    def session_closed(self) -> None:
+        """`session_close` recorded the end of the session: nothing is left for a quit to save
+        (TEST-FINDINGS 26). Optional on a bridge — see `_tell`."""
+
+    def session_changed(self) -> None:
+        """The session wrote something after it closed: a quit may have something to save again."""
+
 
 class HeadlessBridge:
     """No GUI: every mutation is denied, reads answer from disk.
@@ -325,6 +332,12 @@ class HeadlessBridge:
         pass
 
     def refresh_from_disk(self) -> None:
+        pass
+
+    def session_closed(self) -> None:
+        pass
+
+    def session_changed(self) -> None:
         pass
 
     def show_critique(self, critique: dict[str, Any]) -> None:
@@ -744,12 +757,21 @@ def build_server(
     # is owned -- `finish_step` without evidence is refused by the skill and the refusal is
     # returned verbatim.
 
+    def _tell(event: str) -> None:
+        """A bridge method added after the bridges tests and adapters already carry: called when it
+        is there, skipped when it is not — a message about quitting is never worth a failed call."""
+        method = getattr(bridge, event, None)
+        if callable(method):
+            method()
+
     def _record(call, *args, **kwargs) -> str:
         try:
             line = call(project_dir, *args, **kwargs)
         except process_writer.ProcessWriterError as exc:
             return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
         bridge.refresh_from_disk()
+        # Written after a close, it is no longer a closed session (TEST-FINDINGS 26).
+        _tell("session_changed")
         state, _ = _load_process_state()
         return json.dumps({"recorded": True, "said": line,
                            "active_phase": (state or {}).get("active_phase")},
@@ -864,6 +886,9 @@ def build_server(
                 return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
             if recorded:
                 bridge.refresh_from_disk()
+                # Everything is written and the end is on record: a quit need not ask to spend a
+                # turn saving (TEST-FINDINGS 26, the Arbiter's proposal).
+                _tell("session_closed")
             return json.dumps({"recorded": recorded, "said": report}, ensure_ascii=False)
 
         return await asyncio.to_thread(_close)
