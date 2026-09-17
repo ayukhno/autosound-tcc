@@ -26,8 +26,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   the installation block.
 - **The import window's new name is a list** of the names the round still waits for, without the
   ones other rows already took; a name nobody planned can still be typed (F-056).
-- **A driver's Fs carried in from another project says so** in the DSP tree's tooltip — the method's
-  pre-sweep gate holds a fragile driver on it until it is confirmed here or measured (hub #154).
+- **A driver's Fs carried in from another project says so** in the DSP tree's tooltip and in
+  Diagnostics — a warning; what goes into the DSP is the tuner's call (hub #154).
 - **A name typed in the import window that is outside the naming grammar says why**, in the method's
   own words, under the table — without refusing it (hub #153).
 - **An impedance sweep (`w-L (imp)`) shows on the capture card** with the series on screen: it has

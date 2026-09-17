@@ -265,8 +265,9 @@ class ChannelRow(QWidget):
             if row.role:
                 meta.append(str(row.role))
             if row.fs_hz is not None:
-                # Said when it was carried in from another project (hub #154 §4): the pre-sweep
-                # gate holds a fragile driver on it until it is confirmed here or measured.
+                # Said when it was carried in from another project (hub #154 §4). A warning and no
+                # more: the tuner sets in the DSP what they need, taking the advice or not (the
+                # Arbiter, 2026-09-17).
                 inherited = f"&nbsp;({i18n.t('factInherited')})" if row.fs_inherited else ""
                 meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz{inherited}")
             if meta:
