@@ -1785,6 +1785,34 @@ breaks every existing instruction, including ones already in people's notes. Pro
 
 ---
 
+## SCR-057 — TCC reads the form from the gate, so its `FORM_*` names are a consumer surface
+
+**Status**: **PROPOSED** (2026-09-17) — on the bus as hub `#174` (`kind:change from:tcc to:skill`).
+
+**Target**: skill — `rew_tool/gates/side_effect.py` (the `FORM_*` block and `form_answers` /
+`verify_form_reply`) and `CHANGELOG.md` (the Upgrading note of whichever tag changes them).
+
+**TCC dependency**: none to build. Landed in TCC `v0.1.41`: `core/form_report.py` keeps no id of
+its own and asks the gate at run time, `core/issue_assets.py`'s posture for the same module.
+
+**The gap.** The window and a session send a report to the SAME Google Form. Until `v0.1.41` both
+halves kept their own copy of the address, the five question ids and the choice words. The copies
+agreed the day they were written, and what two copies cost is a question id that moves in one of
+them and a column in the sheet quietly filled by the other. So TCC now refers to the method's
+(the user's decision, 2026-09-17: the form is one fact, and the method owns it) — which makes those
+names part of what a consumer depends on, and the method cannot see that from its own tree.
+
+**The asks** (the full text is on `#174`): keep the `FORM_*` names and `form_answers` /
+`verify_form_reply` as they are or name the move in an Upgrading note; say in the CHANGELOG when
+the form's own questions change, since the window maps the choices by KEY and renders them in four
+languages of its own; and, optionally, export the question LABELS as data too — the clipboard text
+TCC writes when the form refused a report is the last place where the sheet's columns exist twice.
+
+**What TCC does when a name is gone**: `form_report.is_available()` asks for the five things it
+needs, and without any of them `post_url()` is `""`, which the dialog already reads as "GitHub is
+the only route". So a rename degrades quietly instead of breaking loudly — which is the reason the
+note matters more than the name.
+
 ## SCR-056 — the installer builds our bundle; TCC now has the command, so call it
 
 **Status**: **DONE** (2026-08-22, the evening it was filed) — merged into the method's `main` as
