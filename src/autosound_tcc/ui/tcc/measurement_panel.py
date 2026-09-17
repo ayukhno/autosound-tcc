@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import capture_import, config, process_writer
+from autosound_tcc.core import capture_import, config, process_writer, protective
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
@@ -232,7 +232,7 @@ class _LedgerWriteWorker(QThread):
 
     def run(self) -> None:
         result: dict = {"round_id": self._round_id, "opened": "", "recorded": [],
-                        "refused": [], "prot_done": [], "prot_refused": []}
+                        "refused": [], "prot_done": [], "prot_refused": [], "prot_lost": []}
         if not self._round_id:
             try:
                 process_writer.start_capture(
@@ -259,6 +259,16 @@ class _LedgerWriteWorker(QThread):
             except Exception as exc:  # noqa: BLE001
                 result["prot_refused"].append(
                     i18n.t("capImportProtRefused").format(channel=channel, why=self._why(exc)))
+        # Read back before saying "recorded" (TODO F-049). A writer that returned is not a round
+        # that holds the record, and the difference is ours to name: the method reads a baseline
+        # channel with no record as one that did not come from this window.
+        if result["prot_done"]:
+            try:
+                result["prot_lost"] = protective.not_in_record(
+                    result["prot_done"], result["round_id"], self._project_dir)
+            except Exception:  # noqa: BLE001 — a record that cannot be read proves no loss
+                result["prot_lost"] = []
+            result["prot_done"] = [c for c in result["prot_done"] if c not in result["prot_lost"]]
         self.done.emit(result)
 
 
@@ -1159,6 +1169,10 @@ class MeasurementPanel(QWidget):
             self._add_status("capImportProtSaved", channels=", ".join(result["prot_done"]))
         for sentence in result.get("prot_refused") or []:
             self._add_status("capImportProtRefusedLine", line=sentence)
+        if result.get("prot_lost"):
+            # Written, reported fine, and not in the round: TCC's defect, not a refusal and not the
+            # tuner's (TODO F-049).
+            self._add_status("protNotInRecord", channels=", ".join(result["prot_lost"]))
         # The round is a fact about the checklist too: what it recorded as taken is what the grid
         # colours, and the Protection dialog now has a pass to write into.
         self.titlesChanged.emit()

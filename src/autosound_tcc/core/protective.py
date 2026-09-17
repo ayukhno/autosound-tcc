@@ -139,6 +139,32 @@ def record_for(project_dir=None) -> Optional[dict]:
         return None
 
 
+def not_in_record(channels, round_id: str, project_dir=None) -> list[str]:
+    """Which of `channels` the capture round `round_id` holds no protective record for.
+
+    Asked right after this window wrote them. Since the method's v3.0.45 a baseline channel with
+    no record means the record did not come from the front-end — a session through MCP, a typed
+    CLI call, a round older than 2026-09-06 — or that the front-end failed to write what it thought
+    it wrote. The last cause is TCC's own defect, and it was silent: the writer returned, the
+    window said "recorded", and nothing read the round again (TODO F-049).
+
+    The journal fold rather than the open round alone, so a round closed between the write and
+    this read still answers. Found by id, so a write that landed in a round opened meanwhile counts
+    as missing from this one — which it is.
+    """
+    from autosound_tcc.state import process_view
+
+    wanted = [str(channel).strip() for channel in channels if str(channel).strip()]
+    if not wanted:
+        return []
+    held: dict = {}
+    for round_ in process_view.capture_rounds(project_dir):
+        if str(round_.get("id") or "") == str(round_id or ""):
+            held = round_.get("protective") or {}
+            break
+    return [channel for channel in wanted if channel not in held]
+
+
 def default_corrected(record: Optional[dict]) -> Optional[bool]:
     """Should the plot open corrected, as the ROUND itself decides?
 

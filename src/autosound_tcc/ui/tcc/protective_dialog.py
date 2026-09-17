@@ -292,6 +292,19 @@ class ProtectiveDialog(QDialog):
                 self._problem.setVisible(True)
                 return
             self.written.append(row.code)
+        # Read back before closing as if it went through (TODO F-049): the method reads a baseline
+        # channel with no record as one that did not come from this window, so a write that
+        # returned and did not land is TCC's defect, said here like a refusal and not left silent.
+        try:
+            lost = protective.not_in_record(
+                self.written, str((self._record or {}).get("series") or ""), self._project_dir)
+        except Exception:  # noqa: BLE001 — a record that cannot be read proves no loss
+            lost = []
+        if lost:
+            self.written = [code for code in self.written if code not in lost]
+            self._problem.setText(i18n.t("protNotInRecord").format(channels=", ".join(lost)))
+            self._problem.setVisible(True)
+            return
         self.accept()
 
 

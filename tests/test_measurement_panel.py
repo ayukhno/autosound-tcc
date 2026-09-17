@@ -746,6 +746,58 @@ def test_a_refused_capture_does_not_silence_the_protective_record(tmp_path, monk
     assert ("protective", "w-L", "OFF") in calls
 
 
+def test_protection_the_round_does_not_hold_after_the_write_is_not_counted_as_recorded(
+    tmp_path, monkeypatch
+):
+    """TODO F-049. The method reads a baseline channel with no protective record as one that did
+    not come from this window -- or as the window having failed to write what it thought it wrote.
+    That second cause is TCC's, and it was silent: the writer returned, the status line said
+    "Protection recorded for", and nothing read the round again. Read back, it is told apart."""
+    from autosound_tcc.core import process_writer, vendor_loader
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    vendor_loader.load_process().Process(str(tmp_path / "process")).start_capture(
+        "v_001", ["w-L_1 (sw)", "m-L_1 (sw)"])
+    round_id = process_view.capture_round(tmp_path)["id"]
+    real = process_writer.set_protective
+
+    def _keeps_only_w_l(project_dir, channel, legs):
+        # `m-L` reports success and writes nothing: the defect being caught.
+        return real(project_dir, channel, legs) if channel == "w-L" else ""
+
+    monkeypatch.setattr(process_writer, "set_protective", _keeps_only_w_l)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id=round_id, version=1,
+        expected=[], titles=[], protective={"m-L": "OFF", "w-L": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert seen["prot_done"] == ["w-L"], "only what the round holds is reported as recorded"
+    assert seen["prot_lost"] == ["m-L"]
+
+
+def test_the_status_line_names_protection_the_round_did_not_keep():
+    """TODO F-049: "мовчати про неї не можна". Said on the line that reports the import, beside
+    what was recorded, in the same words the Protection dialog uses."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._set_status("capImportDone", n=2)
+
+    panel._on_ledger_written({"round_id": "cap_001", "prot_done": ["w-L"], "prot_lost": ["m-L"]})
+
+    said = panel._status_label.text()
+    assert i18n.t("capImportProtSaved").format(channels="w-L") in said
+    assert i18n.t("protNotInRecord").format(channels="m-L") in said
+
+
 def test_a_failed_read_puts_the_rew_dot_out(tmp_path, monkeypatch):
     """The signal only ever carried the good news, so a REW closed since launch left a green dot
     over a failed read — and only a restart of TCC put it right (user, 2026-09-06)."""

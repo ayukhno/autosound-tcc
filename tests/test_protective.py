@@ -295,6 +295,38 @@ def test_the_gate_refuses_a_half_given_leg_and_the_dialog_shows_its_words(tmp_pa
     assert "Traceback" not in said, "the gate's sentence, not the CLI's wrapper"
 
 
+def test_protection_the_round_does_not_hold_after_record_is_said_next_to_the_button(
+    tmp_path, monkeypatch
+):
+    """TODO F-049. A channel with no record on a baseline round now means, to the method, that the
+    record did not come from this window -- or that the window failed to write what it thought it
+    wrote. The second is TCC's defect and must not be silent: the writer returning is not the round
+    holding it. Said where a refusal is said, and the dialog does not close as if it went through."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
+
+    project = _round(tmp_path)
+    real = process_writer.set_protective
+    # `m-L` reports success and writes nothing: the defect being caught.
+    monkeypatch.setattr(process_writer, "set_protective",
+                        lambda d, c, legs: real(d, c, legs) if c == "w-L" else "")
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L", "w-L"])
+
+    dialog._on_save()
+
+    assert dialog.result() != dialog.DialogCode.Accepted, "not closed as if it went through"
+    assert dialog._problem.isVisibleTo(dialog)
+    assert dialog._problem.text() == i18n.t("protNotInRecord").format(channels="m-L")
+    assert dialog.written == ["w-L"], "what the round holds, and only that"
+
+
 def test_one_press_makes_the_leg_the_filter_it_almost_always_is(tmp_path):
     """User, 2026-09-02: "додати маленьку кнопочку по нажаттю якої фільтр стає LR24". Two dropdowns
     are the honest surface — a protective filter can be whatever was in the chain — but nearly
