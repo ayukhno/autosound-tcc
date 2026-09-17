@@ -1427,6 +1427,12 @@ class MainWindow(QMainWindow):
         # their own.
         why = flaw.why or ""
         evidence = ", ".join(flaw.evidence)
+        # The doubt the second line shows, in the same words -- carried into the hover head and
+        # into both copies too, because those are how a row gets QUOTED. The copy dropped it, so a
+        # hypothesis pasted into a message arrived as the verdict the map has not reached, and the
+        # tip's warning colour does not survive a paste (TODO F-034).
+        doubt = (i18n.t("flawHypothesis") if flaw.is_hypothesis
+                 else i18n.t("flawStatusUnstated") if flaw.is_unstated else "")
         # NOT `head`: that name is the headline LABEL a few lines up, and shadowing it made
         # `copy_menu.full_text(head)` read a string instead of a widget -- the copy menu lost its
         # "copy value" entry and the row it offered began with a stray separator (caught by
@@ -1436,6 +1442,7 @@ class MainWindow(QMainWindow):
             i18n.t(f"flawKind_{flaw.kind}"),
             ", ".join(flaw.channels) or i18n.t("flawAllChannels"),
             i18n.t(f"flawAction_{flaw.action}"),
+            doubt,
         ) if part)
         body = "\n\n".join(part for part in (
             why,
@@ -1450,11 +1457,12 @@ class MainWindow(QMainWindow):
         copy_menu.enable_copy(
             widget,
             value=lambda: copy_menu.full_text(head),
-            row=lambda: " · ".join((
+            row=lambda: " · ".join(part for part in (
                 copy_menu.full_text(head),
                 i18n.t(f"flawAction_{flaw.action}"),
+                doubt,
                 copy_menu.full_text(line),
-            )),
+            ) if part),
             hint=lambda: copy_menu.plain(tip.text()),
         )
         return widget

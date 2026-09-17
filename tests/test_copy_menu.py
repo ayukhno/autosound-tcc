@@ -173,6 +173,31 @@ def test_a_flaw_row_copies_its_verdict_and_the_reason_behind_it():
     assert "<" not in hint, "pasted as text, never as markup"
 
 
+def test_a_copied_flaw_row_still_says_what_the_row_says_about_its_doubt():
+    """TODO F-034. The row puts "not settled" beside a hypothesis and "status not stated" beside a
+    row that never said what it is -- and the copy dropped both. A hypothesis pasted into a message
+    or another session arrived as the verdict it is not, which is the flattening F-034 is about.
+    The hint's warning colour is the other half of the doubt, and a paste loses colour."""
+    _app()
+    from autosound_tcc.state.acoustics_view import Flaw
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    window = MainWindow()
+    common = dict(f_hz=32, level_db=-4, kind="cabin_null", action="no_boost")
+    for flaw, doubt in (
+        (Flaw(**common, status="hypothesis"), i18n.t("flawHypothesis")),
+        (Flaw(**common, status_stated=False), i18n.t("flawStatusUnstated")),
+    ):
+        items = dict(window._flaw_row(flaw).copy_items())
+        assert doubt in items[i18n.t("copyRow")], "the row's own doubt, in the copied row"
+        assert doubt in items[i18n.t("copyHint")], "and in the copied hint"
+
+    settled = dict(window._flaw_row(Flaw(**common)).copy_items())
+    for word in (i18n.t("flawHypothesis"), i18n.t("flawStatusUnstated")):
+        assert word not in settled[i18n.t("copyRow")], "a confirmed row is not made to doubt"
+        assert word not in settled[i18n.t("copyHint")]
+
+
 def test_an_elided_label_grows_back_when_the_room_returns():
     """It used to be a one-way ratchet, and a side panel's header showed it: QLabel computes its
     size hint from the text it HOLDS, which this widget has already shortened, so the first elide
