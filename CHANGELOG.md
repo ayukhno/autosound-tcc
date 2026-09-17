@@ -82,6 +82,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **Quitting after a session closed itself in order no longer asks "Save before closing?"** — the
   close TCC hears marks the session saved, and anything written after it takes the mark back
   (TEST-FINDINGS 26).
+- **A long command no longer pushes Allow and Deny off the window** — the command scrolls inside the
+  permission block (TEST-FINDINGS 24).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 

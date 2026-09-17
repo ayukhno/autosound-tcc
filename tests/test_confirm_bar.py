@@ -169,3 +169,31 @@ def test_denying_never_remembers(tmp_path):
     bar._answer(False)
 
     assert seen == []
+
+
+def test_a_long_command_does_not_push_the_answer_off_the_window():
+    """TEST-FINDINGS 24: a `gh issue create … --body "$(cat <<'EOF' …` with the whole body inline
+    grew the block until Allow and Deny were below the window, and the turn waited forever. The
+    command scrolls inside a bounded height; the answer stays on screen, and nothing is cut."""
+    bar = ConfirmBar()
+    bar.resize(600, 400)
+    command = "\n".join(f"line {n}: gh issue create --body with a long inline heredoc" for n in range(200))
+
+    bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?", detail=command, payload={}),
+                Future())
+
+    line = bar.fontMetrics().lineSpacing()
+    assert bar.sizeHint().height() < 30 * line, "the block's height is bounded, whatever the command"
+    assert bar._detail.text() == command, "and the whole command is still there to read"
+
+
+def test_a_short_command_keeps_a_short_block():
+    """The bound is a ceiling, not a floor: a one-line command is not framed in twelve lines."""
+    bar = ConfirmBar()
+    bar.resize(600, 400)
+
+    bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?", detail="ls -la", payload={}),
+                Future())
+
+    assert bar.sizeHint().height() < 8 * bar.fontMetrics().lineSpacing()
+

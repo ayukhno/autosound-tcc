@@ -837,6 +837,8 @@ transcript's scroll area, and its detail is a word-wrapped label with no height 
 
 **Reproduces.** Whenever a command is taller than the space left in the window.
 
+**Fixed** on `wave-0.1.40` (2026-09-17): the detail scrolls inside twelve lines; the buttons stay on screen.
+
 ### 25. From a real terminal the reviewer is refused the same way, and its files follow the current folder
 
 **What.** The Arbiter ran the reviewer by hand from an ordinary PowerShell terminal, as the session

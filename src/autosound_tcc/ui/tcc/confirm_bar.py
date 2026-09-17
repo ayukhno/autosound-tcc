@@ -23,12 +23,18 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from autosound_tcc.core.mcp_server import ConfirmRequest
 from autosound_tcc.ui.tcc import i18n
+
+
+#: How many lines of a request's detail show before it scrolls. Enough to read an ordinary command
+#: whole; a heredoc with an issue body in it scrolls instead of pushing the answer off the window.
+_DETAIL_LINES = 12
 
 
 class ConfirmBar(QWidget):
@@ -60,7 +66,16 @@ class ConfirmBar(QWidget):
         self._detail.setProperty("class", "phead-sub")
         self._detail.setWordWrap(True)
         self._detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        outer.addWidget(self._detail)
+        self._detail.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        # Scrolled inside a bounded height, never grown past it (TEST-FINDINGS 24): a command with
+        # a whole issue body inline pushed Allow and Deny below the window, and the turn waited for
+        # an answer nobody could give. The command stays whole — it scrolls — and the buttons stay.
+        self._detail_scroll = QScrollArea()
+        self._detail_scroll.setWidgetResizable(True)
+        self._detail_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._detail_scroll.setWidget(self._detail)
+        outer.addWidget(self._detail_scroll)
 
         self._always = QCheckBox(i18n.t("confirmAlways"))
         self._always.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -136,11 +151,29 @@ class ConfirmBar(QWidget):
             self._current = (request, future)
             self._title.setText(request.title)
             self._detail.setText(request.detail)
+            self._fit_detail()
             self._update_remaining()
             self.setHidden(False)
             return
         self._current = None
         self.setHidden(True)
+
+    def _fit_detail(self) -> None:
+        """As tall as the command at this width, up to `_DETAIL_LINES` — then it scrolls.
+
+        Set by hand: a scroll area reports a height of several lines until it is shown, so left to
+        its own hint a one-line `ls` came out in a block 70 px taller than before (TEST-FINDINGS 24).
+        """
+        line = self._detail.fontMetrics().lineSpacing()
+        wanted = self._detail.heightForWidth(max(self.width() - 24, 200))
+        if wanted < 0:
+            wanted = self._detail.sizeHint().height()
+        self._detail_scroll.setFixedHeight(max(line, min(wanted + 2, line * _DETAIL_LINES + 8)))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        if self._current is not None:
+            self._fit_detail()  # rewrapped at the new width, so the height changes with it
 
     def _update_remaining(self) -> None:
         extra = len(self._queue)
