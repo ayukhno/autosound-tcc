@@ -1029,12 +1029,19 @@ stale = {k: t for k, t in i18n.T["en"].items()
 
 ### F-034 — «гіпотеза» і «транскрипція» виглядають у нас так само, як підтверджене
 
-**Статус**: open · заведено 2026-08-27, знайдено при написанні ноти до `v0.1.24` ·
+**Статус**: done 2026-09-17 · заведено 2026-08-27, знайдено при написанні ноти до `v0.1.24` ·
 **половина зроблена**: `hypothesis` рядок вади показує словами («не підтверджено») й окремим
 кольором крапки, а `v0.1.32` додав третю відмінність, якої в цьому тікеті не було, — **«стан не
 названо»** (tcc#5): писар скіла мовчки з'їдав `--status`, і рядок без поля читався як
 `confirmed`. **Транскрипція лишається невидимою**: `provenance.kind` у коді не читає ніхто
 (`grep -rn provenance src` → нуль).
+
+**17.09:** a copied flaw row and its copied hint now carry "not settled" and "status not stated"
+too (`99bf32e`). The transcription half is not shown — the user's answer, verbatim: «при
+копіюванні не копіюються налаштування ДСП. Срирі графіки з попередньої інсталяцїї можут мати
+старі фільтри захисту - але ми їх вводимо при замірах і ок.» Found on the way, for the method if
+this comes back: `provenance` is carried into every later version (`state/apply.py`
+`apply_delta` deep-copies the snapshot).
 
 Метод із `v3.0.36` пише два стани, яких у нас нема на екрані:
 
@@ -1498,7 +1505,18 @@ exe, тобто гірше за «Autosound TCC» і не гірше за теп
 
 ### F-042 — як звітувати про ваду й передати налаштування, коли GitHub недоступний
 
-**Статус**: open · заведено 2026-09-01 питанням користувача
+**Статус**: decided 2026-09-17, design next · заведено 2026-09-01 питанням користувача
+
+**17.09, the user's decision.** The channel without GitHub is the Google Form already on the
+user's Drive (public, no sign-in, one field `entry.970390217`, answers in a Sheet), opened from
+TCC with the text and the installation block filled in. On top of it, verbatim: «але ще треба
+мати можливіть передати фото, причесати це на Гугл диску, і дати можливість сесії відправляти
+цим каналом - як мінімум, зворотній звʼязок, як максімум проблеми і побажання з поточної сесіїї
+ШІ коли немає гітхаба». The second half of the question is the method's feedback package
+(`references/core/feedback-loop.md`, posted today by `gates/side_effect.post_feedback` through
+`gh`). TCC already has the form path in "Message the developer", switched off on 27.07 by
+`_FEEDBACK_FORM_URL = ""`. Next: a design for photos and for a session sending through the
+channel; the session's part is the method's, so it goes to the skill as a ticket.
 
 **Питання, дослівно:** «як сесія може оформити багу чи передачу налаштувань з основного
 діалога коли у користувача немає гітхаба чи він не залогінений».
@@ -1615,7 +1633,10 @@ Windows-машиною. Сьогодні цього не видно нізвід
 
 ### F-045 — правий кінець підвалу не стискається: кнопки їдуть за край і ховають те, що зліва
 
-**Статус**: done 2026-09-17 · the model pickers shrink to 90 px and the reviewer status keeps the room it draws in; the right column's clipping is not touched
+**Статус**: done 2026-09-17 · the model pickers shrink to 90 px and the reviewer status keeps the room it draws in; the right column's clipping is not touched ·
+a label given the width it asked for no longer loses its last letters (`labels.py`, rounding) ·
+left: the "Restart on <model>" button still needs its full width, and the "models…" button
+keeps the language the window opened in (`_retranslate`)
 
 **Зміряно, дослівно:** «нижній правий елемент іде праворуч і ховає іконки, а можна зменшувати
 поле».
@@ -1876,7 +1897,12 @@ TCC читав `plain`. Тобто на мапі, написаній тепер�
 
 ### F-049 — `check` тепер питання про ПОХОДЖЕННЯ запису, і показувати треба інше
 
-**Статус**: open · заведено 06.09 з відповіді методу на `hub#71` (TCC-005), у коді `v3.0.46`
+**Статус**: done 2026-09-17 · заведено 06.09 з відповіді методу на `hub#71` (TCC-005), у коді `v3.0.46`
+
+**17.09:** the fourth cause is covered (`6e2566b`): after writing, the import window and the
+Protection dialog read the round back, and a channel the round does not hold is named as TCC's
+defect. Where a record came from is not shown — the user's decision, verbatim: «показуємо коли є
+захіст, а коли немає - не впливає на відображення».
 
 Ми не будували питання «чи був захист?» на базовому проході (`tcc#16`, пункт 1) саме тому, що
 чекали, як метод розсудить третій стан. Розсудив, і зміст змінився. Їхній писар:

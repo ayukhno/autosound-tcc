@@ -7,7 +7,10 @@ and the panel's section headers (`sidebar_section`) need it, and `sidebar_sectio
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import QLabel, QSizePolicy
 
 
@@ -72,7 +75,10 @@ class ElidedLabel(QLabel):
         # The difference between the hint and the text it was measured from is the label's own
         # chrome (margins, indent, frame). Carried over rather than assumed to be zero.
         chrome = max(0, hint.width() - metrics.horizontalAdvance(super().text()))
-        hint.setWidth(metrics.horizontalAdvance(self._full) + chrome)
+        # Rounded UP from the fractional width: `elidedText` measures in fractions of a pixel, so
+        # a text 177.08 px wide given the 177 it asked for lost its last letters (TODO F-045).
+        wanted = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self._full))
+        hint.setWidth(wanted + chrome)
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)

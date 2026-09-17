@@ -22,6 +22,17 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   whole width was the window's minimum: on a 1280 px screen the window came out wider than the
   screen, with "Buy me a coffee" and "Message the developer" past the edge. The reviewer's status
   beside the pickers now shows its whole text when there is room (TODO F-045).
+- **A label no longer loses its last letters in the room it asked for** — a text 177.08 px wide
+  asked for 177, and the eliding, which counts fractions of a pixel, cut it: the reviewer's status
+  read "Критик: ще не викликав…" with space beside it, and 86 of 804 short English and Ukrainian
+  texts were cut the same way at their own width (TODO F-045).
+- **A copied flaw row keeps its doubt** — "Copy row" and "Copy hint" on a hypothesis now carry
+  "not settled", and on a row that never stated its status "status not stated", as the row shows;
+  the pasted text used to read as a verdict (TODO F-034).
+- **Protection that did not reach the round is said, not reported as recorded** — after writing
+  protection, from the import window or from Protection, TCC reads the round back. A channel the
+  round does not hold is named as a TCC defect with the way to report it, and the Protection
+  dialog stays open instead of closing as if it went through (TODO F-049).
 
 ## [v0.1.40] — 2026-09-17 · import from REW names from the round's list, blue for what REW holds, the method at v3.0.54
 
