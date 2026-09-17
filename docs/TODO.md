@@ -1754,6 +1754,35 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
+
+**Статус**: waiting 2026-09-17 · the Arbiter's yes — the tag is the one act this repository cannot
+take back, and `scripts/ship.py` asks for `REAL=1` by name for that reason
+
+The wave is done and its PR is green-or-not on CI, which is the only thing left to read:
+[PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `8eade1d`.
+It carries three things — the pin at the method's `v3.0.57` (bbaefbd), the Arbiter's form read from
+the method's gate instead of a copy here (SCR-057, hub #174), and the two Windows-only failures that
+PR's first run found (`markdown_of` reading the char formats; the footer test taking its roomy width
+from the layout).
+
+**The version and its CHANGELOG entry are already committed** (`0.1.41`, the `## [v0.1.41]` heading
+with its `Paired with method` line), which is the wave shape `ship` knows: it then writes nothing and
+puts the tag on the commit CI checked.
+
+What is left, in order:
+
+```bash
+gh pr checks 41                       # green on windows/linux/macos, or read the failure first
+git -C tcc checkout main && git -C tcc merge --ff-only method-v3.0.56 && git -C tcc push
+make ship                             # DRY RUN: the plan, writing nothing
+make ship REAL=1                      # only after the Arbiter's yes
+```
+
+**Before the real run, suspend the Windows VM.** The suite inside `ship` runs serially and the last
+attempt beside a running VM killed an xdist worker on this Mac (a macOS crash report for the pytest
+child, 23:09:52, 2026-09-17) — the release must not be the run that meets that.
+
 ### F-058 — The method on the beta channel (hub #140, ask 1, the method half)
 
 **Статус**: dropped 2026-09-16 · the Arbiter: "I don't need beta — it was proposed to protect updates; taking a tag is enough." TCC's half stays (the Arbiter's choice the same day: harmless, unticked by default)
