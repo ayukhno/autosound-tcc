@@ -45,13 +45,16 @@ FIELD_IMPACT = "entry.42935929"  # «Наскільки заважає нала�
 FIELD_MESSAGE = "entry.970390217"  # «Повідомлення», required
 FIELD_VERSIONS = "entry.1476583291"  # «Версії»
 #: The form's own words for each choice: anything else is not an answer it takes.
-KIND_ANSWERS = {"problem": "Проблема", "wish": "Побажання", "feedback": "Відгук"}
+KIND_ANSWERS = {"problem": "Проблема", "wish": "Побажання", "feedback": "Відгук", "test": "Тест"}
 IMPACT_ANSWERS = {
     "stops": "Зупиняє: далі налаштовувати не можу",
     "workaround": "Заважає, але можна обійти",
     "none": "Не заважає",
 }
 KINDS = tuple(KIND_ANSWERS)
+#: What a person writing a report chooses from. "Тест" is for probes: a kind of its own, so the
+#: sheet needs no cleaning after a check (the Arbiter, 2026-09-17).
+PERSON_KINDS = ("problem", "wish", "feedback")
 IMPACTS = tuple(IMPACT_ANSWERS)
 #: Only the confirmation page carries it: the link to submit another response.
 ACCEPTED_MARKER = "usp=form_confirm"

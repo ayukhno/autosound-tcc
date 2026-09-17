@@ -214,7 +214,7 @@ class FeedbackDialog(QDialog):
         kind_layout.addWidget(kind_label)
         self._kind_group = QButtonGroup(self)
         self._kind_buttons: dict[str, QRadioButton] = {}
-        for name in form_report.KINDS:
+        for name in form_report.PERSON_KINDS:
             button = QRadioButton(i18n.t(_KIND_KEYS[name]))
             self._kind_group.addButton(button)
             self._kind_buttons[name] = button

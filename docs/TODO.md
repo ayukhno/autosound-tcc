@@ -1542,6 +1542,16 @@ junk columns and the test entries are gone from the sheet and from the form. TCC
 to its own question, remembers who wrote, and asks how far it stops the tuning for a problem only.
 The ticket got the new fields as a comment.
 
+**Then, same day.** The user: «це вже не прототип», «може завести такий тип, щоб потім не чистити
+табличку?», «про статус забув», «ще ми додавали щоб працювало форматування тексту - не зламали?
+важливо». Done: the form is titled "Autosound — звіт і відгук"; **Тип** has a fourth answer
+**Тест** for probes (TCC's window does not offer it; a probe row stays in the sheet, marked); the
+sheet has **Статус** as a dropdown for the whole table column (Нове · У роботі · Зроблено ·
+Відхилено; the July report is Зроблено) and **Коментар** (was "Processed"). Formatting is intact:
+both routes send the editor's Markdown (`**bold**`, `*italic*`, `- ` and `1.` lists), now guarded
+by `test_formatting_reaches_the_form_as_markdown`; a Тест probe through TCC's own code landed in the
+sheet with it.
+
 **Питання, дослівно:** «як сесія може оформити багу чи передачу налаштувань з основного
 діалога коли у користувача немає гітхаба чи він не залогінений».
 

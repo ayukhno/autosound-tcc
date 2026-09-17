@@ -56,12 +56,18 @@ def test_the_answers_are_the_forms_own_words():
     # A choice the form does not list is not taken. These are the published form's words,
     # read from it on 2026-09-17 after the Arbiter's questions were added.
     assert form_report.KIND_ANSWERS == {
-        "problem": "Проблема", "wish": "Побажання", "feedback": "Відгук"}
+        "problem": "Проблема", "wish": "Побажання", "feedback": "Відгук", "test": "Тест"}
     assert form_report.IMPACT_ANSWERS == {
         "stops": "Зупиняє: далі налаштовувати не можу",
         "workaround": "Заважає, але можна обійти",
         "none": "Не заважає",
     }
+
+
+def test_a_person_is_offered_every_kind_but_the_test_one():
+    # "Тест" is for probes (the Arbiter, 2026-09-17: a kind of its own, so the sheet needs no
+    # cleaning after a check) — not a choice for someone writing about their car.
+    assert form_report.PERSON_KINDS == ("problem", "wish", "feedback")
 
 
 def test_a_report_without_a_sender_or_words_is_refused():

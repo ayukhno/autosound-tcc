@@ -432,6 +432,28 @@ def test_the_form_questions_are_asked_only_on_the_route_that_carries_them(monkey
     assert not any(row.isVisibleTo(dialog) for row in rows())
 
 
+def test_the_dialog_does_not_offer_the_test_kind(monkeypatch):
+    dialog, _calls = _form_dialog(monkeypatch)
+
+    assert tuple(dialog._kind_buttons) == ("problem", "wish", "feedback")
+
+
+def test_formatting_reaches_the_form_as_markdown(monkeypatch):
+    """The editor's B / I / lists are the point of it (the prototype sent `**Helix**`); the form
+    takes plain text, so the formatting travels as Markdown rather than being dropped."""
+    dialog, calls = _form_dialog(monkeypatch)
+    _ready(dialog)
+    dialog._editor.setHtml(
+        "<p>по <b>Helix</b> і <i>фазі</i>:</p><ul><li>префікс V</li></ul><ol><li>один</li></ol>")
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+
+    message = calls[0][0].message
+    assert "**Helix**" in message and "*фазі*" in message
+    assert "- префікс V" in message and "1." in message
+
+
 def test_the_github_route_opens_the_link_its_caller_builds(monkeypatch):
     from PySide6.QtGui import QDesktopServices
 

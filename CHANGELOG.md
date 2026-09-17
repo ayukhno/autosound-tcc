@@ -20,8 +20,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   Diagnostics can send a report straight to the developer's form, from the window, with no browser
   and no sign-in. It asks who you are (remembered for next time), whether it is a problem, a wish or
   feedback, and for a problem how far it stops your tuning; each goes to its own column of the
-  developer's sheet, with the versions the app ran on. What goes with your words is on screen
-  before Send. "Sent" is said only when the form confirms it; if it does not, the whole report is
+  developer's sheet, with the versions the app ran on. Bold, italic and lists travel as Markdown.
+  What goes with your words is on screen before Send. "Sent" is said only when the form confirms it; if it does not, the whole report is
   left on the clipboard. Text only: pictures still go through GitHub. The GitHub route keeps its
   issue form, now with your words already in it (TODO F-042).
 
