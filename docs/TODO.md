@@ -1722,7 +1722,9 @@ starts; and whether TCC's own panels load the method's modules from the same cop
 
 ### F-056 — Import from REW into TCC: the logic and the implementation
 
-**Статус**: doing · the three points and hub #153 A–C, E, F built on `wave-0.1.40` (2026-09-16/17), waiting for the Arbiter's test; hub #153 D (a clarification as what an extra is for, where `(imp)` belongs) is the Arbiter's call
+**Статус**: doing · built on `wave-0.1.40` with the method at `v3.0.53` (2026-09-16/17): the three points, hub #153 A–F, hub #154. The Arbiter, 2026-09-17: wait for the next skill version, then pin it, run the full suite, test everything together, and release v0.1.40 — the app's update button installs tags only
+
+**Open, not sent (the Arbiter's word needed):** the method's `v3.0.53` pre-sweep gate REFUSES a fragile driver's inherited Fs until it is confirmed or measured; the Arbiter's rule (2026-09-17) is a warning only — the tuner sets in the DSP what they need, and after phase 0 the working crossovers come from the DSP parameters, not from the capture record. A ticket to skill if the Arbiter says so.
 
 Named, not yet described. Seen around it today: the protective-filter dialog asks for virtual channels
 (TEST-FINDINGS 22), reading depends on REW's display smoothing (hub #151), and the session filed
