@@ -46,7 +46,7 @@ class _FakeBridge:
             raise self._raises
         return self._measurements
 
-    def frequency_response(self, mid):
+    def frequency_response(self, mid, smoothing=None):
         return self._curve
 
     def rename_measurement(self, mid, title):

@@ -54,6 +54,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   after the method and `(imp)` are in the grammar), a reviewer that exits 4 when it has no answer, THD
   flaw rows in percent, facts carried in from another project marked as inherited (all `v3.0.53`);
   junctions read from the impulse, and every REW reader naming its smoothing (`v3.0.54`).
+- **The curve window reads every measurement at 1/48, whatever REW's view is set to** — the curves
+  and the sum under them. It read each view as it was, so two drivers at 1/6 and 1/24 were summed
+  as they stood (hub #155).
 
 ### Fixed
 

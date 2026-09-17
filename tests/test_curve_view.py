@@ -219,7 +219,7 @@ class _FrBridge(_FakeBridge):
     """REW's own answer shapes on the frequency-response endpoint: a sweep carries a phase, an
     MMM capture's comes back null (`rew-api-quirks.md`)."""
 
-    def frequency_response(self, mid):
+    def frequency_response(self, mid, smoothing=None):
         freqs = [20.0 * (2 ** (i / 12.0)) for i in range(120)]
         return freqs, [80.0 - 0.001 * f for f in freqs], (None if "rta" in mid else [0.0] * 120)
 
@@ -4308,3 +4308,30 @@ def test_dragging_the_boundary_does_not_rewrite_the_settings_file_per_pixel(monk
 
     view.hideEvent(QHideEvent())  # closed before the timer could fire
     assert writes == [(curve_view._SPLIT_KEY, 0.3)], "and a pending boundary is not lost"
+
+
+class _SmoothingBridge(_FrBridge):
+    """Records the smoothing every frequency-response read asked REW for."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.smoothings: list = []
+
+    def frequency_response(self, mid, smoothing=None):
+        self.smoothings.append(smoothing)
+        return super().frequency_response(mid, smoothing)
+
+
+def test_every_curve_and_the_sum_read_rew_at_the_finest_smoothing():
+    """hub #155 §2: the window read each measurement as REW's view held it — 1/6 on some, 1/24 on
+    others in the reference session — and summed magnitude AND phase across those. The Arbiter,
+    2026-09-17: everything at 1/48, the method's finest level, whatever the view is set to."""
+    _app()
+    bridge = _SmoothingBridge()
+
+    _CurveWorker(bridge, ["w-L_01 (sw)", "w-R_01 (sw)"], "fr").run()
+    _CurveWorker(bridge, ["w-L_01 (sw)"], "impulse").run()
+
+    assert len(bridge.smoothings) == 3
+    assert set(bridge.smoothings) == {"1/48"}
+

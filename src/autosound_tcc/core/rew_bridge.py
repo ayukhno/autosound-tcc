@@ -76,13 +76,33 @@ class RewBridge:
         return self.api.rename_measurement(mid, title)
 
     # -- curves --
-    def frequency_response(self, mid):
-        """(freqs, magnitude_db, phase_deg | None)."""
-        return self.api.get_fr(mid)
+    @property
+    def FINEST_SMOOTHING(self) -> str:  # noqa: N802 — the method's own constant, under its name
+        """The finest smoothing the method reads at (`rew_api.FINEST_SMOOTHING`, v3.0.54): `None`
+        and `1/48` are one level for its purposes, and `None` comes back linear."""
+        return str(getattr(self.api, "FINEST_SMOOTHING", "1/48"))
 
-    def group_delay(self, mid):
-        """(freqs, group_delay)."""
-        return self.api.get_group_delay(mid)
+    def frequency_response(self, mid, smoothing=None):
+        """(freqs, magnitude_db, phase_deg | None).
+
+        `smoothing` is asked of REW on the read (`?smoothing=`, hub #155); None takes whatever the
+        Arbiter's view of that measurement holds. A method before v3.0.54 cannot ask, and reads the
+        view rather than failing.
+        """
+        return self._read(self.api.get_fr, mid, smoothing)
+
+    def group_delay(self, mid, smoothing=None):
+        """(freqs, group_delay), with `smoothing` as for `frequency_response`."""
+        return self._read(self.api.get_group_delay, mid, smoothing)
+
+    @staticmethod
+    def _read(call, mid, smoothing):
+        if smoothing is None:
+            return call(mid)
+        try:
+            return call(mid, smoothing=smoothing)
+        except TypeError:
+            return call(mid)
 
     def impulse_response(self, mid):
         """(times, samples)."""

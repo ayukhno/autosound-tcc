@@ -319,6 +319,10 @@ class _CurveWorker(QThread):
                  legs_by_title: Optional[dict] = None) -> None:
         super().__init__()
         self._bridge = bridge
+        # Every read at the method's finest level, whatever REW's view of a measurement is set to
+        # (hub #155; the Arbiter, 2026-09-17). The view was 1/6 on some sweeps and 1/24 on others,
+        # and the sum's strip added magnitude AND phase across the two.
+        self._smoothing = getattr(bridge, "FINEST_SMOOTHING", "1/48")
         self._titles = list(titles)
         self._kind = kind
         #: `{title: legs}` for the titles whose protective filter is to be taken back OUT of the
@@ -374,7 +378,8 @@ class _CurveWorker(QThread):
                     # Both halves, from the one call that returns both. Keeping only the one being
                     # drawn is what used to make a sum impossible without a second round trip —
                     # and a sum needs the magnitude AND the phase of every driver in it.
-                    freqs, mag, phase = self._bridge.frequency_response(mid)
+                    freqs, mag, phase = self._bridge.frequency_response(
+                        mid, smoothing=self._smoothing)
                     mag, phase, note = _without_protection(freqs, mag, phase, legs)
                     if note:
                         problems.append(note)
@@ -413,7 +418,7 @@ class _CurveWorker(QThread):
         window for.
         """
         try:
-            freqs, mag, phase = self._bridge.frequency_response(mid)
+            freqs, mag, phase = self._bridge.frequency_response(mid, smoothing=self._smoothing)
         except Exception:  # noqa: BLE001 — see docstring; the impulse is the payload here
             return {}
         if freqs is None or mag is None:
