@@ -13,8 +13,18 @@ import urllib.parse
 
 import pytest
 
-from autosound_tcc.core import form_report
+from autosound_tcc.core import form_report, vendor_loader
 from autosound_tcc.core.form_report import Report
+
+#: The form belongs to the METHOD (the user's decision, 2026-09-17): its address, its question
+#: ids and its answer words are read from the gate, and this module refers to them the same way
+#: TCC does rather than keeping a second copy for the test to agree with itself.
+_GATE = vendor_loader.load("gates/side_effect.py")
+
+pytestmark = pytest.mark.skipif(
+    not form_report.is_available(),
+    reason="no method with the form route (rew_tool/gates/side_effect.py, v3.0.56+)",
+)
 
 
 def _report(**overrides):
@@ -38,36 +48,46 @@ def test_a_version_that_cannot_be_told_is_said_rather_than_left_blank():
 
 def test_every_answer_goes_to_its_own_question():
     assert form_report.fields(_report()) == {
-        form_report.FIELD_SENDER: "Олег, @oleg",
-        form_report.FIELD_KIND: "Проблема",
-        form_report.FIELD_IMPACT: "Зупиняє: далі налаштовувати не можу",
-        form_report.FIELD_MESSAGE: "it froze",
-        form_report.FIELD_VERSIONS: "TCC 1",
+        _GATE.FORM_FIELD_SENDER: "Олег, @oleg",
+        _GATE.FORM_FIELD_KIND: "Проблема",
+        _GATE.FORM_FIELD_IMPACT: "Зупиняє: далі налаштовувати не можу",
+        _GATE.FORM_FIELD_MESSAGE: "it froze",
+        _GATE.FORM_FIELD_VERSIONS: "TCC 1",
     }
+
+
+def test_the_question_ids_are_the_methods_and_not_a_copy_here(monkeypatch):
+    """The point of the consolidation (the user, 2026-09-17): the form is the method's, and this
+    module refers to it. A copy here would keep answering with the old id after the method's
+    moved — the sheet filling a column nobody reads."""
+    monkeypatch.setattr(_GATE, "FORM_POST_URL", "https://example.invalid/formResponse")
+    monkeypatch.setattr(_GATE, "FORM_KINDS", dict(_GATE.FORM_KINDS, wish="Wish"))
+
+    assert form_report.post_url() == "https://example.invalid/formResponse"
+    assert form_report.kind_answers()["wish"] == "Wish"
 
 
 def test_what_was_not_said_is_left_out_rather_than_sent_empty():
     got = form_report.fields(_report(kind="wish", impact="", versions=""))
 
-    assert form_report.FIELD_IMPACT not in got and form_report.FIELD_VERSIONS not in got
+    assert _GATE.FORM_FIELD_IMPACT not in got and _GATE.FORM_FIELD_VERSIONS not in got
 
 
 def test_the_answers_are_the_forms_own_words():
     # A choice the form does not list is not taken. These are the published form's words,
     # read from it on 2026-09-17 after the Arbiter's questions were added.
-    assert form_report.KIND_ANSWERS == {
-        "problem": "Проблема", "wish": "Побажання", "feedback": "Відгук", "test": "Тест"}
-    assert form_report.IMPACT_ANSWERS == {
-        "stops": "Зупиняє: далі налаштовувати не можу",
-        "workaround": "Заважає, але можна обійти",
-        "none": "Не заважає",
-    }
+    assert form_report.kind_answers() == dict(_GATE.FORM_KINDS)
+    assert form_report.impact_answers() == dict(_GATE.FORM_IMPACTS)
+    # The window has a label for each of these, so the keys are the contract, not the wording.
+    assert set(form_report.kind_answers()) >= {"problem", "wish", "feedback"}
+    assert set(form_report.impact_answers()) == {"stops", "workaround", "none"}
 
 
 def test_a_person_is_offered_every_kind_but_the_test_one():
     # "Тест" is for probes (the Arbiter, 2026-09-17: a kind of its own, so the sheet needs no
     # cleaning after a check) — not a choice for someone writing about their car.
-    assert form_report.PERSON_KINDS == ("problem", "wish", "feedback")
+    assert form_report.person_kinds() == ("problem", "wish", "feedback")
+    assert "test" in form_report.kinds()
 
 
 def test_a_report_without_a_sender_or_words_is_refused():
@@ -108,7 +128,7 @@ def test_the_report_is_posted_to_the_form_answer_by_answer():
 
     form_report.send(_report(), post=post)
 
-    assert seen["url"] == form_report.FORM_POST_URL
+    assert seen["url"] == _GATE.FORM_POST_URL
     assert urllib.parse.parse_qs(seen["data"].decode("utf-8")) == {
         key: [value] for key, value in form_report.fields(_report()).items()}
 
@@ -139,3 +159,27 @@ def test_an_http_refusal_is_said_with_its_code():
     got = form_report.send(_report(), post=refused)
 
     assert not got.ok and got.reason == "http" and "405" in got.detail
+
+
+def test_no_method_means_no_form_route_rather_than_a_guess(monkeypatch):
+    """Without the method there is no form to send to, and TCC says so instead of inventing an
+    address: `post_url()` is "", which is the dialog's own "GitHub is the only route" case."""
+    monkeypatch.setattr(form_report, "_gate", lambda: None)
+
+    assert not form_report.is_available()
+    assert form_report.post_url() == ""
+    assert form_report.kind_answers() == {} and form_report.person_kinds() == ()
+
+    got = form_report.send(_report(), post=lambda *_: (200, "usp=form_confirm"))
+    assert not got.ok and got.reason == "no_form"
+    with pytest.raises(form_report.NoForm):
+        form_report.fields(_report())
+
+
+def test_a_method_older_than_the_form_route_is_the_same_case(monkeypatch):
+    """A pin before the method's v3.0.56 has the gate but no form in it (`issue_assets.available()`
+    posture): the module is importable and the route still must not be offered."""
+    monkeypatch.delattr(_GATE, "FORM_POST_URL")
+
+    assert not form_report.is_available()
+    assert form_report.post_url() == ""

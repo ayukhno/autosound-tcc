@@ -768,7 +768,7 @@ class DiagnosticsDialog(QDialog):
         the form's text under the words, or in the issue template's own field."""
         report = self._report_text()
         FeedbackDialog(
-            ISSUES_URL, form_report.FORM_POST_URL, self, kind="problem", attachment=report,
+            ISSUES_URL, form_report.post_url(), self, kind="problem", attachment=report,
             github_link=lambda body: issue_url(body, report),
         ).exec()
 

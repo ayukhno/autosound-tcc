@@ -12,10 +12,10 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [v0.1.41] — 2026-09-17 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.56
+## [v0.1.41] — 2026-09-17 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.57
 
-Paired with method `4c798602987d09964d5eda7b1606b31c9da056d3` — the tag on that commit is
-**`v3.0.56`**.
+Paired with method `bbaefbd0590a744dfb6349b25438f5bb2939dcb8` — the tag on that commit is
+**`v3.0.57`**.
 
 ### Added
 
@@ -30,7 +30,7 @@ Paired with method `4c798602987d09964d5eda7b1606b31c9da056d3` — the tag on tha
 
 ### Changed
 
-- **The method is pinned at `v3.0.56`** (4c79860). Phase 1's crossovers and delays now come from
+- **The method is pinned at `v3.0.57`** (bbaefbd). Phase 1's crossovers and delays now come from
   Resonalyze's engines behind the method's own wrapper; EQ is proposed in two parts, the coarse
   per-driver bands before the delays; above 1 kHz a mid↔tweeter joint whose two witnesses disagree
   comes back UNVERIFIED with both candidates instead of being answered; a crossover candidate is
@@ -40,6 +40,14 @@ Paired with method `4c798602987d09964d5eda7b1606b31c9da056d3` — the tag on tha
   series rather than the DSP state (`v3.0.55`). TCC calls none of the new tools: Phase 1's engine
   needs the .NET SDK or a prebuilt engine, and it is the method's session that runs it, not the
   window.
+- **The form's address and its questions are the METHOD's, and TCC refers to them** (the user's
+  decision, 2026-09-17). A session without `gh` writes to the same sheet through
+  `rew_tool/gates/side_effect.py`, so the form is one fact with one owner: the window reads the
+  address, the five question ids, the words each choice is answered with, and the rule for when a
+  report counts as sent from there instead of keeping a copy beside it. Both copies agreed the day
+  they were written; the cost of two is a question id that moves in one of them and a column in the
+  sheet quietly filled by the other. Where no method is installed the form route is not offered at
+  all — the window's GitHub route and its clipboard are what is left, and nothing invents an address.
 - **The method's Windows PATH fix does not arrive through the update button.** `install.ps1` in
   `v3.0.55` puts `~\.local\bin` ahead of the Store's `python3` shortcut in the user PATH; TCC's
   button only moves the method's checkout to the newest tag, so a Windows machine where a new
@@ -47,6 +55,11 @@ Paired with method `4c798602987d09964d5eda7b1606b31c9da056d3` — the tag on tha
 
 ### Fixed
 
+- **Bold and italic reach the form as formatting on every machine, not just most of them** —
+  what a person marks in the editor is now read off the editor's own formats. Qt's own Markdown
+  writer decides emphasis from the font it RESOLVED rather than from the format that was set, so on
+  a machine whose font database answered "no bold face" for the app's font the same report arrived
+  as plain text with the marks silently dropped. Lists and paragraphs travel as before.
 - **A narrow window no longer pushes the footer's buttons off its right edge** — the two model
   pickers give up width, down to a few characters, before the row asks for more than the window
   has, and keep their full size when there is room. Nothing in the footer used to shrink, so its

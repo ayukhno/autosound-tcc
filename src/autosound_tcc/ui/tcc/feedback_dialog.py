@@ -17,7 +17,13 @@ import urllib.parse
 
 from pathlib import Path
 
-from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextListFormat
+from PySide6.QtGui import (
+    QDesktopServices,
+    QFont,
+    QGuiApplication,
+    QPixmap,
+    QTextListFormat,
+)
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -43,6 +49,76 @@ from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 #: only thing this preview is for. A thumbnail too small to read is a consent screen that shows
 #: nothing (SKL-019).
 THUMB_W, THUMB_H = 220, 140
+
+#: List styles that are numbered rather than bulleted. The toolbar makes only `ListDecimal`; the
+#: rest are here because a document can carry them (pasted from elsewhere) and a number read as a
+#: dash is a changed meaning, not a changed look.
+_NUMBERED = (
+    QTextListFormat.Style.ListDecimal,
+    QTextListFormat.Style.ListLowerAlpha,
+    QTextListFormat.Style.ListUpperAlpha,
+    QTextListFormat.Style.ListLowerRoman,
+    QTextListFormat.Style.ListUpperRoman,
+)
+
+
+def markdown_of(document) -> str:
+    """The editor's four formats — bold, italic, bulleted, numbered — as Markdown.
+
+    **Not `QTextDocument.toMarkdown()`.** Qt's writer decides emphasis from `QFontInfo` of the
+    RESOLVED font, not from the format the editor set (`qtextmarkdownwriter.cpp`:
+    `if (fontInfo.bold() != bold)`), so whether a person's bold survives depends on the machine's
+    font database. Under the offscreen platform the application font is the non-existent
+    "Sans Serif": on macOS and Linux it resolves to a family with a bold face and the markers are
+    written, on the Windows runner it does not and the same report left as PLAIN TEXT — measured
+    2026-09-17, CI on PR #41, where the fragments' own weight was 700 in both. A conversion of
+    what somebody pressed must read what they pressed.
+
+    Read off the char formats, therefore, and only for what the toolbar can make. Whitespace is
+    kept OUTSIDE the markers: `**Helix **` is not emphasis in any Markdown parser.
+    """
+    chunks: list[str] = []
+    block = document.begin()
+    while block.isValid():
+        text = ""
+        fragments = block.begin()
+        while not fragments.atEnd():
+            fragment = fragments.fragment()
+            fragments += 1
+            if not fragment.isValid():
+                continue
+            font = fragment.charFormat().font()
+            marks = ("**" if font.weight() > QFont.Weight.Normal else "") + \
+                    ("*" if font.italic() else "")
+            words = fragment.text()
+            if not marks or not words.strip():
+                text += words
+                continue
+            lead = words[:len(words) - len(words.lstrip())]
+            tail = words[len(words.rstrip()):]
+            text += f"{lead}{marks}{words.strip()}{marks[::-1]}{tail}"
+        listed = block.textList()
+        if listed is not None:
+            numbered = listed.format().style() in _NUMBERED
+            bullet = f"{listed.itemNumber(block) + 1}. " if numbered else "- "
+            chunks.append(("item", bullet + text.strip()))
+        else:
+            chunks.append(("block", text.strip()))
+        block = block.next()
+
+    # A list's items sit on consecutive lines; everything else is a paragraph, and paragraphs are
+    # separated by a blank one. An empty block is spacing a person made with Return, and joining
+    # on blank lines already says that — carried through, it would grow a gap every time.
+    out: list[str] = []
+    previous = ""
+    for kind, text in chunks:
+        if not text:
+            continue
+        if out:
+            out.append("\n" if kind == "item" and previous == "item" else "\n\n")
+        out.append(text)
+        previous = kind
+    return "".join(out).strip()
 
 
 def body_with_shots(body: str, urls) -> str:
@@ -214,13 +290,17 @@ class FeedbackDialog(QDialog):
         kind_layout.addWidget(kind_label)
         self._kind_group = QButtonGroup(self)
         self._kind_buttons: dict[str, QRadioButton] = {}
-        for name in form_report.PERSON_KINDS:
+        for name in form_report.person_kinds():
+            if name not in _KIND_KEYS:
+                continue  # a kind a newer method added and this window has no word for
             button = QRadioButton(i18n.t(_KIND_KEYS[name]))
             self._kind_group.addButton(button)
             self._kind_buttons[name] = button
             kind_layout.addWidget(button)
         kind_layout.addStretch(1)
-        self._kind_buttons[kind if kind in self._kind_buttons else "feedback"].setChecked(True)
+        chosen = kind if kind in self._kind_buttons else "feedback"
+        if chosen in self._kind_buttons:  # no form, no kinds: the GitHub route asks none of this
+            self._kind_buttons[chosen].setChecked(True)
         outer.addWidget(self._kind_row)
 
         self._impact_row = QWidget()
@@ -232,7 +312,9 @@ class FeedbackDialog(QDialog):
         impact_layout.addWidget(impact_label)
         self._impact_group = QButtonGroup(self)
         self._impact_buttons: dict[str, QRadioButton] = {}
-        for name in form_report.IMPACTS:
+        for name in form_report.impacts():
+            if name not in _IMPACT_KEYS:
+                continue
             button = QRadioButton(i18n.t(_IMPACT_KEYS[name]))
             self._impact_group.addButton(button)
             self._impact_buttons[name] = button
@@ -422,7 +504,7 @@ class FeedbackDialog(QDialog):
         if not sender:
             self._say(i18n.t("fbNoSender"))
             return
-        words = self._editor.toMarkdown().strip() if self._editor.toPlainText().strip() else ""
+        words = markdown_of(self._editor.document()) if self._editor.toPlainText().strip() else ""
         if not words:
             self._say(i18n.t("fbEmpty"))
             return
@@ -464,7 +546,7 @@ class FeedbackDialog(QDialog):
         if not self._radio_github.isChecked():
             self._send_to_form()
             return
-        body = self._editor.toMarkdown().strip()
+        body = markdown_of(self._editor.document())
         if self._shots:
             # `consented=True` is EARNED here, and this is the only place in either half that
             # can earn it: these are the pictures still on screen after a person looked at

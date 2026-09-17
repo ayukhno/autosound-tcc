@@ -2255,7 +2255,7 @@ class MainWindow(QMainWindow):
     def _open_feedback(self) -> None:
         # The form for a person without GitHub, sent from the window (TODO F-042). It was an
         # empty constant from 27.07 until the Arbiter chose the route on 17.09.
-        FeedbackDialog(_FEEDBACK_URL, form_report.FORM_POST_URL, self).exec()
+        FeedbackDialog(_FEEDBACK_URL, form_report.post_url(), self).exec()
 
     def _open_support_menu(self) -> None:
         """The coffee button's own popup, opening UPWARD from the footer (user, 2026-07-28).

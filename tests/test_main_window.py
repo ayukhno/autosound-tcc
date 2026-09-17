@@ -3166,7 +3166,17 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
         text = widget.currentText() if hasattr(widget, "currentText") else widget.text()
         return f"{type(widget).__name__} {text!r}"
 
-    for width, roomy in ((1600, True), (1280, False)):
+    # What "roomy" is, is the LAYOUT's number and not a screen size: the same row needs more
+    # window where the text is wider, and 1600 px was roomy on macOS and Linux while the Windows
+    # runner already squeezed at it (CI on PR #41, 2026-09-17, where the picker came out 143 px
+    # against the 260 it asks for). The frame around the row is what the window has beyond it.
+    window.resize(1600, 820)
+    for _ in range(4):
+        app.processEvents()
+        app.sendPostedEvents()
+    roomy_width = max(1600, footer.sizeHint().width() + window.width() - footer.width())
+
+    for width, roomy in ((roomy_width, True), (1280, False)):
         window.resize(width, 820)
         for _ in range(4):
             app.processEvents()
@@ -4399,4 +4409,4 @@ def test_message_the_developer_offers_the_form_for_people_without_github(monkeyp
 
     window._open_feedback()
 
-    assert made == [form_report.FORM_POST_URL]
+    assert made == [form_report.post_url()]

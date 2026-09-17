@@ -854,7 +854,7 @@ def test_report_a_problem_offers_both_routes_with_the_installation_block(monkeyp
 
     assert len(made) == 1
     form_url, kwargs = made[0]
-    assert form_url == form_report.FORM_POST_URL
+    assert form_url == form_report.post_url()
     assert kwargs["kind"] == "problem"
     assert "0.1.4" in kwargs["attachment"], "the installation block travels with the report"
     link = kwargs["github_link"]("it froze")

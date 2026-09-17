@@ -454,6 +454,38 @@ def test_formatting_reaches_the_form_as_markdown(monkeypatch):
     assert "- префікс V" in message and "1." in message
 
 
+def test_the_markdown_is_read_off_the_formats_not_off_the_resolved_font():
+    """What broke on Windows and not here (CI on PR #41, 2026-09-17): `QTextDocument.toMarkdown()`
+    decides emphasis from `QFontInfo` of the RESOLVED font, so on a machine whose font database
+    answered "not bold" for the requested family the same report went as plain text, with the
+    fragments' own weight at 700 in both. Read from the document, with no window and no send, so
+    the rule is the test rather than a platform's font list."""
+    from PySide6.QtGui import QTextDocument
+
+    from autosound_tcc.ui.tcc import feedback_dialog
+
+    doc = QTextDocument()
+    doc.setHtml("<p>по <b>Helix</b> і <i>фазі</i>:</p><ul><li>префікс V</li></ul>"
+                "<ol><li>один</li><li>два</li></ol>")
+
+    got = feedback_dialog.markdown_of(doc)
+
+    assert got == "по **Helix** і *фазі*:\n\n- префікс V\n1. один\n2. два"
+
+
+def test_a_space_inside_a_bold_run_stays_outside_its_markers():
+    """`**Helix **` is not emphasis in any parser: a person who selected a word plus the space
+    after it still means the word."""
+    from PySide6.QtGui import QTextDocument
+
+    from autosound_tcc.ui.tcc import feedback_dialog
+
+    doc = QTextDocument()
+    doc.setHtml("<p>на <b>Helix </b>і далі</p>")
+
+    assert feedback_dialog.markdown_of(doc) == "на **Helix** і далі"
+
+
 def test_the_github_route_opens_the_link_its_caller_builds(monkeypatch):
     from PySide6.QtGui import QDesktopServices
 
