@@ -75,10 +75,10 @@ is not the raw sweeps: those run 16 to 112 MB apiece, they stay on your disk, an
 needed them again you would re-measure. What is worth keeping is everything you *concluded* — the
 ledger of every crossover, delay, gain and filter, the journal of how you got there, the DSP
 config backups that restore the tune, the target curves and the analysis notes. Small files, and
-no amount of re-measuring brings them back. The installer asks whether you want them backed up to
-a **private** GitHub repository, and if so puts GitHub's `gh` in place and signs it in; the backup
-itself happens when you tell the AI to back the project up — it knows what stays out. A free
-account covers it.
+no amount of re-measuring brings them back. The installer does not ask about it: add `--github`
+(`-GitHub` on Windows) and it puts GitHub's `gh` in place and offers its sign-in at the end, for a
+**private** GitHub repository; the backup itself happens when you tell the AI to back the project
+up — it knows what stays out. A free account covers it.
 
 A second AI as reviewer is optional, but it is where most of the value comes from: the method works
 by having one model propose a change and a model from a different vendor argue with it. The
@@ -88,14 +88,15 @@ can wait until after your first session.
 
 ## Install
 
-One line installs, updates and removes, on macOS and on Windows. It installs everything by default
-— Claude Code, the method, the app, the Gemini reviewer, and `omp`, which is what lets the app
-offer models other than Claude — shows what is already on the machine, lists everything it will
-download and where from, asks once, and then runs on its own for ten to twenty minutes. The one
+One line installs, updates and removes, on macOS and on Windows. By default it installs Claude
+Code, the method, the app and the Gemini reviewer; GitHub's `gh` and `omp` (which lets the app offer
+models other than Claude, on a metered route) come only when asked for. It shows what is already on
+the machine, lists everything it will download and where from, asks once, and then runs on its own
+for ten to twenty minutes. The one
 interruption comes right after that question: on a Mac that has never been used for programming it
 asks for your Mac password, once, for Apple's Command Line Tools; on
 Windows it shows one permission dialog, for Git. At the end it signs you in, in your browser:
-Claude first (that one is required), then the reviewer and GitHub if you want them — each on
+Claude first (that one is required), then the reviewer, and GitHub when `gh` is there — each on
 Enter, or later.
 
 It does not matter which folder you run it from. Everything goes to fixed places: `~/.claude/` for
@@ -126,14 +127,15 @@ the one thing Windows asks permission for.
 <details>
 <summary>Options, and a double-click alternative for Windows</summary>
 
-To leave something out: `--terminal` (the method only, no app), `--no-reviewer`, `--no-github`,
-`--no-omp`. On macOS they go after `bash -s --`:
+To add something: `--github` (GitHub's `gh`, for the project backup) and `--with-omp` (models other
+than Claude in the app; metered). To leave something out: `--terminal` (the method only, no app) and
+`--no-reviewer`. On macOS they go after `bash -s --`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.sh | bash -s -- --terminal
 ```
 
-On Windows the same four are `-Terminal`, `-NoReviewer`, `-NoGitHub`, `-NoOmp`, on this form:
+On Windows the same four are `-GitHub`, `-WithOmp`, `-Terminal`, `-NoReviewer`, on this form:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ayukhno/autosound-tuning-skill/main/install.ps1))) -Terminal

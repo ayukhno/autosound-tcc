@@ -43,7 +43,7 @@ the method, the app, the reviewer. `--terminal` leaves the app out, `--no-review
 `--no-github` skips the question; through the one-liner they go after `bash -s --`. The README
 should say the default and name the flags in one sentence, not describe a menu.
 
-**[skill] `omp` is NOT installed by default any more** (`--with-omp`). It is the metered route.
+**[skill] `omp` is NOT installed by default any more** (`--with-omp`). It is the metered route. *Applied to README.md 2026-09-17 (hub #155), with `gh` only on `--github`.*
 The 08-13 line "without it that dialog is empty" is still true and is now the intended state for a
 first install: the recommended pair (Claude through the SDK, Gemini through `agy`) does not need
 it.

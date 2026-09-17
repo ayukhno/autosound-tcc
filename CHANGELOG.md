@@ -91,6 +91,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   (TEST-FINDINGS 26).
 - **A long command no longer pushes Allow and Deny off the window** — the command scrolls inside the
   permission block (TEST-FINDINGS 24).
+- **The README's install section says what the installer does since the method's `v3.0.54`**: `gh`
+  and `omp` only when asked for (`--github`, `--with-omp`), not by default (hub #155).
 
 ## [v0.1.39] — 2026-09-14 · models are re-read on every start, and one that cannot run is red with the reason
 
