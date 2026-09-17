@@ -32,6 +32,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   own words, under the table — without refusing it (hub #153).
 - **An impedance sweep (`w-L (imp)`) shows on the capture card** with the series on screen: it has
   no series number, and which series it sits with does not matter (hub #153).
+- **Diagnostics → Log saves the project's newest agent sessions into one readable file**: who said
+  what, each tool call on one line, a tool's output cut to its first lines, and per session the
+  phase, the Arbiter's turns, the model's words and the tool calls (TODO F-054).
 
 ### Changed
 

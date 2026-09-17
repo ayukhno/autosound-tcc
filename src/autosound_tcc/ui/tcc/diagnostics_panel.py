@@ -17,6 +17,8 @@ from __future__ import annotations
 import threading
 import time
 import urllib.parse
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -24,11 +26,13 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -39,6 +43,7 @@ from autosound_tcc.core import (
     config,
     install_report,
     self_check,
+    session_export,
     terminal_launcher,
     updates,
 )
@@ -587,7 +592,22 @@ class DiagnosticsDialog(QDialog):
         self._log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         layout.addWidget(self._log_text, stretch=1)
         row = QHBoxLayout()
-        row.addStretch(1)
+        # The dialog history, out of the machine in one readable file (TODO F-054): how many of the
+        # project's newest sessions, and a save dialog for where.
+        self._sessions_count = QSpinBox()
+        self._sessions_count.setRange(1, 50)
+        self._sessions_count.setValue(5)
+        row.addWidget(self._sessions_count)
+        self._sessions_btn = QPushButton(i18n.t("diagSessionsSave"))
+        self._sessions_btn.setProperty("class", "reason-btn")
+        self._sessions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sessions_btn.clicked.connect(self._export_sessions)
+        row.addWidget(self._sessions_btn)
+        self._sessions_status = QLabel("")
+        self._sessions_status.setProperty("class", "phead-sub")
+        self._sessions_status.setWordWrap(True)
+        self._sessions_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        row.addWidget(self._sessions_status, stretch=1)
         self._log_copy_btn = QPushButton(i18n.t("diagInstallCopy"))
         self._log_copy_btn.setProperty("class", "reason-btn")
         self._log_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -595,6 +615,34 @@ class DiagnosticsDialog(QDialog):
         row.addWidget(self._log_copy_btn)
         layout.addLayout(row)
         return page
+
+    def _export_sessions(self) -> None:
+        """The newest N sessions of this project into one Markdown file the person names (F-054)."""
+        project = config.project_dir()
+        paths = session_export.recent_transcripts(project, self._sessions_count.value())
+        if not paths:
+            self._sessions_status.setText(i18n.t("diagSessionsNone"))
+            return
+        default = config.tcc_dir(project) / "exports" / (
+            f"sessions-{datetime.now():%Y-%m-%d-%H%M}.md")
+        try:
+            default.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            default = Path(default.name)
+        target, _filter = QFileDialog.getSaveFileName(
+            self, i18n.t("diagSessionsSave"), str(default), "Markdown (*.md)")
+        if not target:
+            return
+        try:
+            Path(target).write_text(
+                session_export.render(paths, session_export.phases_by_session(project),
+                                      title=Path(project).name),
+                encoding="utf-8")
+        except OSError as exc:
+            self._sessions_status.setText(f"{type(exc).__name__}: {exc}")
+            return
+        self._sessions_status.setText(
+            i18n.t("diagSessionsSaved").format(n=len(paths), path=target))
 
     def refresh_log(self) -> None:
         """Re-read the tail, and say where it came from — the path is what a report needs next."""
@@ -774,6 +822,7 @@ class DiagnosticsDialog(QDialog):
         self._report_btn.setText(i18n.t("diagReport"))
         self._report_hint.setText(i18n.t("diagReportShot"))
         self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
+        self._sessions_btn.setText(i18n.t("diagSessionsSave"))
         self._render()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)

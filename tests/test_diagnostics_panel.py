@@ -783,3 +783,61 @@ def test_facts_carried_in_from_another_project_are_named_and_not_counted_as_issu
     assert i18n.t("diagSourceGone").format(path="/cars/old") in said
     assert i18n.t("diagOk") in said, "reported, not an issue"
 
+
+def _one_session(tmp_path) -> Path:
+    import json
+
+    transcript = tmp_path / "abc.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "user", "timestamp": "2026-09-14T14:09:00Z",
+        "message": {"role": "user", "content": "hello car"},
+    }) + "\n", encoding="utf-8")
+    return transcript
+
+
+def test_the_log_tab_writes_the_last_sessions_to_the_file_the_person_names(tmp_path, monkeypatch):
+    """TODO F-054: the dialog history left the machine through a hand-typed PowerShell line. Now: a
+    count, a button, a save dialog, one readable file (the Arbiter's choices, 2026-09-17)."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from autosound_tcc.core import config, session_export
+
+    project = tmp_path / "car"
+    project.mkdir()
+    monkeypatch.setattr(config, "project_dir", lambda *a, **k: project)
+    transcript = _one_session(tmp_path)
+    asked = []
+    monkeypatch.setattr(session_export, "recent_transcripts",
+                        lambda project_dir, count, home=None: asked.append(count) or [transcript])
+    target = tmp_path / "out.md"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(target), "")))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._sessions_count.setValue(3)
+
+    dialog._export_sessions()
+
+    assert asked == [3]
+    assert "hello car" in target.read_text(encoding="utf-8")
+    assert str(target) in dialog._sessions_status.text()
+
+
+def test_no_sessions_says_so_and_asks_for_no_file(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    from autosound_tcc.core import config, session_export
+
+    monkeypatch.setattr(config, "project_dir", lambda *a, **k: tmp_path)
+    monkeypatch.setattr(session_export, "recent_transcripts", lambda *a, **k: [])
+    opened = []
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: opened.append(1) or ("", "")))
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._export_sessions()
+
+    assert opened == []
+    assert dialog._sessions_status.text()
+

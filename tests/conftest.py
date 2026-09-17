@@ -314,4 +314,8 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
 
     monkeypatch.setattr(QInputDialog, "getInt", staticmethod(lambda *_a, **_k: (0, False)))
+    # The same for a save dialog (TODO F-054): nobody picks a file in a test.
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *_a, **_k: ("", "")))
     yield
