@@ -475,6 +475,14 @@ def _cap_combo_width(combo) -> None:
     combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     combo.setMinimumContentsLength(16)
     combo.setMaximumWidth(260)
+    # Sixteen characters is the width the box ASKS for, not a floor (TODO F-045). This policy makes
+    # the size hint and the minimum size hint the same sixteen characters, so the footer could not
+    # narrow either picker by a pixel: the row's natural width became the window's minimum, and on
+    # a screen narrower than that the buttons at the right end went past its edge. A layout takes
+    # an explicit minimum in place of the minimum hint, so the box keeps its sixteen characters
+    # while the row has room and gives them up -- down to a few and the arrow -- before anything
+    # is pushed off.
+    combo.setMinimumWidth(90)
 
 
 def _replacements_for(key: str, entries: list) -> list:
@@ -1181,7 +1189,15 @@ class MainWindow(QMainWindow):
         # Elides for the same reason as the warning beside it: a model name plus "4 h ago" is as
         # long as the model's name happens to be, and a footer that asks for its natural width
         # takes the window's right edge off the screen with it.
-        self._critic_status = ElidedLabel(i18n.t("criticNever"), min_width=130)
+        # `Maximum`, not the default `Ignored` (TODO F-045). In a row with a stretch, a layout gives
+        # an `Ignored` label no width at all, and the label paints its 130 px minimum anyway, over
+        # whatever comes next. That was the stretch, wide enough, only while nothing else in the
+        # row could shrink: once the model pickers could, the status was painted over the coffee
+        # button. As a value it asks for its whole text and gives ground down to 130 px when the
+        # row is short, like the project name in the header.
+        self._critic_status = ElidedLabel(
+            i18n.t("criticNever"), min_width=130, policy=QSizePolicy.Policy.Maximum
+        )
         self._critic_status.setProperty("class", "kv-val")
         layout.addWidget(self._critic_status)
 

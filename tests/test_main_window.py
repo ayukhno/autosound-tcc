@@ -3143,6 +3143,54 @@ def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
     assert i18n.t("supportGithub") in labels and i18n.t("supportMonobank") in labels
 
 
+def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_the_edge():
+    """TODO F-045 (user, Windows, v0.1.28): the bottom-right element goes off to the right and hides
+    the icons -- "the field could be made smaller" instead.
+
+    No control in the footer would give up a pixel, so the row's natural width was the WINDOW's
+    minimum. Asked for 1280 px -- the width this window opens at, and a 1920 px screen at 150% -- it
+    stayed 1314 px wide (measured 2026-09-17), and the two buttons at the right end sat past the
+    edge.
+
+    Measured the way the user meets it. At a roomy width every control keeps its natural size;
+    narrowed, the whole row stays inside the window, left to right with no control drawn over the
+    next, and none is squeezed below the width the layout promises it.
+    """
+    app = _app()
+    window = MainWindow()
+    window.show()
+    footer = window._coffee_btn.parentWidget()
+    layout = footer.layout()
+
+    def name(widget) -> str:
+        text = widget.currentText() if hasattr(widget, "currentText") else widget.text()
+        return f"{type(widget).__name__} {text!r}"
+
+    for width, roomy in ((1600, True), (1280, False)):
+        window.resize(width, 820)
+        for _ in range(4):
+            app.processEvents()
+            app.sendPostedEvents()
+        items = [layout.itemAt(i) for i in range(layout.count())]
+        shown = [(item, item.widget()) for item in items
+                 if item.widget() is not None and item.widget().isVisible()]
+
+        for item, widget in shown:
+            last = widget.mapTo(window, widget.rect().topRight()).x()
+            assert last < width, (
+                f"{name(widget)} is drawn up to x={last} in a window asked to be {width} px wide "
+                f"(it is {window.width()})")
+            promised = (item.sizeHint() if roomy else item.minimumSize()).width()
+            assert widget.width() >= promised, (
+                f"{name(widget)} is {widget.width()} px wide at {width}, below the {promised} px "
+                f"the layout promises it")
+        for (_, left), (_, right) in zip(shown, shown[1:]):
+            drawn, next_from = left.geometry(), right.geometry().left()
+            assert drawn.right() < next_from, (
+                f"at {width} px {name(left)} (x {drawn.left()}..{drawn.right()}) is drawn over "
+                f"{name(right)} (from x {next_from})")
+
+
 def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):
     """The dialog names a MODEL (`claude-opus-5`); a project setting holds a CHOICE key, which
     also says the harness (`sdk:claude-opus-5`). Writing the bare id stored something nothing
