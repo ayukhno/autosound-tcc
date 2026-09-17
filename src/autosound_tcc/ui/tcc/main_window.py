@@ -2738,8 +2738,19 @@ class MainWindow(QMainWindow):
         self._arm_project_watcher()
         self._project_reload.start()
 
+    def _set_project_setting(self, key: str, value) -> None:
+        """A choice made in this window, saved into its project's `.tcc/` — unless the window is on
+        its way out (TODO F-053). A closing window has no business writing, and a window a test
+        left behind resolved the NEXT test's folder through `config` and created `.tcc/` in it.
+        The flush on close writes directly (`_flush_own_state`), so nothing of a real close is lost."""
+        if getattr(self, "_closing", False):
+            return
+        project_settings.set_value(config.tcc_dir(), key, value)
+
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
+        if getattr(self, "_closing", False):
+            return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
         self._arm_project_watcher()
         self._safe_load_project()
 
@@ -3387,7 +3398,7 @@ class MainWindow(QMainWindow):
         choice = self._critic_choice()
         if choice is None:
             return
-        project_settings.set_value(config.tcc_dir(), _CRITIC_KEY, choice.key)
+        self._set_project_setting(_CRITIC_KEY, choice.key)
         self._bridge.set_snapshot(critic_model=choice.model)
 
     def _refresh_critic_warning(self) -> None:
@@ -3543,7 +3554,7 @@ class MainWindow(QMainWindow):
         match = next((c for c in entries if c.key == wanted or c.key.endswith(f":{wanted}")), None)
         if match is None:
             return
-        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, match.key)
+        self._set_project_setting(_GENERATOR_KEY, match.key)
         self._reload_model_choices()
 
     def _start_tuning_session(self, opening: Optional[str] = None) -> None:
@@ -3866,7 +3877,7 @@ class MainWindow(QMainWindow):
         """One tick, one kind, and it survives the session -- Claude Code's own prompt works this
         way. Narrowing the gate deliberately is the opposite of learning to click through it."""
         allowed = set(self._always_allowed()) | {tool}
-        project_settings.set_value(config.tcc_dir(), _ALWAYS_KEY, ",".join(sorted(allowed)))
+        self._set_project_setting(_ALWAYS_KEY, ",".join(sorted(allowed)))
         self._dialog._add_system_message(i18n.t("autoAllowed").format(tool=tool))
         self._push_gate_to_session()
 
@@ -4037,7 +4048,7 @@ class MainWindow(QMainWindow):
         if choice is None:
             self._update_session_button()
             return
-        project_settings.set_value(config.tcc_dir(), _GENERATOR_KEY, choice.key)
+        self._set_project_setting(_GENERATOR_KEY, choice.key)
         # The placeholder has served its purpose the moment a real model is chosen -- but it is
         # dropped *after* this signal has finished being delivered. Removing an item from a combo
         # inside that combo's own `currentIndexChanged` frees the view's internals while Qt is
@@ -4056,7 +4067,7 @@ class MainWindow(QMainWindow):
         live and is not is worse than one that says when it applies.
         """
         level = model_choices.resolve_effort(self._ai_effort_combo.currentData())
-        project_settings.set_value(config.tcc_dir(), _EFFORT_KEY, level)
+        self._set_project_setting(_EFFORT_KEY, level)
         if self._agent_worker is not None:
             self._dialog._add_system_message(i18n.t("effortNextSession"))
         QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
@@ -4244,7 +4255,7 @@ class MainWindow(QMainWindow):
         return buttons.get(box.clickedButton(), omp_session.GATE_AUTO)
 
     def _set_gate_mode(self, mode: str) -> None:
-        project_settings.set_value(config.tcc_dir(), _GATE_KEY, mode)
+        self._set_project_setting(_GATE_KEY, mode)
         self._refresh_project_button()
         self._push_gate_to_session()
         # The panel shows the mode, so it must not lag the menu. `None` is the honest argument:

@@ -4298,3 +4298,33 @@ def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, 
     window.closeEvent(event)
     assert asked == [True], "closed and nothing written since: nothing to ask"
 
+
+def test_a_window_left_behind_by_a_test_writes_nothing_into_the_next_test_s_folder(
+        tmp_path, monkeypatch):
+    """TODO F-053: a window left alive by one test resolved the next test's folder through `config`
+    and wrote into it — `.tcc/` from its model picker, an emptied capture card from its project
+    watcher. Quieted at teardown, it does neither."""
+    from PySide6.QtCore import QFileSystemWatcher, QTimer
+
+    from autosound_tcc.core import config
+    from tests import _windows
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.setattr(config, "project_dir", lambda *a, **k: first)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *a, **k: first)
+    _app()
+    window = MainWindow()
+    combo = window._ai_main_combo
+    combo.setCurrentIndex(combo.findData("sdk:claude-sonnet-5"))
+
+    _windows.quiet(window)
+    monkeypatch.setattr(config, "project_dir", lambda *a, **k: second)  # the next test's folder
+    window._on_generator_model_changed(combo.currentIndex())
+    window._reload_project_files()
+
+    assert not (second / ".tcc").exists(), "the picker wrote into a folder that is not its test's"
+    assert not any(timer.isActive() for timer in window.findChildren(QTimer))
+    assert not any(w.files() or w.directories() for w in window.findChildren(QFileSystemWatcher))
+

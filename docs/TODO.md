@@ -1784,7 +1784,7 @@ file goes.
 
 ### F-053 — Windows left alive by earlier tests write into a later test's project folder
 
-**Статус**: open · found 2026-09-14 in the tcc#22 series; one test guarded, the class is not fixed
+**Статус**: done 2026-09-17 · the second way below: a teardown fixture quiets every window a test leaves (timers stopped, watchers emptied, `_closing` set; nothing deleted), and a closing window writes no project settings and reloads nothing
 
 A test ends with its `MainWindow` still alive — one full `test_main_window.py` leaves 126 — and that
 window keeps running its deferred work: zero-timers, watchers, workers. Tests patch `config` at

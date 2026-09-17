@@ -159,6 +159,25 @@ def _no_live_rew():
         api.BASE_URL = previous
 
 
+@pytest.fixture(autouse=True)
+def _quiet_windows_left_behind():
+    """TODO F-053: a window a test leaves alive stops acting once its test is over — its timers,
+    its watchers, its writes — without being deleted (see `tests/_windows.py` for why not)."""
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    before = {id(widget) for widget in app.topLevelWidgets()} if app is not None else set()
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    from tests import _windows
+
+    for widget in app.topLevelWidgets():
+        if id(widget) not in before and type(widget).__name__ == "MainWindow":
+            _windows.quiet(widget)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _end_qt_before_python_finalises():
     """Destroy the QApplication here, while the interpreter is still whole.
