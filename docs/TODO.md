@@ -228,7 +228,7 @@ something"». Але `_scroll_to_end` (≈602) на кожен новий баб
 
 ### F-010 — «версія» називається трьома різними способами і жоден не пояснює себе
 
-**Статус**: частково 2026-08-21 · be2d373 — підпис зроблено; **розбіжність чисел на живому проєкті
+**Статус**: done 2026-09-17 · nothing left: the label is done and the mismatch did not reproduce (below) · was: частково 2026-08-21 · be2d373 — підпис зроблено; **розбіжність чисел на живому проєкті
 НЕ відтворилась** (06.09, копія `testTCC8` з Windows-ВМ): раунд `cap_002` стоїть на `v_001`,
 леджер HEAD — `v_001`, назви в REW — `_01`, вікно кривих читає з назви `01`. Одна вісь, три
 однакові числа. Отже «`_0` проти `v6`» було станом ІНШОГО проєкту, і як окремий баг тут не
@@ -486,7 +486,7 @@ F-010, але тепер видно наслідок: вибрати «той с
 
 ### F-023 — per-round identity of a capture, entirely inside TCC
 
-**Статус**: open · наступний великий крок після F-017
+**Статус**: відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
 
 **Крок 1 із чотирьох уже існує — як побічний ефект** (02.09, вікно «Взяти заміри»): магазин
 узятих `.tcc/imported-measurements.json` тримає рівно те, що просить пункт 1 — `uuid → {title,
@@ -924,7 +924,7 @@ F-030 — «і правило гри при цьому змінилось».
 
 ### F-032 — у таскбарі Windows поруч із нашим вікном стоїть іконка Python
 
-**Статус**: open — код зроблено 2026-08-23, **перевірку на VM не пройдено**. Маршрут «пін
+**Статус**: done 2026-09-01 · both pin routes measured working on the VM (the VM checklist below, §2: route A and route B) · was: open — код зроблено 2026-08-23, **перевірку на VM не пройдено**. Маршрут «пін
 живого вікна» впав (F-037); маршрут «пін десктопного ярлика», який цей запис і залишав, не
 міряний досі.
 
@@ -1378,7 +1378,7 @@ exe, тобто гірше за «Autosound TCC» і не гірше за теп
 
 ### F-039 — перший запуск із десктопного ярлика не піднімає вікно; другий піднімає
 
-**Статус**: open · заведено 2026-09-01 виміром користувача (Windows 11 у Parallels, `v0.1.27`,
+**Статус**: чекає · the Arbiter's test of v0.1.40: does the first start from the desktop shortcut raise the window · заведено 2026-09-01 виміром користувача (Windows 11 у Parallels, `v0.1.27`,
 одразу після прогону `install.cmd`)
 
 **Зміряно, дослівно:** «після установки двойним кліком по іконці на десктопі програма не
@@ -1505,7 +1505,7 @@ exe, тобто гірше за «Autosound TCC» і не гірше за теп
 
 ### F-042 — як звітувати про ваду й передати налаштування, коли GitHub недоступний
 
-**Статус**: TCC part done 2026-09-17 · the session part waits for the skill (`autosound-hub#157`,
+**Статус**: done 2026-09-17 · TCC's part; the session's part is the skill's (`autosound-hub#157`,
 TCC-017) · заведено 2026-09-01 питанням користувача
 
 **17.09, the user's decisions.**
@@ -1586,7 +1586,7 @@ sheet with it.
 
 ### F-043 — «Оновити TCC» блимає двома консольними вікнами
 
-**Статус**: open · заведено 2026-09-02 спостереженням користувача (Windows, `v0.1.27`) ·
+**Статус**: чекає · the Arbiter's test of v0.1.40: how many consoles "Update TCC" opens (TEST-FINDINGS 13) · заведено 2026-09-02 спостереженням користувача (Windows, `v0.1.27`) ·
 **06.09 винесено на шину як `autosound-hub#73` (TCC-006) з `needs:human`** — разом із двома
 сусідніми джерелами консольних вікон. Причина: з мака жодне з трьох не перевірне, кожна гілка
 того коду там порожня за визначенням. У тікеті три прохання до людини й межа, названа прямо:
@@ -1630,7 +1630,7 @@ sheet with it.
 
 ### F-044 — пін із десктопного ярлика не зливається з живим вікном: дві іконки, і стара запускає другу копію
 
-**Статус**: open · заведено 2026-09-02 спостереженням користувача зі скриншотами (Windows 11,
+**Статус**: чекає · the Arbiter's test of v0.1.40: a pin from the desktop shortcut, one icon or two · заведено 2026-09-02 спостереженням користувача зі скриншотами (Windows 11,
 `v0.1.27`)
 
 **Зміряно, дослівно:** «якщо іконку на таскбар закріпив з ярлика на столі, то після запуска
@@ -1707,7 +1707,7 @@ keeps the language the window opened in (`_retranslate`)
 
 ### F-046 — прихований `.mcp.json` не перезаписується, і сервер через це «не стартував»
 
-**Статус**: **зроблено 06.09** · знайдено в журналі користувача (Windows, `v0.1.31` і `v0.1.32`)
+**Статус**: done 06.09 · знайдено в журналі користувача (Windows, `v0.1.31` і `v0.1.32`)
 
 **Що бачив користувач:** нічого. Вікно відкривалось, сесія з ШІ йшла без жодного тулла, і єдиний
 слід був у журналі:
@@ -1739,7 +1739,7 @@ ERROR the MCP server did not start:
 
 ### F-047 — пін методу відстав: у нас `v3.0.40`, апстрім `v3.0.46`, і вада з кодуванням там уже полагоджена
 
-**Статус**: **зроблено 06.09** · пін `v3.0.40` → `v3.0.46`, набір зелений (1652 passed, 1 skipped;
+**Статус**: done 06.09 · пін `v3.0.40` → `v3.0.46`, набір зелений (1652 passed, 1 skipped;
 було 1650 — селфтести методу параметризовані по його модулях, а їх додалось). Жоден наш тест на
 нових формулюваннях не зламався, хоч цього я й побоювався.
 
@@ -1777,7 +1777,7 @@ starts; and whether TCC's own panels load the method's modules from the same cop
 
 ### F-056 — Import from REW into TCC: the logic and the implementation
 
-**Статус**: doing · released in **v0.1.40** (2026-09-17, tag on `2055f2b`, method `v3.0.54`): the three points, hub #153 A–F, #154, #155; waiting for the Arbiter's test through the app's update button
+**Статус**: чекає · released in **v0.1.40** (2026-09-17, tag on `2055f2b`, method `v3.0.54`): the three points, hub #153 A–F, #154, #155; waiting for the Arbiter's test through the app's update button
 
 **Open, not sent (the Arbiter's word needed):** the method's `v3.0.53` pre-sweep gate REFUSES a fragile driver's inherited Fs until it is confirmed or measured; the Arbiter's rule (2026-09-17) is a warning only — the tuner sets in the DSP what they need, and after phase 0 the working crossovers come from the DSP parameters, not from the capture record. A ticket to skill if the Arbiter says so.
 
@@ -1801,7 +1801,7 @@ day on the same subject):
 
 ### F-057 — The method's virtual-DSP calculations (skill side)
 
-**Статус**: open · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for the next session
+**Статус**: відкладено · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for a separate session
 
 The method's, not TCC's: once the next session has it described with numbers, it goes to the skill as
 a bus ticket (related: skill#29–#35 from the remote run, hub #117 on the Resonalyze readers). Nothing
@@ -1809,7 +1809,7 @@ is sent before that.
 
 ### F-055 — A separate session: from the session analysis to an intake form
 
-**Статус**: deferred · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
+**Статус**: відкладено · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
 
 Where it stands: `docs/SESSION-ANALYSIS-2026-09-14.md` — two runs measured (testTCC8 on the local
 Windows, testTCC-9 on the remote one), the fields the intake needed, and four proposals (one intake
@@ -1884,7 +1884,7 @@ commit, not by version.
 
 ### F-051 — Resonalyze у дереві: чотири ролі, і наглядач бачить дві з них
 
-**Статус**: назване, віддане `skill` — `hub#75` (TCC-008), 06.09
+**Статус**: done 06.09 · named and handed to `skill` — `hub#75` (TCC-008)
 
 Питання користувача «навіщо там Resonalyze». Перебрав усі згадки в обох деревах:
 
@@ -1912,7 +1912,7 @@ commit, not by version.
 
 ### F-050 — панель власника читала поле, якого в методі вже нема (`plain` → `symptom`)
 
-**Статус**: **зроблено 06.09** · знайдено підняттям піна до `v3.0.46`
+**Статус**: done 06.09 · знайдено підняттям піна до `v3.0.46`
 
 Метод перейменував рядок власника, коли той перестав бути необовʼязковою прозою (`v3.0.42`):
 було `plain`, стало `symptom`, ≤200 символів, «one sentence in the OWNER's words, what they
@@ -1955,7 +1955,7 @@ defect. Where a record came from is not shown — the user's decision, verbatim:
 
 ### F-048 — вікна блимають на СТАРТІ, і це не консоль агента
 
-**Статус**: open · заведено 06.09 зі слів користувача на `v0.1.33`
+**Статус**: done 2026-09-14 · the Arbiter on v0.1.39: apart from the first start after an update, no window blinks on start or during work (TEST-FINDINGS 14; that first start is checked on v0.1.40) · заведено 06.09 зі слів користувача на `v0.1.33`
 
 «Після оновлення блимають і термінальне, і віндове; при повторному запуску — тільки маленькі
 віндові». Термінальне після оновлення — це наш `wt` з оновленням, штатно. Маленькі віндові на
