@@ -226,8 +226,10 @@ def test_the_control_appears_exactly_when_this_build_can_publish(monkeypatch):
 
 # ---- the form: a report without GitHub (TODO F-042) ----------------------------------------
 #
-# The Arbiter's decision of 2026-09-17: text only, straight from the window, into his form. What a
-# person must be able to trust is the word "sent" — so it is said only when the form confirmed.
+# The Arbiter's decisions of 2026-09-17: text only, straight from the window, into his form, with
+# who wrote it, what kind it is and — for a problem — how far it stops the tuning, each its own
+# question. What a person must be able to trust is the word "sent": it is said only when the form
+# confirmed.
 
 _GITHUB = "https://github.com/x/y/issues/new"
 _FORM = "https://forms.example/post"
@@ -237,15 +239,15 @@ def _form_dialog(monkeypatch, send=None, **kwargs):
     from autosound_tcc.core import form_report
     from autosound_tcc.ui.tcc import feedback_dialog as fd
 
-    monkeypatch.setattr(fd.form_report, "first_line", lambda kind, lang: f"[{kind}] · TCC 9 · lang={lang}")
+    monkeypatch.setattr(fd.form_report, "versions_line", lambda lang: f"TCC 9 · lang={lang}")
     if send is None:
-        def send(text, url):
+        def send(report, url):
             return form_report.Sent(True)
     calls = []
 
-    def recording(text, url):
-        calls.append((text, url))
-        return send(text, url)
+    def recording(report, url):
+        calls.append((report, url))
+        return send(report, url)
 
     monkeypatch.setattr(fd.form_report, "send", recording)
     _app()
@@ -261,23 +263,75 @@ def _wait_for_send(dialog):
     dialog._poll_send()
 
 
-def test_the_form_route_sends_the_words_under_their_first_line_and_says_sent(monkeypatch):
+def _ready(dialog, kind="wish", words="a darker theme, please", sender="Олег, @oleg"):
+    dialog._sender.setText(sender)
+    dialog._kind_buttons[kind].setChecked(True)
+    dialog._editor.setPlainText(words)
+
+
+def test_the_form_route_sends_each_answer_and_says_sent(monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
     dialog, calls = _form_dialog(monkeypatch)
-    dialog._kind_buttons["wish"].setChecked(True)
-    dialog._editor.setPlainText("a darker theme, please")
+    _ready(dialog)
 
     dialog._on_send()
     _wait_for_send(dialog)
 
     assert len(calls) == 1
-    text, url = calls[0]
+    report, url = calls[0]
     assert url == _FORM
-    assert text.startswith("[wish] · TCC 9 · lang=")
-    assert "a darker theme, please" in text
+    assert (report.sender, report.kind, report.impact) == ("Олег, @oleg", "wish", "")
+    assert "a darker theme, please" in report.message
+    assert report.versions.startswith("TCC 9 · lang=")
     assert dialog._status.text() == i18n.t("fbSent")
     assert not dialog._send.isEnabled(), "one report is one row: Send does not stay armed"
+
+
+def test_who_wrote_is_remembered_for_the_next_report(monkeypatch):
+    dialog, _calls = _form_dialog(monkeypatch)
+    _ready(dialog, sender="Олег, @oleg")
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+    again, _calls = _form_dialog(monkeypatch)
+
+    assert again._sender.text() == "Олег, @oleg"
+
+
+def test_a_report_that_does_not_say_who_wrote_it_is_not_sent(monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, calls = _form_dialog(monkeypatch)
+    _ready(dialog, sender="  ")
+
+    dialog._on_send()
+
+    assert calls == [] and dialog._sending is None
+    assert dialog._status.text() == i18n.t("fbNoSender")
+
+
+def test_a_problem_asks_how_far_it_stops_the_tuning(monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, calls = _form_dialog(monkeypatch)
+    _ready(dialog, kind="problem", words="the window froze")
+    assert dialog._impact_row.isVisibleTo(dialog)
+
+    dialog._on_send()
+    assert calls == [] and dialog._status.text() == i18n.t("fbNoImpact")
+
+    dialog._impact_buttons["stops"].setChecked(True)
+    dialog._on_send()
+    _wait_for_send(dialog)
+    assert calls[0][0].impact == "stops"
+
+
+def test_a_wish_is_not_asked_how_far_it_stops_anything(monkeypatch):
+    dialog, _calls = _form_dialog(monkeypatch)
+    _ready(dialog, kind="wish")
+
+    assert not dialog._impact_row.isVisibleTo(dialog)
 
 
 def test_what_goes_with_the_words_is_on_screen_before_send(monkeypatch):
@@ -285,27 +339,37 @@ def test_what_goes_with_the_words_is_on_screen_before_send(monkeypatch):
         monkeypatch, kind="problem", attachment="[Autosound TCC]\n  version 9")
 
     shown = dialog._goes_with.toPlainText()
-    assert "[problem] · TCC 9" in shown and "[Autosound TCC]" in shown
-
-    dialog._kind_buttons["feedback"].setChecked(True)
-    assert "[feedback] · TCC 9" in dialog._goes_with.toPlainText()
+    assert "TCC 9 · lang=" in shown and "[Autosound TCC]" in shown
 
 
-def test_a_send_the_form_did_not_confirm_is_not_called_sent_and_the_text_is_kept(monkeypatch):
+def test_the_attachment_travels_under_the_words(monkeypatch):
+    dialog, calls = _form_dialog(monkeypatch, kind="problem", attachment="[Autosound TCC]\n  version 9")
+    _ready(dialog, kind="problem", words="the window froze")
+    dialog._impact_buttons["workaround"].setChecked(True)
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+
+    message = calls[0][0].message
+    assert message.index("the window froze") < message.index("[Autosound TCC]")
+
+
+def test_a_send_the_form_did_not_confirm_is_not_called_sent_and_the_report_is_kept(monkeypatch):
     from PySide6.QtGui import QGuiApplication
 
     from autosound_tcc.core import form_report
     from autosound_tcc.ui.tcc import i18n
 
-    dialog, calls = _form_dialog(
-        monkeypatch, send=lambda text, url: form_report.Sent(False, "unconfirmed", "HTTP 200"))
-    dialog._editor.setPlainText("the window froze")
+    dialog, _calls = _form_dialog(
+        monkeypatch, send=lambda report, url: form_report.Sent(False, "unconfirmed", "HTTP 200"))
+    _ready(dialog, words="the window froze")
 
     dialog._on_send()
     _wait_for_send(dialog)
 
     assert i18n.t("fbNoConfirm") in dialog._status.text()
-    assert QGuiApplication.clipboard().text() == calls[0][0], "nothing a person wrote is lost"
+    kept = QGuiApplication.clipboard().text()
+    assert "the window froze" in kept and "Олег, @oleg" in kept, "nothing a person wrote is lost"
     assert dialog._send.isEnabled(), "and it can be tried again"
 
 
@@ -313,8 +377,8 @@ def test_a_network_failure_is_said_in_its_own_words(monkeypatch):
     from autosound_tcc.core import form_report
 
     dialog, _calls = _form_dialog(
-        monkeypatch, send=lambda text, url: form_report.Sent(False, "network", "no route to host"))
-    dialog._editor.setPlainText("the window froze")
+        monkeypatch, send=lambda report, url: form_report.Sent(False, "network", "no route to host"))
+    _ready(dialog)
 
     dialog._on_send()
     _wait_for_send(dialog)
@@ -326,7 +390,7 @@ def test_an_empty_report_is_not_sent(monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
     dialog, calls = _form_dialog(monkeypatch)
-    dialog._editor.setPlainText("   ")
+    _ready(dialog, words="   ")
 
     dialog._on_send()
 
@@ -341,12 +405,12 @@ def test_the_dialog_stays_open_while_its_report_is_on_the_way(monkeypatch):
 
     gate = threading.Event()
 
-    def slow(text, url):
+    def slow(report, url):
         gate.wait(5)
         return form_report.Sent(True)
 
     dialog, _calls = _form_dialog(monkeypatch, send=slow)
-    dialog._editor.setPlainText("the window froze")
+    _ready(dialog)
     dialog.show()
 
     dialog._on_send()
@@ -359,12 +423,13 @@ def test_the_dialog_stays_open_while_its_report_is_on_the_way(monkeypatch):
     assert not dialog.isVisible()
 
 
-def test_the_kind_is_asked_only_on_the_route_that_carries_it(monkeypatch):
+def test_the_form_questions_are_asked_only_on_the_route_that_carries_them(monkeypatch):
     dialog, _calls = _form_dialog(monkeypatch)
+    rows = lambda: (dialog._sender_row, dialog._kind_row, dialog._goes_with)  # noqa: E731
 
-    assert dialog._kind_row.isVisibleTo(dialog) and dialog._goes_with.isVisibleTo(dialog)
+    assert all(row.isVisibleTo(dialog) for row in rows())
     dialog._radio_github.setChecked(True)
-    assert not dialog._kind_row.isVisibleTo(dialog) and not dialog._goes_with.isVisibleTo(dialog)
+    assert not any(row.isVisibleTo(dialog) for row in rows())
 
 
 def test_the_github_route_opens_the_link_its_caller_builds(monkeypatch):

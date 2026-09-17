@@ -116,6 +116,8 @@ def set_project_dir(path: Path) -> None:
 #: unset or unknown value MEANS is `updates.channel_for`'s call — it reads how the app was installed,
 #: which this module cannot import without a cycle (`install_report` imports it).
 _UPDATE_CHANNEL_KEY = "updates/channel"
+#: Who a report without GitHub is from — asked once, then offered again (TODO F-042).
+_FEEDBACK_SENDER_KEY = "feedback/sender"
 
 
 def update_channel() -> str:
@@ -125,6 +127,15 @@ def update_channel() -> str:
 
 def set_update_channel(value: str) -> None:
     _settings().setValue(_UPDATE_CHANNEL_KEY, value)
+
+
+def feedback_sender() -> str:
+    """Who the last report without GitHub was from, "" when none was sent."""
+    return str(_settings().value(_FEEDBACK_SENDER_KEY, "") or "")
+
+
+def set_feedback_sender(value: str) -> None:
+    _settings().setValue(_FEEDBACK_SENDER_KEY, value)
 
 
 def recent_projects() -> list[Path]:

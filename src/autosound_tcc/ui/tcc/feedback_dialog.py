@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import form_report, issue_assets
+from autosound_tcc.core import config, form_report, issue_assets
 from autosound_tcc.ui.tcc import discard, i18n
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -60,15 +61,15 @@ class _FormSend:
     """Posts one report to the form on a plain thread, the `_UpdateProbe` shape of the diagnostics
     dialog: a slow network must not freeze the window, and nothing of Qt's is touched off it."""
 
-    def __init__(self, text: str, url: str) -> None:
+    def __init__(self, report, url: str) -> None:
         self.result = None
         self._thread = threading.Thread(
-            target=self._run, args=(text, url), name="tcc-form-report", daemon=True)
+            target=self._run, args=(report, url), name="tcc-form-report", daemon=True)
         self._thread.start()
 
-    def _run(self, text: str, url: str) -> None:
+    def _run(self, report, url: str) -> None:
         try:
-            self.result = form_report.send(text, url=url)
+            self.result = form_report.send(report, url=url)
         except Exception as exc:  # noqa: BLE001 — `send` never raises; a stand-in still might
             self.result = form_report.Sent(False, "network", f"{type(exc).__name__}: {exc}")
 
@@ -77,8 +78,10 @@ class _FormSend:
         return self._thread.is_alive()
 
 
-#: What each kind is called on screen; the first line always carries the English word.
+#: What each choice is called on screen; the form always gets its own words (`form_report`).
 _KIND_KEYS = {"problem": "fbKindProblem", "wish": "fbKindWish", "feedback": "fbKindFeedback"}
+_IMPACT_KEYS = {"stops": "fbImpactStops", "workaround": "fbImpactWorkaround",
+                "none": "fbImpactNone"}
 
 
 class FeedbackDialog(QDialog):
@@ -188,9 +191,21 @@ class FeedbackDialog(QDialog):
             self._radio_form.hide()
             self._radio_github.setChecked(True)
 
-        # ---- what the form route sends besides the words (TODO F-042) ----------------------
-        # The kind, and the first line it makes, matter only where they travel: the GitHub route
-        # has its own page for them, so both go away with the form radio.
+        # ---- the form's questions (TODO F-042) ----------------------------------------------
+        # The Arbiter's, 2026-09-17: who wrote, so he can answer; what kind it is; for a problem,
+        # how far it stops the tuning. They matter only where they travel — the GitHub route has
+        # its own page — so they go away with the form radio.
+        self._sender_row = QWidget()
+        sender_layout = QHBoxLayout(self._sender_row)
+        sender_layout.setContentsMargins(0, 0, 0, 0)
+        sender_label = QLabel(i18n.t("fbFrom"))
+        sender_label.setProperty("class", "fb-hint")
+        sender_layout.addWidget(sender_label)
+        self._sender = QLineEdit(config.feedback_sender())
+        self._sender.setPlaceholderText(i18n.t("fbFromPh"))
+        sender_layout.addWidget(self._sender, 1)
+        outer.addWidget(self._sender_row)
+
         self._kind_row = QWidget()
         kind_layout = QHBoxLayout(self._kind_row)
         kind_layout.setContentsMargins(0, 0, 0, 0)
@@ -207,6 +222,23 @@ class FeedbackDialog(QDialog):
         kind_layout.addStretch(1)
         self._kind_buttons[kind if kind in self._kind_buttons else "feedback"].setChecked(True)
         outer.addWidget(self._kind_row)
+
+        self._impact_row = QWidget()
+        impact_layout = QVBoxLayout(self._impact_row)
+        impact_layout.setContentsMargins(0, 0, 0, 0)
+        impact_layout.setSpacing(2)
+        impact_label = QLabel(i18n.t("fbImpact"))
+        impact_label.setProperty("class", "fb-hint")
+        impact_layout.addWidget(impact_label)
+        self._impact_group = QButtonGroup(self)
+        self._impact_buttons: dict[str, QRadioButton] = {}
+        for name in form_report.IMPACTS:
+            button = QRadioButton(i18n.t(_IMPACT_KEYS[name]))
+            self._impact_group.addButton(button)
+            self._impact_buttons[name] = button
+            impact_layout.addWidget(button)
+        outer.addWidget(self._impact_row)
+
         self._goes_with_label = QLabel(i18n.t("fbGoesWith"))
         self._goes_with_label.setProperty("class", "fb-hint")
         outer.addWidget(self._goes_with_label)
@@ -214,9 +246,9 @@ class FeedbackDialog(QDialog):
         self._goes_with.setReadOnly(True)
         self._goes_with.setMaximumHeight(90)
         outer.addWidget(self._goes_with)
-        # Connected once the box they write to exists — the `_send` lesson below, again.
+        # Connected once the rows they show and hide exist — the `_send` lesson below, again.
         for button in self._kind_buttons.values():
-            button.toggled.connect(self._refresh_goes_with)
+            button.toggled.connect(self._sync_form_rows)
         self._status = QLabel("")
         self._status.setWordWrap(True)
         self._status.setProperty("class", "fb-hint")
@@ -346,19 +378,28 @@ class FeedbackDialog(QDialog):
         # nowhere to go on that route. Hidden rather than explained: an offer that is withdrawn
         # at Send is worse than one never made.
         self._shots_box.setVisible(issue_assets.available() and self._radio_github.isChecked())
+        self._sync_form_rows()
+
+    def _sync_form_rows(self, *_args) -> None:
         on_form = not self._radio_github.isChecked()
-        for widget in (self._kind_row, self._goes_with_label, self._goes_with):
+        for widget in (self._sender_row, self._kind_row, self._goes_with_label, self._goes_with):
             widget.setVisible(on_form)
+        # How far it stops the tuning is a question about a problem, not about a wish.
+        self._impact_row.setVisible(on_form and self._kind() == "problem")
 
     def _kind(self) -> str:
         return next((name for name, button in self._kind_buttons.items() if button.isChecked()),
                     "feedback")
 
-    def _first_line(self) -> str:
-        return form_report.first_line(self._kind(), i18n.current_language())
+    def _impact(self) -> str:
+        return next((name for name, button in self._impact_buttons.items() if button.isChecked()),
+                    "")
+
+    def _versions(self) -> str:
+        return form_report.versions_line(i18n.current_language())
 
     def _refresh_goes_with(self, *_args) -> None:
-        extra = [self._first_line()]
+        extra = [self._versions()]
         if self._attachment.strip():
             extra.append(self._attachment.strip())
         self._goes_with.setPlainText("\n\n".join(extra))
@@ -377,11 +418,22 @@ class FeedbackDialog(QDialog):
         super().reject()
 
     def _send_to_form(self) -> None:
+        sender = self._sender.text().strip()
+        if not sender:
+            self._say(i18n.t("fbNoSender"))
+            return
         words = self._editor.toMarkdown().strip() if self._editor.toPlainText().strip() else ""
         if not words:
             self._say(i18n.t("fbEmpty"))
             return
-        self._outgoing = form_report.compose(self._first_line(), words, self._attachment)
+        kind = self._kind()
+        impact = self._impact() if kind == "problem" else ""
+        if kind == "problem" and not impact:
+            self._say(i18n.t("fbNoImpact"))
+            return
+        self._outgoing = form_report.Report(
+            sender=sender, kind=kind, impact=impact,
+            message=form_report.compose(words, self._attachment), versions=self._versions())
         self._send.setEnabled(False)
         self._cancel.setEnabled(False)
         self._say(i18n.t("fbSending"))
@@ -397,13 +449,14 @@ class FeedbackDialog(QDialog):
         self._cancel.setEnabled(True)
         result = probe.result or form_report.Sent(False, "network", "no answer")
         if result.ok:
+            config.set_feedback_sender(self._outgoing.sender)
             self._say(i18n.t("fbSent"))
             self._cancel.setText(i18n.t("fbClose"))
             self._editor.setReadOnly(True)
             return
         why = i18n.t("fbNoConfirm") if result.reason == "unconfirmed" else result.detail
-        # Nothing a person wrote is lost to a network: the whole text goes to the clipboard.
-        QGuiApplication.clipboard().setText(self._outgoing)
+        # Nothing a person wrote is lost to a network: the whole report goes to the clipboard.
+        QGuiApplication.clipboard().setText(form_report.as_text(self._outgoing))
         self._say(i18n.t("fbNotSent").format(problem=why))
         self._send.setEnabled(True)
 

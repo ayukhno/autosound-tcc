@@ -1523,14 +1523,24 @@ TCC-017) · заведено 2026-09-01 питанням користувача
 4. The design was approved as a whole: TCC in this wave, the ticket to the skill now, one test entry.
 
 **Done 17.09.** On the Drive: folder "Autosound — звіти" with the form ("Autosound — звіт і відгук")
-and its sheet. The test entry landed in the sheet; the form confirms with `usp=form_confirm` on its
-reply, which the form page does not carry. In TCC (`core/form_report.py`): "Message the developer"
-and Diagnostics' "Report a problem" both offer the form, sent from the window with no browser; the
-text goes under a first line `[problem|wish|feedback] · TCC … · method … · <OS> · lang=…`, what
-goes with the words is on screen before Send, "sent" is said only on the form's confirmation, and a
-failed send leaves the whole text on the clipboard. The GitHub route keeps the beta-report template,
-now with the words in its `what` field. Ticket `autosound-hub#157` asks the method for the same
-route from a session.
+and its sheet. The form confirms an answer with `usp=form_confirm` on its reply, which the form page
+does not carry. In TCC (`core/form_report.py`): "Message the developer" and Diagnostics' "Report a
+problem" both offer the form, sent from the window with no browser; what goes with the words is on
+screen before Send, "sent" is said only on the form's confirmation, and a failed send leaves the
+whole report on the clipboard. The GitHub route keeps the beta-report template, now with the words
+in its `what` field. Ticket `autosound-hub#157` asks the method for the same route from a session.
+
+**Later on 17.09: the Arbiter's questions.** Trying to add them in the form editor broke the sheet's
+headers; the user's ask, verbatim: «треба знати від кого прийшло повідомлення - щоб давати зворотній
+звʼязок. який це тип повідомлення. поле критичності - треба питати на скільки це зупиняє
+налаштування користувача». Chosen: five questions, three levels. The form now asks **Від кого**
+(`entry.240346646`, required), **Тип** (`entry.2096497360`, required: Проблема · Побажання · Відгук),
+**Наскільки заважає налаштуванню** (`entry.42935929`: Зупиняє: далі налаштовувати не можу · Заважає,
+але можна обійти · Не заважає), **Повідомлення** (`entry.970390217`, required) and **Версії**
+(`entry.1476583291`, filled by TCC). The sheet has one column per question plus "Processed"; the
+junk columns and the test entries are gone from the sheet and from the form. TCC sends each answer
+to its own question, remembers who wrote, and asks how far it stops the tuning for a problem only.
+The ticket got the new fields as a comment.
 
 **Питання, дослівно:** «як сесія може оформити багу чи передачу налаштувань з основного
 діалога коли у користувача немає гітхаба чи він не залогінений».

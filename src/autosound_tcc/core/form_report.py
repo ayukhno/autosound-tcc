@@ -1,4 +1,4 @@
-"""Reports without GitHub: text sent straight to the Arbiter's Google Form (TODO F-042).
+"""Reports without GitHub: a report sent straight to the Arbiter's Google Form (TODO F-042).
 
 The window's only report route used to be a GitHub issue, and a person without an account — the
 ordinary tester since the installer stopped installing `gh` unless asked — had nowhere to say that
@@ -7,14 +7,20 @@ browser and no sign-in, into a sheet on his Drive. **Text only.** A file questio
 demand a sign-in for the whole form, and that would close it to a session sending the same way
 (autosound-hub #157, TCC-017) — pictures keep going through GitHub, or separately.
 
+The questions are the Arbiter's (2026-09-17): who wrote, so he can answer; what kind of report it
+is; for a problem, how far it stops the tuning; the words; and the versions it ran on, which the
+window fills in. Each goes to its own question, so each is its own column in the sheet.
+
 The destination is fixed here, in code, and nowhere else: a place that decides where a person's
 words go is a place that can be talked into sending them somewhere else — the posture of the
-method's side-effect gate (`rew_tool/gates/side_effect.py`), kept for a destination of our own.
+method's side-effect gate (`rew_tool/gates/side_effect.py`), kept for a destination of our own. The
+question ids and the choice words below are read from the published form; a choice it does not
+list, or a required answer left out, is not taken.
 
 "Sent" is what the form CONFIRMS, never what the request did. The form answers 200 with its own page
-when it did not take the answer (closed, changed, a check for robots), so the one proof is the
-confirmation page's "submit another response" link — measured on 2026-09-17, one test entry that
-landed in the sheet, and absent from the form page itself.
+when it did not take the answer (closed, changed, a required answer missing), so the one proof is
+the confirmation page's "submit another response" link — measured on 2026-09-17 with test entries
+that landed in the sheet, and absent from the form page itself.
 """
 
 from __future__ import annotations
@@ -32,14 +38,35 @@ FORM_POST_URL = (
     "https://docs.google.com/forms/d/e/"
     "1FAIpQLSdMzITv6Rzh8PWITy5QWc3xQMcAn9aDl1k0QbpZykHEQd6A4g/formResponse"
 )
-#: The form's one paragraph question; the whole text goes into it.
-FORM_FIELD = "entry.970390217"
+#: The form's questions, as published on 2026-09-17.
+FIELD_SENDER = "entry.240346646"  # «Від кого», required
+FIELD_KIND = "entry.2096497360"  # «Тип», required
+FIELD_IMPACT = "entry.42935929"  # «Наскільки заважає налаштуванню»
+FIELD_MESSAGE = "entry.970390217"  # «Повідомлення», required
+FIELD_VERSIONS = "entry.1476583291"  # «Версії»
+#: The form's own words for each choice: anything else is not an answer it takes.
+KIND_ANSWERS = {"problem": "Проблема", "wish": "Побажання", "feedback": "Відгук"}
+IMPACT_ANSWERS = {
+    "stops": "Зупиняє: далі налаштовувати не можу",
+    "workaround": "Заважає, але можна обійти",
+    "none": "Не заважає",
+}
+KINDS = tuple(KIND_ANSWERS)
+IMPACTS = tuple(IMPACT_ANSWERS)
 #: Only the confirmation page carries it: the link to submit another response.
 ACCEPTED_MARKER = "usp=form_confirm"
-#: What the first line may call a report. The author sorts the sheet by it, so a fourth spelling
-#: is a row nobody finds.
-KINDS = ("problem", "wish", "feedback")
 TIMEOUT_S = 20
+
+
+@dataclass(frozen=True)
+class Report:
+    """One report. `impact` is "" when it was not said — the form asks it of a problem only."""
+
+    sender: str
+    kind: str
+    message: str
+    versions: str = ""
+    impact: str = ""
 
 
 @dataclass(frozen=True)
@@ -51,30 +78,63 @@ class Sent:
     detail: str = ""
 
 
-def first_line(kind: str, lang: str, *, tcc=None, method=None, system=None) -> str:
-    """`[wish] · TCC 0.1.41 · method 3.0.54 · Windows 11 · lang=uk` — one line the author can sort by.
+def versions_line(lang: str, *, tcc=None, method=None, system=None) -> str:
+    """`TCC 0.1.41 · method 3.0.54 · Windows 11 · lang=uk` — what the report ran on.
 
     `tcc`, `method` and `system` are read from this installation when not given. What cannot be
-    told is written as "unknown", never left out: a missing field reads as a row cut short.
+    told is written as "unknown", never left out: a missing part reads as a line cut short.
     """
-    if kind not in KINDS:
-        raise ValueError(f"a report is one of {', '.join(KINDS)}, not {kind!r}")
     if tcc is None:
         tcc = install_report.app_version()
     if method is None:
         method = install_report.skill_version()
     if system is None:
         system = f"{platform.system()} {platform.release()}".strip()
-    return (f"[{kind}] · TCC {tcc or 'unknown'} · method {method or 'unknown'} · "
-            f"{system or 'unknown'} · lang={lang}")
+    return (f"TCC {tcc or 'unknown'} · method {method or 'unknown'} · {system or 'unknown'} · "
+            f"lang={lang}")
 
 
-def compose(first: str, text: str, attachment: str = "") -> str:
-    """The first line, the person's words under it, and what goes with them under those."""
-    parts = [first, text.strip()]
+def compose(message: str, attachment: str = "") -> str:
+    """The person's words, and what goes with them under those."""
+    parts = [message.strip()]
     if attachment.strip():
         parts.append(attachment.strip())
     return "\n\n".join(parts)
+
+
+def fields(report: Report) -> dict[str, str]:
+    """The form's question ids with their answers. Raises `ValueError` for what the form would
+    not take: no sender, no words, or a choice it does not list."""
+    if not report.sender.strip():
+        raise ValueError("a report says who wrote it: the Arbiter answers people")
+    if not report.message.strip():
+        raise ValueError("a report without words is not a report")
+    if report.kind not in KIND_ANSWERS:
+        raise ValueError(f"a report is one of {', '.join(KINDS)}, not {report.kind!r}")
+    if report.impact and report.impact not in IMPACT_ANSWERS:
+        raise ValueError(f"how far it stops the tuning is one of {', '.join(IMPACTS)}, "
+                         f"not {report.impact!r}")
+    answers = {
+        FIELD_SENDER: report.sender.strip(),
+        FIELD_KIND: KIND_ANSWERS[report.kind],
+        FIELD_MESSAGE: report.message.strip(),
+    }
+    if report.impact:
+        answers[FIELD_IMPACT] = IMPACT_ANSWERS[report.impact]
+    if report.versions.strip():
+        answers[FIELD_VERSIONS] = report.versions.strip()
+    return answers
+
+
+def as_text(report: Report) -> str:
+    """The whole report as plain text, for a clipboard when the form did not take it."""
+    lines = [f"Від кого: {report.sender.strip()}",
+             f"Тип: {KIND_ANSWERS.get(report.kind, report.kind)}"]
+    if report.impact:
+        lines.append(f"Наскільки заважає: {IMPACT_ANSWERS.get(report.impact, report.impact)}")
+    if report.versions.strip():
+        lines.append(f"Версії: {report.versions.strip()}")
+    return "\n".join(lines) + "\n\n" + report.message.strip()
 
 
 def _context() -> ssl.SSLContext:
@@ -97,9 +157,11 @@ def _post(url: str, data: bytes, timeout: float) -> tuple[int, str]:
         return response.status, response.read().decode("utf-8", "replace")
 
 
-def send(text: str, *, url: str = FORM_POST_URL, post=_post, timeout: float = TIMEOUT_S) -> Sent:
-    """Post `text` to the form and say whether the form confirmed it. Never raises."""
-    data = urllib.parse.urlencode({FORM_FIELD: text}).encode("utf-8")
+def send(report: Report, *, url: str = FORM_POST_URL, post=_post,
+         timeout: float = TIMEOUT_S) -> Sent:
+    """Post `report` to the form and say whether the form confirmed it. Raises only for a report
+    the form would not take (`fields`); a network or a form that says no is a `Sent`."""
+    data = urllib.parse.urlencode(fields(report)).encode("utf-8")
     try:
         status, body = post(url, data, timeout)
     except urllib.error.HTTPError as exc:
