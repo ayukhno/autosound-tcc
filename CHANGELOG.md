@@ -50,9 +50,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **The import row's protective filters are entered with the Protection form's fields** — type,
   slope, frequency and the LR24 button, for the high-pass and the low-pass — from one cell that says
   what is in the chain (F-056). It used to be two typed frequencies with LR24 implied.
-- **The method is pinned at `v3.0.53`** (1fb9b82): one reader for measurement titles (a clarification
+- **The method is pinned at `v3.0.54`** (92084cd): one reader for measurement titles (a clarification
   after the method and `(imp)` are in the grammar), a reviewer that exits 4 when it has no answer, THD
-  flaw rows in percent, and facts carried in from another project marked as inherited.
+  flaw rows in percent, facts carried in from another project marked as inherited (all `v3.0.53`);
+  junctions read from the impulse, and every REW reader naming its smoothing (`v3.0.54`).
 
 ### Fixed
 
