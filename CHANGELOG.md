@@ -12,7 +12,10 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v0.1.41] — 2026-09-17 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.56
+
+Paired with method `4c798602987d09964d5eda7b1606b31c9da056d3` — the tag on that commit is
+**`v3.0.56`**.
 
 ### Added
 
@@ -24,6 +27,23 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   What goes with your words is on screen before Send. "Sent" is said only when the form confirms it; if it does not, the whole report is
   left on the clipboard. Text only: pictures still go through GitHub. The GitHub route keeps its
   issue form, now with your words already in it (TODO F-042).
+
+### Changed
+
+- **The method is pinned at `v3.0.56`** (4c79860). Phase 1's crossovers and delays now come from
+  Resonalyze's engines behind the method's own wrapper; EQ is proposed in two parts, the coarse
+  per-driver bands before the delays; above 1 kHz a mid↔tweeter joint whose two witnesses disagree
+  comes back UNVERIFIED with both candidates instead of being answered; a crossover candidate is
+  also judged by how much its group delay swings across the junction; and a session can send a
+  finding to the developer's form with no GitHub account (all `v3.0.56`). `doctor` says where the
+  reviewer's key came from and what answered its live call, and `_N` numbers the measurement
+  series rather than the DSP state (`v3.0.55`). TCC calls none of the new tools: Phase 1's engine
+  needs the .NET SDK or a prebuilt engine, and it is the method's session that runs it, not the
+  window.
+- **The method's Windows PATH fix does not arrive through the update button.** `install.ps1` in
+  `v3.0.55` puts `~\.local\bin` ahead of the Store's `python3` shortcut in the user PATH; TCC's
+  button only moves the method's checkout to the newest tag, so a Windows machine where a new
+  window runs the wrong `python3` needs the method's installer run once more.
 
 ### Fixed
 
