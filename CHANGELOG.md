@@ -12,7 +12,10 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v0.1.40] — 2026-09-17 · import from REW names from the round's list, blue for what REW holds, the method at v3.0.54
+
+Paired with method `92084cde90afbeef865a0f3de61d95372b6198ef` — the tag on that commit is
+**`v3.0.54`**.
 
 ### Added
 
