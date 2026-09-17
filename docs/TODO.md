@@ -1770,7 +1770,7 @@ intake field list and a writer).
 
 ### F-054 — A button that writes the last N sessions of the dialog into one file
 
-**Статус**: open · the Arbiter, 2026-09-14 (test of 0.1.39); for the wave review
+**Статус**: done 2026-09-17 · Diagnostics → Log, «Save sessions…»; readable Markdown, a save dialog, every session of the project (the Arbiter's choices, 2026-09-17)
 
 The dialog history exists — Claude Code writes each session TCC runs to
 `~/.claude/projects/<project path with dashes>/<session id>.jsonl`, and `<project>/.tcc/sessions.json`
