@@ -4376,3 +4376,27 @@ def test_a_window_left_behind_by_a_test_writes_nothing_into_the_next_test_s_fold
     assert not any(timer.isActive() for timer in window.findChildren(QTimer))
     assert not any(w.files() or w.directories() for w in window.findChildren(QFileSystemWatcher))
 
+
+
+def test_message_the_developer_offers_the_form_for_people_without_github(monkeypatch):
+    """TODO F-042: the form route was switched off by an empty constant on 27.07, so a person
+    without a GitHub account had nowhere to write from the window."""
+    from autosound_tcc.core import form_report
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    made = []
+
+    class _Dialog:
+        def __init__(self, github_url, form_url, parent=None, **kwargs):
+            made.append(form_url)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(mw, "FeedbackDialog", _Dialog)
+    _app()
+    window = MainWindow()
+
+    window._open_feedback()
+
+    assert made == [form_report.FORM_POST_URL]

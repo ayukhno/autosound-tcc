@@ -60,6 +60,7 @@ from autosound_tcc.core import (
     config,
     contract_check,
     critic,
+    form_report,
     install_report,
     model_choices,
     model_overrides,
@@ -221,9 +222,6 @@ _HANDOFF_TIMEOUT_MS = 180_000
 # missed, or nobody is listening -- all three are things the Arbiter should see rather than guess.
 _TOGGLE_LATE_S = 60
 _FEEDBACK_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
-# TODO(user): paste the published Google Form viewform URL here (the one built last session — see
-# memory reference-browse-google-forms). Empty = the modal's form option only copies to clipboard.
-_FEEDBACK_FORM_URL = ""
 
 # The skill's online target-curve visualizer (user request 2026-07-28) -- opened in the system
 # browser when the header's "Target curve" value is clicked, `?lang=` matching the app's own
@@ -2255,7 +2253,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _open_feedback(self) -> None:
-        FeedbackDialog(_FEEDBACK_URL, _FEEDBACK_FORM_URL, self).exec()
+        # The form for a person without GitHub, sent from the window (TODO F-042). It was an
+        # empty constant from 27.07 until the Arbiter chose the route on 17.09.
+        FeedbackDialog(_FEEDBACK_URL, form_report.FORM_POST_URL, self).exec()
 
     def _open_support_menu(self) -> None:
         """The coffee button's own popup, opening UPWARD from the footer (user, 2026-07-28).

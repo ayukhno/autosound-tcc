@@ -21,8 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import (
     app_log,
     config,
+    form_report,
     install_report,
     self_check,
     session_export,
@@ -49,6 +50,7 @@ from autosound_tcc.core import (
 )
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
 from autosound_tcc.ui.tcc.sidebar_section import clear_layout
 
@@ -219,6 +221,18 @@ class _CheckRow(QWidget):
 #: Where a beta report goes. The repository's own form, not a blank issue: a form has fields, and
 #: fields are what let a pile of reports be read by something other than a person one at a time.
 ISSUES_URL = "https://github.com/ayukhno/autosound-tcc/issues/new"
+
+
+def issue_url(what: str, install: str) -> str:
+    """The beta-report form with the person's words and the installation block in its own fields.
+
+    Four hundred lines of log do not fit in a URL, so the log is not sent this way: its tab has a
+    Copy button, and the form has a field waiting for it.
+    """
+    fields = {"template": "beta-report.yml", "labels": "beta", "install": install}
+    if what:
+        fields["what"] = what
+    return f"{ISSUES_URL}?{urllib.parse.urlencode(fields)}"
 
 #: How often, and for how long, the panel looks to see whether the tool probes have finished.
 _TOOLS_POLL_MS = 250
@@ -730,34 +744,33 @@ class DiagnosticsDialog(QDialog):
     def set_install_extra(self, facts: dict) -> None:
         self._install_extra_facts = dict(facts or {})
 
-    def _open_issue(self) -> None:
-        """Open the beta-report form with the installation block already filled in.
+    def _report_text(self) -> str:
+        """The installation block for a report, whichever tab is open.
 
         The half of a bug report nobody can be asked to assemble by hand — versions, where each
         piece came from, which tools answer — is the half that decides whether the report can be
-        answered at all. It goes into the form's own field through the URL, so what arrives is a
-        structured issue rather than a message in a chat (user, 2026-08-19: "дуже хочу обробляти
-        їх напівавтоматично").
-
-        The log is NOT sent this way: four hundred lines do not fit in a URL. Its own tab has a
-        Copy button, and the form has a field waiting for it.
+        answered at all (user, 2026-08-19: "дуже хочу обробляти їх напівавтоматично").
         """
-        report = self._install_text.toPlainText()
-        if not self._install_read:
-            # The tab was never opened, so the box still holds "reading…". Compose the report now,
-            # WITHOUT the tools section: that one starts eight processes, and the versions and
-            # paths — which are what the form needs — are file reads that cost nothing.
-            try:
-                report = install_report.as_text(install_report.report(
-                    extra=self._install_extra(), with_tools=False))
-            except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
-                report = f"{type(exc).__name__}: {exc}"
-        query = urllib.parse.urlencode({
-            "template": "beta-report.yml",
-            "labels": "beta",
-            "install": report,
-        })
-        QDesktopServices.openUrl(QUrl(f"{ISSUES_URL}?{query}"))
+        if self._install_read:
+            return self._install_text.toPlainText()
+        # The tab was never opened, so the box still holds "reading…". Compose the report now,
+        # WITHOUT the tools section: that one starts eight processes, and the versions and paths —
+        # which are what a report needs — are file reads that cost nothing.
+        try:
+            return install_report.as_text(install_report.report(
+                extra=self._install_extra(), with_tools=False))
+        except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
+            return f"{type(exc).__name__}: {exc}"
+
+    def _open_issue(self) -> None:
+        """Ask for the words and send them the way the person can: the form without an account,
+        the beta-report issue with one (TODO F-042). The installation block goes either way — in
+        the form's text under the words, or in the issue template's own field."""
+        report = self._report_text()
+        FeedbackDialog(
+            ISSUES_URL, form_report.FORM_POST_URL, self, kind="problem", attachment=report,
+            github_link=lambda body: issue_url(body, report),
+        ).exec()
 
     def _copy_install(self) -> None:
         QGuiApplication.clipboard().setText(self._install_text.toPlainText())

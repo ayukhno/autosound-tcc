@@ -1,27 +1,31 @@
 """The feedback modal — ported from the prototype's `.fb-modal` (`data/private/prototype/
 tcc-main.html`). A small rich-text editor (Bold / Italic / bulleted / numbered) plus a choice of
-destination: a GitHub issue (for users with an account) or a Google Form (for everyone else).
+destination: a GitHub issue (for users with an account) or the Arbiter's Google Form (for everyone else).
 
-No network calls of our own: "send" hands the composed text off to the chosen destination via the
-system browser (GitHub issue prefilled with the text as Markdown; the Google Form opened with the
-text placed on the clipboard to paste, since a public form has no trusted server-side prefill we
-can rely on here). The point is to lower the barrier for non-developer testers, exactly like the
-prototype's two-way modal.
+The GitHub route hands the text to the system browser, prefilled. The form route SENDS it, from the
+window, with no browser and no sign-in (TODO F-042, the Arbiter's decision of 2026-09-17): a person
+without a GitHub account used to be handed a clipboard and a form to paste into, and before that
+nothing at all. What goes is on screen before Send — the words, the first line that says what they
+ran on, and anything the caller attaches — and "sent" is said only when the form confirmed it
+(`core/form_report.py`).
 """
 
 from __future__ import annotations
 
+import threading
 import urllib.parse
 
 from pathlib import Path
 
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextListFormat
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QTextEdit,
@@ -29,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import issue_assets
+from autosound_tcc.core import form_report, issue_assets
 from autosound_tcc.ui.tcc import discard, i18n
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -52,11 +56,46 @@ def body_with_shots(body: str, urls) -> str:
     return "\n\n".join([body] + shots).strip()
 
 
+class _FormSend:
+    """Posts one report to the form on a plain thread, the `_UpdateProbe` shape of the diagnostics
+    dialog: a slow network must not freeze the window, and nothing of Qt's is touched off it."""
+
+    def __init__(self, text: str, url: str) -> None:
+        self.result = None
+        self._thread = threading.Thread(
+            target=self._run, args=(text, url), name="tcc-form-report", daemon=True)
+        self._thread.start()
+
+    def _run(self, text: str, url: str) -> None:
+        try:
+            self.result = form_report.send(text, url=url)
+        except Exception as exc:  # noqa: BLE001 — `send` never raises; a stand-in still might
+            self.result = form_report.Sent(False, "network", f"{type(exc).__name__}: {exc}")
+
+    @property
+    def running(self) -> bool:
+        return self._thread.is_alive()
+
+
+#: What each kind is called on screen; the first line always carries the English word.
+_KIND_KEYS = {"problem": "fbKindProblem", "wish": "fbKindWish", "feedback": "fbKindFeedback"}
+
+
 class FeedbackDialog(QDialog):
-    def __init__(self, github_url: str, form_url: str, parent=None) -> None:
+    def __init__(self, github_url: str, form_url: str, parent=None, *, kind: str = "feedback",
+                 attachment: str = "", github_link=None) -> None:
+        """`form_url` empty leaves GitHub as the only route. `attachment` goes to the form under
+        the words, shown before Send; `github_link(body)` builds the page the GitHub route opens,
+        so a caller with its own issue template keeps it (the diagnostics dialog does)."""
         super().__init__(parent)
         self._github_url = github_url
         self._form_url = form_url
+        self._attachment = attachment
+        self._github_link = github_link or self._plain_issue_link
+        self._sending = None
+        self._send_timer = QTimer(self)
+        self._send_timer.setInterval(150)
+        self._send_timer.timeout.connect(self._poll_send)
         self.setModal(True)
         self.setMinimumWidth(480)
         self.setProperty("class", "fb-card")
@@ -149,12 +188,48 @@ class FeedbackDialog(QDialog):
             self._radio_form.hide()
             self._radio_github.setChecked(True)
 
+        # ---- what the form route sends besides the words (TODO F-042) ----------------------
+        # The kind, and the first line it makes, matter only where they travel: the GitHub route
+        # has its own page for them, so both go away with the form radio.
+        self._kind_row = QWidget()
+        kind_layout = QHBoxLayout(self._kind_row)
+        kind_layout.setContentsMargins(0, 0, 0, 0)
+        kind_label = QLabel(i18n.t("fbKind"))
+        kind_label.setProperty("class", "fb-hint")
+        kind_layout.addWidget(kind_label)
+        self._kind_group = QButtonGroup(self)
+        self._kind_buttons: dict[str, QRadioButton] = {}
+        for name in form_report.KINDS:
+            button = QRadioButton(i18n.t(_KIND_KEYS[name]))
+            self._kind_group.addButton(button)
+            self._kind_buttons[name] = button
+            kind_layout.addWidget(button)
+        kind_layout.addStretch(1)
+        self._kind_buttons[kind if kind in self._kind_buttons else "feedback"].setChecked(True)
+        outer.addWidget(self._kind_row)
+        self._goes_with_label = QLabel(i18n.t("fbGoesWith"))
+        self._goes_with_label.setProperty("class", "fb-hint")
+        outer.addWidget(self._goes_with_label)
+        self._goes_with = QPlainTextEdit()
+        self._goes_with.setReadOnly(True)
+        self._goes_with.setMaximumHeight(90)
+        outer.addWidget(self._goes_with)
+        # Connected once the box they write to exists — the `_send` lesson below, again.
+        for button in self._kind_buttons.values():
+            button.toggled.connect(self._refresh_goes_with)
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        self._status.setProperty("class", "fb-hint")
+        self._status.setVisible(False)
+        outer.addWidget(self._status)
+
         actions = QHBoxLayout()
         actions.addStretch(1)
         cancel = QPushButton(i18n.t("fbCancel"))
         cancel.setProperty("class", "fb-cancel")
         cancel.clicked.connect(self.reject)
         actions.addWidget(cancel)
+        self._cancel = cancel
         self._send = QPushButton()
         self._send.setProperty("class", "fb-send")
         self._send.clicked.connect(self._on_send)
@@ -167,6 +242,7 @@ class FeedbackDialog(QDialog):
         # sets the radio before this point is now just a state change; the label is settled once,
         # below, and kept in step from here on.
         self._radio_github.toggled.connect(self._sync_send_label)
+        self._refresh_goes_with()
         self._sync_send_label()
 
     # ---- screenshots ------------------------------------------------------
@@ -270,30 +346,83 @@ class FeedbackDialog(QDialog):
         # nowhere to go on that route. Hidden rather than explained: an offer that is withdrawn
         # at Send is worse than one never made.
         self._shots_box.setVisible(issue_assets.available() and self._radio_github.isChecked())
+        on_form = not self._radio_github.isChecked()
+        for widget in (self._kind_row, self._goes_with_label, self._goes_with):
+            widget.setVisible(on_form)
+
+    def _kind(self) -> str:
+        return next((name for name, button in self._kind_buttons.items() if button.isChecked()),
+                    "feedback")
+
+    def _first_line(self) -> str:
+        return form_report.first_line(self._kind(), i18n.current_language())
+
+    def _refresh_goes_with(self, *_args) -> None:
+        extra = [self._first_line()]
+        if self._attachment.strip():
+            extra.append(self._attachment.strip())
+        self._goes_with.setPlainText("\n\n".join(extra))
+
+    def _plain_issue_link(self, body: str) -> str:
+        return f"{self._github_url}?body={urllib.parse.quote(body)}" if body else self._github_url
+
+    def _say(self, text: str) -> None:
+        self._status.setText(text)
+        self._status.setVisible(bool(text))
+
+    def reject(self) -> None:  # noqa: D401 (Qt override)
+        # Not while a report is on the way: closing would leave nobody to say whether it arrived.
+        if self._sending is not None:
+            return
+        super().reject()
+
+    def _send_to_form(self) -> None:
+        words = self._editor.toMarkdown().strip() if self._editor.toPlainText().strip() else ""
+        if not words:
+            self._say(i18n.t("fbEmpty"))
+            return
+        self._outgoing = form_report.compose(self._first_line(), words, self._attachment)
+        self._send.setEnabled(False)
+        self._cancel.setEnabled(False)
+        self._say(i18n.t("fbSending"))
+        self._sending = _FormSend(self._outgoing, self._form_url)
+        self._send_timer.start()
+
+    def _poll_send(self) -> None:
+        probe = self._sending
+        if probe is None or probe.running:
+            return
+        self._send_timer.stop()
+        self._sending = None
+        self._cancel.setEnabled(True)
+        result = probe.result or form_report.Sent(False, "network", "no answer")
+        if result.ok:
+            self._say(i18n.t("fbSent"))
+            self._cancel.setText(i18n.t("fbClose"))
+            self._editor.setReadOnly(True)
+            return
+        why = i18n.t("fbNoConfirm") if result.reason == "unconfirmed" else result.detail
+        # Nothing a person wrote is lost to a network: the whole text goes to the clipboard.
+        QGuiApplication.clipboard().setText(self._outgoing)
+        self._say(i18n.t("fbNotSent").format(problem=why))
+        self._send.setEnabled(True)
 
     def _on_send(self) -> None:
-        if self._radio_github.isChecked():
-            body = self._editor.toMarkdown().strip()
-            if self._shots:
-                # `consented=True` is EARNED here, and this is the only place in either half that
-                # can earn it: these are the pictures still on screen after a person looked at
-                # them and dropped the ones that should not travel.
-                published = issue_assets.publish(self._shots, consented=True)
-                body = body_with_shots(body, published.urls)
-                if not published.ok:
-                    # Nothing is posted on a partial upload — but what already went up cannot be
-                    # taken back, so the count is said rather than swallowed.
-                    self._say_problem(i18n.t("fbShotsFailed").format(
-                        problem=published.problem, n=len(published.urls)))
-                    return
-            url = self._github_url
-            if body:
-                url = f"{self._github_url}?body={urllib.parse.quote(body)}"
-            QDesktopServices.openUrl(QUrl(url))
-        else:
-            # No reliable prefill for a public form: put the text on the clipboard so the tester
-            # can paste it, then open the form.
-            QGuiApplication.clipboard().setText(self._editor.toPlainText().strip())
-            if self._form_url:
-                QDesktopServices.openUrl(QUrl(self._form_url))
+        if not self._radio_github.isChecked():
+            self._send_to_form()
+            return
+        body = self._editor.toMarkdown().strip()
+        if self._shots:
+            # `consented=True` is EARNED here, and this is the only place in either half that
+            # can earn it: these are the pictures still on screen after a person looked at
+            # them and dropped the ones that should not travel.
+            published = issue_assets.publish(self._shots, consented=True)
+            body = body_with_shots(body, published.urls)
+            if not published.ok:
+                # Nothing is posted on a partial upload — but what already went up cannot be
+                # taken back, so the count is said rather than swallowed.
+                self._say_problem(i18n.t("fbShotsFailed").format(
+                    problem=published.problem, n=len(published.urls)))
+                return
+        QDesktopServices.openUrl(QUrl(self._github_link(body)))
         self.accept()

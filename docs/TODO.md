@@ -1505,18 +1505,32 @@ exe, тобто гірше за «Autosound TCC» і не гірше за теп
 
 ### F-042 — як звітувати про ваду й передати налаштування, коли GitHub недоступний
 
-**Статус**: decided 2026-09-17, design next · заведено 2026-09-01 питанням користувача
+**Статус**: TCC part done 2026-09-17 · the session part waits for the skill (`autosound-hub#157`,
+TCC-017) · заведено 2026-09-01 питанням користувача
 
-**17.09, the user's decision.** The channel without GitHub is the Google Form already on the
-user's Drive (public, no sign-in, one field `entry.970390217`, answers in a Sheet), opened from
-TCC with the text and the installation block filled in. On top of it, verbatim: «але ще треба
-мати можливіть передати фото, причесати це на Гугл диску, і дати можливість сесії відправляти
-цим каналом - як мінімум, зворотній звʼязок, як максімум проблеми і побажання з поточної сесіїї
-ШІ коли немає гітхаба». The second half of the question is the method's feedback package
-(`references/core/feedback-loop.md`, posted today by `gates/side_effect.post_feedback` through
-`gh`). TCC already has the form path in "Message the developer", switched off on 27.07 by
-`_FEEDBACK_FORM_URL = ""`. Next: a design for photos and for a session sending through the
-channel; the session's part is the method's, so it goes to the skill as a ticket.
+**17.09, the user's decisions.**
+
+1. The channel without GitHub is the Google Form already on the user's Drive (public, no sign-in,
+   one field `entry.970390217`, answers in a sheet). The first ask, verbatim: «але ще треба мати
+   можливіть передати фото, причесати це на Гугл диску, і дати можливість сесії відправляти цим
+   каналом - як мінімум, зворотній звʼязок, як максімум проблеми і побажання з поточної сесіїї ШІ
+   коли немає гітхаба».
+2. Shown the cost of pictures (a file question makes Google demand a sign-in for the whole form,
+   which closes it to a session; the other way is a receiver script of our own), the user chose
+   **text only**. Pictures go through GitHub or separately.
+3. The second half of the question is the method's feedback package
+   (`references/core/feedback-loop.md`, posted by `gates/side_effect.post_feedback` through `gh`).
+4. The design was approved as a whole: TCC in this wave, the ticket to the skill now, one test entry.
+
+**Done 17.09.** On the Drive: folder "Autosound — звіти" with the form ("Autosound — звіт і відгук")
+and its sheet. The test entry landed in the sheet; the form confirms with `usp=form_confirm` on its
+reply, which the form page does not carry. In TCC (`core/form_report.py`): "Message the developer"
+and Diagnostics' "Report a problem" both offer the form, sent from the window with no browser; the
+text goes under a first line `[problem|wish|feedback] · TCC … · method … · <OS> · lang=…`, what
+goes with the words is on screen before Send, "sent" is said only on the form's confirmation, and a
+failed send leaves the whole text on the clipboard. The GitHub route keeps the beta-report template,
+now with the words in its `what` field. Ticket `autosound-hub#157` asks the method for the same
+route from a session.
 
 **Питання, дослівно:** «як сесія може оформити багу чи передачу налаштувань з основного
 діалога коли у користувача немає гітхаба чи він не залогінений».

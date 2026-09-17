@@ -14,6 +14,16 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
+### Added
+
+- **A report without a GitHub account** — "Message the developer" and "Report a problem" in
+  Diagnostics can send the text straight to the developer's form, from the window, with no browser
+  and no sign-in. Pick what it is — a problem, a wish or feedback — and the window shows what goes
+  with your words (the versions it ran on, and from Diagnostics the installation block) before Send.
+  "Sent" is said only when the form confirms it; if it does not, the whole text is left on the
+  clipboard. Text only: pictures still go through GitHub. The GitHub route keeps its issue form,
+  now with your words already in it (TODO F-042).
+
 ### Fixed
 
 - **A narrow window no longer pushes the footer's buttons off its right edge** — the two model
