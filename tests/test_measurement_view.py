@@ -658,3 +658,14 @@ def test_a_past_round_folds_not_applicable_captures_as_taken(tmp_path):
     by_name = {i.name: i for g in session.groups for i in g.items}
     assert by_name["w-L_01 (rta)"].status == measurement_view.STATUS_DONE
 
+
+def test_an_impedance_sweep_is_shown_with_whatever_series_is_on_screen(project):
+    """`(imp)` is the one method with no `_N` (method v3.0.53, hub #153 D). The Arbiter, 2026-09-17:
+    which series it belongs to does not matter — it sits with the series current when it is taken.
+    Filtered by series like every other extra, it was on no checklist at all."""
+    session = mv.build_session("0", 1, ["w-L (imp)"], project, taken=[])
+
+    extras = [item for g in session.groups for item in g.items if item.additional]
+    assert [item.name for item in extras] == ["w-L (imp)"]
+    assert extras[0].status == mv.STATUS_FOUND, "in REW, not taken in yet"
+

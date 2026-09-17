@@ -502,7 +502,12 @@ def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
         version_n = version
     out = []
     for key, entry in sorted(parsed.items(), key=lambda kv: kv[1]["title"]):
-        if key in wanted or (entry["version_n"] or entry["version"]) != version_n:
+        if key in wanted:
+            continue
+        # An impedance sweep has no `_N` (the method's v3.0.53) and sits with whatever series is on
+        # screen — which one does not matter (the Arbiter, 2026-09-17). Every other extra is ours
+        # only at this series.
+        if entry.get("method") != "imp" and (entry["version_n"] or entry["version"]) != version_n:
             continue
         out.append(
             MeasItem(

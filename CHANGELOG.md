@@ -30,6 +30,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   pre-sweep gate holds a fragile driver on it until it is confirmed here or measured (hub #154).
 - **A name typed in the import window that is outside the naming grammar says why**, in the method's
   own words, under the table — without refusing it (hub #153).
+- **An impedance sweep (`w-L (imp)`) shows on the capture card** with the series on screen: it has
+  no series number, and which series it sits with does not matter (hub #153).
 
 ### Changed
 
