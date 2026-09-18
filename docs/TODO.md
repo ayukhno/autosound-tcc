@@ -1754,6 +1754,29 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-061 — the clipboard's column names still exist twice: read the method's `FORM_LABELS`
+
+**Статус**: open 2026-09-18 · named while re-pinning at the method's `v3.0.58`, which is what made
+it possible; nothing was changed, the wave was already cut
+
+A report the form refuses goes to the clipboard instead, and its lines are read beside the sheet
+whose columns wear exactly those words. `core/form_report.py` writes them from ITS OWN copy — the
+last place the sheet's column names exist in two repositories at once, and the same shape that
+SCR-057 removed for the question ids, the choice words and the "counts as sent" rule.
+
+The method now exports them: `FORM_LABELS`, keyed by question id and in the form's own order
+(`rew_tool/gates/side_effect.py`, `v3.0.58`), with its selftest asking that every answer the form
+takes has a label and no label names a question that is not asked. So the dict `form_answers()`
+returns can be labelled with no second table anywhere.
+
+**The one thing to get right:** the labels are the form's Ukrainian, not a translation, and that is
+deliberate — a column's name belongs to the form, while this window keeps its four languages for
+what a person CHOOSES. So this is not an i18n key; do not route it through `i18n.t`.
+
+**Why it is not urgent.** Nothing is broken today: the copy is correct at `v3.0.58`. What it costs
+is the same silence SCR-057 was opened about — if the form's questions are reworded, the clipboard
+keeps the old column names and nobody is told, because the words still look like words.
+
 ### F-060 — on Windows the footer still does not fit a 1280 px window
 
 **Статус**: done 2026-09-18 · CI run `35320676477` on `9a8a8ba`, all nine jobs green including
