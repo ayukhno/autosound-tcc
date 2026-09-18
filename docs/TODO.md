@@ -1756,8 +1756,8 @@ ERROR the MCP server did not start:
 
 ### F-060 — on Windows the footer still does not fit a 1280 px window
 
-**Статус**: fixed 2026-09-18, waiting for the Windows CI of PR #41 to say so · the Arbiter chose the
-shape (buttons to their glyph) the same day
+**Статус**: done 2026-09-18 · CI run `35320676477` on `9a8a8ba`, all nine jobs green including
+`windows (run 1)` · the Arbiter chose the shape (buttons to their glyph) the same day
 
 **The fact.** CI run `35276410717` (head `83e8d99`), `windows (run 1)`: 1 failed, 2103 passed, 12
 skipped — `test_a_narrow_window_squeezes_the_footer...`, `💬 Message the developer` drawn up to
@@ -1800,17 +1800,21 @@ shortfall out in proportion to what each item can spare, and the keys came up re
 `Effo…` at the width the app opens at. They are worth ~130 px of the ~480 needed; the buttons are
 worth ~350 on their own.
 
-**The next row, if Windows says the window still cannot reach 1280.** With the footer at 779 the
-widest row is now the HEADER (`panel phead`, 1015 px on macOS, 619 of it un-shrinkable): the ☰ menu
+**Windows said the footer was enough.** The whole suite green on run `35320676477`, so the header
+does NOT block 1280 there and is not to be touched. Kept for whoever meets this next: with the
+footer at 779 the widest row in this window is now the HEADER (`panel phead`, 1015 px on macOS, 619 of it un-shrinkable): the ☰ menu
 button, the `Preset` and `Target curve` keys, the preset picker, the zoom frame, the `◐ theme`
 button. Same illness, same medicine, and the same question for the Arbiter about what it looks like
-squeezed. Not touched before there are numbers from the platform that fails.
+squeezed — if a platform, a zoom level or a translation ever asks for it.
 
 **What tells us next time, on a platform nobody here can open.** The test's failure message now
 carries every `panel phead` row — each item's floor, its ask, what it got, and the sum of the ones
 that will not move (`_row_width_report`). The old message named the widget drawn past the edge,
 which is the LAST control in the row and never the one holding the width. The test is also in
-`tests/cross-platform-suspects.txt` now, so the one-minute Windows job runs it.
+`tests/cross-platform-suspects.txt`, which is how the answer came back in two minutes instead of
+nine — and then out of it again, green. That file is now EMPTY: the method's `contract.py` selftest,
+the only other entry, passes at the `v3.0.57` pin this wave carries (bus ticket hub#108 / TCC-007 is
+the skill's to close, and run `35320676477` is its receipt).
 
 **A flake found on the way, and fixed.** `test_no_row_repeats_what_the_row_already_says` asks
 `_fill_combo` which badges a row carries, and `_fill_combo` asks `availability.status` — which says
@@ -1821,12 +1825,13 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
-**Статус**: blocked 2026-09-18 · Windows CI is red on the head — see F-060. The tag also waits for
-the Arbiter's yes (the one act this repository cannot take back, which is why `scripts/ship.py` asks
-for `REAL=1` by name), but there is nothing to say yes to while a platform's suite is failing.
+**Статус**: waiting for the Arbiter 2026-09-18 · CI is GREEN on the head (run `35320676477`,
+`9a8a8ba`, all nine jobs) — F-060 is closed and no longer blocks this. What is left is the tag
+itself: the one act this repository cannot take back, which is why `scripts/ship.py` asks for
+`REAL=1` by name and why it waits for the Arbiter's yes.
 
-The wave is done and its PR is green-or-not on CI, which is the only thing left to read:
-[PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `8eade1d`.
+The wave is done and its PR is green on CI:
+[PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `9a8a8ba`.
 It carries three things — the pin at the method's `v3.0.57` (bbaefbd), the Arbiter's form read from
 the method's gate instead of a copy here (SCR-057, hub #174), and the two Windows-only failures that
 PR's first run found (`markdown_of` reading the char formats; the footer test taking its roomy width
@@ -1839,7 +1844,7 @@ puts the tag on the commit CI checked.
 What is left, in order:
 
 ```bash
-gh pr checks 41                       # green on windows/linux/macos, or read the failure first
+gh pr checks 41                       # green on windows/linux/macos (was, on 9a8a8ba)
 git -C tcc checkout main && git -C tcc merge --ff-only method-v3.0.56 && git -C tcc push
 make ship                             # DRY RUN: the plan, writing nothing
 make ship REAL=1                      # only after the Arbiter's yes

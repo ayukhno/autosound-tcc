@@ -14,16 +14,14 @@
 #
 # Sources: ayukhno/autosound-tcc#17 (26 on Windows), #18 (2 of them also fail on Linux).
 
-# --- not sorted yet; may belong to the skill, not to us (#17, task 5)
-# Waiting on the skill, not on us: `contract.py::_selftest` compares a path it built against a
-# literal with forward slashes, so it fails on Windows and our runner of their selftests reports
-# it. Bus ticket hub#108 (TCC-007). Kept here so the count stays honest — it is red, and we are
-# not the ones who can turn it green.
-tests/test_skill_selftests.py::test_skill_selftest_passes
-
-
-# --- TODO F-060: the footer row's width is a property of the UI FONT, so this one fails on the
-# platform with the widest text and passes everywhere else. Here for the cycle, not because it
-# belongs to anybody else: its failure message names every row of the window and what in each of
-# them refuses to shrink. Delete this line when Windows runs it green.
-tests/test_main_window.py::test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_the_edge
+# --- EMPTY, and that is the goal. Both of the last two entries went green on Windows in run
+# 35320676477 (2026-09-18, 58 passed, nothing skipped):
+#
+#   * the footer row that could not be squeezed into a 1280 px window -- fixed here, TODO F-060;
+#   * `test_skill_selftests.py::test_skill_selftest_passes`, which was never ours to fix: the
+#     method's `contract.py::_selftest` compared a path it had built against a literal written
+#     with forward slashes. It passes at the method's `v3.0.57`, the pin this wave carries. Bus
+#     ticket hub#108 (TCC-007) is the skill's to close, and its receipt is that run.
+#
+# The job now runs nothing and is green by being empty, which is what this file wanted. Add a
+# line the moment a run off macOS finds something, and the one-minute cycle is back.
