@@ -1825,17 +1825,32 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
-**Статус**: held for the next method release · the Arbiter, 2026-09-18: «почекаємо новий скіл».
-Nothing technical is left — CI is GREEN on the head (run `35320676477`, `9a8a8ba`, all nine jobs)
-and F-060 is closed — but the tag waits, and it waits for a REASON, not for a yes: this wave is
-paired with the method at `v3.0.57`, and a release cut now would pair the app with a version about
-to be superseded.
+**Статус**: waiting for the Arbiter 2026-09-18 · re-pinned at the method's `v3.0.58` (66f6bdf), the
+suite run SERIALLY on this Mac — 2115 passed, 1 skipped, 0 failures — and CI to be read on the push.
+What is left is the tag: the one act this repository cannot take back, which is why
+`scripts/ship.py` asks for `REAL=1` by name.
 
-**What the new method version costs before the tag**, in order: re-pin the submodule at the new
-commit; rewrite the `## [v0.1.41]` heading's `Paired with method` line and the "the method is pinned
-at" bullet under **Changed** with what actually changed there; run the suite; push and read CI;
-then, and only then, the merge and the tag below. The pin is not a one-line bump — the CHANGELOG
-bullet is a claim about the method's contents, and it is read by whoever presses the update button.
+**The re-pin, done 2026-09-18.** The tag was not there when this was first asked for — the method's
+`main` carried the release commit and no tag — and it arrived within the hour, with its release: three
+engine archives (`osx-arm64`, `win-arm64`, `win-x64`) and `SHA256SUMS`, as a pre-release. That the
+release carries them matters to a consumer of this method and not only to its own installers: from
+`v3.0.58` an install can FETCH the desk engine instead of needing the .NET SDK, so a tag whose
+release is empty would be a worse install than the one before it. Checked before the pin was
+committed, not assumed.
+
+**What the pin brings us**, and it is our own ticket coming back: hub SCR-057's two remaining asks
+are in `v3.0.58` — the gate's `FORM_*` names pinned by the METHOD's selftest as a surface this repo
+reads (a rename now breaks in their suite, where before it broke silently here: `is_available()`
+missing a name, `post_url()` empty, the form route simply gone from the window), and `FORM_LABELS`,
+the form's question names as data. **`FORM_LABELS` is not read yet** — `core/form_report.py` still
+writes the clipboard's column names from its own copy. That is the last place the sheet's columns
+exist twice, and it is a separate change, not part of a re-pin. Worth a TODO of its own when this
+wave is out.
+
+**A crash seen on the way, and it is not the pin's.** `pytest -n 4` over the whole tree killed the
+`gw3` worker on `tests/test_curve_view.py` (macOS crash report, 10:51, 2026-09-18). That file passes
+serially, 222 of 222, and the whole suite passes serially — it is the pyqtgraph `PlotItem` class this
+repo has measured twice before (`tests/conftest.py`, `ui/tcc/qt_shutdown.py`), not a regression.
 
 The wave is done and its PR is green on CI:
 [PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `9a8a8ba`.

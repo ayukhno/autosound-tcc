@@ -12,10 +12,10 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [v0.1.41] — 2026-09-17 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.57
+## [v0.1.41] — 2026-09-18 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.58
 
-Paired with method `bbaefbd0590a744dfb6349b25438f5bb2939dcb8` — the tag on that commit is
-**`v3.0.57`**.
+Paired with method `66f6bdf05d900e6f6058efd8ee8e0040027251a8` — the tag on that commit is
+**`v3.0.58`**.
 
 ### Added
 
@@ -30,16 +30,26 @@ Paired with method `bbaefbd0590a744dfb6349b25438f5bb2939dcb8` — the tag on tha
 
 ### Changed
 
-- **The method is pinned at `v3.0.57`** (bbaefbd). Phase 1's crossovers and delays now come from
-  Resonalyze's engines behind the method's own wrapper; EQ is proposed in two parts, the coarse
-  per-driver bands before the delays; above 1 kHz a mid↔tweeter joint whose two witnesses disagree
-  comes back UNVERIFIED with both candidates instead of being answered; a crossover candidate is
-  also judged by how much its group delay swings across the junction; and a session can send a
-  finding to the developer's form with no GitHub account (all `v3.0.56`). `doctor` says where the
-  reviewer's key came from and what answered its live call, and `_N` numbers the measurement
-  series rather than the DSP state (`v3.0.55`). TCC calls none of the new tools: Phase 1's engine
-  needs the .NET SDK or a prebuilt engine, and it is the method's session that runs it, not the
-  window.
+- **The method is pinned at `v3.0.58`** (66f6bdf). Two of its changes are answers to this window's
+  own ticket (hub SCR-057): the gate's `FORM_*` names are now pinned by the method's own selftest as
+  a surface another repository reads, so a rename breaks there rather than here — where it would
+  have been silent, the form route simply vanishing from this window with GitHub left as the only
+  way to send a report — and `FORM_LABELS` exports the form's question names as data, which is the
+  last place the sheet's column names still existed twice. This release does not read the labels
+  yet; it stops keeping its own copy of the rest. For a tuning session rather than the window:
+  a wish is now read as a WHOLE configuration and not only at its junction, so a wish costs one more
+  engine pass and the report carries `full_variants`; the phase documents say plainly what Phase 1
+  does on a machine with no engine; and an install can fetch the desk engine from the tag's own
+  release instead of needing the .NET SDK (all `v3.0.58`). Before it, at `v3.0.57` and `v3.0.56`:
+  Phase 1's crossovers and delays come from Resonalyze's engines behind the method's own wrapper;
+  EQ is proposed in two parts, the coarse per-driver bands before the delays; above 1 kHz a
+  mid↔tweeter joint whose two witnesses disagree comes back UNVERIFIED with both candidates instead
+  of being answered; a crossover candidate is also judged by how much its group delay swings across
+  the junction; and a session can send a finding to the developer's form with no GitHub account.
+  `doctor` says where the reviewer's key came from and what answered its live call, and `_N` numbers
+  the measurement series rather than the DSP state (`v3.0.55`). TCC calls none of the new tools:
+  Phase 1's engine needs the .NET SDK or a prebuilt engine, and it is the method's session that runs
+  it, not the window.
 - **The form's address and its questions are the METHOD's, and TCC refers to them** (the user's
   decision, 2026-09-17). A session without `gh` writes to the same sheet through
   `rew_tool/gates/side_effect.py`, so the form is one fact with one owner: the window reads the
