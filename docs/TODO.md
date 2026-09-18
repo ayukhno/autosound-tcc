@@ -1754,10 +1754,37 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-060 — on Windows the footer still does not fit a 1280 px window
+
+**Статус**: waiting 2026-09-18 · recorded, not diagnosed — the word for the night had been said
+
+**The fact.** CI run `35276410717` (head `83e8d99`), `windows (run 1)`: 1 failed, 2103 passed, 12
+skipped. The failure:
+
+```
+FAILED tests/test_main_window.py::test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_the_edge
+AssertionError: QPushButton '💬 Message the developer' is drawn up to x=1430 in a window asked to be
+1280 px wide (it is 1454)
+```
+
+**What it says, and what it does not.** The window was asked for 1280 and came out 1454, so the row
+did not overflow — it could not be made that narrow at all. The squeeze added on 2026-09-17 (F-045)
+holds on macOS and Linux; on Windows the footer's own minimum is still wider than the window this
+app opens at, which is the platform the Arbiter reported F-045 from in the first place (v0.1.28,
+Windows). So this is the product's promise unmet on one platform, not a test that measures wrong.
+
+**Not touched on purpose.** Two guesses are cheap and both are guesses: the minimum belongs to a
+control that gives up nothing (the shrinking is `MiniCombo`'s alone), or Windows' text is wide
+enough that even the shrunken row exceeds 1280. Which one it is takes the evidence, not an evening.
+
+**Where the earlier half is.** `markdown_of` (the same run's first failure last time) PASSED here:
+the emphasis fix is confirmed on Windows.
+
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
-**Статус**: waiting 2026-09-17 · the Arbiter's yes — the tag is the one act this repository cannot
-take back, and `scripts/ship.py` asks for `REAL=1` by name for that reason
+**Статус**: blocked 2026-09-18 · Windows CI is red on the head — see F-060. The tag also waits for
+the Arbiter's yes (the one act this repository cannot take back, which is why `scripts/ship.py` asks
+for `REAL=1` by name), but there is nothing to say yes to while a platform's suite is failing.
 
 The wave is done and its PR is green-or-not on CI, which is the only thing left to read:
 [PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `8eade1d`.
