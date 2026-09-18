@@ -1825,10 +1825,17 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
-**Статус**: waiting for the Arbiter 2026-09-18 · CI is GREEN on the head (run `35320676477`,
-`9a8a8ba`, all nine jobs) — F-060 is closed and no longer blocks this. What is left is the tag
-itself: the one act this repository cannot take back, which is why `scripts/ship.py` asks for
-`REAL=1` by name and why it waits for the Arbiter's yes.
+**Статус**: held for the next method release · the Arbiter, 2026-09-18: «почекаємо новий скіл».
+Nothing technical is left — CI is GREEN on the head (run `35320676477`, `9a8a8ba`, all nine jobs)
+and F-060 is closed — but the tag waits, and it waits for a REASON, not for a yes: this wave is
+paired with the method at `v3.0.57`, and a release cut now would pair the app with a version about
+to be superseded.
+
+**What the new method version costs before the tag**, in order: re-pin the submodule at the new
+commit; rewrite the `## [v0.1.41]` heading's `Paired with method` line and the "the method is pinned
+at" bullet under **Changed** with what actually changed there; run the suite; push and read CI;
+then, and only then, the merge and the tag below. The pin is not a one-line bump — the CHANGELOG
+bullet is a claim about the method's contents, and it is read by whoever presses the update button.
 
 The wave is done and its PR is green on CI:
 [PR #41](https://github.com/ayukhno/autosound-tcc/pull/41), branch `method-v3.0.56`, head `9a8a8ba`.
