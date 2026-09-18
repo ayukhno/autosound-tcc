@@ -1825,10 +1825,12 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
-**Статус**: waiting for the Arbiter 2026-09-18 · re-pinned at the method's `v3.0.58` (66f6bdf), the
-suite run SERIALLY on this Mac — 2115 passed, 1 skipped, 0 failures — and CI to be read on the push.
-What is left is the tag: the one act this repository cannot take back, which is why
-`scripts/ship.py` asks for `REAL=1` by name.
+**Статус**: done 2026-09-18 · **`v0.1.41` is tagged and pushed**, on `c88686c`, paired with the
+method at `v3.0.58` (66f6bdf). The Arbiter's yes, and the VM suspended first as the last release
+asked for. `make ship REAL=1`: all fourteen preflight checks ok, the suite serially inside it —
+2115 passed, 1 skipped, 708 s — then the tag, then the push. No GitHub release object, and none is
+wanted: the updater resolves tags through `ls-remote`, and this repository's ledger keeps tags, not
+releases.
 
 **The re-pin, done 2026-09-18.** The tag was not there when this was first asked for — the method's
 `main` carried the release commit and no tag — and it arrived within the hour, with its release: three
@@ -1863,13 +1865,13 @@ from the layout).
 with its `Paired with method` line), which is the wave shape `ship` knows: it then writes nothing and
 puts the tag on the commit CI checked.
 
-What is left, in order:
+What was done, in order — kept because this is the shape a wave ends in:
 
 ```bash
-gh pr checks 41                       # green on windows/linux/macos (was, on 9a8a8ba)
-git -C tcc checkout main && git -C tcc merge --ff-only method-v3.0.56 && git -C tcc push
+gh pr checks 41                       # green on c88686c, all nine jobs
+git checkout main && git merge --ff-only method-v3.0.56 && git push
 make ship                             # DRY RUN: the plan, writing nothing
-make ship REAL=1                      # only after the Arbiter's yes
+make ship REAL=1                      # after the Arbiter's yes, with the VM suspended
 ```
 
 **Before the real run, suspend the Windows VM.** The suite inside `ship` runs serially and the last
