@@ -1756,29 +1756,68 @@ ERROR the MCP server did not start:
 
 ### F-060 — on Windows the footer still does not fit a 1280 px window
 
-**Статус**: waiting 2026-09-18 · recorded, not diagnosed — the word for the night had been said
+**Статус**: fixed 2026-09-18, waiting for the Windows CI of PR #41 to say so · the Arbiter chose the
+shape (buttons to their glyph) the same day
 
 **The fact.** CI run `35276410717` (head `83e8d99`), `windows (run 1)`: 1 failed, 2103 passed, 12
-skipped. The failure:
+skipped — `test_a_narrow_window_squeezes_the_footer...`, `💬 Message the developer` drawn up to
+x=1430 in a window asked to be 1280 (it was 1454).
 
-```
-FAILED tests/test_main_window.py::test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_the_edge
-AssertionError: QPushButton '💬 Message the developer' is drawn up to x=1430 in a window asked to be
-1280 px wide (it is 1454)
-```
+**The cause, and it was neither of the two guesses written here on 2026-09-17.** Not one control
+holding a minimum, and not the shrinking being `MiniCombo`'s alone in the sense of being too little:
+**seven of the footer's ten controls could not give up a single pixel**, because `min == hint` on
+each of them. Measured on macOS, zoom 100 / 120 / 150 %:
 
-**What it says, and what it does not.** The window was asked for 1280 and came out 1454, so the row
-did not overflow — it could not be made that narrow at all. The squeeze added on 2026-09-17 (F-045)
-holds on macOS and Linux; on Windows the footer's own minimum is still wider than the window this
-app opens at, which is the platform the Arbiter reported F-045 from in the first place (v0.1.28,
-Windows). So this is the product's promise unmet on one platform, not a test that measures wrong.
+| zoom | un-shrinkable | footer min | window min |
+|---|---|---|---|
+| 100 % | 658 px | 1052 | 1068 |
+| 120 % | 730 px | 1124 | 1140 |
+| 150 % | 840 px | 1234 | 1250 |
 
-**Not touched on purpose.** Two guesses are cheap and both are guesses: the minimum belongs to a
-control that gives up nothing (the shrinking is `MiniCombo`'s alone), or Windows' text is wide
-enough that even the shrunken row exceeds 1280. Which one it is takes the evidence, not an evening.
+The footer is the widest row in this window at every zoom, so its minimum IS the window's, and the
+un-shrinkable part of it is pure text — which is why the platform with the wider UI font is the one
+that fails. F-045 fixed what could already be made to shrink (the two capped pickers, the reviewer
+status); the rest of the row was never asked to.
 
-**Where the earlier half is.** `markdown_of` (the same run's first failure last time) PASSED here:
-the emphasis fix is confirmed on Windows.
+Two whys worth keeping:
+
+- a `QPushButton`'s default size policy is `Minimum`, which carries the GROW flag and not the shrink
+  one, and `qSmartMinSize` reads `minimumSizeHint` only for a policy that can shrink. So overriding
+  the hint does nothing on its own — the policy has to change with it;
+- the effort picker had no floor at all. The other two get one from `_cap_combo_width`; this one is
+  not capped, because its rows are short, and "not capped" quietly meant "cannot shrink".
+
+**What was done** (`labels.ElidedButton`, and a floor for the effort picker): the two buttons at the
+right end draw their text elided and stop at their leading glyph, with the full text in a hover.
+Footer minimum 1052 → 779 px at 100 %, and the un-shrinkable part 658 → 243. Nothing changes while
+the row is roomy: a box layout gives a zero-stretch item its hint whenever the stretch beside it can
+absorb the rest.
+
+**Tried and reverted the same hour: the three keys.** `AI MAIN` / `EFFORT` / `AI CRITIC` as
+`ElidedLabel`s took the un-shrinkable part down to 86 px — and cut those keys on the DEFAULT window.
+The row's natural width is ~12 px more than a 1280 px window can give it, a layout shares a
+shortfall out in proportion to what each item can spare, and the keys came up reading `AI ma…` and
+`Effo…` at the width the app opens at. They are worth ~130 px of the ~480 needed; the buttons are
+worth ~350 on their own.
+
+**The next row, if Windows says the window still cannot reach 1280.** With the footer at 779 the
+widest row is now the HEADER (`panel phead`, 1015 px on macOS, 619 of it un-shrinkable): the ☰ menu
+button, the `Preset` and `Target curve` keys, the preset picker, the zoom frame, the `◐ theme`
+button. Same illness, same medicine, and the same question for the Arbiter about what it looks like
+squeezed. Not touched before there are numbers from the platform that fails.
+
+**What tells us next time, on a platform nobody here can open.** The test's failure message now
+carries every `panel phead` row — each item's floor, its ask, what it got, and the sum of the ones
+that will not move (`_row_width_report`). The old message named the widget drawn past the edge,
+which is the LAST control in the row and never the one holding the width. The test is also in
+`tests/cross-platform-suspects.txt` now, so the one-minute Windows job runs it.
+
+**A flake found on the way, and fixed.** `test_no_row_repeats_what_the_row_already_says` asks
+`_fill_combo` which badges a row carries, and `_fill_combo` asks `availability.status` — which says
+"not checked" for as long as a MainWindow left alive by an earlier test keeps a catalogue read on a
+thread (the F-053 class). Measured on this file: 1 run in 10 before this change, 4 in 9 after it —
+a layout change that shifts timing by milliseconds is enough to find it. The test now says its
+availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 

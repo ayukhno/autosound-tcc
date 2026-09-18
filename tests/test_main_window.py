@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QFrame,
     QLabel,
     QPushButton,
     QSplitter,
@@ -2759,6 +2760,16 @@ def test_no_row_repeats_what_the_row_already_says(monkeypatch):
     # so it is not one of the two under test — but it appears whenever the machine cannot reach the
     # reviewer, which on CI is always. Said out loud here rather than inherited from a PATH.
     monkeypatch.setattr(mc, "critic_reaches", lambda choice: True)
+    # Said out loud for the same reason, and it is the same kind of leak: which badges a row
+    # carries is not a question about what this machine happens to be reading right now.
+    # `_fill_combo` asks `availability.status`, and a MainWindow another test left alive keeps a
+    # catalogue read on a thread -- "agy" then sits in `availability._reading` for as long as that
+    # thread lives, and these rows come back "· not checked". Measured on this file, 2026-09-18:
+    # 1 run in 10 before the footer work of TODO F-060, 4 in 9 after it -- the race was always
+    # there, and a layout change that shifts timing by a few milliseconds is enough to find it.
+    # The availability word has its own tests (`test_availability.py`, and line ~2931 here).
+    from autosound_tcc.core import availability
+    monkeypatch.setattr(availability, "status", lambda choice, **_: availability.Status(True))
     _app()
     combo = QComboBox()
     entries = [
@@ -3143,6 +3154,46 @@ def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
     assert i18n.t("supportGithub") in labels and i18n.t("supportMonobank") in labels
 
 
+def _row_width_report(window, footer) -> str:
+    """Every row of the window that could be holding its minimum width, and who in each refuses
+    to give up a pixel.
+
+    These rows are checked on three platforms and their width is a property of the UI FONT, so
+    the run that fails is routinely one nobody can open: the author's machine passes and a CI
+    runner does not (TODO F-060, Windows). A message naming only the widget drawn past the edge
+    says which control was LAST in the row, never which one held it, and those are different
+    controls -- and the row that holds the window need not be the row the test was looking at.
+    So the message carries all of them: what each item asks for, what it will come down to, and
+    the sum of the ones that will not move at all.
+    """
+    rows = [frame for frame in window.findChildren(QFrame)
+            if str(frame.property("class") or "") == "panel phead"]
+    if footer not in rows:
+        rows.append(footer)
+    lines = [f"window min {window.minimumSizeHint().width()} px, and it is {window.width()} px"]
+    for row in sorted(rows, key=lambda r: -r.minimumSizeHint().width()):
+        layout = row.layout()
+        which = "footer" if row is footer else "row"
+        lines.append(f"  {which}: min {row.minimumSizeHint().width()} px, "
+                     f"hint {row.sizeHint().width()} px, actual {row.width()} px")
+        unmovable = 0
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            widget = item.widget()
+            if widget is None or not widget.isVisible():
+                continue
+            floor, wanted = item.minimumSize().width(), item.sizeHint().width()
+            if floor >= wanted:
+                unmovable += floor
+            text = widget.currentText() if hasattr(widget, "currentText") else (
+                widget.text() if hasattr(widget, "text") else "")
+            lines.append(
+                f"    {'FIXED  ' if floor >= wanted else 'shrinks'} {type(widget).__name__:12s} "
+                f"min={floor:4d} hint={wanted:4d} actual={widget.width():4d}  {text[:28]!r}")
+        lines.append(f"    un-shrinkable total: {unmovable} px")
+    return "\n".join(lines)
+
+
 def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_the_edge():
     """TODO F-045 (user, Windows, v0.1.28): the bottom-right element goes off to the right and hides
     the icons -- "the field could be made smaller" instead.
@@ -3181,6 +3232,14 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
         for _ in range(4):
             app.processEvents()
             app.sendPostedEvents()
+        # First, and separately from the per-control checks below: a control drawn past the edge
+        # is the SYMPTOM of a window that could not be made this narrow, and naming the symptom
+        # sends the reader to the last widget in the row instead of the one holding the width --
+        # which may not even be in this row.
+        assert window.width() <= width, (
+            f"the window could not be made {width} px wide (it is {window.width()}). "
+            f"The rows below are what a narrow window comes down to:\n"
+            f"{_row_width_report(window, footer)}")
         items = [layout.itemAt(i) for i in range(layout.count())]
         shown = [(item, item.widget()) for item in items
                  if item.widget() is not None and item.widget().isVisible()]

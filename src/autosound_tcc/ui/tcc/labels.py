@@ -1,4 +1,4 @@
-"""`ElidedLabel` — the one label in the app that gives ground instead of demanding room.
+"""The widgets that give ground instead of demanding room — `ElidedLabel`, `ElidedButton`.
 
 Its own module because both the left panel's rows (`main_window._kv_row`, the channel switches)
 and the panel's section headers (`sidebar_section`) need it, and `sidebar_section` is imported by
@@ -11,7 +11,14 @@ import math
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetricsF
-from PySide6.QtWidgets import QLabel, QSizePolicy
+from PySide6.QtWidgets import (
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
+    QStylePainter,
+)
 
 
 class ElidedLabel(QLabel):
@@ -106,3 +113,82 @@ class ElidedLabel(QLabel):
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().resizeEvent(event)
         self._elide()
+
+
+class ElidedButton(QPushButton):
+    """A button that comes down to its leading glyph instead of pushing the row off the edge.
+
+    The footer's two right-hand buttons carry whole sentences -- `💬 Message the developer` --
+    and a QPushButton asks for every pixel of its text and gives up none of them: the default
+    `Minimum` policy has no shrink flag, so a layout hands it `sizeHint` even when the row has
+    nothing left to hand out. Seven of the footer's ten controls were like that, and their sum
+    became the WINDOW's minimum width: on Windows, where the UI text is wider, a window asked to
+    be 1280 px came out 1454 and the two buttons sat past its edge (TODO F-060, CI 2026-09-18).
+
+    Nothing changes while the row is roomy: `sizeHint` is still the full sentence, and a box
+    layout gives a zero-stretch item exactly its hint whenever a stretch beside it can absorb the
+    rest. Squeezed, the text elides, and the floor is the glyph on its own -- which is what the
+    button looked like to everyone who ever clicked it without reading the words. Both of these
+    are also in the main menu's help section in full, so nothing becomes unreachable.
+    """
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__(text, parent)
+        self._full = text
+        # `Preferred`, not the QPushButton default `Minimum`: only a policy carrying the shrink
+        # flag lets a layout read `minimumSizeHint` at all (`qSmartMinSize`). The vertical half
+        # stays `Fixed` -- this row's height is not in question.
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._full = text
+        super().setText(text)
+        self.updateGeometry()
+
+    def _short(self) -> str:
+        """The leading glyph -- everything up to the first space, or the whole label if it has no
+        space in it. The emoji is part of the translated string in both of these buttons."""
+        head = self._full.split(" ", 1)[0]
+        return head or self._full
+
+    def _chrome(self) -> int:
+        """What the button spends on something other than its text: padding, border, the style's
+        own margins. Measured off the real hint rather than assumed, the way `ElidedLabel` does
+        it, so a stylesheet change carries into this number instead of going unnoticed."""
+        return max(0, super().minimumSizeHint().width()
+                   - self.fontMetrics().horizontalAdvance(self._full))
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        hint.setWidth(self._chrome() + math.ceil(
+            QFontMetricsF(self.font()).horizontalAdvance(self._short())))
+        return hint
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Drawn elided, never re-`setText`-ed: changing the text would change the hint, the
+        layout would hand out a different width, and the two would chase each other."""
+        metrics = self.fontMetrics()
+        room = max(0, self.width() - self._chrome())
+        shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
+        if shown == self._full:
+            super().paintEvent(event)
+            self._tell_the_full_text(cut=False)
+            return
+        # `elidedText` walks down to "…" and then to nothing; the glyph is more use than either,
+        # and `minimumSizeHint` above guarantees there is room for it.
+        if metrics.horizontalAdvance(shown) < metrics.horizontalAdvance(self._short()):
+            shown = self._short()
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = shown
+        QStylePainter(self).drawControl(QStyle.ControlElement.CE_PushButton, option)
+        self._tell_the_full_text(cut=True)
+
+    def _tell_the_full_text(self, cut: bool) -> None:
+        # Same rule as `ElidedLabel`: skip a widget that already carries one of the app's own
+        # rounded tips, or the same words would hover over it twice in two shapes.
+        if getattr(self, "hover_tip", None) is not None:
+            return
+        wanted = self._full if cut else ""
+        if self.toolTip() != wanted:
+            self.setToolTip(wanted)

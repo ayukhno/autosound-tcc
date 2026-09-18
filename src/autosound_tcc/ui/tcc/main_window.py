@@ -103,7 +103,7 @@ from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
-from autosound_tcc.ui.tcc.labels import ElidedLabel
+from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -1100,6 +1100,13 @@ class MainWindow(QMainWindow):
         self._models_btn.clicked.connect(self._open_model_config)
         layout.addWidget(self._models_btn)
 
+        # The three keys of this row stay plain QLabels, and so stay rigid. Making them
+        # `ElidedLabel`s was tried for TODO F-060 and reverted the same hour: the row's
+        # natural width is about 12 px over what a 1280 px window -- the width this app opens
+        # at -- can give it, a layout shares a shortfall out in proportion to what each item
+        # can spare, and the keys came up reading `AI ma…` and `Effo…` on the DEFAULT window.
+        # They are worth ~130 px of the ~480 the window needed; the two buttons at the far end
+        # are worth ~350 on their own, so the keys are not needed and are not worth that.
         self._ai_main_lbl = QLabel(i18n.t("aiMain"))
         self._ai_main_lbl.setProperty("class", "kv-lbl")
         apply_caps(self._ai_main_lbl, spacing_px=1.2)
@@ -1142,6 +1149,12 @@ class MainWindow(QMainWindow):
             ai_effort.setItemData(
                 ai_effort.count() - 1, i18n.t(f"effortTip_{level}"), Qt.ItemDataRole.ToolTipRole
             )
+        # The other two pickers get their floor from `_cap_combo_width`; this one is not capped
+        # (its rows are short, so its widest row is not a problem) and so had none -- min and hint
+        # were the same number and it could not give up a pixel either (TODO F-060). A layout takes
+        # an explicit minimum in place of the minimum hint, so the box keeps its natural width
+        # while the row has room.
+        ai_effort.setMinimumWidth(62)
         self._ai_effort_combo = ai_effort
         ai_effort.currentIndexChanged.connect(self._on_effort_changed)
         layout.addWidget(ai_effort)
@@ -1225,14 +1238,14 @@ class MainWindow(QMainWindow):
         # section. They were moved out on the reasoning that two links and a form are what a menu
         # is for; the reasoning was mine and the button is his. Saying thank you and reporting a
         # bug are the two things a person does on impulse, and an impulse does not open a menu.
-        coffee_btn = QPushButton(i18n.t("coffeeBtn"))
+        coffee_btn = ElidedButton(i18n.t("coffeeBtn"))
         coffee_btn.setProperty("class", "coffee-btn")
         coffee_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         coffee_btn.clicked.connect(self._open_support_menu)
         self._coffee_btn = coffee_btn
         layout.addWidget(coffee_btn)
 
-        self._feedback_btn = QPushButton("💬 " + i18n.t("fbBig"))
+        self._feedback_btn = ElidedButton("💬 " + i18n.t("fbBig"))
         self._feedback_btn.setProperty("class", "feedback-btn")
         self._feedback_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._feedback_btn.clicked.connect(self._open_feedback)

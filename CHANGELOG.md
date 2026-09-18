@@ -66,6 +66,13 @@ Paired with method `bbaefbd0590a744dfb6349b25438f5bb2939dcb8` — the tag on tha
   whole width was the window's minimum: on a 1280 px screen the window came out wider than the
   screen, with "Buy me a coffee" and "Message the developer" past the edge. The reviewer's status
   beside the pickers now shows its whole text when there is room (TODO F-045).
+- **...and the two buttons at its right end give up their words before the row gives up the
+  window** — "Buy me a coffee" and "Message the developer" come down to their ☕ and 💬 when the
+  row is squeezed, with the full text in a hover and, as before, in the main menu's help section.
+  The pickers alone were not enough: seven of the footer's ten controls asked for their whole text
+  and would give up none of it, so on Windows, whose UI text is wider, a window asked to be 1280 px
+  still came out 1454 and the buttons still sat past the edge. The footer now comes down to 779 px
+  where it used to stop at 1052 (TODO F-060).
 - **A label no longer loses its last letters in the room it asked for** — a text 177.08 px wide
   asked for 177, and the eliding, which counts fractions of a pixel, cut it: the reviewer's status
   read "Критик: ще не викликав…" with space beside it, and 86 of 804 short English and Ukrainian
