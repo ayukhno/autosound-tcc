@@ -856,10 +856,12 @@ transcript's scroll area, and its detail is a word-wrapped label with no height 
 
 **Fixed** on `wave-0.1.40` (2026-09-17): the detail scrolls inside twelve lines; the buttons stay on screen.
 
-**Half of it came back on 0.1.41 (2026-09-19).** The bound was on the DETAIL only, and the title
-was a wrapped label with no limit — so a long title moved the buttons down line for line, and on a
-short window off it again. Closed on `wave-0.1.42`: title and command are one scrolled block,
-bounded by twelve lines AND by half the height of the panel it sits in.
+**Not seen again. Widened anyway on `wave-0.1.42` (2026-09-19).** The Arbiter's screenshot of
+0.1.41 shows the scroll working and both buttons in place — this finding stays fixed. Read while
+looking at that screenshot: the bound covered the DETAIL only, and the title above it was a wrapped
+label with no limit, so the same failure was still reachable through a long title (measured: 353 px
+of bar against a bounded 300). Title and command are now one scrolled block, bounded by twelve
+lines AND by half the height of the panel.
 
 ### 25. From a real terminal the reviewer is refused the same way, and its files follow the current folder
 
