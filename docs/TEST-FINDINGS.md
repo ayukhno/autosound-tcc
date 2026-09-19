@@ -946,6 +946,10 @@ matched and under which name it will be filed, so that name belongs in the colum
 editable. Also asked: let the column widths be dragged — the REW title and the timestamp squeeze
 the column that matters.
 
+**Also asked (2026-09-19).** A button at the BOTTOM of the form: "Вибрати все" / "Відмінити вибір".
+Twenty rows of checkboxes and no way to set them all at once — and the rows that need unticking are
+usually all of them but two.
+
 **Where.** The Arbiter's screenshot, macOS, 0.1.41, project EPY-Sep2026, the round waiting on 16.
 
 **Ours or external.** Ours; the name may have to come from the skill.
