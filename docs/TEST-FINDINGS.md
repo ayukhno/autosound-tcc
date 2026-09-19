@@ -970,3 +970,28 @@ worked around.
 
 **Reproduces.** Seen with sixteen unmatched names at once.
 
+### 30. "In focus now": protection is invisible in the list, the RTA column explains what needs no explaining, and a sweep is labelled `(rta)`
+
+**What.** Three things on the same panel, set `cap_005`:
+
+1. **Protection is recorded and the list does not say so.** The line above reads "Захист записано
+   для: c, m-R, tw-L, tw-R" and the protective-filters dialog holds real values (m-L/m-R/c 100 LR24,
+   tw-L/tw-R 1000 LR24) — but the SWEEP (SW) rows themselves show nothing: `m-L_1 (sw)` looks exactly
+   like `sw_1 (sw)`, which carries none. Which curve was taken through a protective filter is a fact
+   about reading that curve, and it belongs on the row.
+2. **The RTA column carries an explanation nobody needs.** Every MMM RTA row is followed by cut-off
+   text — `this che…`, `this ch…`, `thi…` — which squeezes the names and says nothing.
+3. **A sweep is labelled `(rta)`.** In ADDITIONAL the rear sweeps appear as `r-L_1 (sw) (rta)` and
+   `r-R_1 (sw) (rta)`. It is a sweep, `(sw)` already says so, and the measurement's own name in REW
+   is `r-L_1 (sw)` with no second suffix (the Arbiter's second screenshot).
+
+**Where.** The Arbiter's screenshots, macOS, 0.1.41, project EPY-Sep2026, set `cap_005`.
+
+**Ours or external.** Ours for all three; the `(rta)` suffix may be added where the additional rows
+are built rather than where they are drawn.
+
+**Weight.** Medium for the missing protection mark — it changes how a curve is read. Low for the
+explanation and the suffix, but the suffix is a wrong statement about a measurement, not only noise.
+
+**Reproduces.** Seen on this set; the suffix on every additional sweep row in it.
+
