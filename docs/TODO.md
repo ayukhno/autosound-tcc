@@ -1754,6 +1754,38 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-069 — Layout: GUI only / Terminal+GUI, and what the second mode puts in place of the dialog
+
+**Статус**: open · the Arbiter's idea, 2026-09-19, after the collection step closed
+
+**What he asked for.** A `Layout` button with two modes. In `Terminal+GUI` the central AI-dialog
+panel is hidden and no SDK/OMP session is started at all — the Arbiter drives from a terminal
+(menu → open terminal, MCP on) and keeps the window for progress and DSP state. The left panel
+then sits next to the right one, shorter, and the freed space at the top carries a table of
+channels (output or virtual) — "a dynamic zone".
+
+**Why it is cheap in principle.** The window was built for a second front-end:
+`ui/tcc/dialog_panel.py` says its signals go through the MCP signal bus "so they reach whichever
+front-end is driving — the in-app agent or the user's own CLI in a terminal", and the terminal
+session already asks TCC for state (`get_pending_signals`, `get_tcc_state`). The table needs no new
+state either: `get_ledger` returns per channel `gain_db`, `hp`, `lp`, `polarity`, `ta_ms`, `eq` and
+`status`.
+
+**The one decision to make first: where the Arbiter's gate goes.** `ConfirmBar` lives inside the
+dialog panel, and TCC's own MCP tools raise their confirmation INSIDE the tool whatever the gate
+mode says — so in terminal mode those requests still happen and would be hidden with the panel.
+Proposal: the bar moves to a thin strip above the dynamic zone and lives there in both modes.
+Otherwise the new mode quietly turns the gate off.
+
+**Second, smaller.** The "Готово" button of TEST-FINDINGS 31 must not call the SDK in this mode: it
+posts a signal to the bus, and the terminal session picks it up with `get_pending_signals`.
+
+**Open question for the Arbiter**: does the table show the DSP's OUTPUT channels, the VIRTUAL ones,
+or both behind a switch?
+
+**Suggested order**: the mode toggle (remembered per project) + the confirm-bar move + a minimal
+table read from the ledger; the wider "dynamic zone" after living with the minimal one.
+
 ### F-068 — the drivers' Fs deserves its own checkbox, and the flag does not exist yet
 
 **Статус**: open · waits for the method (hub `#185`, readdressed to skill 2026-09-19)
