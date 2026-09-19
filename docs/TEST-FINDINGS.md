@@ -1131,8 +1131,12 @@ after about 3.5 hours of session. Crash report incident `0D55AB43-FC83-423C-8414
 **Weight.** High: the whole application dies, and a step in progress (1.1, just started at 16:12)
 goes with it.
 
-**Reproduces.** Once so far. Two curve workers were live, one of them stuck on REW — which is the
-condition `_stop_worker` exists for.
+**Reproduces. Yes, and the Arbiter walked it twice (2026-09-19).** In the curve window: pick a set
+in the picker (`cap_006`), then pick a GROUP (`Ms`) — and the app dies. Picking a different set and
+choosing a group again killed it the second time too. The state it dies from is the one described
+below: the titles on screen still belong to the PREVIOUS set (`_49`), the read of the first of them
+has already failed with `Не вдалося прочитати з REW: c p1_49 (sw): KeyError` (finding 36), and a
+worker is live on REW when the group selection starts another one.
 
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,
@@ -1141,4 +1145,25 @@ object died on the worker thread during `run()`'s unwind, so what has to be meas
 `finished` → `_DETACHED.discard` can run BEFORE the thread is really finished, leaving the run
 frame's own reference the last one. `detach`'s docstring already notes the object's affinity is the
 GUI thread, which is what makes that ordering possible.
+
+### 36. Choosing a set does not change the list of drivers, and the read fails on the old titles
+
+**What.** In the curve window the Arbiter picked set `cap_006`; the driver list under it still held
+the `_49` titles — `c p1_49 (sw)`, `m-L p1_49 (sw)`, … — i.e. the previous set's. The window then
+said `Не вдалося прочитати з REW: c p1_49 (sw): KeyError`, which is TCC asking REW for a title that
+is not in the set it is now showing. Picking a group on top of that state crashes the app
+(finding 35).
+
+Also visible in that picker: `серія 49` and `серія 1` are BOTH back, above `cap_007 … cap_001` —
+the two axes of finding 33 in one list, and the entry that vanished earlier is present again.
+
+**Where.** The Arbiter's screenshots, macOS, 0.1.41, project EPY-Sep2026, curve window "Де саме?".
+
+**Ours or external.** Ours. The `KeyError` is TCC's own read path reporting a title REW does not
+have; REW is answering correctly.
+
+**Weight.** High: it is the state the crash grows out of, and on its own it shows curves of one set
+under the name of another — which is a wrong answer, not just an empty one.
+
+**Reproduces.** Seen on the same session as 35; the two were reached by the same steps.
 
