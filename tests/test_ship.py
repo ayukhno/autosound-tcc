@@ -773,10 +773,14 @@ def test_the_release_runs_the_suite_serially():
 
 
 def test_no_pytest_caller_carries_its_own_distribution_flags():
-    """One source for how the suite is distributed, and it is `pyproject.toml`. Four places invoke
-    pytest — the Makefile, `ship.py`, and three CI jobs — and the moment one of them grows its own
-    `-n`, "green locally" and "green in CI" stop meaning the same thing. That already cost two red
-    CI runs on a green local suite (user, 2026-09-09), which is why this is a test and not a note.
+    """One source for how the suite is distributed, and it is `pyproject.toml`. The Makefile,
+    `ship.py` and every CI job invoke pytest, and the moment one of them grows its own `-n`,
+    "green locally" and "green in CI" stop meaning the same thing. That already cost two red CI
+    runs on a green local suite (user, 2026-09-09), which is why this is a test and not a note.
+
+    A CI shard is not a distribution flag and is deliberately not caught here: it hands pytest a
+    LIST OF FILES worked out by `scripts/ci_shard.py`, and every one of them runs serially, in one
+    process, exactly as it would locally.
 
     `ship.py` is the deliberate exception above and is excluded by name."""
     import re
@@ -815,23 +819,47 @@ def test_each_commit_runs_ci_once_main_by_push_a_branch_by_its_pull_request():
     assert re.search(r"^  pull_request:", triggers, re.M), "a branch would then run no CI at all"
 
 
-def test_a_push_to_main_skips_what_its_pull_request_already_ran():
-    """Hub WAVES.md, #148: the full CI runs once per wave, on the pull request. The push that lands
-    it on `main` asks first whether a green pull_request run of this workflow exists on the same
-    commit, and the heavy jobs run only when it does not — a merge without a PR, or with GitHub's
-    button, is still tested. Skipped jobs leave the run `success`, which is what the gate reads."""
+def test_the_pull_request_is_sharded_and_the_push_to_main_runs_the_suite_WHOLE():
+    """TCC-020 (hub #181). Which run a person waits for is the whole design: the pull request gets
+    four shards per platform, about six minutes instead of twenty-one, and `main` gets the whole
+    suite in one process — the shape that can still catch what fewer tests per process hide (the
+    Linux abort HUB-049, the `#19` class of native Windows crash). The release gate reads the
+    `main` run, and nobody waits for it.
+
+    Asserted on the file rather than trusted to a reading of it, because the failure mode is
+    silent both ways round: shards that also ran on `main` would double every wave's CI, and a
+    `main` that only ran shards would retire the long-run jobs without anybody deciding to."""
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    head, jobs = text.split("\njobs:\n", 1)
+    jobs = text.split("\njobs:\n", 1)[1]
     blocks = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
 
-    assert re.search(r"^permissions:\n(?:  .*\n)*  actions: read", head + "\n", re.M), \
-        "listing runs needs actions: read"
-    ask = blocks.get("pr-green", "")
-    assert "event=pull_request" in ask and "head_sha" in ask, f"no question asked:\n{ask}"
-    for job in ("ruff", "suspects", "linux-plan", "windows-plan"):
-        block = blocks.get(job, "")
-        assert "needs: pr-green" in block, f"{job} does not wait for the question"
-        assert "needs.pr-green.outputs.skip != 'true'" in block, f"{job} runs regardless"
+    shard = blocks.get("shard", "")
+    assert "github.event_name == 'pull_request'" in shard, "the shards would run on main too"
+    assert "ci_shard.py --splits 4 --group" in shard, "the split is the script's, not the YAML's"
+    assert re.search(r"^        group: \[1, 2, 3, 4\]", shard, re.M), \
+        "four groups asked for, four groups run — a mismatch silently drops a quarter of the suite"
+
+    for job in ("linux-plan", "windows-plan"):
+        assert "github.event_name != 'pull_request'" in blocks.get(job, ""), \
+            f"{job} runs on the pull request as well, so the wave pays for the suite twice"
+
+    assert "pr-green" not in blocks and "needs: pr-green" not in text, \
+        "the skip-on-main question is gone: main is now the run that must not be skipped"
+
+
+def test_every_platform_that_runs_the_suite_on_a_pull_request_is_sharded():
+    """A platform left out of the matrix is a platform whose feedback is still twenty minutes, and
+    the pull request waits for the slowest job it has."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    jobs = text.split("\njobs:\n", 1)[1]
+    blocks = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
+
+    matrix = re.search(r"^        os: \[([^\]]*)\]", blocks.get("shard", ""), re.M)
+    assert matrix, "the shard job has no platform matrix"
+
+    assert {name.strip() for name in matrix.group(1).split(",")} == \
+        {"ubuntu-latest", "windows-latest", "macos-latest"}
+    assert "  macos:" not in text, "macOS runs as shards now; a second whole-suite job would be a copy"
 
 
 # --- the pin the repo RECORDS vs the method actually checked out ---------------------------

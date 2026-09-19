@@ -83,6 +83,83 @@ Three things about the parallel run itself, all of them load-bearing:
   already the default: a release must not become parallel because somebody exported
   `PYTEST_ADDOPTS` in the shell it was cut from.
 
+## CI is sharded on a pull request, whole on `main` (2026-09-19)
+
+The wait for a pull request WAS the suite. Measured 2026-09-18 — run 35393933009 on CI plus a
+serial local run on the author's M1 Pro:
+
+| where | suite | the 40 slowest |
+|---|---|---|
+| Windows | 2104 passed + 12 skipped in 1273 s (job 1308 s) | 290 s — **23%**; the other 2076 average 0.47 s |
+| Linux | 2111 + 5 in 907 s (job 947 s) | — |
+| macOS, local serial | 2132 + 1 in 655 s | 169 s — **26%**; the rest average 0.23 s |
+
+So it is volume, not a handful of slow tests: deleting every one of the forty slowest on Windows
+would have moved 21.2 minutes to 16.4. And the volume grows on its own — this file recorded
+1722 tests / 498 s on 2026-09-09, so in nine days the count was up 24% and the serial time 31%.
+Fixing a few slow tests was ruled out by that measurement rather than by opinion.
+
+> **The pull request runs four shards per platform. The push to `main` runs the suite whole.**
+
+Each shard is a separate runner with a quarter of the files, run SERIALLY — the same condition a
+release has, with fewer tests per process. That is not the `-n auto` rejected above: no workers
+share a machine, so nothing reproduces the Qt crash that made parallel opt-in. About six minutes
+instead of twenty-one.
+
+The whole serial run does not disappear, it moves to where nobody is waiting: the push to `main`
+that lands the wave. Fewer tests per process is exactly what can HIDE the faults those long jobs
+exist to catch — the Linux abort (HUB-049) and the `#19` class of native Windows crash — and the
+release gate reads the `main` run anyway.
+
+**Locally nothing changes.** `make test` is the whole suite, serial, and `scripts/ship.py` still
+runs it whole with `-n 0` before it will cut a tag.
+
+**What DOES change for the person cutting the release:** the tag now waits for the `main` run.
+The gate is unmoved — `hub/scripts/release-preflight.py` asks for a successful workflow run on
+HEAD and always did — but that run used to be the one whose heavy jobs were skipped because the
+pull request had already been green on the same sha. Now it is the whole suite, so after the
+fast-forward push there is about twenty minutes before `make ship REAL=1` will pass. The wave does
+not get longer; the waiting moves off the pull request, where a person is watching, onto the merge,
+where nobody is.
+
+### The split itself
+
+`scripts/ci_shard.py --splits 4 --group K` prints the files for one shard. Three properties, all
+of them load-bearing, and `tests/test_ci_shard.py` holds each:
+
+* **By FILE**, for the reason `--dist loadfile` exists two sections up: session-scoped
+  `QApplication` and module-level state make a whole file the safe unit.
+* **Weighted by a recorded serial run** (`tests/shard-weights.json`), packed longest-first into
+  the lightest shard. An alphabetical quarter balances by name, and two files are a fifth of this
+  suite. A file the table has not heard of weighs the MEDIAN, never nothing, and is named on
+  stderr so a stale table shows in the job log.
+* **Computed independently by every job**, with no state and no talking: four jobs on three
+  platforms must agree that every file is claimed exactly once, or the run is green with a
+  quarter of the suite unrun.
+
+### What four shards actually buy, measured
+
+Recorded 2026-09-19 on the author's M1 Pro, 2122 passed + 1 skipped in 740 s: the four shards come
+out **302 · 146 · 146 · 146 s**. Three of them are even to within a second, and the first is one
+file — `tests/test_main_window.py`, 302 s, two fifths of the suite. A file is indivisible here, so
+that is the floor: no number of shards gets the wait below it, and four buy what three would.
+
+That is still 740 s of waiting turned into 302, and on CI it is the Windows number that matters —
+1273 s, whose shape the local run stands in for. The rest of the win is behind one file:
+`docs/TODO.md` F-065, which this file has half-written since 2026-09-09 under `--dist loadfile`
+("splitting `test_curve_view.py` and `test_main_window.py` is the next win"). Split it and the
+same four shards drop to about 185 s.
+
+The shard job prints its own share on stderr — files, its seconds, and all four numbers — so a
+split that has gone lopsided says so in the job log rather than in somebody's stopwatch.
+
+Re-record the table when the run stops being balanced — the test says so before the clock does:
+
+```
+python scripts/record_shard_weights.py                    # runs the suite once, serially
+python scripts/record_shard_weights.py --from run.txt     # from a --durations=0 log you have
+```
+
 ## The tiered policy that was designed and then not needed (2026-08-12)
 
 The suite really was lopsided:

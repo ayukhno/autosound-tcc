@@ -13,11 +13,24 @@
 # A branch runs through its pull request only: a push trigger on every branch ran each PR commit
 # twice, `push` and `pull_request`, with nothing new in the second run.
 #
-# Once per wave (hub WAVES.md, #148): the full run is the pull request's. A push to `main` first
-# asks whether a green pull_request run of this workflow exists on the same commit — a wave merged
-# with `--ff-only` lands exactly that commit — and skips the heavy jobs when it does. Skipped jobs
-# leave the run `success`, so the gate still reads a green run on HEAD. A merge without a PR, or
-# with GitHub's button (a new commit), finds none and runs everything.
+# Two shapes of run, and which one a person waits for decides everything (TCC-020, hub #181).
+#
+# THE PULL REQUEST is sharded: `tests/` split four ways per platform by `scripts/ci_shard.py`, each
+# shard a separate machine running its quarter SERIALLY. Measured 2026-09-18: the wait was the
+# suite and the suite is uniform volume — Windows ran 2104 tests in 1273 s and its forty slowest
+# were 290 s of that, so deleting every one of them would have moved 21.2 minutes to 16.4. A
+# quarter each is about 6. This is not the `-n auto` that was rejected on 2026-09-09: that put
+# eight workers on one machine and killed Qt in 29% of runs; here each job has a whole runner and
+# the same serial conditions a release has, with fewer tests per process.
+#
+# THE PUSH TO `main` runs the suite WHOLE and serial, on the commit the wave was merged onto. It is
+# the run the release gate reads, and it is the one that can still catch what fewer tests per
+# process can hide — the Linux abort (HUB-049) and the `#19` class of native Windows crash, both of
+# which need a long run in one process to show. Nobody waits for it interactively.
+#
+# So each commit still runs once in each shape, and neither is a substitute for the other. The
+# earlier arrangement — a full run on the pull request, skipped on `main` when a green PR run
+# existed on the same sha — is gone with the `pr-green` job that asked the question.
 name: checks
 
 on:
@@ -70,42 +83,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
   cancel-in-progress: true
 
-# `actions: read` to list this workflow's runs; `contents: read` for the checkouts.
+# `contents: read` for the checkouts, and nothing else: no job here asks GitHub about GitHub any
+# more (the run-listing that needed `actions: read` went with `pr-green`).
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  # The question a push to `main` asks before anything heavy runs. Any other event answers "no".
-  pr-green:
-    name: already green on its pull request?
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      skip: ${{ steps.ask.outputs.skip }}
-    steps:
-      - id: ask
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
-          WORKFLOW: ${{ github.workflow }}
-        run: |
-          skip=false
-          green=n/a
-          if [ "$EVENT" = "push" ]; then
-            green=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request&status=success&per_page=100" \
-              --jq '[.workflow_runs[] | select(.name == $ENV.WORKFLOW)] | length' || echo 0)
-            [ "${green:-0}" -gt 0 ] && skip=true
-          fi
-          echo "skip=$skip" >> "$GITHUB_OUTPUT"
-          echo "$EVENT on ${SHA:0:12}: green pull_request runs of this workflow: $green; heavy jobs skipped: $skip" >> "$GITHUB_STEP_SUMMARY"
-
   ruff:
     name: ruff
-    needs: pr-green
-    if: needs.pr-green.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -129,8 +114,9 @@ jobs:
   # fine. Red here is not a blinking check — it is a count of work left, and it points at a file.
   suspects:
     name: suspects (${{ matrix.os }})
-    needs: pr-green
-    if: needs.pr-green.outputs.skip != 'true'
+    # The pull request's, like the shards: on `main` the whole suite runs anyway, and this list is
+    # a minute of it.
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -159,12 +145,60 @@ jobs:
           printf 'running %s entries\n' "${#ids[@]}"
           uv run --extra dev --python 3.12 python -m pytest "${ids[@]}" -q
 
+  # The pull request's whole answer, four ways per platform. macOS is in here rather than on its
+  # own any more: as the control it earns nothing on a push (it is the machine the author already
+  # runs), and on a pull request it says whether a failure elsewhere is platform-specific or simply
+  # a broken commit — which a quarter of it says just as well, four times sooner.
+  #
+  # The split is `scripts/ci_shard.py`: by FILE, because a session-scoped QApplication and
+  # module-level state make a file the safe unit (`docs/TESTING.md`, under `--dist loadfile`), and
+  # weighted by a recorded serial run rather than alphabetically, because two files are a fifth of
+  # the suite. Each job works the same split out independently and they never talk: the test that
+  # every file is claimed exactly once is `tests/test_ci_shard.py`, not this file.
+  shard:
+    name: shard ${{ matrix.group }}/4 (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    # The Linux abort (HUB-049) is not this commit's fault, and a check that blinks is ignored
+    # within a week — the same reason the full `linux` job below carries this flag. Windows and
+    # macOS go red for real.
+    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libdbus-1-3
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - shell: bash
+        env:
+          # Through `env` rather than interpolated into the line, like every other input here.
+          GROUP: ${{ matrix.group }}
+        run: |
+          # `--no-project`: the splitter is stdlib only, and syncing the project twice to ask it
+          # one question would spend the minutes this job exists to save.
+          files=$(uv run --no-project --python 3.12 python scripts/ci_shard.py --splits 4 --group "$GROUP")
+          count=$(printf '%s\n' $files | grep -c .)
+          echo "shard $GROUP of 4 on ${{ matrix.os }}: $count files"
+          echo "shard **$GROUP/4** on \`${{ matrix.os }}\`: $count test files" >> "$GITHUB_STEP_SUMMARY"
+          uv run --extra dev --python 3.12 python -m pytest $files -q
+
   # How many Linux runs this workflow was asked for, as a matrix. One on a push; whatever the
   # dispatch input says when a person is chasing the abort.
   linux-plan:
     name: linux plan
-    needs: pr-green
-    if: needs.pr-green.outputs.skip != 'true'
+    # The whole-suite half: a push to `main`, or a series somebody asked for by hand. The pull
+    # request has the shards instead.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -223,8 +257,9 @@ jobs:
   # How many Windows runs were asked for. One on a push; a series when somebody is chasing a crash.
   windows-plan:
     name: windows plan
-    needs: pr-green
-    if: needs.pr-green.outputs.skip != 'true'
+    # The whole-suite half: a push to `main`, or a series somebody asked for by hand. The pull
+    # request has the shards instead.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -299,21 +334,3 @@ jobs:
           done
           echo "::error title=native crash::the suite crashed $attempts times in a row"
           exit 1
-
-  macos:
-    name: macos
-    # The control: it is the machine the author already runs, so it earns nothing on a push. On a
-    # tag and a pull request it is worth knowing whether a failure elsewhere is platform-specific
-    # or simply a broken commit.
-    if: github.event_name == 'pull_request' || github.ref_type == 'tag'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -q

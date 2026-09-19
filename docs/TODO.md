@@ -1754,6 +1754,35 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-065 — `test_main_window.py` is two fifths of the suite, and it is what the CI shards wait for
+
+**Статус**: open · found while doing hub `#181` (CI sharding), 2026-09-19
+
+**The fact.** A serial run on the author's M1 Pro, 2026-09-19, 2122 passed + 1 skipped in 740 s,
+seconds per file summed from `--durations=0`:
+
+| file | seconds | share |
+|---|---|---|
+| `tests/test_main_window.py` | 302.3 | **41%** |
+| `tests/test_skill_selftests.py` | 68.8 | 9% |
+| `tests/test_ship.py` | 48.7 | 7% |
+| `tests/test_curve_view.py` | 41.5 | 6% |
+| the other 78 files | 278 | 38% |
+
+**Why it matters now.** The CI shards split by FILE, because a session-scoped `QApplication` and
+module-level state make a file the safe unit (`docs/TESTING.md`). A file cannot be cut, so the
+slowest shard can never be shorter than the longest file: the four shards come out 302 · 146 · 146
+· 146 s, and three of them wait on the first. Four shards therefore buy what three would, and what
+two nearly would. Split this file and the same four shards drop the wait to about 185 s.
+
+**Not new.** `docs/TESTING.md` has said "splitting `test_curve_view.py` and `test_main_window.py`
+is the next win" since 2026-09-09, when it was said about `--dist loadfile` workers. The same
+sentence is now about CI, with a number attached.
+
+**How to check it is done**: `python scripts/record_shard_weights.py` then
+`python scripts/ci_shard.py --splits 4 --group 1` — the stderr line prints the four shard costs,
+and the largest is the wait.
+
 ### F-061 — the clipboard's column names still exist twice: read the method's `FORM_LABELS`
 
 **Статус**: open 2026-09-18 · named while re-pinning at the method's `v3.0.58`, which is what made
