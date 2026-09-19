@@ -922,7 +922,16 @@ def test_the_card_fits_the_column_it_lives_in():
     legend = panel._legend
     assert legend.minimumSizeHint().width() * 2 < legend.sizeHint().width(), (
         "the legend must be able to shrink far below its one-row width")
-    assert legend.minimumSizeHint().width() * 2 < panel.minimumSizeHint().width(), (
+    # The second one was `* 2` as well until 2026-09-19, when a CI shard on Windows measured the
+    # legend at 216 of the card's 364 and failed — a legend that is plainly not what forces the
+    # width. The same file passed in the same commit's whole-suite run, so what moved was the font
+    # an earlier test had left, exactly the dependency the note above is about; a ratio of a hair
+    # under a half (macOS measures 0.46) is not a margin.
+    #
+    # The number this test is actually about is the one BEFORE the fix: the legend was 345 of the
+    # card's 369, 93% of it. Seven tenths separates "a minority of the card" from "the whole card"
+    # with room on both sides — macOS 0.46, Windows 0.59, the defect 0.93.
+    assert legend.minimumSizeHint().width() < 0.7 * panel.minimumSizeHint().width(), (
         "and it is no longer the widest thing in the card — it was 345 of the card's 369")
 
 

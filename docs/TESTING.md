@@ -129,35 +129,50 @@ of them load-bearing, and `tests/test_ci_shard.py` holds each:
 
 * **By FILE**, for the reason `--dist loadfile` exists two sections up: session-scoped
   `QApplication` and module-level state make a whole file the safe unit.
-* **Weighted by a recorded serial run** (`tests/shard-weights.json`), packed longest-first into
-  the lightest shard. An alphabetical quarter balances by name, and two files are a fifth of this
-  suite. A file the table has not heard of weighs the MEDIAN, never nothing, and is named on
-  stderr so a stale table shows in the job log.
+* **Weighted by wall seconds per file** (`tests/shard-weights.json`), each measured in its own
+  process, packed longest-first into the lightest shard. An alphabetical quarter balances by name,
+  and two files are nearly half of this suite. A file the table has not heard of weighs the MEDIAN,
+  never nothing, and is named on stderr so a stale table shows in the job log.
 * **Computed independently by every job**, with no state and no talking: four jobs on three
   platforms must agree that every file is claimed exactly once, or the run is green with a
   quarter of the suite unrun.
 
 ### What four shards actually buy, measured
 
-Recorded 2026-09-19 on the author's M1 Pro, 2122 passed + 1 skipped in 740 s: the four shards come
-out **302 · 146 · 146 · 146 s**. Three of them are even to within a second, and the first is one
-file — `tests/test_main_window.py`, 302 s, two fifths of the suite. A file is indivisible here, so
-that is the floor: no number of shards gets the wait below it, and four buy what three would.
+Run 35429188848, the first sharded pull request, 2026-09-19: **4 min 18 s wall, against about 21
+minutes before.** Twelve jobs, one red (a brittle assertion the shard exposed — see below).
 
-That is still 740 s of waiting turned into 302, and on CI it is the Windows number that matters —
-1273 s, whose shape the local run stands in for. The rest of the win is behind one file:
-`docs/TODO.md` F-065, which this file has half-written since 2026-09-09 under `--dist loadfile`
-("splitting `test_curve_view.py` and `test_main_window.py` is the next win"). Split it and the
-same four shards drop to about 185 s.
+The first split was lopsided — 83 · 164 · 55 · 201 s on ubuntu — and the reason turned out to be
+the weights, not the packing:
 
-The shard job prints its own share on stderr — files, its seconds, and all four numbers — so a
-split that has gone lopsided says so in the job log rather than in somebody's stopwatch.
+| `tests/test_main_window.py` | seconds |
+|---|---|
+| run alone | **53** |
+| summed out of a `--durations=0` run of the whole suite | **302** |
+
+Nothing about the file changes. The suite keeps windows alive, and an app-wide stylesheet change
+re-polishes every widget of every one of them (the note in `tests/test_measurement_panel.py`, from
+2026-09-06), so cost per test rises with how much is already alive. The whole suite is **740 s in
+one process and 227 s as one process per file** — a factor of three that belongs to the process,
+not to the tests. A weights table taken from the big run is a table of that penalty, and it packed
+one file alone into a shard that finished in 83 s while another ran 201.
+
+Re-recorded per file, the same packing gives **57 · 57 · 57 · 57 s** against a biggest file of 52 s
+(`test_skill_selftests.py`). There is nothing left in the split to win; the remaining slack is the
+penalty itself, which is `docs/TODO.md` F-065.
+
+**The shard exposed a brittle test, and that is worth expecting again.** `test_the_card_fits_the_
+column_it_lives_in` asserted `legend × 2 < card` and measured 0.46 on macOS — a hair under the
+line. On Windows, in a shard, the font an earlier test had left was different and it measured 0.59
+and failed, while the same commit's whole-suite run was green. The assertion now reads "a minority
+of the card" with room on both sides (0.93 was the defect it was written for). Fewer tests per
+process is a different environment, and tests that ride on what an earlier test left will say so.
 
 Re-record the table when the run stops being balanced — the test says so before the clock does:
 
 ```
-python scripts/record_shard_weights.py                    # runs the suite once, serially
-python scripts/record_shard_weights.py --from run.txt     # from a --durations=0 log you have
+python scripts/record_shard_weights.py                        # every file, each in its own process
+python scripts/record_shard_weights.py --only tests/test_x.py # just these, keeping the rest
 ```
 
 ## The tiered policy that was designed and then not needed (2026-08-12)

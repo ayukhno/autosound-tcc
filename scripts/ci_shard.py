@@ -23,9 +23,10 @@ already answered.
 ## Why WEIGHTED, and not alphabetically
 
 An alphabetical quarter moves the moment a test file is added, and it balances by name rather than
-by time: `test_curve_view.py` and `test_main_window.py` alone are a fifth of the run. The weights
-are seconds from a real serial run (`tests/shard-weights.json`), and the packing is longest-first
-into the lightest shard — the standard greedy, which is deterministic and needs no state.
+by time: two files are nearly half of the run. The weights are wall seconds per file
+(`tests/shard-weights.json`), each measured in its OWN process — see `record_shard_weights.py` for
+why a `--durations` table from one big run says something else entirely — and the packing is
+longest-first into the lightest shard, the standard greedy, deterministic and needing no state.
 
 A file the table has never heard of gets the MEDIAN of the ones it has, never zero: an unweighted
 new file would always land in the shard that happens to be lightest and would be invisible until

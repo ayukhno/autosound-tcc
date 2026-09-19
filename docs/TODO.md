@@ -1754,34 +1754,43 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
-### F-065 — `test_main_window.py` is two fifths of the suite, and it is what the CI shards wait for
+### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: open · found while doing hub `#181` (CI sharding), 2026-09-19
+**Статус**: open · measured while doing hub `#181` (CI sharding), 2026-09-19
 
-**The fact.** A serial run on the author's M1 Pro, 2026-09-19, 2122 passed + 1 skipped in 740 s,
-seconds per file summed from `--durations=0`:
+**The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
-| file | seconds | share |
-|---|---|---|
-| `tests/test_main_window.py` | 302.3 | **41%** |
-| `tests/test_skill_selftests.py` | 68.8 | 9% |
-| `tests/test_ship.py` | 48.7 | 7% |
-| `tests/test_curve_view.py` | 41.5 | 6% |
-| the other 78 files | 278 | 38% |
+| how the 83 test files were run | seconds |
+|---|---|
+| one process, `pytest tests/` | **740** |
+| one process per file, summed | **227** |
 
-**Why it matters now.** The CI shards split by FILE, because a session-scoped `QApplication` and
-module-level state make a file the safe unit (`docs/TESTING.md`). A file cannot be cut, so the
-slowest shard can never be shorter than the longest file: the four shards come out 302 · 146 · 146
-· 146 s, and three of them wait on the first. Four shards therefore buy what three would, and what
-two nearly would. Split this file and the same four shards drop the wait to about 185 s.
+And the same file, both ways: `tests/test_main_window.py` is **53 s alone** and **302 s** when its
+per-test durations are summed out of the whole run — a factor of six on a file nobody touched.
 
-**Not new.** `docs/TESTING.md` has said "splitting `test_curve_view.py` and `test_main_window.py`
-is the next win" since 2026-09-09, when it was said about `--dist loadfile` workers. The same
-sentence is now about CI, with a number attached.
+**The cause is written in the tree already, one line of it.** `tests/test_measurement_panel.py`
+says it from 2026-09-06: "an app-wide stylesheet change re-polishes every widget of every window
+the suite keeps alive". The suite keeps them alive, so cost per test rises with how much is
+already alive. That is superlinear, and it is why the whole-suite number is not a property of any
+test in it.
 
-**How to check it is done**: `python scripts/record_shard_weights.py` then
-`python scripts/ci_shard.py --splits 4 --group 1` — the stderr line prints the four shard costs,
-and the largest is the wait.
+**What it costs today.** The `main` run after every wave is the whole suite in one process: about
+twelve minutes of which roughly eight are this. The pull request no longer pays it — a shard holds
+a quarter of the files — which is why the shards beat the arithmetic anyone would predict from the
+serial time.
+
+**Where to look first**: whether a window closed by a test is actually destroyed, or only hidden
+and still on `QApplication.topLevelWidgets()`; `tests/conftest.py` has the machinery
+(`WeakSet` + a module-level `aboutToQuit` handler, from the 2026-08-12 leak work) and the question
+is whether anything still holds the last reference.
+
+**How to check it is done**: `python scripts/record_shard_weights.py` records the per-file total;
+`uv run --extra dev --python 3.12 python -m pytest tests/ -q` records the one-process total. The
+gap between them is the number.
+
+**Not this**: splitting `test_main_window.py`. That was the reading on the first measurement, and
+the per-file recording took it back — alone the file is 53 s, ordinary for its size. Splitting it
+would move the penalty, not remove it.
 
 ### F-061 — the clipboard's column names still exist twice: read the method's `FORM_LABELS`
 

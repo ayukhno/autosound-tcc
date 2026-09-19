@@ -96,15 +96,14 @@ def test_the_real_table_covers_most_of_the_real_suite():
 
 
 def test_the_real_split_is_as_even_as_an_indivisible_file_allows():
-    """The slowest shard IS the wait, so that is the number to assert on — but a file cannot be
-    cut in half, so the floor is the biggest one. Measured 2026-09-19: `test_main_window.py` is
-    302 s of a 739 s suite, two fifths of it, so no number of shards gets below 302 s until that
-    file is split (`docs/TODO.md` F-065, and `docs/TESTING.md` has said the same under
-    `--dist loadfile` since 2026-09-09). The other three shards came out at 146 s each.
+    """The slowest shard IS the wait, so that is the number to assert on — but a file cannot be cut
+    in half, so the floor is the biggest one. Measured 2026-09-19: the four shards come out at 57 s
+    each, against a biggest file of 52 s (`tests/test_skill_selftests.py`) and a 227 s suite. The
+    packing has nothing left to give.
 
-    So this asserts the packing is as good as that floor allows, which is the part the splitter
-    controls. It would catch a real break — a shard left empty, two heavy files stacked, a weights
-    table read as zeros — and it does not fail for a fact about the suite."""
+    Written against that floor and not against 57 s, because the floor is the part the splitter
+    controls. It catches the real breaks — a shard left empty, two heavy files stacked, a weights
+    table read as zeros — and does not fail for a fact about the suite."""
     files = ci_shard.test_files(ROOT)
     weights = ci_shard.load_weights()
     default = sorted(weights.values())[len(weights) // 2] if weights else 1.0
