@@ -40,6 +40,14 @@ is the confirmation gate, which the person using the app meets on every tool cal
   that widget is a window — so the colour showed in a test and not where it was needed. It is told
   now, and the scrolled block is transparent on top of it, so the whole question is on the tint.
 
+- **A gate set to "don't ask at all" no longer stops for backticks inside quotes.** Markdown spells
+  code in backticks, so a `printf` writing a README with a table in it — `'| ``target-curves/`` |
+  цільові криві |'` — read as a command substitution to a check that did not look at quoting, and
+  was put in front of the Arbiter as "a command you cannot undo". The check now follows the shell's
+  own rule: inside single quotes a backtick and a `$(` are characters. Everything outside them
+  still asks, unterminated quoting is still unreadable and still dangerous, and `rm -rf /` is
+  untouched. Same shape as the `|` inside `grep "a\|b"` fixed on 2026-09-11.
+
 - **A release can no longer be tagged against a method that was never published.** Three checks
   already compared the pinned method with the checkout and with the CHANGELOG, and all three could
   agree on a commit of the method's `main` that has no version at all — which would reach a user as

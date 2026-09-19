@@ -842,3 +842,34 @@ def test_the_language_rule_reaches_the_tuning_session_not_only_the_interview():
 
     assert "German" in system_prompt_append("de")
     assert "English" in system_prompt_append(), "the default is still a stated language"
+
+
+def test_a_backtick_inside_single_quotes_is_text_not_a_substitution(tmp_path):
+    """The user, 2026-09-19, with the screenshot: the gate was set to never ask and it asked.
+
+    The command wrote a markdown table with `printf`, and markdown spells code in BACKTICKS — so
+    `'| `target-curves/` | цільові криві |'` read as a command substitution to a check that did
+    not look at quotes. Same failure as the `|` inside `grep "a\\|b"` (2026-09-11), one character
+    along: the shell substitutes nothing inside single quotes.
+    """
+    from autosound_tcc.core.tuning_session import bash_is_dangerous
+
+    command = (
+        "printf '%s\\n' "
+        "'# rew_analitic — карта' "
+        "'| `target-curves/` | цільові криві, тека на криву |' "
+        "> \"$P/rew_analitic/README.md\""
+    )
+
+    assert bash_is_dangerous(command, [tmp_path]) is False
+
+
+def test_a_substitution_outside_single_quotes_still_asks(tmp_path):
+    """The narrowing is exactly the shell's own rule, and nothing wider: double quotes substitute."""
+    from autosound_tcc.core.tuning_session import bash_is_dangerous, bash_is_read_only
+
+    assert bash_is_dangerous('echo "`whoami`"', [tmp_path]) is True
+    assert bash_is_dangerous('echo "$(whoami)"', [tmp_path]) is True
+    assert bash_is_dangerous("rm -rf $(cat target.txt)", [tmp_path]) is True
+    assert not bash_is_read_only('cat "$(which ls)"', _ROOTS)
+    assert bash_is_dangerous("echo '$(whoami)'", [tmp_path]) is False

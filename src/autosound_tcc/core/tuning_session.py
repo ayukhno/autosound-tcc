@@ -137,8 +137,8 @@ _SAFE_REW_SCRIPTS = frozenset(
     }
 )
 # Substitution hides a whole second command inside an approved-looking one, and there is no
-# reading of `$(...)` or backticks that keeps the allowlist meaningful. Always ask.
-_SUBSTITUTION = re.compile(r"`|\$\(")
+# reading of `$(...)` or backticks that keeps the allowlist meaningful. Always ask — but only
+# where the shell would actually substitute, which is what `_has_substitution` below decides.
 
 # Redirects that write a file. `2>&1`, `2>/dev/null` and `>/dev/null` are not among them -- they
 # move or discard a stream, which is why the model appends one to almost every command it runs.
@@ -336,12 +336,51 @@ def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
     text = command.strip()
     if not text:
         return False
-    if _SUBSTITUTION.search(text):
+    if _has_substitution(text):
         return True
     parts, piped = _split_on_separators(text)
     if parts is None:
         return True  # quoting that never closes is not safe; it is unknown
     return any(_single_command_is_dangerous(part, piped) for part in parts)
+
+
+def _has_substitution(text: str) -> bool:
+    """Whether the shell would run a second command inside this one.
+
+    The shell's own rule, and nothing wider: inside SINGLE quotes a backtick and a `$(` are just
+    characters. The check used to be a regex over the whole line, so a markdown table written with
+    `printf '| `target-curves/` | … |'` counted as a substitution, and a gate set to never ask
+    stopped for it (the user, with the screenshot, 2026-09-19). Same shape as the `|` inside
+    `grep "a\\|b"` a week earlier: quoting is part of reading a command, not a detail.
+
+    Unterminated quoting is not decided here. It reaches `_split_on_separators`, which answers
+    `None` for it, and unreadable stays dangerous.
+    """
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            i += 1
+            continue
+        if ch == "\\" and quote != "'":
+            i += 2  # escaped: the next character is a character, whatever it is
+            continue
+        if quote == '"':
+            if ch == '"':
+                quote = ""
+                i += 1
+                continue
+        elif ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if ch == "`" or text.startswith("$(", i):
+            return True
+        i += 1
+    return False
 
 
 def _split_on_separators(text: str):
@@ -469,7 +508,7 @@ def bash_is_read_only(command: str, roots: Sequence[Path]) -> bool:
     looking — which is worse protection than not asking. Every part must pass on its own, so the
     chain can only be as permissive as its least permissive command.
     """
-    if not command.strip() or _SUBSTITUTION.search(command):
+    if not command.strip() or _has_substitution(command):
         return False  # nothing to judge is not the same as nothing to worry about
     parts = [part for part in _SEPARATORS.split(command) if part.strip()]
     return bool(parts) and all(_single_command_is_read_only(part, tuple(roots)) for part in parts)
