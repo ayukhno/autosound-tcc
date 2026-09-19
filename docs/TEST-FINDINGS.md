@@ -661,6 +661,14 @@ second time").
 
 **Reproduces.** Seen once on 0.1.39.
 
+**Again on 0.1.41 (2026-09-19), with the cause.** The Arbiter's screenshot: "Не питати взагалі
+(авто)" ticked in the menu, and the chat stopped on `Дозволити Bash?` — "Команда, яку не відкотити:
+set -e …" for a `printf` writing a markdown README. The check for a command substitution was a
+regex over the whole line (`` `|\$\( ``), and markdown spells code in BACKTICKS, so every table
+cell (`` '| `target-curves/` | цільові криві |' ``) read as one. Same shape as the `|` inside
+`grep "a\|b"` (2026-09-11): quoting is part of reading a command. Closed on `wave-0.1.42` —
+`_has_substitution` walks the command with its quote state, the shell's own rule.
+
 ### 16. The permission request has no background, so nothing draws the eye to it
 
 **What.** The "Allow Bash?" block is drawn like the rest of the chat: grey text, no background, the
@@ -674,6 +682,15 @@ buttons at the bottom. The Arbiter: it has NO background that would draw attenti
 macOS light theme). A request nobody notices reads as a hang.
 
 **Reproduces.** Seen on 0.1.39.
+
+**Again on 0.1.41 (2026-09-19), with the cause.** The Arbiter's screenshot of the light theme: the
+request is white like the rest of the panel, no tint and no border, though the stylesheet has asked
+for both since 2026-09-11. Qt paints a stylesheet background on a plain `QWidget` subclass only
+when `WA_StyledBackground` is set — with one exception, a top-level window, which gets it anyway.
+The bar is a child of the dialog panel, so nothing was painted there; a test that grabbed the bar
+alone made it a window and showed a colour the app never drew. Closed on `wave-0.1.42`: the
+attribute is set, the scrolled question block is transparent above it, and the test builds the bar
+inside a parent and grabs the parent (without the attribute 0 of 78 sampled pixels are the tint).
 
 ### 17. The Generator reached the reviewer through Bash, inside its own session
 
@@ -838,6 +855,11 @@ transcript's scroll area, and its detail is a word-wrapped label with no height 
 **Reproduces.** Whenever a command is taller than the space left in the window.
 
 **Fixed** on `wave-0.1.40` (2026-09-17): the detail scrolls inside twelve lines; the buttons stay on screen.
+
+**Half of it came back on 0.1.41 (2026-09-19).** The bound was on the DETAIL only, and the title
+was a wrapped label with no limit — so a long title moved the buttons down line for line, and on a
+short window off it again. Closed on `wave-0.1.42`: title and command are one scrolled block,
+bounded by twelve lines AND by half the height of the panel it sits in.
 
 ### 25. From a real terminal the reviewer is refused the same way, and its files follow the current folder
 
