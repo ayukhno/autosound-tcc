@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import os
 import time
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from autosound_tcc.core import session_export
@@ -100,3 +102,72 @@ def test_a_session_that_runs_past_midnight_names_both_days(tmp_path):
 
     assert "2026-09-16 23:50 → 2026-09-17 00:10" in session_export.render([path])
 
+
+
+def _one_line(when: str = "2026-09-19T12:01:00Z") -> list:
+    return [{"type": "user", "timestamp": when, "message": {"role": "user", "content": "привіт"}}]
+
+
+def test_the_chooser_gets_when_how_big_and_which_phase(tmp_path):
+    """The tab lists sessions to tick, so the list has to say which is which without opening one
+    (the user, 2026-09-19). Newest first, as everywhere else."""
+    project = tmp_path / "EPY-Sep2026"
+    project.mkdir()
+    folder = tmp_path / "home" / ".claude" / "projects" / session_export.folder_name(str(project))
+    day = datetime(2026, 9, 18, 20, 17).timestamp()
+    _transcript(folder, "older", _one_line(), day)
+    _transcript(folder, "newer", _one_line(), day + 3600)
+    (project / ".tcc").mkdir()
+    (project / ".tcc" / "sessions.json").write_text(
+        json.dumps({"phases": {"-1": {"session_id": "newer"}}}), encoding="utf-8")
+
+    rows = session_export.sessions(project, home=tmp_path / "home")
+
+    assert [row.session_id for row in rows] == ["newer", "older"]
+    assert rows[0].phase == "-1" and rows[1].phase is None
+    assert rows[0].size > 0
+    assert rows[0].when.hour == 21 and rows[1].when.hour == 20
+
+
+def test_the_default_name_carries_the_project_and_the_days_being_saved(tmp_path):
+    """Named for WHAT is saved, not for when the saving happened (the user, 2026-09-19)."""
+    project = tmp_path / "EPY-Sep2026"
+    one = session_export.SessionRow(path=Path("a.jsonl"), when=datetime(2026, 9, 19, 12, 1), size=1)
+    two = session_export.SessionRow(path=Path("b.jsonl"), when=datetime(2026, 9, 18, 20, 17), size=1)
+
+    assert session_export.default_stem(project, [one]) == "EPY-Sep2026-sessions-2026-09-19"
+    assert session_export.default_stem(project, [one, two]) == \
+        "EPY-Sep2026-sessions-2026-09-18_2026-09-19"
+    assert session_export.default_stem(project, []) == "EPY-Sep2026-sessions"
+
+
+def test_each_session_can_be_its_own_file_inside_one_archive(tmp_path):
+    """The user, 2026-09-19: «може кожну окремим файлом і архів»."""
+    project = tmp_path / "car"
+    project.mkdir()
+    folder = tmp_path / "home" / ".claude" / "projects" / session_export.folder_name(str(project))
+    day = datetime(2026, 9, 18, 20, 17).timestamp()
+    _transcript(folder, "aaaaaaaa-1111", _one_line(), day)
+    _transcript(folder, "bbbbbbbb-2222", _one_line(), day + 3600)
+    rows = session_export.sessions(project, home=tmp_path / "home")
+
+    target = session_export.save_each_file(rows, tmp_path / "out.zip", title="car")
+
+    with zipfile.ZipFile(target) as archive:
+        names = sorted(archive.namelist())
+        assert names == ["2026-09-18-2017-aaaaaaaa.md", "2026-09-18-2117-bbbbbbbb.md"]
+        assert "привіт" in archive.read(names[0]).decode("utf-8")
+
+
+def test_one_chosen_session_is_a_file_and_not_an_archive_of_one(tmp_path):
+    """An archive holding one thing is a step between the person and what they asked for."""
+    project = tmp_path / "car"
+    project.mkdir()
+    folder = tmp_path / "home" / ".claude" / "projects" / session_export.folder_name(str(project))
+    _transcript(folder, "only", _one_line(), datetime(2026, 9, 19, 12, 1).timestamp())
+    rows = session_export.sessions(project, home=tmp_path / "home")
+
+    target = session_export.save_each_file(rows, tmp_path / "one.md", title="car")
+
+    assert target.read_text(encoding="utf-8").startswith("# Sessions — car")
+    assert not zipfile.is_zipfile(target)

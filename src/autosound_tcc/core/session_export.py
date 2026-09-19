@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 #: How much of a tool's output a session file keeps: enough to see what came back, not a log dump.
 OUTPUT_LINES = 3
@@ -55,6 +57,94 @@ def recent_transcripts(project_dir, count: int, home: Optional[Path] = None) -> 
                 continue
     return sorted(found, key=found.get, reverse=True)[:max(0, int(count))]
 
+
+@dataclass(frozen=True)
+class SessionRow:
+    """One session, as the chooser shows it: when it last ran, how big, which phase it belonged to.
+
+    The size is the transcript's, not the exported file's — a rough measure of how much was said,
+    and the only one available without reading every line of every session to draw a list.
+    """
+
+    path: Path
+    when: datetime
+    size: int
+    phase: Optional[str] = None
+
+    @property
+    def session_id(self) -> str:
+        return self.path.stem
+
+    @property
+    def stem(self) -> str:
+        """A file name for this session alone: the day and time it ran, then enough of its id to
+        tell two sessions of the same minute apart."""
+        return f"{self.when:%Y-%m-%d-%H%M}-{self.session_id[:8]}"
+
+
+def sessions(project_dir, home: Optional[Path] = None,
+             phases: Optional[dict] = None) -> list[SessionRow]:
+    """Every session of this project, newest first — the list the person ticks.
+
+    `recent_transcripts` answers the same question with a count; this one answers it with the facts
+    a choice needs. Both look in the same two spellings of the folder, and neither reads a
+    transcript: a list that opens in a second is worth more than one that knows the word count.
+    """
+    marks = phases if phases is not None else phases_by_session(project_dir)
+    rows: list[SessionRow] = []
+    for path in recent_transcripts(project_dir, count=10_000, home=home):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        rows.append(SessionRow(path=path, when=datetime.fromtimestamp(stat.st_mtime),
+                               size=stat.st_size, phase=(marks or {}).get(path.stem)))
+    return rows
+
+
+def default_stem(project_dir, rows: Sequence[SessionRow]) -> str:
+    """What the save field starts with: the project, and the DAY the sessions are from.
+
+    The date of what is being saved rather than of the saving (the user, 2026-09-19): a file named
+    for today says nothing about a conversation from last week, and a folder of them sorts by the
+    wrong thing. A span of days says both ends.
+    """
+    name = Path(project_dir).name or "project"
+    days = sorted({row.when.date() for row in rows})
+    if not days:
+        return f"{name}-sessions"
+    if len(days) == 1:
+        return f"{name}-sessions-{days[0]:%Y-%m-%d}"
+    return f"{name}-sessions-{days[0]:%Y-%m-%d}_{days[-1]:%Y-%m-%d}"
+
+
+def save_one_file(rows: Sequence[SessionRow], target, title: str = "",
+                  now: Optional[datetime] = None) -> Path:
+    """Every chosen session in one Markdown document, oldest first."""
+    target = Path(target)
+    phases = {row.session_id: row.phase for row in rows if row.phase}
+    target.write_text(render([row.path for row in rows], phases, title=title, now=now),
+                      encoding="utf-8")
+    return target
+
+
+def save_each_file(rows: Sequence[SessionRow], target, title: str = "",
+                   now: Optional[datetime] = None) -> Path:
+    """One Markdown file per session, together in a zip (the user, 2026-09-19).
+
+    A single chosen session is written as that one file instead: an archive holding one thing is a
+    step between the person and what they asked for.
+    """
+    target = Path(target)
+    ordered = sorted(rows, key=lambda row: row.when)
+    if len(ordered) == 1 and target.suffix.lower() != ".zip":
+        return save_one_file(ordered, target, title=title, now=now)
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        for row in ordered:
+            phases = {row.session_id: row.phase} if row.phase else {}
+            archive.writestr(f"{row.stem}.md",
+                             render([row.path], phases, title=title, now=now))
+    return target
 
 def phases_by_session(project_dir) -> dict[str, str]:
     """`session id -> phase`, from TCC's own `.tcc/sessions.json`; {} when there is none."""

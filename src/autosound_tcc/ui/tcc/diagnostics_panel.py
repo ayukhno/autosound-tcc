@@ -17,7 +17,6 @@ from __future__ import annotations
 import threading
 import time
 import urllib.parse
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -29,10 +28,13 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QRadioButton,
     QScrollArea,
-    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -298,6 +300,17 @@ class _UpdateProbe:
         return self._thread.is_alive()
 
 
+def _human_size(size: int) -> str:
+    """A transcript's size in units a person compares at a glance. No locale, no decimals below a
+    megabyte: the number is there to tell a long conversation from a short one, not to be added up.
+    """
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    if size >= 1024:
+        return f"{round(size / 1024)} KB"
+    return f"{size} B"
+
+
 class DiagnosticsDialog(QDialog):
     """Non-modal so it can stay open beside the tune it describes."""
 
@@ -353,6 +366,7 @@ class DiagnosticsDialog(QDialog):
         self._tabs.addTab(scroll, i18n.t("diagTabProject"))
         self._tabs.addTab(self._build_install_tab(), i18n.t("diagTabInstall"))
         self._tabs.addTab(self._build_log_tab(), i18n.t("diagTabLog"))
+        self._tabs.addTab(self._build_sessions_tab(), i18n.t("diagTabSessions"))
         self._tabs.currentChanged.connect(self._on_tab)
         outer.addWidget(self._tabs, stretch=1)
 
@@ -606,22 +620,10 @@ class DiagnosticsDialog(QDialog):
         self._log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         layout.addWidget(self._log_text, stretch=1)
         row = QHBoxLayout()
-        # The dialog history, out of the machine in one readable file (TODO F-054): how many of the
-        # project's newest sessions, and a save dialog for where.
-        self._sessions_count = QSpinBox()
-        self._sessions_count.setRange(1, 50)
-        self._sessions_count.setValue(5)
-        row.addWidget(self._sessions_count)
-        self._sessions_btn = QPushButton(i18n.t("diagSessionsSave"))
-        self._sessions_btn.setProperty("class", "reason-btn")
-        self._sessions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._sessions_btn.clicked.connect(self._export_sessions)
-        row.addWidget(self._sessions_btn)
-        self._sessions_status = QLabel("")
-        self._sessions_status.setProperty("class", "phead-sub")
-        self._sessions_status.setWordWrap(True)
-        self._sessions_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        row.addWidget(self._sessions_status, stretch=1)
+        # The session export used to live here as a spinner and a button — "the newest five" and a
+        # save dialog. It is its own tab now (the user, 2026-09-19): a choice of WHICH sessions
+        # cannot be made by a number, and the log tab is for the log.
+        row.addStretch(1)
         self._log_copy_btn = QPushButton(i18n.t("diagInstallCopy"))
         self._log_copy_btn.setProperty("class", "reason-btn")
         self._log_copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -630,33 +632,174 @@ class DiagnosticsDialog(QDialog):
         layout.addLayout(row)
         return page
 
-    def _export_sessions(self) -> None:
-        """The newest N sessions of this project into one Markdown file the person names (F-054)."""
+    def _build_sessions_tab(self) -> QWidget:
+        """Which conversations with the AI to take off this machine, and where to put them.
+
+        What it does NOT do is show them: the transcripts are long, nobody reads them in a dialog,
+        and the two questions a person actually has are which sessions and which file (the user,
+        2026-09-19). The list says when each ran, how big it is and which phase it belonged to —
+        enough to tick the right ones without opening any.
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+
+        self._sessions_head = QLabel("")
+        self._sessions_head.setProperty("class", "mn")
+        self._sessions_head.setWordWrap(True)
+        layout.addWidget(self._sessions_head)
+
+        self._sessions_list = QListWidget()
+        self._sessions_list.itemChanged.connect(self._on_sessions_ticked)
+        layout.addWidget(self._sessions_list, stretch=1)
+
+        picks = QHBoxLayout()
+        self._sessions_all_btn = QPushButton(i18n.t("diagSessionsTickAll"))
+        self._sessions_none_btn = QPushButton(i18n.t("diagSessionsTickNone"))
+        for button, ticked in ((self._sessions_all_btn, True), (self._sessions_none_btn, False)):
+            button.setProperty("class", "reason-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _c=False, on=ticked: self._tick_all_sessions(on))
+            picks.addWidget(button)
+        picks.addStretch(1)
+        # Each separately by default, because that is what the archive is for: one file per
+        # conversation reads and gets sent on its own (the user, 2026-09-19).
+        self._sessions_each = QRadioButton(i18n.t("diagSessionsEachFile"))
+        self._sessions_each.setChecked(True)
+        self._sessions_one = QRadioButton(i18n.t("diagSessionsOneFile"))
+        for radio in (self._sessions_each, self._sessions_one):
+            radio.setCursor(Qt.CursorShape.PointingHandCursor)
+            radio.toggled.connect(self._sync_sessions_name)
+            picks.addWidget(radio)
+        layout.addLayout(picks)
+
+        name_row = QHBoxLayout()
+        self._sessions_name_label = QLabel(i18n.t("diagSessionsNameLabel"))
+        self._sessions_name_label.setProperty("class", "phead-sub")
+        name_row.addWidget(self._sessions_name_label)
+        self._sessions_name = QLineEdit()
+        # Typing here means the name is the person's: it stops being rewritten under them when the
+        # ticks change, which is the difference between a suggestion and a fight.
+        self._sessions_name.textEdited.connect(self._on_sessions_name_typed)
+        name_row.addWidget(self._sessions_name, stretch=1)
+        layout.addLayout(name_row)
+
+        where_row = QHBoxLayout()
+        self._sessions_folder_label = QLabel(i18n.t("diagSessionsFolder"))
+        self._sessions_folder_label.setProperty("class", "phead-sub")
+        where_row.addWidget(self._sessions_folder_label)
+        self._sessions_folder = QLabel("")
+        self._sessions_folder.setProperty("class", "mn")
+        self._sessions_folder.setWordWrap(True)
+        self._sessions_folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        where_row.addWidget(self._sessions_folder, stretch=1)
+        self._sessions_browse_btn = QPushButton(i18n.t("diagSessionsBrowse"))
+        self._sessions_browse_btn.setProperty("class", "reason-btn")
+        self._sessions_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sessions_browse_btn.clicked.connect(self._pick_sessions_folder)
+        where_row.addWidget(self._sessions_browse_btn)
+        layout.addLayout(where_row)
+
+        save_row = QHBoxLayout()
+        self._sessions_btn = QPushButton(i18n.t("diagSessionsSaveN").format(n=0))
+        self._sessions_btn.setProperty("class", "composer-send")
+        self._sessions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sessions_btn.clicked.connect(self._save_sessions)
+        save_row.addWidget(self._sessions_btn)
+        self._sessions_status = QLabel("")
+        self._sessions_status.setProperty("class", "phead-sub")
+        self._sessions_status.setWordWrap(True)
+        self._sessions_status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        save_row.addWidget(self._sessions_status, stretch=1)
+        layout.addLayout(save_row)
+        return page
+
+    # ---- the sessions tab ----------------------------------------------------
+
+    def refresh_sessions(self) -> None:
+        """Re-read the list every time the tab opens: a session that ran while this window was
+        open is exactly the one somebody came here for."""
         project = config.project_dir()
-        paths = session_export.recent_transcripts(project, self._sessions_count.value())
-        if not paths:
-            self._sessions_status.setText(i18n.t("diagSessionsNone"))
+        self._sessions_rows = session_export.sessions(project) if project else []
+        self._sessions_head.setText(
+            i18n.t("diagSessionsPick").format(project=Path(project).name if project else "—")
+            if self._sessions_rows else i18n.t("diagSessionsNone"))
+        self._sessions_list.blockSignals(True)
+        self._sessions_list.clear()
+        for row in self._sessions_rows:
+            item = QListWidgetItem(i18n.t("diagSessionsRow").format(
+                when=f"{row.when:%d.%m %H:%M}",
+                size=_human_size(row.size),
+                phase=(i18n.t("diagSessionsPhase").format(phase=row.phase) if row.phase
+                       else i18n.t("diagSessionsNoPhase"))))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            # The newest is what somebody came for; everything older is a deliberate tick.
+            item.setCheckState(Qt.CheckState.Checked if row is self._sessions_rows[0]
+                               else Qt.CheckState.Unchecked)
+            self._sessions_list.addItem(item)
+        self._sessions_list.blockSignals(False)
+        if not self._sessions_folder.text():
+            default = (config.tcc_dir(project) / "exports") if project else Path.home()
+            self._sessions_folder.setText(str(default))
+        self._sync_sessions_name()
+
+    def _ticked_sessions(self) -> list:
+        return [row for index, row in enumerate(getattr(self, "_sessions_rows", []))
+                if index < self._sessions_list.count()
+                and self._sessions_list.item(index).checkState() == Qt.CheckState.Checked]
+
+    def _tick_all_sessions(self, on: bool) -> None:
+        self._sessions_list.blockSignals(True)
+        for index in range(self._sessions_list.count()):
+            self._sessions_list.item(index).setCheckState(
+                Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+        self._sessions_list.blockSignals(False)
+        self._sync_sessions_name()
+
+    def _on_sessions_ticked(self, _item) -> None:
+        self._sync_sessions_name()
+
+    def _on_sessions_name_typed(self, _text: str) -> None:
+        self._sessions_name_owned = True
+
+    def _sync_sessions_name(self, *_args) -> None:
+        """The suggested file name, and how many sessions the button says it will save."""
+        chosen = self._ticked_sessions()
+        self._sessions_btn.setText(i18n.t("diagSessionsSaveN").format(n=len(chosen)))
+        self._sessions_btn.setEnabled(bool(chosen))
+        if getattr(self, "_sessions_name_owned", False):
             return
-        default = config.tcc_dir(project) / "exports" / (
-            f"sessions-{datetime.now():%Y-%m-%d-%H%M}.md")
-        try:
-            default.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            default = Path(default.name)
-        target, _filter = QFileDialog.getSaveFileName(
-            self, i18n.t("diagSessionsSave"), str(default), "Markdown (*.md)")
-        if not target:
+        project = config.project_dir()
+        stem = session_export.default_stem(project or "project", chosen)
+        each = self._sessions_each.isChecked() and len(chosen) > 1
+        self._sessions_name.setText(f"{stem}{'.zip' if each else '.md'}")
+
+    def _pick_sessions_folder(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, i18n.t("diagSessionsFolder"), self._sessions_folder.text())
+        if chosen:
+            self._sessions_folder.setText(chosen)
+
+    def _save_sessions(self) -> None:
+        """The ticked sessions into the named file — one document, or one file each in a zip."""
+        chosen = self._ticked_sessions()
+        if not chosen:
             return
+        folder = Path(self._sessions_folder.text() or Path.home())
+        target = folder / (self._sessions_name.text().strip() or "sessions.md")
+        title = Path(config.project_dir() or "").name
         try:
-            Path(target).write_text(
-                session_export.render(paths, session_export.phases_by_session(project),
-                                      title=Path(project).name),
-                encoding="utf-8")
+            folder.mkdir(parents=True, exist_ok=True)
+            if self._sessions_each.isChecked():
+                session_export.save_each_file(chosen, target, title=title)
+            else:
+                session_export.save_one_file(chosen, target, title=title)
         except OSError as exc:
             self._sessions_status.setText(f"{type(exc).__name__}: {exc}")
             return
         self._sessions_status.setText(
-            i18n.t("diagSessionsSaved").format(n=len(paths), path=target))
+            i18n.t("diagSessionsSaved").format(n=len(chosen), path=target))
 
     def refresh_log(self) -> None:
         """Re-read the tail, and say where it came from — the path is what a report needs next."""
@@ -685,6 +828,8 @@ class DiagnosticsDialog(QDialog):
             # Every time, not once: the log grows while this window is open, and that is exactly
             # when something is going wrong.
             self.refresh_log()
+        elif index == 3:
+            self.refresh_sessions()
 
     def refresh_install(self, check_updates: bool = True) -> None:
         """Everything that reads a file, now; everything that runs a program, on a thread.
@@ -828,6 +973,7 @@ class DiagnosticsDialog(QDialog):
         self._tabs.setTabText(0, i18n.t("diagTabProject"))
         self._tabs.setTabText(1, i18n.t("diagTabInstall"))
         self._tabs.setTabText(2, i18n.t("diagTabLog"))
+        self._tabs.setTabText(3, i18n.t("diagTabSessions"))
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
         self._beta_box.setText(i18n.t("updBetaChannel"))
@@ -835,7 +981,14 @@ class DiagnosticsDialog(QDialog):
         self._report_btn.setText(i18n.t("diagReport"))
         self._report_hint.setText(i18n.t("diagReportShot"))
         self._log_copy_btn.setText(i18n.t("diagInstallCopy"))
-        self._sessions_btn.setText(i18n.t("diagSessionsSave"))
+        self._sessions_all_btn.setText(i18n.t("diagSessionsTickAll"))
+        self._sessions_none_btn.setText(i18n.t("diagSessionsTickNone"))
+        self._sessions_each.setText(i18n.t("diagSessionsEachFile"))
+        self._sessions_one.setText(i18n.t("diagSessionsOneFile"))
+        self._sessions_name_label.setText(i18n.t("diagSessionsNameLabel"))
+        self._sessions_folder_label.setText(i18n.t("diagSessionsFolder"))
+        self._sessions_browse_btn.setText(i18n.t("diagSessionsBrowse"))
+        self._sync_sessions_name()
         self._render()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)

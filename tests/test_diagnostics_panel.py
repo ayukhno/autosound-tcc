@@ -282,10 +282,11 @@ def test_the_dialog_has_a_second_tab_with_what_is_installed():
     _app()
     dialog = DiagnosticsDialog()
 
-    assert dialog._tabs.count() == 3
+    assert dialog._tabs.count() == 4
     assert dialog._tabs.tabText(0) == i18n.t("diagTabProject")
     assert dialog._tabs.tabText(1) == i18n.t("diagTabInstall")
     assert dialog._tabs.tabText(2) == i18n.t("diagTabLog")
+    assert dialog._tabs.tabText(3) == i18n.t("diagTabSessions")
 
 
 def test_the_report_is_read_only_when_the_tab_is_opened():
@@ -769,63 +770,97 @@ def test_facts_carried_in_from_another_project_are_named_and_not_counted_as_issu
     assert i18n.t("diagOk") in said, "reported, not an issue"
 
 
-def _one_session(tmp_path) -> Path:
+def _rows(tmp_path, monkeypatch, count: int = 2):
+    """Two sessions of the project, a day apart, as the chooser would list them."""
     import json
-
-    transcript = tmp_path / "abc.jsonl"
-    transcript.write_text(json.dumps({
-        "type": "user", "timestamp": "2026-09-14T14:09:00Z",
-        "message": {"role": "user", "content": "hello car"},
-    }) + "\n", encoding="utf-8")
-    return transcript
-
-
-def test_the_log_tab_writes_the_last_sessions_to_the_file_the_person_names(tmp_path, monkeypatch):
-    """TODO F-054: the dialog history left the machine through a hand-typed PowerShell line. Now: a
-    count, a button, a save dialog, one readable file (the Arbiter's choices, 2026-09-17)."""
-    from PySide6.QtWidgets import QFileDialog
+    from datetime import datetime
 
     from autosound_tcc.core import config, session_export
 
-    project = tmp_path / "car"
-    project.mkdir()
-    monkeypatch.setattr(config, "project_dir", lambda *a, **k: project)
-    transcript = _one_session(tmp_path)
-    asked = []
-    monkeypatch.setattr(session_export, "recent_transcripts",
-                        lambda project_dir, count, home=None: asked.append(count) or [transcript])
-    target = tmp_path / "out.md"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                        staticmethod(lambda *a, **k: (str(target), "")))
+    made = []
+    for n in range(count):
+        path = tmp_path / f"{'abcdefgh' if n == 0 else 'ijklmnop'}-{n}.jsonl"
+        path.write_text(json.dumps({
+            "type": "user", "timestamp": "2026-09-14T14:09:00Z",
+            "message": {"role": "user", "content": f"hello car {n}"},
+        }) + "\n", encoding="utf-8")
+        made.append(session_export.SessionRow(
+            path=path, when=datetime(2026, 9, 18 + n, 20, 17), size=path.stat().st_size,
+            phase="-1" if n == 0 else None))
+    monkeypatch.setattr(config, "project_dir", lambda *a, **k: tmp_path / "EPY-Sep2026")
+    monkeypatch.setattr(session_export, "sessions", lambda *a, **k: made)
+    return made
+
+
+def test_the_sessions_tab_lists_what_there_is_and_ticks_the_newest(tmp_path, monkeypatch):
+    """The user, 2026-09-19: a tab that shows the CHOICE and not the transcripts. Each row says
+    when, how big and which phase, so the right ones can be ticked without opening any."""
+    _rows(tmp_path, monkeypatch)
     _app()
     dialog = DiagnosticsDialog()
-    dialog._sessions_count.setValue(3)
 
-    dialog._export_sessions()
+    dialog._tabs.setCurrentIndex(3)
 
-    assert asked == [3]
-    assert "hello car" in target.read_text(encoding="utf-8")
+    assert dialog._sessions_list.count() == 2
+    assert "18.09 20:17" in dialog._sessions_list.item(0).text()
+    assert "фаза" in dialog._sessions_list.item(0).text() or "phase" in \
+        dialog._sessions_list.item(0).text()
+    assert [dialog._sessions_list.item(n).checkState().name for n in range(2)] == \
+        ["Checked", "Unchecked"]
+    assert "EPY-Sep2026" in dialog._sessions_head.text()
+
+
+def test_the_name_follows_what_is_ticked_and_how_it_is_saved(tmp_path, monkeypatch):
+    """Named for the days being saved, not for today; `.zip` only when there is more than one file
+    in it (the user, 2026-09-19)."""
+    _rows(tmp_path, monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(3)
+
+    assert dialog._sessions_name.text() == "EPY-Sep2026-sessions-2026-09-18.md"
+
+    dialog._tick_all_sessions(True)
+    assert dialog._sessions_name.text() == "EPY-Sep2026-sessions-2026-09-18_2026-09-19.zip"
+
+    dialog._sessions_one.setChecked(True)
+    assert dialog._sessions_name.text() == "EPY-Sep2026-sessions-2026-09-18_2026-09-19.md"
+
+
+def test_saving_writes_one_file_per_session_into_the_archive(tmp_path, monkeypatch):
+    """The user, 2026-09-19: «може кожну окремим файлом і архів»."""
+    import zipfile
+
+    _rows(tmp_path, monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(3)
+    dialog._tick_all_sessions(True)
+    dialog._sessions_folder.setText(str(tmp_path / "out"))
+
+    dialog._save_sessions()
+
+    target = tmp_path / "out" / "EPY-Sep2026-sessions-2026-09-18_2026-09-19.zip"
+    assert target.exists(), dialog._sessions_status.text()
+    with zipfile.ZipFile(target) as archive:
+        assert len(archive.namelist()) == 2
+        assert "hello car 0" in archive.read(sorted(archive.namelist())[0]).decode("utf-8")
     assert str(target) in dialog._sessions_status.text()
 
 
-def test_no_sessions_says_so_and_asks_for_no_file(tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
-
+def test_no_sessions_says_so_and_the_button_cannot_be_pressed(tmp_path, monkeypatch):
     from autosound_tcc.core import config, session_export
 
     monkeypatch.setattr(config, "project_dir", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(session_export, "recent_transcripts", lambda *a, **k: [])
-    opened = []
-    monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                        staticmethod(lambda *a, **k: opened.append(1) or ("", "")))
+    monkeypatch.setattr(session_export, "sessions", lambda *a, **k: [])
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog._export_sessions()
+    dialog._tabs.setCurrentIndex(3)
 
-    assert opened == []
-    assert dialog._sessions_status.text()
-
+    assert dialog._sessions_list.count() == 0
+    assert dialog._sessions_head.text() == i18n.t("diagSessionsNone")
+    assert not dialog._sessions_btn.isEnabled()
 
 
 def test_report_a_problem_offers_both_routes_with_the_installation_block(monkeypatch):

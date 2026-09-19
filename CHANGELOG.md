@@ -17,6 +17,18 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 Two of the items below are about how a release is CUT and how long a change waits for CI; the third
 is the confirmation gate, which the person using the app meets on every tool call.
 
+### Added
+
+- **A tab for taking the conversations with the AI off this machine.** Diagnostics → "AI history"
+  lists the project's sessions — when each ran, how big it is, which phase it belonged to — with the
+  newest ticked; you tick the rest, name the file and say which folder. It shows the choice, not the
+  transcripts: nobody reads a session in a dialog, and the two questions that matter are which ones
+  and where. Each session can be its own Markdown file inside one zip (the default) or all of them
+  one document; a single ticked session is always just the file. The name starts from the project
+  and the DAYS being saved — `EPY-Sep2026-sessions-2026-09-18_2026-09-19.zip` — because a file named
+  for today says nothing about a conversation from last week. The spinner and button that used to do
+  this on the Log tab are gone: a choice of which sessions cannot be made by a number.
+
 ### Changed
 
 - **A pull request now runs four shards per platform instead of the whole suite** — ubuntu, windows
