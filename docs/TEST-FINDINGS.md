@@ -1096,6 +1096,12 @@ nine drags. Wanted: select a GROUP of rows (a range, and non-adjacent ones) and 
 several, and an ordering nobody finishes is a capture order that does not match REW — which is what
 the dialog exists to prevent.
 
+**Also asked (2026-09-19).** Once the order has been changed: a way to SAVE it deliberately, and a
+way to COPY an order from RTA to SW and back. The dialog's own text says the order is kept per
+method and reused next time — so what is missing is the person's hand on it: saying "keep this"
+rather than trusting that it was kept, and not re-dragging the same order a second time for the
+other method when the two are the same list in a different hat.
+
 **Reproduces.** n/a — a change.
 
 **Noticed in the same screenshot.** The rows read `c p1_49 (sw) (rta)` — the double suffix of
