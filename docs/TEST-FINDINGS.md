@@ -1107,3 +1107,38 @@ other method when the two are the same list in a different hat.
 **Noticed in the same screenshot.** The rows read `c p1_49 (sw) (rta)` — the double suffix of
 finding 30 point 3, here on every row of the list.
 
+### 35. TCC aborted: a curve worker was destroyed while it was still running
+
+**What.** The app died with `Abort trap: 6` while the Arbiter worked in the curve window ("Де саме?").
+The log's last line before the restart is the cause, in Qt's own words:
+
+```
+2026-09-19 16:19:02,521 CRITICAL autosound_tcc: Qt: QThread: Destroyed while thread '' is still running
+```
+
+The crash report agrees and says WHERE: the faulting thread is `_CurveWorker`, and its stack is
+`QThreadWrapper::run()` → `method_dealloc` → `subtype_dealloc` → `~QThreadWrapper` →
+`QThread::~QThread()` → `QMessageLogger::fatal` → `abort`. So the destructor ran ON the worker's own
+thread as `run()` was unwinding: the last Python reference to the thread object was dropped there,
+and Qt calls `qFatal` when a QThread is destroyed while still running. A second `_CurveWorker` was
+alive at the time, blocked in `socket.recv_into` — waiting on REW.
+
+**Where.** The Arbiter's Mac (MacBookAir10,1, macOS 26.7), 0.1.41, project EPY-Sep2026, 16:19:02,
+after about 3.5 hours of session. Crash report incident `0D55AB43-FC83-423C-8414-A8974C15F570`.
+
+**Ours or external.** Ours.
+
+**Weight.** High: the whole application dies, and a step in progress (1.1, just started at 16:12)
+goes with it.
+
+**Reproduces.** Once so far. Two curve workers were live, one of them stuck on REW — which is the
+condition `_stop_worker` exists for.
+
+**Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
+`ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,
+which keeps it alive in `_DETACHED` and discards it when `finished` arrives. The stack says the
+object died on the worker thread during `run()`'s unwind, so what has to be measured is whether the
+`finished` → `_DETACHED.discard` can run BEFORE the thread is really finished, leaving the run
+frame's own reference the last one. `detach`'s docstring already notes the object's affinity is the
+GUI thread, which is what makes that ordering possible.
+
