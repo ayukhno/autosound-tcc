@@ -1238,6 +1238,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QWidget[class~="confirm-bar"] QLabel[class~="phead-title"] {{
         color: {t.accent};
     }}
+    /* The tint belongs under the WHOLE question, command included (the user, 2026-09-19). The
+       scrolled block and its viewport paint their own background unless told not to, and that
+       turned the attention colour into a frame around a dark rectangle — the request itself sat
+       on the ordinary panel colour, which is what the tint exists to distinguish it from. */
+    QScrollArea[class~="confirm-question"],
+    QScrollArea[class~="confirm-question"] > QWidget,
+    QScrollArea[class~="confirm-question"] > QWidget > QWidget,
+    QWidget[class~="confirm-question"] {{
+        background: transparent;
+    }}
     QPushButton[class~="reason-btn"] {{
         background: {t.panel3};
         border: 1px solid {t.border2};

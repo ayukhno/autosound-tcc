@@ -14,8 +14,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
-Nothing here changes the app. Both items are about how a release is CUT and how long a change waits
-for CI, and they are written down because the next release carries them.
+Two of the items below are about how a release is CUT and how long a change waits for CI; the third
+is the confirmation gate, which the person using the app meets on every tool call.
 
 ### Changed
 
@@ -29,6 +29,15 @@ for CI, and they are written down because the next release carries them.
   forty slowest tests on Windows would have saved five of the twenty-one minutes (hub `#181`).
 
 ### Fixed
+
+- **A long confirmation no longer pushes Allow and Deny out of sight, and the whole question sits on
+  the attention colour.** The command was already bounded and scrolled; the TITLE was not, so a
+  request whose title wrapped over several lines moved the buttons down by exactly those lines, and
+  on a short window they went past its edge — the turn then waited for an answer nobody could give.
+  Title and command now scroll together in one block, bounded by twelve lines AND by half the
+  panel's height, so the answer keeps its place whatever arrives. The same block used to paint the
+  ordinary panel colour inside the orange frame, which left the request itself looking like any
+  other text; it is transparent now, and the tint carries the whole question.
 
 - **A release can no longer be tagged against a method that was never published.** Three checks
   already compared the pinned method with the checkout and with the CHANGELOG, and all three could

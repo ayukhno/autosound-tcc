@@ -14,6 +14,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from autosound_tcc.ui.tcc import theme  # noqa: E402
+
 from autosound_tcc.core.mcp_server import ConfirmRequest  # noqa: E402
 from autosound_tcc.ui.tcc.confirm_bar import ConfirmBar  # noqa: E402
 
@@ -197,3 +199,59 @@ def test_a_short_command_keeps_a_short_block():
 
     assert bar.sizeHint().height() < 8 * bar.fontMetrics().lineSpacing()
 
+
+
+def test_a_long_title_does_not_grow_the_bar_either():
+    """The user, 2026-09-19: with a long request the buttons hid past the window.
+
+    The command was bounded (TEST-FINDINGS 24) and the TITLE was not, so a title that wrapped over
+    ten lines moved Allow down by exactly those ten lines. Both scroll together in one block now,
+    and the bar's height stops depending on how much there is to read."""
+    command = "\n".join(f"line {n}: gh issue create --body with a long inline heredoc"
+                        for n in range(200))
+    short, long_title = "Allow Bash?", "Дозволити Bash: " + " ".join(f"крок-{n}" for n in range(200))
+
+    plain = ConfirmBar()
+    plain.resize(600, 400)
+    plain.enqueue(ConfirmRequest(tool="Bash", title=short, detail=command, payload={}), Future())
+
+    wordy = ConfirmBar()
+    wordy.resize(600, 400)
+    wordy.enqueue(ConfirmRequest(tool="Bash", title=long_title, detail=command, payload={}),
+                  Future())
+
+    assert wordy.sizeHint().height() == plain.sizeHint().height()
+    assert wordy._title.text() == long_title, "and the whole title is still there to read"
+
+
+def test_the_whole_question_sits_on_the_attention_background():
+    """The user, 2026-09-19: the orange field goes under the WHOLE question.
+
+    The scrolled block painted its own panel colour, so the attention tint framed the question
+    instead of carrying it — a dark rectangle where the request itself is."""
+    app = QApplication.instance()
+    theme.apply_theme(app, "dark")
+    try:
+        bar = ConfirmBar()
+        bar.resize(600, 320)
+        bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?",
+                                   detail="\n".join(f"line {n}" for n in range(60)), payload={}),
+                    Future())
+        bar.show()
+        app.processEvents()
+        image = bar.grab().toImage()
+
+        tint = image.pixelColor(6, bar.height() - 6)          # the bar's own padding
+        rect = bar._question_scroll.geometry()
+        sampled = [image.pixelColor(x, y).name()
+                   for y in range(rect.top() + 2, rect.bottom() - 2, 4)
+                   for x in (rect.right() - 6, rect.right() - 14)]
+        on_tint = sum(1 for name in sampled if name == tint.name())
+
+        assert sampled, "the question block has a height to sample"
+        assert on_tint > len(sampled) * 0.8, (
+            f"the question block paints its own background: {on_tint}/{len(sampled)} "
+            f"pixels are the bar's {tint.name()}"
+        )
+    finally:
+        app.setStyleSheet("")
