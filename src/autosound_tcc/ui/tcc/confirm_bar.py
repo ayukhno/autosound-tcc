@@ -62,6 +62,11 @@ class ConfirmBar(QWidget):
         self._current: Optional[tuple[ConfirmRequest, "Future[bool]"]] = None
 
         self.setProperty("class", "edit-reasons confirm-bar")
+        # Qt draws a stylesheet background on a plain `QWidget` subclass only when it is told to —
+        # a top-level window gets one anyway, a CHILD does not. The bar is a child of the dialog
+        # panel, so the attention tint and its border were simply not painted in the app while a
+        # standalone widget in a test showed them (the user, with the screenshot, 2026-09-19).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 8, 12, 8)
         outer.setSpacing(4)

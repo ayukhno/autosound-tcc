@@ -35,9 +35,10 @@ is the confirmation gate, which the person using the app meets on every tool cal
   request whose title wrapped over several lines moved the buttons down by exactly those lines, and
   on a short window they went past its edge — the turn then waited for an answer nobody could give.
   Title and command now scroll together in one block, bounded by twelve lines AND by half the
-  panel's height, so the answer keeps its place whatever arrives. The same block used to paint the
-  ordinary panel colour inside the orange frame, which left the request itself looking like any
-  other text; it is transparent now, and the tint carries the whole question.
+  panel's height, so the answer keeps its place whatever arrives. The tint itself was never drawn
+  in the app at all: Qt paints a stylesheet background on a plain widget only when told to, unless
+  that widget is a window — so the colour showed in a test and not where it was needed. It is told
+  now, and the scrolled block is transparent on top of it, so the whole question is on the tint.
 
 - **A release can no longer be tagged against a method that was never published.** Three checks
   already compared the pinned method with the checkout and with the CHANGELOG, and all three could

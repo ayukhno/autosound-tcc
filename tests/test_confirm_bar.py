@@ -7,12 +7,14 @@ always end up with a resolved future, whatever the user does or doesn't do.
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import Future
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget  # noqa: E402
 
 from autosound_tcc.ui.tcc import theme  # noqa: E402
 
@@ -225,33 +227,43 @@ def test_a_long_title_does_not_grow_the_bar_either():
 
 
 def test_the_whole_question_sits_on_the_attention_background():
-    """The user, 2026-09-19: the orange field goes under the WHOLE question.
+    """The user, 2026-09-19, with the screenshot: the orange field goes under the WHOLE question.
 
-    The scrolled block painted its own panel colour, so the attention tint framed the question
-    instead of carrying it — a dark rectangle where the request itself is."""
+    Two things had to be true and neither was. Qt paints a stylesheet background on a plain
+    `QWidget` subclass only when asked, except on a top-level window — so the bar drew the tint in
+    a test and nothing in the app, where it is a child of the dialog panel. And the scrolled block
+    painted its own panel colour on top, which left the request itself off the tint.
+
+    Grabbed from the PARENT for that reason: grabbing the bar alone renders it as its own window
+    and shows a background the app never draws."""
     app = QApplication.instance()
-    theme.apply_theme(app, "dark")
+    active = theme.apply_theme(app, "dark")
     try:
+        panel = QWidget()
+        panel.resize(600, 320)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
         bar = ConfirmBar()
-        bar.resize(600, 320)
+        layout.addWidget(bar)
         bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?",
                                    detail="\n".join(f"line {n}" for n in range(60)), payload={}),
                     Future())
-        bar.show()
+        panel.show()
         app.processEvents()
-        image = bar.grab().toImage()
+        image = panel.grab().toImage()
 
-        tint = image.pixelColor(6, bar.height() - 6)          # the bar's own padding
-        rect = bar._question_scroll.geometry()
+        # `mix` answers in CSS `rgb(r, g, b)`; a grabbed pixel answers in `#rrggbb`.
+        tint = QColor(*(int(n) for n in re.findall(r"\d+", active.mix("inv", 22, "panel")))).name()
+        rect = bar._question_scroll.geometry().translated(bar.pos())
         sampled = [image.pixelColor(x, y).name()
                    for y in range(rect.top() + 2, rect.bottom() - 2, 4)
                    for x in (rect.right() - 6, rect.right() - 14)]
-        on_tint = sum(1 for name in sampled if name == tint.name())
+        on_tint = sum(1 for name in sampled if name.lower() == tint.lower())
 
         assert sampled, "the question block has a height to sample"
         assert on_tint > len(sampled) * 0.8, (
-            f"the question block paints its own background: {on_tint}/{len(sampled)} "
-            f"pixels are the bar's {tint.name()}"
+            f"the question block is not on the attention colour: {on_tint}/{len(sampled)} "
+            f"pixels are {tint}"
         )
     finally:
         app.setStyleSheet("")
