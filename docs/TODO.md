@@ -1754,6 +1754,24 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-067 — the wave of 2026-09-19 is worked but not released, and it has no milestone
+
+**Статус**: open · waits for the user's word (goodnight 2026-09-19)
+
+Branch `wave-0.1.42` carries the whole wave — TCC-020 (sharded CI), TCC-021 (a tag cannot pin an
+unpublished method), TCC-022 (this repo's `CLAUDE.md` now points at `governance/WAVES.md`) — and PR
+#42 is open on it. Nothing is merged and no tag is cut: the release step is the user's call, not a
+session's.
+
+**What is left, in order.** Green CI on PR #42 → `git merge --ff-only` and push `main` → `make ship
+REAL=1` for `v0.1.42` (the exit criteria are hub `governance/WAVES.md` §3.1, and the installer path
+is walked by hand).
+
+**The milestone that TCC-019 asks for does not exist.** Measured 2026-09-19: `gh api
+repos/ayukhno/autosound-tcc/milestones --paginate` and the same for `autosound-tuning-skill` both
+return an empty list, so by the read-never-agree rule the number is `W-1`. Whether this already
+worked wave gets it retroactively, or `W-1` opens on the next one, is the user's line to say.
+
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
 **Статус**: open · left by the wave of 2026-09-19 (hub `#181`), worth about a minute
