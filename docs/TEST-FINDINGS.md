@@ -1082,3 +1082,22 @@ gone from it, leaving `cap_006 … cap_001` and nothing else. So the list is reb
 `set_sessions` (`ui/tcc/main_window.py:3211`) when a round arrives, and whatever the series entry
 came from is not in what that rebuild is given.
 
+### 34. "Порядок зняття": one row at a time, where the reordering is always a block
+
+**What.** Asked 2026-09-19. The capture-order dialog drags a single row, and the list it drags in is
+long — `c p1_49 … c p9_49`, then `m-L p1_49 …`, nine positions per channel. Moving a channel means
+nine drags. Wanted: select a GROUP of rows (a range, and non-adjacent ones) and drag them together.
+
+**Where.** The Arbiter's screenshot, macOS, 0.1.41, the method's 49-position list.
+
+**Ours or external.** Ours.
+
+**Weight.** Medium, and it grows with the method: the 49-point grid turns a one-minute ordering into
+several, and an ordering nobody finishes is a capture order that does not match REW — which is what
+the dialog exists to prevent.
+
+**Reproduces.** n/a — a change.
+
+**Noticed in the same screenshot.** The rows read `c p1_49 (sw) (rta)` — the double suffix of
+finding 30 point 3, here on every row of the list.
+
