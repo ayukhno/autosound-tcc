@@ -155,6 +155,26 @@ dispatch a `selftest` command. On its first run that found **two nobody had ever
 `curve_view.py` and `state/migrate.py`, both working, both unrun. The list is checked by a test
 rather than by memory for exactly that reason.
 
+## The method pin is tested against the REMOTE, not this machine (2026-09-19)
+
+`scripts/ship.py` now asks one more question before it will cut a tag: does the pinned commit of
+`vendor/autosound-tuning-skill` carry a tag the method has PUBLISHED? Three checks already stood
+there and all three could agree on a commit that was never released — the gitlink matches the
+checkout (`check_method_pin`), the CHANGELOG names that same sha (`check_paired_method`), and the
+suite ran against it. The release would then ship a method with no version at all.
+
+In a shared wave the order is skill first (hub `governance/WAVES.md` §1 step 4); this is the third
+of that order made mechanical. It is absolute for a release and there is no override flag: a build
+against a method that has no version is a candidate, and `make ship CANDIDATE=…` does not ask.
+
+**It is `git ls-remote --tags`, and the suite never runs it.** The local skill tree is routinely
+ahead of what a person can install, so `for-each-ref --points-at` would call a tag published when
+it exists on one machine only — and a suite that reached the network to find that out would be
+red on a train. `ship()` takes the reader as an argument, the fixture hands it a stand-in, and
+what the tests hold is the SHAPE: that the remote is the one asked, that an annotated tag's `^{}`
+peel is what matches a gitlink, and that a failed `ls-remote` is a Stop rather than "no tags".
+The recorded `ls-remote` output the parsing is tested against is real, copied on 2026-09-19.
+
 ## Conventions
 
 * `QT_QPA_PLATFORM=offscreen` is set by `tests/conftest.py`; no display is needed anywhere.

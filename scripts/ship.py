@@ -128,6 +128,7 @@ class Plan:
     tag: str = ""
     version: str = ""
     method_sha: str = ""
+    method_tags: list = field(default_factory=list)
     commands: list = field(default_factory=list)
 
 
@@ -339,13 +340,18 @@ def relock(root: Path) -> None:
                    f"version while the tag says otherwise:\n{done.stderr.strip()}")
 
 
+#: The method's tree inside this repository. One name rather than a literal in every place that
+#: has to say it: the gitlink reader, the remote reader and the refusal are all about this path.
+METHOD_TREE = "vendor/autosound-tuning-skill"
+
+
 def pinned_method_sha(root: Path) -> str:
     """The method commit this repository RECORDS — the gitlink, not the working checkout.
 
     `git ls-tree` rather than anything inside the submodule: what a person gets when they clone
     the tag is whatever the parent commit points at, and that is this.
     """
-    line = run(["git", "ls-tree", "HEAD", "vendor/autosound-tuning-skill"], root, check=False)
+    line = run(["git", "ls-tree", "HEAD", METHOD_TREE], root, check=False)
     parts = line.split()
     return parts[2] if len(parts) > 2 and _SHA.match(parts[2]) else ""
 
@@ -373,6 +379,60 @@ def check_method_pin(pinned: str, checked_out: str) -> None:
             f"`{checked_out[:12]}` — commit the submodule move, or check the recorded one out, "
             "so the tag pairs with a commit that exists in this history"
         )
+
+
+def published_method_tags(root: Path, sha: str) -> list[str]:
+    """Tag names the method's REMOTE has pointing at `sha` — published, not merely local.
+
+    `ls-remote` rather than `for-each-ref --points-at`: the skill tree beside this one is
+    routinely ahead of what a person can actually install, so a tag that exists on this machine
+    only is not an answer to "does this pin have a version".
+
+    Annotated tags come back twice — the tag object, then its `^{}` peel — and only the peel
+    carries the commit. A gitlink always points at a commit, so the peel is the line that can
+    match; matching column one without peeling would find nothing for every annotated tag.
+
+    Not `check=False`: a remote that cannot be asked returns the same empty output as a method
+    with no tags at all, and those two must not read the same (hub `HUB-CONSTRAINTS.md` §1.4 —
+    unknown is a refusal, never "no objections").
+    """
+    out = run(["git", "-C", str(root / METHOD_TREE), "ls-remote", "--tags", "origin"], root)
+    names = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == sha and parts[1].startswith("refs/tags/"):
+            names.add(parts[1][len("refs/tags/"):].removesuffix("^{}"))
+    return sorted(names)
+
+
+def check_published_method(pinned: str, tags: list) -> None:
+    """The recorded pin against what the method has PUBLISHED.
+
+    `check_method_pin` proves the gitlink and the checkout agree, and `check_paired_method` proves
+    the CHANGELOG names that same commit. All three could agree on a commit of the method's `main`
+    that was never released — and then this repository ships a tag whose method has no version at
+    all, so the user updates to something nobody can name or go back to.
+
+    In a shared wave the order is skill first: the method is fixed and tagged, tcc pins that
+    published tag and is tested against it, and only then cuts its own tag (hub
+    `governance/WAVES.md` §1 step 4). This is the third of that order made mechanical; the other
+    two already are.
+
+    It is ABSOLUTE for a release, with no override to remember, because the case an override
+    would serve already has a path: a candidate (`make ship CANDIDATE=…`) skips
+    `Paired with method` too, and skips this. Measured before it was written, 2026-09-19: the
+    last six tcc tags all pin a tagged method commit, so nothing about how releases are cut
+    changes — this only writes down what hands already do.
+    """
+    if tags:
+        return
+    raise Stop(
+        f"the method pinned here, `{pinned[:12]}`, carries no published tag on its remote — "
+        "tag the method first, then move the pin and test against it (hub governance/WAVES.md "
+        "§1 step 4: in a shared wave the order is skill first). A build against a method with no "
+        "version is a candidate rather than a release: `make ship CANDIDATE=vX.Y.Z` does not ask "
+        "this."
+    )
 
 
 def method_sha(root: Path) -> str:
@@ -403,6 +463,7 @@ def ship(root: Path, release: bool, test_command=None,
          channel: Callable[..., tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
          read_pinned_sha: Callable[[Path], str] = pinned_method_sha,
+         read_published_tags: Callable[[Path, str], list] = published_method_tags,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print,
          candidate: str = "", version: str = "") -> Plan:
@@ -440,9 +501,12 @@ def ship(root: Path, release: bool, test_command=None,
         changelog = check_changelog(root, plan.tag)
 
     plan.method_sha = read_method_sha(root)
-    check_method_pin(read_pinned_sha(root), plan.method_sha)
+    pinned = read_pinned_sha(root)
+    check_method_pin(pinned, plan.method_sha)
     if plan.mode != "candidate":
         check_paired_method(changelog, plan.method_sha, plan.tag)
+        plan.method_tags = list(read_published_tags(root, pinned))
+        check_published_method(pinned, plan.method_tags)
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
@@ -455,7 +519,8 @@ def ship(root: Path, release: bool, test_command=None,
     ]
 
     say(f"  {plan.mode:<17}: {plan.tag}")
-    say(f"  method           : {plan.method_sha[:12] or '(unknown)'}")
+    published = f"  published as {', '.join(plan.method_tags)}" if plan.method_tags else ""
+    say(f"  method           : {plan.method_sha[:12] or '(unknown)'}{published}")
 
     if not release:
         again = {"candidate": f" CANDIDATE={candidate}",

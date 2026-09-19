@@ -148,12 +148,18 @@ def _relock(root):
                            lock.read_text(), flags=re.M), encoding="utf-8")
 
 
-def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, **mode):
+def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, published=None,
+         **mode):
     """Ship on the fixture, with the suite stubbed and the channel half stood in for."""
     stub = [sys.executable, "-c", f"import sys; sys.exit({test_exit})"]
     return ship_mod.ship(repo, release=release, test_command=stub,
                          channel=ask or channel(),
                          read_method_sha=lambda _root: METHOD_SHA,
+                         # The method's remote is not asked from the fixture either: it has no
+                         # submodule, and the suite does not reach the network. The default
+                         # stands for the state a release is allowed to happen in — the pin
+                         # carries a published tag.
+                         read_published_tags=published or (lambda _root, _sha: ["v3.0.58"]),
                          # The fixture has no submodule at all, so the recorded pin is stood in
                          # for as well — agreeing with the checkout, which is the state a release
                          # is allowed to happen in. `test_a_release_refuses_when_the_checkout_is_
@@ -876,3 +882,132 @@ def test_the_recorded_pin_is_read_from_this_repository_for_real():
     ).stdout.split()
     assert pinned == said[2]
     assert len(pinned) == 40
+
+
+# --- the pin against what the method's remote has PUBLISHED --------------------------------
+#
+# TCC-021 (hub #182). In a shared wave the order is skill first: the method is fixed and tagged,
+# tcc pins that published tag, is tested against it, and only then cuts its own tag (hub
+# `governance/WAVES.md` §1 step 4). Two thirds of that were already mechanical — the gitlink must
+# be committed (`check_method_pin`), and `check_paired_method` compares the CHANGELOG line with
+# the method actually checked out. The third was not: nothing asked whether that commit carries a
+# PUBLISHED tag, so a tcc release could ship pinned to an arbitrary commit of the method's `main`
+# and the user would be updating to a method that has no version at all.
+
+
+#: `git ls-remote --tags` as the method's remote really answers it, recorded 2026-09-19 — the
+#: `v1.0.0` and `v3.0.58` lines verbatim, plus the two tags that are not versions. Annotated tags
+#: come back TWICE: the tag object first, then its `^{}` peel, and only the peel is the commit.
+LS_REMOTE_TAGS = (
+    "798e176774d7c7641963982599f1e96f430c82ba\trefs/tags/archive/manual-step-by-step-full-history\n"
+    "ca089e8de20ae39d542d6814570bb1709594baf2\trefs/tags/manual-v0.1.0\n"
+    "d7590fc80bf06842e860d8716b8eb2e1338ffb2c\trefs/tags/manual-v0.1.0^{}\n"
+    "4de6933e3eaa8ccc77a9275eca91b130fb00b321\trefs/tags/v1.0.0\n"
+    "96883c70e5e84d15ea964bfd78932c82032e6ede\trefs/tags/v1.0.0^{}\n"
+    "5e05729643d7f4278e87a934da8811e2c9f5f979\trefs/tags/v3.0.58\n"
+    "66f6bdf05d900e6f6058efd8ee8e0040027251a8\trefs/tags/v3.0.58^{}\n"
+)
+PINNED_V3_0_58 = "66f6bdf05d900e6f6058efd8ee8e0040027251a8"
+
+
+def test_a_release_refuses_a_method_pin_that_no_published_tag_points_at():
+    """A pin on a bare commit of the method's `main` is a release nobody can name."""
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_published_method("a" * 40, [])
+
+    said = str(stop.value)
+    assert "a" * 12 in said, "the refusal names the commit it is about"
+    assert "tag the method first" in said, "and the step that is missing"
+
+
+def test_a_release_is_fine_when_the_pin_carries_a_published_tag():
+    """Measured 2026-09-19: the last six tcc tags all pin a tagged method commit — v0.1.41→v3.0.58,
+    v0.1.40→v3.0.54, v0.1.39→v3.0.52, v0.1.38 and v0.1.37→v3.0.49, v0.1.36→v3.0.48. This check
+    writes down what hands already do rather than changing how releases are cut."""
+    ship_mod.check_published_method(PINNED_V3_0_58, ["v3.0.58"])
+
+
+def test_the_published_tags_are_asked_of_the_REMOTE_and_annotated_tags_are_peeled(monkeypatch):
+    """Two things at once, because both are ways this check would quietly pass nothing.
+
+    THE REMOTE, not the local clone: the skill tree beside this one is routinely ahead of what a
+    user can install, so `for-each-ref --points-at` would call a tag published that exists on one
+    machine. THE PEEL: an annotated tag's first line is the tag object, not the commit, so
+    matching the pin against column one without peeling finds nothing for every annotated tag in
+    the method's history — which is all of them."""
+    seen = {}
+
+    def fake_run(argv, cwd, check=True):
+        seen.update(argv=list(argv), cwd=cwd, check=check)
+        return LS_REMOTE_TAGS
+
+    monkeypatch.setattr(ship_mod, "run", fake_run)
+
+    names = ship_mod.published_method_tags(ROOT, PINNED_V3_0_58)
+
+    assert names == ["v3.0.58"], "the peel matched, and nothing else did"
+    assert "ls-remote" in seen["argv"] and "--tags" in seen["argv"]
+    assert Path(seen["argv"][2]).name == "autosound-tuning-skill", \
+        "asked inside the submodule, so the URL is the method's own remote"
+
+
+def test_a_pin_matching_no_line_comes_back_empty_rather_than_guessing(monkeypatch):
+    monkeypatch.setattr(ship_mod, "run", lambda *_a, **_k: LS_REMOTE_TAGS)
+
+    assert ship_mod.published_method_tags(ROOT, "b" * 40) == []
+
+
+def test_a_remote_that_cannot_be_asked_stops_the_release_rather_than_passing(monkeypatch):
+    """Unknown is a refusal, never "no objections" (hub `HUB-CONSTRAINTS.md` §1.4). A failed
+    `ls-remote` returns the same empty string as a method with no tags at all, so the two must not
+    be allowed to read the same: the call checks, and a non-zero exit is a Stop."""
+    def fake_run(argv, cwd, check=True):
+        assert check, "a failed ls-remote must raise rather than come back as 'no tags'"
+        raise ship_mod.Stop("git ls-remote -> 128")
+
+    monkeypatch.setattr(ship_mod, "run", fake_run)
+
+    with pytest.raises(ship_mod.Stop):
+        ship_mod.published_method_tags(ROOT, PINNED_V3_0_58)
+
+
+def test_a_release_stops_before_writing_when_the_pinned_method_is_not_published(repo):
+    """The whole point: it aborts with the bump, the commit and the tag all still unwritten."""
+    before = git(repo, "rev-parse", "HEAD")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, published=lambda _root, _sha: [])
+
+    assert "tag the method first" in str(stop.value)
+    assert git(repo, "rev-parse", "HEAD") == before
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+    assert 'version = "0.1.24"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_a_release_asks_about_the_RECORDED_pin_and_names_the_tag_it_found(repo):
+    """The gitlink is what a clone of the tag gets; the working checkout is only what this machine
+    happens to have. They are equal by the time this runs (`check_method_pin`), so the question is
+    which one the check is WRITTEN against — and the answer has to be the recorded one."""
+    asked = []
+
+    def published(root, sha):
+        asked.append(sha)
+        return ["v3.0.58"]
+
+    plan = _run(repo, published=published)
+
+    assert asked == [METHOD_SHA], "asked once, about the pin the repository records"
+    assert plan.method_tags == ["v3.0.58"], "and the plan says which tag vouched for it"
+
+
+def test_a_candidate_does_not_ask_the_remote_at_all(repo):
+    """The path for a pin deliberately ahead of every tag — a diagnostic build — is the one that
+    already exists rather than a new override flag to remember: a candidate skips
+    `Paired with method` too, and this check stands beside it. A release is absolute (hub #182)."""
+    _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA))
+    asked = []
+
+    _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
+         published=lambda _root, sha: asked.append(sha) or [])
+
+    assert asked == [], "a candidate is the diagnostic build, and it answers to nobody's tag"
