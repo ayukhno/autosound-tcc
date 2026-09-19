@@ -12,6 +12,31 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+Nothing here changes the app. Both items are about how a release is CUT and how long a change waits
+for CI, and they are written down because the next release carries them.
+
+### Changed
+
+- **A pull request now runs four shards per platform instead of the whole suite** — ubuntu, windows
+  and macOS, each a separate runner with a quarter of the test FILES, run serially. The wait goes
+  from about 21 minutes to about 5, and the whole serial run moves to the push to `main`, where
+  nobody is watching: fewer tests per process is exactly what can hide the Linux abort and the
+  native Windows crash those long jobs exist to catch. The release gate is unmoved and still reads
+  the `main` run — which now means the tag waits for it, about twenty minutes after the merge
+  rather than nothing. Measured before it was built: the suite is uniform volume, and deleting the
+  forty slowest tests on Windows would have saved five of the twenty-one minutes (hub `#181`).
+
+### Fixed
+
+- **A release can no longer be tagged against a method that was never published.** Three checks
+  already compared the pinned method with the checkout and with the CHANGELOG, and all three could
+  agree on a commit of the method's `main` that has no version at all — which would reach a user as
+  "updated to" something nobody can name or go back to. `make ship` now asks the method's own remote
+  whether a published tag points at the pinned commit, and refuses by name when none does. It costs
+  nothing today: the last six tags all pin a tagged method commit (hub `#182`).
+
 ## [v0.1.41] — 2026-09-18 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.58
 
 Paired with method `66f6bdf05d900e6f6058efd8ee8e0040027251a8` — the tag on that commit is
