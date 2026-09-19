@@ -1754,18 +1754,44 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-068 — the drivers' Fs deserves its own checkbox, and the flag does not exist yet
+
+**Статус**: open · waits for the method (hub `#185`, readdressed to skill 2026-09-19)
+
+**What the user decided (2026-09-19, hub `#185`).** On seeding a new project from an existing one,
+the drivers' `fs_hz` travels behind its own checkbox, TICKED by default — «імпеданс складна штука і
+міряти його другий раз це подвиг». The same shape the cabin-flaws box already has.
+
+**Why it is not done here yet.** `fs_hz` sits inside `channels`, which the method's
+`rew_tool/project_seed.py` carries under `DSP_KEYS`; there is no flag to pass. Our
+`ui/tcc/new_project_dialog.py` only passes `include_findings` and `copy_profile` and draws the
+note, so a checkbox added now would be wired to nothing. Measured on the real package
+(`passat-b8-2026-car-2026-09-18.zip`) through the pinned `v3.0.58`: seven `fs_hz` facts arrive,
+each already marked `origin: inherited` + `inherited_from`, with no way to decline them.
+
+**What to do when the method has the flag**: one `QCheckBox` next to `npSeedFindings`, ticked by
+default, its own `i18n` key in all four languages, passed into both `seed()` call sites (the
+preview at `_seed_preview` and the real one at Create), and the seed note counting what it carries
+the way the findings box already does.
+
+**How to check it is done**: create a project from a seed with the box unticked and read the new
+`project.json` — no `fs_hz` on any channel; tick it and the seven arrive.
+
 ### F-067 — the wave of 2026-09-19 is worked but not released, and it has no milestone
 
-**Статус**: open · waits for the user's word (goodnight 2026-09-19)
+**Статус**: open · merged 2026-09-19, the tag waits for the user's word
 
-Branch `wave-0.1.42` carries the whole wave — TCC-020 (sharded CI), TCC-021 (a tag cannot pin an
-unpublished method), TCC-022 (this repo's `CLAUDE.md` now points at `governance/WAVES.md`) — and PR
-#42 is open on it. Nothing is merged and no tag is cut: the release step is the user's call, not a
-session's.
+Branch `wave-0.1.42` carried the whole wave — TCC-020 (sharded CI), TCC-021 (a tag cannot pin an
+unpublished method), TCC-022 (this repo's `CLAUDE.md` now points at `governance/WAVES.md`). PR #42
+went green and was merged into `main` by `git merge --ff-only` on 2026-09-19 (`ae9f6b6`, no merge
+commit), and the full serial run on `main` is green — 35431649941, linux 905 s, windows 1361 s.
 
-**What is left, in order.** Green CI on PR #42 → `git merge --ff-only` and push `main` → `make ship
-REAL=1` for `v0.1.42` (the exit criteria are hub `governance/WAVES.md` §3.1, and the installer path
-is walked by hand).
+**No tag is cut, and that is deliberate**: the user is testing and wants the findings of that
+testing to land in this same wave, so `v0.1.42` is cut after them (the user, 2026-09-19). The
+CHANGELOG entries stay under `## [Unreleased]` until then.
+
+**What is left, in order.** The testing findings → `make ship REAL=1` for `v0.1.42` (the exit
+criteria are hub `governance/WAVES.md` §3.1, and the installer path is walked by hand).
 
 **The milestone that TCC-019 asks for does not exist.** Measured 2026-09-19: `gh api
 repos/ayukhno/autosound-tcc/milestones --paginate` and the same for `autosound-tuning-skill` both
