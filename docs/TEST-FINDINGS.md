@@ -1072,7 +1072,9 @@ still puts them in one list with nothing between them.
 **Weight.** Medium: the picker decides what the whole panel is showing, and an entry whose kind is
 unclear — and which comes and goes — makes the panel unreadable at the moment a round is run.
 
-**Reproduces.** The mixing, always. The disappearing was seen once and not pinned down: the list is
-rebuilt wholesale by `set_sessions` (`ui/tcc/main_window.py:3211`), so a refresh that yields only
-rounds would drop it. To be measured, not assumed.
+**Reproduces.** The mixing, always. The disappearing now has its trigger, seen a second time the
+same day: a new round was created, `cap_006` appeared at the top of the list — and `серія 1` was
+gone from it, leaving `cap_006 … cap_001` and nothing else. So the list is rebuilt wholesale by
+`set_sessions` (`ui/tcc/main_window.py:3211`) when a round arrives, and whatever the series entry
+came from is not in what that rebuild is given.
 
