@@ -935,3 +935,38 @@ session built it while the collection step was still open; the rule is that a se
 while the Arbiter tests (WAVES.md §1), and that holds for a wish said in passing as much as for a
 finding. The work is in the branch and stays there; the entry is here so the review step sees it
 with everything else.
+
+### 28. "Take measurements from REW": the new name is empty, and the columns cannot be resized
+
+**What.** The import form lists what REW holds — `sw_01 (sw)`, `w-L_01 (rta)`, `r-L_17 (rta) noXO`
+and the rest, twenty rows with their timestamps — and the **New name** column is "вибери або
+впиши…" on every one of them. The name is exactly what the person came to the form for, and it is
+the one column the form does not fill: TCC (or the skill) already knows which measurement it
+matched and under which name it will be filed, so that name belongs in the column, pre-filled and
+editable. Also asked: let the column widths be dragged — the REW title and the timestamp squeeze
+the column that matters.
+
+**Where.** The Arbiter's screenshot, macOS, 0.1.41, project EPY-Sep2026, the round waiting on 16.
+
+**Ours or external.** Ours; the name may have to come from the skill.
+
+**Weight.** High for the empty name — it is the point of the form, and twenty rows of typing is
+where a round gets abandoned. Low for the widths.
+
+**Reproduces.** Every import, by the look of it.
+
+### 29. The UNUSABLE banner takes half the window and cannot be closed
+
+**What.** Sixteen `UNUSABLE sw_1 (sw) — No measurement titled 'sw_1 (sw)'` lines are drawn across
+the top of the main window, above the project panel and the dialog, and there is no ✕ — the only
+way out of them is whatever redraws the screen. On a laptop they take about half the height.
+
+**Where.** The Arbiter's screenshot, macOS, 0.1.41, project EPY-Sep2026.
+
+**Ours or external.** Ours (the text comes from the method's matcher; the strip is TCC's).
+
+**Weight.** High: it hides the work area, and a message nobody can dismiss is read once and then
+worked around.
+
+**Reproduces.** Seen with sixteen unmatched names at once.
+
