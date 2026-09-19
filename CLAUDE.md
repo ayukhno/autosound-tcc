@@ -52,6 +52,22 @@ called rather than copied (HUB-003). No hub on the machine means nothing is chec
 and unknown is a refusal, never "no objections". The hub's git hook cannot see any of this either:
 it parses the command line, and `make ship` contains no git verb at all.
 
+**Releases come in waves** (hub `governance/WAVES.md`, HUB-065): test → review → work → release,
+and again. One branch and one PR per product per wave; the version bump and the CHANGELOG entry are
+committed on that branch before the PR; the full CI runs on the pull request, and the tag goes on the
+merged commit straight away. A finding waits for its wave — only the user's «терміново» ships one
+earlier, and during a wave the hub changes nothing in the process.
+
+**The wave's number is READ, never agreed on.** Before opening one, look for an open `W-…` milestone in
+the skill's repo: found — take that same number; none — `max(W-N) + 1` across both repos. The milestone
+is `W-<N> · v0.1.42`, and its description is five lines and nothing else: `Goal:` · `Included:` ·
+`Not included:` · `Blockers:` · `Exit:`. A shared wave is told mechanically — `vendor/autosound-tuning-skill`
+moves in it — and then the order is skill first: the method is tagged, then tcc pins that published tag.
+
+What "released" is allowed to mean is `WAVES.md` §3.1: a table of checks `hub/scripts/release-preflight.py`
+and `scripts/ship.py` already make, plus the installer path walked by hand. Pointed at, not copied —
+the rule has one copy, the way the preflight above is called rather than duplicated.
+
 ## The bus
 
 Work arrives as tickets in `ayukhno/autosound-hub`, labelled `to:tcc`. `hub/bin/ticket queue`
