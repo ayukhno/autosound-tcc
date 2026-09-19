@@ -1020,3 +1020,38 @@ capture to the AI.
 
 **Reproduces.** n/a — a change, not a defect.
 
+### 32. The reviewer channel: an API key in the environment silently reroutes the call, and a nested-session refusal that is not a real limit
+
+**What.** Reported by the Arbiter's parallel terminal session (read-only, diagnosing the reviewer
+channel), from reading TCC's and the skill's code and reproducing both halves by hand:
+
+1. **The environment TCC was launched from decides which transport the reviewer uses.**
+   `vendor_loader.child_env()` (`core/vendor_loader.py:247`) hands the child the whole `os.environ`
+   plus four names of its own — confirmed here, the dict literally starts `**os.environ`. So a
+   `GEMINI_API_KEY` in the shell that started TCC makes the skill take the API path instead of the
+   `agy` CLI. The model TCC passes, `gemini-3.8-flash-high`, exists only in `agy`: over the API it
+   is `HTTP 404 models/gemini-3.8-flash-high is not found for API version v1beta`. Reproduced both
+   ways — with the key, 404; with `env -u GEMINI_API_KEY`, a full review in about 70 s.
+2. **"The CLI cannot be run from an agent session" is our own marker, not a limit.** The refusal
+   comes from `_NESTED_MARKERS` in the skill's `autosound_ai.py:675`, which matches `CLAUDECODE`;
+   the same raw `agy --model … --input-format stream-json --output-format stream-json --print=`
+   call with the critic package on stdin returned SUCCESS, 6730 characters, `num_turns: 1`.
+   `AUTOSOUND_ALLOW_NESTED_CLI=1` turns it off.
+3. **Ruled out as causes, each checked rather than argued:** `stdin=DEVNULL` from
+   `core/child.py:263` (A/B on the same package, full answer both times), the model-name handover
+   (`core/critic.py:285` → the skill's `REVIEWER_MODEL_VARS`), and a trimmed environment (see 1).
+4. **What still has no answer**: `agy`'s raw output when TCC calls it is kept nowhere, so
+   "SUCCESS, no answer" cannot be told apart from `num_turns: 0`. Proposed instead of patching TCC:
+   a shim at `AUTOSOUND_CRITIC_BIN` that tees stdin and stdout to files and `exec`s the real `agy`.
+
+**Where.** The Arbiter's machine, project EPY-Sep2026, TCC 0.1.41 / method 3.0.58; the terminal
+session's own reproduction.
+
+**Ours or external.** Ours and the skill's, one path: point 1 is TCC's `child_env` meeting the
+skill's transport choice; point 2 is the skill's marker.
+
+**Weight.** High: the reviewer is the second half of the tuning loop, and today it can fail two
+different ways on one machine without saying which.
+
+**Reproduces.** Both halves reproduced by hand by that session.
+
