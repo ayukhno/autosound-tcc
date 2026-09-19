@@ -913,3 +913,25 @@ writes or changes anything again after it — or refuse changes after a close.
 **Reproduces.** After every `session_close`, on quit.
 
 **Fixed** on `wave-0.1.40` (2026-09-17), as the Arbiter proposed: a recorded `session_close` marks the session saved and the next write clears it.
+
+### 27. The AI history needs a tab of its own: which sessions, which file, which folder
+
+**What.** Asked by the Arbiter while testing, 2026-09-19, with a screenshot of Diagnostics → Log:
+the export was a spinner ("the newest five") and a save dialog, and neither says WHICH conversations
+go into the file. Wanted: its own tab showing the choice and not the transcripts — the project's
+sessions to tick, where to save, and a name that starts from the project and the date of what is
+being saved. Then: each session as its own file, the set as one archive.
+
+**Where.** The Arbiter's screenshot, macOS, 0.1.41.
+
+**Ours or external.** Ours. A wish, not a defect — the old path worked, it just could not be aimed.
+
+**Weight.** Medium: it is how a session's history leaves the machine for a report or a review.
+
+**Reproduces.** n/a.
+
+**Built on `wave-0.1.42` the same day — out of turn.** The Arbiter said "let's add it" and the
+session built it while the collection step was still open; the rule is that a session only RECORDS
+while the Arbiter tests (WAVES.md §1), and that holds for a wish said in passing as much as for a
+finding. The work is in the branch and stays there; the entry is here so the review step sees it
+with everything else.
