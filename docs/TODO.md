@@ -1754,6 +1754,26 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-066 — shard weights are macOS seconds, and Windows does not scale from them
+
+**Статус**: open · left by the wave of 2026-09-19 (hub `#181`), worth about a minute
+
+**The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
+windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
+recorded on the author's Mac — so the unevenness is that Qt widget work costs more on Windows than
+import and file work does, and one table cannot say that.
+
+**What it would take**: a weights table per platform, recorded on a runner
+(`scripts/record_shard_weights.py` already times each file alone, so it is the same command in a
+job), and `scripts/ci_shard.py` picking the table by `runner.os`.
+
+**Why it is not done**: the wait is set by the slowest shard, which is 268 s against a perfect
+split of about 175 s on Windows. A minute and a half, against a table that then has to be
+re-recorded on three platforms instead of one.
+
+**How to check it is done**: the shard costs printed on stderr by each job, against the job's own
+wall time.
+
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
 **Статус**: open · measured while doing hub `#181` (CI sharding), 2026-09-19
