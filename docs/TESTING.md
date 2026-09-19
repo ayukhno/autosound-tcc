@@ -139,8 +139,21 @@ of them load-bearing, and `tests/test_ci_shard.py` holds each:
 
 ### What four shards actually buy, measured
 
-Run 35429188848, the first sharded pull request, 2026-09-19: **4 min 18 s wall, against about 21
-minutes before.** Twelve jobs, one red (a brittle assertion the shard exposed — see below).
+The two numbers side by side, 2026-09-19:
+
+| | wall |
+|---|---|
+| before, the whole suite on the pull request (run 35393933009, Windows job) | **21 min 48 s** |
+| after, twelve shards (run 35430530459, all green) | **4 min 33 s** |
+
+The first sharded run, 35429188848, was 4 min 18 s with one red shard and a lopsided split; both
+are below. The second is the one to read.
+
+**Still uneven on Windows**, and knowably so: the slowest shard was `3/4 (windows-latest)` at 268 s
+against 137, 159 and 200 for its siblings, while ubuntu came out 108 · 115 · 194 · 111. The weights
+are recorded on macOS, and Windows does not scale from them uniformly — Qt widget work costs more
+there than file and import work does. Recording the table per platform is the next thing that would
+buy anything, and it buys about a minute, so it is not done yet.
 
 The first split was lopsided — 83 · 164 · 55 · 201 s on ubuntu — and the reason turned out to be
 the weights, not the packing:
