@@ -1055,3 +1055,24 @@ different ways on one machine without saying which.
 
 **Reproduces.** Both halves reproduced by hand by that session.
 
+### 33. The set picker mixes series with rounds, and "серія 1" sometimes disappears
+
+**What.** The picker above the measurement panel shows `серія 1 ●` and, opened, lists
+`серія 1` over `cap_005 … cap_001`. The Arbiter: it looks out of place, and somewhere it vanished
+altogether. It is NOT a stub — `_session_label` (`ui/tcc/measurement_panel.py:422`) turns a session
+id of the shape `v1` into «серія 1», and the mock data cannot be the source (its ids are `v10`,
+`v9`, `v8`). What the list actually holds is two different axes at once: a capture SERIES (`v1`) and
+the ROUNDS of a config (`cap_001…`). The code's own comment says the two are different axes and
+still puts them in one list with nothing between them.
+
+**Where.** The Arbiter's screenshots, macOS, 0.1.41, project EPY-Sep2026.
+
+**Ours or external.** Ours.
+
+**Weight.** Medium: the picker decides what the whole panel is showing, and an entry whose kind is
+unclear — and which comes and goes — makes the panel unreadable at the moment a round is run.
+
+**Reproduces.** The mixing, always. The disappearing was seen once and not pinned down: the list is
+rebuilt wholesale by `set_sessions` (`ui/tcc/main_window.py:3211`), so a refresh that yields only
+rounds would drop it. To be measured, not assumed.
+
