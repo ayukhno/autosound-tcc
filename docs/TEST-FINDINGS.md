@@ -995,3 +995,28 @@ explanation and the suffix, but the suffix is a wrong statement about a measurem
 
 **Reproduces.** Seen on this set; the suffix on every additional sweep row in it.
 
+### 31. "In focus now" needs tidying: four changes the Arbiter named
+
+**What.** Asked 2026-09-19 with the screenshot of the panel (set `cap_005`), in the Arbiter's own
+order:
+
+1. **"Захист" moves up into the row with the name field and the two buttons.** The name field stops
+   being fixed at its current width — it shrinks to the measurement's name, or to a fixed but SMALL
+   width; today it is fixed too wide and pushes everything else down.
+2. **The colour legend goes on one line**, with the words shortened; the full wording moves into a
+   tooltip.
+3. **The status message goes ABOVE the field and the buttons, in blue.** Today it is two lines
+   below them — "Взято: 4. Записано в набір: 4. Захист записано для: …" and "пропущено".
+4. **A "Готово" button**, in the header next to the green REW mark, which tells the AI to start
+   working on what was just captured. Disabled until something has been loaded.
+
+**Where.** The Arbiter's screenshot, macOS, 0.1.41, project EPY-Sep2026.
+
+**Ours or external.** Ours.
+
+**Weight.** Medium: the panel is the one a round is run from, and today its top half is spent on
+text rather than on the round. Point 4 is new behaviour, not tidying — it is the hand-off from
+capture to the AI.
+
+**Reproduces.** n/a — a change, not a defect.
+
