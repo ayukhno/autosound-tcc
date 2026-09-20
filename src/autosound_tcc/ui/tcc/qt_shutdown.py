@@ -38,11 +38,16 @@ dismantling itself.
 
 from __future__ import annotations
 
+import logging
 import sys
+import threading
+import weakref
 from collections.abc import Iterable
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QWidget
+
+_log = logging.getLogger("autosound_tcc")
 
 #: How long to wait for a background thread that ignores being asked to stop. Bounded because a
 #: teardown that hangs is worse than the crash it prevents: the wait only has to cover a normal
@@ -68,6 +73,51 @@ def detach(thread: QThread) -> None:
     """
     _DETACHED.add(thread)
     thread.finished.connect(lambda: _DETACHED.discard(thread))
+
+
+def watch(thread: QThread) -> QThread:
+    """Have this worker say who it was when it is destroyed. Returns it, so it can wrap a `self`.
+
+    MEASURED, 2026-09-20 (finding 35): dropping the last external reference to a RUNNING worker
+    aborts the process, and the destructor runs on the worker's OWN thread right after `run()`
+    returns — from the moment the external reference goes, the running frame holds the only one,
+    and the frame dies when `run()` does. Qt then prints `QThread: Destroyed while thread '' is
+    still running` and calls `abort()`.
+
+    That message does not say WHICH worker, and the app has eight kinds. Three crashes were
+    collected from the Arbiter's machine (2026-08-27, twice on 2026-09-19) and none of them could
+    be pinned to a worker by reading the log. This line lands immediately before Qt's, and names
+    it.
+
+    A `weakref.finalize` rather than `__del__`: it cannot resurrect the object, it runs even when
+    the object dies inside a reference cycle, and it carries no reference of its own — a
+    `__del__` on a QThread subclass would keep every worker alive until the collector felt like
+    it, which is the opposite of what this is for. The finalizer may not touch `thread`, so what
+    it needs is captured now: the class name, and a flag a `finished` connection sets.
+    """
+    name = type(thread).__name__
+    # `started` as well as `finished`: a worker built and never started has not finished either,
+    # and warning about those buries the one line that matters — the suite alone produced five of
+    # them the first time this ran. Only a worker that RAN and did not finish is the fatal shape.
+    state = {"started": False, "finished": False}
+    thread.started.connect(lambda: state.__setitem__("started", True))
+    thread.finished.connect(lambda: state.__setitem__("finished", True))
+    weakref.finalize(thread, _gone, name, state)
+    return thread
+
+
+def _gone(name: str, state: dict) -> None:
+    """One line about a worker's death — loud when it is the fatal shape, quiet otherwise."""
+    where = "GUI" if threading.current_thread() is threading.main_thread() else "a worker"
+    if state.get("finished") or not state.get("started"):
+        _log.debug("worker %s destroyed on %s thread (started=%s finished=%s)",
+                   name, where, state.get("started"), state.get("finished"))
+        return
+    # Not "probably": Qt aborts on this, and the abort is the next thing in the log.
+    _log.warning(
+        "worker %s destroyed on %s thread while it had NOT finished — this is the abort "
+        "(finding 35). Whoever dropped the last reference to it is the bug.", name, where
+    )
 
 
 def detached() -> frozenset:

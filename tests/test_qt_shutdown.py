@@ -176,3 +176,67 @@ def test_a_detached_thread_is_still_the_exit_paths_business():
     # slower machine when this line runs. Windows CI, 2026-09-12, 2 runs of 10: the set held
     # exactly one entry, `curve_dialog._CurveWorker`, and this test's own thread had let go.
     assert thread not in qt_shutdown.detached(), "and it lets go of itself when it ends"
+
+
+def test_a_worker_destroyed_after_running_and_before_finishing_names_itself(caplog):
+    """Qt's own `QThread: Destroyed while thread '' is still running` does not say WHICH worker,
+    and this app has eight kinds. Three crashes were collected from the Arbiter's machine and none
+    could be pinned to one by reading the log (finding 35). This line lands immediately before the
+    abort, and names it.
+
+    The reporting branch is exercised directly, because the state it reports on CANNOT be reached
+    in-process: destroying a started, unfinished worker is the abort itself — measured, exit 134.
+    What `watch` wires up is covered by the two tests below it.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        qt_shutdown._gone("_CurveWorker", {"started": True, "finished": False})
+
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "_CurveWorker" in said, f"the worker names itself: {said}"
+    assert "NOT finished" in said
+
+
+def test_a_worker_built_and_never_started_is_not_shouted_about(caplog):
+    """A worker that never ran has not finished either, and warning about those buries the one
+    line that matters — the suite alone produced five of them the first time this ran."""
+    import gc
+    import logging
+
+    from PySide6.QtCore import QThread
+
+    class _Never(QThread):
+        pass
+
+    _app()
+    worker = qt_shutdown.watch(_Never())
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        del worker
+        gc.collect()
+
+    assert not [r for r in caplog.records if "NOT finished" in r.getMessage()]
+
+
+def test_a_worker_that_finished_first_is_not_shouted_about(caplog):
+    """The ordinary death of a worker is not news, and a warning per curve fetch would bury the
+    one that matters."""
+    import gc
+    import logging
+
+    from PySide6.QtCore import QThread
+
+    class _Quick(QThread):
+        def run(self) -> None:
+            self.msleep(10)
+
+    _app()
+    worker = qt_shutdown.watch(_Quick())
+    worker.start()
+    worker.wait(4000)
+    QApplication.processEvents()  # the queued `finished` sets the flag
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        del worker
+        gc.collect()
+
+    assert not [r for r in caplog.records if "NOT finished" in r.getMessage()]

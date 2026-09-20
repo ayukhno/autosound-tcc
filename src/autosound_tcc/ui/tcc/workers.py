@@ -21,6 +21,7 @@ from autosound_tcc.core import (
     process_writer,
 )
 from autosound_tcc.core.rew_bridge import RewBridge
+from autosound_tcc.ui.tcc import qt_shutdown
 
 
 class _RewPingWorker(QThread):
@@ -38,6 +39,9 @@ class _RewPingWorker(QThread):
     def __init__(self, bridge: RewBridge) -> None:
         super().__init__()
         self._bridge = bridge
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         self.result.emit(self._bridge.is_reachable())
@@ -56,6 +60,9 @@ class _ContractWorker(QThread):
         super().__init__()
         self._project_dir = project_dir
         self._child = None
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         self.result.emit(contract_check.run(self._project_dir, register=self._took_child))
@@ -98,6 +105,9 @@ class _CliCatalogueWorker(QThread):
         self._active_omp = list(active_omp or [])
         #: The start's own reading, if there is one. Waited on instead of asked again.
         self._wait_for = wait_for
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         if self._wait_for is not None:
@@ -151,6 +161,9 @@ class _ReviewerProbeWorker(QThread):
         super().__init__()
         self._key = key
         self._project_dir = project_dir
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         import tempfile
@@ -208,6 +221,9 @@ class _CaptureCheckWorker(QThread):
     def __init__(self, project_dir) -> None:
         super().__init__()
         self._project_dir = project_dir
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         try:

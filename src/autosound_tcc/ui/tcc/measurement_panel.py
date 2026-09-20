@@ -138,6 +138,9 @@ class _RewScanWorker(QThread):
     def __init__(self, bridge: RewBridge) -> None:
         super().__init__()
         self._bridge = bridge
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         try:
@@ -171,6 +174,9 @@ class _RewRenameWorker(QThread):
         super().__init__()
         self._bridge = bridge
         self._pairs = pairs
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         renamed: list[tuple[str, str]] = []
@@ -227,7 +233,9 @@ class _LedgerWriteWorker(QThread):
         self._expected = list(expected or [])
         self._titles = list(titles or [])
         self._protective = dict(protective or {})
-
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
     @staticmethod
     def _why(exc: Exception) -> str:
         """The gate's own last line — its words, not ours (`PROTOCOL` §2.6 in the hub, and the

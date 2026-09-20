@@ -1184,8 +1184,25 @@ the only lever that reaches a thread blocked reading it.
 every tool call, and one is spawned at `16:12:07` before the `16:19:02` crash and at `16:24:10`
 before the `16:25:09` one — but its start site is guarded and its shutdown path only runs on a
 close, which did not happen. So the rule is now enforced in four places and the specific chain is
-not proven. The next measurement is instrumentation rather than reading: log every worker
-construction and destruction with its thread, and reproduce the set→group steps.
+not proven.
+
+*Instrumented instead of guessed further (2026-09-20).* `qt_shutdown.watch(self)` is called from
+every worker's constructor, and it logs a WARNING naming the class when that worker is destroyed
+after it STARTED and before it finished — which is the fatal shape, and the line lands immediately
+before Qt's own. Qt's message names no class and this app has eight kinds, which is why three
+collected crashes could not be pinned to one by reading the log. Narrowed to started workers after
+the first run: a worker built and never started has not finished either, and the suite alone
+produced five such lines, which is exactly the noise that would bury the real one.
+
+*The Arbiter's newest reproduction, 2026-09-20, changes the shape of the question.* It died after
+choosing set **`cap_007`** and with NO pair/group picked, having switched other sets before that
+without trouble. On `0.1.41` a set switch starts no worker of its own, so what died had been
+running already — and "other sets were fine" points at the set rather than at the act. His own
+read: *"може щось з сетом, бо там були проблеми і в них точно може чогось не бути"*. The window's
+offer list is a UNION of REW's titles and the measurement panel's round (`main_window._open_curves`),
+so a set missing something can put a title on offer that REW does not hold — which is the same
+root as finding 36's `KeyError`. Hypothesis, not a verdict: the next run with this build names the
+worker in the log, and that is what settles it.
 
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,

@@ -331,6 +331,9 @@ class _CurveWorker(QThread):
         #: so a phase-0 solo swept behind a protective high-pass was read with the filter still in
         #: it — and at a junction three times away that is tens of degrees (tcc#16).
         self._legs = dict(legs_by_title or {})
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
 
     def run(self) -> None:
         traces: list[Trace] = []
