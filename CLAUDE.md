@@ -62,7 +62,10 @@ earlier, and during a wave the hub changes nothing in the process.
 the skill's repo: found — take that same number; none — `max(W-N) + 1` across both repos. The milestone
 is `W-<N> · v0.1.42`, and its description is five lines and nothing else: `Goal:` · `Included:` ·
 `Not included:` · `Blockers:` · `Exit:`. A shared wave is told mechanically — `vendor/autosound-tuning-skill`
-moves in it — and then the order is skill first: the method is tagged, then tcc pins that published tag.
+moves in it — and then the order is skill first: the method is tagged, then tcc pins that published tag. That
+last step is **mechanical** since `TCC-021`: `ship.py` asks the method's remote (`git ls-remote --tags`)
+whether the pinned commit carries a published tag, and refuses the release when it does not — a build
+against an untagged method is a candidate, and `make ship CANDIDATE=vX.Y.Z` does not ask.
 
 What "released" is allowed to mean is `WAVES.md` §3.1: a table of checks `hub/scripts/release-preflight.py`
 and `scripts/ship.py` already make, plus the installer path walked by hand. Pointed at, not copied —

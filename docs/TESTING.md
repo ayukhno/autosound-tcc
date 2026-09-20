@@ -137,6 +137,57 @@ of them load-bearing, and `tests/test_ci_shard.py` holds each:
   platforms must agree that every file is claimed exactly once, or the run is green with a
   quarter of the suite unrun.
 
+### The four checks the sharding was not allowed to skip, run 2026-09-20
+
+`TCC-020` (hub #181) asked for four things to be checked **with commands, not by reading the YAML**.
+Three can be answered now; the fourth waits for the tag, because it is about a tag.
+
+**1. The shards do not become the whole answer.** The `pr-green` job that used to let a `main` push
+skip a suite a pull request had already run is gone, so the second branch of the condition has to
+hold: a push to `main` runs the suite WHOLE. It does — the shards are skipped there, by name:
+
+```
+$ gh run view 35431649941 -R ayukhno/autosound-tcc --json jobs \
+    --jq '.jobs[] | "\(.conclusion)  \(.name)"'
+success  ruff
+success  linux plan
+success  windows plan
+skipped  shard ${{ matrix.group }}/4 (${{ matrix.os }})
+skipped  suspects (${{ matrix.os }})
+success  linux (run 1)
+success  windows (run 1)
+```
+
+**2. `release-preflight.ci_verdict` still reads that arrangement as green.** A push run whose shard
+and suspects jobs are *skipped* could plausibly have read as "nothing succeeded" — the verdict has a
+`skipped` state that fails. It does not, because the vote is per WORKFLOW RUN, not per job:
+
+```
+$ python3 -c "…load hub/scripts/release-preflight.py…; ci_verdict(ci_runs(repo, sha), repo, sha)"
+runs: [('checks', 'push', 'success'), ('checks', 'pull_request', 'success')]
+state: green
+verdict: Check(name='ci-green', verdict='ok', line='CI green on ae9f6b6f6f0c: checks')
+```
+
+On `origin/main` at `ae9f6b6f`, which is the shape a tag gets cut from. The part still owed is the
+same call **on a real tagged commit**, and that happens when `v0.1.42` is cut — `make ship` runs it.
+
+**3. Branch protection cannot have been broken by renaming a job, because there is nothing to
+break.** The only ruleset on this repository forbids deletion and non-fast-forward, and requires no
+status check at all:
+
+```
+$ gh api repos/ayukhno/autosound-tcc/rulesets/22399321 --jq '.rules[].type'
+deletion
+non_fast_forward
+```
+
+So splitting one job into twelve renamed nothing that a required check was pointing at. Worth
+knowing in the other direction too: **nothing mechanical stops a red pull request from being
+merged here** — the gate is `make ship`, at the tag, not at the merge.
+
+**4. Measured again, the same way.** The two numbers are in the next section.
+
 ### What four shards actually buy, measured
 
 The two numbers side by side, 2026-09-19:
