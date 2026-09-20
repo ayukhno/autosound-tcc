@@ -1503,7 +1503,7 @@ big" and "a non-finite coordinate in the CURVES" — were both measured and both
 was a third thing neither of them covered, in the one item on the plot that does its own axis
 transform. Reading the stack for WHICH item was painting is what found it.
 
-### 40. "Could not reach GitHub" on the update row, once, with no cause established
+### 40. "Could not reach GitHub" while GitHub was fine: the only `git` on the machine was broken
 
 **What.** After `v0.1.42` was tagged, the Arbiter's window showed `ТСС 0.1.41 — не достукався до
 GitHub` while the very same code, run from his shell on that machine, answered
@@ -1520,14 +1520,52 @@ GitHub` while the very same code, run from his shell on that machine, answered
 * not a slow network — the log's next line lands eleven milliseconds after the spawn, which is an
   immediate failure, not a round trip.
 
-**Not reproduced.** On the next build the probe succeeded and the log carries no failure line at
-all. So the cause is not established, and this entry says so rather than crediting the fix below
-with something it did not do.
+**CAUSE FOUND, 2026-09-20, and it was in the app's own report all along.** The
+`[Command-line tools]` block of the very same dialog, two lines below the update row, printed it
+in full:
 
-**What changed, and what it is worth.** `updates._git` logged that git was SPAWNED and never what
-it answered, so a missing git, a dead network, a refusing server and a bad URL all reached the
-window as one sentence. It now logs the command, the exit code and git's own words at WARNING
-(`37fac7a`). That fixes no bug; it means the next occurrence explains itself in one line instead
-of costing a session.
+```
+git  xcrun: error: unable to load libxcrun (... fat file, but missing compatible architecture
+     (have 'arm64,arm64e', need 'x86_64'))   (/usr/bin/git)
+```
+
+`/usr/bin/git` on macOS is only a shim for the Xcode Command Line Tools, and on that machine it
+could not run at all. It was also the ONLY git there (`which -a git` → one line), so every probe
+the app made failed — updates, and the project backup with them.
+
+**It had worked before.** The Arbiter has updated through this window more than once, so the shim
+did not fail from the start: it broke at some point on that machine, and the likeliest mover is a
+macOS update, which is what touches the Command Line Tools. That is a reading, not a measurement,
+and it is written as one — the moment it broke was not captured by anything, which is precisely
+what the logging below changes for next time. `brew install git` fixed it
+outright: the bundle's own launcher already puts `/opt/homebrew/bin` ahead of `/usr/bin`, so a
+real git is preferred the moment one exists. The row then read `0.1.42 — актуальна` and the
+method's row offered `3.0.59`.
+
+**What is still not established,** and is recorded rather than guessed: why that shim failed only
+when the app was launched from Finder. From a terminal — including the app's own interpreter,
+`~/.local/share/uv/tools/autosound-tcc/bin/python3` — the same `/usr/bin/git` answered fine. The
+architecture was identical either way (`platform.machine()` → `arm64` in both), both bundles
+behaved the same, and nothing in `desktop_entry.py` touches architecture. Not chased further: the
+machine has a working git now, and the cost of the next step was higher than what it would buy.
+
+**Ruled out on the way, each by a command rather than by reasoning:** PATH to git (the log shows
+git spawning), the app's no-prompting environment (the exact invocation returns the full tag list
+on both machines), a slow network (the failure landed eleven milliseconds after the spawn), and
+Rosetta (`arm64` on both sides).
+
+**What changed, and it is the part worth keeping.** The app HAD the sentence and showed a
+different one. Three things were wrong with how it answered, and all three are fixed:
+
+* `updates._git` logged that git was SPAWNED and never what it answered (`37fac7a`), so every
+  outcome looked alike;
+* two of the three failure paths did not log even then — the exception path returns before the
+  exit-code line, and exit 0 with empty output is a third answer, not a failure (`b39014f`);
+* the row itself said `no_network` for all of them. It now says `probe_failed` and carries git's
+  own words (`22643c0`).
+
+None of that fixes a machine. It means the next one says in one line what this one cost a
+session — which is the same lesson finding 35 bought: an event logged without its outcome makes
+every outcome look alike.
 
 **If it comes back:** `grep "git ls-remote exited" ~/Library/Logs/autosound-tcc/tcc.log`.
