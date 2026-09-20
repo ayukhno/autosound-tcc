@@ -31,7 +31,7 @@ Four sources, and nothing else was counted:
 
 ## Proposed for W-1
 
-### Package A — the window neither lies nor dies (first, and nothing starts before it)
+### Package «neither lies nor dies» — the window's correctness (first, and nothing starts before it)
 
 - **`35` the crash** — a curve worker destroyed while running; reproduction: in the curve window
   pick a set, then pick a group. Twice, on two sets.
@@ -44,7 +44,7 @@ Four sources, and nothing else was counted:
   rounds in a row), while the load form in the same state cannot be opened at all. One half lenient,
   the other strict.
 
-### Package B — the window stops getting in the way
+### Package «out of the way» — the window's noise and missing affordances
 
 - **`29`** the `UNUSABLE` banner: sixteen lines across the top, no way to dismiss it.
 - **`28`** the REW import form: the New name column pre-filled (ours or the method's), draggable
@@ -59,7 +59,7 @@ Four sources, and nothing else was counted:
 - **`34`** capture order: drag a selection rather than a row, save the order deliberately, and copy
   it between RTA and SW.
 
-### Package C — the method's five, whose visible half is ours (`SKL-046`)
+### Package «the method's five» — changes whose visible half is ours (`SKL-046`)
 
 Needs the method's `w1` branch first, then its published tag.
 
@@ -73,7 +73,7 @@ Needs the method's `w1` branch first, then its published tag.
 - **Imported measurements carry their origin** (S-048) — the project they came from and the `_N`
   they had there.
 
-### Package D — words, and the header that speaks them
+### Package «words» — the vocabulary, and the header that speaks it
 
 - **The vocabulary**, settled by the Arbiter 2026-09-20: **варіант** (what the desk proposes in
   Phase 1) → **конфігурація = версія `v_NNN`** (what is in the processor now) → **пресет** (the slot
@@ -100,15 +100,15 @@ Needs the method's `w1` branch first, then its published tag.
 
 ## Order, and why this one
 
-1. **A**, and its first item is `36`, not `35`: the crash grows out of the stale list, and a crash
+1. **Correctness**, and its first item is `36`, not `35`: the crash grows out of the stale list, and a crash
    fixed without its cause is a crash that comes back by another path. Then `35` with its own
    measurement of the detach bookkeeping, then `33`, then `#43`.
-2. **D's vocabulary pass** next, because `B` and `C` both write strings, and doing the rename after
-   them means touching the same lines twice in four languages.
-3. **C** as soon as the method's `w1` branch is installable — test against the branch
+2. **The vocabulary pass** next, because «out of the way» and «the method's five» both write
+   interface strings, and renaming after them means touching the same lines twice in four languages.
+3. **The method's five** as soon as its `w1` branch is installable — test against the branch
    (`install.sh --skill-ref w1`), not against a release; `fetch-binary` still takes the last tag
    (`--tag v3.0.58`), which is not a bug.
-4. **B**, which is the widest but has no order inside it.
+4. **Out of the way**, which is the widest package but has no order inside it.
 5. **F-070** last of the wave's own work: it reads state the earlier packages may move.
 
 ## Exit criteria
@@ -122,13 +122,13 @@ Needs the method's `w1` branch first, then its published tag.
 
 ## Models, and what each is for
 
-- **The implementation session: Opus.** Every item in package A is judgment — a race in thread
+- **The main session — the one that talks to the Arbiter — runs Opus.** Every item in package A is judgment — a race in thread
   teardown, and two halves of a capture flow that disagree. `F-070` and the vocabulary are design
   decisions in four languages. This is not work a cheaper model finishes correctly faster.
 - **Sonnet, for mechanical sweeps, and only with the Arbiter's word**: reading a source tree to
   list every place a term appears, checking the four language blocks have the same keys, running a
   suite and reporting failures. Reading and cross-checking, never deciding.
-- **Fable: the main session only**, never a subagent.
+- **Fable: the main session only** — the conversation itself, never a subagent it spawns.
 - At most four subagents at once, and only against a written plan with its cost named first.
 
 ## Starting the next session
