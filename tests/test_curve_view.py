@@ -541,6 +541,11 @@ def test_the_frequency_axis_speaks_the_trade_s_own_numbers():
     a smear. Nobody says "the null at four times ten to the second"."""
     from autosound_tcc.ui.tcc.curve_view import LogHzAxis
 
+    # `AxisItem.__init__` builds a graphics item, and one built before the QApplication ABORTS
+    # the process. These three said nothing and passed only because something earlier in the
+    # file had called `_app()` — so each died whenever it ran first, which `-n 4` does by chance
+    # (F-071) and `-k` does on purpose.
+    _app()
     axis = LogHzAxis(orientation="bottom")
     axis.tickValues(math.log10(20), math.log10(20000), 1400)  # decides which values get a label
 
@@ -556,6 +561,11 @@ def test_the_axis_thins_labels_and_never_the_grid_lines():
     window got narrow enough to need one."""
     from autosound_tcc.ui.tcc.curve_view import LogHzAxis
 
+    # `AxisItem.__init__` builds a graphics item, and one built before the QApplication ABORTS
+    # the process. These three said nothing and passed only because something earlier in the
+    # file had called `_app()` — so each died whenever it ran first, which `-n 4` does by chance
+    # (F-071) and `-k` does on purpose.
+    _app()
     axis = LogHzAxis(orientation="bottom")
     lo, hi = math.log10(20), math.log10(20000)
 
@@ -580,6 +590,11 @@ def test_the_grid_has_two_weights_the_way_rews_does():
     what makes 300 Hz findable on a picture whose labels stop at 100 and 1k."""
     from autosound_tcc.ui.tcc.curve_view import LogHzAxis
 
+    # `AxisItem.__init__` builds a graphics item, and one built before the QApplication ABORTS
+    # the process. These three said nothing and passed only because something earlier in the
+    # file had called `_app()` — so each died whenever it ran first, which `-n 4` does by chance
+    # (F-071) and `-k` does on purpose.
+    _app()
     axis = LogHzAxis(orientation="bottom")
 
     levels = dict(axis.tickValues(math.log10(20), math.log10(20000), 900))

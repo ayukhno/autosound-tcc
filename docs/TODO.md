@@ -2006,6 +2006,28 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-072 — Three axis tests built a Qt graphics item before the QApplication
+
+**Статус**: done 2026-09-20 · the same class as F-071, and found by it
+
+`test_the_grid_has_two_weights_the_way_rews_does`, `test_the_frequency_axis_speaks_the_trade_s_own_numbers`
+and `test_the_axis_thins_labels_and_never_the_grid_lines` each build a `LogHzAxis` and none of
+them called `_app()` first. `AxisItem.__init__` builds a graphics item — `showLabel` →
+`updateAutoSIPrefix` → `_updateLabel` — and one built before the QApplication aborts the process.
+
+They passed because something earlier in the file had made the application. Each died whenever it
+ran FIRST, which is what an `-n 4` worker does by chance and what `-k <one name>` does on purpose:
+
+```
+$ .venv/bin/python -m pytest tests/test_curve_view.py -k grid_has_two_weights
+Fatal Python error: Aborted
+  AxisItem.py line 350 in _updateLabel
+```
+
+Fixed by calling `_app()` in each, the rule the module's own `_dialog` helper already follows.
+F-071 stays open: it is a different test and the crash there is in widget teardown, not
+construction. This one was found while chasing it.
+
 ### F-071 — `test_only_the_current_phase_starts_expanded` crashes its worker under `-n 4`
 
 **Статус**: open 2026-09-20 · named, not diagnosed — first stumble

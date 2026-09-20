@@ -225,7 +225,7 @@ class _LedgerWriteWorker(QThread):
     done = Signal(dict)
 
     def __init__(self, *, project_dir: Path, round_id: str, version, expected: list,
-                 titles: list, protective: dict) -> None:
+                 titles: list, protective: dict, auto=()) -> None:
         super().__init__()
         self._project_dir = project_dir
         self._round_id = str(round_id or "")
@@ -233,9 +233,15 @@ class _LedgerWriteWorker(QThread):
         self._expected = list(expected or [])
         self._titles = list(titles or [])
         self._protective = dict(protective or {})
+        #: Channels whose `OFF` this window filled in because they came in, as against the ones a
+        #: person typed. They are signed `front_end` (method `v3.0.59`, S-036): ten channels
+        #: marked `OFF` in one second is not ten answers, and the method reads a front-end's
+        #: blanket `OFF` as `check` rather than as settled.
+        self._auto = set(auto or ())
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
+
     @staticmethod
     def _why(exc: Exception) -> str:
         """The gate's own last line — its words, not ours (`PROTOCOL` §2.6 in the hub, and the
@@ -267,7 +273,10 @@ class _LedgerWriteWorker(QThread):
                 result["refused"].append(self._why(exc))
         for channel, legs in sorted(self._protective.items()):
             try:
-                process_writer.set_protective(self._project_dir, channel, legs)
+                process_writer.set_protective(
+                    self._project_dir, channel, legs,
+                    source="front_end" if channel in self._auto else "user",
+                )
                 result["prot_done"].append(channel)
             except Exception as exc:  # noqa: BLE001
                 result["prot_refused"].append(
@@ -1128,7 +1137,7 @@ class MeasurementPanel(QWidget):
                  for row in rows if row.identified]
         if not taken and not self._protective:
             return
-        protective = self._protective_for(rows, titles)
+        protective, auto = self._protective_for(rows, titles)
         if not process_writer.is_available():
             return  # no skill installed: the project's own store is all there is to write
         if not self._round_id and self._capture_version is None:
@@ -1146,6 +1155,7 @@ class MeasurementPanel(QWidget):
             expected=list(self._expected),
             titles=taken,
             protective=protective,
+            auto=auto,
         ))
         worker.done.connect(self._on_ledger_written)
         worker.start()
@@ -1166,6 +1176,7 @@ class MeasurementPanel(QWidget):
         `core/protective.should_de_embed` answers with `"check"`.
         """
         out = dict(self._protective)
+        auto: set = set()
         for row in rows:
             if not row.identified:
                 continue
@@ -1173,7 +1184,8 @@ class MeasurementPanel(QWidget):
                 row, str((titles or {}).get(row.uuid) or ""), config.project_dir())
             if channel and channel not in out:
                 out[channel] = "OFF"
-        return out
+                auto.add(channel)
+        return out, auto
 
     def _on_ledger_written(self, result: dict) -> None:
         """What the ledger accepted, in the status line — refusals named one by one."""

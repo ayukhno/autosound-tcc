@@ -44,6 +44,19 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _bank_next_version(project):
+    """Write one more ledger snapshot, through the skill's own writer for the reason `_intake`
+    gives: a hand-written `v_00N` goes stale the day the schema moves."""
+    state = vendor_loader.load_dsp_state()
+    history = state.PresetHistory(str(project / "state"), "FULL", project_dir=str(project))
+    history.snapshot({
+        "preset": "FULL",
+        "sample_rate": 96000,
+        "channels": {"w-L": {"hp": None, "lp": None, "gain_db": 0.0, "ta_ms": 0.0,
+                             "polarity": "NORM"}},
+    }, note="fixture: a second banked configuration")
+
+
 def _names(session):
     return [item.name for group in session.groups for item in group.items]
 
@@ -599,7 +612,11 @@ def test_an_old_round_opened_with_the_ledger_version_counts_by_the_series_of_its
     ledger version and `_N` are different counters; the method finds a round by either."""
     process = _round(project, version="v_001", expected=["w-L_49 (sw)"], taken=["w-L_49 (sw)"])
     process.close_capture("done")
-    # A later round open, so the old one reaches the checklist only as a past round.
+    # A later round open, so the old one reaches the checklist only as a past round. `v_002` is
+    # BANKED first: since method `v3.0.59` a `v_NNN` round whose snapshot is not on disk is
+    # refused (TCC-022, which TCC asked for), and this test is deliberately about a round opened
+    # at a LEDGER version — so the honest fixture is one where that version exists.
+    _bank_next_version(project)
     process.start_capture("v_002", expected=["w-R_49 (sw)"])
 
     session = mv.build_session("0", 49, [], project, taken=[])
@@ -615,11 +632,15 @@ def test_the_series_is_read_by_the_grammar(project):
 
 
 def test_the_highest_series_among_the_rounds(project):
+    """The second round is `_2`, not `_3`: since method `v3.0.59` a project's series numbers are
+    its OWN and consecutive, and a foreign one is refused unless `--origin` says where it came
+    from (S-048). The jump to `_3` here was incidental — what is asserted is that the highest of
+    several rounds is found, and `_2` says that as well as `_3` did."""
     process = _round(project, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
     process.close_capture("done")
-    process.start_capture(3, expected=[_as_typed("w-L_3 (sw)")])
+    process.start_capture(2, expected=[_as_typed("w-L_2 (sw)")])
 
-    assert mv.highest_series(project) == 3
+    assert mv.highest_series(project) == 2
 
 
 def test_an_rta_the_check_does_not_apply_to_is_taken_not_unusable(project):

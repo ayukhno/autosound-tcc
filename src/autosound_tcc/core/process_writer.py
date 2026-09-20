@@ -284,7 +284,7 @@ def record_reviewer(
     return _run(project_dir, args)
 
 
-def set_protective(project_dir: Path, channel: str, legs) -> str:
+def set_protective(project_dir: Path, channel: str, legs, source: str = "user") -> str:
     """Declare what was in the signal path for one channel of the OPEN capture round.
 
     `legs` is `"OFF"` -- an ANSWER, meaning this channel was swept with nothing in the chain -- or
@@ -292,6 +292,13 @@ def set_protective(project_dir: Path, channel: str, legs) -> str:
     entirely is a THIRD thing: nobody said, and it is recorded by not calling this at all. The
     de-embed refuses that case rather than treating it as clean, which is the whole point of the
     feature.
+
+    `source` says WHO answered — `user`, `front_end` or `default` (method `v3.0.59`, S-036). The
+    CLI's own default is `user`, so a caller that says nothing signs its write as a person, and a
+    bulk import doing that for ten channels in one second is the exact claim the field was added
+    to stop: the method reads a front-end's blanket `OFF` as `check` rather than as an answer.
+    The default is kept at `user` deliberately — the dialog IS a person, and the one caller that
+    is not says so.
 
     Nothing is validated here. The skill refuses a leg missing `f`/`type`/`slope` at write time,
     and that refusal comes back verbatim through `ProcessWriterError` for the dialog to show: a UI
@@ -313,6 +320,12 @@ def set_protective(project_dir: Path, channel: str, legs) -> str:
             values = [leg.get("f"), leg.get("type"), leg.get("slope")]
             args.append(f"--{kind}")
             args += [str(value) for value in values if value not in (None, "")]
+    if source and source != "user":
+        # Only when it differs: `--source` landed in `v3.0.59`, and an older method answers an
+        # unknown flag with its usage text (`_refuse_if_too_old` reads that per COMMAND, not per
+        # flag). Sending it only where it changes the meaning keeps the ordinary path working
+        # against the method this build is paired with and against the one before it.
+        args += ["--source", str(source)]
     return _run(project_dir, args)
 
 

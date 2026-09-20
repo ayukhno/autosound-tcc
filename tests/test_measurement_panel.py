@@ -676,8 +676,11 @@ def _ledger_calls(monkeypatch):
                         lambda d, v, e: calls.append(("start", v, tuple(e))))
     monkeypatch.setattr(mp.process_writer, "record_capture",
                         lambda d, t: calls.append(("taken", t)))
+    # `source` is recorded too (method `v3.0.59`, S-036): who answered is part of what was
+    # written, and a double that drops it cannot tell a person's answer from a bulk default.
     monkeypatch.setattr(mp.process_writer, "set_protective",
-                        lambda d, c, legs: calls.append(("protective", c, legs)))
+                        lambda d, c, legs, source="user":
+                        calls.append(("protective", c, legs, source)))
     monkeypatch.setattr(mp.process_view, "capture_round", lambda *_a, **_k: {"id": "cap_003"})
     return calls
 
@@ -702,7 +705,7 @@ def test_taking_measurements_in_opens_the_pass_when_no_session_did(tmp_path, mon
 
     assert calls[0] == ("start", "6", ("w-L_6 (sw)", "w-R_6 (sw)"))
     assert ("taken", "w-L_6 (sw)") in calls
-    assert ("protective", "w-L", "OFF") in calls
+    assert ("protective", "w-L", "OFF", "user") in calls
     assert seen["opened"] == "cap_003" and seen["round_id"] == "cap_003"
 
 
@@ -743,7 +746,7 @@ def test_a_refused_capture_does_not_silence_the_protective_record(tmp_path, monk
     worker.run()
 
     assert seen["refused"] == ["no such measurement in REW"], "the gate's own last line"
-    assert ("protective", "w-L", "OFF") in calls
+    assert ("protective", "w-L", "OFF", "user") in calls
 
 
 def test_protection_the_round_does_not_hold_after_the_write_is_not_counted_as_recorded(
@@ -761,13 +764,16 @@ def test_protection_the_round_does_not_hold_after_the_write_is_not_counted_as_re
     (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
                                            encoding="utf-8")
     vendor_loader.load_process().Process(str(tmp_path / "process")).start_capture(
-        "v_001", ["w-L_1 (sw)", "m-L_1 (sw)"])
+        # A SERIES, not a ledger version: this project has no snapshot on disk, and since method
+        # `v3.0.59` a `v_NNN` round whose snapshot is missing is refused (TCC-022, which TCC asked
+        # for). The titles here are `_1`, so the series is what they were always taken at.
+        "1", ["w-L_1 (sw)", "m-L_1 (sw)"])
     round_id = process_view.capture_round(tmp_path)["id"]
     real = process_writer.set_protective
 
-    def _keeps_only_w_l(project_dir, channel, legs):
+    def _keeps_only_w_l(project_dir, channel, legs, source="user"):
         # `m-L` reports success and writes nothing: the defect being caught.
-        return real(project_dir, channel, legs) if channel == "w-L" else ""
+        return real(project_dir, channel, legs, source) if channel == "w-L" else ""
 
     monkeypatch.setattr(process_writer, "set_protective", _keeps_only_w_l)
     worker = _LedgerWriteWorker(

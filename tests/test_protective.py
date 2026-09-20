@@ -125,13 +125,23 @@ def test_no_round_reads_as_no_answer_rather_than_as_a_clean_chain(tmp_path):
 
 
 def _round(tmp_path):
-    """A project with an open capture round, the way the dialog expects to find one."""
+    """A project with an open capture round, the way the dialog expects to find one.
+
+    Opened at its SERIES number, not at `v_001`. These fixtures have no ledger — they are the
+    phase-0 baseline — and since method `v3.0.59` a `v_NNN` round whose snapshot is not on disk is
+    refused (TCC-022, which TCC asked for). The refusal names this very way out. The fixtures were
+    saying "taken under configuration v_001" about measurements taken before anything was banked,
+    which is the thing that gate exists to stop.
+    """
     from autosound_tcc.core import vendor_loader
 
     (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
                                            encoding="utf-8")
     proc = vendor_loader.load_process().Process(str(tmp_path / "process"))
-    proc.start_capture("v_001", ["m-L_0 (sw)"])
+    # Both channels the dialog is opened on, because since `v3.0.59` a protective record for a
+    # channel the round never captured is refused (S-036, the Arbiter's rears). A fixture that
+    # writes `w-L` into a pass that only took `m-L` was describing a pass that did not happen.
+    proc.start_capture("0", ["m-L_0 (sw)", "w-L_0 (sw)"])
     return tmp_path
 
 
@@ -409,7 +419,7 @@ def test_the_button_opens_on_the_round_being_reviewed_not_on_the_whole_rig(tmp_p
 
     project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}, {"code": "tw-L"}])
     proc = vendor_loader.load_process().Process(str(project / "process"))
-    proc.start_capture("v_001", ["m-L_01 (sw)", "m-R_01 (sw)"])
+    proc.start_capture("01", ["m-L_01 (sw)", "m-R_01 (sw)"])  # a baseline: series, not a ledger
 
     assert round_channel_codes(project) == ["m-L", "m-R"]
 
@@ -484,3 +494,31 @@ def test_the_row_form_has_the_protection_form_s_own_fields():
     form._clear()
     assert form.legs() is None, "cleared is 'read the curve as measured'"
 
+
+
+def test_who_answered_is_recorded_with_the_protective_record(tmp_path):
+    """Method `v3.0.59` (SKL-046, S-036): a protective record carries WHO answered —
+    `user | front_end | default`. Ten channels marked `OFF` in one second is not a person
+    answering ten times, and the method reads a front-end's blanket `OFF` as `check` rather than
+    as a settled answer.
+
+    The CLI's own default is `user`, so a caller that says nothing signs every bulk write as a
+    person. TCC has both kinds in one flow and they must not be signed alike:
+
+    * the protective dialog is a person typing legs per channel → `user`;
+    * the import filling an empty cell with `OFF` because the channel came in is the FRONT END
+      answering for a channel it captured → `front_end`.
+    """
+    from autosound_tcc.core import process_writer, vendor_loader
+
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    proc = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    proc.start_capture("0", ["m-L_0 (sw)", "w-L_0 (sw)"])
+
+    process_writer.set_protective(tmp_path, "m-L", "OFF")                      # the default
+    process_writer.set_protective(tmp_path, "w-L", "OFF", source="front_end")
+
+    record = proc.load()["capture"]["protective_source"]
+    assert record["m-L"] == "user", "a caller that says nothing is still a person"
+    assert record["w-L"] == "front_end", "and the front end can say it was the front end"
