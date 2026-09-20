@@ -2008,7 +2008,30 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-060 — Carry `planned` on a skipped capture, once the method emits it
 
-**Статус**: відкладено 2026-09-20 · waits for the method's release of `TCC-022` (autosound-hub#190)
+**Статус**: done 2026-09-20 · the readers carry it; the PIN still waits for the method's tag
+
+The method landed `TCC-022` on its `w1` branch (`4d5f5c3`), and it gave more than was asked for:
+
+* `skipped[title]` carries `planned`, mirroring `capture_taken` — as asked;
+* the round and `capture_task_issued` carry `version_kind` (`ledger` | `series` | `null`), so which
+  counter a `version` belongs to is RECORDED rather than read off the spelling;
+* `contract.py` reports **every** skip now (it used to intersect `skipped` with `missing`, which is
+  derived from `expected`), and names the ones outside the list in `skipped_unplanned`.
+
+Ours reads all three: `state/process_view.py` carries `planned` and `version_kind` (`None` on a
+journal written before them — not `False`, so a caller can tell "did not say" from "was not
+planned"), and `ui/tcc/diagnostics_panel.py` marks an unplanned skip in the method's own words.
+Both shapes are tested, because the pin is still `v3.0.58` until the method tags and both arrive.
+
+**Named while doing it, not done:**
+
+* `state/measurement_view.py:180` still infers the counter from the spelling
+  (`str(round_.get("version")).lstrip("v_").lstrip("0")`) — exactly the guess `version_kind` exists
+  to end. Worth revisiting when the pin moves; not touched here, because it is matching logic and a
+  quiet change to it moves which round a capture belongs to.
+* The contract report's `rew` block carries `version` and **not** `version_kind`, so the diagnostics
+  line cannot say which counter a round used even now. If that is wanted it is a request to the
+  method, not a change here.
 
 `skip_capture` records a title that was never in the round's `expected` list without marking it,
 while `record_capture` marks an unplanned arrival as `planned: false`. Asked of the method in

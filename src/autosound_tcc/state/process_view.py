@@ -126,12 +126,17 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
         round_ = rounds.get(rid)
         if round_ is None:
             round_ = rounds[rid] = {"id": rid, "expected": [], "taken": {}, "skipped": {},
-                                    "protective": {}}
+                                    "protective": {}, "version_kind": None}
             order.append(rid)
         kind = event.get("type")
         if kind == "capture_task_issued":
             round_["phase"] = event.get("phase")
             round_["version"] = event.get("version")
+            # WHICH counter that version is: `ledger` (`v_001`) or `series` (`_17`). They are
+            # different counters and neither is derived from the other, so reading it off the
+            # spelling was a guess — the method records it since TCC-022 (hub #190). `None` on a
+            # journal written before that, which is every journal this pin can still produce.
+            round_["version_kind"] = event.get("version_kind")
             round_["issued"] = event.get("at")
             round_["step"] = event.get("step")
             round_["expected"] = [str(t) for t in (event.get("expected") or [])]
@@ -141,7 +146,13 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
                 "planned": event.get("planned"),
             }
         elif kind == "capture_skipped":
-            round_["skipped"][str(event.get("title"))] = {"reason": event.get("reason")}
+            # `planned` beside the reason, the way `capture_taken` above carries it: `expected[]`
+            # is not a closed set, so a reader cannot assume everything skipped was ever asked for
+            # (TCC-022). `None` — not `False` — when the method that wrote the line did not say.
+            round_["skipped"][str(event.get("title"))] = {
+                "reason": event.get("reason"),
+                "planned": event.get("planned"),
+            }
         elif kind == "capture_verified":
             # The arithmetic's own verdict per title (SCR-040), folded onto the entry the panel
             # reads. `bad` carries no issue list here — the open round in state does, and for a

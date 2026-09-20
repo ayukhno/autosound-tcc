@@ -1116,8 +1116,15 @@ def _rew_line(report: ContractReport) -> str:
         if not rew.get("complete"):
             line = f"{line} — missing {rew.get('missing')}"
         # A skip is a decision with a reason, not work still owed (hub #154 §3) — said apart.
+        # And a skip of a title the round never asked for is a THIRD fact (method TCC-022, hub
+        # #190): before it, such a skip was reported nowhere at all, because `skipped` was
+        # intersected with `missing`. Now it arrives, and reads exactly like a decided-against
+        # capture unless it is marked. The words are the method's own, from the same branch of
+        # `contract.py` — one vocabulary for one fact, not a second one invented here.
+        unplanned = set(rew.get("skipped_unplanned") or [])
         for title, reason in skipped.items():
-            line = f"{line}\n    skipped: {title} — {reason or 'no reason on record'}"
+            mark = "  (never expected by this round)" if title in unplanned else ""
+            line = f"{line}\n    skipped: {title} — {reason or 'no reason on record'}{mark}"
         return f"{prefix}{line}" if prefix else line
     return f"{prefix}REW: —" if prefix else "REW: —"
 

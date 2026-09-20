@@ -895,3 +895,46 @@ def test_report_a_problem_offers_both_routes_with_the_installation_block(monkeyp
     link = kwargs["github_link"]("it froze")
     assert link.startswith("https://github.com/ayukhno/autosound-tcc/issues/new?")
     assert "template=beta-report.yml" in link and "0.1.4" in link and "it+froze" in link
+
+
+def test_the_rew_line_marks_a_skip_of_a_title_the_round_never_expected():
+    """Method `TCC-022` (hub #190): every skip is reported now, including one outside `expected`.
+
+    It used to intersect `skipped` with `missing`, and `missing` comes from `expected` — so a skip
+    of a title nobody asked for vanished from the report entirely. Four rear titles went that way
+    on a live project. `skipped_unplanned` names them, and this line has to say which is which:
+    "decided against" and "nobody ever asked for this" are different facts, and a reader who
+    cannot tell them apart learns the wrong thing from the same sentence.
+
+    The words are the method's own (`contract.py`, the `skipped_unplanned` branch) — one
+    vocabulary, not a second one invented here.
+    """
+    from autosound_tcc.ui.tcc.diagnostics_panel import _rew_line
+
+    mixed = _report(cross_checks={"rew": {
+        "reachable": True, "round": "cap_006", "phase": 0, "version": "v_002",
+        "expected": ["w-L_1 (sw)", "r-L_1 (sw)"], "found": ["w-L_1 (sw)"],
+        "missing": [], "complete": True,
+        "skipped": {"r-L_1 (sw)": "rear deferred", "r-R_1 (sw)": "rears not wired"},
+        "skipped_unplanned": ["r-R_1 (sw)"],
+    }})
+    line = _rew_line(mixed)
+
+    assert "r-R_1 (sw) — rears not wired  (never expected by this round)" in line
+    # The planned skip keeps its plain form: the mark is the exception, not decoration on both.
+    assert "r-L_1 (sw) — rear deferred\n" in line + "\n"
+    assert "r-L_1 (sw) — rear deferred  (never" not in line
+
+
+def test_the_rew_line_of_a_method_that_does_not_send_the_key_is_unchanged():
+    """The pin is still `v3.0.58` until the method tags, so both shapes arrive at this reader."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _rew_line
+
+    old = _report(cross_checks={"rew": {
+        "reachable": True, "round": "cap_007", "phase": 0, "version": "v_001",
+        "expected": ["w-L_1 (sw)"], "found": [], "missing": [], "complete": True,
+        "skipped": {"w-L_1 (sw)": "not today"},
+    }})
+    line = _rew_line(old)
+
+    assert "w-L_1 (sw) — not today" in line and "never expected" not in line

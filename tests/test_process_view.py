@@ -332,3 +332,61 @@ def test_without_the_stale_map_the_plan_is_unchanged(project, process):
     steps = {s.id: s for phase in process_view.to_plan(process.load()) for s in phase.steps}
 
     assert steps["2.1"].tag["en"] == "ok"
+
+
+def test_a_round_carries_the_counter_it_named_and_whether_a_skip_was_planned(project):
+    """Method `TCC-022` (hub #190) added two facts to the journal, and a reader that drops them
+    puts the panel back to guessing.
+
+    `version_kind` — `ledger` or `series` — is the round saying WHICH counter its `version` is.
+    They are different counters and neither is derived from the other, so reading it off the
+    spelling was always a guess; the method now records it instead.
+
+    `planned` on a skip mirrors `record_capture`'s: `expected[]` is not a closed set, and a reader
+    of a round cannot assume everything in `skipped` was ever asked for.
+
+    Written as journal lines rather than through `Process`, on purpose: the checked-out method is
+    still `v3.0.58` (the pin moves when the method tags), so the fixture cannot produce the new
+    shape yet. What is pinned here is OUR mapping of a documented event, which is the thing this
+    module owns.
+    """
+    import json
+
+    journal = process_view.journal_file(project)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("\n".join(json.dumps(e) for e in [
+        {"type": "capture_task_issued", "capture": "cap_001", "at": "t0", "phase": "0",
+         "version": "_1", "version_kind": "series", "expected": ["w-L_1 (sw)"]},
+        {"type": "capture_skipped", "capture": "cap_001", "at": "t1",
+         "title": "r-R_1 (sw)", "reason": "rears not wired", "planned": False},
+        {"type": "capture_skipped", "capture": "cap_001", "at": "t2",
+         "title": "w-L_1 (sw)", "reason": "not today", "planned": True},
+    ]) + "\n", encoding="utf-8")
+
+    round_ = process_view.capture_rounds(project)[0]
+
+    assert round_["version_kind"] == "series"
+    assert round_["skipped"]["r-R_1 (sw)"]["planned"] is False
+    assert round_["skipped"]["w-L_1 (sw)"]["planned"] is True
+    # The reason is still there: the new field is carried BESIDE it, not instead of it.
+    assert round_["skipped"]["r-R_1 (sw)"]["reason"] == "rears not wired"
+
+
+def test_a_round_written_by_a_method_without_those_fields_still_reads(project):
+    """The pin is `v3.0.58` until the method tags, and journals written before it never go back:
+    absent is `None`, and a caller can tell that from `False` if it needs to."""
+    import json
+
+    journal = process_view.journal_file(project)
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("\n".join(json.dumps(e) for e in [
+        {"type": "capture_task_issued", "capture": "cap_001", "at": "t0", "phase": "0",
+         "version": "v_001", "expected": ["w-L_1 (sw)"]},
+        {"type": "capture_skipped", "capture": "cap_001", "at": "t1",
+         "title": "w-L_1 (sw)", "reason": "not today"},
+    ]) + "\n", encoding="utf-8")
+
+    round_ = process_view.capture_rounds(project)[0]
+
+    assert round_["version_kind"] is None
+    assert round_["skipped"]["w-L_1 (sw)"] == {"reason": "not today", "planned": None}
