@@ -211,13 +211,19 @@ class ProtectiveDialog(QDialog):
     `"OFF"` — which is the same instruction to the analysis, spelled out. Cancel writes nothing.
     """
 
-    def __init__(self, project_dir: Path, channels, parent=None) -> None:
+    def __init__(self, project_dir: Path, channels, parent=None, capture_id: str = "") -> None:
         super().__init__(parent)
         self.setModal(True)
         self.setWindowTitle(i18n.t("protTitle"))
         self.setMinimumWidth(640)
         self._project_dir = Path(project_dir)
-        self._record = protective.record_for(self._project_dir)
+        #: The round being CORRECTED, when this was opened on a closed one (skill `#48`). Empty
+        #: means the ordinary case: whatever round is open, written into directly.
+        self._capture_id = str(capture_id or "")
+        self._record = (protective.record_for_capture(self._project_dir, self._capture_id)
+                        if self._capture_id else protective.record_for(self._project_dir))
+        #: The why, asked only for a correction — the gate requires it there and nowhere else.
+        self._reason = None
         self.written: list[str] = []
 
         layout = QVBoxLayout(self)
@@ -253,6 +259,19 @@ class ProtectiveDialog(QDialog):
         scroll.setWidget(holder)
         layout.addWidget(scroll, stretch=1)
 
+        if self._capture_id:
+            # A closed round is not written into, it is CORRECTED — and a correction that does not
+            # say why is indistinguishable from a second opinion, which is the gate's own wording.
+            # The field is here rather than in a second dialog because the reason belongs to the
+            # same act as the legs: it explains them.
+            note = QLabel(i18n.t("protAmending").format(round=self._capture_id))
+            note.setWordWrap(True)
+            note.setProperty("class", "kv-warn")
+            layout.addWidget(note)
+            self._reason = QLineEdit()
+            self._reason.setPlaceholderText(i18n.t("protReasonHint"))
+            layout.addWidget(self._reason)
+
         self._problem = QLabel("")
         self._problem.setWordWrap(True)
         self._problem.setProperty("class", "kv-warn")
@@ -279,12 +298,25 @@ class ProtectiveDialog(QDialog):
 
         Stops rather than continues: the refusals are about a leg somebody typed, and writing the
         rest while one is wrong leaves a record that is half this dialog and half the last one.
+
+        On a CLOSED round every write is an amendment instead (skill `#48`), and the reason is
+        checked HERE as well as at the gate — not to replace the gate's rule but to spare a round
+        trip per channel for a field the person is looking at.
         """
+        reason = self._reason.text().strip() if self._reason is not None else ""
+        if self._capture_id and not reason:
+            self._problem.setText(i18n.t("protNeedsReason"))
+            self._problem.setVisible(True)
+            return
         self.written = []
         for row in self._rows:
             answer = row.answer()
             try:
-                process_writer.set_protective(self._project_dir, row.code, answer)
+                if self._capture_id:
+                    process_writer.amend_protective(
+                        self._project_dir, self._capture_id, row.code, answer, reason)
+                else:
+                    process_writer.set_protective(self._project_dir, row.code, answer)
             except Exception as exc:  # noqa: BLE001 — the gate's words, not ours
                 self._problem.setText(
                     i18n.t("protRefused").format(channel=row.code, why=_last_line(str(exc)))
@@ -442,7 +474,7 @@ def channel_codes(view, project_dir: Optional[Path] = None) -> list[str]:
     return codes
 
 
-def round_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
+def round_channel_codes(project_dir: Optional[Path] = None, capture_id: str = "") -> list[str]:
     """The channels the open capture round is actually about, in the order it expects them.
 
     This is what the button opens on now that the import table is where a protective filter is
@@ -453,7 +485,14 @@ def round_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
     from autosound_tcc.core import capture_import
     from autosound_tcc.state import process_view
 
-    round_ = process_view.capture_round(project_dir) or {}
+    if capture_id:
+        # A NAMED round, which is how a closed one is reached: `capture_round` answers for the
+        # open one only, and the record worth correcting usually belongs to a pass closed
+        # sessions ago (skill `#48`).
+        round_ = next((r for r in process_view.capture_rounds(project_dir)
+                       if str(r.get("id") or "") == str(capture_id)), {})
+    else:
+        round_ = process_view.capture_round(project_dir) or {}
     titles = list(round_.get("expected") or []) + list((round_.get("taken") or {}).keys())
     codes: list[str] = []
     for title in titles:
@@ -463,14 +502,19 @@ def round_channel_codes(project_dir: Optional[Path] = None) -> list[str]:
     return codes
 
 
-def open_for(project_dir: Path, view, parent=None) -> Optional[ProtectiveDialog]:
-    """Build the dialog over the open round's channels, or the whole rig when there is no round.
+def open_for(project_dir: Path, view, parent=None,
+             capture_id: str = "") -> Optional[ProtectiveDialog]:
+    """Build the dialog over a round's channels, or the whole rig when there is no round.
 
     The fallback is not a formality: a project with no round open is exactly where somebody goes
     to READ what a past pass recorded, and offering nothing there would be the F-041 symptom
     again — a button that answers a press with nothing.
+
+    `capture_id` names a CLOSED round to correct (skill `#48`). Passed, the dialog opens on that
+    round's channels and its record, asks why, and writes amendments instead of a record.
     """
-    codes = round_channel_codes(project_dir) or channel_codes(view, project_dir)
+    codes = (round_channel_codes(project_dir, capture_id)
+             or channel_codes(view, project_dir))
     if not codes:
         return None
-    return ProtectiveDialog(project_dir, codes, parent=parent)
+    return ProtectiveDialog(project_dir, codes, parent=parent, capture_id=capture_id)

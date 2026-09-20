@@ -116,6 +116,32 @@ def reason() -> str:
     return "" if hasattr(module, "de_embed") else "this skill's protective module has no de_embed"
 
 
+def record_for_capture(project_dir=None, capture_id: str = "") -> Optional[dict]:
+    """One NAMED round's protective record, open or closed — the shape `legs_of` reads.
+
+    `record_for` answers for the round that is OPEN, which is the wrong question when the record
+    being corrected belongs to a pass closed sessions ago (skill `#48`). Built from the journal
+    fold rather than the state slice for exactly that reason: the slice holds the open round only.
+
+    `None` when no such round is in the journal, which a caller must not read as "nothing was in
+    the chain" — the same rule `record_for` carries.
+    """
+    from autosound_tcc.state import process_view
+
+    if not capture_id:
+        return None
+    try:
+        rounds = process_view.capture_rounds(project_dir)
+    except Exception:  # noqa: BLE001 — no journal: nothing knows what was in the chain
+        return None
+    for round_ in rounds:
+        if str(round_.get("id") or "") != str(capture_id):
+            continue
+        return {"series": round_.get("id"), "phase": round_.get("phase"),
+                "version": round_.get("version"), "channels": round_.get("protective") or {}}
+    return None
+
+
 def record_for(project_dir=None) -> Optional[dict]:
     """The open capture round's protective record, read through the skill's own module.
 

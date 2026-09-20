@@ -522,3 +522,61 @@ def test_who_answered_is_recorded_with_the_protective_record(tmp_path):
     record = proc.load()["capture"]["protective_source"]
     assert record["m-L"] == "user", "a caller that says nothing is still a person"
     assert record["w-L"] == "front_end", "and the front end can say it was the front end"
+
+
+def test_a_closed_round_is_corrected_with_a_reason_rather_than_written_into(tmp_path, monkeypatch):
+    """The window half of skill `#48`. `set_protective` needs an OPEN round, and the round that
+    needs correcting is the one already read — on a live project, a nine-position series filed as
+    `OFF` for all ten channels while the sweeps show the roll-off.
+
+    Opened on a closed round the dialog becomes a CORRECTION: the reason is asked for, because
+    the gate requires it and because a correction with no why is indistinguishable from a second
+    opinion, and the write goes to `amend_protective` with that round's id.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import process_writer, vendor_loader
+    from autosound_tcc.ui.tcc.protective_dialog import ProtectiveDialog
+
+    project = _described(tmp_path, [{"code": "m-L"}])
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("1", ["m-L_1 (sw)"])
+    proc.set_protective("m-L", "OFF")
+    cap_id = proc.load()["capture"]["id"]
+    proc.close_capture("done")
+
+    QApplication.instance() or QApplication([])
+    dialog = ProtectiveDialog(project, ["m-L"], capture_id=cap_id)
+
+    assert dialog._reason is not None, "a correction asks why"
+    dialog._rows[0].hp_quick.click()
+    dialog._rows[0].hp_f.setText("100")
+
+    dialog._on_save()
+    assert not dialog.written, "no reason, no write — the gate's rule, said before the round trip"
+
+    dialog._reason.setText("the sweep shows the roll-off; filed OFF by mistake")
+    dialog._on_save()
+
+    assert dialog.written == ["m-L"]
+    record = proc.protective_record_for("1")
+    assert record["channels"]["m-L"]["hp"]["f"] == 100
+    assert process_writer.amend_protective is not None  # the writer this path uses
+
+
+def test_a_named_round_offers_its_own_channels_not_the_open_rounds(tmp_path):
+    """`round_channel_codes` answered for the OPEN round only, which is the wrong round whenever
+    the record being corrected belongs to a closed one (skill `#48`). Named, it answers for that
+    one — otherwise the correction dialog would offer rows the pass never touched."""
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.ui.tcc.protective_dialog import round_channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}, {"code": "tw-L"}])
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("1", ["m-L_1 (sw)", "m-R_1 (sw)"])
+    closed = proc.load()["capture"]["id"]
+    proc.close_capture("done")
+    proc.start_capture("2", ["tw-L_2 (sw)"])
+
+    assert round_channel_codes(project) == ["tw-L"], "the open round, as before"
+    assert round_channel_codes(project, closed) == ["m-L", "m-R"], "and the named one by name"

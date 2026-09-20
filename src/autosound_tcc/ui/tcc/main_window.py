@@ -2244,7 +2244,15 @@ class MainWindow(QMainWindow):
         was captured with protection is DERIVED from what was entered, so there is no tick that
         can drift from the filters it claims to describe (the user's own correction, 2026-08-23).
         """
-        dialog = protective_dialog.open_for(config.project_dir(), getattr(self, "_view", None), self)
+        # Which round the press is about: the one on screen in the measurement panel. When that
+        # is a round already CLOSED, the dialog opens as a correction — the record worth fixing is
+        # usually one a pass closed sessions ago wrote, and `set_protective` cannot touch it
+        # (skill `#48`). The open round keeps the ordinary path, written into directly.
+        viewing = str(self._meas_panel.viewing_session_id() or "")
+        open_round = str((process_view.capture_round(config.project_dir()) or {}).get("id") or "")
+        amending = viewing if viewing and viewing != open_round else ""
+        dialog = protective_dialog.open_for(
+            config.project_dir(), getattr(self, "_view", None), self, capture_id=amending)
         if dialog is None:
             # Answered where the question was asked. This button sits at the bottom of the right
             # column and the status strip is under the header, so a refusal written there is, from
