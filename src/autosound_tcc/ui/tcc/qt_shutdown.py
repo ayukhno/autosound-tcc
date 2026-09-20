@@ -54,6 +54,12 @@ _log = logging.getLogger("autosound_tcc")
 #: in-flight call, and every worker in this app talks over timeout-bounded HTTP.
 _THREAD_WAIT_MS = 3000
 
+#: Every worker between `started` and `finished`, held so that NOTHING can drop the last
+#: reference to a running one — `~QThread` against a running thread is `qFatal`, i.e. `abort()`,
+#: and the destructor then runs on the worker's OWN thread as `run()` unwinds (measured,
+#: 2026-09-20). Filled and emptied by `watch`, which every worker's constructor calls.
+_LIVE: set = set()
+
 #: Threads still running with no widget behind them (F-027).
 #:
 #: A window that is closing cannot wait indefinitely for its own worker and cannot destroy it
@@ -100,8 +106,35 @@ def watch(thread: QThread) -> QThread:
     # and warning about those buries the one line that matters — the suite alone produced five of
     # them the first time this ran. Only a worker that RAN and did not finish is the fatal shape.
     state = {"started": False, "finished": False}
-    thread.started.connect(lambda: state.__setitem__("started", True))
-    thread.finished.connect(lambda: state.__setitem__("finished", True))
+
+    # THE STRUCTURAL GUARD, and the reason this is not one more fix at one more call site.
+    # A running worker is referenced HERE, by the module, from `start()` until `finished` — so no
+    # caller can leave it without a reference, whatever it does with its own attribute. Chasing
+    # the callers had already produced five fixes (`_replace_worker`, three waits in
+    # `stop_workers`, the start/running window) and the Arbiter's log still showed
+    # `_CurveWorker destroyed on a worker thread`: destroyed with NOBODY holding it, which is the
+    # one state that cannot happen once this set does.
+    #
+    # Wrapping `start` rather than connecting to the `started` SIGNAL, and that is the whole
+    # point: `started` is emitted from the new thread and delivered queued, so it arrives only
+    # after the event loop turns — measured, `live()` read 0 straight after `start()`. The window
+    # between `start()` and the loop turning is exactly the dangerous one.
+    original_start = thread.start
+
+    def _start(*args, **kwargs):
+        _LIVE.add(thread)
+        state["started"] = True
+        return original_start(*args, **kwargs)
+
+    thread.start = _start  # type: ignore[method-assign]
+
+    def _ended() -> None:
+        state["finished"] = True
+        # Discarded from the GUI thread (the sender's affinity), and only after `run()` has
+        # returned — which is what makes dropping the reference here safe.
+        _LIVE.discard(thread)
+
+    thread.finished.connect(_ended)
     weakref.finalize(thread, _gone, name, state)
     return thread
 
@@ -118,6 +151,11 @@ def _gone(name: str, state: dict) -> None:
         "worker %s destroyed on %s thread while it had NOT finished — this is the abort "
         "(finding 35). Whoever dropped the last reference to it is the bug.", name, where
     )
+
+
+def live() -> frozenset:
+    """Workers currently between `started` and `finished`. For the exit path and for tests."""
+    return frozenset(_LIVE)
 
 
 def detached() -> frozenset:

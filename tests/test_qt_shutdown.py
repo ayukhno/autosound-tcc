@@ -303,3 +303,61 @@ def test_a_worker_that_has_finished_is_still_let_go_of_cheaply():
     done = _Done()
     assert qt_shutdown.stop_or_detach(done, 10) is False
     assert done not in qt_shutdown.detached()
+
+
+def test_a_running_worker_is_held_by_the_module_from_start_to_finish():
+    """The structural end of finding 35, and the reason it is not a sixth fix at a sixth call site.
+
+    Five call-site fixes went in first — `_replace_worker`, three waits in `stop_workers`, and the
+    start/running window in `stop_or_detach` — and the Arbiter's log still read
+    `_CurveWorker destroyed on a worker thread`: destroyed with NOBODY holding it. A running
+    worker is now referenced by this module, so that state cannot be reached whatever a caller
+    does with its own attribute.
+
+    Held from `start()` and not from the `started` SIGNAL, which is the measurement that made this
+    work: `started` is emitted on the new thread and delivered queued, so it lands only after the
+    event loop turns — `live()` read 0 straight after `start()` — and the window between `start()`
+    and the loop turning is exactly the dangerous one.
+    """
+    from PySide6.QtCore import QThread
+
+    class _Brief(QThread):
+        def run(self) -> None:
+            self.msleep(60)
+
+    _app()
+    worker = qt_shutdown.watch(_Brief())
+    assert worker not in qt_shutdown.live(), "nothing is held before it runs"
+
+    worker.start()
+    assert worker in qt_shutdown.live(), "held synchronously, not one event loop later"
+
+    worker.wait(4000)
+    QApplication.processEvents()  # the queued `finished` empties the set
+    assert worker not in qt_shutdown.live(), "and let go once it is done — this must not leak"
+
+
+def test_dropping_every_reference_to_a_running_worker_no_longer_destroys_it():
+    """What the crash actually was, expressed as a test: the caller drops its attribute while the
+    worker runs. Before the guard that was the last reference, and the worker destroyed itself on
+    its own thread when `run()` returned — measured at exit 134. Now the module still has one."""
+    import gc
+
+    from PySide6.QtCore import QThread
+
+    class _Brief(QThread):
+        def run(self) -> None:
+            self.msleep(120)
+
+    _app()
+    holder = {"worker": qt_shutdown.watch(_Brief())}
+    holder["worker"].start()
+    still = next(w for w in qt_shutdown.live() if isinstance(w, _Brief))
+
+    holder.clear()  # exactly what `self._worker = <new>` does to the previous one
+    gc.collect()
+
+    assert still.isRunning(), "still running, and still alive to be asked"
+    still.wait(4000)
+    QApplication.processEvents()
+    assert still not in qt_shutdown.live()

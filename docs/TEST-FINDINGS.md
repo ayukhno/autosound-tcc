@@ -1229,8 +1229,44 @@ cannot be told apart from outside — both read not-running and not-finished —
 is dangerous, so the first is held too, at the cost of one reference. Pinning genuinely finished
 workers would be a leak that grows with the session, which is why `isFinished()` is the test.
 
-All four earlier fixes stand and are what makes this one enough: every call site now goes through
-`stop_or_detach`, so closing the window it reads through closes it everywhere.
+**AND IT STILL CRASHED — so the answer stopped being a call-site fix, 2026-09-20.** The Arbiter
+installed that build, reproduced twice (13:20:06 and 13:21:31, both after a restart at 13:19:37),
+and the log read `_CurveWorker destroyed on a worker thread` again: destroyed with **nobody**
+holding it. Five fixes had gone in — `_replace_worker`, three waits in `stop_workers`, the
+start/running window — and the state they all guard against was still reachable. Chasing a sixth
+call site is a losing game when the rule is "any caller can do this".
+
+*What the journal said, and it is not what anyone guessed.* The rounds he switched between:
+
+| round | titles |
+|---|---|
+| `cap_001`, `cap_002`, `cap_004`, `cap_005` | 16-21 |
+| **`cap_003`** | **35** |
+| **`cap_007`** | **73** |
+
+Both crashes landed on the biggest set of their run. So "something wrong with the set" was real
+and it is the SIZE: 35 and 73 titles is a fetch long enough that the next switch arrives while it
+is still in flight. Nothing to do with the contents.
+
+*Reproduced locally, off his machine.* `CurveDialog` over a deliberately slow bridge, a group
+chosen, rounds switched in a loop - the fatal line appears. That is the loop this was finally
+solved in, rather than a round trip to the Arbiter per hypothesis.
+
+**THE FIX IS STRUCTURAL.** `qt_shutdown.watch` - already called from every worker's constructor -
+now holds the worker in a module-level `_LIVE` set from `start()` until `finished`. A running
+worker therefore always has a reference, whatever a caller does with its own attribute, and
+"destroyed with nobody holding it" stops being a reachable state.
+
+*One measurement decided how.* Connecting to the `started` SIGNAL does not work: it is emitted on
+the new thread and delivered queued, so it lands only after the event loop turns - `live()` read
+**0** straight after `start()`, and the window between `start()` and the loop turning is exactly
+the dangerous one. `watch` wraps `start` instead, so the reference is taken synchronously.
+
+Both reproductions are clean afterwards, and `live()` empties - checked, because a guard that
+holds for ever is a leak rather than a fix.
+
+The five call-site fixes stay. They are correct on their own terms - a wait is still not a guard -
+and they are what keeps a worker from being left running with nothing asking it to stop.
 
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,
