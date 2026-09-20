@@ -1041,7 +1041,13 @@ class CurveDialog(QDialog):
 
         for version in reversed(versions):  # newest first: it is the usual answer
             combo.addItem(_row(version), version)
-        if wanted is not None and combo.findData(wanted) < 0:
+        # The fallback row exists so a version REW no longer lists can still be stood on. A ROUND
+        # is not that: its rows are added just below, and `select` arrives straight from
+        # `currentData()` in every caller — so while a round was the choice, `findData` could not
+        # find it yet and each call added a second row for it, labelled `серія round:cap_006`.
+        # Measured before the round path started calling this on every pick.
+        if (wanted is not None and not str(wanted).startswith("round:")
+                and combo.findData(wanted) < 0):
             combo.addItem(_row(wanted), wanted)
         # And the ROUNDS, which are the other axis (SCR-034): a series is the DSP config the
         # sweeps were taken under, a round is one pass at it, and two passes at one config carry
@@ -1093,6 +1099,35 @@ class CurveDialog(QDialog):
             return
         if self._group is not None:
             self._apply_group()
+        elif round_id:
+            self._set_selection(self._same_rows_in(round_id))
+
+    def _same_rows_in(self, round_id: str) -> list:
+        """The rows of `round_id` that answer for what is on screen now — the SAME channels and
+        the same method, at that round's own titles.
+
+        Choosing a set is asking "show me these drivers in that pass", so the channels travel and
+        the version does not. Finding 36 is what it cost to leave the selection alone here: the
+        rows narrowed to `cap_006` while the chips, the worker and `statement()` all still named
+        the pass he had left, so the window drew one set under another's name and then asked REW
+        for `c p1_49 (sw)`, which that set does not contain — `KeyError`, and a group picked on
+        top of it killed the app (finding 35).
+
+        Falls back to the whole round when nothing answers: a set with none of the current
+        channels in it is still a set he asked to see, and showing the previous one instead is the
+        bug this method exists to end.
+        """
+        wanted = []
+        for title in self._chosen():
+            channel = capture_import.channel_from_title(title)
+            _version, method = _title_facts(title)
+            wanted.append((channel, method))
+        rows = self._selectable()
+        kept = [
+            row for row in rows
+            if (capture_import.channel_from_title(row), _title_facts(row)[1]) in wanted
+        ]
+        return kept or rows
 
     def _apply_group(self) -> None:
         """Put the chosen group at the chosen version on screen, and NAME what is not there.

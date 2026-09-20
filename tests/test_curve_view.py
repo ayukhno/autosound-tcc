@@ -4335,3 +4335,92 @@ def test_every_curve_and_the_sum_read_rew_at_the_finest_smoothing():
     assert len(bridge.smoothings) == 3
     assert set(bridge.smoothings) == {"1/48"}
 
+
+
+def test_choosing_a_round_repoints_the_selection_at_what_that_round_took(monkeypatch):
+    """Finding 36, walked the way the Arbiter walked it (2026-09-19, project EPY-Sep2026).
+
+    He picked set `cap_006` in the picker and the rows under it still named the PREVIOUS set's
+    titles; the window then said `Не вдалося прочитати з REW: c p1_49 (sw): KeyError` — TCC asking
+    REW for a title that is not in the set it is now showing. Picking a group on top of that state
+    killed the app (finding 35), twice.
+
+    The root of it is here: choosing a round narrowed `_selectable()` and never touched the
+    SELECTION. `_chosen()` is what the chips name, what the worker fetches and what `statement()`
+    reports, so after the switch all three still belonged to the round he had left — which is the
+    exact failure `_set_selection`'s own docstring is written against ("two controls each holding
+    half a selection is how a window comes to draw one thing and report another"), arriving by the
+    one path that did not go through it.
+    """
+    from autosound_tcc.ui.tcc import curve_dialog as cd
+
+    rounds = [
+        {"id": "cap_006", "expected": ["w-L_01 (sw)", "w-R_01 (sw)"],
+         "taken": {"w-L_01 (sw)": {}, "w-R_01 (sw)": {}}},
+        {"id": "cap_005", "expected": ["w-L_02 (sw)", "w-R_02 (sw)"],
+         "taken": {"w-L_02 (sw)": {}, "w-R_02 (sw)": {}}},
+    ]
+    monkeypatch.setattr(cd.process_view, "capture_rounds", lambda *a, **k: rounds)
+
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    combo = dialog._version_combo
+    offered = [combo.itemData(i) for i in range(combo.count())]
+
+    combo.setCurrentIndex(offered.index("round:cap_006"))
+
+    assert dialog._chosen_round() == "cap_006"
+    assert sorted(dialog._selectable()) == ["w-L_01 (sw)", "w-R_01 (sw)"]
+    # The part that was missing: what the window is PLOTTING follows the set it was pointed at.
+    assert sorted(dialog._chosen()) == ["w-L_01 (sw)", "w-R_01 (sw)"], \
+        "the selection belongs to the chosen round, not the one before it"
+
+
+def test_a_round_that_shares_no_title_with_the_selection_leaves_the_plot_alone(monkeypatch):
+    """The other half of the same rule, and the reason it is not just "select everything".
+
+    A round REW no longer holds has nothing to point the selection at; blanking the selection
+    there would leave the window plotting nothing with no sentence to explain it, which is the
+    state `_on_version_chosen` already refuses (`curveRoundEmpty`). What must NOT happen is the
+    thing finding 36 is about: the old titles staying live and being fetched again.
+    """
+    from autosound_tcc.ui.tcc import curve_dialog as cd
+
+    rounds = [{"id": "cap_000", "expected": ["gone_09 (sw)"], "taken": {}}]
+    monkeypatch.setattr(cd.process_view, "capture_rounds", lambda *a, **k: rounds)
+
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    combo = dialog._version_combo
+    offered = [combo.itemData(i) for i in range(combo.count())]
+
+    before = sorted(dialog._chosen())
+    combo.setCurrentIndex(offered.index("round:cap_000"))
+
+    assert dialog._selectable() == []
+    assert dialog._group_note, "the window says where it looked"
+    assert sorted(dialog._chosen()) == before, "and nothing was silently dropped"
+
+
+def test_the_picker_does_not_grow_a_bogus_series_row_when_a_round_is_the_choice(monkeypatch):
+    """`_sync_version_combo` adds the SERIES rows first, then a fallback row for `select` if it is
+    not among them, and only then the rounds — so a `select` of `round:cap_00N`, which every
+    caller passes straight from `currentData()`, was never found yet and got a row of its own
+    reading `серія round:cap_006`. Probed before making the round path call it on every pick."""
+    from autosound_tcc.ui.tcc import curve_dialog as cd
+
+    rounds = [{"id": "cap_006", "expected": ["w-L_01 (sw)"], "taken": {"w-L_01 (sw)": {}}}]
+    monkeypatch.setattr(cd.process_view, "capture_rounds", lambda *a, **k: rounds)
+
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    combo = dialog._version_combo
+    offered = [combo.itemData(i) for i in range(combo.count())]
+    combo.setCurrentIndex(offered.index("round:cap_006"))
+
+    dialog._set_selection(["w-L_01 (sw)"])
+
+    data = [combo.itemData(i) for i in range(combo.count())]
+    assert data.count("round:cap_006") == 1, f"one row per round, got {data}"
+    texts = [combo.itemText(i) for i in range(combo.count())]
+    assert not [t for t in texts if "round:" in t], f"and no series row named after a round: {texts}"

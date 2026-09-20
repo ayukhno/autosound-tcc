@@ -1167,3 +1167,28 @@ under the name of another — which is a wrong answer, not just an empty one.
 
 **Reproduces.** Seen on the same session as 35; the two were reached by the same steps.
 
+**Root cause, found 2026-09-20 and reproduced in a test.** Choosing a round narrowed what may be
+chosen and never touched what IS chosen. `_on_version_chosen` rebuilt the choose menu
+(`_selectable()` intersects `_options` with the round's own titles) and then did nothing unless a
+group was picked — while `_chosen()` is what the chips name, what `_CurveWorker` fetches and what
+`statement()` reports. So after the switch all three still belonged to the pass he had left, the
+window drew one set under another's name, and the next fetch asked REW for `c p1_49 (sw)`, which
+the chosen set does not contain: `KeyError`.
+
+That is the failure `_set_selection`'s own docstring is written against — "two controls each
+holding half a selection is how a window comes to draw one thing and report another" — arriving by
+the one path that did not go through it.
+
+**Fixed:** `_on_version_chosen` re-points the selection through `_set_selection`, at
+`_same_rows_in(round_id)`: the round's rows for the same channels and the same method, because
+choosing a set asks "show me these drivers in that pass" — the channels travel, the version does
+not. Nothing answering falls back to the whole round. A round REW no longer holds keeps its
+existing branch (`curveRoundEmpty`) and leaves the plot alone rather than blanking it.
+
+**A second defect, found while probing that path and fixed with it.** `_sync_version_combo` adds a
+fallback row for `select` so a version REW no longer lists can still be stood on — but it adds it
+BEFORE the round rows, and every caller passes `select` straight from `currentData()`. With a
+round chosen, `findData("round:cap_006")` could not find it yet, so each call added a second row
+for the same round, labelled `серія round:cap_006`. Live already through the group path; the fix
+above would have run it on every pick. Both are covered by tests in `tests/test_curve_view.py`.
+
