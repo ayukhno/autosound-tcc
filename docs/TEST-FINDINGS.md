@@ -1434,5 +1434,33 @@ Two things to measure before touching anything:
    `inf`/`nan` in `_shifted`; the raster engine does not survive those. Cheap to check and cheap
    to rule out.
 
-Only after those: whether the phase view should decimate, or clip to the visible range, or stop
-drawing wrapped phase as one path.
+**Both of those measured, 2026-09-20 — and both hypotheses came out WEAK.**
+
+*Non-finite coordinates: ruled out.* On the phase view `_shifted` ends in
+`(shifted + 180.0) % 360.0 - 180.0`, so whatever the delay, the drawn value is bounded to ±180.
+The x axis is the frequency array unchanged. There is no arithmetic on that path that can produce
+`inf` or `nan`.
+
+*Path size: much weaker than it looked.* The view already draws with
+`pg.setConfigOptions(antialias=False)` and `self._plot.setDownsampling(auto=True, mode="peak")`,
+so what reaches Qt is already reduced to roughly the pixel count, not the sample count. And a
+local probe — nine wrapped-phase curves of 60 000 points each, 540 000 in total, dragged through
+40 delay steps offscreen — survives. So "the wall of vertical lines is too big to stroke" does not
+hold up on its own.
+
+*What that leaves.* The crash needs the real on-screen paint path (a backing store and a window
+server), which the offscreen platform does not exercise, and probably something else that was on
+that screen: the Σ strip, the two markers, the delay lines, the legend of nine. Guessing further
+without the real window is how the first three hypotheses of finding 35 were spent.
+
+**What would actually settle it,** in order of cost to the Arbiter:
+
+1. The same drag with the window NOT maximised and with Σ off — if it survives, the extra item is
+   the lead, and that is one run rather than a build.
+2. Whether it reproduces on the magnitude view with the same nine curves. Phase is the view with
+   the wall; magnitude is not.
+3. Only then a build that logs what `paint()` is handed on the phase view.
+
+**One thing that changed under it.** At the moment of the drag the plot was in finding 37's state:
+nine curves drawn, two named, both reads failed. That state no longer exists (37 is fixed), so
+this must be re-tested before any of the above — it may not reproduce at all.
