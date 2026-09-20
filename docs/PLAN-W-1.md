@@ -7,6 +7,45 @@ Arbiter's call, and nothing below starts before he says so.
 The name was read, not agreed: the method's milestone is `W-1 · v3.0.59`, so ours is
 `W-1 · v0.1.42` (`WAVES.md` §1; skill's `SKL-046`, hub `#188`).
 
+## Start here — a clean session with no memory of the last one
+
+Written for a session that begins with nothing but this repository (the Arbiter restarts fresh,
+2026-09-20). Read this section first and in order; everything below it is the reasoning.
+
+**1. Know your breed, then look at the queue.**
+
+```bash
+echo "HUB_ROLE=[$HUB_ROLE]"     # must say tcc; empty means you are the hub and this plan is not yours
+bin/ticket queue                # in ../hub — the queue, the receipts, and THIS repo's issues
+```
+
+`#188` (skill → us) is already taken into work and is the other half of this wave. `#179`, `#181`,
+`#182` are in work from the previous wave: the code of `#181`/`#182` is merged, and what is left of
+`#181` is one check — `release-preflight.ci_verdict` on a REAL tag, which happens when `v0.1.42` is
+cut. `#83` is deferred; do not count it.
+
+**2. Know where the tree stands.**
+
+- Branch `wave-0.1.42` is checked out and pushed, and it is AHEAD of `main` by about two dozen
+  commits — not only documents. The code on it that `main` does not have: the confirmation bar's
+  single scrolled question block and its attention tint (`ui/tcc/confirm_bar.py`, `ui/tcc/theme.py`),
+  the quote-aware substitution check that stopped the never-ask gate firing on markdown backticks
+  (`core/tuning_session.py`), and the AI-history tab (`core/session_export.py`,
+  `ui/tcc/diagnostics_panel.py`, strings in four languages).
+- **No pull request is open for any of it**, and no tag is cut. `CHANGELOG.md` carries the entries
+  under `## [Unreleased]`.
+- Continue on this branch. It is the wave's branch; do not open a second one.
+
+**3. Do not rebuild what is already built.** Findings `15`, `16`, `24` and `27` are closed in the
+branch above. `32` went to the method as hub `#187` and is W-2.
+
+**4. Then work the packages in the order given under "Order, and why this one"**, starting with
+finding `36` — not with the crash it causes.
+
+**5. Before claiming anything is done**: targeted tests on the file you changed while hunting, the
+full suite only when the change is final (and say so). `make test` is the hub's set, not ours; ours
+is `uv run --extra dev --python 3.12 python -m pytest tests/... -q -p no:randomly`.
+
 ## Where the work comes from
 
 Four sources, and nothing else was counted:
