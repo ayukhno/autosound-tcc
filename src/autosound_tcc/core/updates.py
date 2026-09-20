@@ -27,6 +27,7 @@ pays PySide6's source-reading import hook (see `core/install_report.py`).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -166,6 +167,9 @@ class Status:
 _NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_ASKPASS": ""}
 
 
+_log = logging.getLogger("autosound_tcc")
+
+
 def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash."""
     try:
@@ -186,6 +190,13 @@ def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
         return False, f"{type(exc).__name__}: {exc}"
     out = (done.stdout or "").strip() or (done.stderr or "").strip()
+    if done.returncode != 0:
+        # The log used to record that git was SPAWNED and never what it answered, so every failure
+        # reached the window as one sentence — "could not reach GitHub" — covering a missing git, a
+        # dead network, a refusing server and a bad URL alike. On the Arbiter's machine the log
+        # showed `spawn: git ls-remote` and the next line ELEVEN milliseconds later: not a network
+        # round trip, an immediate failure, and nothing said which one (2026-09-20).
+        _log.warning("git %s exited %s: %s", " ".join(args), done.returncode, out or "(no output)")
     return done.returncode == 0, out
 
 

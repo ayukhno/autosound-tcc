@@ -150,3 +150,29 @@ def test_the_first_start_of_a_new_version_says_so(tmp_path, monkeypatch):
     assert second is False, "and every run after it"
     assert said.count("first run of this version") == 1
     assert "version=" in said
+
+
+def test_a_failed_git_probe_says_what_git_said(caplog):
+    """The log recorded that `git ls-remote` was SPAWNED and never what it answered, so every
+    failure arrived as one sentence — "could not reach GitHub" — covering a missing git, a dead
+    network, a refusing server and a bad URL alike.
+
+    Measured on the Arbiter's machine, 2026-09-20: the log showed `spawn: git ls-remote` and the
+    next line eleven milliseconds later, which is not a network round trip but an immediate
+    failure — and nothing anywhere said which one. `_git` already has the message in hand; it
+    threw it away.
+
+    WARNING rather than debug: this is the line somebody will be looking for, and a level nobody
+    turns on is the same as no line.
+    """
+    import logging
+
+    from autosound_tcc.core import updates
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        ok, out = updates._git("ls-remote", "--tags", "file:///nowhere/at/all.git")
+
+    assert not ok
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "ls-remote" in said, f"the command: {said}"
+    assert out.split()[0][:12] in said or "nowhere" in said, f"and what git said: {said}"
