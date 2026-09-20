@@ -281,7 +281,9 @@ def _stop_worker(worker: Optional[_CurveWorker]) -> None:
     """
     if worker is None:
         return
-    qt_shutdown.stop_or_detach(worker, _WORKER_WAIT_MS, mute=(worker.done, worker.failed))
+    qt_shutdown.stop_or_detach(
+        worker, _WORKER_WAIT_MS, mute=(worker.done, worker.failed, worker.unreadable)
+    )
 
 
 def _without_protection(freqs, magnitude_db, phase_deg, legs):
@@ -314,6 +316,11 @@ class _CurveWorker(QThread):
 
     done = Signal(list)  # list[Trace]
     failed = Signal(str)
+    #: Titles REW could not answer for, as a fact rather than a sentence (finding 38). Separate
+    #: from `failed`, which only fires when NOTHING came back: a read where four of six worked
+    #: used to drop its four refusals on the floor, and those four are exactly what the picker
+    #: has to grey out.
+    unreadable = Signal(list)
 
     def __init__(self, bridge: RewBridge, titles: Sequence[str], kind: str,
                  legs_by_title: Optional[dict] = None) -> None:
@@ -338,6 +345,7 @@ class _CurveWorker(QThread):
     def run(self) -> None:
         traces: list[Trace] = []
         problems: list[str] = []
+        missing: list[str] = []
         for title in self._titles:
             # Asked to stop, so stop — between measurements, which is the only place this loop can
             # be interrupted: the HTTP call inside is not cancellable and does not need to be, it
@@ -402,6 +410,9 @@ class _CurveWorker(QThread):
                     )
             except Exception as exc:  # noqa: BLE001 — a REW failure is a message, not a crash
                 problems.append(f"{title}: {type(exc).__name__}")
+                missing.append(title)
+        if missing:
+            self.unreadable.emit(missing)
         if not traces:
             self.failed.emit("; ".join(problems) or "no curves")
             return
@@ -468,6 +479,10 @@ class CurveDialog(QDialog):
         self._markers = list(markers)
         self._bridge = bridge or RewBridge()
         self._worker: Optional[_CurveWorker] = None
+        #: Titles this window has PROVED REW does not hold — collected from reads that failed,
+        #: never guessed (finding 38). Their rows are greyed and cannot be ticked. Set BEFORE any
+        #: control is built: `_fill_choose_menu` runs during construction and reads it.
+        self._unreadable: set = set()
         #: Why what is on screen is not what was asked for, in words. Empty when nothing was
         #: refused — the status line is then free to disappear, as it did before. `_note` is the
         #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
@@ -477,6 +492,9 @@ class CurveDialog(QDialog):
         #: them every time the picker moves.
         self._touched_protection = False
         self._refused_note = ""
+        #: Whether the note on the status line means "nothing can be shown". Set beside every note
+        #: that says so; `_render_note` is what colours it.
+        self._note_bad = False
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
         self._restoring = False
@@ -852,6 +870,12 @@ class CurveDialog(QDialog):
             action = self._choose_menu.addAction(title)
             action.setCheckable(True)
             action.toggled.connect(lambda on, t=title: self._on_choose_toggled(t, on))
+            if title in self._unreadable:
+                # Visible and unusable, which is this app's habit for a choice that exists and
+                # does not apply (the kind picker does the same): the row is part of the round's
+                # history and deleting it would hide that the capture was ever taken.
+                action.setEnabled(False)
+                action.setToolTip(i18n.t("curveNotInRew"))
             self._choose_actions[title] = action
         self._sync_choose_ticks()
         # The rows are new objects, so the delays `_render_bank` wrote beside the titles went with
@@ -1098,6 +1122,7 @@ class CurveDialog(QDialog):
             # project is open, or they were deleted. An empty checklist with no sentence beside it
             # is the shape of "the window is broken"; this is the shape of what is actually true.
             self._group_note = i18n.t("curveRoundEmpty").format(round=round_id)
+            self._note_bad = True
             self._render_note()
             return
         if self._group is not None:
@@ -1151,11 +1176,13 @@ class CurveDialog(QDialog):
             self._group_note = i18n.t("curveGroupEmpty").format(
                 group=self._group.name, version=version
             )
+            self._note_bad = True
             self._render_note()
             return
         self._group_note = "" if found.complete else i18n.t("curveGroupMissing").format(
             group=self._group.name, version=version, names=names
         )
+        self._note_bad = False  # something IS drawn, so this is an aside rather than a refusal
         self._set_selection(list(found.titles))
 
     def _on_choose_toggled(self, title: str, on: bool) -> None:
@@ -1506,6 +1533,11 @@ class CurveDialog(QDialog):
         )
         self._status.setText(self._note)
         self._status.setVisible(bool(self._note))
+        # Red when the note means NOTHING can be shown — which from the tuner's seat is the same
+        # event as a failed read, and was the quiet grey until he said so (2026-09-20). The split
+        # is not failure-versus-success: a group drawn with one member missing keeps the quiet
+        # colour, because the plot does answer.
+        self._status_bad(bool(self._note) and self._note_bad)
 
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
@@ -1599,9 +1631,12 @@ class CurveDialog(QDialog):
         self._worker = _CurveWorker(self._bridge, titles, self._kind, self._legs_by_title())
         self._worker.done.connect(self._on_curves)
         self._worker.failed.connect(self._on_failed)
+        self._worker.unreadable.connect(self._on_unreadable)
         self._worker.start()
 
     def _on_curves(self, traces: list) -> None:
+        # Red is a state, not a stain: a read that works takes it off again.
+        self._status_bad(False)
         # The status line ends up carrying the notes, if there are any, and disappears when there
         # are not. It is written HERE as well as where each note is decided, because `_reload` puts
         # "Reading the curves from REW…" over whatever was there.
@@ -1765,6 +1800,28 @@ class CurveDialog(QDialog):
         # widget from `trace_colour`, and the palette it was resolved against has just changed.
         self._render_chips()
 
+    def _on_unreadable(self, titles) -> None:
+        """REW refused these names. Remember them and grey their rows.
+
+        The Arbiter picked four titles of `cap_003` while REW was holding the `_49` series and got
+        four refusals off rows that looked exactly like the ones that work (finding 38). The
+        project's own list outlives REW on purpose — `known_titles()` is "what REW showed this
+        session PLUS what the project has taken in" — so a round from another session is offerable
+        and unreadable at once.
+
+        From what was MEASURED, not from a guess about REW's contents: asking REW would be a
+        second call on the GUI thread, and the read that just failed already knows.
+        """
+        self._unreadable |= {str(t) for t in titles if t}
+        self._fill_choose_menu()
+
+    def _status_bad(self, bad: bool) -> None:
+        """Red for a failure, the quiet grey for everything else (the Arbiter, 2026-09-20: four
+        failed reads in 11px grey over an empty plot — «хоч би червоним коли помилки»)."""
+        self._status.setProperty("class", "phead-sub curve-status-bad" if bad else "phead-sub")
+        self._status.style().unpolish(self._status)
+        self._status.style().polish(self._status)
+
     def _on_failed(self, message: str) -> None:
         """Nothing came back. Take the PREVIOUS curves off the plot before saying so.
 
@@ -1785,6 +1842,7 @@ class CurveDialog(QDialog):
         self._view.set_traces([])
         self._status.setVisible(True)
         self._status.setText(i18n.t("curveFailed").format(error=message))
+        self._status_bad(True)
 
     def _on_send(self, reading: str) -> None:
         if reading:

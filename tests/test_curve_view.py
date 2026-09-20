@@ -4489,3 +4489,71 @@ def test_a_zero_hertz_bin_never_reaches_the_sum_overlay_as_minus_infinity():
     assert np.isfinite(np.asarray(xs, dtype=float)).all(), "no -inf may reach the painter"
     assert len(xs) == len(ys)
     assert len(xs) == n - 1, "the 0 Hz point is dropped, and only it"
+
+
+def test_a_title_rew_could_not_answer_for_is_marked_and_the_error_goes_red():
+    """The Arbiter, 2026-09-20, looking at four failed reads in grey 11px type above an empty
+    plot: «хіба там щось видно - хоч би червоним коли помилки». And, on the rows themselves:
+    they look exactly like the ones that work (finding 38).
+
+    `known_titles()` is "what REW showed this session PLUS what the project has taken in", and
+    the second half outlives REW — so a round from another session (`cap_003`'s `_1` titles,
+    against the `_49` REW is holding) offers names that cannot be read. The window now says so
+    twice: the failure is red, and each title REW refused is greyed and cannot be ticked again.
+
+    Marked from what was MEASURED — the titles this read actually failed on — rather than from a
+    guess about what REW holds. Asking REW would be a second network call on the GUI thread, and
+    the answer is already in hand.
+    """
+    _app()
+    dialog = _dialog(["tw-L_1 (sw)", "tw-R_1 (sw)"], bridge=_FakeBridge(raises=KeyError("nope")),
+                     kind="fr", available=["tw-L_1 (sw)", "tw-R_1 (sw)", "w-L_01 (sw)"])
+    _fetch(dialog)
+
+    assert "curve-status-bad" in str(dialog._status.property("class") or ""), "red, not a whisper"
+    assert dialog._unreadable == {"tw-L_1 (sw)", "tw-R_1 (sw)"}
+
+    action = dialog._choose_actions["tw-L_1 (sw)"]
+    assert not action.isEnabled(), "a row REW refused cannot be ticked again"
+    assert dialog._choose_actions["w-L_01 (sw)"].isEnabled(), "and the untried rows are untouched"
+
+
+def test_a_successful_read_puts_the_status_back_to_a_quiet_one():
+    """The red is a state, not a stain: the next read that works takes it off again."""
+    _app()
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge(raises=KeyError("nope")), kind="fr")
+    _fetch(dialog)
+    assert "curve-status-bad" in str(dialog._status.property("class") or "")
+
+    dialog._bridge = _FrBridge()
+    dialog._reload()
+    _fetch(dialog)
+
+    assert "curve-status-bad" not in str(dialog._status.property("class") or "")
+
+
+def test_a_note_that_means_nothing_can_be_shown_is_red_too():
+    """The Arbiter, 2026-09-20, after the failed-read colour landed: «вибираю пару мідів і пусто,
+    бо там немає цих назв — зрозумів, але добре б написати червоним що до чого».
+
+    A failed READ was already red; a group that resolves to nothing was still the quiet grey, and
+    from the tuner's seat those are the same event — the window cannot show what was asked for.
+    The split is not failure-versus-success, it is NOTHING-to-show versus something-to-show: a
+    group drawn with one member missing keeps the quiet colour, because the plot does answer.
+    """
+    _app()
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    assert "curve-status-bad" not in str(dialog._status.property("class") or "")
+
+    dialog._group_note = i18n.t("curveGroupEmpty").format(group="Ms", version="49")
+    dialog._note_bad = True
+    dialog._render_note()
+    assert "curve-status-bad" in str(dialog._status.property("class") or "")
+
+    dialog._group_note = i18n.t("curveGroupMissing").format(
+        group="Ms", version="49", names="m-R_49 (sw)")
+    dialog._note_bad = False
+    dialog._render_note()
+    assert "curve-status-bad" not in str(dialog._status.property("class") or ""), \
+        "a partial answer is still an answer"

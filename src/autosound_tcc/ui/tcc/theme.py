@@ -207,6 +207,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-size: 11px;
     }}
 
+    /* .curve-status-bad — the curve window's status line when a read FAILED. Four refusals in
+    faint 11px over an empty plot read as a whisper (the Arbiter, 2026-09-20: «хоч би червоним
+    коли помилки»). Same token the status strip uses for an error, so one colour means one thing. */
+    QLabel[class~="curve-status-bad"] {{
+        color: {t.warn};
+        font-size: 11px;
+    }}
+
     /* .status-strip — "what TCC found on disk" (MCP up/down, terminal-launch result), read-only
     and shown in both view/control modes -- deliberately NOT a dialog bubble, see TCC-TZ.md §8.
     One line, hidden when there's nothing to say; `status-warn` recolors it for an error. */
