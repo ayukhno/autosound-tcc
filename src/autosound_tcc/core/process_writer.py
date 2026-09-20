@@ -284,6 +284,31 @@ def record_reviewer(
     return _run(project_dir, args)
 
 
+def _protective_legs(channel: str, legs) -> list[str]:
+    """`<channel> OFF` or `<channel> --hp f type slope --lp …`, as the CLI takes them.
+
+    Shared by `set_protective` and `amend_protective` so the two cannot spell a leg differently —
+    a correction that reached the journal in another shape than the record it corrects would be
+    the one thing worse than no correction.
+
+    Only what was actually given. Padding a half-filled leg with empty strings made the CLI's own
+    parser fail on `int("")` — a ValueError where the gate has a sentence ready ("--hp needs three
+    values: f type slope … a leg missing any of them cannot be taken back out later"). Sending
+    three values when two were typed hides the refusal written for exactly this.
+    """
+    out = [str(channel)]
+    if legs == "OFF":
+        return out + ["OFF"]
+    for kind in ("hp", "lp"):
+        leg = (legs or {}).get(kind)
+        if leg in (None, "OFF"):
+            continue
+        values = [leg.get("f"), leg.get("type"), leg.get("slope")]
+        out.append(f"--{kind}")
+        out += [str(value) for value in values if value not in (None, "")]
+    return out
+
+
 def set_protective(project_dir: Path, channel: str, legs, source: str = "user") -> str:
     """Declare what was in the signal path for one channel of the OPEN capture round.
 
@@ -304,27 +329,39 @@ def set_protective(project_dir: Path, channel: str, legs, source: str = "user") 
     and that refusal comes back verbatim through `ProcessWriterError` for the dialog to show: a UI
     that quietly fixes what a gate would have refused trains people to trust the UI over the gate.
     """
-    args = ["capture-protective", str(channel)]
-    if legs == "OFF":
-        args.append("OFF")
-    else:
-        for kind in ("hp", "lp"):
-            leg = (legs or {}).get(kind)
-            if leg in (None, "OFF"):
-                continue
-            # Only what was actually given. Padding a half-filled leg with empty strings made the
-            # CLI's own parser fail on `int("")` -- a ValueError where the gate has a sentence
-            # ready ("--hp needs three values: f type slope ... a leg missing any of them cannot
-            # be taken back out later"). Sending three values when two were typed hides the
-            # refusal that was written for exactly this.
-            values = [leg.get("f"), leg.get("type"), leg.get("slope")]
-            args.append(f"--{kind}")
-            args += [str(value) for value in values if value not in (None, "")]
+    args = ["capture-protective", *_protective_legs(channel, legs)]
     if source and source != "user":
         # Only when it differs: `--source` landed in `v3.0.59`, and an older method answers an
         # unknown flag with its usage text (`_refuse_if_too_old` reads that per COMMAND, not per
         # flag). Sending it only where it changes the meaning keeps the ordinary path working
         # against the method this build is paired with and against the one before it.
+        args += ["--source", str(source)]
+    return _run(project_dir, args)
+
+
+def amend_protective(project_dir: Path, capture_id: str, channel: str, legs,
+                     reason: str, source: str = "user") -> str:
+    """Correct a CLOSED round's protective record, visibly as a correction (skill `#48`).
+
+    `set_protective` needs an OPEN round, and the round most likely to need a correction is the
+    one somebody has already read. The live case: a nine-position series captured with 100 Hz LR24
+    on the mids and 1 kHz LR24 on the tweeters, filed as `OFF` for all ten channels. The only way
+    to say so was to open a NEW round on the same version and close it with a reason saying
+    nothing was measured in it — which makes "capture round" mean two things at once.
+
+    `reason` is required BY THE GATE, and this does not soften that: a correction with no why is
+    indistinguishable from a second opinion, and the refusal says exactly that. The empty string
+    is passed through rather than caught here, for the same reason no other writer in this file
+    validates — one implementation of the rule, on the side that owns it.
+
+    Writes no state: a closed round is not in the slice. The correction is a journal event
+    carrying the round's id, which `protective_record_for` replays as the last word on that
+    channel, plus `amends` and the reason so a reader sees a correction rather than a record that
+    was always this way.
+    """
+    args = ["capture-protective", "--amend", str(capture_id), "--reason", str(reason or "")]
+    args += _protective_legs(channel, legs)
+    if source and source != "user":
         args += ["--source", str(source)]
     return _run(project_dir, args)
 

@@ -248,3 +248,42 @@ def test_a_round_can_say_which_project_its_measurements_came_from(tmp_path):
 
     round_ = proc.load()["capture"]
     assert round_["origin"] == {"project": "passat-b8-2026", "series": "49"}
+
+
+def test_a_closed_rounds_protective_record_can_be_corrected_with_a_reason(tmp_path):
+    """Skill `#48` / S-036, method `v3.0.59`: the round most likely to need a correction is the one
+    somebody has already read, and `set_protective` needs an OPEN round.
+
+    The case is live, not hypothetical: a nine-position series was captured with 100 Hz LR24 on
+    the mids and 1 kHz LR24 on the tweeters, and the round recorded `OFF` for all ten channels.
+    The measurements themselves show the roll-off. Until now the only way to say so was to open a
+    NEW round on the same version and close it with a reason saying nothing was measured in it —
+    which makes "capture round" mean two things and misleads the next reader twice.
+
+    The reason is required, and that is the point: a correction with no why is indistinguishable
+    from a second opinion.
+    """
+    from autosound_tcc.core import process_writer, vendor_loader
+
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    proc = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    proc.start_capture("1", ["m-L_1 (sw)"])
+    proc.set_protective("m-L", "OFF")
+    cap_id = proc.load()["capture"]["id"]
+    proc.close_capture("done")
+
+    with pytest.raises(process_writer.ProcessWriterError) as no_reason:
+        process_writer.amend_protective(tmp_path, cap_id, "m-L", "OFF", "")
+    assert "reason" in str(no_reason.value)
+
+    process_writer.amend_protective(
+        tmp_path, cap_id, "m-L",
+        {"hp": {"f": 100, "type": "LR", "slope": 24}},
+        "the sweep shows the roll-off; the round was filed OFF by mistake",
+    )
+
+    # Asked by the round's VERSION, which is what `protective_record_for` matches on — the
+    # round id is what the amendment carries, the version is how a reader finds the round.
+    record = proc.protective_record_for("1")
+    assert record["channels"]["m-L"] == {"hp": {"f": 100, "type": "LR", "slope": 24}}
