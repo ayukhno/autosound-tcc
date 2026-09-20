@@ -1322,3 +1322,71 @@ round chosen, `findData("round:cap_006")` could not find it yet, so each call ad
 for the same round, labelled `серія round:cap_006`. Live already through the group path; the fix
 above would have run it on every pick. Both are covered by tests in `tests/test_curve_view.py`.
 
+
+### 37. A failed read leaves the PREVIOUS curves on screen under the new selection
+
+**What.** The Arbiter picked the pair `Ms` in `cap_007`. The chips read `m-L_49 (sw)` and
+`m-R_49 (sw)`, the status line read `Не вдалось прочитати з REW: m-L_49 (sw): KeyError;
+m-R_49 (sw): KeyError` — and the plot went on showing **nine** curves from the previous
+selection, `c p1_49 (sw)` … `c p9_49 (sw)`, with the legend naming them.
+
+So the window DRAWS one set and REPORTS another. Which is exactly what `_set_selection`'s own
+docstring is written against: *"two controls each holding half a selection is how a window comes
+to draw one thing and report another"*.
+
+**Where.** The Arbiter's screenshot, 2026-09-20, `0.1.41` at `df524a8`, project EPY-Sep2026,
+curve window "Де саме?", phase view, protection off.
+
+**Ours or external.** Ours.
+
+**Weight.** High, and higher than a crash: a crash is obvious, this is a wrong answer that looks
+like a right one. Every reading taken off that screen — a junction, a delay, a polarity call —
+would be taken off the wrong drivers.
+
+**Root cause, read off the code.** `_on_failed` sets the status text and nothing else:
+
+```python
+def _on_failed(self, message: str) -> None:
+    self._status.setVisible(True)
+    self._status.setText(i18n.t("curveFailed").format(error=message))
+```
+
+`_on_curves` is what calls `self._view.set_traces(...)`, so when every title in a selection fails,
+nothing replaces what is on the plot. The selection, the chips and `statement()` have already
+moved; only the drawing has not.
+
+**Not the same as the deliberate "keep what is on screen" case.** `_apply_group`'s
+`curveGroupEmpty` branch keeps the curves ON PURPOSE — there nothing was fetched and nothing
+changed, so an empty plot would be worse. Here a fetch happened, it failed, and the selection is
+already something else. The two look alike and are opposites.
+
+**Reproduces.** Any selection REW cannot answer for — which finding 38 below makes easy to reach.
+
+### 38. Titles REW does not hold are offered, chosen and then asked for
+
+**What.** `m-L_49 (sw)` was offered in the picker and selected, and REW answered `KeyError`: it
+does not hold a measurement by that name. The name came from the project's journal —
+`cap_007` records 73 taken titles — not from REW.
+
+**Where.** Same session and screenshot as 37.
+
+**Ours or external.** Ours. REW is answering correctly; TCC asked for something that is not there.
+
+**Weight.** Medium on its own, high in combination: it is the supply of failed reads that finding
+37 turns into a wrong picture.
+
+**Root cause.** `main_window._open_curves` builds the window's offer list as a UNION:
+
+```python
+available = sorted(set(titles) | set(available or []) | set(self._meas_panel.known_titles()))
+```
+
+and the panel passes its whole round. `_selectable()` then intersects that with the round's own
+titles, so a title the JOURNAL knows and REW does not survives both filters. Named while fixing
+finding 36 on 2026-09-20 and deliberately not touched then, because the union is there on purpose:
+the window is opened over what the model names, which need not be what REW is holding this second.
+
+**What has to be decided, not just coded.** Either the picker marks a title REW does not hold (the
+kind picker already greys rows, `_mark_availability`), or the offer list stops being a union and
+the window says what it cannot show. The first keeps the window openable over a name REW has lost;
+the second is simpler and narrower. This is the Arbiter's call.
