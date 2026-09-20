@@ -1161,11 +1161,31 @@ while the panel's own `shutdown()` had been fixed for it. It now goes through
 deliberately outlasts the wait. The `2026-08-27` crash, sixteen seconds after a launch, fits a
 scan being replaced; whether it accounts for the two on `2026-09-19` is NOT established.
 
-*What is still open.* The recorded stack has the destructor running INSIDE `run()` — reached
-through `method_dealloc` on the worker thread — and none of the curve window's own paths explain
-that yet: `_reload`, `closeEvent` and `reset` all hand a busy worker to `stop_or_detach` first.
-What has to be measured next is who held the last reference at that moment, and whether a bound
-signal temporary (`self.done.emit(...)`, the last statement of `run()`) can be it.
+*The mechanism, MEASURED rather than reasoned about (2026-09-20).* Drop the last external
+reference to a worker while it is running, and the process aborts — `exit 134`, with this exact
+fatal line. A `weakref.finalize` on the worker says where: **the destructor runs on the WORKER's
+own thread, right after `run()` returns**, because from the moment the external reference goes the
+running frame holds the only one, and the frame dies when `run()` does. That is the recorded stack
+of this finding, reproduced in eleven lines.
+
+> **A bounded wait is not a guard. Whoever drops the last reference to a live worker aborts the
+> application.**
+
+*Three more doors of the same class, found by that rule and closed.* `MainWindow.stop_workers`
+waited on `_rew_ping` (2 s), `_contract_worker` (3 s, after `cancel()`) and `_capture_check` (5 s)
+— and then carried on, leaving each in its attribute to die with the window. The block's own
+comment already said what that costs; the answer written under it was the wait. All three now go
+through `qt_shutdown.stop_or_detach`, the move `_reviewer_probe` and `_cli_catalogue` two lines
+below were already making. The contract check keeps its `cancel()` first — killing the child is
+the only lever that reaches a thread blocked reading it.
+
+*What is still open.* Which door the two `2026-09-19` crashes came through is still not named.
+`_contract_worker` is the strongest candidate and fits the log — `spawn: contract.py` runs after
+every tool call, and one is spawned at `16:12:07` before the `16:19:02` crash and at `16:24:10`
+before the `16:25:09` one — but its start site is guarded and its shutdown path only runs on a
+close, which did not happen. So the rule is now enforced in four places and the specific chain is
+not proven. The next measurement is instrumentation rather than reading: log every worker
+construction and destruction with its thread, and reproduce the set→group steps.
 
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,

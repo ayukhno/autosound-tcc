@@ -4509,3 +4509,56 @@ def test_a_project_with_no_ledger_offers_the_route_to_the_first_snapshot(tmp_pat
     assert i18n.t("leftBankFirst") not in composed  # the label is not the request
     assert "FULL" in composed  # the method's default name for a first preset
     assert composed.startswith(i18n.t("leftBankFirstAsk").split("{")[0][:40])
+
+
+def test_quitting_also_lets_go_of_the_ping_the_contract_check_and_the_capture_check():
+    """The same rule, for the three workers in `stop_workers` that only WAITED (finding 35).
+
+    The block's own comment says it: "Qt destroying a still-running QThread is a `qFatal`, which
+    aborts the process". The answer written under it was a bounded wait — and a wait is not the
+    guard. A worker that outlasts it is left in the attribute, the attribute dies with the window,
+    and the destructor runs against a running thread. Probed on 2026-09-20: dropping the last
+    reference to a running worker aborts the process with exit 134, and the destructor runs on the
+    WORKER's own thread as `run()` unwinds, which is exactly the stack in the crash report.
+
+    The contract check keeps its `cancel()` — killing the child is the only lever that reaches a
+    thread blocked reading it — and the hand-over is what covers the case where even that does not
+    land in time.
+    """
+    from PySide6.QtCore import QObject, Signal
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    class _Stuck(QObject):
+        finished = Signal()
+        cancelled = False
+
+        def isRunning(self) -> bool:  # noqa: N802 (QThread's name)
+            return True
+
+        def requestInterruption(self) -> None:  # noqa: N802 (QThread's name)
+            pass
+
+        def wait(self, _ms: int = 0) -> bool:
+            return False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    ping, contract, check = _Stuck(), _Stuck(), _Stuck()
+    window._rew_ping, window._contract_worker, window._capture_check = ping, contract, check
+    try:
+        window.stop_workers()
+        detached = qt_shutdown.detached()
+    finally:
+        window._rew_ping = window._contract_worker = window._capture_check = None
+        for worker in (ping, contract, check):
+            qt_shutdown._DETACHED.discard(worker)
+
+    assert ping in detached, "the REW ping"
+    assert contract in detached, "the contract check"
+    assert check in detached, "the capture check"
+    assert contract.cancelled, "and the child is still killed first — that is the lever"

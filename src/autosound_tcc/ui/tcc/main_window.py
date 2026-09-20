@@ -4521,20 +4521,22 @@ class MainWindow(QMainWindow):
         # Before the threads: the sink holds a bound method of this window, and a log line
         # arriving after Qt has torn the window down would call into a deleted C++ object.
         app_log.set_ui_sink(None)
-        ping = getattr(self, "_rew_ping", None)
-        if ping is not None and ping.isRunning():
-            ping.wait(2000)
+        # A WAIT IS NOT THE GUARD, and these three only waited. A worker that outlasts the wait
+        # stays in its attribute, the attribute dies with the window, and `~QThread` against a
+        # running thread is `qFatal`. Measured 2026-09-20 (finding 35): dropping the last
+        # reference to a running worker aborts with 134, and the destructor runs on the WORKER's
+        # own thread as `run()` unwinds -- which is the stack the crash report carries. The
+        # hand-over below is the same move `_reviewer_probe` and `_cli_catalogue` already make.
+        qt_shutdown.stop_or_detach(getattr(self, "_rew_ping", None), 2000)
         # The contract check is the worker most likely to still be going: it starts at launch and
-        # takes as long as a Python subprocess plus a REW probe. Cancel first, then wait -- waiting
-        # out its own 30 s timeout would freeze a window on its way out.
+        # takes as long as a Python subprocess plus a REW probe. Cancel FIRST -- killing the child
+        # is the only lever that reaches a thread blocked reading it, and waiting out its own 30 s
+        # timeout would freeze a window on its way out. The hand-over covers the rest.
         contract = getattr(self, "_contract_worker", None)
         if contract is not None and contract.isRunning():
             contract.cancel()
-            contract.wait(3000)
-        # Same rule as the contract worker: a running QThread destroyed by Qt is a `qFatal`.
-        check = getattr(self, "_capture_check", None)
-        if check is not None and check.isRunning():
-            check.wait(5000)
+        qt_shutdown.stop_or_detach(contract, 3000)
+        qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
         # Both can outlast any wait worth making at quit: a probe is a real model call, and the
         # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
         # left for Qt to destroy running (F-027) — with `done` cut first, so a late answer never
