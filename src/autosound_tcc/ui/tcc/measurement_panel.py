@@ -53,6 +53,11 @@ _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
 #: one, and what happens after it is what stopped being a crash.
 _WORKER_WAIT_MS = 6000
 
+#: The same, for a worker being replaced mid-session rather than at teardown. Longer,
+#: because here the window stays open and a scan that is about to answer is worth waiting
+#: for; what it must never do is assign over one that is still running (`_replace_worker`).
+_REPLACE_WAIT_MS = 6000
+
 # `ui/capture_order/<preset>/<method>` -- the user's declared REW capture sequence, one per capture
 # method (sw/rta/rta_group -- item 9 round 2, 2026-07-27: one button covers all three methods, so
 # the order is scoped per method, not just per preset). Deliberately a distinct key namespace from
@@ -973,8 +978,14 @@ class MeasurementPanel(QWidget):
         a rename started from a scan that was still running, could take the window out.
         """
         previous = getattr(self, attr, None)
-        if previous is not None and previous.isRunning():
-            previous.wait(6000)
+        # The wait is not the guard, and this line is where that was still true. It waited and
+        # then assigned ANYWAY: a worker that outlasted the wait lost its last reference right
+        # here -- these workers have no parent -- and `~QThread` against a running thread is
+        # `qFatal`, so the process aborts mid-session. Exactly the half-guard F-027 named one file
+        # over, and the one this panel's own `shutdown()` was fixed for while this path was not.
+        # The Arbiter's log carries the fatal line three times (2026-08-27 18:30:47, sixteen
+        # seconds after a launch, which is a scan being replaced; twice on 2026-09-19).
+        qt_shutdown.stop_or_detach(previous, _REPLACE_WAIT_MS)
         setattr(self, attr, worker)
         return worker
 

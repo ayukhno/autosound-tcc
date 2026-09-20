@@ -1009,3 +1009,40 @@ def test_cancelling_the_series_question_opens_no_round(tmp_path, monkeypatch):
 
     assert captured == {}, "the ledger is left alone"
 
+
+
+def test_a_worker_that_outlasts_the_wait_is_handed_over_rather_than_dropped(monkeypatch):
+    """The other half of the test above, and the half that aborts the app.
+
+    `_replace_worker` waited and then assigned ANYWAY. A worker that outlasted the wait lost its
+    last reference on that line, and Qt answers `~QThread` against a running thread with `qFatal`
+    — `abort()` mid-session. That is the same half-guard F-027 named in the curve window, and the
+    panel's own `shutdown()` was fixed for it while this path was not.
+
+    The Arbiter's log carries the fatal line three times: 2026-08-27 18:30:47, sixteen seconds
+    after a launch — which is a scan being replaced — and twice on 2026-09-19 (findings 35).
+
+    The wait itself is not the guard: `qt_shutdown.stop_or_detach` is, and what it buys is that a
+    still-busy worker is held by `_DETACHED` instead of by nobody.
+    """
+    from PySide6.QtCore import QThread
+
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    class _Stubborn(QThread):
+        def run(self) -> None:
+            self.msleep(400)  # longer than the wait below, and it ignores interruption
+
+    _app()
+    monkeypatch.setattr(mp, "_REPLACE_WAIT_MS", 50, raising=False)
+    panel = MeasurementPanel()
+    first = _Stubborn()
+    panel._replace_worker("_worker", first)
+    first.start()
+
+    panel._replace_worker("_worker", _Stubborn())
+
+    assert first.isRunning(), "the point of the test: it did NOT finish inside the wait"
+    assert first in qt_shutdown.detached(), "so something has to be holding it"
+    first.wait(4000)

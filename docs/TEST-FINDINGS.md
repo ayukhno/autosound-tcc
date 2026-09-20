@@ -1138,6 +1138,35 @@ below: the titles on screen still belong to the PREVIOUS set (`_49`), the read o
 has already failed with `Не вдалося прочитати з REW: c p1_49 (sw): KeyError` (finding 36), and a
 worker is live on REW when the group selection starts another one.
 
+**Investigated 2026-09-20; one hypothesis killed, one defect found and fixed, the chain NOT yet
+closed.**
+
+*The log, collected from the Arbiter's machine.* The fatal line appears **three** times, not two:
+`2026-08-27 18:30:47` — sixteen seconds after a launch, so a long session is not a precondition —
+and `2026-09-19` at `16:19:02` and `16:25:09`. TCC logs nothing else around them: the REW read
+failure of finding 36 is a status line in the window, not a log record.
+
+*Hypothesis killed.* `qt_shutdown.detach` connects `finished` to a bare lambda, and a bare lambda
+has no receiver object — so the discard looked like it would run DIRECTLY on the worker's thread
+and destroy the object there, which is exactly the shape of the recorded stack. Probed instead of
+assumed: the lambda runs on the GUI thread (`QThread` affinity is the GUI thread and PySide queues
+on it). The docstring is right and this is not the path.
+
+*Defect found and fixed — the same fatal line, a different door.*
+`measurement_panel._replace_worker` waited six seconds and then **assigned anyway**. A worker that
+outlasted the wait lost its last reference on that line — these workers have no parent — and
+`~QThread` against a running thread is `qFatal`. That is the F-027 half-guard, still live here
+while the panel's own `shutdown()` had been fixed for it. It now goes through
+`qt_shutdown.stop_or_detach(previous, _REPLACE_WAIT_MS)`, and a test covers a worker that
+deliberately outlasts the wait. The `2026-08-27` crash, sixteen seconds after a launch, fits a
+scan being replaced; whether it accounts for the two on `2026-09-19` is NOT established.
+
+*What is still open.* The recorded stack has the destructor running INSIDE `run()` — reached
+through `method_dealloc` on the worker thread — and none of the curve window's own paths explain
+that yet: `_reload`, `closeEvent` and `reset` all hand a busy worker to `stop_or_detach` first.
+What has to be measured next is who held the last reference at that moment, and whether a bound
+signal temporary (`self.done.emit(...)`, the last statement of `run()`) can be it.
+
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,
 which keeps it alive in `_DETACHED` and discards it when `finished` arrives. The stack says the
