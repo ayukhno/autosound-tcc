@@ -357,3 +357,62 @@ def test_building_the_plan_puts_no_window_of_its_own_on_the_desktop():
         app.removeEventFilter(watch)
 
     assert shown == [], f"a panel must build inside its parent, not on the desktop: {shown}"
+
+
+def _covering_step(covers):
+    from autosound_tcc.state.models import PlanStep as RealStep
+
+    return RealStep(id="-1.2", name={"en": "Close open fields: a, b, c +1", "uk": ""},
+                    covers=tuple(covers))
+
+
+def test_a_step_with_covers_gets_a_chip_and_the_list_starts_collapsed():
+    """Method `SKL-047` (hub #189). The Arbiter's words about the old rendering: «ось такий пункт
+    в плані зовсім не зрозумілий» — thirteen facts behind two counts. The chip says how many are
+    behind the name; the list is what he can actually act on, and it starts closed because a plan
+    of thirty steps with every list open is not a plan he can read."""
+    _app()
+    row = _PhaseStepRow(_covering_step(["project.json:a", "project.json:b"]),
+                        _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    chips = [w for w in row.findChildren(QLabel) if "step-covers-chip" in (w.property("class") or "")]
+    assert len(chips) == 1 and "2" in chips[0].text()
+    assert row._covers_list.isHidden()
+
+    chips[0].mousePressEvent(None)
+    assert not row._covers_list.isHidden()
+    assert "project.json:a" in row._covers_list.text()
+    assert "project.json:b" in row._covers_list.text()
+
+
+def test_a_step_with_no_covers_has_no_chip_and_no_list():
+    """Every step written before the field, which is all of them until the pin moves."""
+    _app()
+    row = _PhaseStepRow(_covering_step([]), _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    assert not [w for w in row.findChildren(QLabel)
+                if "step-covers-chip" in (w.property("class") or "")]
+    assert getattr(row, "_covers_list", None) is None
+
+
+def test_a_covered_fact_still_open_is_marked_apart_from_one_already_answered():
+    """Ask 2 of the ticket, as far as it can honestly go here: the panel's tick is the skill's to
+    write (SCR-004), so nothing is ticked by hand. What the window CAN say is which of the step's
+    facts the project still has open — `_open_questions` is keyed by the same dotted paths, so
+    this is a lookup, not a guess."""
+    _app()
+    row = _PhaseStepRow(
+        _covering_step(["project.json:a", "project.json:b"]),
+        _PlanProgress(), lambda *_: None, lambda _sid: None,
+        open_questions=frozenset({"project.json:a"}),
+    )
+    row._covers_list.setVisible(True)
+    text = row._covers_list.text()
+
+    assert "project.json:a" in text and "project.json:b" in text
+    # The open one is marked; the answered one is plain. Which way round matters: the list exists
+    # to say what is LEFT, so the mark goes on the work, not on the done.
+    open_line = [ln for ln in text.splitlines() if "project.json:a" in ln][0]
+    done_line = [ln for ln in text.splitlines() if "project.json:b" in ln][0]
+    assert i18n.t("planCoversOpen") in open_line
+    assert i18n.t("planCoversOpen") not in done_line

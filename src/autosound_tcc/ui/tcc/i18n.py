@@ -68,6 +68,10 @@ T: dict[Lang, dict[str, str]] = {
         "leftNoLedgerSheet": "Until that snapshot exists there is no settings sheet to enter either — banking it is what produces one.",
         "leftBankFirst": "Bank the first snapshot",
         "leftBankFirstAsk": "This project has no ledger yet — it was described or copied from another car, not measured here. Read the DSP settings as they stand in the processor now and bank them as the FIRST snapshot of preset {preset}, through the gate, then show me the settings sheet.",
+        # A plan step says which facts it closes (method SKL-047). The chip's tooltip and the
+        # mark on a fact the project has NOT answered yet.
+        "planCoversTip": "What this step closes — click to open the list",
+        "planCoversOpen": "still open",
         "planEmpty": "No plan yet. The skill writes one when a session enters a phase, and this fills in as steps are added and closed.",
         "planNoProject": "No project open.",
         "noDataYet": "No data yet",
@@ -1082,6 +1086,8 @@ Choose sweeps (sw) above to read this.",
         "leftNoLedgerSheet": "Доки того знімка нема, нема й листа налаштувань — його видає саме банкування.",
         "leftBankFirst": "Завести перший знімок",
         "leftBankFirstAsk": "У цьому проєкті ще нема леджера — його описали або скопіювали з іншого авто, а не зняли тут. Прочитай налаштування DSP, як вони зараз стоять у процесорі, і заведи їх ПЕРШИМ знімком пресету {preset}, через гейт, тоді покажи лист налаштувань.",
+        "planCoversTip": "Що цей крок закриває — натисни, щоб розгорнути перелік",
+        "planCoversOpen": "ще відкрите",
         "planEmpty": "Плану ще немає. Скіл записує його, коли сесія входить у фазу — панель наповниться, щойно з'являться й почнуть закриватися кроки.",
         "planNoProject": "Проєкт не відкрито.",
         "noDataYet": "Даних поки нема",
@@ -2012,6 +2018,8 @@ Choose sweeps (sw) above to read this.",
                             'zmierzony tutaj. Odczytaj ustawienia DSP w takiej postaci, w jakiej są teraz w procesorze, '
                             'i zapisz je jako PIERWSZY zrzut presetu {preset}, przez bramkę, a potem pokaż mi arkusz '
                             'ustawień.',
+        "planCoversTip": 'Co zamyka ten krok — kliknij, aby rozwinąć listę',
+        "planCoversOpen": 'wciąż otwarte',
         "planEmpty": 'Planu jeszcze nie ma. Skill zapisuje go, gdy sesja wchodzi w fazę — panel wypełni się, gdy '
                      'pojawią się i zaczną zamykać kroki.',
         "planNoProject": 'Nie otwarto projektu.',
@@ -3024,6 +3032,8 @@ Choose sweeps (sw) above to read this.",
                             'kopiert, nicht hier gemessen. Lies die DSP-Einstellungen so aus, wie sie jetzt im Prozessor '
                             'stehen, und trage sie als ERSTEN Schnappschuss des Presets {preset} durchs Gate ein; zeig '
                             'mir dann das Einstellungsblatt.',
+        "planCoversTip": 'Was dieser Schritt schließt — zum Aufklappen klicken',
+        "planCoversOpen": 'noch offen',
         "planEmpty": 'Noch kein Plan. Der Skill schreibt ihn, wenn eine Sitzung eine Phase betritt; dieses Panel '
                      'füllt sich, während Schritte hinzukommen und geschlossen werden.',
         "planNoProject": 'Kein Projekt geöffnet.',

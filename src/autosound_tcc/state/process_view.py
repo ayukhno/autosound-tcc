@@ -274,6 +274,7 @@ def _to_step(step: dict, stale: Optional[dict] = None,
         source=step.get("source", "skill"),
         skip=bool(step.get("skip")),
         attempt=int(step.get("attempt", 1) or 1),
+        covers=tuple(str(c) for c in step.get("covers") or ()),
     )
 
 

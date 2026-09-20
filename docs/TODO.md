@@ -2006,6 +2006,31 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-071 — `test_only_the_current_phase_starts_expanded` crashes its worker under `-n 4`
+
+**Статус**: open 2026-09-20 · named, not diagnosed — first stumble
+
+Reproduced 2026-09-20 while working on `SKL-047`, and measured against a clean tree so it is not
+mistaken for a regression: with `tests/test_plan_panel.py` in the same `-n 4` run as
+`test_process_view.py`, `test_project_view.py`, `test_main_window.py`, `test_i18n_languages.py`
+and `test_plan_audit.py`, the worker CRASHES — not fails:
+
+```
+worker 'gw0' crashed while running 'tests/test_plan_panel.py::test_only_the_current_phase_starts_expanded'
+```
+
+3 runs of 3 with the `SKL-047` change in the tree, **2 of 3 with the tree stashed clean**. So it
+belongs to the file combination, not to that change. Serially (`-p no:randomly`, no `-n`) the same
+336 tests are green, and `tests/test_plan_panel.py` alone under `-n 4` is green too.
+
+Worth suspecting first: `_PhaseRow` parents its steps container at construction precisely because
+an unparented widget is a top-level window (the note in `plan_panel.py`, probe35), and this test is
+the one that reads `_steps_container` visibility. Fewer tests per process is a different
+environment — `docs/TESTING.md` says the shards should be expected to expose exactly this class.
+
+Not diagnosed here: it is not what the session was doing, and CI shards by FILE, so the
+combination above is not one a shard produces.
+
 ### F-060 — Carry `planned` on a skipped capture, once the method emits it
 
 **Статус**: done 2026-09-20 · the readers carry it; the PIN still waits for the method's tag

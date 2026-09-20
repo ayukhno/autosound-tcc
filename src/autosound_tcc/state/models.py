@@ -20,6 +20,11 @@ class PlanStep:
     source: str = "skill"  # "skill" (base structure) | "project" (situational, inserted by user)
     skip: bool = False  # marked skipped -- still shown, dimmed, order preserved
     attempt: int = 1  # >1 renders an "attempt N" chip (a repeated step, "approach 2")
+    # The facts this step closes, as `open-questions` prints them: `<file>:<dotted.path>`
+    # (method SKL-047). The step's own NAME already carries the first few and `+N` — composed by
+    # the method, not by a caller — and this is the whole list behind that count. Empty for every
+    # step written before the field, and never written back: steps are not rewritten (SCR-004).
+    covers: tuple = ()
 
 
 @dataclass(frozen=True)

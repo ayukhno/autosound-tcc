@@ -285,6 +285,36 @@ def load_open_questions(project_dir_: Optional[Path] = None) -> tuple[str, ...]:
     return tuple(str(q) for q in (_load(project_dir_).get("_open_questions") or []))
 
 
+def open_questions_by_file(project_dir_: Optional[Path] = None) -> frozenset[str]:
+    """The same unresolved facts, keyed `<file>:<dotted.path>` — the spelling a plan step uses.
+
+    A step's `covers` (method SKL-047) names the facts it closes in exactly this form, so the two
+    compare directly and nothing here normalises anything: a normalisation is a guess about the
+    other side's format, and the point of the field was to stop guessing.
+
+    Two files rather than one, because a step closes facts in both, and `load_open_questions`
+    above answers for `project.json` alone and drops the prefix — right for the onboarding chips
+    it feeds, wrong here.
+
+    Read off disk on every call rather than out of a contract report: the report is run on demand
+    and can be absent or stale, while `_open_questions` is written by whoever answered the
+    question. Silent when a file is missing or unreadable, the way `_load` is: "nothing open" is
+    the honest reading of a project that has not been described yet.
+    """
+    project = Path(project_dir_ or config.project_dir())
+    out: set[str] = set()
+    for name, path in (("project.json", config.project_path(project)),
+                       ("dsp_profile.json", config.dsp_profile_path(project))):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        out.update(f"{name}:{q}" for q in (data.get("_open_questions") or []))
+    return frozenset(out)
+
+
 def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
     """Branch and working-tree state of the project folder, when it is a git repo.
 

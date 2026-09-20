@@ -2865,6 +2865,10 @@ class MainWindow(QMainWindow):
         if unbacked:
             plan = process_view.mark_unbacked(plan, unbacked)
         self._plan_panel.set_plan(plan)
+        # Which of a step's `covers` facts are still open (SKL-047). Read off disk beside the
+        # plan, not out of the contract report: the report runs on demand and can be absent,
+        # while `_open_questions` is written by whoever answered the question.
+        self._plan_panel.set_open_questions(project_view.open_questions_by_file())
         self._refresh_capture_task(state)
         self._notify_stale(stale)
         self._notify_missing_records(state)

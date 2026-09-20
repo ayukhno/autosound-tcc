@@ -994,6 +994,18 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         font-size: 12px;
     }}
     QLabel[class~="step-meas-icon"]:hover {{ color: {t.info}; }}
+    /* .step-covers-chip / .step-covers-list — what a step CLOSES (method SKL-047). The chip
+    carries the count and opens the list; the list is the facts themselves, as dotted paths, so it
+    is set in the mono face for the same reason a path anywhere else is: these are identifiers the
+    Arbiter compares character by character against a form, not prose. */
+    QLabel[class~="step-covers-chip"] {{ color: {t.muted}; }}
+    QLabel[class~="step-covers-chip"]:hover {{ color: {t.info}; }}
+    QLabel[class~="step-covers-list"] {{
+        color: {t.muted};
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        padding: 2px 0 2px 26px;
+    }}
     /* .step-skip — a superseded/skipped step stays visible (attempt history matters) but dims,
     same descendant-override idiom as .chan-dim in the DSP tree. */
     QWidget[class~="step-skip"] QLabel[class~="substep-name"] {{ color: {t.faint}; }}

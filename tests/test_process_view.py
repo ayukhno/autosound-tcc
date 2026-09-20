@@ -390,3 +390,32 @@ def test_a_round_written_by_a_method_without_those_fields_still_reads(project):
 
     assert round_["version_kind"] is None
     assert round_["skipped"]["w-L_1 (sw)"] == {"reason": "not today", "planned": None}
+
+
+def test_a_step_carries_the_facts_it_covers(project, process):
+    """Method `SKL-047` (hub #189): a step says WHICH facts it closes, as dotted paths.
+
+    The Arbiter read `Закрити відкриті поля: project.json (8) і dsp_profile.json (5)` and said it
+    meant nothing to him — thirteen facts named nowhere he could see, in the one artefact he acts
+    on. The names existed all along (`project.py open-questions`); the step had no field for them.
+
+    Read-only here, and absent-tolerant: `covers` is written when the step is added, steps are
+    never rewritten (SCR-004), and every step written before the field has none.
+    """
+    covers = ["project.json:sources.sweep_input", "dsp_profile.json:eq.bands_total"]
+    state = {
+        "active_phase": "-1",
+        "phases": {},
+        "plan": [
+            {"id": "-1.2", "phase": "-1", "name": "Закрити відкриті поля: … +1",
+             "status": "todo", "covers": covers},
+            {"id": "-1.3", "phase": "-1", "name": "written before the field", "status": "todo"},
+        ],
+    }
+    phases = {p.name["en"]: p for p in process_view.to_plan(state)}
+    steps = {s.id: s for s in phases["Phase -1 · Intake"].steps} if \
+        "Phase -1 · Intake" in phases else {
+            s.id: s for phase in phases.values() for s in phase.steps}
+
+    assert steps["-1.2"].covers == tuple(covers)
+    assert steps["-1.3"].covers == ()

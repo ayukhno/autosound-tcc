@@ -147,9 +147,11 @@ def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
 class _PhaseStepRow(QWidget):
     def __init__(
         self, step: PlanStep, progress: _PlanProgress, on_toggle, on_session_click,
-        sessions_for=sessions_for_step,
+        sessions_for=sessions_for_step, open_questions=frozenset(),
     ) -> None:
         super().__init__()
+        #: The list of facts this step closes, built only when there are any (SKL-047).
+        self._covers_list = None
         # Done is what the skill wrote, never what was clicked here. The checkbox used to read a
         # local QSettings overlay left over from the mock, so a finished phase showed unticked
         # steps *and* the Arbiter could tick one -- recording nothing, contradicting the file, and
@@ -242,14 +244,61 @@ class _PhaseStepRow(QWidget):
             chips.addWidget(meas_icon)
             has_chip = True
 
+        # What this step CLOSES, not only how many (method SKL-047, hub #189). The Arbiter read a
+        # step as `Закрити відкриті поля: project.json (8) і dsp_profile.json (5)` and said it meant
+        # nothing to him -- thirteen facts named nowhere, in the one artefact he acts on. The names
+        # existed all along (`project.py open-questions`); the step had no field to carry them.
+        #
+        # Collapsed by default, and that is not timidity: a phase has a dozen steps, and a plan
+        # where every list is open is a wall. The chip carries the count, which is the affordance
+        # -- the same job the `+N` does inside the composed name.
+        if step.covers:
+            covers_chip = QLabel(f"\u25be {len(step.covers)}")
+            covers_chip.setProperty("class", "stag step-covers-chip")
+            covers_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            attach_tip(covers_chip, i18n.t("planCoversTip"))
+            covers_chip.mousePressEvent = (  # type: ignore[assignment]
+                lambda _e: self._toggle_covers()
+            )
+            chips.addWidget(covers_chip)
+            has_chip = True
+
         if has_chip:
             layout.addLayout(chips)
+
+        if step.covers:
+            # Marked on the OPEN ones, not on the answered: the list exists to say what is left.
+            # `open_questions` is `_open_questions` from both files keyed the way `covers` spells
+            # them (`project_view.open_questions_by_file`), so this is a lookup and not a guess --
+            # which is the whole reason the method writes dotted paths rather than a summary.
+            mark = i18n.t("planCoversOpen")
+            lines = [
+                f"\u2022 {fact}" + (f"  \u2014 {mark}" if fact in open_questions else "")
+                for fact in step.covers
+            ]
+            self._covers_list = QLabel("\n".join(lines))
+            self._covers_list.setProperty("class", "step-covers-list")
+            self._covers_list.setWordWrap(True)
+            # Same reason the name does it: one dotted path with no space in it would otherwise
+            # set the whole column's minimum width.
+            self._covers_list.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                            QSizePolicy.Policy.Preferred)
+            self._covers_list.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._covers_list.setVisible(False)
+            outer.addWidget(self._covers_list)
+
+    def _toggle_covers(self) -> None:
+        """Open or close the list. Read-only either way: `covers` is set when the step is added
+        and steps are never rewritten (SCR-004) -- the window has nothing to write back."""
+        if self._covers_list is not None:
+            self._covers_list.setVisible(self._covers_list.isHidden())
 
 
 class _PhaseRow(QWidget):
     def __init__(
         self, phase: PlanPhase, phase_index: int, progress: _PlanProgress, on_changed,
-        on_session_click, sessions_for=sessions_for_step,
+        on_session_click, sessions_for=sessions_for_step, open_questions=frozenset(),
     ) -> None:
         super().__init__()
         steps = phase.steps + progress.inserted_steps(phase_index)
@@ -301,7 +350,8 @@ class _PhaseRow(QWidget):
 
         for step in _collapse_runs(steps):
             steps_layout.addWidget(
-                _PhaseStepRow(step, progress, _on_toggle, on_session_click, sessions_for)
+                _PhaseStepRow(step, progress, _on_toggle, on_session_click, sessions_for,
+                              open_questions)
             )
 
         # "+ add step" wrote into the same local overlay the checkbox did, so a step added here
@@ -338,6 +388,7 @@ class PlanPanel(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._progress = _PlanProgress()
         self._sessions: tuple = ()
+        self._open_questions: frozenset = frozenset()
         # The real plan from the skill's process-state, or None for "there isn't one yet".
         # None used to fall back to the mock `PLAN`, which meant a real project that had not
         # started tuning showed seven invented phases with invented progress -- the same mistake
@@ -353,6 +404,16 @@ class PlanPanel(QScrollArea):
     def set_plan(self, phases: "tuple[PlanPhase, ...] | None") -> None:
         """Swap in the real plan, or None when the project has no process state yet."""
         self._plan = phases
+        self.retranslate()
+
+    def set_open_questions(self, questions) -> None:
+        """Which intake facts the project still has open, keyed `<file>:<dotted.path>`.
+
+        Only ever read here: a step's `covers` names the facts it closes, and this says which of
+        them are left. The panel's own tick stays the skill's to write (SCR-004), so "still open"
+        is a fact off disk rather than something anybody clicks.
+        """
+        self._open_questions = frozenset(questions or ())
         self.retranslate()
 
     def set_sessions(self, sessions) -> None:
@@ -399,6 +460,7 @@ class PlanPanel(QScrollArea):
         for i, phase in enumerate(plan):
             self._layout.addWidget(
                 _PhaseRow(phase, i, self._progress, self.retranslate,
-                          self.sessionRequested.emit, self._sessions_for_step)
+                          self.sessionRequested.emit, self._sessions_for_step,
+                          self._open_questions)
             )
         self._layout.addStretch(1)

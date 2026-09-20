@@ -229,3 +229,35 @@ def test_no_car_block_at_all_is_its_own_answer(tmp_path):
     _write(tmp_path, {"dsp": {"vendor": "Musway", "model": "M6V4"}})
 
     assert project_view.load_car(tmp_path) == ("", project_view.CAR_PARTS)
+
+
+def test_open_questions_keyed_by_file_match_a_steps_covers(tmp_path, monkeypatch):
+    """Method `SKL-047` (hub #189): a step's `covers` entries are `<file>:<dotted.path>`, and the
+    intake's open questions are keyed by the same paths — so the two can be compared without
+    inventing a normalisation.
+
+    `load_open_questions` above answers for `project.json` alone and drops the file, which is
+    right for the onboarding chips it feeds. The plan panel needs BOTH files and the prefix, so it
+    can say which of a step's facts are still open.
+    """
+    import json
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "project.json").write_text(json.dumps(
+        {"_open_questions": ["sources.sweep_input", "amps.front.gain_db"]}), encoding="utf-8")
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(
+        {"_open_questions": ["eq.bands_total"]}), encoding="utf-8")
+
+    assert project_view.open_questions_by_file(tmp_path) == frozenset({
+        "project.json:sources.sweep_input",
+        "project.json:amps.front.gain_db",
+        "dsp_profile.json:eq.bands_total",
+    })
+
+
+def test_open_questions_by_file_is_empty_when_there_is_no_project(tmp_path, monkeypatch):
+    """A project with neither file answers "nothing open", not an exception: the panel asks this
+    on every render, including before intake has written anything."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+    assert project_view.open_questions_by_file(tmp_path) == frozenset()
