@@ -63,6 +63,11 @@ T: dict[Lang, dict[str, str]] = {
         "audioAnalysis": "Car audio analysis",
         "leftNoProfile": "No DSP yet. Start a session and tell it which processor this car has — the profile is written as soon as it is named, and this panel fills in.",
         "leftNoLedger": "No settings captured yet. The tree fills in once the first ledger snapshot is written, during tuning.",
+        # The note explains the empty VALUES; this says the other thing the first snapshot
+        # unlocks. A copied car has neither, and only the values were ever named (#43).
+        "leftNoLedgerSheet": "Until that snapshot exists there is no settings sheet to enter either — banking it is what produces one.",
+        "leftBankFirst": "Bank the first snapshot",
+        "leftBankFirstAsk": "This project has no ledger yet — it was described or copied from another car, not measured here. Read the DSP settings as they stand in the processor now and bank them as the FIRST snapshot of preset {preset}, through the gate, then show me the settings sheet.",
         "planEmpty": "No plan yet. The skill writes one when a session enters a phase, and this fills in as steps are added and closed.",
         "planNoProject": "No project open.",
         "noDataYet": "No data yet",
@@ -1074,6 +1079,9 @@ Choose sweeps (sw) above to read this.",
         "audioAnalysis": "Аудіо аналіз авто",
         "leftNoProfile": "Процесор ще не відомий. Почни сесію й скажи, який DSP у цьому авто — профіль пишеться щойно його названо, і панель наповниться.",
         "leftNoLedger": "Налаштувань ще не знято. Дерево наповниться, щойно буде записано перший знімок леджера — це вже під час тюнінгу.",
+        "leftNoLedgerSheet": "Доки того знімка нема, нема й листа налаштувань — його видає саме банкування.",
+        "leftBankFirst": "Завести перший знімок",
+        "leftBankFirstAsk": "У цьому проєкті ще нема леджера — його описали або скопіювали з іншого авто, а не зняли тут. Прочитай налаштування DSP, як вони зараз стоять у процесорі, і заведи їх ПЕРШИМ знімком пресету {preset}, через гейт, тоді покажи лист налаштувань.",
         "planEmpty": "Плану ще немає. Скіл записує його, коли сесія входить у фазу — панель наповниться, щойно з'являться й почнуть закриватися кроки.",
         "planNoProject": "Проєкт не відкрито.",
         "noDataYet": "Даних поки нема",
@@ -1997,6 +2005,13 @@ Choose sweeps (sw) above to read this.",
                          'zapisuje się, gdy tylko go nazwiesz, a panel się wypełni.',
         "leftNoLedger": 'Nie zdjęto jeszcze żadnych ustawień. Drzewo wypełni się, gdy powstanie pierwszy zrzut '
                         'ledgera — już podczas strojenia.',
+        "leftNoLedgerSheet": 'Dopóki tego zrzutu nie ma, nie ma też arkusza ustawień — powstaje on dopiero przy '
+                             'zapisie przez bramkę.',
+        "leftBankFirst": 'Załóż pierwszy zrzut',
+        "leftBankFirstAsk": 'Ten projekt nie ma jeszcze ledgera — został opisany albo skopiowany z innego auta, a nie '
+                            'zmierzony tutaj. Odczytaj ustawienia DSP w takiej postaci, w jakiej są teraz w procesorze, '
+                            'i zapisz je jako PIERWSZY zrzut presetu {preset}, przez bramkę, a potem pokaż mi arkusz '
+                            'ustawień.',
         "planEmpty": 'Planu jeszcze nie ma. Skill zapisuje go, gdy sesja wchodzi w fazę — panel wypełni się, gdy '
                      'pojawią się i zaczną zamykać kroki.',
         "planNoProject": 'Nie otwarto projektu.',
@@ -3002,6 +3017,13 @@ Choose sweeps (sw) above to read this.",
                          'wird geschrieben, sobald er benannt ist, und dieses Panel füllt sich.',
         "leftNoLedger": 'Noch keine Einstellungen erfasst. Der Baum füllt sich, sobald der erste Ledger-Schnappschuss '
                         'geschrieben wird, während des Einmessens.',
+        "leftNoLedgerSheet": 'Solange dieser Schnappschuss fehlt, gibt es auch kein Einstellungsblatt — erst das '
+                             'Eintragen durchs Gate erzeugt eines.',
+        "leftBankFirst": 'Ersten Schnappschuss eintragen',
+        "leftBankFirstAsk": 'Dieses Projekt hat noch kein Ledger — es wurde beschrieben oder von einem anderen Auto '
+                            'kopiert, nicht hier gemessen. Lies die DSP-Einstellungen so aus, wie sie jetzt im Prozessor '
+                            'stehen, und trage sie als ERSTEN Schnappschuss des Presets {preset} durchs Gate ein; zeig '
+                            'mir dann das Einstellungsblatt.',
         "planEmpty": 'Noch kein Plan. Der Skill schreibt ihn, wenn eine Sitzung eine Phase betritt; dieses Panel '
                      'füllt sich, während Schritte hinzukommen und geschlossen werden.',
         "planNoProject": 'Kein Projekt geöffnet.',

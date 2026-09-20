@@ -1983,6 +1983,25 @@ class MainWindow(QMainWindow):
             self._create_project_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
+        # The route out of "no ledger yet", for the two branches that describe exactly that.
+        # A project made through Copy car has a profile and no `state/` -- `project_seed.py`
+        # carries system parameters and never the tune -- so nothing produces a settings sheet
+        # until a first snapshot is banked, and until now the only place that offered to bank one
+        # was inside the Resonalyze import dialog. Somebody who had not been there had no way to
+        # know the step existed (#43; the Arbiter: "why can't I call up the Load form?").
+        #
+        # It writes a REQUEST into the composer, never the ledger: banking is `state/apply.py`'s
+        # gate, which validates against HEAD, versions the snapshot and emits the sheet. The same
+        # path `resonalyze_import_dialog._send_rows` takes, for the same reason.
+        self._bank_first_btn = QPushButton(i18n.t("leftBankFirst"))
+        self._bank_first_btn.setProperty("class", "reason-btn")
+        self._bank_first_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bank_first_btn.clicked.connect(lambda _checked=False: self._ask_to_bank_first())
+        self._bank_first_btn.setVisible(False)
+        self._dsp_section.body_layout().addWidget(
+            self._bank_first_btn, alignment=Qt.AlignmentFlag.AlignCenter
+        )
+
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -2064,10 +2083,12 @@ class MainWindow(QMainWindow):
             # lights up on its own.
             if not any(group.rows_visible() for group in rig.groups):
                 head = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
-                self._show_left_status(
-                    f"{head}\n\n" + i18n.t("leftNoLedger"),
-                    again=lambda h=head: f"{h}\n\n" + i18n.t("leftNoLedger"),
-                )
+
+                def _note(h: str = head) -> str:
+                    return f"{h}\n\n" + i18n.t("leftNoLedger") + " " + i18n.t("leftNoLedgerSheet")
+
+                self._show_left_status(_note(), again=_note)
+                self._bank_first_btn.setVisible(True)
                 return
             self._has_project = True
             self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
@@ -2076,9 +2097,12 @@ class MainWindow(QMainWindow):
             # fills in once the first snapshot is written" reads as broken next to a tree that is
             # already full of channels (user, 2026-08-23: "looks like a de-sync -- the channels
             # are there and underneath it still says there are none").
-            self._left_status.setText(i18n.t("leftRigOnly"))
+            self._left_status.setText(
+                i18n.t("leftRigOnly") + " " + i18n.t("leftNoLedgerSheet")
+            )
             self._left_status.setVisible(True)
             self._create_project_btn.setVisible(False)
+            self._bank_first_btn.setVisible(True)
             self._tree.setVisible(True)
             self._view = rig
             self._rebuild_system_params()
@@ -2104,6 +2128,7 @@ class MainWindow(QMainWindow):
         self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
+        self._bank_first_btn.setVisible(False)
         self._tree.setVisible(True)
         # BEFORE the rebuild, not after: System params renders its channel switches off `_view`
         # (`_add_channel_switches`), so rebuilding first read the previous load's view -- absent on
@@ -2372,6 +2397,23 @@ class MainWindow(QMainWindow):
         self._settings.setValue("ui/preset", preset)
         self._load_project()
 
+    def _ask_to_bank_first(self) -> None:
+        """Hand the Arbiter a request to bank the first snapshot; never write one.
+
+        Banking is the method's gate (`state/apply.py`): it validates against HEAD, versions the
+        snapshot and emits the settings sheet somebody enters by hand. A window that wrote ledger
+        state beside that gate would be a second way in, which is the thing the boundary exists to
+        prevent -- so this lands in the composer, where it is read and edited before it goes out.
+        """
+        try:
+            presets = config.available_presets()
+        except Exception:  # noqa: BLE001 -- an unreadable state root is "no preset", not a crash
+            presets = []
+        # The method's default name for a first preset, same fallback as the Resonalyze import
+        # dialog's `_preset()`: there is nothing on disk to read it from yet.
+        preset = presets[0] if presets else "FULL"
+        self._dialog.put_in_composer(i18n.t("leftBankFirstAsk").format(preset=preset))
+
     def _show_left_status(self, message: str, offer_create: bool = False,
                           again: Optional[Callable[[], str]] = None) -> None:
         """No loaded DSP view right now -- all four `_load_project` failure branches route here.
@@ -2395,6 +2437,7 @@ class MainWindow(QMainWindow):
         self._left_status.setText(_breakable(message))
         self._left_status.setVisible(True)
         self._create_project_btn.setVisible(False)
+        self._bank_first_btn.setVisible(False)
         self._rebuild_system_params()
         self._set_project_params(None)
         self._detail.close_pane()
@@ -4710,6 +4753,7 @@ class MainWindow(QMainWindow):
             # only ever sees the already-resolved string MainWindow passed in, not the i18n key.
             self._meas_panel.set_no_project(i18n.t("noProjectMeas"))
         self._create_project_btn.setText(i18n.t("createProject"))
+        self._bank_first_btn.setText(i18n.t("leftBankFirst"))
         self._dialog.retranslate()
         # The tree builds its group headers / params-row labels from i18n at set_view() time and
         # has no live binding, so rebuild it in the new language (cheap -- a handful of widgets).

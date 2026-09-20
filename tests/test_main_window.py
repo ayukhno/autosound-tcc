@@ -4469,3 +4469,43 @@ def test_message_the_developer_offers_the_form_for_people_without_github(monkeyp
     window._open_feedback()
 
     assert made == [form_report.post_url()]
+
+
+def test_a_project_with_no_ledger_offers_the_route_to_the_first_snapshot(tmp_path, monkeypatch):
+    """A copied car has a profile and no ledger, and the panel has to say where the step lives.
+
+    Found live (`#43`): a project made through Copy car has no `state/` at all -- `project_seed.py`
+    carries system parameters and never the tune -- so `ui.preset` stays `null` and the settings
+    sheet cannot be produced, because `apply.propose` needs a ledger history. The note explained
+    the empty VALUES and said nothing about the sheet, and the only route to a first snapshot in
+    the window was buried inside the Resonalyze import dialog. The Arbiter, verbatim: "why can't I
+    call up the Load form?"
+
+    The banking itself stays behind the method's gate -- the button writes a request into the
+    composer, the same path the Resonalyze rows take, and nothing is recorded behind the Arbiter.
+    """
+    profile = {
+        "dsp_profile": {
+            "name": "Helix DSP Ultra S", "vendor": "Audiotec-Fischer",
+            "groups": [{"id": "physical_outputs", "label": "Output channels",
+                        "fields": ["hp", "lp", "gain_db"]}],
+        }
+    }
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path / "state"))  # never written
+
+    _app()
+    window = MainWindow()
+
+    # Said: the missing sheet is named, not only the missing values.
+    assert i18n.t("leftNoLedgerSheet") in window._left_status.text()
+    # And offered: the route is a button on the panel, not knowledge of another dialog.
+    assert not window._bank_first_btn.isHidden()
+
+    window._bank_first_btn.click()
+
+    composed = window._dialog._input.text()
+    assert i18n.t("leftBankFirst") not in composed  # the label is not the request
+    assert "FULL" in composed  # the method's default name for a first preset
+    assert composed.startswith(i18n.t("leftBankFirstAsk").split("{")[0][:40])

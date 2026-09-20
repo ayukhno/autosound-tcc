@@ -2006,6 +2006,22 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-060 — Carry `planned` on a skipped capture, once the method emits it
+
+**Статус**: відкладено 2026-09-20 · waits for the method's release of `TCC-022` (autosound-hub#190)
+
+`skip_capture` records a title that was never in the round's `expected` list without marking it,
+while `record_capture` marks an unplanned arrival as `planned: false`. Asked of the method in
+`TCC-022`; when it lands, this side has to carry the flag rather than drop it.
+
+**Де**: `src/autosound_tcc/state/process_view.py:144` rebuilds the skipped entry from
+`EV_CAPTURE_SKIPPED` and keeps only `reason` — `{"reason": event.get("reason")}` — so a `planned`
+on the event would be thrown away here. The reader that shows it is
+`ui/tcc/diagnostics_panel.py:1119`, the `skipped: <title> — <reason>` line.
+
+**Чому не зараз**: nothing emits the field yet, so a reader for it would be a guess about a shape
+the method has not chosen. The ordering of the two releases is the subject of autosound-hub#188.
+
 ### F-059 — `v0.1.41` waits for its tag: merge `--ff-only`, then `make ship`
 
 **Статус**: done 2026-09-18 · **`v0.1.41` is tagged and pushed**, on `c88686c`, paired with the
