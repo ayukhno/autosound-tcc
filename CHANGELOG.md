@@ -12,12 +12,33 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v0.1.42] — 2026-09-20 · the curve window stops lying and stops dying, the method at v3.0.59
 
-Two of the items below are about how a release is CUT and how long a change waits for CI; the third
-is the confirmation gate, which the person using the app meets on every tool call.
+Paired with method `cf8d7d37d1a0f1b0f14c746cb945d53b594f91a6` — the tag on that commit is
+**`v3.0.59`**.
+
+The wave the Arbiter tested on a VW Passat B8 / Helix DSP Ultra S. Most of it is the curve window:
+it showed one set of curves under another set's name, and it died three different ways while he
+worked in it. Everything below was found by running the thing, not by reading it.
 
 ### Added
+
+- **A plan step shows the facts it closes.** A step read `Закрити відкриті поля: project.json (8)
+  і dsp_profile.json (5)` and meant nothing to anybody: thirteen facts named nowhere, in the one
+  artefact the Arbiter acts on. The step now carries them, and a chip beside it opens the list —
+  with the ones the project still has open marked apart from the ones already answered.
+
+- **A capture round can say which project its measurements came from.** `_N` numbers one
+  project's series, and the method refuses another project's number without knowing where it came
+  from. That is not an edge case: every tune after the first on the same car starts from the
+  earlier one's captures. The series question now asks both, and the round records the origin.
+
+- **A closed round's protective record can be corrected, as a correction.** The record most likely
+  to be wrong belongs to a pass already read — on a live project, a nine-position series filed as
+  "no protective filter" on all ten channels while the sweeps plainly show the roll-off. Opened on
+  a closed round, the Protection dialog says so, asks why, and files an amendment. The only way
+  before was to open a NEW round on the same version and close it saying nothing was measured in
+  it.
 
 - **A tab for taking the conversations with the AI off this machine.** Diagnostics → "AI history"
   lists the project's sessions — when each ran, how big it is, which phase it belonged to — with the
@@ -41,6 +62,29 @@ is the confirmation gate, which the person using the app meets on every tool cal
   forty slowest tests on Windows would have saved five of the twenty-one minutes (hub `#181`).
 
 ### Fixed
+
+- **The app no longer dies while you work in the curve window.** Two crashes reached the Arbiter,
+  with different causes, both ours. A worker fetching curves could be left with nothing holding it and
+  destroy itself while still running, which aborts the process — that is now structurally
+  impossible rather than guarded at each of the six places that could do it. And a 0 Hz bin
+  reached the sum overlay as minus infinity and went straight into Qt's painter, which is what
+  killed the app when a curve was dragged.
+
+- **Choosing a capture set changes what is drawn, not just what may be chosen.** Picking a set
+  narrowed the list and left the plot, the chips and the report on the previous set — so the
+  window drew one pass under another's name and then asked REW for titles the chosen set does not
+  contain. The selection now follows the set, keeping the same channels.
+
+- **A read that fails takes the old curves off the plot.** When REW could not answer for a single
+  title in the selection, the status line said so and nine curves from the previous selection
+  stayed on screen with the legend naming them. A reading taken off that screen was taken off the
+  wrong drivers.
+
+- **A measurement REW is not holding is marked, and failures are red.** The window offers what the
+  project has taken in as well as what REW is showing, so a round from another session can be
+  browsed — and its titles looked exactly like the ones that work. Those rows are now greyed with
+  the reason on hover, and a failed read is red instead of faint grey. A partial failure used to
+  be dropped silently; it is named too.
 
 - **A long confirmation no longer pushes Allow and Deny out of sight, and the whole question sits on
   the attention colour.** The command was already bounded and scrolled; the TITLE was not, so a
@@ -66,6 +110,15 @@ is the confirmation gate, which the person using the app meets on every tool cal
   "updated to" something nobody can name or go back to. `make ship` now asks the method's own remote
   whether a published tag points at the pinned commit, and refuses by name when none does. It costs
   nothing today: the last six tags all pin a tagged method commit (hub `#182`).
+
+### Changed
+
+- **The method is pinned at `v3.0.59`** (cf8d7d3), 37 commits on from `v3.0.58`. Its new gates
+  refuse three things this window could previously write: a capture round at a ledger version with
+  no snapshot on disk, a protective record for a channel the round never captured, and a series
+  number belonging to another project. Each refusal names the way out. The protective record also
+  carries WHO answered now — a person, or this window filling in a channel it captured — and a
+  bulk "no filter" is read as a question rather than as an answer.
 
 ## [v0.1.41] — 2026-09-18 · a report with no GitHub account, a footer that fits a narrow window, the method at v3.0.58
 
