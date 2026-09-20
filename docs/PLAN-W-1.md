@@ -134,7 +134,7 @@ Needs the method's `w1` branch first, then its published tag.
 ## Starting the next session
 
 ```bash
-hub/bin/role tcc --resume <session-id>        # this conversation, in its breed
+hub/bin/role tcc --resume 7f1f34ff-a032-471c-a38e-6d519c231fa5        # this conversation, in its breed
 ```
 
 First three things in that session, in order:
