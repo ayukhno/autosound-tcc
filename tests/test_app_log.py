@@ -215,3 +215,28 @@ def test_a_probe_that_never_ran_at_all_also_leaves_a_line(caplog, monkeypatch):
 
     assert not ok and "FileNotFoundError" in out
     assert "did not run" in " ".join(r.getMessage() for r in caplog.records)
+
+
+def test_the_update_row_says_what_git_said_instead_of_blaming_github(monkeypatch):
+    """The row read `ТСС 0.1.42 — не достукався до GitHub` on a machine where GitHub was fine and
+    `git` itself could not run: an `xcrun` error about a missing architecture, printed IN FULL two
+    lines lower in the same dialog. The app had the sentence and showed the wrong one, and both of
+    us went to check the network.
+
+    So the reason is no longer "no_network" for everything that is not a version. It is
+    "probe_failed", and git's own words ride with it as the detail the panel already appends.
+    """
+    from autosound_tcc.core import updates
+    from autosound_tcc.ui.tcc.diagnostics_panel import _reason
+
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda *_a, **_k: "")
+    monkeypatch.setattr(updates, "last_probe_error", lambda: "xcrun: error: unable to load libxcrun")
+    monkeypatch.setattr(updates.install_report, "app_version", lambda: "0.1.42")
+    monkeypatch.setattr(updates.install_report, "install_source",
+                        lambda: ("https://github.com/ayukhno/autosound-tcc", "37fac7a"))
+
+    status = updates.check_tcc()
+
+    assert status.reason == "probe_failed"
+    assert "xcrun" in status.detail
+    assert "xcrun" in _reason(status.reason, status.detail), "and it reaches the row"

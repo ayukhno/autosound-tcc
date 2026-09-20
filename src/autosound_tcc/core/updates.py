@@ -229,6 +229,21 @@ def channel_key(name: str) -> Optional[tuple[int, int, int, int, int]]:
     return None
 
 
+#: What the last `ls-remote` said when it failed, so a caller can put WHY in front of a person
+#: instead of "could not reach GitHub". Set by `_newest_tag_in` and read immediately after it, on
+#: the same thread — `check_all` asks its two questions in order, never at once.
+#:
+#: The sentence it replaces cost a session: on the Arbiter's Mac `git` itself could not run (an
+#: `xcrun` error about a missing architecture, printed in full two lines lower in the very same
+#: dialog), and the update row blamed GitHub — so both of us went and checked the network.
+_last_probe_error = ""
+
+
+def last_probe_error() -> str:
+    """Git's own words from the last failed probe, or "" when the last one worked."""
+    return _last_probe_error
+
+
 def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
     """The newest tag matching any of `globs` in `repo`, and the COMMIT it names. `("", "")` if unaskable.
 
@@ -250,8 +265,10 @@ def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
     orders the names and drops the ones it answers None for — the beta channel passes
     `channel_key`; stable keeps `_version_key`, which drops nothing.
     """
+    global _last_probe_error
     patterns = [pattern for glob in globs for pattern in (glob, f"{glob}^{{}}")]
     ok, out = _git("ls-remote", "--tags", repo, *patterns)
+    _last_probe_error = "" if ok and out else (out or "no tag matched")
     if ok and not out:
         # Exit 0 and NOTHING back is a third answer, and it used to read as the same "could not
         # reach GitHub" as a failure — while `_git`'s own log, which only speaks on a non-zero
@@ -388,7 +405,9 @@ def check_tcc(channel: str = STABLE) -> Status:
         return _check_tcc_on_beta(version, commit)
     tag = newest_tcc_tag()
     if not tag:
-        return Status("tcc", version, "", False, "no_network")
+        # WHY, not just "no". `git` unable to run at all is a different problem from a network
+        # that is down, and the window had git's own sentence in hand while saying the second.
+        return Status("tcc", version, "", False, "probe_failed", last_probe_error())
     latest = tag.lstrip("v")
     if not version:
         # No metadata to compare with: fall back to what is on offer, and let the person decide.
