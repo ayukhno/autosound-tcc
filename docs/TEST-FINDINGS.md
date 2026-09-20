@@ -1502,3 +1502,32 @@ Worth keeping for the next one of these: the two hypotheses prepared in advance 
 big" and "a non-finite coordinate in the CURVES" — were both measured and both wrong. The answer
 was a third thing neither of them covered, in the one item on the plot that does its own axis
 transform. Reading the stack for WHICH item was painting is what found it.
+
+### 40. "Could not reach GitHub" on the update row, once, with no cause established
+
+**What.** After `v0.1.42` was tagged, the Arbiter's window showed `ТСС 0.1.41 — не достукався до
+GitHub` while the very same code, run from his shell on that machine, answered
+`latest='0.1.42', newer=True, updatable=True`.
+
+**Where.** His MacBook, 2026-09-20, app installed from the wave branch at `80b0544`.
+
+**What was ruled out, each by a command rather than by reasoning:**
+
+* not `PATH` — the log shows `git --version` and `git ls-remote` both spawning;
+* not the app's no-prompting environment — `env GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never
+  GIT_ASKPASS= git ls-remote --tags <repo> 'v*' 'v*^{}'` returns the full tag list on BOTH
+  machines;
+* not a slow network — the log's next line lands eleven milliseconds after the spawn, which is an
+  immediate failure, not a round trip.
+
+**Not reproduced.** On the next build the probe succeeded and the log carries no failure line at
+all. So the cause is not established, and this entry says so rather than crediting the fix below
+with something it did not do.
+
+**What changed, and what it is worth.** `updates._git` logged that git was SPAWNED and never what
+it answered, so a missing git, a dead network, a refusing server and a bad URL all reached the
+window as one sentence. It now logs the command, the exit code and git's own words at WARNING
+(`37fac7a`). That fixes no bug; it means the next occurrence explains itself in one line instead
+of costing a session.
+
+**If it comes back:** `grep "git ls-remote exited" ~/Library/Logs/autosound-tcc/tcc.log`.
