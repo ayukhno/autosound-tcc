@@ -1462,5 +1462,37 @@ without the real window is how the first three hypotheses of finding 35 were spe
 3. Only then a build that logs what `paint()` is handed on the phase view.
 
 **One thing that changed under it.** At the moment of the drag the plot was in finding 37's state:
-nine curves drawn, two named, both reads failed. That state no longer exists (37 is fixed), so
-this must be re-tested before any of the above — it may not reproduce at all.
+nine curves drawn, two named, both reads failed. That state no longer exists (37 is fixed).
+
+**FOUND — a non-finite coordinate after all, and not where it was looked for first.** The search
+above was for `inf`/`nan` in the CURVES, and there is none: the phase view wraps to ±180. The Σ
+overlay is the other half of the picture and was not checked, because Σ lives on a **ViewBox of
+ours** rather than on pyqtgraph's plot — so log mode does not transform it and
+`_draw_sum_on_axis` takes `log10` by hand:
+
+```python
+x = np.log10(freqs) if self._log_x else freqs     # unguarded
+```
+
+`log10(0)` is `-inf`. A linear frequency grid whose first bin is 0 Hz is REW's own shape (an
+FFT's DC bin), so this is the ordinary case, not a malformed one. Measured directly:
+
+```
+min freq: 0.0
+non-finite x in the sum path: 1
+```
+
+`connect="finite"` does not save it — the point stays in the item's data — and that coordinate
+goes to `QPainter.drawPath`, which is exactly the frame under `QRasterPaintEngine::stroke` in the
+crash report. **Σ was on in the Arbiter's screenshot.**
+
+The same conversion twenty lines down already guarded it — `math.log10(x) if self._log_x and
+x > 0` — so the rule was known and applied in one place of two.
+
+**Fixed:** non-positive frequencies are dropped before the log rather than passed through it, and
+a test asserts no non-finite x reaches the sum curve.
+
+**Still to confirm by the Arbiter,** and said plainly: this is a mechanism that MATCHES the
+recorded stack, not a reproduction of his crash. Neither the offscreen nor the on-screen probe
+(nine wrapped-phase curves, 540 000 points, dragged) crashed here, so the proof is his next run
+with Σ on: it either stops happening or it does not.

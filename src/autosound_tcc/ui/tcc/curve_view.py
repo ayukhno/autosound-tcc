@@ -2046,6 +2046,22 @@ class CurveView(QWidget):
             return False
         # log10 by hand: pyqtgraph's log mode transforms the items IT owns, and this curve lives on
         # a ViewBox of ours. The X ranges are linked, so both must be in the same coordinates.
+        #
+        # And a frequency of ZERO is dropped before that, not passed through it. `log10(0)` is
+        # `-inf`, `connect="finite"` leaves the point in the item's data anyway, and a non-finite
+        # coordinate goes straight to Qt's raster stroker — finding 39 is an `EXC_BAD_ACCESS`
+        # inside `QRasterPaintEngine::stroke` at an address ~49 GB out, which is what a stroker
+        # overrun looks like. A linear grid whose first bin is 0 Hz is REW's own shape (an FFT's
+        # DC bin), so this is the ordinary case rather than a malformed one. `_x_in_plot_units`
+        # twenty lines down already guarded the same conversion; this is the other half of it.
+        freqs = np.asarray(freqs, dtype=float)
+        values = np.asarray(values, dtype=float)
+        if self._log_x:
+            drawable = freqs > 0
+            if not drawable.all():
+                freqs, values = freqs[drawable], values[drawable]
+            if not freqs.size:
+                return False
         x = np.log10(freqs) if self._log_x else freqs
         self._sum_curve = pg.PlotCurveItem(
             x, values,

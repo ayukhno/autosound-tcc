@@ -4457,3 +4457,35 @@ def test_a_read_that_fails_for_everything_takes_the_previous_curves_off_the_plot
 
     assert not dialog._view._traces, "nothing of the previous set is left under the new chips"
     assert "KeyError" in dialog._status.text(), "and the window says what it could not read"
+
+
+def test_a_zero_hertz_bin_never_reaches_the_sum_overlay_as_minus_infinity():
+    """Finding 39's mechanism, measured 2026-09-20.
+
+    The Σ overlay lives on a ViewBox of ours, so pyqtgraph's log mode does not transform it and
+    `_draw_sum_on_axis` takes `log10` BY HAND. It did so unguarded — and `log10(0)` is `-inf`.
+    The same converter twenty lines down already guards (`math.log10(x) if self._log_x and x > 0`),
+    so the rule was known and applied in one place of two.
+
+    A non-finite coordinate is not a cosmetic problem: it is handed straight to Qt's raster
+    stroker, and the crash report for this finding is `EXC_BAD_ACCESS` inside
+    `QRasterPaintEngine::stroke` at an address ~49 GB out — what a stroker overrun looks like.
+    `connect="finite"` does not save it: the point stays in the item's data, as this test showed
+    before the fix (`non-finite x in the sum path: 1`).
+
+    A linear frequency grid starting at 0 Hz is REW's own shape — the first bin of an FFT.
+    """
+    import numpy as np
+
+    _app()
+    n = 512
+    freqs = np.linspace(0.0, 20000.0, n)  # the first bin is 0 Hz
+    mag = -6.0 - 0.0005 * freqs
+    view = _fr_view(Trace("c p1_49 (sw)", freqs, mag, magnitude_db=mag, phase_deg=np.zeros(n)))
+
+    assert view._draw_sum_on_axis(freqs, mag)
+
+    xs, ys = view._sum_curve.getData()
+    assert np.isfinite(np.asarray(xs, dtype=float)).all(), "no -inf may reach the painter"
+    assert len(xs) == len(ys)
+    assert len(xs) == n - 1, "the 0 Hz point is dropped, and only it"
