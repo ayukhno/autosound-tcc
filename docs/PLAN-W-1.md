@@ -16,7 +16,8 @@ Written for a session that begins with nothing but this repository (the Arbiter 
 
 ```bash
 echo "HUB_ROLE=[$HUB_ROLE]"     # must say tcc; empty means you are the hub and this plan is not yours
-bin/ticket queue                # in ../hub — the queue, the receipts, and THIS repo's issues
+bin/ticket queue                # in ../hub — the WAVE first (this milestone), then the queue,
+                                # the receipts, and this repo's own issues
 ```
 
 `#188` (skill → us) is already taken into work and is the other half of this wave. `#179`, `#181`,
