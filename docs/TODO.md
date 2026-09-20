@@ -1754,6 +1754,32 @@ ERROR the MCP server did not start:
 **Урок:** перед тим як заводити тікет на метод, дивитись не у свій пін, а в апстрім. Тікет на
 вже зроблене коштує адресатові рівно стільки ж часу, скільки справжній.
 
+### F-070 — the header should say which ledger version is in the DSP, and whether it is attested
+
+**Статус**: open · the Arbiter, 2026-09-19
+
+**What he asked for.** Two things on the top row, both about what is IN the processor rather than
+what the processor is called:
+
+1. **Instead of the processor's name — the ledger version and its state**: `v_008` with a dot,
+   yellow while it has only been proposed and green once it is attested, exactly as the session
+   writes it in prose ("Як введете — скажіть, поставлю `attest v_008`, і стан стане 🟢 замість 🟡").
+   The processor's name is not lost: it moves into the tooltip.
+2. **The DSP's PRESET NUMBER, when there is one**, next to the preset name (`SQdriver`), before
+   the target curve.
+
+**Why it is the right swap.** The processor does not change for the life of a project — it is a
+constant sitting in the most valuable row of the window — while the version in the DSP changes
+every round, and "is what I am hearing what the ledger says" is the question the Arbiter asks
+oftenest. Today it is answered only in prose, by whoever happens to say it.
+
+**What the data needs.** The versions exist on disk as `state/<preset>/v_NNN.json`
+(`state/plan_audit.py` already reads them), and `get_ledger` returns a per-channel `status`
+(`applied` and the rest). Two things to establish before building, not to guess:
+which status the dot reads (a per-channel `status`, or the attest record for the version as a
+whole), and where the DSP's preset NUMBER comes from — `project.json` carries `presets`, but
+whether a slot number is in it is unchecked.
+
 ### F-069 — Layout: GUI only / Terminal+GUI, and what the second mode puts in place of the dialog
 
 **Статус**: open · the Arbiter's idea, 2026-09-19, after the collection step closed
