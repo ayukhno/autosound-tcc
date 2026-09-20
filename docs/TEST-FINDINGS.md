@@ -1492,7 +1492,13 @@ x > 0` — so the rule was known and applied in one place of two.
 **Fixed:** non-positive frequencies are dropped before the log rather than passed through it, and
 a test asserts no non-finite x reaches the sum curve.
 
-**Still to confirm by the Arbiter,** and said plainly: this is a mechanism that MATCHES the
-recorded stack, not a reproduction of his crash. Neither the offscreen nor the on-screen probe
-(nine wrapped-phase curves, 540 000 points, dragged) crashed here, so the proof is his next run
-with Σ on: it either stops happening or it does not.
+**CONFIRMED BY THE ARBITER, 2026-09-20.** He ran the build with Σ on and tried to break it the
+way he had: «все ок». That is the proof this finding was missing — the fix was a mechanism that
+matched the recorded stack, reproduced nowhere on this machine (neither offscreen nor on-screen,
+nine wrapped-phase curves at 540 000 points dragged through forty delay steps), and a match is not
+a reproduction. His run is what closes it.
+
+Worth keeping for the next one of these: the two hypotheses prepared in advance — "the path is too
+big" and "a non-finite coordinate in the CURVES" — were both measured and both wrong. The answer
+was a third thing neither of them covered, in the one item on the plot that does its own axis
+transform. Reading the stack for WHICH item was painting is what found it.
