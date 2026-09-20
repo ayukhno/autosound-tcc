@@ -1390,3 +1390,49 @@ the window is opened over what the model names, which need not be what REW is ho
 kind picker already greys rows, `_mark_availability`), or the offer list stops being a union and
 the window says what it cannot show. The first keeps the window openable over a name REW has lost;
 the second is simpler and narrower. This is the Arbiter's call.
+
+### 39. SIGSEGV in Qt's raster painter while dragging a curve — no Python error at all
+
+**What.** The Arbiter dragged the tweeter's curve to the right in the curve window and the app
+died. Nothing in `tcc.log`: the last line is an ordinary `stray window` at `13:41:58` and then the
+file simply ends. That absence is itself evidence — the earlier crashes all left
+`QThread: Destroyed while thread '' is still running` first. This one is a **segfault**, not an
+`abort()`, and it gave Python no chance to say anything.
+
+**Where.** The Arbiter's Mac, 2026-09-20 13:43:41, `0.1.41` at `df524a8`, project EPY-Sep2026,
+curve window "Де саме?", PHASE view, `cap_007`, nine `c pN_49 (sw)` curves on screen. Report
+`python3.12-2026-09-20-134341.ips`.
+
+**The stack, main thread:**
+
+```
+QRasterPaintEngine::stroke(QVectorPath const&, QPen const&)   <- SIGSEGV
+QPaintEngineEx::draw(QVectorPath const&)
+Sbk_QPainterFunc_drawPath                     (QPainter.drawPath from Python)
+QGraphicsPixmapItemWrapper::sbk_o_paint       (a pyqtgraph item's paint())
+QGraphicsView::paintEvent
+```
+
+`EXC_BAD_ACCESS`, `KERN_INVALID_ADDRESS at 0x0000000b7f7ffff0` — a wild pointer roughly 49 GB out,
+which is what a stroker buffer overrun looks like rather than a null dereference.
+
+**Ours or external.** The fault is inside Qt's raster engine, so the CODE is external — but what
+is handed to it is ours. Not to be filed as "a Qt bug" until what the path contains has been
+looked at.
+
+**Weight.** High: the whole application dies, silently, during an ordinary interaction.
+
+**Where to start, as a hypothesis and not a verdict.** The screenshot of that very session shows
+the phase view above ~4 kHz as a solid wall of wrapped ±180° transitions across NINE curves —
+a path with an enormous number of near-vertical segments, redrawn on every mouse move of a drag.
+Two things to measure before touching anything:
+
+1. **The size of the path.** How many points per curve reach `drawPath` on the phase view, and
+   what `QPainter` antialiasing/clipping is on. A stroker overrun is a size problem far more often
+   than a content one.
+2. **Whether any coordinate is non-finite.** A shift applied on the phase view could produce
+   `inf`/`nan` in `_shifted`; the raster engine does not survive those. Cheap to check and cheap
+   to rule out.
+
+Only after those: whether the phase view should decimate, or clip to the visible range, or stop
+drawing wrapped phase as one path.

@@ -1766,6 +1766,23 @@ class CurveDialog(QDialog):
         self._render_chips()
 
     def _on_failed(self, message: str) -> None:
+        """Nothing came back. Take the PREVIOUS curves off the plot before saying so.
+
+        Finding 37, from a screenshot: the chips read `m-L_49 (sw)` and `m-R_49 (sw)`, the status
+        line said both reads failed with `KeyError`, and the plot went on showing nine curves from
+        the selection before it, with the legend naming them. The window drew one set and reported
+        another — the failure `_set_selection`'s docstring is written against, reached through the
+        one path that never touched the plot.
+
+        Worse than a crash: a crash is obvious, while a reading taken off that screen — a
+        junction, a delay, a polarity call — is taken off the wrong drivers with nothing saying
+        so. The empty plot under the message is the honest picture; the selection has already
+        moved, and there is nothing to draw for it.
+
+        NOT the same as `_apply_group`'s `curveGroupEmpty`, which keeps the curves on purpose:
+        there nothing was fetched and the selection did not move.
+        """
+        self._view.set_traces([])
         self._status.setVisible(True)
         self._status.setText(i18n.t("curveFailed").format(error=message))
 

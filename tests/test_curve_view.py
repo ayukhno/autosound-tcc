@@ -4424,3 +4424,36 @@ def test_the_picker_does_not_grow_a_bogus_series_row_when_a_round_is_the_choice(
     assert data.count("round:cap_006") == 1, f"one row per round, got {data}"
     texts = [combo.itemText(i) for i in range(combo.count())]
     assert not [t for t in texts if "round:" in t], f"and no series row named after a round: {texts}"
+
+
+def test_a_read_that_fails_for_everything_takes_the_previous_curves_off_the_plot():
+    """Finding 37, from the Arbiter's screenshot 2026-09-20.
+
+    He picked the pair `Ms` in `cap_007`. The chips read `m-L_49 (sw)` and `m-R_49 (sw)`, the
+    status line read `Не вдалось прочитати з REW: … KeyError; … KeyError`, and the plot went on
+    showing NINE curves from the previous selection with the legend naming them. The window drew
+    one set and reported another — the failure `_set_selection`'s own docstring is written
+    against, reached through the one path that never touches the plot: `_on_failed` set a status
+    line and nothing else.
+
+    Worse than a crash, and that is why it is fixed rather than noted: a crash is obvious, and a
+    reading taken off that screen — a junction, a delay, a polarity call — is taken off the wrong
+    drivers with nothing on screen saying so.
+
+    NOT the same as `_apply_group`'s `curveGroupEmpty`, which keeps the curves on purpose: there
+    nothing was fetched and the selection did not move. Here a fetch happened, it failed, and the
+    selection is already something else.
+    """
+    _app()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FrBridge(), kind="fr")
+    _fetch(dialog)
+    assert dialog._view._traces, "the first read put curves on the plot"
+
+    # The second question is one REW cannot answer at all — the shape of a title the journal knows
+    # and REW has lost (finding 38).
+    dialog._bridge = _FakeBridge(raises=KeyError("m-L_49 (sw)"))
+    dialog._set_selection(["m-L_49 (sw)", "m-R_49 (sw)"])
+    _fetch(dialog)
+
+    assert not dialog._view._traces, "nothing of the previous set is left under the new chips"
+    assert "KeyError" in dialog._status.text(), "and the window says what it could not read"
