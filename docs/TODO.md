@@ -2006,6 +2006,32 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-074 — Check the project's GitHub backup after the broken-git spell
+
+**Статус**: open 2026-09-20 · not checked, named at the Arbiter's stop
+
+`/usr/bin/git` could not run on the Arbiter's Mac for an unknown length of time (TEST-FINDINGS
+40), and the project's backup to GitHub goes through the same git the update probe does. So it
+may have been failing silently for as long as the update row was — nothing refuses, git simply
+never answers.
+
+**Що перевірити**: whether the project `~/Projects/autosound/EPY-Sep2026` has commits and a remote
+push after the date the shim broke, and whether anything in the window said so at the time. If it
+was silent there too, that is the same defect as finding 40's — an operation whose failure has no
+line — and it is a second place to fix it, not a second diagnosis.
+
+### F-073 — The five commits after v0.1.42 ride the next tag
+
+**Статус**: open 2026-09-20 · nothing to do until the next release
+
+`main` is five commits ahead of `v0.1.42` (`37fac7a`, `6832b70`, `b39014f`, `22643c0`,
+`cffc870`) — the git-probe logging, the honest update-row reason and finding 40. They were cut
+after the tag deliberately: the wave was closed and they answer a machine problem, not the wave.
+
+**Що зробити**: include them in the next release's CHANGELOG entry rather than letting them land
+unmentioned. The Arbiter is running a build ahead of the published tag until then, which is
+correct and worth remembering when a report comes in with version 0.1.42 on it.
+
 ### F-072 — Three axis tests built a Qt graphics item before the QApplication
 
 **Статус**: done 2026-09-20 · the same class as F-071, and found by it
