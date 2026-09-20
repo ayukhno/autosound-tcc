@@ -333,6 +333,13 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
 
     monkeypatch.setattr(QInputDialog, "getInt", staticmethod(lambda *_a, **_k: (0, False)))
+    # That question grew a second half on 2026-09-20 (S-048: where the measurements came from), so
+    # it is its own dialog now and `QInputDialog` no longer covers it. Cancel here too; the rule it
+    # applies afterwards is `_origin_of`, which is a plain function precisely so it can be tested
+    # without anybody clicking anything.
+    from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+
+    monkeypatch.setattr(MeasurementPanel, "_ask_series", lambda self: None)
     # The same for a save dialog (TODO F-054): nobody picks a file in a test.
     from PySide6.QtWidgets import QFileDialog
 

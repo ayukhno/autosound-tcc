@@ -217,3 +217,34 @@ def test_every_command_tcc_sends_has_the_method_version_that_has_it():
     assert sent, "the pattern found no commands — it no longer matches how they are written"
     missing = sorted(sent - set(process_writer.LANDED_IN))
     assert not missing, f"commands with no method version: {missing}"
+
+
+def test_a_round_can_say_which_project_its_measurements_came_from(tmp_path):
+    """S-048, method `v3.0.59`: `_N` numbers ONE project's series, and a foreign number is refused
+    unless the round records where it came from.
+
+    Not an edge case — the Arbiter, 2026-09-20: *"то не рідкість, а база всіх після першого тюна
+    на одному авто"*. A second tune of the same car starts from the first one's measurements, so
+    the foreign number is the ordinary path and the window has to be able to say it.
+
+    Two projects both have a `_49` and they mean different DSP states on different days; a foreign
+    number joined to this project's flaw map is another build's data wearing this build's label.
+    """
+    from autosound_tcc.core import process_writer, vendor_loader
+
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    proc = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    proc.start_capture("1", ["w-L_1 (sw)"])
+    proc.close_capture("done")
+
+    # Without it the gate refuses, and the refusal is the one a person has to read.
+    with pytest.raises(process_writer.ProcessWriterError) as refused:
+        process_writer.start_capture(tmp_path, "49", ["m-L p1_49 (sw)"])
+    assert "--origin" in str(refused.value)
+
+    process_writer.start_capture(tmp_path, "49", ["m-L p1_49 (sw)"],
+                                 origin="passat-b8-2026:49")
+
+    round_ = proc.load()["capture"]
+    assert round_["origin"] == {"project": "passat-b8-2026", "series": "49"}

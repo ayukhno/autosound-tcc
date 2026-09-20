@@ -22,13 +22,17 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QStyleOptionComboBox,
+    QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -203,6 +207,22 @@ class _RewRenameWorker(QThread):
         self.done.emit(renamed)
 
 
+def _origin_of(foreign: bool, project: str, their_n: str) -> str:
+    """`"<project>:<their _N>"`, or empty for this project's own measurements (S-048).
+
+    A function rather than three lines inside the dialog so that the rule can be tested without
+    a modal: the dialog itself cannot run in a test, which is why `conftest` answers Cancel for
+    every question nobody is there to answer.
+
+    Half an origin is NOT patched up here — a project with no number, or a number with no project,
+    goes to the gate as typed. The gate has a sentence ready for it ("'From somewhere else' with
+    no name is the unanswered question"), and a window that quietly completes what a gate would
+    have refused teaches people to trust the window over the gate.
+    """
+    name, theirs = str(project).strip(), str(their_n).strip().lstrip("_")
+    return f"{name}:{theirs}" if foreign and (name or theirs) else ""
+
+
 class _LedgerWriteWorker(QThread):
     """Everything the ledger has to be told about a batch that just came in, off the GUI thread.
 
@@ -225,7 +245,7 @@ class _LedgerWriteWorker(QThread):
     done = Signal(dict)
 
     def __init__(self, *, project_dir: Path, round_id: str, version, expected: list,
-                 titles: list, protective: dict, auto=()) -> None:
+                 titles: list, protective: dict, auto=(), origin: str = "") -> None:
         super().__init__()
         self._project_dir = project_dir
         self._round_id = str(round_id or "")
@@ -238,6 +258,9 @@ class _LedgerWriteWorker(QThread):
         #: marked `OFF` in one second is not ten answers, and the method reads a front-end's
         #: blanket `OFF` as `check` rather than as settled.
         self._auto = set(auto or ())
+        #: `"<project>:<their _N>"` when these measurements were taken in ANOTHER project — the
+        #: ordinary path on a second tune of the same car (S-048). Empty for this project's own.
+        self._origin = str(origin or "")
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
@@ -255,7 +278,8 @@ class _LedgerWriteWorker(QThread):
         if not self._round_id:
             try:
                 process_writer.start_capture(
-                    self._project_dir, str(self._version), self._expected)
+                    self._project_dir, str(self._version), self._expected,
+                    origin=self._origin)
                 round_ = process_view.capture_round(self._project_dir) or {}
                 result["round_id"] = str(round_.get("id") or "")
                 result["opened"] = result["round_id"]
@@ -1138,6 +1162,7 @@ class MeasurementPanel(QWidget):
         if not taken and not self._protective:
             return
         protective, auto = self._protective_for(rows, titles)
+        origin = ""  # only a first round can be told where its measurements came from
         if not process_writer.is_available():
             return  # no skill installed: the project's own store is all there is to write
         if not self._round_id and self._capture_version is None:
@@ -1147,7 +1172,7 @@ class MeasurementPanel(QWidget):
             asked = self._ask_series()
             if asked is None:
                 return
-            self._capture_version = asked
+            self._capture_version, origin = asked
         worker = self._replace_worker("_ledger_worker", _LedgerWriteWorker(
             project_dir=config.project_dir(),
             round_id=self._round_id,
@@ -1156,15 +1181,56 @@ class MeasurementPanel(QWidget):
             titles=taken,
             protective=protective,
             auto=auto,
+            origin=origin,
         ))
         worker.done.connect(self._on_ledger_written)
         worker.start()
 
-    def _ask_series(self) -> Optional[int]:
-        """The series number for a first round, asked because nothing else says it (hub #153 A)."""
-        value, ok = QInputDialog.getInt(
-            self, i18n.t("askSeriesTitle"), i18n.t("askSeriesLabel"), 1, 1, 9999, 1)
-        return int(value) if ok else None
+    def _ask_series(self):
+        """The series number for a first round, and WHERE the measurements came from.
+
+        The number alone was the whole question until method `v3.0.59` (hub #153 A). `_N` numbers
+        ONE project's series, and a number from another project is refused unless the round records
+        its origin (S-048) — which is not an edge case but the ordinary path: a second tune of the
+        same car starts from the first one's captures (the Arbiter, 2026-09-20).
+
+        Both fields are asked TOGETHER and neither is validated here. Whether this number is
+        foreign is the gate's judgement, and deciding it in the window would be a second copy of a
+        rule that lives on the method's side — the same boundary `process_writer` is built on.
+        Left empty, the origin says "ours", which is what it was before this existed.
+
+        Returns `(series, origin)` or `None` when the tuner cancels.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle(i18n.t("askSeriesTitle"))
+        form = QFormLayout(dialog)
+
+        number = QSpinBox(dialog)
+        number.setRange(1, 9999)
+        form.addRow(i18n.t("askSeriesLabel"), number)
+
+        foreign = QCheckBox(i18n.t("askSeriesFrom"), dialog)
+        attach_tip(foreign, i18n.t("askSeriesFromTip"))
+        form.addRow(foreign)
+        project = QLineEdit(dialog)
+        their_n = QLineEdit(dialog)
+        for label, field in ((i18n.t("askSeriesProject"), project),
+                             (i18n.t("askSeriesTheirN"), their_n)):
+            field.setEnabled(False)
+            form.addRow(label, field)
+        foreign.toggled.connect(project.setEnabled)
+        foreign.toggled.connect(their_n.setEnabled)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return int(number.value()), _origin_of(
+            foreign.isChecked(), project.text(), their_n.text())
 
     def _protective_for(self, rows: list, titles: dict) -> dict:
         """What was in the chain, for every channel coming in — typed legs, or `"OFF"`.

@@ -461,7 +461,7 @@ def _refuse_if_too_old(command: str, out: str, err: str) -> None:
 
 
 def start_capture(
-    project_dir: Path, version: str, expected: list[str], step: str = ""
+    project_dir: Path, version: str, expected: list[str], step: str = "", origin: str = ""
 ) -> str:
     """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
 
@@ -471,10 +471,20 @@ def start_capture(
     `step` binds the round to the plan step it satisfies (SCR-040): that is what makes a re-take
     visibly attempt N of the step that asked for it, and what lets the step's own gate read the
     verdict on those captures.
+
+    `origin` is `"<project>:<their _N>"` and says these measurements were taken SOMEWHERE ELSE
+    (S-048, method `v3.0.59`). `_N` numbers one project's series, so a foreign number is refused
+    without it — two projects both have a `_49` and they mean different DSP states on different
+    days. Not an edge case: a second tune of the same car starts from the first one's
+    measurements, which the Arbiter called the base case rather than a rarity (2026-09-20).
+    Whether a number IS foreign is the method's judgement, not ours — TCC carries the answer, it
+    does not re-derive the gate.
     """
     args = ["capture-start", str(version), *[str(t) for t in expected or []]]
     if step:
         args += ["--step", step]
+    if origin:
+        args += ["--origin", str(origin)]
     return _run(project_dir, args)
 
 

@@ -672,8 +672,11 @@ def _ledger_calls(monkeypatch):
     from autosound_tcc.ui.tcc import measurement_panel as mp
 
     calls: list = []
+    # `origin` too (S-048): where the measurements came from is part of what a round records,
+    # and a double that drops it cannot tell this project's series from another project's.
     monkeypatch.setattr(mp.process_writer, "start_capture",
-                        lambda d, v, e: calls.append(("start", v, tuple(e))))
+                        lambda d, v, e, step="", origin="":
+                        calls.append(("start", v, tuple(e), origin)))
     monkeypatch.setattr(mp.process_writer, "record_capture",
                         lambda d, t: calls.append(("taken", t)))
     # `source` is recorded too (method `v3.0.59`, S-036): who answered is part of what was
@@ -703,7 +706,7 @@ def test_taking_measurements_in_opens_the_pass_when_no_session_did(tmp_path, mon
 
     worker.run()
 
-    assert calls[0] == ("start", "6", ("w-L_6 (sw)", "w-R_6 (sw)"))
+    assert calls[0] == ("start", "6", ("w-L_6 (sw)", "w-R_6 (sw)"), "")
     assert ("taken", "w-L_6 (sw)") in calls
     assert ("protective", "w-L", "OFF", "user") in calls
     assert seen["opened"] == "cap_003" and seen["round_id"] == "cap_003"
@@ -992,7 +995,9 @@ def test_a_first_round_with_no_series_asks_for_the_number(tmp_path, monkeypatch)
     panel = MeasurementPanel()
     panel.set_series_unknown()
     _first_pass(panel, tmp_path)
-    monkeypatch.setattr(mp.QInputDialog, "getInt", lambda *a, **k: (49, True))
+    # The question is its own dialog since it grew a second half (S-048); answering it in a test
+    # means answering `_ask_series`, which conftest cancels for everyone else.
+    monkeypatch.setattr(mp.MeasurementPanel, "_ask_series", lambda self: (49, ""))
 
     panel._finish_import({})
 
@@ -1009,7 +1014,7 @@ def test_cancelling_the_series_question_opens_no_round(tmp_path, monkeypatch):
     panel = MeasurementPanel()
     panel.set_series_unknown()
     _first_pass(panel, tmp_path)
-    monkeypatch.setattr(mp.QInputDialog, "getInt", lambda *a, **k: (1, False))
+    monkeypatch.setattr(mp.MeasurementPanel, "_ask_series", lambda self: None)  # Cancel
 
     panel._finish_import({})
 
@@ -1052,3 +1057,49 @@ def test_a_worker_that_outlasts_the_wait_is_handed_over_rather_than_dropped(monk
     assert first.isRunning(), "the point of the test: it did NOT finish inside the wait"
     assert first in qt_shutdown.detached(), "so something has to be holding it"
     first.wait(4000)
+
+
+def test_the_series_question_can_also_say_the_measurements_came_from_another_project(monkeypatch):
+    """S-048's visible half. The Arbiter, 2026-09-20: importing another project's measurements is
+    «не рідкість, а база всіх після першого тюна на одному авто» — a second tune of the same car
+    starts from the first one's captures, so a foreign `_N` is the ordinary path.
+
+    The method refuses one without an origin and names both ways out, but until now the window had
+    nowhere to say "yes, they are from there": `_ask_series` asked for a bare integer. Now it asks
+    both, and the origin rides into `capture-start --origin <project>:<their _N>`.
+
+    TCC does NOT decide whether the number is foreign — that is the gate's judgement, and
+    re-deriving it here would be a second copy of a rule that lives on the method's side. The
+    window carries the answer; the method judges it.
+    """
+    from pathlib import Path
+
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    worker = _LedgerWriteWorker(
+        project_dir=Path("/nowhere"), round_id="", version=49,
+        expected=["m-L p1_49 (sw)"], titles=[], protective={},
+        origin="passat-b8-2026:49",
+    )
+    worker.run()
+
+    assert ("start", "49", ("m-L p1_49 (sw)",), "passat-b8-2026:49") in calls
+
+
+def test_the_origin_is_assembled_only_when_it_was_actually_asked_for():
+    """`_origin_of` is the rule behind the second half of the series question (S-048), and a plain
+    function precisely so it can be tested without anybody clicking a modal.
+
+    Half an origin is deliberately NOT patched up: a project with no number, or a number with no
+    project, goes to the gate as typed, and the gate has a sentence for it. A window that quietly
+    completes what a gate would refuse teaches people to trust the window over the gate.
+    """
+    from autosound_tcc.ui.tcc.measurement_panel import _origin_of
+
+    assert _origin_of(True, "passat-b8-2026", "49") == "passat-b8-2026:49"
+    assert _origin_of(True, " passat-b8-2026 ", "_49") == "passat-b8-2026:49", "trimmed, unpadded"
+    assert _origin_of(False, "passat-b8-2026", "49") == "", "unticked means these are ours"
+    assert _origin_of(True, "", "") == "", "ticked and empty is not an origin either"
+    assert _origin_of(True, "passat-b8-2026", "") == "passat-b8-2026:", "half goes to the gate"
