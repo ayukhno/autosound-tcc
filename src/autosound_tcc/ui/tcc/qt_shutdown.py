@@ -136,8 +136,24 @@ def stop_or_detach(thread: QThread | None, wait_ms: int, mute: Iterable = ()) ->
     early, and that is not a reason to skip asking. What makes this safe either way is the branch
     below, not the worker's cooperation.
     """
-    if thread is None or not thread.isRunning():
+    if thread is None:
         return False
+    if not thread.isRunning():
+        # `isRunning()` alone was the bug, and the app's own log named it (finding 35,
+        # 2026-09-20): `QThread.start()` returns BEFORE the thread is scheduled, so there is a
+        # window where a worker that is about to run reads not-running. This returned False there,
+        # and the caller's next line — `self._worker = <new>` — dropped the last reference to it.
+        # It then ran, and destroyed itself on its own thread when `run()` returned, which is
+        # `qFatal`.
+        #
+        # "Never started" and "started, not scheduled yet" cannot be told apart from outside:
+        # both read not-running and not-finished. Only one of them is dangerous, and holding the
+        # other costs one reference, so the not-finished thread is held either way. A thread that
+        # really is finished needs no holding, and pinning those would be a growing leak.
+        if thread.isFinished():
+            return False
+        detach(thread)
+        return True
     thread.requestInterruption()
     if thread.wait(wait_ms):
         return False

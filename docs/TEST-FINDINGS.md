@@ -1204,6 +1204,34 @@ so a set missing something can put a title on offer that REW does not hold — w
 root as finding 36's `KeyError`. Hypothesis, not a verdict: the next run with this build names the
 worker in the log, and that is what settles it.
 
+**ROOT CAUSE, named by the app's own log, 2026-09-20 13:13:59.** The instrumented build
+reproduced it on the first run, and the two lines are consecutive:
+
+```
+13:13:59,509 WARNING  worker _CurveWorker destroyed on a worker thread while it had NOT finished
+13:13:59,510 CRITICAL Qt: QThread: Destroyed while thread '' is still running
+```
+
+`QThread.start()` is **asynchronous**: it returns before the thread is scheduled, and in that
+window `isRunning()` is still False while `isFinished()` is False too. `stop_or_detach` read only
+`isRunning()` and returned immediately — handing the worker to nobody — so the caller's very next
+line, `self._worker = <new>` in `curve_dialog._reload`, dropped the last reference to a worker
+that was about to run. It then ran, and destroyed itself on its own thread when `run()` returned.
+
+That is why it needed two reloads close together, why `cap_007` was not special, and why other
+sets switched fine: it is a RACE against thread scheduling, not a property of a set. The
+Arbiter's read that something was wrong with the set is a coincidence of timing — which is
+exactly why this was measured rather than reasoned about.
+
+**Fixed:** "not running" no longer means "safe to drop". Only a thread that is genuinely
+`isFinished()` is let go; anything else is held. "Never started" and "started, not scheduled yet"
+cannot be told apart from outside — both read not-running and not-finished — and only the second
+is dangerous, so the first is held too, at the cost of one reference. Pinning genuinely finished
+workers would be a leak that grows with the session, which is why `isFinished()` is the test.
+
+All four earlier fixes stand and are what makes this one enough: every call site now goes through
+`stop_or_detach`, so closing the window it reads through closes it everywhere.
+
 **Where to start, as a hypothesis and not a verdict.** The guard is already there and did not hold:
 `ui/tcc/curve_dialog.py` `_stop_worker` hands a slow worker to `ui/tcc/qt_shutdown.stop_or_detach`,
 which keeps it alive in `_DETACHED` and discards it when `finished` arrives. The stack says the

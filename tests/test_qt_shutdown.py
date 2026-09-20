@@ -240,3 +240,66 @@ def test_a_worker_that_finished_first_is_not_shouted_about(caplog):
         gc.collect()
 
     assert not [r for r in caplog.records if "NOT finished" in r.getMessage()]
+
+
+def test_a_worker_between_start_and_running_is_held_rather_than_skipped():
+    """The door finding 35 actually came through, named by the app's own log on 2026-09-20:
+
+        WARNING  worker _CurveWorker destroyed on a worker thread while it had NOT finished
+        CRITICAL Qt: QThread: Destroyed while thread '' is still running
+
+    `QThread.start()` is asynchronous — it returns before the thread is scheduled, and in that
+    window `isRunning()` is still False while `isFinished()` is False too. `stop_or_detach` read
+    only the first and returned immediately, so the caller's next line (`self._worker = <new>` in
+    `curve_dialog._reload`) dropped the last reference to a worker that was about to run. It then
+    ran, and destroyed itself on its own thread when `run()` returned — measured, that is an
+    `abort()`.
+
+    The two states cannot be told apart from outside: "never started" and "started, not scheduled
+    yet" both read not-running and not-finished. Only one of them is dangerous, and holding the
+    other costs one reference — so the not-finished thread is held either way.
+    """
+    from PySide6.QtCore import QObject, Signal
+
+    class _Starting(QObject):
+        finished = Signal()
+
+        def isRunning(self) -> bool:  # noqa: N802 (QThread's name)
+            return False  # start() has returned; the thread is not scheduled yet
+
+        def isFinished(self) -> bool:  # noqa: N802 (QThread's name)
+            return False  # and it certainly has not finished
+
+        def requestInterruption(self) -> None:  # noqa: N802 (QThread's name)
+            pass
+
+        def wait(self, _ms: int = 0) -> bool:
+            return False
+
+    _app()
+    starting = _Starting()
+    try:
+        assert qt_shutdown.stop_or_detach(starting, 10) is True
+        assert starting in qt_shutdown.detached(), "held, not skipped"
+    finally:
+        qt_shutdown._DETACHED.discard(starting)
+
+
+def test_a_worker_that_has_finished_is_still_let_go_of_cheaply():
+    """The other side: a thread that really is done needs no holding, and pinning every finished
+    worker in `_DETACHED` would be a leak that grows with the session."""
+    from PySide6.QtCore import QObject, Signal
+
+    class _Done(QObject):
+        finished = Signal()
+
+        def isRunning(self) -> bool:  # noqa: N802 (QThread's name)
+            return False
+
+        def isFinished(self) -> bool:  # noqa: N802 (QThread's name)
+            return True
+
+    _app()
+    done = _Done()
+    assert qt_shutdown.stop_or_detach(done, 10) is False
+    assert done not in qt_shutdown.detached()
