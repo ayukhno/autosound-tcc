@@ -188,6 +188,10 @@ def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
             check=False, cwd=str(cwd) if cwd else None,
             **child.quiet())
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
+        # Logged HERE too, and that is the point: this path returns before the one below, so a
+        # missing git and a timed-out probe were the two failures that left no line at all while
+        # the window said "could not reach GitHub" (2026-09-20).
+        _log.warning("git %s did not run: %s: %s", " ".join(args), type(exc).__name__, exc)
         return False, f"{type(exc).__name__}: {exc}"
     out = (done.stdout or "").strip() or (done.stderr or "").strip()
     if done.returncode != 0:
@@ -248,6 +252,13 @@ def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
     """
     patterns = [pattern for glob in globs for pattern in (glob, f"{glob}^{{}}")]
     ok, out = _git("ls-remote", "--tags", repo, *patterns)
+    if ok and not out:
+        # Exit 0 and NOTHING back is a third answer, and it used to read as the same "could not
+        # reach GitHub" as a failure — while `_git`'s own log, which only speaks on a non-zero
+        # exit, stayed silent. So the row blamed the network for a repository that answered
+        # perfectly well and matched no tag (2026-09-20, chasing the Arbiter's update row).
+        _log.warning("git ls-remote %s matched nothing for %s — the repo answered, the patterns "
+                     "did not", repo, " ".join(patterns))
     if not ok or not out:
         return "", ""
     shas: dict[str, str] = {}

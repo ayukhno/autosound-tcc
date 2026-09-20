@@ -176,3 +176,42 @@ def test_a_failed_git_probe_says_what_git_said(caplog):
     said = " ".join(r.getMessage() for r in caplog.records)
     assert "ls-remote" in said, f"the command: {said}"
     assert out.split()[0][:12] in said or "nowhere" in said, f"and what git said: {said}"
+
+
+def test_a_probe_that_matched_nothing_is_not_reported_as_a_dead_network(caplog):
+    """Exit 0 with no output is a THIRD answer — the repository replied and no tag matched — and
+    it reached the window as the same "could not reach GitHub" as a failure, with `_git`'s log
+    silent because that only speaks on a non-zero exit.
+
+    Blaming the network for a server that answered is the kind of wrong sentence that sends
+    somebody to check their wifi for half an hour.
+    """
+    import logging
+
+    from autosound_tcc.core import updates
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        tag, sha = updates._newest_tag_in(updates.TCC_REPO, "no-such-prefix-*")
+
+    assert (tag, sha) == ("", "")
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "matched nothing" in said, f"it says which of the three it was: {said}"
+
+
+def test_a_probe_that_never_ran_at_all_also_leaves_a_line(caplog, monkeypatch):
+    """The exception path returns BEFORE the exit-code log, so a missing git and a timed-out probe
+    were the two failures that left nothing in the log while the window blamed GitHub."""
+    import logging
+    import subprocess
+
+    from autosound_tcc.core import updates
+
+    def _boom(*_a, **_k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        ok, out = updates._git("ls-remote", "--tags", "whatever")
+
+    assert not ok and "FileNotFoundError" in out
+    assert "did not run" in " ".join(r.getMessage() for r in caplog.records)
