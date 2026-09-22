@@ -119,6 +119,7 @@ class CaptureImportDialog(QDialog):
         name_sets: Optional[dict] = None,
         project_dir: Optional[Path] = None,
         parent=None,
+        save_order=None,
     ) -> None:
         super().__init__(parent)
         self.setModal(True)
@@ -138,6 +139,9 @@ class CaptureImportDialog(QDialog):
         #: `{method: [(channel id, the full name a capture gets in REW)]}` — the round's own name
         #: sets, in the order the tuner declared. Built by the panel, which owns the sessions.
         self._name_sets = dict(name_sets or {})
+        #: The panel's own writer for a declared capture order (`save_order(method, ids)`), handed
+        #: to the order dialog so «Зберегти порядок» reaches the place the order is read from.
+        self._save_order = save_order
         #: Proposed names, by uuid. Empty means "leave the title alone".
         self._names: dict[str, str] = {}
         #: `{uuid: {"hp": {f, type, slope}, "lp": {…}}}` — what was in each row's chain, as the
@@ -483,7 +487,7 @@ class CaptureImportDialog(QDialog):
         be a button on the card that then guessed which REW measurements were "the newest batch"
         by their ordinals. That guess is what the measurements of 2026-09-02 disproved.
         """
-        picker = ChannelOrderDialog(self._name_sets, parent=self)
+        picker = ChannelOrderDialog(self._name_sets, parent=self, save_order=self._save_order)
         if picker.exec() != QDialog.DialogCode.Accepted:
             return
         method = picker.get_method()

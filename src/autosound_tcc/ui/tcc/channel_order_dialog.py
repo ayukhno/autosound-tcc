@@ -16,6 +16,9 @@ about to capture, in what order" (user request 2026-07-27 round 2).
 
 from __future__ import annotations
 
+import re
+from typing import Callable, Optional
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -32,6 +35,14 @@ from PySide6.QtWidgets import (
 from autosound_tcc.ui.tcc import i18n
 
 _ID_ROLE = Qt.ItemDataRole.UserRole
+
+#: A capture name without its method: `m-L_1 (sw)` and `m-L_1 (rta)` are one channel's position in
+#: two lists (finding 34, "the same list in a different hat").
+_METHOD_TAIL = re.compile(r"\s*\((sw|rta)\)")
+
+
+def _channel_of(name: str) -> str:
+    return _METHOD_TAIL.sub("", str(name or "")).strip()
 
 # method key -> i18n label key, in switcher order.
 _METHOD_LABELS = (
@@ -52,8 +63,13 @@ class ChannelOrderDialog(QDialog):
         methods: dict[str, list[tuple[str, str]]],
         initial_method: str | None = None,
         parent=None,
+        save_order: Optional[Callable[[str, list[str]], None]] = None,
     ) -> None:
         super().__init__(parent)
+        #: Writes one method's order where the panel keeps it. None when nobody can keep it — the
+        #: button is then not offered rather than offered and ignored (finding 34: the hint said
+        #: "saved per method", and nothing wrote it).
+        self._save_order = save_order
         self.setWindowTitle(i18n.t("captureOrderTitle"))
         self.resize(360, 460)
         self._methods = {k: list(v) for k, v in methods.items() if v}
@@ -83,7 +99,38 @@ class ChannelOrderDialog(QDialog):
 
         self._list = QListWidget()
         self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        # Several rows at once — a range with Shift, single rows with Cmd/Ctrl — and they move
+        # together (finding 34: nine positions per channel was nine drags).
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         layout.addWidget(self._list, stretch=1)
+
+        tools = QHBoxLayout()
+        for text, step in (("⤒", -10_000), ("↑", -1), ("↓", +1), ("⤓", +10_000)):
+            move = QPushButton(text)
+            move.setToolTip(i18n.t("captureOrderMoveTip"))
+            move.clicked.connect(lambda _checked=False, d=step: self._move_selection(d))
+            tools.addWidget(move)
+        tools.addStretch(1)
+        #: «Як у RTA» / «Як у SW»: the other method's order, matched by channel.
+        self._copy_btns: dict[str, QPushButton] = {}
+        for key, label_key in _METHOD_LABELS:
+            if key not in self._methods:
+                continue
+            copy = QPushButton(i18n.t("captureOrderCopyFrom").format(method=i18n.t(label_key)))
+            copy.clicked.connect(lambda _checked=False, k=key: self._copy_from(k))
+            tools.addWidget(copy)
+            self._copy_btns[key] = copy
+        layout.addLayout(tools)
+
+        save_row = QHBoxLayout()
+        self._save_btn = QPushButton(i18n.t("captureOrderSave"))
+        self._save_btn.setToolTip(i18n.t("captureOrderSaveTip"))
+        self._save_btn.clicked.connect(self._on_save)
+        self._save_btn.setVisible(save_order is not None)
+        save_row.addWidget(self._save_btn)
+        self._saved_note = QLabel("")
+        save_row.addWidget(self._saved_note, 1)
+        layout.addLayout(save_row)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -103,16 +150,59 @@ class ChannelOrderDialog(QDialog):
             for i in range(self._list.count())
         ]
 
-    def _switch_method(self, key: str) -> None:
+    def _move_selection(self, step: int) -> None:
+        """Move the selected rows by `step` places as one block, keeping their own order.
+
+        A block that is not adjacent closes up around its first row: that is what "drag these
+        together" means once they land."""
+        rows = sorted(self._list.row(item) for item in self._list.selectedItems())
+        if not rows:
+            return
         self._store_current_list()
-        self._method = key
-        for k, btn in self._method_btns.items():
-            btn.setChecked(k == key)
+        entries = list(self._methods[self._method])
+        moving = [entries[r] for r in rows]
+        rest = [e for i, e in enumerate(entries) if i not in set(rows)]
+        target = max(0, min(len(rest), rows[0] + step))
+        self._methods[self._method] = rest[:target] + moving + rest[target:]
+        self._fill(self._method)
+        for i in range(target, target + len(moving)):
+            self._list.item(i).setSelected(True)
+
+    def _copy_from(self, other: str) -> None:
+        """This method's list in the other method's order, matched by channel; anything the other
+        list does not name stays at the end in its own order."""
+        if other == self._method or other not in self._methods:
+            return
+        self._store_current_list()
+        rank = {_channel_of(cid): n for n, (cid, _label) in enumerate(self._methods[other])}
+        entries = list(self._methods[self._method])
+        known = sorted((e for e in entries if _channel_of(e[0]) in rank),
+                       key=lambda e: rank[_channel_of(e[0])])
+        self._methods[self._method] = known + [e for e in entries if _channel_of(e[0]) not in rank]
+        self._fill(self._method)
+
+    def _on_save(self) -> None:
+        if self._save_order is None or self._method is None:
+            return
+        self._save_order(self._method, self.get_order())
+        label = dict(_METHOD_LABELS).get(self._method, self._method)
+        self._saved_note.setText(i18n.t("captureOrderSaved").format(method=i18n.t(label)))
+
+    def _fill(self, key: str) -> None:
         self._list.clear()
         for chan_id, label in self._methods.get(key, []):
             item = QListWidgetItem(label)
             item.setData(_ID_ROLE, chan_id)
             self._list.addItem(item)
+
+    def _switch_method(self, key: str) -> None:
+        self._store_current_list()
+        self._method = key
+        for k, btn in self._method_btns.items():
+            btn.setChecked(k == key)
+        for k, btn in getattr(self, "_copy_btns", {}).items():
+            btn.setVisible(k != key)
+        self._fill(key)
 
     def get_method(self) -> str | None:
         return self._method

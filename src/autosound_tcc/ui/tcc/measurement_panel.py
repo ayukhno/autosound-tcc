@@ -969,6 +969,14 @@ class MeasurementPanel(QWidget):
         preset = self._preset_provider() if self._preset_provider else None
         return f"{_CAPTURE_ORDER_KEY_PREFIX}{preset or 'default'}/{method}"
 
+    def _store_order(self, method: str, ids: list) -> None:
+        """«Зберегти порядок» (finding 34): the declared capture sequence, per preset and method.
+
+        The dialog's hint said the order was saved per method since 2026-07-27, and nothing wrote
+        it once the dialog moved into the import form. Saving is the Arbiter's deliberate act now,
+        and this is where `_saved_order` reads it back."""
+        self._settings.setValue(self._capture_order_key(method), json.dumps(list(ids)))
+
     def _saved_order(self, method: str) -> Optional[list[str]]:
         raw = self._settings.value(self._capture_order_key(method), None)
         if not raw:
@@ -1144,6 +1152,7 @@ class MeasurementPanel(QWidget):
             name_sets=self._method_channel_pairs() if self._has_real_sessions else {},
             project_dir=config.project_dir(),
             parent=self,
+            save_order=self._store_order,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._set_status("measReadCancelled", n=len(measurements))

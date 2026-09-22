@@ -1143,3 +1143,66 @@ def test_the_protective_mark_is_readable_on_the_row():
 
     assert short_legs("HP 100 LR24") == "HP100"
     assert short_legs("HP 1000 LR24 · LP 3500 LR24") == "HP1k · LP3.5k"
+
+
+def _order_dialog(methods, **kw):
+    from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog as _D
+
+    _app()
+    return _D(methods, **kw)
+
+
+def _select(dialog, rows):
+    dialog._list.clearSelection()
+    for row in rows:
+        dialog._list.item(row).setSelected(True)
+
+
+def test_the_order_list_takes_a_selection_of_several_rows():
+    """Finding 34: moving a channel of nine positions was nine drags."""
+    from PySide6.QtWidgets import QAbstractItemView
+
+    dialog = _order_dialog({"sw": [(c, c) for c in "ABCDE"]})
+    assert dialog._list.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+
+
+def test_a_selection_moves_as_a_block_even_when_it_is_not_adjacent():
+    dialog = _order_dialog({"sw": [(c, c) for c in "ABCDE"]})
+    _select(dialog, [1, 3])  # B and D
+    dialog._move_selection(-1)  # a dragged group lands together, closed up, in its own order
+    assert dialog.get_order() == ["B", "D", "A", "C", "E"]
+    dialog._move_selection(+10)  # still selected: to the bottom
+    assert dialog.get_order() == ["A", "C", "E", "B", "D"]
+
+
+def test_save_writes_the_order_for_this_method_when_asked():
+    """The hint promised the order was kept per method; nothing wrote it (finding 34). Saving is
+    now the Arbiter's deliberate act, and it reaches the panel's store."""
+    saved = []
+    dialog = _order_dialog({"sw": [(c, c) for c in "ABC"]},
+                           save_order=lambda method, ids: saved.append((method, ids)))
+    _select(dialog, [2])
+    dialog._move_selection(-10)
+    dialog._save_btn.click()
+    assert saved == [("sw", ["C", "A", "B"])]
+
+
+def test_the_order_is_copied_between_methods_by_channel():
+    """Finding 34: the same list in a different hat — copy RTA's order onto SW and back."""
+    dialog = _order_dialog({
+        "sw": [("m-L_1 (sw)", "m-L_1 (sw)"), ("m-R_1 (sw)", "m-R_1 (sw)"), ("c_1 (sw)", "c_1 (sw)")],
+        "rta": [("c_1 (rta)", "c_1 (rta)"), ("m-R_1 (rta)", "m-R_1 (rta)"), ("m-L_1 (rta)", "m-L_1 (rta)")],
+    })
+    dialog._copy_from("rta")
+    assert dialog.get_order() == ["c_1 (sw)", "m-R_1 (sw)", "m-L_1 (sw)"]
+
+
+def test_a_saved_order_is_what_the_panel_reads_back(tmp_path, monkeypatch):
+    """The dialog's save reaches the panel's store, and the next name set opens in that order."""
+    _app()
+    panel = MeasurementPanel(preset_provider=lambda: "SQ")
+    store = {}
+    monkeypatch.setattr(panel._settings, "setValue", lambda k, v: store.__setitem__(k, v))
+    monkeypatch.setattr(panel._settings, "value", lambda k, d=None: store.get(k, d))
+    panel._store_order("sw", ["B", "A"])
+    assert panel._saved_order("sw") == ["B", "A"]
