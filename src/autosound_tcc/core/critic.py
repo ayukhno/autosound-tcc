@@ -482,15 +482,20 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
         # `trustedWorkspaces`; the Arbiter followed it on Windows and the refusal came back
         # byte-identical — the project folder was never the gate. It also offered
         # `toolPermission: always-proceed` next, which after a narrow fix that did nothing walks a
-        # person to "every folder" by elimination. How narrow the rule should be is the method's
-        # call (autosound-hub#150); until it says, the clipboard step is the route that works.
+        # person to "every folder" by elimination. The method answered in v3.0.53 (hub #150): agy
+        # gets the package on STDIN, so no file is read, and a per-run CLI flag can be passed with
+        # `AUTOSOUND_CRITIC_CLI_ARGS`. A refusal here therefore means an older method or a tool the
+        # prompt made agy call on its own — said so, with agy's own remedy and the per-run route
+        # (findings 23, 25).
         tool = _refused_tool(said) or "read_file"
         return (
             f"agy runs the reviewer headless, so it cannot ask for the `{tool}` permission and "
-            f"refuses it. Its own answer is an allow-rule under `permissions.allow` in "
-            f"`{AGY_SETTINGS}`, in the form it prints: `{tool}(<target>)`; this project is at "
-            f"{where}. Until that rule is there, the route that works is the clipboard step: paste "
-            f"the package into a web chat and bring the answer back."
+            f"refuses it. Since the method's v3.0.53 the package goes to agy on stdin and no file "
+            f"has to be read — if this persists, update the method. agy's own answer is an "
+            f"allow-rule under `permissions.allow` in `{AGY_SETTINGS}`, in the form it prints: "
+            f"`{tool}(<target>)`; this project is at {where}. A flag for one run goes through "
+            f"`AUTOSOUND_CRITIC_CLI_ARGS`. Meanwhile the clipboard step works: paste the package "
+            f"into a web chat and bring the answer back."
         ) if (harness or "").lower() == "agy" else (
             f"the reviewer CLI is asking permission it has no standing answer for. It needs that "
             f"answer in its own settings; this project is at {where}."
