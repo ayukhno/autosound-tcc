@@ -59,6 +59,49 @@ def _seeder():
         return None
 
 
+#: The method's seats, in its order, when the skill cannot be loaded (the dialog must still open).
+_SEATS_FALLBACK = ("driver", "passenger", "both", "all", "rear_left", "rear_right")
+
+
+def _seats() -> tuple[str, ...]:
+    try:
+        return tuple(vendor_loader.load_project().PROJECT_TYPES)
+    except Exception:  # noqa: BLE001 — no skill: offer the seats the method is known to have
+        return _SEATS_FALLBACK
+
+
+def _seat_label(seat: str) -> str:
+    """The seat in the method's own words (its form's translations), so the form and this dialog
+    name a seat the same way; the code itself when no translation says otherwise."""
+    import json
+
+    for lang in (i18n.current_language(), "en"):
+        path = vendor_loader.rew_tool_dir() / "intake_i18n" / f"{lang}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        label = (((data.get("fields") or {}).get("goal.reference_seat") or {})
+                 .get("enum") or {}).get(seat)
+        if label:
+            return str(label)
+    return seat
+
+
+def _source_seat(source: Path) -> Optional[str]:
+    """The seat the source project was tuned for, or None when it never said."""
+    import json
+
+    try:
+        data = json.loads((source / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        return vendor_loader.load_project().project_type(data)
+    except Exception:  # noqa: BLE001 — an older method: read the field itself
+        return data.get("project_type")
+
+
 def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
     """(vendor, name) pairs from the packaged `dsp_profiles/*.json` -- read directly rather than through
     the vendored `rew_tool` so this dialog still works if that submodule isn't checked out.
@@ -193,6 +236,23 @@ class NewProjectDialog(QDialog):
         self._seed_findings.toggled.connect(self._refresh_seed_note_now)
         layout.addWidget(self._seed_findings)
 
+        # The seat never travels: another seat is why a copy exists (hub #193, SKL-048). So it
+        # is chosen HERE, with no default, and the source's own seat is said beside the choice.
+        self._seat_label = _field_label(i18n.t("npSeat"))
+        layout.addWidget(self._seat_label)
+        self._seat_combo = QComboBox()
+        self._seat_combo.setProperty("class", "mini-select")
+        self._seat_combo.addItem(i18n.t("npSeatPick"), None)
+        for seat in _seats():
+            self._seat_combo.addItem(_seat_label(seat), seat)
+        self._seat_combo.currentIndexChanged.connect(self._sync_create_enabled)
+        self._seat_combo.currentIndexChanged.connect(self._refresh_seed_note_now)
+        layout.addWidget(self._seat_combo)
+        self._seat_source = QLabel("")
+        self._seat_source.setWordWrap(True)
+        self._seat_source.setProperty("class", "kv-lbl")
+        layout.addWidget(self._seat_source)
+
         layout.addWidget(_field_label(i18n.t("npProfile")))
         self._profile_combo = QComboBox()
         self._profile_combo.setProperty("class", "mini-select")
@@ -280,7 +340,8 @@ class NewProjectDialog(QDialog):
         copying = self._seed_combo.currentData() == "copy"
         self._sync_create_enabled()  # the button names the act this mode performs
         for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
-                       self._seed_findings):
+                       self._seed_findings, self._seat_label, self._seat_combo,
+                       self._seat_source):
             widget.setVisible(copying)
         if copying:
             self._on_seed_source(self._seed_edit.text())
@@ -302,6 +363,9 @@ class NewProjectDialog(QDialog):
         seeder = _seeder()
         summary = seeder.describe(source) if (source is not None and seeder) else None
         self._seed_describes = summary
+        seat = _source_seat(source) if (source is not None and summary is not None) else None
+        self._seat_source.setText(i18n.t("npSeatSource").format(
+            seat=_seat_label(seat) if seat else i18n.t("npSeatUnset")) if summary else "")
         if source is None:
             self._set_seed_note("", warn=False)
             return
@@ -344,6 +408,7 @@ class NewProjectDialog(QDialog):
                     copy_profile=seeder.dsp_of(source) == (
                         self._vendor_edit.text().strip(), self._model_edit.text().strip()),
                     note=i18n.t("npSeedNote"),
+                    seat=self._seat_combo.currentData(),
                 )
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
                 return None
@@ -483,10 +548,13 @@ class NewProjectDialog(QDialog):
         self._create_btn.setText(
             i18n.t("npCopy") if self._seed_combo.currentData() == "copy" else i18n.t("npCreate")
         )
+        copying = self._seed_combo.currentData() == "copy"
+        seat_combo = getattr(self, "_seat_combo", None)  # built after the seed picker
         self._create_btn.setEnabled(
             bool(self._folder_edit.text().strip())
             and bool(self._vendor_edit.text().strip())
             and bool(self._model_edit.text().strip())
+            and (not copying or (seat_combo is not None and seat_combo.currentData() is not None))
         )
 
     def _on_browse(self) -> None:
@@ -526,6 +594,7 @@ class NewProjectDialog(QDialog):
                 # capabilities are a question for the form's /new-dsp page, not a file to inherit.
                 copy_profile=seeder.dsp_of(source) == (vendor, model),
                 note=i18n.t("npSeedNote"),
+                seat=self._seat_combo.currentData(),
             )
             if not report.ok:
                 # The module answers in English, with a path in it, because it is a library and

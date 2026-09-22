@@ -378,3 +378,53 @@ def test_typing_a_dsp_name_does_not_run_a_seed_per_character(monkeypatch, tmp_pa
 
     dlg._refresh_seed_note_now()                   # what the timer would do when typing stops
     assert len(seeder.seeded_into) == before + 1, "one seed per pause, not per keystroke"
+
+
+def _passat(tmp_path, seat=None):
+    source = tmp_path / "source"
+    source.mkdir()
+    extra = f', "project_type": "{seat}"' if seat else ""
+    (source / "project.json").write_text(
+        '{"schema_version": 3, "car": {"make": "VW"}, '
+        '"dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"}, "channels": []'
+        + extra + "}", encoding="utf-8")
+    return source
+
+
+def test_a_copy_cannot_be_made_until_a_seat_is_chosen(tmp_path, monkeypatch):
+    seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))
+    dlg = _dialog_on(_passat(tmp_path), seeder, monkeypatch)
+    dlg._folder_edit.setText(str(tmp_path / "new"))
+    assert dlg._seat_combo.currentData() is None
+    assert not dlg._create_btn.isEnabled()
+    dlg._seat_combo.setCurrentIndex(dlg._seat_combo.findData("passenger"))
+    assert dlg._create_btn.isEnabled()
+
+
+def test_the_seat_reaches_both_seed_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
+    seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))
+    dlg = _dialog_on(_passat(tmp_path), seeder, monkeypatch)
+    dlg._folder_edit.setText(str(tmp_path / "new"))
+    seeder.seeded_into.clear()  # the previews drawn before a seat was chosen are not the point
+    dlg._seat_combo.setCurrentIndex(dlg._seat_combo.findData("rear_left"))
+    dlg._refresh_seed_note_now()
+    dlg._on_create()
+    seats = [kwargs.get("seat") for _src, _dst, kwargs in seeder.seeded_into]
+    assert len(seats) >= 2 and set(seats) == {"rear_left"}, seats
+
+
+def test_the_source_s_own_seat_is_named_beside_the_choice(tmp_path, monkeypatch):
+    seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))
+    dlg = _dialog_on(_passat(tmp_path, seat="driver"), seeder, monkeypatch)
+    driver = dlg._seat_combo.itemText(dlg._seat_combo.findData("driver"))
+    assert driver in dlg._seat_source.text()
+
+
+def test_the_seat_offers_exactly_the_method_s_seats_in_its_words():
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    codes = [dlg._seat_combo.itemData(i) for i in range(1, dlg._seat_combo.count())]
+    assert codes == ["driver", "passenger", "both", "all", "rear_left", "rear_right"]
+    assert all(dlg._seat_combo.itemText(i) != dlg._seat_combo.itemData(i)
+               for i in range(1, dlg._seat_combo.count())), "labels come from the method, not codes"
