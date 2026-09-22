@@ -2233,7 +2233,7 @@ is sent before that.
 
 ### F-055 — A separate session: from the session analysis to an intake form
 
-**Статус**: відкладено · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
+**Статус**: superseded 2026-09-22 · by hub #194 — one intake form for every front end, the skill's page (the Arbiter); built on `wave-0.1.43`. Was: відкладено · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
 
 Where it stands: `docs/SESSION-ANALYSIS-2026-09-14.md` — two runs measured (testTCC8 on the local
 Windows, testTCC-9 on the remote one), the fields the intake needed, and four proposals (one intake

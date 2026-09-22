@@ -12,6 +12,24 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+### Added
+
+- **The intake is a form.** Project menu → «Інтейк…» opens the method's own intake page in your
+  browser, in the interface language; a new project opens on it straight away. Save writes the
+  project files and the window follows. When phase 0 has everything it needs, the status line
+  offers to start the session — one click, never automatic (hub `#194`).
+- **Copying a project asks for the seat.** Driver, passenger, both, all, rear left or right — no
+  default, in the method's own words, with the source's seat named beside it, because another seat
+  is why a copy exists (hub `#193`).
+
+### Removed
+
+- **The conversational DSP-profile interview at "New project".** The form asks it, and for a
+  processor the method has no profile for, the form's own page does. A terminal AI chosen at
+  "New project" now starts from the offer after the form, told the intake is already filled.
+
 ## [v0.1.42] — 2026-09-20 · the curve window stops lying and stops dying, the method at v3.0.59
 
 Paired with method `cf8d7d37d1a0f1b0f14c746cb945d53b594f91a6` — the tag on that commit is
