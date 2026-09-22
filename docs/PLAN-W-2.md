@@ -113,7 +113,7 @@ lives in the panel this mode hides, and TCC's own tools raise confirmations in e
 | item | why |
 |---|---|
 | `F-068` the drivers' Fs checkbox | The method's flag does not exist (hub `#185`, with skill) and is not on its wave branch. |
-| per-project version numbering | The method has not built its migration; we keep `state/<preset>/v_NNN.json` and name a version with its slot (`SQ v_007`). |
+| per-project version numbering | The method has not built its migration, and nothing carried it — filed as hub `#195` (TCC-025, 2026-09-22). It joins the wave when the skill takes it; until then we keep `state/<preset>/v_NNN.json` and name a version with its slot (`SQ v_007`). |
 | `F-055` a separate session towards an intake form | Superseded by `#194`: one form for every front end, the skill's page (the Arbiter, 2026-09-22). |
 | hub `#83`, `#21`, `F-023`, `F-057` | Already deferred; not touched. |
 | finding `19` | Done by `F-042` (2026-09-17): the report has a path without GitHub. |
