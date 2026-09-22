@@ -468,16 +468,24 @@ def _step_label(step_id: str) -> str:
 _SERIES_ID = re.compile(r"^v(\d+)$")
 
 
-def _session_label(session_id: str) -> str:
-    """`v6` reads as a version of something and explains nothing; `series 6` says which axis it
-    is on. A round id (`cap_001`) is the OTHER axis -- two passes at one config -- and keeps the
-    name the journal gave it, which is what makes the two tellable apart in one list.
+def _picker_label(session) -> str:
+    """The series AND the round, whichever the session has (finding 33).
 
-    User, 2026-08-21: "ось цей v6 (а до цього було v4 і ще щось) не дуже розумію і інтуітивно не
-    зрозуміло що означає". The curve window spells the same number the same way now.
+    The series is spelled in words: `v6` read as a version of something and explained nothing
+    (user, 2026-08-21), and the curve window spells the same number the same way.
+
+    The live entry took the open round's id (`cap_006`) and the series it belonged to vanished from
+    the list; a past round said nothing about its series. Two axes, both named: «серія 1 · cap_006».
     """
-    found = _SERIES_ID.match(session_id)
-    return i18n.t("seriesItem").format(v=found.group(1)) if found else session_id
+    series = getattr(session, "series", "") or ""
+    found = _SERIES_ID.match(session.id)
+    if not series and found:
+        series = found.group(1)
+    round_id = getattr(session, "round_id", "") or ("" if found else session.id)
+    parts = [i18n.t("seriesItem").format(v=series)] if series else []
+    if round_id:
+        parts.append(round_id)
+    return " · ".join(parts) or session.id
 
 
 class MeasurementPanel(QWidget):
@@ -558,9 +566,7 @@ class MeasurementPanel(QWidget):
         # width) so both keep their ratio if the panel is resized.
         self._session_combo = QComboBox()
         self._session_combo.setProperty("class", "mini-select")
-        for session in self._sessions:
-            marker = " ●" if session.id == self._sessions[0].id else ""
-            self._session_combo.addItem(_session_label(session.id) + marker, session.id)
+        self._fill_session_combo()
         self._session_combo.currentIndexChanged.connect(
             lambda _idx: self.show_session(self._session_combo.currentData())
         )
@@ -770,13 +776,20 @@ class MeasurementPanel(QWidget):
         self._sessions = tuple(sessions)
         self._viewing_id = self._sessions[0].id
         self._session_combo.blockSignals(True)
-        self._session_combo.clear()
-        for session in self._sessions:
-            marker = " ●" if session.id == self._sessions[0].id else ""
-            self._session_combo.addItem(_session_label(session.id) + marker, session.id)
+        self._fill_session_combo()
         self._fit_session_combo()
         self._session_combo.blockSignals(False)
         self.show_session(self._viewing_id)
+
+    def _fill_session_combo(self) -> None:
+        """What is being taken now, a separator, then what was taken before (finding 33) -- the
+        two kinds in one list used to sit together with nothing between them."""
+        self._session_combo.clear()
+        for index, session in enumerate(self._sessions):
+            if index == 1:
+                self._session_combo.insertSeparator(self._session_combo.count())
+            marker = " ●" if index == 0 else ""
+            self._session_combo.addItem(_picker_label(session) + marker, session.id)
 
     def viewing_session_id(self) -> str:
         """Which capture series the grid is showing. The curve window scopes its delay bank by

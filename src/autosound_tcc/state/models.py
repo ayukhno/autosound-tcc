@@ -81,6 +81,11 @@ class MeasSession(MeasTask):
     `ui/tcc/plan_panel.py`'s per-step measurement icon)."""
 
     id: str = ""
+    #: The capture series `_N` this session belongs to, and the round (`cap_NNN`) when it is one.
+    #: Both are said in the picker, because an open round used to take the series' place in it and
+    #: the series looked gone (finding 33).
+    series: str = ""
+    round_id: str = ""
     # PlanStep ids this session's captures were used for/informed -- the CURRENT session's own
     # entry is what it's *being captured for* right now, not yet "used" past tense.
     used_in_steps: tuple[str, ...] = ()

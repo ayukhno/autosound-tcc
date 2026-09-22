@@ -412,9 +412,10 @@ def test_session_dropdown_lists_all_sessions_live_one_marked():
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     items = [panel._session_combo.itemText(i) for i in range(panel._session_combo.count())]
-    assert items == ["series 10 ●", "series 9", "series 8"]
+    # A separator between what is being taken now and what was taken before (finding 33).
+    assert items == ["series 10 ●", "", "series 9", "series 8"]
     assert [panel._session_combo.itemData(i) for i in range(panel._session_combo.count())] == \
-        ["v10", "v9", "v8"], "the id is what the panel is keyed on and it did not change"
+        ["v10", None, "v9", "v8"], "the id is what the panel is keyed on and it did not change"
 
 
 def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live_actions():
@@ -1103,3 +1104,23 @@ def test_the_origin_is_assembled_only_when_it_was_actually_asked_for():
     assert _origin_of(False, "passat-b8-2026", "49") == "", "unticked means these are ours"
     assert _origin_of(True, "", "") == "", "ticked and empty is not an origin either"
     assert _origin_of(True, "passat-b8-2026", "") == "passat-b8-2026:", "half goes to the gate"
+
+
+
+def test_an_open_round_does_not_hide_its_series_and_a_past_round_names_its_own():
+    """Finding 33: with a round open, the live entry was `cap_006 ●` and «серія 1» vanished from
+    the list; the past rounds said nothing about which series they were. Every entry now says
+    both, and a separator sits between now and before."""
+    from autosound_tcc.state.models import MeasSession
+
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions([
+        MeasSession(id="cap_006", version={"en": "live"}, groups=(), series="1", round_id="cap_006"),
+        MeasSession(id="cap_005", version={"en": "past"}, groups=(), series="1", round_id="cap_005"),
+        MeasSession(id="v1", version={"en": "past"}, groups=(), series="1"),
+    ])
+    combo = panel._session_combo
+    items = [combo.itemText(i) for i in range(combo.count())]
+    series = i18n.t("seriesItem").format(v="1")
+    assert items == [f"{series} · cap_006 ●", "", f"{series} · cap_005", series]

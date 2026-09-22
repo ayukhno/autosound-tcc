@@ -227,6 +227,7 @@ def build_session(
         if not outstanding:
             return MeasSession(
                 id=f"v{version}",
+                series=str(version),
                 version={"en": f"Phase {phase} · no capture",
                          "uk": f"Фаза {phase} · без замірів"},
                 groups=(),
@@ -381,6 +382,8 @@ def build_session(
     round_id = str(round_.get("id") or "") if not round_.get("closed") else ""
     return MeasSession(
         id=round_id or f"v{version}",
+        series=str(version),
+        round_id=round_id,
         version={
             "en": f"Series {version} · phase {phase}"
             + (f" · {round_id}" if round_id else ""),
@@ -480,6 +483,8 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
     phase = round_.get("phase")
     return MeasSession(
         id=rid or f"round·{ver}",
+        series="" if ver == "?" else ver,
+        round_id=rid,
         version={
             "en": f"Series {ver} · phase {phase} · {rid}",
             "uk": f"Серія {ver} · фаза {phase} · {rid}",
