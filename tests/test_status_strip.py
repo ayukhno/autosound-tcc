@@ -54,3 +54,26 @@ def test_a_second_fact_replaces_the_first_and_restarts_the_clock():
 
     assert strip.text() == "second"
     assert strip.timer_is_running() is True
+
+
+def test_an_action_is_a_link_that_runs_once_and_clears_the_line():
+    _app()
+    strip = StatusStrip()
+    calls = []
+    strip.notify("Intake ready", action=("Start the session", lambda: calls.append(1)))
+    assert "Start the session" in strip.text() and "<a " in strip.text()
+    assert not strip.timer_is_running(), "an offer waits for the click, it does not expire"
+    strip.linkActivated.emit("action")
+    assert calls == [1]
+    assert not strip.isVisible()
+    strip.linkActivated.emit("action")
+    assert calls == [1], "a cleared offer cannot be taken twice"
+
+
+def test_a_plain_message_after_an_offer_has_no_link():
+    _app()
+    strip = StatusStrip()
+    strip.notify("Intake ready", action=("Start", lambda: None))
+    strip.notify("a <b>fact</b> & nothing else")
+    assert "<a " not in strip.text()
+    assert strip.timer_is_running()
