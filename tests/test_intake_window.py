@@ -262,3 +262,23 @@ def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_
     assert kind == main_window.signal_bus.CAPTURE_READY
     assert payload == {"round": "cap_006", "titles": ["m-L_1 (sw)", "m-R_1 (sw)"]}
     assert pushed[-1] == "nudged"
+
+
+def test_a_reviewer_refused_by_region_turns_the_closed_picker_red(tmp_path, monkeypatch):
+    """Finding 20: the refused reviewer was red in the open list and plain in the closed picker."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.core import availability
+
+    choice = SimpleNamespace(key="agy:gemini-3.1-pro-high", available=True, harness="agy")
+    window, _ = _window(tmp_path, monkeypatch)
+    combo = main_window.QComboBox()
+    combo.addItem("AGY · Gemini 3.1 Pro (High)", choice.key)
+    monkeypatch.setattr(availability, "status",
+                        lambda c: availability.Status(False, availability.LOCATION))
+    main_window._mark_missing(combo, [choice])
+    assert "is-missing" in combo.property("class")
+    monkeypatch.setattr(availability, "status",
+                        lambda c: availability.Status(False, availability.NOT_CHECKED))
+    main_window._mark_missing(combo, [choice])
+    assert "is-missing" not in combo.property("class"), "not checked is not refused"

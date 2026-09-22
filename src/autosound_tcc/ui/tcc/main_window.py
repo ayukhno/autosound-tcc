@@ -440,9 +440,15 @@ def _mark_missing(combo, entries, warn: bool = False) -> None:
     # A route whose CLI is not installed counts as missing here, even though its row is now on the
     # list (greyed, saying what it needs). The row exists so the option is discoverable; the field
     # still has to say that what it currently holds cannot run.
-    missing = bool(current) and not any(
-        choice.key == current and choice.available for choice in entries
-    )
+    #
+    # And so does a choice this launch saw REFUSED — by region, a missing sign-in, a refused call
+    # (finding 20: red in the open list, plain in the closed picker that is on screen all the
+    # time). "Not checked yet" is not a refusal and does not turn it red.
+    def runs(choice) -> bool:
+        state = availability.status(choice)
+        return choice.available and (state.ready or state.reason == availability.NOT_CHECKED)
+
+    missing = bool(current) and not any(choice.key == current and runs(choice) for choice in entries)
     classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
     combo.setProperty("class", classes)
     combo.style().unpolish(combo)
