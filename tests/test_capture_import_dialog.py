@@ -490,3 +490,31 @@ def test_a_typed_name_outside_the_grammar_says_why_under_the_table(tmp_path):
 
     assert "w-L (sw)" in dialog._note.text() and "_N" in dialog._note.text()
 
+
+
+def test_the_new_name_opens_filled_with_the_round_s_own_spelling(tmp_path):
+    """Finding 28: the name is the point of the form, and it was the one column left empty."""
+    dialog = _dialog(_rew(5), tmp_path, expected=["m_2 (sw)", "m_4 (sw)"])
+    names = {dialog.uuid_at(r): dialog._table.item(r, 4).text() for r in range(dialog._table.rowCount())}
+    assert names["u2"] == "m_2 (sw)" and names["u4"] == "m_4 (sw)"
+    assert names["u1"] == "", "a row nothing matched is left for the person"
+    assert dialog.renames() == [], "the same spelling is not a rename"
+
+
+def test_the_columns_can_be_dragged_wider(tmp_path):
+    from PySide6.QtWidgets import QHeaderView
+
+    dialog = _dialog(_rew(3), tmp_path)
+    header = dialog._table.horizontalHeader()
+    for column in (2, 3, 4):
+        assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+
+
+def test_select_all_and_clear_at_the_foot_act_on_what_is_shown(tmp_path):
+    dialog = _dialog(_rew(8), tmp_path)
+    dialog._select_all_btn.click()
+    shown = {dialog.uuid_at(r) for r in range(dialog._table.rowCount())}
+    assert {row.uuid for row in dialog.ticked_rows()} == shown
+    assert all(_tick_state(dialog, r) for r in range(dialog._table.rowCount()))
+    dialog._clear_btn.click()
+    assert dialog.ticked_rows() == []

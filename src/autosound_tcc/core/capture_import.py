@@ -38,7 +38,7 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -362,6 +362,11 @@ class Preselect:
 
     ticked: frozenset
     ambiguous: frozenset
+    #: `{uuid: the expected name it answers to}` for every ticked row, spelled as the ROUND spells
+    #: it — the name the row is filed under, which is what the New name column opens with
+    #: (finding 28). A REW title that differs only in how the grammar reads it (`_01` for `_1`)
+    #: becomes a rename to the round's spelling, which the method's own check now asks for.
+    names: dict = field(default_factory=dict)
 
     @property
     def shown(self) -> frozenset:
@@ -383,7 +388,11 @@ def preselect(rows: Iterable[Candidate], expected: Iterable[str],
     one that came out is exactly what the person is looking at the list to decide.
     """
     read = key_reader(project_dir)
-    wanted = {read(name) for name in expected if str(name).strip()}
+    spelled: dict[str, str] = {}
+    for name in expected:
+        if str(name).strip():
+            spelled.setdefault(read(name), str(name))
+    wanted = set(spelled)
     wanted.discard("")
     by_key: dict[str, list[Candidate]] = {}
     for row in rows:
@@ -392,13 +401,14 @@ def preselect(rows: Iterable[Candidate], expected: Iterable[str],
         key = read(row.title)
         if key in wanted:
             by_key.setdefault(key, []).append(row)
-    ticked, ambiguous = set(), set()
-    for group in by_key.values():
+    ticked, ambiguous, names = set(), set(), {}
+    for key, group in by_key.items():
         if len(group) == 1:
             ticked.add(group[0].uuid)
+            names[group[0].uuid] = spelled[key]
         else:
             ambiguous.update(row.uuid for row in group)
-    return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous))
+    return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous), names=names)
 
 
 @dataclass(frozen=True)

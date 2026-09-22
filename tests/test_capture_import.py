@@ -475,3 +475,14 @@ def test_a_method_without_explain_name_explains_nothing(monkeypatch, tmp_path):
 
     assert ci.name_explainer(tmp_path)("w-L (sw)") == ""
 
+
+
+def test_a_ticked_row_knows_the_name_the_round_gave_it(tmp_path):
+    """Finding 28: the New name column was empty on every row although the match was already
+    made — by name. The round's own spelling is the name the row is filed under."""
+    rows = ci.candidates(_rew(*[("w-L_01 (sw)", "u1", "2026-Aug-25 20:01:00"),
+                                ("w-R_1 (sw)", "u3", "2026-Aug-25 20:03:00")]), tmp_path)
+
+    picked = ci.preselect(rows, ["w-L_1 (sw)", "w-R_1 (sw)"], tmp_path)
+
+    assert picked.names == {"u1": "w-L_1 (sw)", "u3": "w-R_1 (sw)"}

@@ -164,6 +164,9 @@ class CaptureImportDialog(QDialog):
         #: pre-ticked: there is no batch to match against.
         picked = capture_import.preselect(self._all, self._expected, project_dir)
         self._ticked = set(picked.ticked)
+        #: The New name opens with the name each ticked row was matched to, in the round's own
+        #: spelling (finding 28) -- it was the one column left empty, and it is what the form is for.
+        self._names.update(picked.names)
         #: How many the DIALOG ticked, kept apart from `_ticked`, which the tuner then edits. The
         #: line under the table is about what was decided for them, not about the running total.
         self._picked = len(picked.ticked)
@@ -211,13 +214,15 @@ class CaptureImportDialog(QDialog):
         # REW's own number, for finding the row in REW's window and nothing else — see
         # `_render_note` for why it is never written down.
         header.setSectionResizeMode(_COL_NUM, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
+        # Title, date and name are dragged to the width the person needs (finding 28: the REW
+        # title and the timestamp squeezed the name). The last column takes what is left.
         # The date sits BESIDE the proposed name on purpose: they are read together. A re-take
         # lands out of time order, and the name about to be written on it is the thing that goes
         # wrong when it does.
-        header.setSectionResizeMode(_COL_WHEN, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(_COL_PROT, QHeaderView.ResizeMode.ResizeToContents)
+        for column, width in ((_COL_TITLE, 240), (_COL_WHEN, 170), (_COL_NAME, 220)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            header.resizeSection(column, width)
+        header.setSectionResizeMode(_COL_PROT, QHeaderView.ResizeMode.Stretch)
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.cellClicked.connect(self._on_cell_clicked)
@@ -251,6 +256,17 @@ class CaptureImportDialog(QDialog):
         self._name_btn.setEnabled(bool(self._name_sets))
         attach_tip(self._name_btn, i18n.t("assignNames"))
         controls.addWidget(self._name_btn)
+        # The rows to untick are usually all but two (finding 28): one click for all, one for none.
+        self._select_all_btn = QPushButton(i18n.t("capImportSelectAll"))
+        self._select_all_btn.setProperty("class", "reason-btn")
+        self._select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._select_all_btn.clicked.connect(lambda: self._tick_all(True))
+        controls.addWidget(self._select_all_btn)
+        self._clear_btn = QPushButton(i18n.t("capImportSelectNone"))
+        self._clear_btn.setProperty("class", "reason-btn")
+        self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_btn.clicked.connect(lambda: self._tick_all(False))
+        controls.addWidget(self._clear_btn)
         controls.addStretch(1)
         cancel = QPushButton(i18n.t("npCancel"))
         cancel.setProperty("class", "reason-btn")
@@ -489,6 +505,14 @@ class CaptureImportDialog(QDialog):
         """`(uuid, new title)` for every ticked row that is actually being renamed."""
         return [(row.uuid, self._names[row.uuid]) for row in self.ticked_rows()
                 if self._names.get(row.uuid) and self._names[row.uuid] != row.title]
+
+    def _tick_all(self, on: bool) -> None:
+        """Tick every row on screen that can be taken, or untick everything."""
+        if on:
+            self._ticked |= {row.uuid for row in self.visible_rows() if row.identified}
+        else:
+            self._ticked.clear()
+        self._render()
 
     def _on_more(self) -> None:
         self._pages += 1
