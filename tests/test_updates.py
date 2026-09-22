@@ -241,7 +241,10 @@ def test_an_unreachable_github_is_not_up_to_date(monkeypatch):
 
     assert status.newer is False
     assert status.latest == ""
-    assert status.reason == "no_network"
+    # Not "no network" on the app's word: git says what failed, and the row repeats git (22643c0,
+    # finding 40 — the row blamed GitHub while git itself could not run).
+    assert status.reason == "probe_failed"
+    assert "could not resolve host" in status.detail
 
 
 def test_the_probe_never_raises_when_git_is_missing(monkeypatch):
@@ -295,7 +298,7 @@ def test_a_repository_that_cannot_be_asked_for_tags_says_so(monkeypatch):
 
     status = updates.check_tcc()
 
-    assert status.newer is False and status.reason == "no_network"
+    assert status.newer is False and status.reason == "probe_failed"
     assert status.latest == ""
 def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
     """The case the other guards let through: a submodule is detached and clean, exactly like a

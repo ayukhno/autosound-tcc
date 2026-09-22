@@ -2025,7 +2025,7 @@ bus signal is the one real act) — in all four languages, and drop the fake.
 
 ### F-075 — `test_updates.py` is red on `main` since the update-row commits after `v0.1.42`
 
-**Статус**: open 2026-09-22 · named, not fixed — found by the full run on `wave-0.1.43`
+**Статус**: done on `wave-0.1.43` 2026-09-22 · the two tests now expect `probe_failed` with git's words in `detail` — the behaviour `22643c0` chose on purpose
 
 `22643c0` ("The update row says what git said") made an unreachable remote answer
 `reason='probe_failed'` with git's own words in `detail`; two tests still expect `no_network`:
