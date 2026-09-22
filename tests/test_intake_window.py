@@ -217,3 +217,23 @@ def test_the_header_shows_the_version_with_its_state_and_the_processor_on_hover(
     window._show_version(view, profile)
     assert "tl-done" in window._version_dot.property("class")
     assert "Helix DSP Ultra S" in window._version_tip._text
+
+
+def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(tmp_path, monkeypatch):
+    """Finding 29: sixteen UNUSABLE lines took half the window and could not be closed."""
+    window, _ = _window(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify",
+                        lambda text, level="info", action=None, dismissible=False, on_dismiss=None:
+                        said.append((text, level, action, dismissible, on_dismiss)))
+    monkeypatch.setattr(main_window.process_view, "load_state", lambda *a, **k: None)
+    lines = "\n".join(f"UNUSABLE sw_{n} (sw) — No measurement titled 'sw_{n} (sw)'" for n in range(1, 17))
+    window._on_capture_check_done(lines)
+    text, level, action, dismissible, on_dismiss = said[-1]
+    assert "<br>" not in text and "16" in text and "sw_1 (sw)" in text
+    assert action is not None and dismissible
+    on_dismiss()
+    window._on_capture_check_done(lines)
+    assert len(said) == 1, "a list closed by hand does not come back until it changes"
+    window._on_capture_check_done(lines + "\nUNUSABLE sw_17 (sw) — gone")
+    assert len(said) == 2

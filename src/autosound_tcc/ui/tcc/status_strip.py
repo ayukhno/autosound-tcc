@@ -31,11 +31,14 @@ class StatusStrip(QLabel):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._expire)
         self._action: Optional[Callable[[], None]] = None
+        self._on_dismiss: Optional[Callable[[], None]] = None
         self.setOpenExternalLinks(False)
         self.linkActivated.connect(self._on_link)
 
     def notify(self, text: str, level: Level = "info",
-               action: Optional[tuple[str, Callable[[], None]]] = None) -> None:
+               action: Optional[tuple[str, Callable[[], None]]] = None,
+               dismissible: bool = False,
+               on_dismiss: Optional[Callable[[], None]] = None) -> None:
         """Show the latest fact — and, when it is an EVENT, let go of it after a while.
 
         The difference is not decoration. `info` says something HAPPENED ("opened a terminal
@@ -50,17 +53,26 @@ class StatusStrip(QLabel):
         An `action` is an OFFER -- one link at the end of the line, taken with one click. It is
         not on the clock either: an offer that expires while the Arbiter reads the form it
         follows was never made.
+
+        `dismissible` adds a ✕ -- for a warning that is true but that the Arbiter has read, which
+        otherwise stays until something replaces it (finding 29). `on_dismiss` hears the ✕.
         """
         self._timer.stop()
         self._action = action[1] if action else None
+        self._on_dismiss = on_dismiss
         if level != "warn" and action is None:
             self._timer.start(_INFO_SECONDS * 1000)
-        if action is None:
+        if action is None and not dismissible:
             self.setTextFormat(Qt.TextFormat.AutoText)
             self.setText(text)
         else:
             self.setTextFormat(Qt.TextFormat.RichText)
-            self.setText(f'{html.escape(text)} &nbsp;<a href="action">{html.escape(action[0])}</a>')
+            links = ""
+            if action is not None:
+                links += f' &nbsp;<a href="action">{html.escape(action[0])}</a>'
+            if dismissible:
+                links += ' &nbsp;<a href="close">✕</a>'
+            self.setText(html.escape(text) + links)
         self.setProperty("class", f"status-strip status-{level}" if level == "warn" else "status-strip")
         self.style().unpolish(self)
         self.style().polish(self)
@@ -69,6 +81,7 @@ class StatusStrip(QLabel):
     def clear(self) -> None:
         self._timer.stop()
         self._action = None
+        self._on_dismiss = None
         self.setText("")
         self.setVisible(False)
 
@@ -80,8 +93,8 @@ class StatusStrip(QLabel):
         """The clock ran out. Nothing else changed, so nothing else is touched."""
         self.clear()
 
-    def _on_link(self, _href: str) -> None:
-        callback = self._action
+    def _on_link(self, href: str) -> None:
+        callback = self._on_dismiss if href == "close" else self._action
         self.clear()
         if callback is not None:
             callback()

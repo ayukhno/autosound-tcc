@@ -3229,12 +3229,31 @@ class MainWindow(QMainWindow):
         actions at the car.
         """
         bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")]
-        if bad:
-            self._status_strip.notify("<br>".join(bad), level="warn")
+        # One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into
+        # the strip took half the window and nothing could close it. A list closed by hand stays
+        # closed until it CHANGES -- the same sixteen again are not news.
+        if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
+            first = bad[0][len("UNUSABLE"):].strip()
+            self._status_strip.notify(
+                i18n.t("unusableSummary").format(n=len(bad), first=first), level="warn",
+                action=(i18n.t("unusableShow"), lambda lines=tuple(bad): self._show_unusable(lines)),
+                dismissible=True,
+                on_dismiss=lambda lines=frozenset(bad): setattr(self, "_unusable_dismissed", lines),
+            )
         # The panel reads the recorded verdict, not this text.
         state = process_view.load_state()
         if state:
             self._refresh_capture_task(state)
+
+    def _show_unusable(self, lines) -> None:
+        """The whole list, in the checker's own words, where it can be read and closed."""
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.t("unusableTitle"))
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(i18n.t("unusableSummary").format(
+            n=len(lines), first=lines[0][len("UNUSABLE"):].strip()))
+        box.setDetailedText("\n".join(lines))
+        box.exec()
 
     def _record_decision(self, question: str, answer: str) -> None:
         """The Arbiter ruled on something in the dialog — put it in the journal (SCR-030).

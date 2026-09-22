@@ -77,3 +77,15 @@ def test_a_plain_message_after_an_offer_has_no_link():
     strip.notify("a <b>fact</b> & nothing else")
     assert "<a " not in strip.text()
     assert strip.timer_is_running()
+
+
+def test_a_dismissible_message_carries_a_close_link_that_clears_it():
+    _app()
+    strip = StatusStrip()
+    closed = []
+    strip.notify("16 unusable", level="warn", action=("show all", lambda: None),
+                 dismissible=True, on_dismiss=lambda: closed.append(1))
+    assert 'href="close"' in strip.text()
+    strip.linkActivated.emit("close")
+    assert not strip.isVisible()
+    assert closed == [1]
