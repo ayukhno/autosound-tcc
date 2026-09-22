@@ -1044,6 +1044,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: 1px solid {t.mix('yellow', 42)};
     }}
     QLabel[class~="meas-legend-label"] {{ color: {t.muted}; font-size: 10px; }}
+    /* What the last import or read did, above the capture panel's row (finding 31): blue. */
+    QLabel[class~="meas-status"] {{ color: {t.info}; font-size: 11px; }}
     QLabel[class~="tl"] {{ border-radius: 4px; }}
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
     QLabel[class~="tl-found"] {{ background: {t.info}; }}

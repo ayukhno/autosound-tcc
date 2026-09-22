@@ -2700,6 +2700,16 @@ class MainWindow(QMainWindow):
         # nothing turn green" should be visible without looking away from the question. Same
         # `_rew_online` state and same `TrafficLight` widget, so there is one status shown twice,
         # not two statuses that can disagree.
+        # «Готово» (finding 31): hands what was just captured to the AI. Beside the REW mark,
+        # because that is where the capture is judged; disabled until the open round has taken
+        # something, since "start on it" with nothing taken is a turn spent on nothing.
+        self._capture_ready_btn = QPushButton(i18n.t("captureReady"))
+        self._capture_ready_btn.setProperty("class", "reason-btn")
+        self._capture_ready_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._capture_ready_btn.setEnabled(False)
+        self._capture_ready_tip = attach_tip(self._capture_ready_btn, i18n.t("captureReadyTip"))
+        self._capture_ready_btn.clicked.connect(self._on_capture_ready)
+        meas_head.layout().addWidget(self._capture_ready_btn)
         self._meas_rew_lbl = QLabel("REW")
         self._meas_rew_lbl.setProperty("class", "phead-sub")
         self._meas_rew_dot = TrafficLight(self._rew_status_class())
@@ -2908,6 +2918,8 @@ class MainWindow(QMainWindow):
         self._check_intake_gate()
 
     def _refresh_process(self, *_args) -> None:
+        # The round is in the process state, so «Готово» follows every write to it (finding 31).
+        self._sync_capture_ready()
         state = process_view.load_state()
         if state is None and process_view.has_process_state():
             # The file is there but did not read as state: the skill is mid-write, or wrote
@@ -3199,6 +3211,7 @@ class MainWindow(QMainWindow):
         state = process_view.load_state()
         if state:
             self._refresh_capture_task(state)
+        self._sync_capture_ready()
         round_ = process_view.capture_round() or {}
         if not round_ or round_.get("closed"):
             return
@@ -3244,6 +3257,32 @@ class MainWindow(QMainWindow):
         state = process_view.load_state()
         if state:
             self._refresh_capture_task(state)
+
+    def _sync_capture_ready(self) -> None:
+        """«Готово» is live while the open round has taken something (finding 31)."""
+        button = getattr(self, "_capture_ready_btn", None)
+        if button is None:
+            return
+        round_ = process_view.capture_round() or {}
+        button.setEnabled(bool(round_) and not round_.get("closed") and bool(round_.get("taken")))
+
+    def _on_capture_ready(self) -> None:
+        """The Arbiter says the captures in front of him are taken: put it on the bus and, when a
+        session in this window is idle, give it the turn to start on them.
+
+        A signal rather than a message typed on his behalf: a session in a terminal reads the same
+        bus (`get_pending_signals`), and the transcript should say TCC started the turn."""
+        server = self._mcp_server
+        if server is None:
+            self._status_strip.notify(i18n.t("noSessionForSignal"), level="warn")
+            return
+        round_ = process_view.capture_round() or {}
+        titles = sorted(str(t) for t in (round_.get("taken") or {}))
+        server.bus.push(signal_bus.CAPTURE_READY, round=round_.get("id"), titles=titles)
+        listening = self._dialog.has_agent()
+        self._status_strip.notify(i18n.t("captureReadySent" if listening else "captureReadyQueued")
+                                  .format(round=round_.get("id") or "—", n=len(titles)))
+        self._nudge_for_open_signals()
 
     def _show_unusable(self, lines) -> None:
         """The whole list, in the checker's own words, where it can be read and closed."""
@@ -4830,6 +4869,8 @@ class MainWindow(QMainWindow):
         self._plan_title.setText(i18n.t("planTitle"))
         self._plan_sub.setText(i18n.t("planSub"))
         self._meas_title.setText(i18n.t("focus"))
+        self._capture_ready_btn.setText(i18n.t("captureReady"))
+        self._capture_ready_tip.set_text(i18n.t("captureReadyTip"))
         self._meas_sub.setText(i18n.t("measSub"))
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))

@@ -50,6 +50,10 @@ NOTE = "note"  # free-text aside typed into the panel
 # the model records it, the same way the ✎ chip works -- which is why every channel is now shown,
 # including the ones nobody is using. You cannot switch on what the panel refuses to draw.
 CHANNEL_TOGGLE = "channel_toggle"
+# «Готово» on the capture card (finding 31): the Arbiter says the captures in front of him are
+# taken and the model should start on them. Carries the round and what it has taken. A signal, so
+# a session in a terminal gets it through `get_pending_signals` the same way the in-app one does.
+CAPTURE_READY = "capture_ready"
 
 # Ack outcomes. Plain strings for the same reason the kinds are: they cross the JSON boundary,
 # and the value the agent writes should be the value the audit log keeps.

@@ -582,6 +582,15 @@ class MeasurementPanel(QWidget):
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
 
+        # What the last import or read did, ABOVE the picker and the buttons and in blue (finding
+        # 31, the Arbiter's order): it is the answer to what was just pressed, and two lines under
+        # the row it read as part of the list.
+        self._status_label = QLabel("")
+        self._status_label.setProperty("class", "meas-status")
+        self._status_label.setWordWrap(True)
+        self._status_label.setHidden(True)
+        layout.addWidget(self._status_label)
+
         head_row = QHBoxLayout()
         head_row.setSpacing(8)
         # Session picker (user request 2026-07-28): a dropdown, ~1/5 of the row, a gap, then the
@@ -608,6 +617,17 @@ class MeasurementPanel(QWidget):
         self._session_tip = attach_tip(self._session_combo)
         self._fit_session_combo()
         head_row.addWidget(self._session_combo)
+
+        # What was in the signal path while this round was measured: a fact about the CAPTURE, one
+        # protective set per pass. A word rather than a glyph, because there is no icon for "what
+        # was in the chain" and inventing one would be a picture nobody can read. In this row since
+        # finding 31: its own row pushed the list down for one button.
+        self._protective_btn = QPushButton(i18n.t("protBtn"))
+        self._protective_btn.setProperty("class", "reason-btn")
+        self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
+        self._protective_btn.clicked.connect(self.protectiveRequested.emit)
+        head_row.addWidget(self._protective_btn)
         self._version = QLabel("")
         self._version.setProperty("class", "meas-head")
         self._version_tip = attach_tip(self._version)
@@ -636,34 +656,7 @@ class MeasurementPanel(QWidget):
         head_row.addWidget(self._read_btn)
         layout.addLayout(head_row)
 
-        # A second row for the two buttons that carry WORDS. They were in the row above and the
-        # words came out clipped ("Protectior", "Listening" against the edge — the user's own
-        # screenshot, 2026-08-25): that row is sized for 28×28 glyphs beside a stretching banner,
-        # and a label has no width to bargain with there. They belong together anyway — both write
-        # down a fact about the pass in front of you rather than acting on it, one from the
-        # measuring chain and one from the ear.
-        facts_row = QHBoxLayout()
-        facts_row.setSpacing(8)
-
-        # What was in the signal path while this round was measured: a fact about the CAPTURE, one
-        # protective set per pass. A word rather than a glyph, because there is no icon for "what
-        # was in the chain" and inventing one would be a picture nobody can read.
-        self._protective_btn = QPushButton(i18n.t("protBtn"))
-        self._protective_btn.setProperty("class", "reason-btn")
-        self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
-        self._protective_btn.clicked.connect(self.protectiveRequested.emit)
-        facts_row.addWidget(self._protective_btn)
-
-        facts_row.addStretch(1)
-        layout.addLayout(facts_row)
         self._fit_fact_buttons()
-
-        self._status_label = QLabel("")
-        self._status_label.setProperty("class", "meas-legend-label")
-        self._status_label.setWordWrap(True)
-        self._status_label.setHidden(True)
-        layout.addWidget(self._status_label)
 
         legend = QWidget()
         self._legend = legend
@@ -683,7 +676,9 @@ class MeasurementPanel(QWidget):
         self._legend_labels: list[QLabel] = []
         for status, key in _LEGEND:
             dot = TrafficLight(status)
-            text = QLabel(i18n.t(key))
+            # One word each, so the legend fits one line; the full wording is the hover (finding 31).
+            text = QLabel(i18n.t(f"{key}Short"))
+            text.setToolTip(i18n.t(key))
             text.setProperty("class", "meas-legend-label")
             legend_layout.addWidget(dot)
             legend_layout.addWidget(text)
@@ -958,7 +953,8 @@ class MeasurementPanel(QWidget):
             self.set_no_project(i18n.t("measNoTask"))
         self._render_status()  # the last Read/Scan result, in the new language too
         for label, (_status, key) in zip(self._legend_labels, _LEGEND):
-            label.setText(i18n.t(key))
+            label.setText(i18n.t(f"{key}Short"))
+            label.setToolTip(i18n.t(key))
         self._read_tip.set_text(i18n.t("measRead"))
         self._curves_tip.set_text(i18n.t("curveBtn"))
         # Both of these are WORDS on the button, not glyphs, so the label has to move too -- the

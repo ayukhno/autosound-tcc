@@ -648,12 +648,14 @@ def test_the_legend_speaks_the_window_s_language():
         i18n.set_language("uk")
         panel.retranslate()  # MainWindow's own language switch calls exactly this
 
-        assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+        # One word on the row, the full wording on the hover (finding 31).
+        assert [w.text() for w in labels] == [i18n.t(f"{key}Short") for _s, key in _LEGEND]
+        assert [w.toolTip() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
         assert labels[0].text() != "waiting", "the legend actually changed"
     finally:
         i18n.set_language("en")
     panel.retranslate()
-    assert [w.text() for w in labels] == [i18n.t(key) for _s, key in _LEGEND]
+    assert [w.text() for w in labels] == [i18n.t(f"{key}Short") for _s, key in _LEGEND]
 
 
 def test_every_string_the_app_asks_for_exists_in_both_languages():

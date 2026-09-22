@@ -237,3 +237,28 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(tmp_path, mo
     assert len(said) == 1, "a list closed by hand does not come back until it changes"
     window._on_capture_check_done(lines + "\nUNUSABLE sw_17 (sw) — gone")
     assert len(said) == 2
+
+
+def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_path, monkeypatch):
+    """Finding 31: «Готово» hands what was just captured to the AI — disabled until the open
+    round has taken something, and a SIGNAL, so a terminal session gets it too."""
+    from types import SimpleNamespace
+
+    window, _ = _window(tmp_path, monkeypatch)
+    round_ = {"id": "cap_006", "taken": {}}
+    monkeypatch.setattr(main_window.process_view, "capture_round", lambda *a, **k: round_)
+    window._sync_capture_ready()
+    assert not window._capture_ready_btn.isEnabled()
+    round_["taken"] = {"m-L_1 (sw)": {}, "m-R_1 (sw)": {}}
+    window._sync_capture_ready()
+    assert window._capture_ready_btn.isEnabled()
+
+    pushed = []
+    bus = SimpleNamespace(push=lambda kind, **payload: pushed.append((kind, payload)))
+    window._mcp_server = SimpleNamespace(bus=bus)
+    monkeypatch.setattr(window, "_nudge_for_open_signals", lambda: pushed.append("nudged"))
+    window._on_capture_ready()
+    kind, payload = pushed[0]
+    assert kind == main_window.signal_bus.CAPTURE_READY
+    assert payload == {"round": "cap_006", "titles": ["m-L_1 (sw)", "m-R_1 (sw)"]}
+    assert pushed[-1] == "nudged"

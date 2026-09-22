@@ -2112,6 +2112,8 @@ environment — `docs/TESTING.md` says the shards should be expected to expose e
 Not diagnosed here: it is not what the session was doing, and CI shards by FILE, so the
 combination above is not one a shard produces.
 
+**Seen again 2026-09-22 (second stumble).** `pytest tests/test_intake_window.py tests/test_measurement_panel.py tests/test_i18n_languages.py tests/test_main_window.py -n 4` hung past 600 s with no output; the same command rerun passed in 12.7 s, and each file passes serially. Same class: a worker lost under `-n 4`, and xdist then waits forever instead of failing.
+
 ### F-060 — Carry `planned` on a skipped capture, once the method emits it
 
 **Статус**: done 2026-09-20 · the readers carry it; the PIN still waits for the method's tag
