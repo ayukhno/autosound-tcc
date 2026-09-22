@@ -590,3 +590,38 @@ def test_a_refusal_is_its_own_mode_with_the_reasons_and_the_package(stubbed, tmp
     assert "PACKAGE_FILE" not in result.detail
     assert result.package == "process/reviews/x-critic-package.md"
 
+
+
+def _env_seen_by_reviewer(tmp_path, monkeypatch, harness):
+    from autosound_tcc.core import critic
+
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(_argv, **kwargs):
+        seen.update(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+    critic.run("a package", project_dir=tmp_path, harness=harness, model="gemini-3.8-flash-high")
+    return seen
+
+
+def test_a_key_in_the_launching_shell_does_not_reroute_a_cli_pick_to_the_api(tmp_path, monkeypatch):
+    """Finding 32: TCC handed the reviewer its whole environment, so a GEMINI_API_KEY in the shell
+    that started TCC sent an `agy` pick down the API — where `gemini-3.8-flash-high` does not
+    exist, a 404. With the CLI picked, the matching key stays out of the child's environment."""
+    monkeypatch.setenv("GEMINI_API_KEY", "AQ." + "x" * 50)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+
+    agy = _env_seen_by_reviewer(tmp_path, monkeypatch, "agy")
+    assert "GEMINI_API_KEY" not in agy
+    assert agy.get("OPENAI_API_KEY") == "sk-x", "only the key that reroutes THIS pick"
+
+
+def test_an_api_pick_keeps_its_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "AQ." + "x" * 50)
+    assert "GEMINI_API_KEY" in _env_seen_by_reviewer(tmp_path, monkeypatch, "omp")

@@ -234,6 +234,11 @@ def write_package(markdown: str, project_dir: Optional[Path] = None) -> Path:
     return path
 
 
+#: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
+#: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
+_CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",)}
+
+
 def run(
     package: str,
     project_dir: Optional[Path] = None,
@@ -292,6 +297,14 @@ def run(
     env_overrides.update(extra_env or {})
 
     env = vendor_loader.child_env(**env_overrides)
+    # Finding 32: the reviewer tries the API BEFORE the CLI whenever its key is set, so a key in the
+    # shell that started TCC sent a CLI pick down the API — where the CLI's model name is a 404 —
+    # and the call failed two different ways on one machine without saying which. With a CLI
+    # picked, the key that would reroute it stays out of this child's environment. The person's
+    # own `critic-env` file is the reviewer's to read and is not touched.
+    dropped = [var for var in _CLI_REROUTING_KEYS.get((harness or "").lower(), ()) if env.pop(var, None)]
+    if dropped:
+        app_log.logger().info("critic: %s left out for the %s pick", ", ".join(dropped), harness)
     # Said out loud, because not saying it cost a whole round trip. `AUTOSOUND_CRITIC_BIN` is put
     # into the CHILD's environment and nowhere else, so looking at TCC's own `os.environ` shows
     # `None` on a fixed build exactly as it does on a broken one — and a session on the machine
