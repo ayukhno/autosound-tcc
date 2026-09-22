@@ -254,8 +254,11 @@ def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_
     assert window._capture_ready_btn.isEnabled()
 
     pushed = []
-    bus = SimpleNamespace(push=lambda kind, **payload: pushed.append((kind, payload)))
-    window._mcp_server = SimpleNamespace(bus=bus)
+    bus = SimpleNamespace(push=lambda kind, **payload: pushed.append((kind, payload)),
+                          pending_count=0, unacked_brief=lambda: "", is_open=lambda _id: False)
+    # Through monkeypatch, so the fake server leaves with the test: assigned directly, it stayed
+    # on a window a later test's timer then reached (found by the full run, 2026-09-22).
+    monkeypatch.setattr(window, "_mcp_server", SimpleNamespace(bus=bus))
     monkeypatch.setattr(window, "_nudge_for_open_signals", lambda: pushed.append("nudged"))
     window._on_capture_ready()
     kind, payload = pushed[0]
