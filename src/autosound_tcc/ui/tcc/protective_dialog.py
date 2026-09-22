@@ -494,10 +494,14 @@ def round_channel_codes(project_dir: Optional[Path] = None, capture_id: str = ""
     else:
         round_ = process_view.capture_round(project_dir) or {}
     titles = list(round_.get("expected") or []) + list((round_.get("taken") or {}).keys())
+    # Outputs only, as with no round (TEST-FINDINGS 22): a round's titles can name a virtual
+    # channel, and a virtual channel is not measured through a protective filter. Filtered only
+    # when the project says which channels are outputs — a fresh one keeps what the round names.
+    outputs = set(project_channel_codes(project_dir))
     codes: list[str] = []
     for title in titles:
         code = capture_import.channel_from_title(title, project_dir)
-        if code and code not in codes:
+        if code and code not in codes and (not outputs or code in outputs):
             codes.append(code)
     return codes
 

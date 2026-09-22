@@ -580,3 +580,16 @@ def test_a_named_round_offers_its_own_channels_not_the_open_rounds(tmp_path):
 
     assert round_channel_codes(project) == ["tw-L"], "the open round, as before"
     assert round_channel_codes(project, closed) == ["m-L", "m-R"], "and the named one by name"
+
+
+def test_with_a_round_open_only_output_channels_are_offered_too(tmp_path):
+    """TEST-FINDINGS 22, the other half: the round's titles named a virtual channel and the dialog
+    offered it. Filtered by the same rule — when the project says which channels are outputs."""
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.ui.tcc.protective_dialog import round_channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "VFL", "tier": "virtual_channels"}])
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("01", ["VFL_01 (sw)", "m-L_01 (sw)"])
+
+    assert round_channel_codes(project) == ["m-L"]
