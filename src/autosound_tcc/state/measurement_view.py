@@ -340,8 +340,14 @@ def build_session(
         return STATUS_STALE if codes & set(stale) else STATUS_DONE
 
     def issues_for(name: str) -> Optional[str]:
-        """Why a capture is unusable, in the checker's own words — the panel shows it on hover."""
-        issues = (verdicts.get(name) or {}).get("issues") or []
+        """Why a capture is unusable, in the checker's own words — the panel shows it on hover.
+
+        Nothing for a capture the check does not apply to (an RTA): "this check does not apply"
+        trailed every RTA row, cut off, and said nothing anyone needed (finding 30)."""
+        verdict = verdicts.get(name) or {}
+        if not applicable(verdict):
+            return None
+        issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
 
     protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}
@@ -453,7 +459,10 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         # human decided not to take it outranks the arithmetic noticing it is not there.
         if name in skipped:
             return (round_.get("skipped") or {}).get(name, {}).get("reason")
-        issues = ((taken.get(name) or {}).get("verified") or {}).get("issues") or []
+        verdict = (taken.get(name) or {}).get("verified") or {}
+        if not applicable(verdict):
+            return None  # an RTA: the check has nothing to say about it (finding 30)
+        issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
 
     protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}

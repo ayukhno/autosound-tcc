@@ -1124,3 +1124,20 @@ def test_an_open_round_does_not_hide_its_series_and_a_past_round_names_its_own()
     items = [combo.itemText(i) for i in range(combo.count())]
     series = i18n.t("seriesItem").format(v="1")
     assert items == [f"{series} · cap_006 ●", "", f"{series} · cap_005", series]
+
+
+def test_a_name_that_says_its_method_is_not_given_a_second_one():
+    """Finding 30: an additional sweep shown under RTA printed `r-L_1 (sw) (rta)`."""
+    from autosound_tcc.ui.tcc.measurement_panel import with_method
+
+    assert with_method("r-L_1 (sw)", "rta") == "r-L_1 (sw)"
+    assert with_method("r-L_17 (rta) noXO", "rta") == "r-L_17 (rta) noXO"
+    assert with_method("c_1", "sw") == "c_1 (sw)"
+
+
+def test_the_protective_mark_is_readable_on_the_row():
+    """Finding 30: a 10 px glyph at the row's end was invisible; the row looked measured clean."""
+    from autosound_tcc.ui.tcc.measurement_panel import short_legs
+
+    assert short_legs("HP 100 LR24") == "HP100"
+    assert short_legs("HP 1000 LR24 · LP 3500 LR24") == "HP1k · LP3.5k"

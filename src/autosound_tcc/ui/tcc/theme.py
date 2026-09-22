@@ -1081,7 +1081,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* The protective-filter marker on a capture row: what was in the signal path while it
     was measured. Muted, small and to the right of the name — a fact about the recording,
     not a state of the capture, so it must not compete with the traffic light. */
-    QLabel[class~="mn-prot"] {{ color: {t.info}; font-size: 10px; padding: 0 2px; }}
+    /* The protective filter a curve was measured through, on its row (finding 30: a 10 px glyph
+    at the row's end was invisible, and the row looked exactly like one measured clean). */
+    QLabel[class~="mn-prot"] {{
+        color: {t.info};
+        background: {t.mix('info', 12, 'panel')};
+        border: 1px solid {t.mix('info', 40, 'panel')};
+        border-radius: 3px;
+        font-size: 11px;
+        padding: 0 4px;
+    }}
 
     /* ---- AI dialog: bubbles / composer / edit-chip ---- */
     QFrame[class~="msg"] {{

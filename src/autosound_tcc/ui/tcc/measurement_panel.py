@@ -94,6 +94,9 @@ def _method_suffix_for(group, column: int) -> str:
     return "rta"
 
 
+_METHOD_IN_NAME = re.compile(r"\((sw|rta)\)")
+
+
 def with_method(name: str, suffix: str) -> str:
     """`"c_1"` or `"c_1 (sw)"` in, `"c_1 (sw)"` out.
 
@@ -103,8 +106,28 @@ def with_method(name: str, suffix: str) -> str:
     rather than at each call site that formats one.
     """
     name = (name or "").strip()
-    tail = f"({suffix})"
-    return name if name.endswith(tail) else f"{name} {tail}"
+    # A name that already says its method keeps it, whichever method the row is shown under:
+    # an additional sweep under the RTA list printed `r-L_1 (sw) (rta)` — a wrong statement about
+    # a measurement, not only noise (finding 30) — and `r-L_17 (rta) noXO` grew a second `(rta)`.
+    if _METHOD_IN_NAME.search(name):
+        return name
+    return f"{name} ({suffix})"
+
+_LEG = re.compile(r"\b(HP|LP) (\d+(?:\.\d+)?)")
+
+
+def short_legs(phrase: str) -> str:
+    """`"HP 100 LR24 · LP 3500 LR24"` -> `"HP100 · LP3.5k"`: what fits on a capture row.
+
+    The row is ~300 px wide and the name comes first; the slopes and the full wording are on the
+    hover. A readable mark rather than a glyph (finding 30: the glyph was invisible).
+    """
+    parts = []
+    for kind, freq in _LEG.findall(phrase or ""):
+        value = float(freq)
+        parts.append(f"{kind}{value / 1000:g}k" if value >= 1000 else f"{kind}{value:g}")
+    return " · ".join(parts) or "⌁"
+
 
 #: (traffic-light status, i18n key). Keys, not words: three of the four had a Ukrainian
 #: translation sitting unused in the table while the legend showed English (2026-08-12).
@@ -418,7 +441,7 @@ class _MeasRow(QWidget):
         #: the column is ~100 px wide and the numbers go on the hover (the same lesson as the
         #: names themselves). Hidden when the round says there was no protective filter — two
         #: states, which is what the record has since 2026-09-06.
-        self._prot = QLabel("⌁")
+        self._prot = QLabel("")
         self._prot.setProperty("class", "mn-prot")
         self._prot_tip = attach_tip(self._prot)
         layout.addWidget(self._prot)
@@ -436,6 +459,7 @@ class _MeasRow(QWidget):
         self._name_label.set_parts(base, self._extra, self._additional)
         self._prot.setVisible(bool(self._protective))
         if self._protective:
+            self._prot.setText(short_legs(self._protective))
             self._prot_tip.set_text(i18n.t("measProtTip").format(legs=self._protective))
 
     @property

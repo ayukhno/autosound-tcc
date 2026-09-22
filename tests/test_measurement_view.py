@@ -690,3 +690,15 @@ def test_an_impedance_sweep_is_shown_with_whatever_series_is_on_screen(project):
     assert [item.name for item in extras] == ["w-L (imp)"]
     assert extras[0].status == mv.STATUS_FOUND, "in REW, not taken in yet"
 
+
+
+def test_an_rta_the_check_does_not_apply_to_carries_no_explanation_on_its_row():
+    """Finding 30: «this check does not apply…» trailed every RTA row, cut off."""
+    round_ = {"id": "cap_001", "version": "1", "phase": "0", "expected": ["c_1 (rta)"],
+              "taken": {"c_1 (rta)": {"verified": {"ok": False, "applicable": False,
+                                                   "issues": ["this check does not apply to an RTA"]}}},
+              "skipped": {}, "protective": {}}
+    session = measurement_view._session_for_round(round_, None)
+    item = session.groups[0].items[0]
+    assert item.extra is None
+    assert item.status == measurement_view.STATUS_DONE
