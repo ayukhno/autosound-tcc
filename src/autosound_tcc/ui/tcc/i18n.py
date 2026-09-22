@@ -62,12 +62,12 @@ T: dict[Lang, dict[str, str]] = {
         "systemParams": "System params",
         "audioAnalysis": "Car audio analysis",
         "leftNoProfile": "No DSP yet. Start a session and tell it which processor this car has — the profile is written as soon as it is named, and this panel fills in.",
-        "leftNoLedger": "No settings captured yet. The tree fills in once the first ledger snapshot is written, during tuning.",
+        "leftNoLedger": "No settings recorded yet. The tree fills in once the first configuration (v_001) is recorded, during tuning.",
         # The note explains the empty VALUES; this says the other thing the first snapshot
         # unlocks. A copied car has neither, and only the values were ever named (#43).
-        "leftNoLedgerSheet": "Until that snapshot exists there is no settings sheet to enter either — banking it is what produces one.",
-        "leftBankFirst": "Bank the first snapshot",
-        "leftBankFirstAsk": "This project has no ledger yet — it was described or copied from another car, not measured here. Read the DSP settings as they stand in the processor now and bank them as the FIRST snapshot of preset {preset}, through the gate, then show me the settings sheet.",
+        "leftNoLedgerSheet": "Until that configuration is recorded there is no settings sheet to enter either — recording it is what produces one.",
+        "leftBankFirst": "Record the first configuration",
+        "leftBankFirstAsk": "This project has no ledger yet — it was described or copied from another car, not measured here. Read the DSP settings as they stand in the processor now and bank them as the FIRST configuration (ledger version v_001) of preset {preset}, through the gate, then show me the settings sheet.",
         # A plan step says which facts it closes (method SKL-047). The chip's tooltip and the
         # mark on a fact the project has NOT answered yet.
         "planCoversTip": "What this step closes — click to open the list",
@@ -78,7 +78,7 @@ T: dict[Lang, dict[str, str]] = {
         "askSeriesFrom": "These were measured in ANOTHER project",
         "askSeriesProject": "Project",
         "askSeriesTheirN": "Its _N",
-        "askSeriesFromTip": "`_N` numbers one project's own series. Two cars both have a _49 and they mean different DSP states — so a number from elsewhere is recorded with where it came from, or refused.",
+        "askSeriesFromTip": "`_N` numbers one project's own series. Two cars can both have a _49 and they are different sets of measurements — so a number from elsewhere is recorded with where it came from, or refused.",
         # skill #48: a closed round is corrected, not written into.
         "protAmending": "Round {round} is CLOSED — this is a correction, and it is recorded as one. Say why: somebody has already read what is there.",
         "protReasonHint": "Why the record is being corrected",
@@ -257,7 +257,7 @@ answers the first five questions anybody would ask.",
         "recordTargetCurve": "the target curve",
         "recordTargetCurveWhy": "phase 0 chooses it and every later phase is measured against it, "
                                 "so nothing on disk says which curve was picked",
-        "measNoTask": "No capture task yet. It is derived from the phase, the naming glossary and the current ledger version — so it appears once the intake has settled the channel names.",
+        "measNoTask": "No capture task yet. It is derived from the phase, the naming glossary and the current configuration (v_NNN) — so it appears once the intake has settled the channel names.",
         "measSeriesUnknown": "The series is not known yet: no open round, plan step or earlier round names it. Take measurements in with ⤓ — the first round asks for its number.",
         "askSeriesTitle": "Series number",
         "askSeriesLabel": "The DSP state these were measured on (_N in the names):",
@@ -322,12 +322,7 @@ answers the first five questions anybody would ask.",
         "riBlocked": "This processor cannot be given the plan as it stands: {refused} value(s) "
                      "refused, {unbound} channel(s) unbound. Nothing is rounded to fit, and nothing "
                      "is written.",
-        "riClear": "No stated limit of this DSP refuses any of the {legs} channels. That answers for "
-                   "the HARDWARE — a PC-Tool mode (Fine EQ) can be narrower, and the switch is at "
-                   "the screen. To bring it into the project, press “Send to be banked”: the rows and "
-                   "the request land in the AI dialog’s composer, where you read them and send "
-                   "them. The gate validates them, writes the snapshot and produces the settings "
-                   "sheet you enter in PC-Tool by hand.",
+        "riClear": "No stated limit of this DSP refuses any of the {legs} channels. That answers for the HARDWARE — a PC-Tool mode (Fine EQ) can be narrower, and the switch is at the screen. To bring it into the project, press “Send to be banked”: the rows and the request land in the AI dialog’s composer, where you read them and send them. The gate validates them, records the configuration and produces the settings sheet you enter in PC-Tool by hand.",
         "riCopyRows": "Copy rows (JSON)",
         "riCopied": "The rows are on the clipboard.",
         "riFailed": "This file could not be read:",
@@ -370,10 +365,10 @@ answers the first five questions anybody would ask.",
         "riNoChannels": "This project has no channels yet — there is nothing to bind these to. Set the car up first: Menu ▸ Project ▸ New project / Copy the car.",
         "npCopy": "Copy",
         "npSeedTargetTaken": "The folder “{folder}” already has a project in it. Copying never writes over facts somebody has confirmed — pick an empty folder, or a new one.",
-        "leftRigOnly": "This is the rig as the project describes it — every channel in its tier, no values yet. The values arrive with the first ledger snapshot, during tuning.",
+        "leftRigOnly": "This is the rig as the project describes it — every channel in its tier, no values yet. The values arrive with the first configuration (v_001), during tuning.",
         "riProjectLink": "Resonalyze by DIMOSUS — github.com/DIMOSUS/Resonalyze",
         "riSendRows": "Send to be banked",
-        "riSendFirst": "Import from a Resonalyze project — {file}. Checked against this project's DSP profile: {ok} values enterable, none refused, {unknown} unverifiable. This project has no ledger yet, so bank it as the FIRST snapshot of preset {preset}, through the gate. The rows follow, keyed by channel:",
+        "riSendFirst": "Import from a Resonalyze project — {file}. Checked against this project's DSP profile: {ok} values enterable, none refused, {unknown} unverifiable. This project has no ledger yet, so bank it as the FIRST configuration (ledger version v_001) of preset {preset}, through the gate. The rows follow, keyed by channel:",
         "riSendPropose": "Import from a Resonalyze project — {file}. Checked against this project's DSP profile: {ok} values enterable, none refused, {unknown} unverifiable. Propose it as a change to preset {preset} through the gate, and show me the settings sheet. The rows follow, keyed by channel:",
         "riPair": "pair {pair} {side}",
         "riSideLeft": "left",
@@ -581,7 +576,7 @@ answers the first five questions anybody would ask.",
         "captureMethodRtaGroup": "RTA GROUP",
         "effectProcess": "record the process (plan, steps, journal)",
         "effectProfile": "write the DSP capability profile",
-        "effectLedger": "bank a ledger snapshot of the DSP settings",
+        "effectLedger": "record the DSP settings as a new configuration (v_NNN)",
         "effectProject": "write the project's own files",
         "effectContract": "check the project against the skill's contract",
         "gateMode": "Ask about",
@@ -921,15 +916,8 @@ come from a REW sweep.",
         "curveGroupKind_sides": "side",
         "curveGroupKind_combos": "combo",
         "curveGroupNoGlossary": "— no glossary in this project —",
-        "curveGroupTip": "Fill the selection with a whole group at once — the woofers, the mids, \
-sub+woofers, one side, everything. The names come from this car's glossary, and the sweeps chosen \
-are the ones at the config version beside it. Nothing is fetched that the group does not name: a \
-member REW has no sweep for is reported, not skipped. It FILLS and then lets go: take a chip off \
-afterwards and nothing re-fills, which is how you hear what one driver is doing to the joint.",
-        "curveGroupVersionTip": "Which capture series the group's sweeps are taken from — the DSP \
-config they were measured under, spelled `_N` in a REW title and named the same way in the capture \
-panel. It starts on the series the curves already on screen share, or on the newest this car has \
-for those drivers, and you can move it.",
+        "curveGroupTip": "Fill the selection with a whole group at once — the woofers, the mids, sub+woofers, one side, everything. The names come from this car's glossary, and the sweeps come from the capture series chosen beside it. Nothing is fetched that the group does not name: a member REW has no sweep for is reported, not skipped. It FILLS and then lets go: take a chip off afterwards and nothing re-fills, which is how you hear what one driver is doing to the joint.",
+        "curveGroupVersionTip": "Which capture series the group's sweeps are taken from — a set of measurements, not a DSP configuration — spelled `_N` in a REW title and named the same way in the capture panel. It starts on the series the curves already on screen share, or on the newest this car has for those drivers, and you can move it.",
         # Named, never skipped: `curve_sum` sees only what it was handed, so it cannot tell a sum
         # of the woofers from a sum of one woofer. This sentence is the only place that can.
         "curveGroupMissing": "{group} at _{version}: {names} — not in REW. What is drawn is the \
@@ -1071,8 +1059,7 @@ Choose sweeps (sw) above to read this.",
         "lsnProblems": "The method's own check reports: {problems}",
         "lsnNotTranslated": 'not translated yet — showing the English',
         "lsnVersion": 'state {version}',
-        "lsnNoVersion": 'no ledger snapshot yet — the verdict is written without one, and cannot later be attributed '
-                        'to a state',
+        "lsnNoVersion": "no configuration recorded yet — the verdict is written without one, and cannot later be attributed to a configuration",
         "lsnOwnHint": 'For a track that is not here, use “own” — say which track it was in your own words.',
     },
     "uk": {
@@ -1099,17 +1086,17 @@ Choose sweeps (sw) above to read this.",
         "systemParams": "Параметри системи",
         "audioAnalysis": "Аудіо аналіз авто",
         "leftNoProfile": "Процесор ще не відомий. Почни сесію й скажи, який DSP у цьому авто — профіль пишеться щойно його названо, і панель наповниться.",
-        "leftNoLedger": "Налаштувань ще не знято. Дерево наповниться, щойно буде записано перший знімок леджера — це вже під час тюнінгу.",
-        "leftNoLedgerSheet": "Доки того знімка нема, нема й листа налаштувань — його видає саме банкування.",
-        "leftBankFirst": "Завести перший знімок",
-        "leftBankFirstAsk": "У цьому проєкті ще нема леджера — його описали або скопіювали з іншого авто, а не зняли тут. Прочитай налаштування DSP, як вони зараз стоять у процесорі, і заведи їх ПЕРШИМ знімком пресету {preset}, через гейт, тоді покажи лист налаштувань.",
+        "leftNoLedger": "Налаштувань ще не записано. Дерево наповниться, щойно буде записано першу конфігурацію (v_001) — це вже під час тюнінгу.",
+        "leftNoLedgerSheet": "Доки цієї конфігурації не записано, нема й листа налаштувань — його видає саме запис.",
+        "leftBankFirst": "Записати першу конфігурацію",
+        "leftBankFirstAsk": "У цьому проєкті ще нема реєстру конфігурацій — його описали або скопіювали з іншого авто, а не зняли тут. Прочитай налаштування DSP, як вони зараз стоять у процесорі, і запиши їх ПЕРШОЮ конфігурацією (версія реєстру v_001) пресету {preset}, через гейт, тоді покажи лист налаштувань.",
         "planCoversTip": "Що цей крок закриває — натисни, щоб розгорнути перелік",
         "planCoversOpen": "ще відкрите",
         "curveNotInRew": "REW зараз не тримає цього заміру — відкрий файл, у якому його знято.",
         "askSeriesFrom": "Це знімали в ІНШОМУ проєкті",
         "askSeriesProject": "Проєкт",
         "askSeriesTheirN": "Його _N",
-        "askSeriesFromTip": "`_N` нумерує серії одного проєкту. У двох машин обидві можуть мати _49, і це різні стани DSP — тож чужий номер записується разом із тим, звідки він, або не приймається.",
+        "askSeriesFromTip": "`_N` нумерує серії одного проєкту. У двох машин обидві можуть мати _49, і це різні набори замірів — тож чужий номер записується разом із тим, звідки він, або не приймається.",
         "protAmending": "Раунд {round} ЗАКРИТИЙ — це виправлення, і воно так і записується. Скажи чому: те, що там є, уже хтось прочитав.",
         "protReasonHint": "Чому запис виправляється",
         "protNeedsReason": "Виправлення потребує причини — без неї його не відрізнити від іншої думки.",
@@ -1127,7 +1114,7 @@ Choose sweeps (sw) above to read this.",
         "rewOnlineTip": "REW: онлайн",
         "rewOfflineTip": "REW: недоступний на цьому порту.\nAPI є лише в БЕТА-збірках REW — у релізній версії вкладки API немає взагалі (roomeqwizard.com/beta.html).",
         "createProject": "+ Створити новий проєкт",
-        "refreshProjectTip": "Перечитати проєкт з диска (профіль, леджер)",
+        "refreshProjectTip": "Перечитати проєкт з диска (профіль, реєстр конфігурацій)",
         "selfSection": "Власні налаштування TCC",
         "selfAliasTitle": "Діють псевдоніми моделей: {n}",
         "selfAliasDetail": "",
@@ -1271,7 +1258,7 @@ Choose sweeps (sw) above to read this.",
         "recordTargetCurve": "цільова крива",
         "recordTargetCurveWhy": "фаза 0 її обирає, і всі наступні фази міряються проти неї, "
                                 "тож на диску не лишилось, яку саме криву взяли",
-        "measNoTask": "Завдання на зняття ще немає. Воно виводиться з фази, глосарія імен і поточної версії леджера — тож з'явиться, коли інтейк закріпить назви каналів.",
+        "measNoTask": "Завдання на зняття ще немає. Воно виводиться з фази, глосарія імен і поточної конфігурації (v_NNN) — тож з'явиться, коли інтейк закріпить назви каналів.",
         "measSeriesUnknown": "Серія ще не відома: її не називає ні відкритий раунд, ні крок плану, ні попередній раунд. Візьми заміри через ⤓ — перший раунд спитає номер.",
         "askSeriesTitle": "Номер серії",
         "askSeriesLabel": "Стан DSP, на якому це знято (_N у назвах):",
@@ -1333,11 +1320,7 @@ Choose sweeps (sw) above to read this.",
         "riBlocked": "Цей процесор не прийме план у такому вигляді: відмовлено значень — {refused}, "
                      "непривʼязаних каналів — {unbound}. Нічого не округлюється під залізо і нічого не "
                      "записується.",
-        "riClear": "Жодна заявлена межа цього DSP не відмовляє жодному з {legs} каналів. Це відповідь "
-                   "про ЗАЛІЗО — режим PC-Tool (Fine EQ) може бути вужчим, і перемикається він на "
-                   "екрані. Щоб занести це в проєкт — «Відправити на запис»: рядки разом із проханням "
-                   "лягають у поле діалогу з ШІ, ви їх читаєте й надсилаєте. Гейт перевірить їх, "
-                   "запише знімок і випише лист налаштувань, який ви вводите в PC-Tool руками.",
+        "riClear": "Жодна заявлена межа цього DSP не відмовляє жодному з {legs} каналів. Це відповідь про ЗАЛІЗО — режим PC-Tool (Fine EQ) може бути вужчим, і перемикається він на екрані. Щоб занести це в проєкт — «Відправити на запис»: рядки разом із проханням лягають у поле діалогу з ШІ, ви їх читаєте й надсилаєте. Гейт перевірить їх, запише конфігурацію і випише лист налаштувань, який ви вводите в PC-Tool руками.",
         "riCopyRows": "Скопіювати рядки (JSON)",
         "riCopied": "Рядки в буфері обміну.",
         "riFailed": "Цей файл не вдалося прочитати:",
@@ -1380,10 +1363,10 @@ Choose sweeps (sw) above to read this.",
         "riNoChannels": "У цьому проєкті ще нема каналів — прив’язувати нема до чого. Спершу заведіть авто: Меню ▸ Проєкт ▸ Новий проєкт / Скопіювати авто.",
         "npCopy": "Скопіювати",
         "npSeedTargetTaken": "У теці «{folder}» вже є проєкт. Копіювання не пише поверх фактів, які хтось підтвердив, — виберіть порожню або нову теку.",
-        "leftRigOnly": "Тут показано склад системи, як його описує проєкт — усі канали у своїх ярусах, поки без значень. Значення прийдуть із першим знімком леджера, вже під час тюнінгу.",
+        "leftRigOnly": "Тут показано склад системи, як його описує проєкт — усі канали у своїх ярусах, поки без значень. Значення прийдуть із першою конфігурацією (v_001), вже під час тюнінгу.",
         "riProjectLink": "Resonalyze від DIMOSUS — github.com/DIMOSUS/Resonalyze",
         "riSendRows": "Відправити на запис",
-        "riSendFirst": "Імпорт з проєкту Resonalyze — {file}. Звірено з профілем DSP цього проєкту: {ok} значень заходять, жодного відмовленого, {unknown} не перевірених. Леджера в проєкті ще нема, тож заведи це ПЕРШИМ знімком пресету {preset}, через гейт. Нижче рядки, по каналах:",
+        "riSendFirst": "Імпорт з проєкту Resonalyze — {file}. Звірено з профілем DSP цього проєкту: {ok} значень заходять, жодного відмовленого, {unknown} не перевірених. Реєстру конфігурацій у проєкті ще нема, тож запиши це ПЕРШОЮ конфігурацією (версія реєстру v_001) пресету {preset}, через гейт. Нижче рядки, по каналах:",
         "riSendPropose": "Імпорт з проєкту Resonalyze — {file}. Звірено з профілем DSP цього проєкту: {ok} значень заходять, жодного відмовленого, {unknown} не перевірених. Запропонуй це як зміну пресету {preset} через гейт і покажи лист налаштувань. Нижче рядки, по каналах:",
         "riPair": "пара {pair}, {side}",
         "riSideLeft": "ліва",
@@ -1529,17 +1512,13 @@ Choose sweeps (sw) above to read this.",
         "signalNudgePrompt": "Арбітр скористався інтерфейсом. Спершу опрацюй сигнали, перелічені вище, підтверди кожен через ack_signals, і коротко скажи, що зробив.",
         "chanToggleWaiting": "запит · {secs}с",
         "chanToggleLate": "⚠ без відповіді · {secs}с",
-        "chanToggleWaitTip": "TCC попросив модель це записати; леджер пише скіл, не TCC. Рядок зміниться, коли модель відповість. Повторний клік лише оновлює очікування, другого запиту не надсилає.",
+        "chanToggleWaitTip": "TCC попросив модель це записати; реєстр конфігурацій пише скіл, не TCC. Рядок зміниться, коли модель відповість. Повторний клік лише оновлює очікування, другого запиту не надсилає.",
         "chanToggleAlreadyAsked": "{channel} — уже запитано, чекаю на модель. Вдруге не надсилав.",
-        "chanToggleTip": "Попросити модель увімкнути або вимкнути канал. TCC не пише леджер — "
-                         "запит іде в сесію, і зміну записує вона.",
-        "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в "
-                          "леджер; дерево оновиться, щойно запис буде.",
+        "chanToggleTip": "Попросити модель увімкнути або вимкнути канал. TCC не пише реєстр конфігурацій — запит іде в сесію, і зміну записує вона.",
+        "chanToggleSent": "Попросив перемкнути <b>{channel}</b> → {state}. Модель запише це в реєстр конфігурацій; дерево оновиться, щойно запис буде.",
         "noSessionForSignal": "Сесія не запущена — запусти, і запит до неї дійде.",
         "chanToggleConfirmTitle": "Перемкнути канал?",
-        "chanToggleConfirmOff": "Вимкнути <b>{channel}</b>?\n\nЙого EQ, кросовер і затримка "
-                                "живуть у леджері й можуть не пережити вимкнення. TCC це не "
-                                "відкотить — зміну записує модель.",
+        "chanToggleConfirmOff": "Вимкнути <b>{channel}</b>?\n\nЙого EQ, кросовер і затримка живуть у реєстрі конфігурацій й можуть не пережити вимкнення. TCC це не відкотить — зміну записує модель.",
         "chanToggleConfirmOn": "Увімкнути <b>{channel}</b>?\n\nЦе структурна зміна: каналу "
                                "потрібне місце в глосарії, а фізичному виходу — віртуальний "
                                "відповідник. Модель це розрахує й запише.",
@@ -1585,7 +1564,7 @@ Choose sweeps (sw) above to read this.",
         "captureMethodRtaGroup": "RTA GROUP",
         "effectProcess": "записати процес (план, кроки, журнал)",
         "effectProfile": "записати профіль можливостей DSP",
-        "effectLedger": "забанкувати знімок налаштувань DSP у леджер",
+        "effectLedger": "записати налаштування DSP як нову конфігурацію (v_NNN)",
         "effectProject": "записати власні файли проєкту",
         "effectContract": "перевірити проєкт за контрактом скіла",
         "gateMode": "Питати про",
@@ -1695,7 +1674,7 @@ Choose sweeps (sw) above to read this.",
         "questionCancelled": "Питання знято — хід може йти далі.",
         "questionWithdrawn": "Агент забрав це питання назад.",
         "questionWaiting": "Чекає на твою відповідь",
-        "questionFreeText": "Впиши відповідь нижче — тут немає варіантів на вибір.",
+        "questionFreeText": "Впиши відповідь нижче — тут немає готових відповідей на вибір.",
         "questionRole": "ПИТАННЯ",
         "composerAnswer": "Відповідай або впиши своє…",
         "composerQueue": "Написати Генератору… (піде, коли хід завершиться)",
@@ -1866,15 +1845,8 @@ Choose sweeps (sw) above to read this.",
         "curveGroupKind_sides": "сторона",
         "curveGroupKind_combos": "набір",
         "curveGroupNoGlossary": "— у цьому проєкті нема глосарію —",
-        "curveGroupTip": "Заповнити вибір цілою групою — мідбаси, середні, саб+мідбаси, одну \
-сторону, все. Назви беруться з глосарію цієї машини, а свіпи — ті, що на версії конфігурації \
-поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не \
-мовчки пропускається. Група ЗАПОВНЮЄ і відпускає: прибереш потім один чіп — нічого не \
-підставляється назад, і саме так чути, що цей драйвер робить зі стиком.",
-        "curveGroupVersionTip": "З якої серії замірів беруться свіпи групи — це конфігурація ДСП, \
-під якою їх зняли; у назві заміру в REW вона стоїть як `_N`, і так само зветься в панелі замірів. \
-Починає з серії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — і \
-її можна змінити.",
+        "curveGroupTip": "Заповнити вибір цілою групою — мідбаси, середні, саб+мідбаси, одну сторону, все. Назви беруться з глосарію цієї машини, а свіпи — з серії замірів, вибраної поруч. Нічого зайвого не тягнеться: учасник, для якого в REW нема свіпу, називається, а не мовчки пропускається. Група ЗАПОВНЮЄ і відпускає: прибереш потім один чіп — нічого не підставляється назад, і саме так чути, що цей драйвер робить зі стиком.",
+        "curveGroupVersionTip": "З якої серії замірів беруться свіпи групи — це набір замірів, а не конфігурація ДСП; у назві заміру в REW серія стоїть як `_N`, і так само зветься в панелі замірів. Починає з серії, яку поділяють криві вже на екрані, або з найновішої, що є для цих драйверів — і її можна змінити.",
         "curveGroupMissing": "{group} на _{version}: {names} — цього нема в REW. Намальовано суму \
 іншого набору.",
         "curveGroupEmpty": "{group} на _{version}: у REW нема жодного свіпу учасників, тож нічого \
@@ -2009,7 +1981,7 @@ Choose sweeps (sw) above to read this.",
         "lsnProblems": 'Власна перевірка методу каже: {problems}',
         "lsnNotTranslated": 'ще не перекладено — показано англійською',
         "lsnVersion": 'стан {version}',
-        "lsnNoVersion": 'знімка леджера ще нема — вердикт запишеться без нього, і його потім не привʼязати до стану',
+        "lsnNoVersion": "конфігурації ще не записано — вердикт запишеться без неї, і його потім не привʼязати до конфігурації",
         "lsnOwnHint": 'Для треку, якого тут нема, візьми «own» — а який саме це був трек, скажи своїми словами.',
     },
     "pl": {
@@ -2038,22 +2010,17 @@ Choose sweeps (sw) above to read this.",
         "audioAnalysis": 'Analiza car audio',
         "leftNoProfile": 'Procesor jeszcze nieznany. Rozpocznij sesję i powiedz, jaki DSP jest w tym aucie — profil '
                          'zapisuje się, gdy tylko go nazwiesz, a panel się wypełni.',
-        "leftNoLedger": 'Nie zdjęto jeszcze żadnych ustawień. Drzewo wypełni się, gdy powstanie pierwszy zrzut '
-                        'ledgera — już podczas strojenia.',
-        "leftNoLedgerSheet": 'Dopóki tego zrzutu nie ma, nie ma też arkusza ustawień — powstaje on dopiero przy '
-                             'zapisie przez bramkę.',
-        "leftBankFirst": 'Załóż pierwszy zrzut',
-        "leftBankFirstAsk": 'Ten projekt nie ma jeszcze ledgera — został opisany albo skopiowany z innego auta, a nie '
-                            'zmierzony tutaj. Odczytaj ustawienia DSP w takiej postaci, w jakiej są teraz w procesorze, '
-                            'i zapisz je jako PIERWSZY zrzut presetu {preset}, przez bramkę, a potem pokaż mi arkusz '
-                            'ustawień.',
+        "leftNoLedger": "Nie zapisano jeszcze żadnych ustawień. Drzewo wypełni się, gdy zostanie zapisana pierwsza konfiguracja (v_001) — już podczas strojenia.",
+        "leftNoLedgerSheet": "Dopóki ta konfiguracja nie jest zapisana, nie ma też arkusza ustawień — powstaje on dopiero przy zapisie przez bramkę.",
+        "leftBankFirst": "Zapisz pierwszą konfigurację",
+        "leftBankFirstAsk": "Ten projekt nie ma jeszcze rejestru konfiguracji — został opisany albo skopiowany z innego auta, a nie zmierzony tutaj. Odczytaj ustawienia DSP w takiej postaci, w jakiej są teraz w procesorze, i zapisz je jako PIERWSZĄ konfigurację (wersja rejestru v_001) presetu {preset}, przez bramkę, a potem pokaż mi arkusz ustawień.",
         "planCoversTip": 'Co zamyka ten krok — kliknij, aby rozwinąć listę',
         "planCoversOpen": 'wciąż otwarte',
         "curveNotInRew": 'REW nie ma teraz tego pomiaru — otwórz plik, w którym go zdjęto.',
         "askSeriesFrom": 'To mierzono w INNYM projekcie',
         "askSeriesProject": 'Projekt',
         "askSeriesTheirN": 'Jego _N',
-        "askSeriesFromTip": '`_N` numeruje serie jednego projektu. Dwa auta mogą mieć po _49 i oznaczają różne stany DSP — więc obcy numer zapisuje się razem z tym, skąd pochodzi, albo nie jest przyjmowany.',
+        "askSeriesFromTip": "`_N` numeruje serie jednego projektu. Dwa auta mogą mieć po _49 i to są różne zestawy pomiarów — więc obcy numer zapisuje się razem z tym, skąd pochodzi, albo nie jest przyjmowany.",
         "protAmending": 'Runda {round} jest ZAMKNIĘTA — to poprawka i tak zostanie zapisana. Powiedz dlaczego: to, co tam jest, ktoś już przeczytał.',
         "protReasonHint": 'Dlaczego zapis jest poprawiany',
         "protNeedsReason": 'Poprawka wymaga powodu — bez niego nie odróżnisz jej od drugiej opinii.',
@@ -2074,7 +2041,7 @@ Choose sweeps (sw) above to read this.",
         "rewOfflineTip": 'REW: nieosiągalny na tym porcie.\nAPI jest tylko w wersjach BETA REW — wydanie stabilne nie '
                          'ma zakładki API w ogóle (roomeqwizard.com/beta.html).',
         "createProject": '+ Utwórz nowy projekt',
-        "refreshProjectTip": 'Wczytaj projekt z dysku ponownie (profil, ledger)',
+        "refreshProjectTip": "Wczytaj projekt z dysku ponownie (profil, rejestr konfiguracji)",
         "selfSection": 'Ustawienia samego TCC',
         "selfAliasTitle": 'Działające aliasy modeli: {n}',
         "selfAliasDetail": '',
@@ -2236,8 +2203,7 @@ Choose sweeps (sw) above to read this.",
         "recordTargetCurve": 'krzywa docelowa',
         "recordTargetCurveWhy": 'faza 0 ją wybiera, a każda kolejna faza jest do niej mierzona — a na dysku nie zostało, '
                                 'którą krzywą wzięto',
-        "measNoTask": 'Zadania zdjęcia jeszcze nie ma. Wynika ono z fazy, słownika nazw i bieżącej wersji ledgera — '
-                      'więc pojawi się, gdy intake ustali nazwy kanałów.',
+        "measNoTask": "Zadania zdjęcia jeszcze nie ma. Wynika ono z fazy, słownika nazw i bieżącej konfiguracji (v_NNN) — więc pojawi się, gdy intake ustali nazwy kanałów.",
         "measSeriesUnknown": 'Seria nie jest jeszcze znana: nie podaje jej ani otwarta runda, ani krok planu, ani wcześniejsza runda. Pobierz pomiary przez ⤓ — pierwsza runda zapyta o numer.',
         "askSeriesTitle": 'Numer serii',
         "askSeriesLabel": 'Stan DSP, na którym to zmierzono (_N w nazwach):',
@@ -2299,11 +2265,7 @@ Choose sweeps (sw) above to read this.",
         "riBlocked": 'Ten procesor nie przyjmie planu w tej postaci: odmówiono wartości — {refused}, '
                      'niepowiązanych kanałów — {unbound}. Nic nie jest zaokrąglane pod sprzęt i nic nie jest '
                      'zapisywane.',
-        "riClear": 'Żadna podana granica tego DSP nie odmawia żadnemu z {legs} kanałów. To odpowiedź o SPRZĘCIE '
-                   '— tryb PC-Tool (Fine EQ) może być węższy, a przełącza się go na ekranie. Żeby wnieść to do '
-                   'projektu, naciśnij „Wyślij do zapisu”: wiersze wraz z prośbą trafią do pola dialogu z AI, '
-                   'gdzie je przeczytasz i wyślesz. Bramka je sprawdzi, zapisze zrzut i wypisze arkusz ustawień, '
-                   'który wprowadzasz w PC-Tool ręcznie.',
+        "riClear": "Żadna podana granica tego DSP nie odmawia żadnemu z {legs} kanałów. To odpowiedź o SPRZĘCIE — tryb PC-Tool (Fine EQ) może być węższy, a przełącza się go na ekranie. Żeby wnieść to do projektu, naciśnij „Wyślij do zapisu”: wiersze wraz z prośbą trafią do pola dialogu z AI, gdzie je przeczytasz i wyślesz. Bramka je sprawdzi, zapisze konfigurację i wypisze arkusz ustawień, który wprowadzasz w PC-Tool ręcznie.",
         "riCopyRows": 'Kopiuj wiersze (JSON)',
         "riCopied": 'Wiersze są w schowku.',
         "riFailed": 'Nie udało się odczytać tego pliku:',
@@ -2359,14 +2321,10 @@ Choose sweeps (sw) above to read this.",
         "npCopy": 'Skopiuj',
         "npSeedTargetTaken": 'W folderze „{folder}” jest już projekt. Kopiowanie nigdy nie nadpisuje faktów, które ktoś '
                              'potwierdził — wybierz pusty albo nowy folder.',
-        "leftRigOnly": 'To jest układ tak, jak opisuje go projekt — każdy kanał w swoim poziomie, na razie bez '
-                       'wartości. Wartości przyjdą z pierwszym zrzutem ledgera, podczas strojenia.',
+        "leftRigOnly": "To jest układ tak, jak opisuje go projekt — każdy kanał w swoim poziomie, na razie bez wartości. Wartości przyjdą z pierwszą konfiguracją (v_001), podczas strojenia.",
         "riProjectLink": 'Resonalyze autorstwa DIMOSUS — github.com/DIMOSUS/Resonalyze',
         "riSendRows": 'Wyślij do zapisu',
-        "riSendFirst": 'Import z projektu Resonalyze — {file}. Zweryfikowano z profilem DSP tego projektu: {ok} '
-                       'wartości wchodzi, żadnej odmowy, {unknown} niesprawdzonych. Projekt nie ma jeszcze ledgera, '
-                       'więc zapisz to jako PIERWSZY zrzut presetu {preset}, przez bramkę. Niżej wiersze, po '
-                       'kanałach:',
+        "riSendFirst": "Import z projektu Resonalyze — {file}. Zweryfikowano z profilem DSP tego projektu: {ok} wartości wchodzi, żadnej odmowy, {unknown} niesprawdzonych. Projekt nie ma jeszcze rejestru konfiguracji, więc zapisz to jako PIERWSZĄ konfigurację (wersja rejestru v_001) presetu {preset}, przez bramkę. Niżej wiersze, po kanałach:",
         "riSendPropose": 'Import z projektu Resonalyze — {file}. Zweryfikowano z profilem DSP tego projektu: {ok} '
                          'wartości wchodzi, żadnej odmowy, {unknown} niesprawdzonych. Zaproponuj to jako zmianę '
                          'presetu {preset} przez bramkę i pokaż arkusz ustawień. Niżej wiersze, po kanałach:',
@@ -2533,17 +2491,13 @@ Choose sweeps (sw) above to read this.",
                              'przez ack_signals, a potem krótko powiedz, co zrobiłeś.',
         "chanToggleWaiting": 'poproszono · {secs}s',
         "chanToggleLate": '⚠ brak odpowiedzi · {secs}s',
-        "chanToggleWaitTip": 'TCC poprosił model, żeby to zapisał; ledger pisze skill, nie TCC. Wiersz zmieni się, gdy '
-                             'model odpowie. Ponowne kliknięcie tylko odświeża oczekiwanie, drugiej prośby nie wysyła.',
+        "chanToggleWaitTip": "TCC poprosił model, żeby to zapisał; rejestr konfiguracji pisze skill, nie TCC. Wiersz zmieni się, gdy model odpowie. Ponowne kliknięcie tylko odświeża oczekiwanie, drugiej prośby nie wysyła.",
         "chanToggleAlreadyAsked": '{channel} — już poproszono, czekam na model. Drugi raz nie wysłano.',
-        "chanToggleTip": 'Poproś model, żeby włączył albo wyłączył ten kanał. TCC nie pisze ledgera — prośba idzie do '
-                         'sesji, a ona zapisuje zmianę.',
-        "chanToggleSent": 'Poproszono o przełączenie <b>{channel}</b> → {state}. Model zapisze to w ledgerze; drzewo '
-                          'nadąży, gdy zapis powstanie.',
+        "chanToggleTip": "Poproś model, żeby włączył albo wyłączył ten kanał. TCC nie pisze rejestru konfiguracji — prośba idzie do sesji, a ona zapisuje zmianę.",
+        "chanToggleSent": "Poproszono o przełączenie <b>{channel}</b> → {state}. Model zapisze to w rejestrze konfiguracji; drzewo nadąży, gdy zapis powstanie.",
         "noSessionForSignal": 'Sesja nie działa — uruchom ją, a prośba do niej dotrze.',
         "chanToggleConfirmTitle": 'Przełączyć ten kanał?',
-        "chanToggleConfirmOff": 'Wyłączyć <b>{channel}</b>?\n\nJego EQ, crossover i opóźnienie żyją w ledgerze i mogą nie '
-                                'przeżyć wyłączenia. TCC tego nie cofnie — zmianę zapisuje model.',
+        "chanToggleConfirmOff": "Wyłączyć <b>{channel}</b>?\n\nJego EQ, crossover i opóźnienie żyją w rejestrze konfiguracji i mogą nie przeżyć wyłączenia. TCC tego nie cofnie — zmianę zapisuje model.",
         "chanToggleConfirmOn": 'Włączyć <b>{channel}</b>?\n\nTo zmiana strukturalna: kanał potrzebuje miejsca w słowniku, a '
                                'fizyczne wyjście — swojego wirtualnego odpowiednika. Model to wyliczy i zapisze.',
         "pillMute": 'MUTE',
@@ -2587,7 +2541,7 @@ Choose sweeps (sw) above to read this.",
         "captureMethodRtaGroup": 'RTA GROUP',
         "effectProcess": 'zapisać proces (plan, kroki, dziennik)',
         "effectProfile": 'zapisać profil możliwości DSP',
-        "effectLedger": 'zapisać zrzut ustawień DSP do ledgera',
+        "effectLedger": "zapisać ustawienia DSP jako nową konfigurację (v_NNN)",
         "effectProject": 'zapisać własne pliki projektu',
         "effectContract": 'sprawdzić projekt według kontraktu skilla',
         "gateMode": 'Pytać o',
@@ -2889,15 +2843,8 @@ Choose sweeps (sw) above to read this.",
         "curveGroupKind_sides": 'strona',
         "curveGroupKind_combos": 'zestaw',
         "curveGroupNoGlossary": '— w tym projekcie nie ma słownika —',
-        "curveGroupTip": 'Wypełnij wybór całą grupą naraz — mid-basy, średnie, sub+mid-basy, jedną stronę, wszystko. '
-                         'Nazwy pochodzą ze słownika tego auta, a sweepy — te z wersji konfiguracji obok. Nic zbędnego '
-                         'się nie dociąga: uczestnik, dla którego REW nie ma sweepa, zostaje wymieniony, a nie po '
-                         'cichu pominięty. Grupa WYPEŁNIA i puszcza: zdejmiesz potem jeden chip i nic się nie '
-                         'podstawia z powrotem — i właśnie tak słychać, co ten jeden głośnik robi ze stykiem.',
-        "curveGroupVersionTip": 'Z której serii pomiarów bierze się sweepy grupy — to konfiguracja DSP, pod którą je zdjęto; '
-                                'w nazwie pomiaru w REW stoi jako `_N` i tak samo nazywa się w panelu pomiarów. Zaczyna od '
-                                'serii wspólnej dla krzywych już na ekranie albo od najnowszej, jaką to auto ma dla tych '
-                                'głośników, i można ją zmienić.',
+        "curveGroupTip": "Wypełnij wybór całą grupą naraz — mid-basy, średnie, sub+mid-basy, jedną stronę, wszystko. Nazwy pochodzą ze słownika tego auta, a sweepy — z serii pomiarów wybranej obok. Nic zbędnego się nie dociąga: uczestnik, dla którego REW nie ma sweepa, zostaje wymieniony, a nie po cichu pominięty. Grupa WYPEŁNIA i puszcza: zdejmiesz potem jeden chip i nic się nie podstawia z powrotem — i właśnie tak słychać, co ten jeden głośnik robi ze stykiem.",
+        "curveGroupVersionTip": "Z której serii pomiarów bierze się sweepy grupy — to zestaw pomiarów, a nie konfiguracja DSP; w nazwie pomiaru w REW seria stoi jako `_N` i tak samo nazywa się w panelu pomiarów. Zaczyna od serii wspólnej dla krzywych już na ekranie albo od najnowszej, jaką to auto ma dla tych głośników, i można ją zmienić.",
         "curveGroupMissing": '{group} na _{version}: {names} — tego nie ma w REW. Narysowano sumę innego zestawu.',
         "curveGroupEmpty": '{group} na _{version}: w REW nie ma sweepa żadnego uczestnika, więc nic nie zmieniono.',
         "curveChooseBtn": 'Wybierz… ({n})',
@@ -3036,8 +2983,7 @@ Choose sweeps (sw) above to read this.",
         "lsnProblems": 'Własna kontrola metody mówi: {problems}',
         "lsnNotTranslated": 'jeszcze nieprzetłumaczone — pokazano po angielsku',
         "lsnVersion": 'stan {version}',
-        "lsnNoVersion": 'nie ma jeszcze zrzutu ledgera — werdykt zapisze się bez niego i nie da się go potem '
-                        'przypisać do stanu',
+        "lsnNoVersion": "nie zapisano jeszcze konfiguracji — werdykt zapisze się bez niej i nie da się go potem przypisać do konfiguracji",
         "lsnOwnHint": 'Dla utworu, którego tu nie ma, weź „own” — a który to był utwór, powiedz własnymi słowami.',
     },
     "de": {
@@ -3066,22 +3012,17 @@ Choose sweeps (sw) above to read this.",
         "audioAnalysis": 'Car-Audio-Analyse',
         "leftNoProfile": 'Noch kein DSP bekannt. Starte eine Sitzung und nenne den Prozessor dieses Autos — das Profil '
                          'wird geschrieben, sobald er benannt ist, und dieses Panel füllt sich.',
-        "leftNoLedger": 'Noch keine Einstellungen erfasst. Der Baum füllt sich, sobald der erste Ledger-Schnappschuss '
-                        'geschrieben wird, während des Einmessens.',
-        "leftNoLedgerSheet": 'Solange dieser Schnappschuss fehlt, gibt es auch kein Einstellungsblatt — erst das '
-                             'Eintragen durchs Gate erzeugt eines.',
-        "leftBankFirst": 'Ersten Schnappschuss eintragen',
-        "leftBankFirstAsk": 'Dieses Projekt hat noch kein Ledger — es wurde beschrieben oder von einem anderen Auto '
-                            'kopiert, nicht hier gemessen. Lies die DSP-Einstellungen so aus, wie sie jetzt im Prozessor '
-                            'stehen, und trage sie als ERSTEN Schnappschuss des Presets {preset} durchs Gate ein; zeig '
-                            'mir dann das Einstellungsblatt.',
+        "leftNoLedger": "Noch keine Einstellungen eingetragen. Der Baum füllt sich, sobald die erste Konfiguration (v_001) eingetragen ist, während des Einmessens.",
+        "leftNoLedgerSheet": "Solange diese Konfiguration nicht eingetragen ist, gibt es auch kein Einstellungsblatt — erst das Eintragen durchs Gate erzeugt eines.",
+        "leftBankFirst": "Erste Konfiguration eintragen",
+        "leftBankFirstAsk": "Dieses Projekt hat noch kein Konfigurationsregister — es wurde beschrieben oder von einem anderen Auto kopiert, nicht hier gemessen. Lies die DSP-Einstellungen so aus, wie sie jetzt im Prozessor stehen, und trage sie als ERSTE Konfiguration (Registerversion v_001) des Presets {preset} durchs Gate ein; zeig mir dann das Einstellungsblatt.",
         "planCoversTip": 'Was dieser Schritt schließt — zum Aufklappen klicken',
         "planCoversOpen": 'noch offen',
         "curveNotInRew": 'REW hält diese Messung gerade nicht — öffne die Datei, in der sie aufgenommen wurde.',
         "askSeriesFrom": 'Das wurde in einem ANDEREN Projekt gemessen',
         "askSeriesProject": 'Projekt',
         "askSeriesTheirN": 'Dessen _N',
-        "askSeriesFromTip": '`_N` nummeriert die Serien EINES Projekts. Zwei Autos haben beide ein _49 und meinen verschiedene DSP-Zustände — eine fremde Nummer wird also mit ihrer Herkunft eingetragen oder abgelehnt.',
+        "askSeriesFromTip": "`_N` nummeriert die Serien EINES Projekts. Zwei Autos können beide ein _49 haben, und das sind verschiedene Messreihen — eine fremde Nummer wird also mit ihrer Herkunft eingetragen oder abgelehnt.",
         "protAmending": 'Runde {round} ist GESCHLOSSEN — das ist eine Korrektur und wird als solche festgehalten. Sag warum: was dort steht, hat schon jemand gelesen.',
         "protReasonHint": 'Warum der Eintrag korrigiert wird',
         "protNeedsReason": 'Eine Korrektur braucht einen Grund — ohne ihn ist sie von einer zweiten Meinung nicht zu unterscheiden.',
@@ -3102,7 +3043,7 @@ Choose sweeps (sw) above to read this.",
         "rewOfflineTip": 'REW: auf diesem Port nicht erreichbar.\nDie API gibt es nur in den BETA-Builds von REW — die '
                          'Release-Version hat gar keinen API-Reiter (roomeqwizard.com/beta.html).',
         "createProject": '+ Neues Projekt anlegen',
-        "refreshProjectTip": 'Projekt neu von der Platte lesen (Profil, Ledger)',
+        "refreshProjectTip": "Projekt neu von der Platte lesen (Profil, Konfigurationsregister)",
         "selfSection": 'TCCs eigene Einstellungen',
         "selfAliasTitle": '{n} Modell-Alias(e) aktiv',
         "selfAliasDetail": '',
@@ -3267,8 +3208,7 @@ Choose sweeps (sw) above to read this.",
         "recordTargetCurve": 'die Zielkurve',
         "recordTargetCurveWhy": 'Phase 0 wählt sie, und jede spätere Phase wird gegen sie gemessen, aber auf der Platte steht '
                                 'nirgends, welche Kurve genommen wurde',
-        "measNoTask": 'Noch keine Messaufgabe. Sie ergibt sich aus der Phase, dem Namensglossar und der aktuellen '
-                      'Ledger-Version — sie erscheint also, sobald der Intake die Kanalnamen festgelegt hat.',
+        "measNoTask": "Noch keine Messaufgabe. Sie ergibt sich aus der Phase, dem Namensglossar und der aktuellen Konfiguration (v_NNN) — sie erscheint also, sobald der Intake die Kanalnamen festgelegt hat.",
         "measSeriesUnknown": 'Die Serie ist noch nicht bekannt: weder eine offene Runde noch ein Planschritt noch eine frühere Runde nennt sie. Messungen mit ⤓ übernehmen — die erste Runde fragt nach der Nummer.',
         "askSeriesTitle": 'Seriennummer',
         "askSeriesLabel": 'Der DSP-Zustand, auf dem gemessen wurde (_N in den Namen):',
@@ -3329,12 +3269,7 @@ Choose sweeps (sw) above to read this.",
         "riBindNone": '— nicht zuordnen —',
         "riBlocked": 'Dieser Prozessor kann den Plan so nicht bekommen: {refused} Wert(e) abgelehnt, {unbound} '
                      'Kanal/Kanäle nicht zugeordnet. Es wird nichts passend gerundet und nichts geschrieben.',
-        "riClear": 'Keine angegebene Grenze dieses DSP lehnt einen der {legs} Kanäle ab. Das ist die Antwort für '
-                   'die HARDWARE — ein PC-Tool-Modus (Fine EQ) kann enger sein, und umgeschaltet wird er am '
-                   'Bildschirm. Um es ins Projekt zu holen, drücke „Zum Eintragen senden“: die Zeilen und die '
-                   'Bitte landen im Eingabefeld des KI-Dialogs, wo du sie liest und absendest. Das Gate prüft '
-                   'sie, schreibt den Schnappschuss und erzeugt das Einstellungsblatt, das du im PC-Tool von '
-                   'Hand einträgst.',
+        "riClear": "Keine angegebene Grenze dieses DSP lehnt einen der {legs} Kanäle ab. Das ist die Antwort für die HARDWARE — ein PC-Tool-Modus (Fine EQ) kann enger sein, und umgeschaltet wird er am Bildschirm. Um es ins Projekt zu holen, drücke „Zum Eintragen senden“: die Zeilen und die Bitte landen im Eingabefeld des KI-Dialogs, wo du sie liest und absendest. Das Gate prüft sie, trägt die Konfiguration ein und erzeugt das Einstellungsblatt, das du im PC-Tool von Hand einträgst.",
         "riCopyRows": 'Zeilen kopieren (JSON)',
         "riCopied": 'Die Zeilen liegen in der Zwischenablage.',
         "riFailed": 'Diese Datei konnte nicht gelesen werden:',
@@ -3392,14 +3327,10 @@ Choose sweeps (sw) above to read this.",
         "npCopy": 'Kopieren',
         "npSeedTargetTaken": 'Im Ordner „{folder}“ liegt bereits ein Projekt. Kopieren schreibt nie über Fakten, die '
                              'jemand bestätigt hat — wähle einen leeren oder einen neuen Ordner.',
-        "leftRigOnly": 'So beschreibt das Projekt die Anlage — jeder Kanal in seiner Ebene, noch ohne Werte. Die '
-                       'Werte kommen mit dem ersten Ledger-Schnappschuss, während des Einmessens.',
+        "leftRigOnly": "So beschreibt das Projekt die Anlage — jeder Kanal in seiner Ebene, noch ohne Werte. Die Werte kommen mit der ersten Konfiguration (v_001), während des Einmessens.",
         "riProjectLink": 'Resonalyze von DIMOSUS — github.com/DIMOSUS/Resonalyze',
         "riSendRows": 'Zum Eintragen senden',
-        "riSendFirst": 'Import aus einem Resonalyze-Projekt — {file}. Gegen das DSP-Profil dieses Projekts geprüft: '
-                       '{ok} Werte eintragbar, keiner abgelehnt, {unknown} nicht überprüfbar. Dieses Projekt hat '
-                       'noch kein Ledger, trage es also als ERSTEN Schnappschuss des Presets {preset} ein, durchs '
-                       'Gate. Es folgen die Zeilen, nach Kanal:',
+        "riSendFirst": "Import aus einem Resonalyze-Projekt — {file}. Gegen das DSP-Profil dieses Projekts geprüft: {ok} Werte eintragbar, keiner abgelehnt, {unknown} nicht überprüfbar. Dieses Projekt hat noch kein Konfigurationsregister, trage es also als ERSTE Konfiguration (Registerversion v_001) des Presets {preset} ein, durchs Gate. Es folgen die Zeilen, nach Kanal:",
         "riSendPropose": 'Import aus einem Resonalyze-Projekt — {file}. Gegen das DSP-Profil dieses Projekts geprüft: '
                          '{ok} Werte eintragbar, keiner abgelehnt, {unknown} nicht überprüfbar. Schlage es als '
                          'Änderung am Preset {preset} durchs Gate vor und zeig mir das Einstellungsblatt. Es folgen '
@@ -3576,19 +3507,13 @@ Choose sweeps (sw) above to read this.",
                              'bestätige jedes mit ack_signals und sag dann kurz, was du getan hast.',
         "chanToggleWaiting": 'gefragt · {secs}s',
         "chanToggleLate": '⚠ keine Antwort · {secs}s',
-        "chanToggleWaitTip": 'TCC hat das Modell gebeten, dies festzuhalten; das Ledger zu schreiben ist Sache des Skills. '
-                             'Die Zeile ändert sich, wenn das Modell antwortet. Erneut zu fragen, solange das steht, '
-                             'frischt nur die Wartezeit auf und sendet keine zweite Anfrage.',
+        "chanToggleWaitTip": "TCC hat das Modell gebeten, dies festzuhalten; das Konfigurationsregister zu schreiben ist Sache des Skills. Die Zeile ändert sich, wenn das Modell antwortet. Erneut zu fragen, solange das steht, frischt nur die Wartezeit auf und sendet keine zweite Anfrage.",
         "chanToggleAlreadyAsked": '{channel} — bereits gefragt, warte auf das Modell. Nicht zweimal gesendet.',
-        "chanToggleTip": 'Bitte das Modell, diesen Kanal ein- oder auszuschalten. TCC schreibt das Ledger nicht — die '
-                         'Anfrage geht an die Sitzung, die die Änderung festhält.',
-        "chanToggleSent": 'Es wurde gebeten, <b>{channel}</b> {state} zu schalten. Das Modell hält es im Ledger fest; '
-                          'der Baum folgt, sobald es geschrieben ist.',
+        "chanToggleTip": "Bitte das Modell, diesen Kanal ein- oder auszuschalten. TCC schreibt das Konfigurationsregister nicht — die Anfrage geht an die Sitzung, die die Änderung festhält.",
+        "chanToggleSent": "Es wurde gebeten, <b>{channel}</b> {state} zu schalten. Das Modell hält es im Konfigurationsregister fest; der Baum folgt, sobald es geschrieben ist.",
         "noSessionForSignal": 'Es läuft keine Sitzung — starte eine, und die Anfrage erreicht sie.',
         "chanToggleConfirmTitle": 'Diesen Kanal schalten?',
-        "chanToggleConfirmOff": '<b>{channel}</b> ausschalten?\n\nSein EQ, seine Weiche und sein Delay leben im Ledger und '
-                                'überstehen das Ausschalten womöglich nicht. TCC kann das nicht rückgängig machen — die '
-                                'Änderung hält das Modell fest.',
+        "chanToggleConfirmOff": "<b>{channel}</b> ausschalten?\n\nSein EQ, seine Weiche und sein Delay leben im Konfigurationsregister und überstehen das Ausschalten womöglich nicht. TCC kann das nicht rückgängig machen — die Änderung hält das Modell fest.",
         "chanToggleConfirmOn": '<b>{channel}</b> einschalten?\n\nDas ist eine strukturelle Änderung: der Kanal braucht seinen '
                                'Platz im Glossar, und ein physischer Ausgang braucht sein virtuelles Gegenstück. Das Modell '
                                'klärt das und hält es fest.',
@@ -3634,7 +3559,7 @@ Choose sweeps (sw) above to read this.",
         "captureMethodRtaGroup": 'RTA GROUP',
         "effectProcess": 'den Prozess festhalten (Plan, Schritte, Journal)',
         "effectProfile": 'das Fähigkeitsprofil des DSP schreiben',
-        "effectLedger": 'einen Ledger-Schnappschuss der DSP-Einstellungen eintragen',
+        "effectLedger": "die DSP-Einstellungen als neue Konfiguration (v_NNN) eintragen",
         "effectProject": 'die eigenen Dateien des Projekts schreiben',
         "effectContract": 'das Projekt gegen den Vertrag des Skills prüfen',
         "gateMode": 'Fragen bei',
@@ -3828,27 +3753,11 @@ Choose sweeps (sw) above to read this.",
         "curveSendMarkers": 'Marker',
         "curveSendDelays": 'Delays',
         "curveShift": 'Delay',
-        "curveShiftTip": 'Halte das gewählte Chassis zurück — der Schalter bestimmt, welches. Es beginnt bei dem, das '
-                         'ZUERST ankommt, die natürliche Wahl im ersten Durchgang; negativ ist erlaubt, denn in einem '
-                         'späteren Durchgang korrigierst du einen Kanal, der bereits ein Delay trägt. Was nicht unter '
-                         'null darf, ist die SUMME des Kanals, und der Ablesewert sagt das, sobald das Ledger bekannt '
-                         'ist. Die Schrittweite ist die, die dieses DSP eingeben lässt. Es wird nichts angewendet: der '
-                         'Ablesewert geht als Vorschlag hinaus.',
+        "curveShiftTip": "Halte das gewählte Chassis zurück — der Schalter bestimmt, welches. Es beginnt bei dem, das ZUERST ankommt, die natürliche Wahl im ersten Durchgang; negativ ist erlaubt, denn in einem späteren Durchgang korrigierst du einen Kanal, der bereits ein Delay trägt. Was nicht unter null darf, ist die SUMME des Kanals, und der Ablesewert sagt das, sobald das Konfigurationsregister bekannt ist. Die Schrittweite ist die, die dieses DSP eingeben lässt. Es wird nichts angewendet: der Ablesewert geht als Vorschlag hinaus.",
         "curveDelayHead": 'Delay zum Ausrichten (Vorschlag, nicht angewendet):',
         "curveApfLabel": 'Allpass:',
         "curveApfNone": '—',
-        "curveApfTip": 'Ein Allpass für das Chassis, das der Schalter gewählt hat — dasselbe, das auch das '
-                       'Delay-Feld bearbeitet. Er ändert KEINEN Pegel und dreht die Phase um f0: APF1 dreht bei f0 '
-                       'um −90° (insgesamt 0 → −180°), APF2 bei f0 um −180° (0 → −360°), und Q sagt, wie viel dieser '
-                       'Drehung dicht bei f0 passiert. Im Frequenzgang bewegt sich die Kurve nicht; in der Phase '
-                       'dreht sie sich; in beiden zeigt die vorhergesagte Summe (Σ), was das mit der Übernahme macht '
-                       '— darum geht es. Im Impuls bleibt der gezeichnete Verlauf wie aufgenommen (ein Allpass '
-                       'verschmiert einen Impuls); die Summe im Streifen trägt ihn. Es wird nichts angewendet: er '
-                       'geht als Vorschlag in den Ablesewert, in den Worten des Ledgers (APF2 250 Hz Q 0.71). Und '
-                       'ein Allpass füllt keine Auslöschung eines einzelnen Chassis — durch Phasendrehung lässt sich '
-                       'nur die Summe zweier überlappender Chassis neu abstimmen, lies ihn also an der Summe, nie an '
-                       'einer einzelnen Kurve. Die Mathematik gehört dem Skill selbst (dsp_math), hier gibt es keine '
-                       'zweite Kopie.',
+        "curveApfTip": "Ein Allpass für das Chassis, das der Schalter gewählt hat — dasselbe, das auch das Delay-Feld bearbeitet. Er ändert KEINEN Pegel und dreht die Phase um f0: APF1 dreht bei f0 um −90° (insgesamt 0 → −180°), APF2 bei f0 um −180° (0 → −360°), und Q sagt, wie viel dieser Drehung dicht bei f0 passiert. Im Frequenzgang bewegt sich die Kurve nicht; in der Phase dreht sie sich; in beiden zeigt die vorhergesagte Summe (Σ), was das mit der Übernahme macht — darum geht es. Im Impuls bleibt der gezeichnete Verlauf wie aufgenommen (ein Allpass verschmiert einen Impuls); die Summe im Streifen trägt ihn. Es wird nichts angewendet: er geht als Vorschlag in den Ablesewert, in den Worten des Konfigurationsregisters (APF2 250 Hz Q 0.71). Und ein Allpass füllt keine Auslöschung eines einzelnen Chassis — durch Phasendrehung lässt sich nur die Summe zweier überlappender Chassis neu abstimmen, lies ihn also an der Summe, nie an einer einzelnen Kurve. Die Mathematik gehört dem Skill selbst (dsp_math), hier gibt es keine zweite Kopie.",
         "curveApfKindTip": 'Welche Ordnung. APF1: nur f0, dort −90° — die sanftere Vierteldrehung. APF2: f0 und Q, dort '
                            '−180° — das, was ein APF2-Platz in einem PEQ-Satz annimmt. Zwei APF1 auf einer f0 sind ein '
                            'APF2 mit Q 0,5.',
@@ -3952,16 +3861,8 @@ Choose sweeps (sw) above to read this.",
         "curveGroupKind_sides": 'Seite',
         "curveGroupKind_combos": 'Kombination',
         "curveGroupNoGlossary": '— kein Glossar in diesem Projekt —',
-        "curveGroupTip": 'Fülle die Auswahl mit einer ganzen Gruppe auf einmal — die Tiefmitteltöner, die Mitteltöner, '
-                         'Sub+Tiefmitteltöner, eine Seite, alles. Die Namen kommen aus dem Glossar dieses Autos, und '
-                         'die gewählten Sweeps sind die der Konfigurationsversion daneben. Es wird nichts geholt, was '
-                         'die Gruppe nicht nennt: ein Mitglied, für das REW keinen Sweep hat, wird gemeldet, nicht '
-                         'übersprungen. Sie FÜLLT und lässt dann los: nimmst du danach einen Chip weg, füllt nichts '
-                         'nach — und genau so hört man, was ein einzelnes Chassis mit der Übernahme macht.',
-        "curveGroupVersionTip": 'Aus welcher Aufnahmeserie die Sweeps der Gruppe stammen — die DSP-Konfiguration, unter der '
-                                'sie gemessen wurden, im REW-Titel als `_N` geschrieben und im Messpanel genauso benannt. Sie '
-                                'beginnt bei der Serie, die die Kurven auf dem Bildschirm teilen, oder bei der neuesten, die '
-                                'dieses Auto für diese Chassis hat, und du kannst sie verschieben.',
+        "curveGroupTip": "Fülle die Auswahl mit einer ganzen Gruppe auf einmal — die Tiefmitteltöner, die Mitteltöner, Sub+Tiefmitteltöner, eine Seite, alles. Die Namen kommen aus dem Glossar dieses Autos, und die Sweeps kommen aus der daneben gewählten Messserie. Es wird nichts geholt, was die Gruppe nicht nennt: ein Mitglied, für das REW keinen Sweep hat, wird gemeldet, nicht übersprungen. Sie FÜLLT und lässt dann los: nimmst du danach einen Chip weg, füllt nichts nach — und genau so hört man, was ein einzelnes Chassis mit der Übernahme macht.",
+        "curveGroupVersionTip": "Aus welcher Aufnahmeserie die Sweeps der Gruppe stammen — eine Messreihe, keine DSP-Konfiguration — im REW-Titel als `_N` geschrieben und im Messpanel genauso benannt. Sie beginnt bei der Serie, die die Kurven auf dem Bildschirm teilen, oder bei der neuesten, die dieses Auto für diese Chassis hat, und du kannst sie verschieben.",
         "curveGroupMissing": '{group} bei _{version}: {names} — nicht in REW. Gezeichnet ist die Summe eines anderen '
                              'Satzes.',
         "curveGroupEmpty": '{group} bei _{version}: REW hat von keinem Mitglied einen Sweep, es wurde also nichts '
@@ -4104,8 +4005,7 @@ Choose sweeps (sw) above to read this.",
         "lsnProblems": 'Die eigene Prüfung der Methode meldet: {problems}',
         "lsnNotTranslated": 'noch nicht übersetzt — gezeigt wird das Englische',
         "lsnVersion": 'Zustand {version}',
-        "lsnNoVersion": 'noch kein Ledger-Schnappschuss — das Urteil wird ohne einen eingetragen und lässt sich '
-                        'später keinem Zustand zuordnen',
+        "lsnNoVersion": "noch keine Konfiguration eingetragen — das Urteil wird ohne eine eingetragen und lässt sich später keiner Konfiguration zuordnen",
         "lsnOwnHint": 'Für ein Stück, das hier nicht steht, nimm „own“ — welches es war, sag in deinen eigenen '
                       'Worten.',
     },

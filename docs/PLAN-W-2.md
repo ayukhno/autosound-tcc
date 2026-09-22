@@ -94,6 +94,7 @@ Skill branch `wave-2026-09-20` carries them; not tagged yet.
 - **`22`** protection asked for virtual channels — fixed with no round open (`4c11825`); check with
   a round open.
 - **`F-061`** the clipboard's column names exist twice; read the method's `FORM_LABELS`.
+- **`F-076`** closing «edit project parameters» prints a hard-coded demo «fixed» message as if true.
 
 ### 7 · Layout `GUI only` / `Terminal+GUI` (`F-069`)
 

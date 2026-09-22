@@ -34,3 +34,4 @@ Each row: what was chosen, why, and what reversing it costs.
 
 | # | decision | why | to reverse |
 |---|---|---|---|
+| S1 | **The vocabulary pass** changes 70 strings in four languages: a series `_N` is never called a DSP configuration or state (3 tooltips said so); «знімок (леджера)» becomes «конфігурація (v_NNN)»; «варіант» is kept for a Phase-1 proposal only («тут немає варіантів» → «готових відповідей»); the Ukrainian/Polish/German «леджер» becomes «реєстр конфігурацій» (plain words). English keeps «ledger» — it is the method's own word and the prompts to the model use it | the Arbiter's vocabulary of 2026-09-20; memory «`_N` — номер серії, не стан DSP» | one commit; the old strings are in `git show HEAD~1:src/autosound_tcc/ui/tcc/i18n.py` |

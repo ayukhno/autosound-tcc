@@ -2011,6 +2011,19 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-076 — Closing "edit project parameters" prints a hard-coded demo result as if it were true
+
+**Статус**: open 2026-09-22 · found during the W-2 vocabulary pass; in W-2 package «small»
+
+`DialogPanel._finish_editing` (`ui/tcc/dialog_panel.py`) adds `editDoneForgot` / `editDoneManual` to
+the transcript, and those strings are a MOCK: «✓ Ledger checked: `Rear R Full` delay was 9.5 ms in
+the dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms» and «✓ Logged: `Front R High` gain 1.4 →
+1.0 dB (manual). Ledger updated and re-attested». Nothing is checked; the channel names are not
+this car's. The window states a fix that never happened.
+
+**Що зробити**: say what actually happened — the edit mode is closed and the session was told (the
+bus signal is the one real act) — in all four languages, and drop the fake.
+
 ### F-075 — `test_updates.py` is red on `main` since the update-row commits after `v0.1.42`
 
 **Статус**: open 2026-09-22 · named, not fixed — found by the full run on `wave-0.1.43`
