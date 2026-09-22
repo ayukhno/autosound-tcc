@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.core import config, intake_form  # noqa: E402
+from autosound_tcc.core.contract_check import ContractReport  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, main_window  # noqa: E402
 
 
@@ -79,3 +80,73 @@ def test_closing_the_window_stops_the_form(tmp_path, monkeypatch):
     window._open_intake_form()
     window.close()
     assert _FakeForm.made[0].stopped >= 1
+
+
+
+def _report(complete=True):
+    return ContractReport(ok=True, project_dir="/p", complete=complete)
+
+
+def _offers(window, monkeypatch):
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify",
+                        lambda text, level="info", action=None: said.append((text, action)))
+    return said
+
+
+def test_a_green_gate_offers_the_session_once(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    said = _offers(window, monkeypatch)
+    window._on_gate_result(_report())
+    window._on_gate_result(_report())
+    offers = [s for s in said if s[1] is not None]
+    assert len(offers) == 1 and offers[0][0] == i18n.t("intakeReady")
+
+
+def test_the_offer_returns_after_the_gate_went_red_and_green_again(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    said = _offers(window, monkeypatch)
+    window._on_gate_result(_report())
+    window._on_gate_result(_report(complete=False))
+    window._on_gate_result(_report())
+    assert len([s for s in said if s[1] is not None]) == 2
+
+
+def test_no_offer_while_a_session_runs(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    said = _offers(window, monkeypatch)
+    window._agent_worker = object()
+    try:
+        window._on_gate_result(_report())
+    finally:
+        window._agent_worker = None
+    assert said == []
+
+
+def test_no_gate_check_for_a_form_never_opened(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    built = []
+    monkeypatch.setattr(main_window, "_ContractWorker", lambda *a, **k: built.append(a))
+    window._check_intake_gate()
+    assert built == []
+
+
+def test_the_offer_starts_the_in_app_session(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    started = []
+    monkeypatch.setattr(window, "_start_tuning_session", lambda *a, **k: started.append(1))
+    window._intake_terminal_cli = None
+    window._start_after_intake()
+    assert started == [1]
+
+
+def test_the_offer_starts_the_terminal_the_project_was_created_with(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    launched = []
+    monkeypatch.setattr(main_window.terminal_launcher, "launch",
+                        lambda project_dir, cli, hint, model=None: launched.append((cli, hint, model)))
+    window._intake_terminal_cli, window._intake_terminal_model = "claude", "opus"
+    window._start_after_intake()
+    cli, hint, model = launched[0]
+    assert (cli, model) == ("claude", "opus")
+    assert i18n.language_name() in hint

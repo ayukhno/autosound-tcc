@@ -2182,6 +2182,49 @@ class MainWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl(url)):
             self._status_strip.notify(i18n.t("intakeOpenByHand").format(url=url), level="warn")
 
+    def _check_intake_gate(self) -> None:
+        """After the form wrote the project files: is phase 0's gate green now?
+
+        Only for a form opened in this window and with no session running -- the offer is the
+        hand-off from the form to the AI, and neither a session already talking nor a project
+        nobody opened the form on needs it. REW is skipped: the gate is about the files.
+        """
+        form = getattr(self, "_intake_form", None)
+        if form is None or not form.was_opened or getattr(self, "_agent_worker", None) is not None:
+            return
+        worker = getattr(self, "_gate_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+        self._gate_worker = _ContractWorker(config.project_dir(), skip_rew=True)
+        self._gate_worker.result.connect(self._on_gate_result)
+        self._gate_worker.start()
+
+    def _on_gate_result(self, report) -> None:
+        """Offer the session once per green; a red gate re-arms the offer. Red says nothing here:
+        the page itself shows what is missing."""
+        if not report.available or not report.complete:
+            self._gate_offered = False
+            return
+        if getattr(self, "_gate_offered", False) or getattr(self, "_agent_worker", None) is not None:
+            return
+        self._gate_offered = True
+        self._status_strip.notify(i18n.t("intakeReady"),
+                                  action=(i18n.t("intakeStartSession"), self._start_after_intake))
+
+    def _start_after_intake(self) -> None:
+        """The route the project was created with: a terminal CLI when the new-project dialog chose
+        one in this window, the in-app session otherwise."""
+        cli = getattr(self, "_intake_terminal_cli", None)
+        if cli is None:
+            self._start_tuning_session()
+            return
+        hint = i18n.t("npOnboardingHint").format(language=i18n.language_name())
+        try:
+            terminal_launcher.launch(config.project_dir(), cli=cli, hint=hint,
+                                     model=getattr(self, "_intake_terminal_model", None))
+        except terminal_launcher.TerminalLaunchError as exc:
+            self._status_strip.notify(str(exc), level="warn")
+
     def _open_new_project_dialog(self, seed: bool = False) -> None:
         """Folder + vendor/model + (in-app Claude OR a detected terminal CLI). Either path hands
         off to a fresh `MainWindow` pointed at the new folder rather than trying to hot-reload
@@ -2870,6 +2913,7 @@ class MainWindow(QMainWindow):
             return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
         self._arm_project_watcher()
         self._safe_load_project()
+        self._check_intake_gate()
 
     def _refresh_process(self, *_args) -> None:
         state = process_view.load_state()
@@ -4573,6 +4617,11 @@ class MainWindow(QMainWindow):
         if contract is not None and contract.isRunning():
             contract.cancel()
         qt_shutdown.stop_or_detach(contract, 3000)
+        # The same checker, asked after the intake form saved (hub #194) -- same lever, same wait.
+        gate = getattr(self, "_gate_worker", None)
+        if gate is not None and gate.isRunning():
+            gate.cancel()
+        qt_shutdown.stop_or_detach(gate, 3000)
         qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
         # Both can outlast any wait worth making at quit: a probe is a real model call, and the
         # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
