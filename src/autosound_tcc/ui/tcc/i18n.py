@@ -1021,16 +1021,10 @@ Choose sweeps (sw) above to read this.",
         "editReasonsQ": "Why?",
         "reasonForgot": "skill didn't save",
         "reasonManual": "I changed something manually",
-        "editStartForgot": "◆ Editing project parameters — flagged: the skill may not have "
-                            "saved a recent change. Describe what should be in the ledger; "
-                            "I'll check and fix it.",
-        "editStartManual": "◆ Editing project parameters — you changed something by hand. "
-                            "Tell me what and where; I'll log it in the ledger so future "
-                            "recommendations account for it.",
-        "editDoneForgot": "✓ Ledger checked: <code>Rear R Full</code> delay was 9.5 ms in the "
-                           "dialog but 8.0 ms on disk — fixed, re-saved as 9.5 ms.",
-        "editDoneManual": "✓ Logged: <code>Front R High</code> gain 1.4 → 1.0 dB (manual). "
-                           "Ledger updated and re-attested.",
+        "editStartForgot": "◆ Editing project parameters — flagged «the skill did not save». The session was sent a signal: describe what the ledger should hold, and it checks and records it.",
+        "editStartManual": "◆ Editing project parameters — «I changed something by hand». The session was sent a signal: say what and where, and it records it in the ledger.",
+        "editDoneForgot": "✓ Editing closed — the session was sent a signal. What was recorded, it says itself.",
+        "editDoneManual": "✓ Editing closed — the session was sent a signal. What was recorded, it says itself.",
         "targetHandedOver": '“{name}” went to the page in the link — it should be on the plot.',
         "targetLocalViewer": 'The tool does not carry “{name}”, so this is a LOCAL copy of it with your curve already '
                              'plotted — built from the method version this app is pinned to, not the live page. Everything '
@@ -1962,15 +1956,10 @@ Choose sweeps (sw) above to read this.",
         "editReasonsQ": "Причина?",
         "reasonForgot": "скіл не зберіг",
         "reasonManual": "я змінив щось руками",
-        "editStartForgot": "◆ Правка параметрів проекту — позначено: скіл, можливо, не "
-                            "зберіг останню зміну. Опиши, що повинно бути в ledger; я "
-                            "перевірю і виправлю.",
-        "editStartManual": "◆ Правка параметрів проекту — ти змінив щось руками. Скажи що і "
-                            "де; я запишу в ledger, щоб наступні рекомендації це враховували.",
-        "editDoneForgot": "✓ Перевірив ledger: у <code>Rear R Full</code> delay в діалозі був "
-                           "9.5 мс, а на диску 8.0 мс — виправив, перезаписав 9.5 мс.",
-        "editDoneManual": "✓ Занотовано: <code>Front R High</code> gain 1.4 → 1.0 дБ "
-                           "(вручну). Ledger оновлено і переатестовано.",
+        "editStartForgot": "◆ Правка параметрів проєкту — позначено «скіл не зберіг». Сесії надіслано сигнал: опиши, що має бути в реєстрі конфігурацій, — вона перевірить і запише.",
+        "editStartManual": "◆ Правка параметрів проєкту — «я змінив щось руками». Сесії надіслано сигнал: скажи, що й де змінено, — вона запише це в реєстр конфігурацій.",
+        "editDoneForgot": "✓ Правку закрито — сесії надіслано сигнал. Що саме записано, скаже вона сама.",
+        "editDoneManual": "✓ Правку закрито — сесії надіслано сигнал. Що саме записано, скаже вона сама.",
         "targetHandedOver": '«{name}» поїхала на сторінку в посиланні — вона має бути на графіку.',
         "targetLocalViewer": 'Інструмент не несе «{name}», тож це ЛОКАЛЬНА його копія з уже нанесеною твоєю кривою — '
                              'зібрана з тієї версії методу, на якій стоїть застосунок, а не жива сторінка. Усе інше в ній '
@@ -2983,14 +2972,10 @@ Choose sweeps (sw) above to read this.",
         "editReasonsQ": 'Dlaczego?',
         "reasonForgot": 'skill nie zapisał',
         "reasonManual": 'zmieniłem coś ręcznie',
-        "editStartForgot": '◆ Edycja parametrów projektu — oznaczono: skill mógł nie zapisać ostatniej zmiany. Opisz, co '
-                           'powinno być w ledgerze; sprawdzę i poprawię.',
-        "editStartManual": '◆ Edycja parametrów projektu — zmieniłeś coś ręcznie. Powiedz, co i gdzie; zapiszę to w '
-                           'ledgerze, żeby kolejne rekomendacje to uwzględniały.',
-        "editDoneForgot": '✓ Sprawdzono ledger: w <code>Rear R Full</code> opóźnienie w dialogu wynosiło 9.5 ms, a na '
-                          'dysku 8.0 ms — poprawione, zapisane ponownie jako 9.5 ms.',
-        "editDoneManual": '✓ Zapisano: <code>Front R High</code> wzmocnienie 1.4 → 1.0 dB (ręcznie). Ledger '
-                          'zaktualizowany i ponownie zatwierdzony.',
+        "editStartForgot": "◆ Edycja parametrów projektu — oznaczono „skill nie zapisał”. Sesja dostała sygnał: opisz, co powinno być w rejestrze konfiguracji, a ona sprawdzi i zapisze.",
+        "editStartManual": "◆ Edycja parametrów projektu — „zmieniłem coś ręcznie”. Sesja dostała sygnał: powiedz, co i gdzie, a zapisze to w rejestrze konfiguracji.",
+        "editDoneForgot": "✓ Edycję zamknięto — sesja dostała sygnał. Co zapisano, powie sama.",
+        "editDoneManual": "✓ Edycję zamknięto — sesja dostała sygnał. Co zapisano, powie sama.",
         "targetHandedOver": '„{name}” pojechała na stronę w linku — powinna być na wykresie.',
         "targetLocalViewer": 'Narzędzie nie zawiera „{name}”, więc to jego LOKALNA kopia z już naniesioną twoją krzywą — '
                              'zbudowana z wersji metody, na której stoi aplikacja, a nie żywa strona. Cała reszta w niej '
@@ -4023,14 +4008,10 @@ Choose sweeps (sw) above to read this.",
         "editReasonsQ": 'Warum?',
         "reasonForgot": 'der Skill hat nicht gespeichert',
         "reasonManual": 'ich habe etwas von Hand geändert',
-        "editStartForgot": '◆ Projektparameter bearbeiten — markiert: der Skill hat eine kürzliche Änderung womöglich '
-                           'nicht gespeichert. Beschreibe, was im Ledger stehen sollte; ich prüfe es und korrigiere.',
-        "editStartManual": '◆ Projektparameter bearbeiten — du hast etwas von Hand geändert. Sag, was und wo; ich halte '
-                           'es im Ledger fest, damit spätere Empfehlungen es berücksichtigen.',
-        "editDoneForgot": '✓ Ledger geprüft: das Delay von <code>Rear R Full</code> stand im Dialog auf 9,5 ms, auf der '
-                          'Festplatte aber auf 8,0 ms — behoben, wieder als 9,5 ms gespeichert.',
-        "editDoneManual": '✓ Vermerkt: <code>Front R High</code> Pegel 1,4 → 1,0 dB (von Hand). Ledger aktualisiert und '
-                          'neu bestätigt.',
+        "editStartForgot": "◆ Projektparameter bearbeiten — markiert „der Skill hat nicht gespeichert“. Die Sitzung hat ein Signal bekommen: beschreibe, was im Konfigurationsregister stehen soll, sie prüft es und trägt es ein.",
+        "editStartManual": "◆ Projektparameter bearbeiten — „ich habe etwas von Hand geändert“. Die Sitzung hat ein Signal bekommen: sag was und wo, sie trägt es ins Konfigurationsregister ein.",
+        "editDoneForgot": "✓ Bearbeitung geschlossen — die Sitzung hat ein Signal bekommen. Was eingetragen wurde, sagt sie selbst.",
+        "editDoneManual": "✓ Bearbeitung geschlossen — die Sitzung hat ein Signal bekommen. Was eingetragen wurde, sagt sie selbst.",
         "targetHandedOver": '„{name}“ ist im Link mitgefahren — sie sollte im Diagramm stehen.',
         "targetLocalViewer": 'Das Werkzeug trägt „{name}“ nicht, das hier ist also eine LOKALE Kopie davon mit deiner '
                              'Kurve bereits darauf — gebaut aus der Methodenversion, auf die diese App gepinnt ist, nicht '

@@ -1371,16 +1371,23 @@ class DialogPanel(QWidget):
         self._edit_chip.setProperty("class", "edit-chip on")
         self._edit_chip.setText("✎ " + i18n.t("reasonForgot" if reason == "forgot" else "reasonManual") + " ✕")
         self._restyle_chip()
-        self._add_system_message(i18n.t("editStartForgot" if reason == "forgot" else "editStartManual"))
         # Goes through the bus, not the session: the agent may be the in-app one or the user's own
-        # CLI in a terminal, and param-edit mode has to reach whichever is actually listening.
+        # CLI in a terminal, and param-edit mode has to reach whichever is actually listening. The
+        # line says a signal went out only when one did (F-076).
         if self._bus is not None:
+            self._add_system_message(
+                i18n.t("editStartForgot" if reason == "forgot" else "editStartManual"))
             self._bus.push(signal_bus.PARAM_EDIT_MODE, on=True, reason=reason)
+        else:
+            self._add_system_message(i18n.t("noSessionForSignal"))
         self.editingChanged.emit(True)
 
     def _finish_editing(self) -> None:
-        self._add_system_message(i18n.t("editDoneForgot" if self._reason == "forgot" else "editDoneManual"))
+        # What happened, and only that: this line used to be a hard-coded demo («delay was 9.5 ms
+        # … fixed») printed as if it were true (F-076).
         if self._bus is not None:
+            self._add_system_message(
+                i18n.t("editDoneForgot" if self._reason == "forgot" else "editDoneManual"))
             self._bus.push(signal_bus.PARAM_EDIT_MODE, on=False, reason=self._reason)
         self._editing = False
         self._reason = None

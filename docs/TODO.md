@@ -2013,7 +2013,7 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-076 — Closing "edit project parameters" prints a hard-coded demo result as if it were true
 
-**Статус**: open 2026-09-22 · found during the W-2 vocabulary pass; in W-2 package «small»
+**Статус**: done on `wave-0.1.43` 2026-09-22 · the four edit-mode lines say what happened (a signal to the session), and nothing when there is no bus
 
 `DialogPanel._finish_editing` (`ui/tcc/dialog_panel.py`) adds `editDoneForgot` / `editDoneManual` to
 the transcript, and those strings are a MOCK: «✓ Ledger checked: `Rear R Full` delay was 9.5 ms in
