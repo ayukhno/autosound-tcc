@@ -8,6 +8,24 @@ what it would take to reverse it.
 Tomorrow's order (the Arbiter, 2026-09-22): read these decisions → the Layout prototype → sync with
 the skill → finish the development. **Testing is at the end of all development**, not per package.
 
+## Night of 2026-09-22 — where it stands (read this first)
+
+**Built on `wave-0.1.43`** (pushed, not released, full suite 2227 passed / 1 skipped under `-n 4`):
+the intake form (hub `#194`, `#193`); package 1 — vocabulary, F-070 header; package 2 — findings
+28, 29, 30, 31 (with «Готово»), 33, 34; package 6 — 1, 5, 22, F-061, F-076; package 3, TCC's half
+of the reviewer channel — 17, 20, 21, 23, 25, 32, `#45`; machinery — F-073, F-075.
+
+**Prototype** of «Режим контролю» on branch `proto-layout-control` — `docs/PROTO-LAYOUT-CONTROL.md`
+there says how to run it and lists six questions.
+
+**Waiting, and on whom:**
+- the Arbiter: F-074 (where does `EPY-Sep2026` live?); the Advisor pass on finding 1 (S10);
+  the prototype's questions; the testing at the end;
+- the skill (tomorrow's sync): its tag of `wave-2026-09-20` (the release pins it); a ticket for
+  S-044 / S-039 (S22); its half of `#187` / skill `#54`; hub `#185` (F-068) and `#195` (numbering);
+- the Windows VM session: package 5 (12, 13/F-043, 14, F-039, F-044) and finding 18 (S12);
+- machinery with no product effect: F-065, F-066, F-071 (S16).
+
 ## Taken by the Arbiter, 2026-09-22
 
 | # | decision | where |
