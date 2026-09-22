@@ -1389,6 +1389,8 @@ class DialogPanel(QWidget):
             self._add_system_message(
                 i18n.t("editDoneForgot" if self._reason == "forgot" else "editDoneManual"))
             self._bus.push(signal_bus.PARAM_EDIT_MODE, on=False, reason=self._reason)
+        else:
+            self._add_system_message(i18n.t("editDoneNoBus"))
         self._editing = False
         self._reason = None
         self._edit_chip.setProperty("class", "edit-chip")
