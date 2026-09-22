@@ -1351,3 +1351,21 @@ def test_the_queue_rows_button_says_it_interrupts_the_turn(tmp_path):
     assert i18n.T["en"]["queueSendNow"] == "Interrupt and send"
     assert button.toolTip() == i18n.t("queueSendNowTip")
     assert "when" in i18n.T["en"]["queueSendNowTip"], "says the message goes out on its own otherwise"
+
+
+def test_the_running_call_and_the_turn_say_how_long_they_have_taken(_app, monkeypatch):
+    """Finding 5: «Bash ×4…» for five minutes said nothing about whether it was alive."""
+    from autosound_tcc.ui.tcc import dialog_panel as dp
+
+    panel = dp.DialogPanel()
+    clock = [1000.0]
+    monkeypatch.setattr(dp.time, "monotonic", lambda: clock[0])
+    panel._set_busy(True)
+    panel._add_chip("Bash")
+    clock[0] += 92
+    panel._tick_activity()
+    assert "Bash · 1:32" in panel._activity.text()
+    panel._tick_turn()
+    assert panel._sub_label.text() == f"{i18n.t('agentThinking')} · 1:32"
+    panel._end_chip()
+    assert panel._activity.text() == "· Bash · 1:32"

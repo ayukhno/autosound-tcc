@@ -15,6 +15,7 @@ they reach whichever front-end is driving — the in-app agent or the user's own
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -200,6 +201,12 @@ def turn_ended_in_a_dropped_connection(text: str) -> bool:
     """
     said = (text or "").lower()
     return any(phrase in said for phrase in _TRANSPORT_GAVE_UP)
+
+
+def _clock(seconds: float) -> str:
+    """`m:ss` — how long a call or a turn has been going (finding 5)."""
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 class DialogPanel(QWidget):
@@ -423,6 +430,13 @@ class DialogPanel(QWidget):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(450)
         self._activity_timer.timeout.connect(self._tick_activity)
+        # And HOW LONG (finding 5): «Bash ×4…» for five minutes said nothing about whether that was
+        # one long command or four stuck ones. The running call and the whole turn both show time.
+        self._chip_started = 0.0
+        self._turn_started = 0.0
+        self._turn_timer = QTimer(self)
+        self._turn_timer.setInterval(1000)
+        self._turn_timer.timeout.connect(self._tick_turn)
 
         # What is waiting to be sent, and the way out of waiting. Not a transcript entry: a queued
         # message was first announced as a SYSTEM · ledger bubble, which reads as something that
@@ -917,12 +931,25 @@ class DialogPanel(QWidget):
         # arrives as a paragraph, not a question frame -- so a composer that greys out for the
         # length of the turn is off exactly when there is something to say. Typing is always
         # allowed; `_on_send` decides whether it goes now or at the turn boundary.
+        was_busy = getattr(self, "_busy", False)
         self._busy = busy
         self._input.setEnabled(True)
         self._stop_btn.setHidden(not busy)
         self._refresh_placeholder()
+        if busy and not was_busy:
+            self._turn_started = time.monotonic()
+            self._turn_timer.start()
+        elif not busy:
+            self._turn_timer.stop()
         if self._pending_question is None:
             self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
+
+    def _tick_turn(self) -> None:
+        """The turn's own clock beside «thinking» — a pause that says how long it has been."""
+        if not self._busy or self._pending_question is not None:
+            return
+        self._sub_label.setText(
+            f"{i18n.t('agentThinking')} · {_clock(time.monotonic() - self._turn_started)}")
 
     def _refresh_placeholder(self) -> None:
         """What the field is for right now: answering a parked question, queueing, or talking."""
@@ -1139,7 +1166,8 @@ class DialogPanel(QWidget):
     def _tick_activity(self) -> None:
         self._activity_phase = (self._activity_phase + 1) % 4
         dots = "." * self._activity_phase
-        self._activity.setText(f"⟳ {self._activity_label}{dots}")
+        took = _clock(time.monotonic() - self._chip_started) if self._chip_started else ""
+        self._activity.setText(f"⟳ {self._activity_label}" + (f" · {took}" if took else "") + dots)
 
     def _end_chip(self) -> None:
         """That tool returned, so the line stops claiming it is running.
@@ -1151,7 +1179,8 @@ class DialogPanel(QWidget):
         """
         self._activity_timer.stop()
         if self._activity_label:
-            self._activity.setText(f"· {self._activity_label}")
+            took = _clock(time.monotonic() - self._chip_started) if self._chip_started else ""
+            self._activity.setText(f"· {self._activity_label}" + (f" · {took}" if took else ""))
 
     def _answer_question(self, value: str) -> None:
         """Send the Arbiter's choice back through the channel the question came from."""
@@ -1188,6 +1217,7 @@ class DialogPanel(QWidget):
         is, and "TOOL" on eight consecutive rows is the same word eight times.
         """
         pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
+        self._chip_started = time.monotonic()  # the clock is the CURRENT call's, not the run's
         self._chip_count = self._chip_count + 1 if self._chip_tool == pretty else 1
         self._chip_tool = pretty
         self._activity_label = pretty + (f" ×{self._chip_count}" if self._chip_count > 1 else "")
