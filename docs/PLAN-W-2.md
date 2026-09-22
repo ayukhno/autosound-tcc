@@ -120,12 +120,15 @@ lives in the panel this mode hides, and TCC's own tools raise confirmations in e
 
 ## Order
 
+0. **The intake form** (`#194`, `#193` from package 4) — FIRST, by the Arbiter's word
+   (2026-09-22): designed and built before anything else, against the skill's branch pin. Spec:
+   `docs/superpowers/specs/2026-09-22-intake-form-design.md`.
 1. **Words** (1) — every package after it writes strings.
 2. **The capture panel** (2), starting with `33`.
 3. **The reviewer channel** (3) — our half; the method's half is its own.
 4. **Small** (6) and **machinery** (8) — no order inside.
 5. **Layout** (7) — after its decision.
-6. **The skill's halves** (4) — built against the branch while it is untagged
+6. **The rest of the skill's halves** (4, S-044) — built against the branch while it is untagged
    (`install.sh --skill-ref wave-2026-09-20`), pinned to its published tag before ours.
 7. **The Windows update path** (5) — the VM session, together with walking the installer.
 
@@ -137,6 +140,7 @@ on the Windows VM.
 
 ## Decisions the review owes
 
-- Whether `F-069` (Layout) is in this wave or the next.
+- ~~Whether `F-069` (Layout) is in this wave or the next.~~ In W-2, its decision first (the Arbiter,
+  2026-09-22).
 - What the milestone carries (hub `#191`, open): only `#45` is an issue today; the rest lives here
   and in the milestone's five lines.
