@@ -704,6 +704,7 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
+        self._main_splitter = splitter  # PROTOTYPE (F-069): the control layout hides and restores it
         self._left = self._build_left()
         self._center = self._build_center()
         self._right = self._build_right()
@@ -880,6 +881,22 @@ class MainWindow(QMainWindow):
         # stays as the one manual "reload from disk" a user can always reach, regardless of which
         # left-panel accordion section happens to be collapsed (user request 2026-07-29: the
         # earlier left-panel version was easy to lose track of).
+        # PROTOTYPE (F-069, branch proto-layout-control only): «Активний TCC / Режим контролю».
+        from autosound_tcc.ui.tcc.control_layout import ControlLayout
+
+        self._control_layout = ControlLayout(self)
+        self._control_btn = QPushButton("Режим контролю")
+        self._control_btn.setProperty("class", "reason-btn")
+        self._control_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def _toggle_control() -> None:
+            self._control_layout.toggle()
+            self._control_btn.setText(
+                "Активний TCC" if self._control_layout.active else "Режим контролю")
+
+        self._control_btn.clicked.connect(_toggle_control)
+        layout.addWidget(self._control_btn)
+
         self._header_refresh_btn = QPushButton("↻")
         self._header_refresh_btn.setProperty("class", "icon-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
