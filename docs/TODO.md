@@ -1921,8 +1921,7 @@ would move the penalty, not remove it.
 
 ### F-061 — the clipboard's column names still exist twice: read the method's `FORM_LABELS`
 
-**Статус**: open 2026-09-18 · named while re-pinning at the method's `v3.0.58`, which is what made
-it possible; nothing was changed, the wave was already cut
+**Статус**: done on `wave-0.1.43` 2026-09-22 · `form_report.as_text` names its lines with the method's `FORM_LABELS`, in the form's order; the second table is gone
 
 A report the form refuses goes to the clipboard instead, and its lines are read beside the sheet
 whose columns wear exactly those words. `core/form_report.py` writes them from ITS OWN copy — the

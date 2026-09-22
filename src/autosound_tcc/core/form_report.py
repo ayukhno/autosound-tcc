@@ -199,17 +199,29 @@ def fields(report: Report) -> dict[str, str]:
 def as_text(report: Report) -> str:
     """The whole report as plain text, for a clipboard when the form did not take it.
 
-    The labels are this window's — a clipboard is not the form — but the ANSWERS are the form's, so
-    what a person pastes is what the sheet would have held. Without the method the keys are all
-    there is, and they are written rather than dropped.
+    The column names are the FORM's (`FORM_LABELS`, in the form's own order), because the lines
+    are read beside the sheet whose columns wear exactly those words — and they are not a
+    translation: a column's name belongs to the form (F-061; this file kept its own copy of them
+    until then). The ANSWERS are the form's too, so what a person pastes is what the sheet would
+    have held. Without the method its field names are all there is, and they are written rather
+    than dropped.
     """
-    answers, impacts_ = kind_answers(), impact_answers()
-    lines = [f"Від кого: {report.sender.strip()}",
-             f"Тип: {answers.get(report.kind, report.kind)}"]
-    if report.impact:
-        lines.append(f"Наскільки заважає: {impacts_.get(report.impact, report.impact)}")
-    if report.versions.strip():
-        lines.append(f"Версії: {report.versions.strip()}")
+    gate = _form_gate()
+    labels = dict(getattr(gate, "FORM_LABELS", None) or {}) if gate is not None else {}
+    names = ("sender", "kind", "impact", "message", "versions")
+    if labels:
+        ids = {getattr(gate, f"FORM_FIELD_{name.upper()}", name): name for name in names}
+    else:
+        ids = {name: name for name in names}
+        labels = {name: name for name in names}
+    values = {
+        "sender": report.sender.strip(),
+        "kind": kind_answers().get(report.kind, report.kind),
+        "impact": impact_answers().get(report.impact, report.impact) if report.impact else "",
+        "versions": report.versions.strip(),
+    }
+    lines = [f"{label}: {values[ids[field_id]]}" for field_id, label in labels.items()
+             if ids.get(field_id) in values and values[ids[field_id]]]
     return "\n".join(lines) + "\n\n" + report.message.strip()
 
 

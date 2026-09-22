@@ -183,3 +183,13 @@ def test_a_method_older_than_the_form_route_is_the_same_case(monkeypatch):
 
     assert not form_report.is_available()
     assert form_report.post_url() == ""
+
+
+def test_the_clipboard_names_its_lines_with_the_forms_own_column_names(monkeypatch):
+    """F-061: the column names lived in two repositories; the method's `FORM_LABELS` are the ones."""
+    monkeypatch.setattr(_GATE, "FORM_LABELS", {_GATE.FORM_FIELD_KIND: "ТИП-З-ФОРМИ",
+                                               _GATE.FORM_FIELD_SENDER: "ХТО-З-ФОРМИ"})
+    text = form_report.as_text(_report())
+    head = text.split("\n\n", 1)[0].splitlines()
+    assert head[0].startswith("ТИП-З-ФОРМИ: ") and head[1].startswith("ХТО-З-ФОРМИ: Олег")
+    assert "it froze" in text
