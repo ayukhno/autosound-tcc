@@ -24,11 +24,54 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   default, in the method's own words, with the source's seat named beside it, because another seat
   is why a copy exists (hub `#193`).
 
+### Changed
+
+- **The vocabulary the method settled is the window's.** A capture series `_N` is never called a
+  DSP configuration; what the ledger banks is a *configuration (version v_NNN)*, fixed in a
+  *preset*; the Ukrainian, Polish and German windows say *register of configurations* where they
+  said *ledger*.
+- **The header shows the configuration standing in the preset** — `v_007` beside the preset with a
+  dot, yellow while any channel is only proposed, green once all of it is entered; the processor's
+  name is on its hover (F-070).
+- **The capture card**: protection sits in the picker's row, the legend is one word per status on
+  one line, the status line is above the row in blue, and **Готово** hands the round's captures to
+  the AI — as a signal, so a session in a terminal gets it too (TEST-FINDINGS 31).
+- **The REW import form opens with the round's names filled in**, its columns can be dragged, and
+  "Select all / Clear selection" sit at its foot (TEST-FINDINGS 28).
+- **The capture order** moves a selection of rows as one block, is saved when you say so — the
+  hint had promised that since July and nothing wrote it — and can be copied between SW and RTA
+  (TEST-FINDINGS 34).
+- **A running tool call and the whole turn show how long they have been going** (TEST-FINDINGS 5).
+- **The "Agent commands" question comes first** in its dialog, in three short sentences
+  (TEST-FINDINGS 1).
+
 ### Removed
 
 - **The conversational DSP-profile interview at "New project".** The form asks it, and for a
   processor the method has no profile for, the form's own page does. A terminal AI chosen at
   "New project" now starts from the offer after the form, told the intake is already filled.
+
+### Fixed
+
+- **The update row says what went wrong instead of blaming GitHub.** On a Mac whose only `git`
+  was a broken Xcode shim, the row read "could not reach GitHub" while GitHub was fine and the
+  real error sat two lines lower in the same dialog. A failed probe now reads `probe_failed` with
+  git's own words, and every way the probe can fail — git missing, git refusing, a repository that
+  answered with no matching tag — leaves a line in the log (TEST-FINDINGS 40).
+- **The protective filter a curve was measured through shows on its row.** It was drawn as a
+  10 px glyph nobody could see; it is a small mark with the short legs now — `HP100`,
+  `HP1k · LP3.5k` — and the full wording on hover (TEST-FINDINGS 30).
+- **A sweep listed under RTA is no longer called `(sw) (rta)`**, and an RTA row no longer trails
+  a cut-off "this check does not apply" (TEST-FINDINGS 30).
+- **The set picker names the series and the round** in every entry, with the live task apart from
+  the past rounds; «серія 1» no longer vanishes when a round opens (TEST-FINDINGS 33).
+- **With a round open, the protection dialog offers output channels only**, as it already did
+  with none (TEST-FINDINGS 22).
+- **Closing "edit project parameters" says what happened** — a signal to the session — instead of
+  printing a made-up fix with another car's channel names (F-076).
+- **Sixteen unusable captures are one line, not half the window.** The count and the first
+  reason, "show all" for the list, and a close link (TEST-FINDINGS 29).
+
 
 ## [v0.1.42] — 2026-09-20 · the curve window stops lying and stops dying, the method at v3.0.59
 

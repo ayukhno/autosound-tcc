@@ -2054,7 +2054,7 @@ line — and it is a second place to fix it, not a second diagnosis.
 
 ### F-073 — The five commits after v0.1.42 ride the next tag
 
-**Статус**: open 2026-09-20 · nothing to do until the next release
+**Статус**: done on `wave-0.1.43` 2026-09-22 · the update-row fixes are under «Fixed» in `## [Unreleased]`
 
 `main` is five commits ahead of `v0.1.42` (`37fac7a`, `6832b70`, `b39014f`, `22643c0`,
 `cffc870`) — the git-probe logging, the honest update-row reason and finding 40. They were cut
