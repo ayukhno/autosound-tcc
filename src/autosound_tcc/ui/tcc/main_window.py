@@ -62,6 +62,7 @@ from autosound_tcc.core import (
     critic,
     form_report,
     install_report,
+    intake_form,
     model_choices,
     model_overrides,
     omp_session,
@@ -997,6 +998,11 @@ class MainWindow(QMainWindow):
         self._copy_car_action.triggered.connect(
             lambda _checked=False: self._open_new_project_dialog(seed=True)
         )
+        # The intake is the skill's own form, served and opened in the browser (hub #194): one
+        # form for every front end, so TCC starts it and never draws its own copy of it.
+        self._intake_action = menu.addAction(i18n.t("menuIntake"))
+        self._intake_action.setToolTip(i18n.t("menuIntakeTip"))
+        self._intake_action.triggered.connect(lambda _checked=False: self._open_intake_form())
         self._reload_action = menu.addAction(i18n.t("menuReload"))
         self._reload_action.setToolTip(i18n.t("refreshProjectTip"))
         self._reload_action.triggered.connect(self._reload_from_disk)
@@ -2152,6 +2158,29 @@ class MainWindow(QMainWindow):
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._version_label.setText(view.version or "")
         self._show_banked_delta(view.version, preset)
+
+    def _open_intake_form(self) -> None:
+        """Start the skill's intake form for this project, or reopen the one already running.
+
+        Blocks for as long as the form takes to print its address -- well under a second when it
+        starts, at most `intake_form.DEFAULT_TIMEOUT_S` when it does not, and then it says so.
+        """
+        project_dir = config.chosen_project_dir()
+        if project_dir is None:
+            self._status_strip.notify(i18n.t("intakeNoProject"), level="warn")
+            return
+        form = getattr(self, "_intake_form", None)
+        if form is None:
+            form = self._intake_form = intake_form.IntakeForm(project_dir,
+                                                              i18n.current_language())
+        try:
+            url = form.open_url()
+        except intake_form.IntakeFormError as exc:
+            key = "intakeNoForm" if exc.kind == "no_form" else "intakeFailed"
+            self._status_strip.notify(i18n.t(key).format(detail=exc.detail), level="warn")
+            return
+        if not QDesktopServices.openUrl(QUrl(url)):
+            self._status_strip.notify(i18n.t("intakeOpenByHand").format(url=url), level="warn")
 
     def _open_new_project_dialog(self, seed: bool = False) -> None:
         """Folder + vendor/model + (in-app Claude OR a detected terminal CLI). Either path hands
@@ -4635,6 +4664,10 @@ class MainWindow(QMainWindow):
         # first and cleared the flag.
         self._record_session_stop()
         self.stop_workers()
+        # The form serves THIS project; a process left behind holds a port for nobody.
+        form = getattr(self, "_intake_form", None)
+        if form is not None:
+            form.stop()
         # Let any in-flight REW worker on the measurement panel finish before the window (and its
         # widgets) go away -- see MeasurementPanel.shutdown()'s docstring for why this matters.
         self._meas_panel.shutdown()
