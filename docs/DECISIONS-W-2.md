@@ -1,0 +1,36 @@
+# W-2 · v0.1.43 — decisions, for the Arbiter to read and overturn
+
+Every decision taken for this wave, in the order taken. **Arbiter** = he said it; **session** = the
+session chose while he was away (2026-09-22 night, his word: «роби що можна без мене, всі прийняті
+рішення нотуй і мені покажеш завтра»). A session decision is a default, not a verdict: each says
+what it would take to reverse it.
+
+Tomorrow's order (the Arbiter, 2026-09-22): read these decisions → the Layout prototype → sync with
+the skill → finish the development. **Testing is at the end of all development**, not per package.
+
+## Taken by the Arbiter, 2026-09-22
+
+| # | decision | where |
+|---|---|---|
+| A1 | W-1 is closed on both products; the next wave is W-2 | milestones |
+| A2 | Include as much as possible; what stays out gets a reason and is deferred; if the skill has a ticket for it, we take it | `PLAN-W-2.md` |
+| A3 | Per-project version numbering has no ticket → one was filed (hub `#195`) | `PLAN-W-2.md` |
+| A4 | The intake form goes FIRST, designed and built before the rest | spec, plan |
+| A5 | The form REPLACES the conversational intake in "New project" | spec |
+| A6 | After the form, TCC OFFERS the session when the gate is green; the start is his click | spec |
+| A7 | Execute the form's plan in this session, not with subagents | — |
+| A8 | `F-069` Layout is in W-2, its look discussed with a prototype before code | `PLAN-W-2.md` |
+| A9 | Layout (control mode): a button toggles «Активний TCC / Режим контролю»; TCC takes half the screen | below |
+| A10 | Control mode: the top window is full width with tabs — «Моніторинг» (what remains of the dialog, as info), «Таблиця-V» (virtual channels), «Таблиця-О» (outputs), then EQ / levels / delays / phases as now; below it the left and right panels side by side, equal, with a movable border between them and between them and the top | below |
+| A11 | Control mode: TCC's own confirmation requests — the terminal auto-confirms by default; when one does arise, a strip above the top window, visible from any tab | below |
+| A12 | Control mode: TCC on the RIGHT half, TCC opens the terminal on the LEFT half | below |
+| A13 | «Моніторинг» is a read-only feed plus the bus buttons («Готово», «Прослухати»); typing is in the terminal | below |
+| A14 | The Layout is shown as a throwaway prototype inside TCC, on its own branch, built LAST | below |
+| A15 | Testing is postponed to the end of all development | — |
+
+## Taken by the session (night of 2026-09-22) — defaults, to be read
+
+Each row: what was chosen, why, and what reversing it costs.
+
+| # | decision | why | to reverse |
+|---|---|---|---|
