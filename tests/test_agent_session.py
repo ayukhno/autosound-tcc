@@ -142,7 +142,9 @@ def test_a_project_directory_that_is_not_there_is_said_at_once(tmp_path, monkeyp
     assert str(missing) in str(raised.value)
 
 
-@pytest.mark.parametrize("caller", ["cli", "dialog"])
+# The new-project dialog was the second caller until hub #194 replaced its interview with the
+# skill's intake form; the CLI is the one left.
+@pytest.mark.parametrize("caller", ["cli"])
 def test_both_callers_create_the_folder_before_the_session(caller):
     """The other half of the contract above, read from the callers themselves rather than trusted.
 
@@ -153,12 +155,8 @@ def test_both_callers_create_the_folder_before_the_session(caller):
     import ast
 
     root = Path(agent_session.__file__).parents[3]
-    if caller == "cli":
-        path = root / "src" / "autosound_tcc" / "dsp_profile_interview.py"
-        builds = "OnboardingSession"
-    else:
-        path = root / "src" / "autosound_tcc" / "ui" / "tcc" / "new_project_dialog.py"
-        builds = "ProfileInterviewDialog"
+    path = root / "src" / "autosound_tcc" / "dsp_profile_interview.py"
+    builds = "OnboardingSession"
     source = path.read_text(encoding="utf-8")
 
     mkdir_at = min(

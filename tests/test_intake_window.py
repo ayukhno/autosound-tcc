@@ -150,3 +150,51 @@ def test_the_offer_starts_the_terminal_the_project_was_created_with(tmp_path, mo
     cli, hint, model = launched[0]
     assert (cli, model) == ("claude", "opus")
     assert i18n.language_name() in hint
+
+
+class _Dialog:
+    def __init__(self, project_dir, cli=None):
+        from PySide6.QtWidgets import QDialog
+        self._accepted = QDialog.DialogCode.Accepted
+        self.project_dir = project_dir
+        self.open_terminal_cli, self.onboarding_ai_model = cli, ("opus" if cli else None)
+        self.in_app_model, self.seeded, self.seeded_from = None, None, None
+
+    def exec(self):
+        return self._accepted
+
+
+class _NewWindow:
+    made = []
+
+    def __init__(self):
+        self.calls = []
+        _NewWindow.made.append(self)
+        self._status_strip = type("S", (), {"notify": lambda *a, **k: None})()
+
+    def show(self):
+        self.calls.append("show")
+
+    def _adopt_choices_from_new_project(self, dialog):
+        self.calls.append("adopt")
+
+    def _open_intake_form(self):
+        self.calls.append("intake")
+
+
+def test_create_opens_the_new_window_on_the_form(tmp_path, monkeypatch):
+    window, _ = _window(tmp_path, monkeypatch)
+    _NewWindow.made = []
+    monkeypatch.setattr(main_window, "NewProjectDialog",
+                        lambda parent, seed_first=False: _Dialog(tmp_path / "n", cli="claude"))
+    monkeypatch.setattr(main_window, "MainWindow", _NewWindow)
+    monkeypatch.setattr(main_window, "_force_project_dir_env", lambda p: None)
+    launched = []
+    monkeypatch.setattr(main_window.terminal_launcher, "launch",
+                        lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(window, "close", lambda: True)
+    window._open_new_project_dialog()
+    new = _NewWindow.made[0]
+    assert new.calls == ["show", "adopt", "intake"]
+    assert (new._intake_terminal_cli, new._intake_terminal_model) == ("claude", "opus")
+    assert launched == [], "the terminal waits for the gate, it does not start at Create"

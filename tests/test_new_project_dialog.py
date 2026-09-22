@@ -1,6 +1,5 @@
-"""NewProjectDialog: folder + vendor/model + AI model, then hands off to (a faked)
-ProfileInterviewDialog -- the real one spins up a Claude Agent SDK session, which has no place in
-a headless unit test.
+"""NewProjectDialog: folder + vendor/model + how the AI runs. The intake itself is the skill's
+served form, which the new window opens (hub #194) -- this dialog starts no interview.
 """
 
 from __future__ import annotations
@@ -18,16 +17,6 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-class _FakeInterviewDialog:
-    def __init__(self, project_dir, vendor, model, ai_model, language="en", parent=None):
-        self.project_dir = project_dir
-        self.vendor = vendor
-        self.model = model
-        self.ai_model = ai_model
-        self.language = language
-        self.parent_arg = parent
-
-
 def test_create_disabled_until_folder_vendor_and_model_are_filled(tmp_path):
     _app()
     dlg = npd.NewProjectDialog()
@@ -42,11 +31,10 @@ def test_create_disabled_until_folder_vendor_and_model_are_filled(tmp_path):
     assert dlg._create_btn.isEnabled()
 
 
-def test_create_mkdirs_persists_project_dir_and_builds_the_interview(tmp_path, monkeypatch):
+def test_create_mkdirs_and_persists_project_dir_with_no_interview(tmp_path, monkeypatch):
     _app()
     calls = []
     monkeypatch.setattr(npd.config, "set_project_dir", lambda p: calls.append(p))
-    monkeypatch.setattr(npd, "ProfileInterviewDialog", _FakeInterviewDialog)
 
     project_dir = tmp_path / "brand_new_project"
     dlg = npd.NewProjectDialog()
@@ -56,13 +44,11 @@ def test_create_mkdirs_persists_project_dir_and_builds_the_interview(tmp_path, m
 
     dlg._on_create()
 
-    assert project_dir.is_dir()  # OnboardingSession itself does not create the folder
+    assert project_dir.is_dir()
     assert calls == [project_dir]
-    assert dlg.interview_dialog is not None
-    assert dlg.interview_dialog.project_dir == project_dir
-    assert dlg.interview_dialog.vendor == "Musway"
-    assert dlg.interview_dialog.model == "M6V4"
-    assert dlg.interview_dialog.ai_model == "claude-opus-5"  # default AI_MAIN_MODELS[0]
+    assert not hasattr(npd, "ProfileInterviewDialog"), "the form replaced the interview"
+    assert dlg.project_dir == project_dir
+    assert dlg.in_app_model == "claude-opus-5"  # default AI_MAIN_MODELS[0]
 
 
 def test_bundled_profile_picker_defaults_to_an_exact_find_bundled_match():
@@ -120,8 +106,8 @@ def test_no_detected_clis_means_only_the_in_app_option(monkeypatch):
 
 def test_selecting_a_terminal_cli_hides_ai_model_and_branches_on_create(tmp_path, monkeypatch):
     """Regression path for the multi-AI onboarding request (2026-07-29): picking a detected CLI
-    must skip ProfileInterviewDialog entirely and hand the caller (main_window) enough to open a
-    terminal instead -- the AI-model picker is meaningless once a terminal CLI is in charge."""
+    must hand the caller (main_window) enough to open a terminal later, from the intake's gate
+    offer -- the AI-model picker is meaningless once a terminal CLI is in charge."""
     monkeypatch.setattr(npd.terminal_launcher, "available_clis", lambda: [("gemini", "Gemini CLI")])
     calls = []
     monkeypatch.setattr(npd.config, "set_project_dir", lambda p: calls.append(p))
@@ -143,7 +129,6 @@ def test_selecting_a_terminal_cli_hides_ai_model_and_branches_on_create(tmp_path
 
     assert project_dir.is_dir()
     assert calls == [project_dir]
-    assert dlg.interview_dialog is None
     assert dlg.open_terminal_cli == "gemini"
     assert dlg.project_dir == project_dir
     assert dlg.onboarding_vendor == "Musway"
@@ -207,7 +192,6 @@ def test_the_in_app_model_survives_a_copy_that_skips_the_interview(tmp_path, mon
     was dropped and the window opened on "no model chosen" (user, 2026-08-23). The dialog keeps it
     where the caller can find it whether the interview ran or not."""
     monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
-    monkeypatch.setattr(npd, "ProfileInterviewDialog", _FakeInterviewDialog)
     source = tmp_path / "source"
     source.mkdir()
     (source / "project.json").write_text(
@@ -227,7 +211,6 @@ def test_the_in_app_model_survives_a_copy_that_skips_the_interview(tmp_path, mon
     dlg._on_create()
 
     assert dlg.seeded is not None and dlg.seeded.ok
-    assert dlg.interview_dialog is None, "same DSP: nothing left to interview about"
     assert dlg.in_app_model == npd.AI_MODEL_IDS.get(dlg._ai_combo.currentText())
     assert dlg.in_app_model, "and it is a real model id, not an empty string"
 

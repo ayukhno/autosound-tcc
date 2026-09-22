@@ -55,7 +55,6 @@
     "tests/test_plan_panel.py": 0.45,
     "tests/test_process_view.py": 1.24,
     "tests/test_process_writer.py": 1.24,
-    "tests/test_profile_interview_dialog.py": 0.62,
     "tests/test_project_gate.py": 0.61,
     "tests/test_project_seed.py": 0.38,
     "tests/test_project_settings.py": 0.34,

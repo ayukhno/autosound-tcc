@@ -4,8 +4,8 @@ Qt's event loop is not asyncio-compatible, so an agent session cannot live on th
 owns a thread with its own asyncio loop, keeps the session inside it, and exposes exactly two safe
 operations to the GUI: `send()` and `stop()`. Everything coming back is a signal.
 
-Generalised from the pattern proven in `profile_interview_dialog` so the DSP-profile interview and
-the tuning dialog share one implementation. It is deliberately agnostic about what a session
+Generalised from the pattern proven in the DSP-profile interview window (removed with hub #194,
+when the intake became the skill's form); the tuning dialog is what uses it now. It is deliberately agnostic about what a session
 *yields*: the onboarding session yields text chunks, the tuning session yields SDK message
 objects, and both arrive on `chunk` for the caller to render.
 """

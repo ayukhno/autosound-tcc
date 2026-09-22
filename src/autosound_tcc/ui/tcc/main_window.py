@@ -2236,22 +2236,6 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        if dialog.interview_dialog is not None:
-            interview = dialog.interview_dialog
-            project_dir = dialog.project_dir
-
-            def _on_saved(_path: str) -> None:
-                interview.close()
-                if project_dir is not None:
-                    _force_project_dir_env(project_dir)
-                new_window = MainWindow()
-                new_window.show()
-                self.close()
-
-            interview.profile_saved.connect(_on_saved)
-            interview.show()
-            return
-
         if dialog.project_dir is None:
             return
 
@@ -2266,16 +2250,12 @@ class MainWindow(QMainWindow):
         # opens, so there's no ordering race to wait out here.
         new_window = MainWindow()
         new_window.show()
-        # Reached with NO interview and no terminal when the project was seeded from another one
-        # and came with its DSP profile: there is nothing left to onboard, so the new window IS
-        # the answer. It says what it inherited rather than opening silently on somebody else's
-        # facts.
+        # Every path now: the interview used to carry the model choice, and there is no interview
+        # any more (hub #194). A person chose Claude Opus 5, the window opened on "no model
+        # chosen", and the session they asked for never started (user, 2026-08-23).
+        new_window._adopt_choices_from_new_project(dialog)
+        # A copy says what it inherited rather than opening silently on somebody else's facts.
         if dialog.seeded is not None and dialog.seeded_from is not None:
-            # The models picked in the dialog were being dropped on this path: the interview is
-            # what used to carry them, and a copy skips it. So a person chose Claude Opus 5, the
-            # window opened on "no model chosen", and the session they asked for never started
-            # (user, 2026-08-23).
-            new_window._adopt_choices_from_new_project(dialog)
             said = i18n.t("npSeedDone").format(
                 source=dialog.seeded_from.name, files=", ".join(dialog.seeded.written)
             )
@@ -2286,27 +2266,11 @@ class MainWindow(QMainWindow):
             if still_open:
                 said = f"{said} {i18n.t('npSeedOpen').format(open=still_open)}"
             new_window._status_strip.notify(said)
-        if dialog.open_terminal_cli is not None:
-            language_name = i18n.language_name()
-            hint = i18n.t("npOnboardingHint").format(
-                vendor=dialog.onboarding_vendor,
-                model=dialog.onboarding_model,
-                language=language_name,
-            )
-            if dialog.seeded is not None and dialog.seeded_from is not None:
-                # The CLI must be told the folder is not empty. Without this it opens on a
-                # project full of inherited facts and starts the intake from "what car is it",
-                # which is the cost the seeding exists to remove.
-                hint = f"{hint} {i18n.t('npSeedHint').format(source=dialog.seeded_from.name)}"
-            try:
-                terminal_launcher.launch(
-                    dialog.project_dir,
-                    cli=dialog.open_terminal_cli,
-                    hint=hint,
-                    model=dialog.onboarding_ai_model,
-                )
-            except terminal_launcher.TerminalLaunchError as exc:
-                new_window._status_strip.notify(str(exc), level="warn")
+        # The intake is the skill's form, opened straight away. A terminal CLI chosen in the
+        # dialog is remembered and started from the gate offer, once the form has done its work.
+        new_window._intake_terminal_cli = dialog.open_terminal_cli
+        new_window._intake_terminal_model = dialog.onboarding_ai_model
+        new_window._open_intake_form()
         self.close()
 
     def _open_protective(self) -> None:

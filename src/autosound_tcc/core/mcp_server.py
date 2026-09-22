@@ -572,9 +572,9 @@ def build_server(
 
     # ---- onboarding (DSP-profile capture) -----------------------------------
     #
-    # The in-app onboarding chat (ProfileInterviewDialog) drives the SAME interview through the
-    # Claude Agent SDK's own in-process tool server (agent_session.build_tools) instead of these --
-    # that one is scoped to one vendor/model at construction time, since TCC itself supplies them.
+    # The in-app onboarding chat that drove the same interview through the SDK's in-process tool
+    # server (agent_session.build_tools) is gone since hub #194: a new project opens the skill's
+    # intake form instead. `dsp_profile_interview.py` still uses those tools from a terminal.
     # These exist so an EXTERNAL CLI (gemini, codex, claude -- "Open Terminal", provider-agnostic
     # by construction, see terminal_launcher.py) can run the identical interview against a brand
     # new project: there's no system_prompt= channel for an arbitrary external agent, so these tool

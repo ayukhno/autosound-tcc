@@ -277,10 +277,7 @@ answers the first five questions anybody would ask.",
         "npAiModel": "AI model",
         "npTerminalModel": "Model (optional)",
         "npTerminalModelPlaceholder": "e.g. {models} — blank = CLI default",
-        "npOnboardingHint": "Use the autosound-tuning skill for DSP-profile onboarding. Connect "
-                            "to this project's 'tcc' MCP server (see .mcp.json) and call its "
-                            "check_existing_profile tool first, for vendor={vendor} model={model}. "
-                            "Please conduct the interview in {language}.",
+        "npOnboardingHint": "Use the autosound-tuning skill. This project's intake was filled on the form, so read the project files first and continue from what the method still reports missing (contract.py check). Connect to this project's 'tcc' MCP server (see .mcp.json). Please work in {language}.",
         "langNameEn": "English",
         "langNameUk": "Ukrainian",
         "langNamePl": "Polish",
@@ -305,10 +302,6 @@ answers the first five questions anybody would ask.",
         "npSeedFailed": "Nothing was copied: {problem}",
         "npSeedDone": "System parameters copied from '{source}': {files}. They were inherited, not "
                       "measured here — check them against this build.",
-        "npSeedHint": "The system parameters were copied from the project '{source}' into this "
-                      "folder: read project.json and dsp_profile.json FIRST and go through them "
-                      "with the person, correcting what differs. Do not ask for the car to be "
-                      "described from scratch.",
         "riTitle": "Import from a Resonalyze project",
         "riFilePlaceholder": "A Resonalyze virtual-DSP session (.json)",
         "riAgainst": "Checked against",
@@ -336,9 +329,6 @@ answers the first five questions anybody would ask.",
         "riFailed": "This file could not be read:",
         "riClose": "Close",
         "riImport": "Import from a Resonalyze project…",
-        "npSeedNoInterview": "Its dsp_profile.json comes too, so the capability interview is "
-                             "skipped — there is nothing left to ask about a processor already "
-                             "described. Choose a different DSP above and it runs as usual.",
         "npSeedNoSkill": "The autosound-tuning skill is not available here, and the copying "
                          "lives in it — install the skill, or fill the new project in by hand.",
         "npSeedOpen": "The inherited DSP profile still has {open} fact(s) nobody has confirmed.",
@@ -1297,10 +1287,7 @@ Choose sweeps (sw) above to read this.",
         "npAiModel": "Модель ШІ",
         "npTerminalModel": "Модель (необовʼязково)",
         "npTerminalModelPlaceholder": "напр. {models} — пусто = дефолт CLI",
-        "npOnboardingHint": "Скористайся скілом autosound-tuning для onboarding DSP-профілю. "
-                            "Підключись до MCP-сервера 'tcc' цього проєкту (див. .mcp.json) і "
-                            "виклич його тул check_existing_profile першим, для vendor={vendor} "
-                            "model={model}. Веди інтерв'ю {language}.",
+        "npOnboardingHint": "Скористайся скілом autosound-tuning. Інтейк цього проєкту заповнено у формі, тож спершу прочитай файли проєкту й продовжуй із того, чого метод ще не має (contract.py check). Підключись до MCP-сервера 'tcc' цього проєкту (див. .mcp.json). Працюй {language}.",
         "langNameEn": "англійською",
         "langNameUk": "українською",
         "langNamePl": "польською",
@@ -1322,9 +1309,6 @@ Choose sweeps (sw) above to read this.",
         "npSeedFailed": "Нічого не скопійовано: {problem}",
         "npSeedDone": "Системні параметри скопійовано з «{source}»: {files}. Вони успадковані, а не "
                       "виміряні тут — звірте їх із цією збіркою.",
-        "npSeedHint": "Системні параметри скопійовано в цю теку з проєкту «{source}»: СПОЧАТКУ "
-                      "прочитай project.json і dsp_profile.json і пройди їх разом із людиною, "
-                      "виправляючи те, що відрізняється. Не проси описувати машину з нуля.",
         "riTitle": "Імпорт з проєкту Resonalyze",
         "riFilePlaceholder": "Сесія віртуального DSP Resonalyze (.json)",
         "riAgainst": "Звірено з",
@@ -1351,9 +1335,6 @@ Choose sweeps (sw) above to read this.",
         "riFailed": "Цей файл не вдалося прочитати:",
         "riClose": "Закрити",
         "riImport": "Імпорт з проєкту Resonalyze…",
-        "npSeedNoInterview": "Разом із ним прийде dsp_profile.json, тож інтерв'ю про можливості "
-                             "не буде — питати нема про що, процесор уже описаний. Виберіть інший "
-                             "DSP вище — і воно піде як завжди.",
         "npSeedNoSkill": "Скіл autosound-tuning тут недоступний, а копіювання живе в ньому — "
                          "встановіть скіл або заповніть новий проєкт вручну.",
         "npSeedOpen": "У успадкованому профілі DSP ще {open} фактів, яких ніхто не підтвердив.",
@@ -2269,9 +2250,7 @@ Choose sweeps (sw) above to read this.",
         "npAiModel": 'Model AI',
         "npTerminalModel": 'Model (opcjonalnie)',
         "npTerminalModelPlaceholder": 'np. {models} — puste = domyślny CLI',
-        "npOnboardingHint": 'Skorzystaj ze skilla autosound-tuning do onboardingu profilu DSP. Podłącz się do serwera MCP '
-                            "'tcc' tego projektu (zob. .mcp.json) i wywołaj najpierw jego narzędzie "
-                            'check_existing_profile, dla vendor={vendor} model={model}. Prowadź wywiad {language}.',
+        "npOnboardingHint": "Skorzystaj ze skilla autosound-tuning. Intake tego projektu wypełniono w formularzu, więc najpierw przeczytaj pliki projektu i kontynuuj od tego, czego metoda jeszcze nie ma (contract.py check). Połącz się z serwerem MCP 'tcc' tego projektu (zob. .mcp.json). Pracuj {language}.",
         "langNameEn": 'po angielsku',
         "langNameUk": 'po ukraińsku',
         "langNamePl": 'po polsku',
@@ -2292,9 +2271,6 @@ Choose sweeps (sw) above to read this.",
         "npSeedFailed": 'Nic nie skopiowano: {problem}',
         "npSeedDone": 'Parametry systemu skopiowano z «{source}»: {files}. Są odziedziczone, a nie zmierzone tutaj '
                       '— zweryfikuj je z tą instalacją.',
-        "npSeedHint": 'Parametry systemu skopiowano do tego folderu z projektu «{source}»: NAJPIERW przeczytaj '
-                      'project.json i dsp_profile.json i przejdź je razem z osobą, poprawiając to, co się różni. '
-                      'Nie proś o opisanie auta od zera.',
         "riTitle": 'Import z projektu Resonalyze',
         "riFilePlaceholder": 'Sesja wirtualnego DSP Resonalyze (.json)',
         "riAgainst": 'Zweryfikowano z',
@@ -2321,8 +2297,6 @@ Choose sweeps (sw) above to read this.",
         "riFailed": 'Nie udało się odczytać tego pliku:',
         "riClose": 'Zamknij',
         "riImport": 'Import z projektu Resonalyze…',
-        "npSeedNoInterview": 'Razem z nim przyjdzie dsp_profile.json, więc wywiadu o możliwościach nie będzie — nie ma o '
-                             'co pytać, procesor jest już opisany. Wybierz inny DSP wyżej, a pójdzie jak zwykle.',
         "npSeedNoSkill": 'Skill autosound-tuning jest tu niedostępny, a kopiowanie mieszka w nim — zainstaluj skill '
                          'albo wypełnij nowy projekt ręcznie.',
         "npSeedOpen": 'W odziedziczonym profilu DSP jest jeszcze {open} faktów, których nikt nie potwierdził.',
@@ -3303,10 +3277,7 @@ Choose sweeps (sw) above to read this.",
         "npAiModel": 'KI-Modell',
         "npTerminalModel": 'Modell (optional)',
         "npTerminalModelPlaceholder": 'z. B. {models} — leer = Standard des CLI',
-        "npOnboardingHint": 'Nutze den Skill autosound-tuning für das Onboarding des DSP-Profils. Verbinde dich mit dem '
-                            "'tcc'-MCP-Server dieses Projekts (siehe .mcp.json) und rufe zuerst dessen Werkzeug "
-                            'check_existing_profile auf, für vendor={vendor} model={model}. Führe das Interview '
-                            '{language}.',
+        "npOnboardingHint": "Nutze den Skill autosound-tuning. Das Intake dieses Projekts wurde im Formular ausgefüllt; lies zuerst die Projektdateien und mach dort weiter, wo die Methode noch etwas vermisst (contract.py check). Verbinde dich mit dem MCP-Server 'tcc' dieses Projekts (siehe .mcp.json). Arbeite {language}.",
         "langNameEn": 'auf Englisch',
         "langNameUk": 'auf Ukrainisch',
         "langNamePl": 'auf Polnisch',
@@ -3327,9 +3298,6 @@ Choose sweeps (sw) above to read this.",
         "npSeedFailed": 'Es wurde nichts kopiert: {problem}',
         "npSeedDone": 'Systemparameter aus „{source}“ kopiert: {files}. Sie sind geerbt, nicht hier gemessen — '
                       'gleiche sie mit diesem Aufbau ab.',
-        "npSeedHint": 'Die Systemparameter wurden aus dem Projekt „{source}“ in diesen Ordner kopiert: lies ZUERST '
-                      'project.json und dsp_profile.json und geh sie mit der Person durch, wobei du korrigierst, '
-                      'was abweicht. Bitte nicht darum, das Auto von Grund auf zu beschreiben.',
         "riTitle": 'Import aus einem Resonalyze-Projekt',
         "riFilePlaceholder": 'Eine Resonalyze-Sitzung des virtuellen DSP (.json)',
         "riAgainst": 'Geprüft gegen',
@@ -3356,9 +3324,6 @@ Choose sweeps (sw) above to read this.",
         "riFailed": 'Diese Datei konnte nicht gelesen werden:',
         "riClose": 'Schließen',
         "riImport": 'Aus einem Resonalyze-Projekt importieren…',
-        "npSeedNoInterview": 'Seine dsp_profile.json kommt mit, also entfällt das Fähigkeiten-Interview — zu einem bereits '
-                             'beschriebenen Prozessor bleibt nichts zu fragen. Wähle oben ein anderes DSP, dann läuft es '
-                             'wie gewohnt.',
         "npSeedNoSkill": 'Der Skill autosound-tuning ist hier nicht verfügbar, und das Kopieren steckt in ihm — '
                          'installiere den Skill, oder fülle das neue Projekt von Hand aus.',
         "npSeedOpen": 'Im geerbten DSP-Profil stehen noch {open} Fakt(en), die niemand bestätigt hat.',

@@ -77,7 +77,7 @@ def test_language_choices_are_named_in_the_current_language():
         i18n.set_language("de")
         assert i18n.language_choices() == [("en", "auf Englisch"), ("uk", "auf Ukrainisch"),
                                            ("pl", "auf Polnisch"), ("de", "auf Deutsch")]
-        # The one that goes into `npOnboardingHint`: "Führe das Interview auf Deutsch."
+        # The one that goes into `npOnboardingHint`: "Arbeite auf Deutsch."
         assert i18n.language_name() == "auf Deutsch"
         assert i18n.language_name("pl") == "auf Polnisch"
     finally:

@@ -1,7 +1,7 @@
-""""Create new project" entry point (docs/TCC-TZ.md): folder + vendor/model + AI model, then
-hands off to the existing `ProfileInterviewDialog` -- no new interview logic here, just supplying
-the three inputs it already needs (the same ones `dsp_profile_interview.py`'s CLI takes as
-`--project-dir`/`--vendor`/`--model`; the interview itself asks everything else conversationally).
+""""Create new project" entry point (docs/TCC-TZ.md): folder + DSP vendor/model + how the AI
+runs. The intake itself is the skill's served form, which the new window opens straight away (hub
+#194, the Arbiter 2026-09-22: one form for every front end) -- this dialog no longer starts a
+conversational interview.
 
 Since 2026-08-23 it can also START FROM AN EXISTING PROJECT instead of from nothing: pick a folder
 that already has a `project.json` and the car, the drivers, the glossary and the prose come over
@@ -11,9 +11,8 @@ Two consequences show up here rather than in that module:
 
 * picking a source fills the DSP vendor/model from it, because those two strings are matched
   EXACTLY against the bundled profiles and the source already holds a pair that matched once;
-* if the DSP is the same one, the capability interview is skipped altogether -- it would be an
-  interview about a `dsp_profile.json` that is already sitting in the new folder. Change the DSP
-  and the profile does not travel, the rest still does, and the interview runs as before.
+* if the DSP is the same one, its profile travels with the copy; change the DSP and it does not,
+  the rest still does, and the form's own `/new-dsp` page asks for the new processor.
 """
 
 from __future__ import annotations
@@ -39,7 +38,6 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config, model_choices, terminal_launcher, vendor_loader
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
-from autosound_tcc.ui.tcc.profile_interview_dialog import ProfileInterviewDialog
 
 
 def _field_label(text: str) -> QLabel:
@@ -92,10 +90,9 @@ _SEED_NOTE_DELAY_MS = 250
 
 
 class NewProjectDialog(QDialog):
-    """Collects folder + vendor + model + AI model, then constructs (but does not show)
-    `ProfileInterviewDialog` -- the caller (`main_window._open_new_project_dialog`) owns showing
-    it and reacting to its `profile_saved` signal, since that's where the "restart pointed at the
-    new project" logic belongs."""
+    """Collects folder + vendor + model + how the AI runs, creates the project, and hands the
+    caller (`main_window._open_new_project_dialog`) what it needs to open the new window on the
+    intake form."""
 
     def __init__(self, parent=None, seed_first: bool = False) -> None:
         """`seed_first` opens straight on "copy from an existing project": the main menu offers
@@ -106,7 +103,6 @@ class NewProjectDialog(QDialog):
         self.setModal(True)
         self.setWindowTitle(i18n.t("npTitle"))
         self.setMinimumWidth(420)
-        self.interview_dialog: Optional[ProfileInterviewDialog] = None
         #: `describe()`'s answer for the folder currently picked, kept so the note can be redrawn
         #: when the DSP choice changes without reading the folder again.
         self._seed_describes = None
@@ -125,9 +121,9 @@ class NewProjectDialog(QDialog):
         self.onboarding_vendor: str = ""
         self.onboarding_model: str = ""
         self.onboarding_ai_model: Optional[str] = None
-        #: The in-app pick, kept for the path that runs NO interview: a copied project skips the
-        #: capability questions, and the model chosen here would otherwise be dropped on the floor
-        #: -- the window then opened on "no model chosen" (user, 2026-08-23).
+        #: The in-app pick, kept for the new window: no interview carries it any more (hub #194),
+        #: and a model chosen here and dropped is a window that opens on "no model chosen" (user,
+        #: 2026-08-23).
         self.in_app_model: Optional[str] = None
         #: What was copied in, for the caller to report. None when the project starts empty.
         #: Typed loosely on purpose: the class is the method's (`rew_tool/project_seed.py`),
@@ -196,18 +192,6 @@ class NewProjectDialog(QDialog):
         # offered blind -- "and what was measured there" with no count of what "what" is (#48).
         self._seed_findings.toggled.connect(self._refresh_seed_note_now)
         layout.addWidget(self._seed_findings)
-
-        # Said here rather than discovered afterwards: with the same DSP, the capability interview
-        # does not run at all, and a person who chose an AI model below deserves to know why they
-        # are never asked anything.
-        self._seed_no_interview = QLabel(i18n.t("npSeedNoInterview"))
-        self._seed_no_interview.setWordWrap(True)
-        self._seed_no_interview.setProperty("class", "kv-lbl")
-        self._seed_no_interview.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding
-        )
-        self._seed_no_interview.setVisible(False)
-        layout.addWidget(self._seed_no_interview)
 
         layout.addWidget(_field_label(i18n.t("npProfile")))
         self._profile_combo = QComboBox()
@@ -298,7 +282,6 @@ class NewProjectDialog(QDialog):
         for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
                        self._seed_findings):
             widget.setVisible(copying)
-        self._seed_no_interview.setVisible(False)
         if copying:
             self._on_seed_source(self._seed_edit.text())
 
@@ -321,11 +304,9 @@ class NewProjectDialog(QDialog):
         self._seed_describes = summary
         if source is None:
             self._set_seed_note("", warn=False)
-            self._seed_no_interview.setVisible(False)
             return
         if summary is None:
             self._set_seed_note(i18n.t("npSeedNotAProject"), warn=True)
-            self._seed_no_interview.setVisible(False)
             return
         self._prefill_dsp(source)
         # At once, not on the typing delay: picking a folder is one deliberate act, and the note
@@ -434,7 +415,6 @@ class NewProjectDialog(QDialog):
         """
         seeder = _seeder()
         pair = seeder.dsp_of(source) if seeder else None
-        self._seed_no_interview.setVisible(pair is not None)
         if pair is None:
             return
         # Guarded: every line below writes into a field that redraws the note, and the note reads
@@ -543,7 +523,7 @@ class NewProjectDialog(QDialog):
                 project_dir,
                 include_findings=self._seed_findings.isChecked(),
                 # The profile travels only when it is the same DSP. Pick a different one and its
-                # capabilities are a question for the interview, not a file to inherit.
+                # capabilities are a question for the form's /new-dsp page, not a file to inherit.
                 copy_profile=seeder.dsp_of(source) == (vendor, model),
                 note=i18n.t("npSeedNote"),
             )
@@ -558,23 +538,9 @@ class NewProjectDialog(QDialog):
         config.set_project_dir(project_dir)
         self.project_dir = project_dir
 
-        # A project that arrived with its `dsp_profile.json` has nothing left to interview about:
-        # the capability checklist would be asking after a file already in the folder. Everything
-        # else about the new project is unchanged, including the terminal path below -- a person
-        # who asked for a CLI still gets one, told what came over rather than what to ask.
-        interview_needed = (
-            self.seeded is None or _seeder().PROFILE_FILE not in self.seeded.written
-        )
-
         cli = self._run_via_combo.currentData()
         if cli is None:
             self.in_app_model = AI_MODEL_IDS.get(self._ai_combo.currentText())
-            if interview_needed:
-                ai_model = self.in_app_model
-                self.interview_dialog = ProfileInterviewDialog(
-                    project_dir, vendor, model, ai_model, i18n.current_language(),
-                    parent=self.parent(),
-                )
         else:
             self.open_terminal_cli = cli
             self.onboarding_vendor = vendor
