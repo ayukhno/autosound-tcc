@@ -56,16 +56,18 @@ class _ContractWorker(QThread):
 
     result = Signal(object)  # ContractReport
 
-    def __init__(self, project_dir) -> None:
+    def __init__(self, project_dir, skip_rew: bool = False) -> None:
         super().__init__()
         self._project_dir = project_dir
+        self._skip_rew = skip_rew
         self._child = None
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
 
     def run(self) -> None:
-        self.result.emit(contract_check.run(self._project_dir, register=self._took_child))
+        self.result.emit(contract_check.run(self._project_dir, skip_rew=self._skip_rew,
+                                            register=self._took_child))
 
     def _took_child(self, child) -> None:
         self._child = child

@@ -58,6 +58,9 @@ class ContractReport:
     #: gated: not issues, and not in `ok`.
     inherited: tuple[dict, ...] = ()
     sources_gone: tuple[str, ...] = ()
+    #: The phase −1 gate: intake left everything phase 0 needs (`contract.py`'s own `complete`,
+    #: what `--gate` exits on). False when the method does not say -- not a green gate.
+    complete: bool = False
 
     @property
     def available(self) -> bool:
@@ -240,4 +243,5 @@ def report_from_json(report: dict, project_dir, checked_at: str, duration_s: flo
         duration_s=duration_s,
         inherited=tuple(row for row in report.get("inherited") or [] if isinstance(row, dict)),
         sources_gone=tuple(str(path) for path in report.get("sources_gone") or []),
+        complete=bool(report.get("complete")),
     )

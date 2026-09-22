@@ -162,3 +162,14 @@ def test_the_report_carries_inherited_facts_and_gone_sources():
                                  "from_exists": False},)
     assert report.sources_gone == ("/old",)
 
+
+
+def test_complete_is_the_gate_verdict_the_report_already_carries():
+    from autosound_tcc.core.contract_check import report_from_json
+
+    done = report_from_json({"ok": True, "complete": True, "files": []}, "/p", "t", 0.1)
+    open_ = report_from_json({"ok": True, "complete": False, "files": []}, "/p", "t", 0.1)
+    older = report_from_json({"ok": True, "files": []}, "/p", "t", 0.1)
+    assert done.complete is True
+    assert open_.complete is False
+    assert older.complete is False, "a method that does not say is not a green gate"
