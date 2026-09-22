@@ -2113,6 +2113,8 @@ combination above is not one a shard produces.
 
 **Seen again 2026-09-22 (second stumble).** `pytest tests/test_intake_window.py tests/test_measurement_panel.py tests/test_i18n_languages.py tests/test_main_window.py -n 4` hung past 600 s with no output; the same command rerun passed in 12.7 s, and each file passes serially. Same class: a worker lost under `-n 4`, and xdist then waits forever instead of failing.
 
+**Not reproduced 2026-09-22 night.** The original combination (`test_plan_panel`, `test_process_view`, `test_project_view`, `test_main_window`, `test_i18n_languages`, `test_plan_audit`) ran 3 of 3 green under `-n 4` (291 tests, 12–15 s) on `wave-0.1.43`. Left open: a crash that shows 2 of 3 one day and 0 of 3 the next is not diagnosed by a quiet evening.
+
 ### F-060 — Carry `planned` on a skipped capture, once the method emits it
 
 **Статус**: done 2026-09-20 · the readers carry it; the PIN still waits for the method's tag
