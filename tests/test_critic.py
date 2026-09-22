@@ -625,3 +625,22 @@ def test_a_key_in_the_launching_shell_does_not_reroute_a_cli_pick_to_the_api(tmp
 def test_an_api_pick_keeps_its_key(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "AQ." + "x" * 50)
     assert "GEMINI_API_KEY" in _env_seen_by_reviewer(tmp_path, monkeypatch, "omp")
+
+
+def test_a_session_shell_inherits_the_reviewer_the_arbiter_picked(tmp_path, monkeypatch):
+    """Findings 17, 21: a session that ran the reviewer script itself was refused for "no model"
+    although TCC had one picked. The session's environment now carries it."""
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "configured", lambda _p: ("gemini-3.8-flash-high", "agy"))
+    monkeypatch.setattr(critic, "critic_bin_override", lambda harness="": {"AUTOSOUND_CRITIC_BIN": "agy"})
+    assert critic.session_env(tmp_path) == {"AUTOSOUND_CRITIC_MODEL": "gemini-3.8-flash-high",
+                                            "AUTOSOUND_CRITIC_BIN": "agy"}
+    monkeypatch.setattr(critic, "configured", lambda _p: ("", ""))
+    assert critic.session_env(tmp_path) == {}
+
+
+def test_the_session_is_told_to_reach_the_reviewer_through_tcc():
+    from autosound_tcc.core import tuning_session
+
+    assert "call_critic" in tuning_session.SYSTEM_PROMPT_APPEND

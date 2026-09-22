@@ -234,6 +234,36 @@ def write_package(markdown: str, project_dir: Optional[Path] = None) -> Path:
     return path
 
 
+def configured(project_dir: Path) -> tuple[str, str]:
+    """`(model, route)` of the reviewer this project's footer is set to — `("", "")` when none.
+
+    One answer for every caller: the MCP tool that runs the reviewer and the session environment
+    that a direct call inherits read the same pair (findings 17/21, `#45`).
+    """
+    from autosound_tcc.core import model_choices, project_settings
+
+    resolved, choice = model_choices.resolve_critic(
+        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
+    model = choice.model if choice is not None else ""
+    route = resolved.key.partition(":")[0] if ":" in resolved.key else ""
+    return model, route
+
+
+def session_env(project_dir: Path) -> dict:
+    """What a tuning session's own shell should know about the reviewer the Arbiter picked.
+
+    A session that runs the reviewer script itself — the route the method still documents — did
+    not inherit the pick and was refused for "no model" (findings 17, 21; `#45` point 3). The
+    reviewer reads `AUTOSOUND_CRITIC_MODEL` first, and the binary TCC would use goes with it.
+    """
+    model, route = configured(project_dir)
+    if not model:
+        return {}
+    env = {"AUTOSOUND_CRITIC_MODEL": model}
+    env.update(critic_bin_override(harness=route))
+    return env
+
+
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
 _CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",)}

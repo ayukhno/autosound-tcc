@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import openers
-from autosound_tcc.core import child, config, model_choices, signal_bus, vendor_loader
+from autosound_tcc.core import child, config, critic, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -833,7 +833,8 @@ class OmpSession:
             stderr=asyncio.subprocess.PIPE,
             # omp shells out to the skill, whose scripts are in a git submodule; without this its
             # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
-            env=vendor_loader.child_env(),
+            # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`).
+            env=vendor_loader.child_env(**critic.session_env(self.project_dir)),
             # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
             # the other half — no console window on Windows (see core/child.py).
             **child.flags(),

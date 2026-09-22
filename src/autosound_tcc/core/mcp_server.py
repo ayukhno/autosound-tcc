@@ -199,9 +199,7 @@ def configured_critic_model(project_dir: Path) -> str:
     Through `model_choices.resolve_critic`, so a machine-level alias is honoured here exactly as it
     is in the picker; two answers to "which model" is how they came to disagree in the first place.
     """
-    _, choice = model_choices.resolve_critic(
-        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
-    return choice.model if choice is not None else ""
+    return critic.configured(project_dir)[0]
 
 
 def configured_critic_harness(project_dir: Path) -> str:
@@ -211,9 +209,7 @@ def configured_critic_harness(project_dir: Path) -> str:
     belong together: a model name without the CLI it runs on is what let TCC's pick and the
     machine's environment point at different reviewers for ten calls running (TCC-002).
     """
-    resolved, _ = model_choices.resolve_critic(
-        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
-    return resolved.key.partition(":")[0] if ":" in resolved.key else ""
+    return critic.configured(project_dir)[1]
 
 
 def clipboard_reason(project_dir: Path) -> str:
