@@ -100,6 +100,10 @@ Skill branch `wave-2026-09-20` carries them; not tagged yet.
 A whole new shape, deferred from W-1. One decision comes before any code: the confirmation bar
 lives in the panel this mode hides, and TCC's own tools raise confirmations in every mode.
 
+**How it looks is discussed with the Arbiter BEFORE any code** — shown as a prototype or in a
+design tool, not described (the Arbiter, 2026-09-22: «не забудь зі мною обговорити як це буде
+виглядати»).
+
 ### 8 · Machinery
 
 - **`F-071`** a test crashes its worker under `-n 4`.

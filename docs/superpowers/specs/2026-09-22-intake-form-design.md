@@ -61,7 +61,8 @@ class IntakeFormError(Exception): ... # carries a sentence for the Arbiter, not 
 - **The gate offer.** The existing project watcher already reloads after the form writes
   `project.json` / `dsp_profile.json` (`_reload_project_files`, coalesced). After that reload, when
   `IntakeForm.was_opened` is true and no tuning session is running, a worker runs
-  `contract_check.run(project_dir, gate=True)`. Green → the status strip shows «Інтейк готовий»
+  `contract_check.run(project_dir, skip_rew=True)` and reads the report's own `complete` — the verdict
+  `--gate` exits on, already in the JSON TCC parses. Green → the status strip shows «Інтейк готовий»
   with a «Стартувати сесію» button, once per green (not again on the next reload while nothing
   changed). Red → nothing: the page itself shows what is missing.
 - «Стартувати сесію» starts the route the project was created with: the in-app session
@@ -70,13 +71,13 @@ class IntakeFormError(Exception): ... # carries a sentence for the Arbiter, not 
 
 ### `core/contract_check.py`
 
-`run(..., gate: bool = False)` passes `--gate`. Nothing else changes; `ok` already carries the
-verdict.
+`ContractReport.complete` is read from the report's top-level `complete` (what `--gate` exits on);
+no flag is passed. False when the method does not say.
 
 ### `ui/tcc/status_strip.py`
 
-`notify(text, level="info", action=None)` where `action` is `(label, callback)`: a flat button at
-the end of the strip, removed with the message. The strip's timer does not expire a message that
+`notify(text, level="info", action=None)` where `action` is `(label, callback)`: a link at the end
+of the line (the strip is a `QLabel`), taken once and removed with the message. The strip's timer does not expire a message that
 carries an action.
 
 ### `ui/tcc/new_project_dialog.py` and the new-project flow
@@ -91,7 +92,8 @@ carries an action.
   filled on the form; continue from what the method still reports missing.
 - **The seat at the copy (`#193`).** In the copy mode a «Місце слухача» combo lists
   `project.PROJECT_TYPES` (driver, passenger, both, all, rear_left, rear_right) with translated
-  labels, no default (an empty first entry), and the source's own seat beside it («у джерелі:
+  labels read from the method's own form translations (`rew_tool/intake_i18n/<lang>.json`,
+  `fields["goal.reference_seat"].enum`), no default (an empty first entry), and the source's own seat beside it («у джерелі:
   водій», read from the source's `project.json` `project_type`; «не задано» when absent).
   «Створити» stays disabled until a seat is chosen. The choice goes into both `seed()` calls — the
   preview (`_would_travel`) and the real one — as `seat=`.
@@ -99,8 +101,9 @@ carries an action.
 ### Strings
 
 New `i18n` keys in all four languages: `menuIntake`, `menuIntakeTip`, `intakeNoForm`,
-`intakeFailed`, `intakeReady`, `intakeStartSession`, `npSeat`, `npSeatSource`, `npSeatUnset`, and
-one per seat. `npOnboardingHint` is rewritten in all four.
+`intakeFailed`, `intakeOpenByHand`, `intakeNoProject`, `intakeReady`, `intakeStartSession`,
+`npSeat`, `npSeatPick`, `npSeatSource`, `npSeatUnset`. The seats' own names are the method's.
+`npOnboardingHint` is rewritten in all four; `npSeedNoInterview` and `npSeedHint` go.
 
 ## The method it needs
 
@@ -125,7 +128,7 @@ build on the old pin says `intakeNoForm` instead of failing.
   `open_url()` does not start a second process; `stop()` ends it and is idempotent; a script that
   never prints the line → `IntakeFormError` and no process left; a missing script →
   `IntakeFormError` without starting anything; the command carries `--lang` and `--port 0`.
-- `contract_check.run(gate=True)` passes `--gate`.
+- `ContractReport.complete` follows the report's `complete`, and is False when it is absent.
 - The status strip's action button: shown, clicked once, removed with the message.
 - The gate offer: shown once on green, not while a session runs, not when the form was never
   opened, not again on a reload with nothing changed.
