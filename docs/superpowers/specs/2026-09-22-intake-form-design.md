@@ -17,7 +17,7 @@ for the rest — and the Arbiter's verdict on walking Phase −1 that way was «
 1. **The form REPLACES the conversational intake** in the new-project flow. The AI session finishes
    only what the form does not ask (the profile's `finalize`, the channel glossary).
 2. **After the form, TCC OFFERS the session**: when `contract.py check --gate` passes, the status
-   strip says so with a start button. The start is the Arbiter's click, never automatic.
+   strip says so with a start link. The start is the Arbiter's click, never automatic.
 3. **A child process through `subprocess.Popen`**, like `contract.py` and the reviewer scripts —
    not `QProcess` (it would go around `core/child.py`'s Windows console handling) and not
    in-process (`intake_form` rewrites `sys.path`, the reason `contract.py` is out of process too).
@@ -63,7 +63,7 @@ class IntakeFormError(Exception): ... # carries a sentence for the Arbiter, not 
   `IntakeForm.was_opened` is true and no tuning session is running, a worker runs
   `contract_check.run(project_dir, skip_rew=True)` and reads the report's own `complete` — the verdict
   `--gate` exits on, already in the JSON TCC parses. Green → the status strip shows «Інтейк готовий»
-  with a «Стартувати сесію» button, once per green (not again on the next reload while nothing
+  with a «Стартувати сесію» link, once per green (not again on the next reload while nothing
   changed). Red → nothing: the page itself shows what is missing.
 - «Стартувати сесію» starts the route the project was created with: the in-app session
   (`_start_tuning_session`), or — when the new-project dialog chose a terminal CLI in this window —
