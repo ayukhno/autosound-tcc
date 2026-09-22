@@ -1840,8 +1840,9 @@ the way the findings box already does.
 **Статус**: closed 2026-09-22 · `v0.1.42` cut 2026-09-20 on `b35dca6`, pinned to the published
 `v3.0.59`; milestone `W-1 · v0.1.42` closed the same day (`gh api
 repos/ayukhno/autosound-tcc/milestones/1 --jq .state` → `closed`). Hub `#181` and `#188` closed
-2026-09-22. What stays open of W-1 is the method's half — `W-1 · v3.0.59` in the skill repo, with
-its `#47`, `#48`, `#49` waiting for the Arbiter's test. The text below is the state of 2026-09-19.
+2026-09-22. The method's half closed the same evening: `W-1 · v3.0.59` closed 2026-09-22 20:08Z
+with `#48` in it; `#47` and `#49` left the milestone and stay open. W-1 is closed on both
+products, so the next wave reads `W-2`. The text below is the state of 2026-09-19.
 
 Branch `wave-0.1.42` carried the whole wave — TCC-020 (sharded CI), TCC-021 (a tag cannot pin an
 unpublished method), TCC-022 (this repo's `CLAUDE.md` now points at `governance/WAVES.md`). PR #42
