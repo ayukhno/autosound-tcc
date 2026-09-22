@@ -831,6 +831,18 @@ class MainWindow(QMainWindow):
         self._preset_combo.currentIndexChanged.connect(self._on_preset_index)
         layout.addWidget(self._preset_combo)
 
+        # The configuration standing in that preset, and whether all of it is entered in the DSP
+        # (F-070, the Arbiter 2026-09-19): what is IN the processor changes every round, while the
+        # processor itself never does -- so its name moved into this tooltip. Beside the preset,
+        # because a configuration is fixed IN a preset (the vocabulary of 2026-09-20).
+        self._version_dot = TrafficLight("wait")
+        self._version_dot.setVisible(False)
+        layout.addWidget(self._version_dot)
+        self._version_label = QLabel("")
+        self._version_label.setProperty("class", "slot-val")
+        self._version_tip = attach_tip(self._version_label, "")
+        layout.addWidget(self._version_label)
+
         self._slot_label = QLabel("")
         self._slot_label.setProperty("class", "slot-val")
         layout.addWidget(self._slot_label)
@@ -854,10 +866,6 @@ class MainWindow(QMainWindow):
         self._target_tip = attach_tip(self._target_label, i18n.t("targetToolTip"))
         self._target_label.mousePressEvent = self._open_target_curve_tool  # type: ignore[assignment]
         layout.addWidget(self._target_label)
-
-        self._version_label = QLabel("")
-        self._version_label.setProperty("class", "phead-sub")
-        layout.addWidget(self._version_label)
         layout.addStretch(1)
 
         # Always visible (not just in the no-project states). The project files and the ledger are
@@ -2121,6 +2129,9 @@ class MainWindow(QMainWindow):
             self._slot_label.setText("")
             self._save_label.setText("")
             self._target_label.setText("")
+            # No configuration yet, so no version and nothing to be yellow or green about.
+            self._version_label.setText("")
+            self._version_dot.setVisible(False)
             self._refresh_process()
             return
         try:
@@ -2156,8 +2167,25 @@ class MainWindow(QMainWindow):
         self._slot_label.setText(view.slot_label or "")
         self._save_label.setText(view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
-        self._version_label.setText(view.version or "")
+        self._show_version(view, profile)
         self._show_banked_delta(view.version, preset)
+
+    def _show_version(self, view, profile: dict) -> None:
+        """`v_008` with its dot: yellow while any channel is only proposed, green once all of it
+        is entered (`attest`), and the processor's name with the counts on hover (F-070)."""
+        self._version_shown = (view, profile)  # a language switch re-says the tooltip
+        self._version_label.setText(view.version or "")
+        state = view.state if view.version else None
+        self._version_dot.setVisible(state is not None)
+        if state is not None:
+            self._version_dot.set_status("wait" if state == "proposed" else "done")
+        prof = profile.get("dsp_profile", profile)
+        counts = dict(view.status_counts)
+        self._version_tip.set_text(i18n.t("versionTip").format(
+            dsp=f"{prof.get('vendor', '?')} {prof.get('name', '?')}",
+            version=view.version or "—", preset=view.preset,
+            applied=counts.get("applied", 0), proposed=counts.get("proposed", 0),
+            measured=counts.get("measured", 0)) if view.version else "")
 
     def _open_intake_form(self) -> None:
         """Start the skill's intake form for this project, or reopen the one already running.
@@ -4787,6 +4815,9 @@ class MainWindow(QMainWindow):
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))
         self._target_tip.set_text(i18n.t("targetToolTip"))
+        shown = getattr(self, "_version_shown", None)
+        if shown is not None:
+            self._show_version(*shown)
         self._refresh_tip.set_text(i18n.t("refreshProjectTip"))
         self._diag_tip.set_text(i18n.t("diagBtnTip"))
         self._ai_main_lbl.setText(i18n.t("aiMain"))

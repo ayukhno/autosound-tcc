@@ -198,3 +198,22 @@ def test_create_opens_the_new_window_on_the_form(tmp_path, monkeypatch):
     assert new.calls == ["show", "adopt", "intake"]
     assert (new._intake_terminal_cli, new._intake_terminal_model) == ("claude", "opus")
     assert launched == [], "the terminal waits for the gate, it does not start at Create"
+
+
+def test_the_header_shows_the_version_with_its_state_and_the_processor_on_hover(tmp_path, monkeypatch):
+    """F-070: `v_NNN` beside the preset, a yellow dot while anything is only proposed and a green
+    one once all of it is entered; the processor's name is in the tooltip."""
+    from types import SimpleNamespace
+
+    window, _ = _window(tmp_path, monkeypatch)
+    profile = {"dsp_profile": {"vendor": "Audiotec-Fischer", "name": "Helix DSP Ultra S"}}
+    view = SimpleNamespace(version="v_008", preset="SQ", state="proposed",
+                           status_counts=(("applied", 9), ("proposed", 1)))
+    window._show_version(view, profile)
+    assert window._version_label.text() == "v_008"
+    assert not window._version_dot.isHidden()
+    assert "tl-wait" in window._version_dot.property("class")
+    view.state = "applied"
+    window._show_version(view, profile)
+    assert "tl-done" in window._version_dot.property("class")
+    assert "Helix DSP Ultra S" in window._version_tip._text

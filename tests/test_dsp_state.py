@@ -607,3 +607,37 @@ def test_the_project_file_is_read_as_utf8_and_not_as_the_machines_locale(tmp_pat
         project.read_text(encoding="cp1252")  # what the old line did on that machine
 
     assert load_hardware_controls(tmp_path) == {"RearRC": "0 dB", "SubRC": "−3 dB"}
+
+
+def _with_statuses(statuses):
+    """The sample ledger with its output channels set to these statuses, in order."""
+    ledger = json.loads(json.dumps(LEDGER))
+    for (name, row), status in zip(ledger["channels"].items(), statuses):
+        if status is None:
+            row.pop("status", None)
+        else:
+            row["status"] = status
+    return ledger
+
+
+def test_a_version_is_proposed_while_any_channel_waits_to_be_entered():
+    """F-070: the dot in the header is yellow while anything of this version is only proposed —
+    `attest` is what turns `proposed` into `applied` (the skill's `apply.attest`)."""
+    n = len(LEDGER["channels"])
+    waiting = _view(_with_statuses(["applied"] * (n - 1) + ["proposed"]))
+    assert waiting.state == "proposed"
+    assert dict(waiting.status_counts)["proposed"] == 1
+
+
+def test_a_version_all_entered_or_measured_is_applied():
+    n = len(LEDGER["channels"])
+    view = _view(_with_statuses(["measured"] + ["applied"] * (n - 1)))
+    assert view.state == "applied"
+    assert dict(view.status_counts) == {"measured": 1, "applied": n - 1}
+
+
+def test_a_channel_with_no_status_counts_as_proposed_as_the_method_reads_it():
+    """The skill renders a missing status as `proposed` (`state.render`), so the header does too."""
+    n = len(LEDGER["channels"])
+    view = _view(_with_statuses([None] + ["applied"] * (n - 1)))
+    assert view.state == "proposed"

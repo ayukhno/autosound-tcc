@@ -357,6 +357,7 @@ answers the first five questions anybody would ask.",
         "intakeNoProject": "Open or create a project first — the form fills a project folder.",
         "intakeReady": "The intake is complete — phase 0 has everything it needs.",
         "intakeStartSession": "Start the session",
+        "versionTip": "{dsp} — configuration {version} of preset {preset}. Entered in the DSP: {applied}; proposed, not yet entered: {proposed}; measured since: {measured}. The dot is yellow while anything is only proposed, green once all of it is entered (attest).",
         "menuCopyCarTip": "Start a project from one that already exists: the car, the equipment and the installation — make, drivers per channel, amps, mic, the DSP and its profile, the naming glossary. What was MEASURED in the other project stays there unless you ask for it. You adjust what differs instead of describing your own car again.",
         "menuModelsTip": "Which models this project may use — the generator, the critic and how hard they are asked to think. Everything except Claude runs through OMP, so what you mark here is what OMP is allowed to reach for.",
         "menuButton": "☰ Menu",
@@ -1355,6 +1356,7 @@ Choose sweeps (sw) above to read this.",
         "intakeNoProject": "Спершу відкрийте або створіть проєкт — форма заповнює теку проєкту.",
         "intakeReady": "Інтейк заповнено — для фази 0 є все потрібне.",
         "intakeStartSession": "Стартувати сесію",
+        "versionTip": "{dsp} — конфігурація {version} пресету {preset}. Введено в DSP: {applied}; лише запропоновано, ще не введено: {proposed}; після того виміряно: {measured}. Крапка жовта, доки щось лише запропоновано, і зелена, коли все введено (attest).",
         "menuCopyCarTip": "Почати проєкт із наявного: авто, обладнання та установка — марка, драйвери по каналах, підсилювачі, мікрофон, DSP та його профіль, глосарій назв. Те, що ВИМІРЯНО в тому проєкті, лишається там, поки ви не попросите. Ви правите те, що відрізняється, замість описувати свою машину заново.",
         "menuModelsTip": "Які моделі можна цьому проєкту — генератор, критик і скільки їм думати. Усе, крім Claude, іде через OMP, тож позначене тут — це те, до чого OMP дозволено тягнутись.",
         "menuButton": "☰ Меню",
@@ -2303,6 +2305,7 @@ Choose sweeps (sw) above to read this.",
         "intakeNoProject": "Najpierw otwórz lub utwórz projekt — formularz wypełnia folder projektu.",
         "intakeReady": "Intake jest kompletny — faza 0 ma wszystko, czego potrzebuje.",
         "intakeStartSession": "Rozpocznij sesję",
+        "versionTip": "{dsp} — konfiguracja {version} presetu {preset}. Wprowadzone do DSP: {applied}; tylko zaproponowane, jeszcze niewprowadzone: {proposed}; zmierzone od tego czasu: {measured}. Kropka jest żółta, dopóki coś jest tylko zaproponowane, i zielona, gdy wszystko wprowadzono (attest).",
         "menuCopyCarTip": 'Zacznij projekt od już istniejącego: auto, sprzęt i montaż — marka, głośniki po kanałach, '
                           'wzmacniacze, mikrofon, DSP i jego profil, słownik nazw. To, co ZMIERZONO w tamtym projekcie, '
                           'zostaje tam, dopóki nie poprosisz. Poprawiasz to, co się różni, zamiast opisywać własne auto '
@@ -3308,6 +3311,7 @@ Choose sweeps (sw) above to read this.",
         "intakeNoProject": "Öffne oder erstelle zuerst ein Projekt — das Formular füllt einen Projektordner.",
         "intakeReady": "Das Intake ist vollständig — Phase 0 hat alles, was sie braucht.",
         "intakeStartSession": "Sitzung starten",
+        "versionTip": "{dsp} — Konfiguration {version} des Presets {preset}. Im DSP eingetragen: {applied}; nur vorgeschlagen, noch nicht eingetragen: {proposed}; seitdem gemessen: {measured}. Der Punkt ist gelb, solange etwas nur vorgeschlagen ist, und grün, sobald alles eingetragen ist (attest).",
         "menuCopyCarTip": 'Ein Projekt aus einem bestehenden beginnen: das Auto, die Anlage und der Einbau — Marke, '
                           'Chassis pro Kanal, Endstufen, Mikrofon, das DSP und sein Profil, das Namensglossar. Was im '
                           'anderen Projekt GEMESSEN wurde, bleibt dort, solange du es nicht anforderst. Du korrigierst, '

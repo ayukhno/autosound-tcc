@@ -418,6 +418,19 @@ class ProjectView:
     features: tuple[tuple[str, str], ...] = ()
     slot_label: Optional[str] = None
     save: Optional[str] = None
+    #: How many channels of this version stand at each step of the method's lifecycle —
+    #: `proposed` -> `applied` -> `measured` (the skill's `state.STATUSES`) — as `(status, n)`.
+    status_counts: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def state(self) -> Optional[str]:
+        """`proposed` while any channel of this version waits to be entered in the DSP, else
+        `applied`; None for a view with no channels. `attest` is what turns one into the other
+        (the skill's `apply.attest`), and the header's dot reads exactly this (F-070)."""
+        counts = dict(self.status_counts)
+        if not counts:
+            return None
+        return "proposed" if counts.get("proposed") else "applied"
 
     @classmethod
     def from_dict(
@@ -436,11 +449,17 @@ class ProjectView:
         hw_controls = hardware_controls or {}
         identities = channels or {}
         groups = []
+        statuses: dict[str, int] = {}
         for g in prof.get("groups", []):
             gid = g["id"]
             # convention: physical_outputs maps to the ledger's required `channels` key;
             # every other group id maps to a same-named top-level key (absent -> no rows yet).
             row_source = raw.get("channels", {}) if gid == "physical_outputs" else raw.get(gid, {})
+            for row_raw in (row_source or {}).values():
+                if isinstance(row_raw, dict):
+                    # A missing status reads as `proposed`, as the skill's own render reads it.
+                    status = str(row_raw.get("status") or "proposed")
+                    statuses[status] = statuses.get(status, 0) + 1
             tier_key = "channels" if gid == "physical_outputs" else gid
             rows = [
                 _build_row(name, row_raw, identities.get(name, {}), hw_controls)
@@ -486,6 +505,7 @@ class ProjectView:
             features=features,
             slot_label=raw.get("slot_label"),
             save=raw.get("save"),
+            status_counts=tuple(sorted(statuses.items())),
         )
 
 

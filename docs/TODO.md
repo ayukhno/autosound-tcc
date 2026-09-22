@@ -1756,7 +1756,7 @@ ERROR the MCP server did not start:
 
 ### F-070 — the header should say which ledger version is in the DSP, and whether it is attested
 
-**Статус**: open · the Arbiter, 2026-09-19
+**Статус**: done on `wave-0.1.43` 2026-09-22 · version + state dot beside the preset, processor on hover (DECISIONS-W-2 S2); the preset NUMBER waits for the method (S3, hub `#195`)
 
 **What he asked for.** Two things on the top row, both about what is IN the processor rather than
 what the processor is called:
