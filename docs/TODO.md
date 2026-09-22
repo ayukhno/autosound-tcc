@@ -2011,6 +2011,21 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-075 — `test_updates.py` is red on `main` since the update-row commits after `v0.1.42`
+
+**Статус**: open 2026-09-22 · named, not fixed — found by the full run on `wave-0.1.43`
+
+`22643c0` ("The update row says what git said") made an unreachable remote answer
+`reason='probe_failed'` with git's own words in `detail`; two tests still expect `no_network`:
+`test_an_unreachable_github_is_not_up_to_date` and
+`test_a_repository_that_cannot_be_asked_for_tags_says_so`. Neither file is touched by
+`wave-0.1.43` (`git diff --stat main..wave-0.1.43 -- src/autosound_tcc/core/updates.py
+tests/test_updates.py` is empty), so `main` has been red there since 2026-09-20 — nothing ran the
+suite after those commits, which went in after the tag.
+
+**Що зробити**: decide which answer is right for "could not resolve host" — the new `probe_failed`
+with git's line is the point of finding 40 — and bring the two tests to it. Before the wave's PR.
+
 ### F-074 — Check the project's GitHub backup after the broken-git spell
 
 **Статус**: open 2026-09-20 · not checked, named at the Arbiter's stop

@@ -111,6 +111,7 @@ design tool, not described (the Arbiter, 2026-09-22: «не забудь зі м
 - **`F-066`** shard weights are macOS seconds; Windows is uneven.
 - **`F-073`** the six commits after `v0.1.42` go into this CHANGELOG entry.
 - **`F-074`** check the project's GitHub backup after the broken-git spell.
+- **`F-075`** `test_updates.py` red on `main` since `22643c0`: two tests still expect `no_network`.
 
 ## Not included, and why
 
