@@ -1614,6 +1614,11 @@ machines.
 
 **Where.** Windows VM and the Arbiter's second Windows machine, v0.1.43.
 
+**Evidence.** The VM's `tcc.log` (copied to `~/Downloads/тест/vm-logs/`), each start at 14:35:44
+and 14:38:03: `spawn: agy models`, then `claude.EXE auth`, `python.exe …\autosound_ai.py`, `git`,
+`contract.py`. On the second machine the Arbiter saw `agy` open before the splash and took it as
+the model check.
+
 **Weight.** Medium: the console flashes are the class TCC-006 was about.
 
 ### 44. A pin made from the desktop shortcut does not merge with the running window (F-044, narrowed)
@@ -1634,5 +1639,18 @@ another in the centre of the screen. Switching back is clean.
 
 **Where.** Windows VM, v0.1.43.
 
+**Evidence.** The VM's `tcc.log` at the switch (14:41:45): no process spawned; three
+`QWindowsWindow::setGeometry: Unable to set geometry` on the main window (1996×2314, 2086×2314,
+3600×2044 on the «Parallels Vu» screen).
+
 **Weight.** Medium: visible on every switch.
+
+### 46. Quitting while REW is being pinged: "worker destroyed on the GUI thread while it had NOT finished"
+
+**What.** The log line finding 35 names as the abort, six times in one sitting. Each one comes a
+moment before the next `started:` line, which is a quit. No crash was reported.
+
+**Where.** Windows VM, v0.1.43, `tcc.log` 14:38:02 – 14:42:25 (`_RewPingWorker`).
+
+**Weight.** Medium: it is the line that preceded the crashes of finding 35.
 
