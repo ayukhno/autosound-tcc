@@ -728,6 +728,9 @@ else in the window.
 
 **Reproduces.** Always, on that window size.
 
+**Status.** Closed 2026-09-23: the Arbiter reports it no longer shows, on Windows or on the Mac.
+No change was made for it; nothing to verify on the VM.
+
 ### 19. Feedback has one way out: GitHub
 
 **What.** The feedback dialog ("Відгук про прототип TCC") offers a single radio button, "GitHub
