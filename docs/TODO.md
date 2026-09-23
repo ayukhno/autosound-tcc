@@ -2010,6 +2010,20 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-083 — A GUI guide with English screenshots (#47)
+
+**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's terminology review is being applied
+
+`docs/guide/QUICK-GUIDE.md` (eight screens) and `docs/guide/REFERENCE.md` (every panel, dialog
+and button), 25 lossless WebP screenshots in `docs/guide/img/`, linked from the README. The window
+was rendered offscreen at 2x on a copy of the car role's `passat-b8-2026`, with its notes
+translated into English through the Advisor, and the curves read live from REW (`v10.mdat`). Each
+screen was checked for leftover Cyrillic and for personal paths. The tooling and the English copy
+are in `hub/scratch/tcc/gui-guide/` (not in git): `shots/shoot.py` + `shots/steps.py` re-render
+every screen in about two minutes.
+
+Not shown: the diagnostics dialog. Its project check does not finish offscreen.
+
 ### F-082 — W-3: the collection continues, then the planning
 
 **Статус**: open 2026-09-23 · the Arbiter's «добраніч» during the W-3 collection

@@ -12,6 +12,14 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+### Added
+
+- **A user guide with screenshots, in English.** [TCC in eight screens](docs/guide/QUICK-GUIDE.md)
+  is a short tour of the window; [the full reference](docs/guide/REFERENCE.md) covers every panel,
+  dialog and button. The screenshots come from a real project, its notes translated into English.
+
 ## [v0.1.43] — 2026-09-23 · the intake form, control mode, the reviewer key in the Keychain, the method at v3.0.60
 
 Paired with method `03ba97cda8f9767c417d18305187065409bc64c4` — the tag on that commit is

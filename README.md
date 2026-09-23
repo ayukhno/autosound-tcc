@@ -218,10 +218,14 @@ nothing and can be deleted.
 
 **Starting the app.** Double-click **Autosound TCC** on your Desktop. It asks which folder:
 *Browse…* to the car's folder — a new, empty one is right — and pick the models: Claude Opus (SDK)
-as *AI main*, Gemini Pro (High) as *AI critic*. Press *Open*. Then you work in the dialog panel on
-the right, in any language. Say what you want to do, for example *"let's tune this car from
+as *AI main*, Gemini Pro (High) as *AI critic*. Press *Open*. Then you work in the dialog panel in
+the middle, in any language. Say what you want to do, for example *"let's tune this car from
 scratch"*, and it takes you through the phases. On Windows, start REW from the **REW (API on)**
 shortcut the installer put beside it, so its API is up.
+
+**A tour of the window.** [TCC in eight screens](docs/guide/QUICK-GUIDE.md) shows each part of the
+window with a screenshot. [The full reference](docs/guide/REFERENCE.md) covers every panel, dialog
+and button.
 
 From a terminal the same is:
 
