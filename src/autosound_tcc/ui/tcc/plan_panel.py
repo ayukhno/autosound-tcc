@@ -385,7 +385,8 @@ class PlanPanel(QScrollArea):
         super().__init__()
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Sideways too, when a step is wider than the card (the Arbiter, 2026-09-23).
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._progress = _PlanProgress()
         self._sessions: tuple = ()
         self._open_questions: frozenset = frozenset()

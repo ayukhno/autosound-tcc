@@ -38,6 +38,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ### Changed
 
+- **Each card in the right column scrolls on its own.** The capture list scrolls, up and down and
+  sideways, while the picker, its buttons and the legend stay where they are; the plan card has
+  its own scroll; the border between the two cards moves and is remembered. Capture names are
+  whole again: a panel too narrow for every column scrolls the columns instead of cutting names.
 - **The vocabulary the method settled is the window's.** A capture series `_N` is never called a
   DSP configuration; what the ledger banks is a *configuration (version v_NNN)*, fixed in a
   *preset*; the Ukrainian, Polish and German windows say *register of configurations* where they

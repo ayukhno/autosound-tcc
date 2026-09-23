@@ -11,6 +11,7 @@ section gets wired to real data, but the outer structure built here should not n
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import threading
 import re
@@ -158,6 +159,8 @@ _LISTENING_PHASE = "4"
 #: read which phase is open and what the current step is, which is the whole reason it is on
 #: screen while a round is being captured.
 _PLAN_MIN_PX = 180
+#: The border between the plan and the capture card in the right column, where it was left.
+_RIGHT_SPLIT_KEY = "ui/right_split"
 #: How often the REW-online dot re-asks, while this window has the focus. Thirty seconds because
 #: the probe pulls REW's whole measurement list — cheap for a local HTTP call, not free — and
 #: because what it is watching for (REW being started or closed beside TCC) happens on the scale
@@ -2707,6 +2710,31 @@ class MainWindow(QMainWindow):
         splitter.setSizes([420, 600])
         return splitter
 
+    def _read_right_split(self) -> list[int]:
+        """Where the Arbiter left the border between the plan and the capture card, or nothing."""
+        raw = self._settings.value(_RIGHT_SPLIT_KEY, None)
+        try:
+            sizes = [int(v) for v in json.loads(raw)] if raw else []
+        except (TypeError, ValueError):
+            sizes = []
+        return sizes if len(sizes) == 2 and all(v > 0 for v in sizes) else []
+
+    def _apply_right_split(self) -> None:
+        """Where the border was left — or, the first time, the larger share to the capture card:
+        it is the one with the list in it."""
+        try:
+            total = sum(self._right_split.sizes())
+        except RuntimeError:
+            return
+        saved = self._read_right_split()
+        if saved:
+            self._right_split.setSizes(saved)
+        elif total > 0:
+            self._right_split.setSizes([total * 3 // 8, total - total * 3 // 8])
+
+    def _remember_right_split(self, *_args) -> None:
+        self._settings.setValue(_RIGHT_SPLIT_KEY, json.dumps(self._right_split.sizes()))
+
     def _on_dialog_editing_changed(self, editing: bool) -> None:
         self._dialog_frame.setProperty("class", "panel dialog-editing" if editing else "panel")
         self._dialog_frame.style().unpolish(self._dialog_frame)
@@ -2717,30 +2745,18 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(container)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        # One scroll for the whole column — the same answer the left column already carries, and
-        # for the same reason. The capture card was added at its natural height with nothing
-        # around it, so a round of 102 measurements made a card 1864 px tall inside a 778 px
-        # column: the bottom of the list was not merely unscrollable, it was off the screen, and
-        # the plan panel above it was squeezed to 62 px (measured, 2026-09-01, F-040 — the user's
-        # screenshot shows exactly those two symptoms).
-        #
-        # Around the COLUMN and not around the list, which is the other half of the same lesson:
-        # F-002 was a section scrolling inside a column that did not, and that reads as broken
-        # twice over — the wheel does nothing where you point it and the section below is
-        # unreachable anyway.
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        inner = QWidget()
-        layout = QVBoxLayout(inner)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        # The layout BEFORE `setWidget`, like the left column: a widget handed over bare never
-        # told the area it had grown, and the scrollbar stayed at range 0 while the content was
-        # 2008 px in a 778 px viewport (measured while fixing this).
-        right_scroll.setWidget(inner)
-        outer.addWidget(right_scroll)
+        # Two cards, one movable border between them, and each card scrolls on its own (the
+        # Arbiter, 2026-09-23: the capture list scrolls, and the picker and buttons above it do
+        # not; the plan has its own scroll, sideways too). This column scrolled as ONE before
+        # (F-040): a card at its natural height had nothing around it, 102 captures made it 1864 px
+        # in a 778 px column, and the plan above was squeezed to 62 px. A border that holds its
+        # place and a floor under the plan answer that, and the list no longer drags the picker off
+        # the screen when it scrolls.
+        split = QSplitter(Qt.Orientation.Vertical)
+        split.setChildrenCollapsible(False)
+        split.setHandleWidth(8)
+        self._right_split = split
+        outer.addWidget(split)
 
         plan_panel = _panel()
         plan_layout = QVBoxLayout(plan_panel)
@@ -2755,7 +2771,7 @@ class MainWindow(QMainWindow):
         # where the tune stands must not be squeezed to nothing by the card below it.
         self._plan_panel.setMinimumHeight(_PLAN_MIN_PX)
         plan_layout.addWidget(self._plan_panel, stretch=1)
-        layout.addWidget(plan_panel, stretch=1)
+        split.addWidget(plan_panel)
 
         meas_panel = _panel()
         meas_panel.setProperty("class", "panel meas-card")
@@ -2788,8 +2804,14 @@ class MainWindow(QMainWindow):
         self._meas_panel = MeasurementPanel(
             preset_provider=lambda: self._view.preset if self._view else "",
         )
-        meas_layout.addWidget(self._meas_panel)
-        layout.addWidget(meas_panel)
+        meas_layout.addWidget(self._meas_panel, stretch=1)
+        split.addWidget(meas_panel)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 2)
+        # Sized once the column has a height: sizes set before that are clamped to the cards'
+        # minimums and the plan ended up with most of the column.
+        QTimer.singleShot(0, self._apply_right_split)
+        split.splitterMoved.connect(self._remember_right_split)
 
         # A step's measurement icon opens that capture series in the panel below (user request
         # 2026-07-28).

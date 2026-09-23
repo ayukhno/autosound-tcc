@@ -238,6 +238,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QScrollArea[class~="status-strip-scroll"] > QWidget > QWidget {{
         background: transparent;
     }}
+    /* The capture card's columns scroll on their own; the card's colour shows through. */
+    QScrollArea[class~="meas-cols-scroll"],
+    QScrollArea[class~="meas-cols-scroll"] > QWidget,
+    QScrollArea[class~="meas-cols-scroll"] > QWidget > QWidget {{
+        background: transparent;
+    }}
     QToolButton[class~="status-strip-close"] {{
         background: transparent;
         border: none;

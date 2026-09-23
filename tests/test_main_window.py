@@ -3548,29 +3548,22 @@ def test_the_protection_button_answers_where_it_was_pressed(tmp_path, monkeypatc
     assert i18n.t("protNoChannels") in said[0]
 
 
-def test_the_right_column_scrolls_when_the_capture_list_is_long(tmp_path, monkeypatch):
-    """F-040, from a screenshot: a round of 102 captures made a card 1864 px tall inside a 778 px
-    column, with nothing to scroll it — the bottom of the list was off the screen, not merely
-    below the fold. The plan card above it was squeezed to 62 px in the bargain.
+def test_the_capture_list_scrolls_and_the_picker_above_it_stays(tmp_path, monkeypatch):
+    """The Arbiter, 2026-09-23: with many columns the WHOLE right column scrolled, taking the
+    picker, the buttons and the legend with the list. Now the list scrolls on its own, both ways,
+    and everything above it stays put.
 
-    One scroll for the whole column, which is what the LEFT column already does and for the same
-    reason; a floor under the plan card so the one below cannot crush it.
+    F-040 is still held: a round of 102 captures once made a card 1864 px tall in a 778 px column,
+    with the plan above squeezed to 62 px. The border between the two cards holds its place and
+    the plan keeps its floor.
     """
-    from PySide6.QtWidgets import QScrollArea
-
     from autosound_tcc.ui.tcc.mock_data import MeasGroup, MeasItem, MeasSession
 
-    # Pointed at an empty folder, so nothing on this machine can change under the window while it
-    # is being measured: the project watcher would otherwise fire a reload, and a reload re-renders
-    # the capture card from disk — i.e. empties the one this test just filled by hand.
+    # An empty folder and no reload: windows left alive by earlier tests still run their deferred
+    # work, and a reload re-renders the capture card from disk — i.e. empties the one this test
+    # fills by hand (seen 2026-09-14, 1 in 3 full-file runs).
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
-    # And no reload reaches the window at all. The empty folder was not enough: windows left alive by
-    # earlier tests still run their deferred work, and with `config` patched module-wide they write
-    # `.tcc/` into THIS folder — seen 2026-09-14: `_drop_model_placeholder` on another of 126 live
-    # windows, then `set_no_project` from this window's `_reload_project_files`, 1 in 3 full-file runs.
-    # Tearing those windows down per test is measured to crash (`qt_shutdown`), so the reload is what
-    # is kept out; the layout under test does not involve one.
     monkeypatch.setattr(MainWindow, "_reload_project_files", lambda self: None)
 
     _app()
@@ -3579,32 +3572,53 @@ def test_the_right_column_scrolls_when_the_capture_list_is_long(tmp_path, monkey
     window.show()
     names = [f"{code}_{n:02d}" for n in range(1, 18)
              for code in ("sw", "w-L", "w-R", "m-L", "m-R", "tw-L")]
-    window._meas_panel.set_sessions((MeasSession(
+    panel = window._meas_panel
+    panel.set_sessions((MeasSession(
         id="v1", version={"en": "Series 1", "uk": "серія 1"},
         groups=(MeasGroup(type="sw (LB)", items=tuple(MeasItem(n, "done", 1) for n in names)),),
     ),))
-    # Two passes: the offscreen platform settles a layout of this size one request later.
     QApplication.processEvents()
     window.resize(1441, 901)
     QApplication.processEvents()
 
-    area = next(a for a in window._right.findChildren(QScrollArea) if type(a) is QScrollArea)
-    assert window._meas_panel.height() >= window._meas_panel.sizeHint().height(), (
-        "and the card is drawn at its full height inside it, not clipped to the viewport")
+    assert not window._right_split.childrenCollapsible()
     assert window._plan_panel.height() >= 160, "the plan card is not crushed by the one below it"
 
-    # LAST, and forced rather than hoped for. Whether 102 rows overrun the column depends on the
-    # platform's font metrics: on the Windows runner the same list FITS, `maximum()` is 0, and the
-    # test failed while the bug it guards had not come back. What is being tested is that the
-    # column scrolls when its content is taller than it — so make the content taller than it.
-    #
-    # It goes last because it leaves the layout stretched: an earlier attempt put it first and
-    # reset the height afterwards, and the reset had not settled by the time the card was
-    # measured. Nothing after it needs the natural layout, so nothing has to be put back.
+    # Forced rather than hoped for: whether 102 rows overrun depends on the platform's fonts, and
+    # on the Windows runner the same list once FIT. What is tested is that the list scrolls when
+    # it is taller than its place — so make it taller.
+    area = panel._cols_scroll
     area.widget().setMinimumHeight(area.viewport().height() * 3)
+    area.widget().setMinimumWidth(area.viewport().width() * 2)
     QApplication.processEvents()
-    assert area.verticalScrollBar().maximum() > 0, "the column that overflowed can be scrolled"
+    picker_at = panel._session_combo.mapTo(window, panel._session_combo.rect().topLeft())
+    bar = area.verticalScrollBar()
+    assert bar.maximum() > 0, "the list that overflowed can be scrolled"
+    assert area.horizontalScrollBar().maximum() > 0, "and sideways, when the columns are wide"
+    bar.setValue(bar.maximum())
+    QApplication.processEvents()
+    assert panel._session_combo.mapTo(window, panel._session_combo.rect().topLeft()) == picker_at, \
+        "the picker does not move with the list"
 
+    window.hide()
+
+
+def test_the_border_between_plan_and_captures_is_remembered(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    store: dict = {}
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(window._settings, "setValue", lambda k, v: store.__setitem__(k, v))
+    monkeypatch.setattr(window._settings, "value", lambda k, d=None, **kw: store.get(k, d))
+    window.resize(1400, 900)
+    window.show()
+    QApplication.processEvents()
+    window._right_split.setSizes([500, 300])
+    QApplication.processEvents()
+    held = window._right_split.sizes()
+    window._remember_right_split()
+    assert window._read_right_split() == held
     window.hide()
 
 

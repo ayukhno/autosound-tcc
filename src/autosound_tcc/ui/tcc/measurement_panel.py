@@ -27,11 +27,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -363,12 +365,15 @@ class _MeasName(QLabel):
     to colour a trailing qualifier and the whole name of an off-checklist graph, so it renders
     HTML. It therefore elides the composite string itself and re-colours what survived.
 
-    Why it has to: the right column is a fixed ~300 px (`main_window._build_right`) with its
-    horizontal scrollbar deliberately off, so a card that asks for more is simply cut. Three
-    columns of `m-L_01 (sw) · 3` ask for more — and what went over the edge was the right-hand end
+    Why it had to: the right column was a fixed ~300 px with its horizontal scrollbar off, so a
+    card that asked for more was simply cut — and what went over the edge was the right-hand end
     of the card, including the two icon buttons in its header (user, 2026-09-06, with the picture).
 
-    The full name is on the hover whenever anything was cut, so nothing is lost — only moved.
+    Since 2026-09-23 the columns sit in a scroll area of their own, sideways too, and the header
+    with its buttons stays outside it. So a name asks for its full width again, and a panel too
+    narrow for all the columns scrolls the columns instead of cutting the names (the Arbiter:
+    «коли багато стовпчиків ... скрол тільки таблиці»). The eliding stays as the last resort, with
+    the full name on the hover whenever anything was cut.
     """
 
     #: Enough for a dot, a channel and the start of the method — below this the row says nothing.
@@ -377,8 +382,8 @@ class _MeasName(QLabel):
     def __init__(self) -> None:
         super().__init__()
         self.setTextFormat(Qt.TextFormat.RichText)
-        # `Ignored`: the row takes the width the column has, and never sets it.
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        # At least its own text: the columns' scroll area, not this label, answers a narrow panel.
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(self._MIN_WIDTH)
         self._base = ""
         self._extra = ""
@@ -401,6 +406,7 @@ class _MeasName(QLabel):
     def _draw(self) -> None:
         theme = current_theme()
         full = self.full_text()
+        self.setMinimumWidth(max(self._MIN_WIDTH, self.fontMetrics().horizontalAdvance(full) + 4))
         shown = self.fontMetrics().elidedText(
             full, Qt.TextElideMode.ElideRight, max(self.width(), self._MIN_WIDTH))
         self.setToolTip(full if shown != full else "")
@@ -685,11 +691,25 @@ class MeasurementPanel(QWidget):
             self._legend_labels.append(text)
         layout.addWidget(legend)
 
-        self._cols_layout = QGridLayout()
+        # The columns scroll on their own, both ways, and the status, the picker row and the
+        # legend above them stay put (the Arbiter, 2026-09-23: «скрол ... тільки таблиці, щоб поле
+        # зверху та кнопки ... в скрол не попадали»). The whole right column scrolled before
+        # (F-040), which took the picker off the screen with the list.
+        cols = QWidget()
+        cols.setProperty("class", "meas-cols")
+        self._cols_layout = QGridLayout(cols)
+        self._cols_layout.setContentsMargins(0, 0, 0, 0)
         self._cols_layout.setHorizontalSpacing(8)
         self._cols_layout.setVerticalSpacing(2)
         self._col_next_row: list[int] = []
-        layout.addLayout(self._cols_layout)
+        self._cols_scroll = QScrollArea()
+        self._cols_scroll.setProperty("class", "meas-cols-scroll")
+        self._cols_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._cols_scroll.setWidgetResizable(True)
+        self._cols_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._cols_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._cols_scroll.setWidget(cols)
+        layout.addWidget(self._cols_scroll, 1)
 
         # Shown instead of the grid when there's no real project to derive a capture task from --
         # an EMPTY grid reads as "everything captured" (see `set_sessions`), which is worse than
@@ -741,6 +761,7 @@ class MeasurementPanel(QWidget):
         ):
             widget.setVisible(False)
         self._legend.setVisible(False)
+        self._cols_scroll.setVisible(False)
         while self._cols_layout.count():
             item = self._cols_layout.takeAt(0)
             widget = item.widget()
@@ -769,6 +790,7 @@ class MeasurementPanel(QWidget):
         ):
             widget.setVisible(True)
         self._legend.setVisible(True)
+        self._cols_scroll.setVisible(True)
         self._no_project_label.setVisible(False)
 
     def _session(self, session_id: str) -> MeasSession:
@@ -914,9 +936,9 @@ class MeasurementPanel(QWidget):
             header = QLabel(group.type)
             header.setProperty("class", "mcol-h")
             self._cols_layout.addWidget(header, 0, c)
-            # Every column gets the same share of a column that cannot grow: without this the
-            # first group takes the width its longest name asks for and the last one goes over
-            # the edge of the card (user, 2026-09-06). The rows elide inside their share.
+            # Every column gets the same share of the width there is: without this the first group
+            # takes the width its longest name asks for and the rest crowd (user, 2026-09-06).
+            # Narrower than the names, the columns scroll sideways instead (2026-09-23).
             self._cols_layout.setColumnStretch(c, 1)
             method_suffix = _method_suffix_for(group, c)
             self._col_methods.append(method_suffix)
