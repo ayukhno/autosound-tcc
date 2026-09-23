@@ -1657,3 +1657,23 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 
 **Weight.** Medium: it is the line that preceded the crashes of finding 35.
 
+### 47. Control mode: the tables carry the full window's own menus, and EQ has no way back
+
+**What.** The Arbiter's list (2026-09-23, with screenshots):
+
+1. Inside «Таблиця-V», «Таблиця-О» and «EQ», the full window's detail menu is shown again
+   (Рівень · Затримки · Фази, and on EQ also Таблиця · EQ). It duplicates the main tabs, which is
+   confusing.
+2. In the left panel, a click on «params · усі параметри таблицею» opens no table: not the virtual
+   one, not the output one, not the input one (which exists, even though it is empty).
+3. «Закрити ✕» is not needed in this mode: hide it.
+4. «порівняти з» belongs up at the level of the main tabs, and the full-mode menu should be hidden
+   entirely.
+5. **The main point:** EQ from a table («1 band ▸», or the menu's EQ) turns the table tab into the
+   EQ band view (PK 1950 Hz, «Копіювати EQ с») instead of switching to the EQ tab, and there is no
+   way back without leaving the mode. The «EQ» tab itself shows the output table, not the EQ.
+
+**Where.** v0.1.43, «Режим контролю».
+
+**Weight.** High for 5 (a dead end); medium for the rest.
+
