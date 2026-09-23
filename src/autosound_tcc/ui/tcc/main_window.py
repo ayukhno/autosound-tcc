@@ -846,8 +846,10 @@ class MainWindow(QMainWindow):
         # -- it asks for its natural width and only gives ground when the header would otherwise
         # widen. With `Ignored` it took whatever was left, which at this size was almost nothing,
         # and the name sat on top of the preset label beside it.
+        # A floor of 80, not 120: «⌂ passat…» still names it, and the header has to fit 1280 px
+        # on Windows fonts with the control-mode button in it (CI, PR #46).
         self._project_label = ElidedLabel(
-            "", min_width=120, policy=QSizePolicy.Policy.Maximum
+            "", min_width=80, policy=QSizePolicy.Policy.Maximum
         )
         self._project_label.setProperty("class", "kv-val")
         layout.addWidget(self._project_label)
@@ -859,6 +861,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._preset_field_lbl)
 
         self._preset_combo = _mini_combo()
+        # A floor below its natural width, as the footer's pickers have (TODO F-045): the header
+        # also has to fit 1280 px on Windows fonts, and preset names are short (CI, PR #46).
+        self._preset_combo.setMinimumWidth(80)
         self._preset_combo.currentIndexChanged.connect(self._on_preset_index)
         layout.addWidget(self._preset_combo)
 
@@ -895,7 +900,9 @@ class MainWindow(QMainWindow):
         # earlier left-panel version was easy to lose track of).
         # «Активний TCC / Режим контролю» (F-069): where the session runs decides the layout.
         self._control_layout = ControlLayout(self)
-        self._layout_btn = QPushButton(i18n.t("layoutControl"))
+        # Gives ground in a narrow window, down to its first word, the whole name on hover: a rigid
+        # 170 px here took the header over 1280 on Windows fonts (CI, PR #46).
+        self._layout_btn = ElidedButton(i18n.t("layoutControl"))
         self._layout_btn.setProperty("class", "reason-btn")
         self._layout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._layout_tip = attach_tip(self._layout_btn, i18n.t("layoutControlTip"))
@@ -961,7 +968,7 @@ class MainWindow(QMainWindow):
         zg_layout.addWidget(zoom_in)
         layout.addWidget(zoom_group)
 
-        self._theme_btn = QPushButton("◐ " + i18n.t("theme"))
+        self._theme_btn = ElidedButton("◐ " + i18n.t("theme"))  # down to ◐ when squeezed
         self._theme_btn.setProperty("class", "theme-btn")
         self._theme_btn.clicked.connect(self._toggle_theme)
         layout.addWidget(self._theme_btn)
