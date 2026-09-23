@@ -1378,7 +1378,7 @@ exe, тобто гірше за «Autosound TCC» і не гірше за теп
 
 ### F-039 — перший запуск із десктопного ярлика не піднімає вікно; другий піднімає
 
-**Статус**: чекає · the Arbiter's test of v0.1.40: does the first start from the desktop shortcut raise the window · заведено 2026-09-01 виміром користувача (Windows 11 у Parallels, `v0.1.27`,
+**Статус**: done · the Arbiter's Windows test of v0.1.43, 2026-09-23: the window comes up on the first start from the desktop shortcut, on both Windows machines · the two terminals before the splash are TEST-FINDINGS 43
 одразу після прогону `install.cmd`)
 
 **Зміряно, дослівно:** «після установки двойним кліком по іконці на десктопі програма не
@@ -1586,7 +1586,7 @@ sheet with it.
 
 ### F-043 — «Оновити TCC» блимає двома консольними вікнами
 
-**Статус**: чекає · the Arbiter's test of v0.1.40: how many consoles "Update TCC" opens (TEST-FINDINGS 13) · заведено 2026-09-02 спостереженням користувача (Windows, `v0.1.27`) ·
+**Статус**: done · the Arbiter's Windows test of v0.1.43, 2026-09-23: «Update TCC» opened ONE console (0.1.41 → 0.1.43)
 **06.09 винесено на шину як `autosound-hub#73` (TCC-006) з `needs:human`** — разом із двома
 сусідніми джерелами консольних вікон. Причина: з мака жодне з трьох не перевірне, кожна гілка
 того коду там порожня за визначенням. У тікеті три прохання до людини й межа, названа прямо:
@@ -1630,7 +1630,7 @@ sheet with it.
 
 ### F-044 — пін із десктопного ярлика не зливається з живим вікном: дві іконки, і стара запускає другу копію
 
-**Статус**: чекає · the Arbiter's test of v0.1.40: a pin from the desktop shortcut, one icon or two · заведено 2026-09-02 спостереженням користувача зі скриншотами (Windows 11,
+**Статус**: narrowed 2026-09-23 → TEST-FINDINGS 44 (W-3 pool): two icons only for a pin made from the desktop shortcut's menu; a pin from the running window stays one icon
 `v0.1.27`)
 
 **Зміряно, дослівно:** «якщо іконку на таскбар закріпив з ярлика на столі, то після запуска

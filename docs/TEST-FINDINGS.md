@@ -618,6 +618,7 @@ report after that is about the wrong version.
 
 **Reproduces.** No: the second attempt on that machine (a UTM VM, "Windows 2") went through, 0.1.36 → 0.1.39. The finding is the "Done" after a failure, not the failure.
 
+**Status.** Not seen again 2026-09-23: the update on the Windows VM succeeded (0.1.41 → 0.1.43) and said Done; the failure path was not met, so the finding stays open.
 ### 13. "Update TCC" opens a second, empty console
 
 **What.** Beside `Administrator: cmd`, which runs the update, a second window
@@ -631,6 +632,7 @@ report after that is about the wrong version.
 
 **Reproduces.** Known since 2026-09-06.
 
+**Status.** Fixed, the Arbiter's Windows test of v0.1.43, 2026-09-23: one console during the update.
 ### 14. First start after the update: a terminal window blinks behind "Reading models"
 
 **What.** On the first start of 0.1.39, TCC's own console (`Autosound TCC: reading models...`)
@@ -646,6 +648,7 @@ hub #73 (TCC-006) was waiting for, and it passes.
 
 **Reproduces.** Only on the first start after the update so far.
 
+**Status.** Not seen on the VM's first start after the update to v0.1.43 (2026-09-23); the second machine's `agy` console at start is TEST-FINDINGS 43.
 ### 15. "Don't ask at all (auto)" is ticked, and TCC still asks "Allow Bash?"
 
 **What.** Menu → "Ask about" shows "Don't ask at all (auto)" ticked. The chat still stops on
