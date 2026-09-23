@@ -39,6 +39,7 @@ def seeder():
 def _source(root: Path) -> Path:
     """A project on disk with facts, prose, and a tune around them to leave behind."""
     root.mkdir(parents=True, exist_ok=True)
+    (root.parent / "corpus" / "vw-passat-b8").mkdir(parents=True, exist_ok=True)
     (root / "project.json").write_text(json.dumps({
         "schema_version": 3,
         "project_rev": 95,
@@ -53,7 +54,9 @@ def _source(root: Path) -> Path:
             {"code": "w-L", "slot": "C", "role": "woofer", "tier": "channels"},
             {"code": "sw", "slot": "A", "role": "sub", "tier": "channels"},
         ],
-        "paths": {"measurements_repo": "/corpus/vw-passat-b8",
+        # A folder that EXISTS here: since v3.0.60 an absolute path travels only when it resolves
+        # on this machine (the Arbiter, 2026-09-23); one to nothing stays behind as history.
+        "paths": {"measurements_repo": str(root.parent / "corpus" / "vw-passat-b8"),
                   "rew_project": "new-logic-EPY.mdat"},
         "acoustics": {"flaws": [{
             "kind": "cabin_null", "channels": ["sw"], "f_hz": 32.0, "level_db": -4.1,
@@ -99,7 +102,7 @@ def test_the_installation_travels_and_the_tune_stays_behind(seeder, tmp_path):
         assert seeded[key] == original[key]
     # The new project counts its own writes, and takes only the path that addresses the car.
     assert seeded["project_rev"] == 1
-    assert seeded["paths"] == {"measurements_repo": "/corpus/vw-passat-b8"}
+    assert seeded["paths"] == {"measurements_repo": str(tmp_path / "corpus" / "vw-passat-b8")}
     for left in ("state", "process", ".tcc"):
         assert not (target / left).exists()
 
