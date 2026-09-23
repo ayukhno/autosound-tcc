@@ -225,7 +225,7 @@ shortcut the installer put beside it, so its API is up.
 
 **A tour of the window.** [TCC in eight screens](docs/guide/QUICK-GUIDE.md) shows each part of the
 window with a screenshot. [The full reference](docs/guide/REFERENCE.md) covers every panel, dialog
-and button.
+and button, and [the house curve in TCC](docs/guide/HOUSE-CURVE.md) covers the target-curve tool.
 
 From a terminal the same is:
 

@@ -1,25 +1,42 @@
-# The target-curve tool
+# The house curve in TCC
 
-**In one line:** how to use the method's target-curve page: load curves and measurements, compare
-them, and read a measurement against your target.
+**In one line:** where TCC shows your target (house) curve, how it opens the method's target-curve
+tool, and what each button in that tool does.
 
-A target (house) curve is the tonal shape a tune aims for. What it is, how to choose one, how to
-build your own and how to finish it by ear is covered in the method's
-[target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md).
+A target (house) curve is the tonal shape a tune aims for. What it is, how to choose and build one
+is in the method's
+[target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md),
+and how to finish it by ear is in
+[voicing by ear](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/voicing-by-ear.md).
 This page covers only the buttons.
 
 The screenshots show a real car: two MMM measurements of a VW Passat B8 read against the bundled
 SQ-Comp-Ref curve.
 
-## Opening it
+## Where TCC shows it
 
-- **From TCC**: *Target-curve tool* under *Tools* in the *☰ Menu*, or click the target curve's name in
-  the header. If the page does not carry your project's curve, TCC passes it along with the link, so
-  the page opens on your curve. When it cannot, it shows you the curve's file to drop on the page.
-- **Without TCC**: open `curves.html` in your project folder, or the
-  [published page](https://ayukhno.github.io/autosound-tuning-skill/skills/autosound-tuning/references/patterns/target-curves/target_curves_visualizer.html).
+![The header: the target curve's name next to the preset](img/header.webp)
 
-The page works offline. Nothing you load leaves your computer.
+The header shows the target curve of the preset you are looking at, under **Target curve**. It is
+the name the project has recorded; TCC does not choose it.
+
+## Opening it in the target-curve tool
+
+Click that name, or pick *Target-curve tool* under *Tools* in the *☰ Menu*. The tool opens in your
+browser. It carries only the method's own curves, so for any other curve TCC finds the curve's file
+in the project folder and does one of these, and the status line says which:
+
+- **Hands it over in the link.** The page opens with your curve already on the plot.
+- **Opens a local copy of the tool** with your curve plotted, built from the method version this
+  TCC is pinned to.
+- **Selects the file in your file manager.** Drag it onto the page.
+- **Finds no file.** The page opens with its own curves, and the status line names the folder to
+  export the curve into. Where a project keeps its curves is in the method's
+  [target-curves README](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/README.md).
+
+Without TCC, open `curves.html` in your project folder, or the
+[published page](https://ayukhno.github.io/autosound-tuning-skill/skills/autosound-tuning/references/patterns/target-curves/target_curves_visualizer.html).
+The page works offline, and nothing you load leaves your computer.
 
 ## The page
 
@@ -78,7 +95,7 @@ above the target, blue where it is below.
 **Band-by-band analysis** lists what stands out, one peak, dip or null per row. There can be two
 rows in one band.
 
-- **Δ dB** is the depth of that one feature. It is not the band average that *Compare* shows, so
+- **Δ dB** is the height or depth of that one feature. It is not the band average that *Compare* shows, so
   the two can differ for the same band.
 - **Feature** says what it is (PEAK, DIP, NULL) and where.
 - **Tonal shift** says how it sounds, and the line under it says what may be done about it, with the

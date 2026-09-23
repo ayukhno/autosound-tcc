@@ -2010,21 +2010,23 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
-### F-084 — A guide to the target-curve tool (#48)
+### F-084 — The house-curve page (#48, hub #202 SKL-053)
 
 **Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it
 
-`docs/guide/TARGET-CURVE-TOOL.md`, eight screenshots (`curve-tool-*.webp`), linked from the
-reference and the CHANGELOG. Buttons only: what a target curve is, how to choose, build and voice
+`docs/guide/HOUSE-CURVE.md` (renamed from TARGET-CURVE-TOOL.md on SKL-053), eight screenshots
+(`curve-tool-*.webp`), linked from the README, both guides and the CHANGELOG. It opens with where
+TCC shows the curve and the four ways the header click opens the tool (`target_curve.py`). Buttons only: what a target curve is, how to choose, build and voice
 one stays in the method's `target_curves_guide.md`, linked in one sentence (the Arbiter's rule,
 23.09: a second text about the method drifts from it). Shot with gstack's headless browser on the
 skill's page as published, with two Passat MMM captures exported from REW. The Advisor's review:
 one edit taken, one refused (it said Analyze updates live; the page itself says "click Analyze to
 refresh").
 
-A finding for the skill, not fixed here: Compare's band cell is the band AVERAGE, Analyze's Δ dB is
-one feature's depth, and the page does not say so, so one band reads −1.2 dB in one table and
-−5.1 dB in the other.
+Sent to the skill as hub #203 TCC-029: Compare's band cell is the band AVERAGE, Analyze's Δ dB is
+one feature's depth, and the page does not say so (−1.2 dB and −5.1 dB for one band). When the page
+says it, the guide drops its own Δ dB sentence. The in-app "Guide" entry is #49 on W-3 (no `ok`).
+SKL-053 (hub #202) closes when the guides are on `main`, with the three file URLs.
 
 ### F-083 — A GUI guide with English screenshots (#47)
 

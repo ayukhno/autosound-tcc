@@ -27,7 +27,8 @@ status.
 ![The header bar: menu, project name, preset, target curve, control mode, reload, diagnostics, language, text size and theme](img/header.webp)
 
 From left to right: **☰ Menu**, the project folder, the **Preset** you are looking at (SQ, FULL…),
-and the **Target curve**, which opens in the target-curve tool. On the right: **Control mode**
+and the **Target curve**, which opens in the target-curve tool (see
+[the house curve in TCC](HOUSE-CURVE.md)). On the right: **Control mode**
 (see screen 8), **⟳** reloads the project from disk, **⚙** opens diagnostics and updates, then the
 language, the text size and the light/dark theme.
 
