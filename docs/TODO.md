@@ -1782,7 +1782,7 @@ whether a slot number is in it is unchecked.
 
 ### F-069 — Layout: GUI only / Terminal+GUI, and what the second mode puts in place of the dialog
 
-**Статус**: open · the Arbiter's idea, 2026-09-19, after the collection step closed
+**Статус**: done on `wave-0.1.43` 2026-09-23 · built after the prototype was approved (DECISIONS-W-2 S23); Windows terminal placement not yet
 
 **What he asked for.** A `Layout` button with two modes. In `Terminal+GUI` the central AI-dialog
 panel is hidden and no SDK/OMP session is started at all — the Arbiter drives from a terminal

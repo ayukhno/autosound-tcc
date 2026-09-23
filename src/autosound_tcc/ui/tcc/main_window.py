@@ -100,7 +100,8 @@ from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
-from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
+from autosound_tcc.ui.tcc import control_layout, listening_dialog, protective_dialog
+from autosound_tcc.ui.tcc.control_layout import ControlLayout
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
@@ -184,6 +185,7 @@ _MACHINE_GATE_KEY = "gate/machine"
 #: launch, because a question re-asked forever is not a question.
 _TERMINAL_ASKED_KEY = "gate/default-terminal-asked"
 _EFFORT_KEY = "effort"                # per project: how hard the Generator is asked to think
+_LAYOUT_KEY = "layout"                # per project: "control" (session in a terminal) or "gui"
 _ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
@@ -704,6 +706,8 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
+        # The control layout (F-069) hides this and puts its panels elsewhere, then back.
+        self._main_splitter = splitter
         self._left = self._build_left()
         self._center = self._build_center()
         self._right = self._build_right()
@@ -740,6 +744,10 @@ class MainWindow(QMainWindow):
         self._load_project()
         self._load_process()
         self._start_mcp_server()
+        # The project was last left in control mode: open it that way (F-069). After the first
+        # paint, so the window has a screen to take half of.
+        if self._project_setting(_LAYOUT_KEY) == "control":
+            QTimer.singleShot(0, self._enter_saved_layout)
 
         # The REW-online dot. Same escape hatch as the MCP server just above -- this is a real
         # outbound network call, and the test suite relies on AUTOSOUND_TCC_MCP=0 to stay off the
@@ -880,6 +888,15 @@ class MainWindow(QMainWindow):
         # stays as the one manual "reload from disk" a user can always reach, regardless of which
         # left-panel accordion section happens to be collapsed (user request 2026-07-29: the
         # earlier left-panel version was easy to lose track of).
+        # «Активний TCC / Режим контролю» (F-069): where the session runs decides the layout.
+        self._control_layout = ControlLayout(self)
+        self._layout_btn = QPushButton(i18n.t("layoutControl"))
+        self._layout_btn.setProperty("class", "reason-btn")
+        self._layout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._layout_tip = attach_tip(self._layout_btn, i18n.t("layoutControlTip"))
+        self._layout_btn.clicked.connect(self._on_layout_toggle)
+        layout.addWidget(self._layout_btn)
+
         self._header_refresh_btn = QPushButton("↻")
         self._header_refresh_btn.setProperty("class", "icon-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2046,6 +2063,10 @@ class MainWindow(QMainWindow):
         """Load the DSP capability profile + the current preset's ledger, and hand the result to
         the tree. Degrades to a status message rather than crashing — no profile / no ledger /
         a broken file are all things a half-set-up project can legitimately be in."""
+        # The control layout's tables read the view this builds: refresh them once it is built.
+        control = getattr(self, "_control_layout", None)
+        if control is not None and control.active:
+            QTimer.singleShot(0, control.refresh)
         # The demo transcript goes the moment there is a real project to confuse it with. It was
         # only dropped on the "no project" branch, so opening a real one and not starting a session
         # left invented EQ values ("PK 1120 -2.5 Q2.2") on screen under a real project's name.
@@ -2192,6 +2213,27 @@ class MainWindow(QMainWindow):
             version=view.version or "—", preset=view.preset,
             applied=counts.get("applied", 0), proposed=counts.get("proposed", 0),
             measured=counts.get("measured", 0)) if view.version else "")
+
+    def _on_layout_toggle(self) -> None:
+        """Switch between the in-app session's layout and the control layout, and remember it."""
+        self._control_layout.toggle()
+        self._set_project_setting(_LAYOUT_KEY, "control" if self._control_layout.active else "gui")
+        self._sync_layout_button()
+
+    def _enter_saved_layout(self) -> None:
+        if not self._control_layout.active and getattr(self, "_agent_worker", None) is None:
+            self._control_layout.enter()
+            self._sync_layout_button()
+
+    def _sync_layout_button(self) -> None:
+        """The button names the mode it switches TO, and waits while a session runs in this window:
+        the control layout hides the dialog that session talks through."""
+        active = self._control_layout.active
+        self._layout_btn.setText(i18n.t("layoutActive" if active else "layoutControl"))
+        busy = getattr(self, "_agent_worker", None) is not None
+        self._layout_btn.setEnabled(active or not busy)
+        self._layout_tip.set_text(i18n.t("layoutBusyTip") if busy and not active
+                                  else i18n.t("layoutActiveTip" if active else "layoutControlTip"))
 
     def _open_intake_form(self) -> None:
         """Start the skill's intake form for this project, or reopen the one already running.
@@ -3780,6 +3822,10 @@ class MainWindow(QMainWindow):
 
     def _start_tuning_session(self, opening: Optional[str] = None) -> None:
         """Front-end A: run the skill in-process and stream it into the dialog panel."""
+        if getattr(self, "_control_layout", None) is not None and self._control_layout.active:
+            # The control layout is for a session in a terminal, and hides this one's dialog.
+            self._status_strip.notify(i18n.t("layoutNoInApp"), level="warn")
+            return
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
             # Same model: nothing to do. A different one: the running conversation ends, because
@@ -3923,6 +3969,7 @@ class MainWindow(QMainWindow):
         if worker is not None:
             worker.shutdown()
         self._agent_worker = None
+        self._sync_layout_button()
         self._running_model = None
         self._dialog._add_system_message(
             i18n.t("sessionFresh") if mode == "fresh" else i18n.t("sessionRestarted")
@@ -3985,6 +4032,7 @@ class MainWindow(QMainWindow):
                 effort=effort,
             )
         self._agent_worker = AgentWorker(session_factory=factory, opening_prompt=opening)
+        self._sync_layout_button()
         self._dialog.attach_agent(
             self._agent_worker,
             server.bus,
@@ -4631,6 +4679,10 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(str(exc), level="warn")
             return
         self._status_strip.notify(i18n.t("terminalOpened").format(cli=launched))
+        if self._control_layout.active:
+            # The terminal takes the left half (F-069, A12) — once its window exists.
+            screen = self.screen().availableGeometry()
+            QTimer.singleShot(1500, lambda: control_layout.place_terminal_left(screen))
 
     def _on_logged_error(self, message: str, path) -> None:
         """Called from `app_log` when something was written to the log. Never from a worker
@@ -4881,6 +4933,8 @@ class MainWindow(QMainWindow):
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))
         self._target_tip.set_text(i18n.t("targetToolTip"))
+        self._sync_layout_button()
+        self._control_layout.refresh()
         shown = getattr(self, "_version_shown", None)
         if shown is not None:
             self._show_version(*shown)

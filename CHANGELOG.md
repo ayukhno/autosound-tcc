@@ -23,6 +23,11 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **Copying a project asks for the seat.** Driver, passenger, both, all, rear left or right — no
   default, in the method's own words, with the source's seat named beside it, because another seat
   is why a copy exists (hub `#193`).
+- **Control mode, for a session running in a terminal.** One header button switches the window:
+  TCC takes the right half of the screen and the terminal the left; on top, «Моніторинг» (the
+  session's journal as it happens, «Готово» and «Прослухати»), the virtual and output tables and
+  the EQ, level, delay and phase views; below, the left and right panels side by side. Both
+  borders drag, and stay where you leave them; the mode is remembered per project (F-069).
 
 ### Changed
 
