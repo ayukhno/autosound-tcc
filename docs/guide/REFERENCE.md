@@ -69,7 +69,7 @@ your DSP software yourself, or import them there.
 | **☰ Menu** | Projects, sessions and models, appearance, tools, help. See [The menu](#the-menu). |
 | **⌂ passat-b8-2026** | The project folder this window is bound to. |
 | **Preset** | Which preset the tree and the tables show. |
-| **Target curve** | The curve this project tunes to. Click it to open the target-curve tool in a browser. |
+| **Target curve** | The curve this project tunes to. Click it to open the [target-curve tool](TARGET-CURVE-TOOL.md) in a browser. |
 | **Control mode** | Hands the session to a terminal. See [Control mode](#control-mode). |
 | **⟳** | Reloads the project from disk: the DSP profile and the ledger. |
 | **⚙** | Diagnostics: the project check, updates, installation and run logs. |
@@ -295,7 +295,8 @@ full window back. Both borders can be dragged, and TCC remembers where you left 
   model knows to disk, start a fresh session, configure models, set the reviewer's key, ask about
   something.
 - **Appearance**: theme, language, text size.
-- **Tools**: diagnostics and updates, importing from a Resonalyze project, the target-curve tool.
+- **Tools**: diagnostics and updates, importing from a Resonalyze project, the
+  [target-curve tool](TARGET-CURVE-TOOL.md).
 - **Help and support**: message the developer. The support links are next to it.
 
 ## Dialogs

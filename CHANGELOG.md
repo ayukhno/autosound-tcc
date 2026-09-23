@@ -19,6 +19,9 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A user guide with screenshots, in English.** [TCC in eight screens](docs/guide/QUICK-GUIDE.md)
   is a short tour of the window; [the full reference](docs/guide/REFERENCE.md) covers every panel,
   dialog and button. The screenshots come from a real project, its notes translated into English.
+- **A guide to the target-curve tool.** [The target-curve tool](docs/guide/TARGET-CURVE-TOOL.md):
+  loading curves and measurements, Compare, and Analyze, with screenshots. What a target curve is
+  stays in the method's own guide, linked from the page.
 
 ## [v0.1.43] — 2026-09-23 · the intake form, control mode, the reviewer key in the Keychain, the method at v3.0.60
 
