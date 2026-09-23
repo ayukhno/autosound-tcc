@@ -107,9 +107,9 @@ design tool, not described (the Arbiter, 2026-09-22: «не забудь зі м
 
 ### 8 · Machinery
 
-- **`F-071`** a test crashes its worker under `-n 4`.
-- **`F-065`** the suite costs three times more in one process than the same files apart.
-- **`F-066`** shard weights are macOS seconds; Windows is uneven.
+- **`F-071`** a test crashes its worker under `-n 4`. **Deferred out of W-2 (the Arbiter, 2026-09-23).**
+- **`F-065`** the suite costs three times more in one process than the same files apart. **Deferred out of W-2 (the Arbiter, 2026-09-23).**
+- **`F-066`** shard weights are macOS seconds; Windows is uneven. **Deferred out of W-2 (the Arbiter, 2026-09-23).**
 - **`F-073`** the six commits after `v0.1.42` go into this CHANGELOG entry.
 - **`F-074`** check the project's GitHub backup after the broken-git spell.
 - **`F-075`** `test_updates.py` red on `main` since `22643c0`: two tests still expect `no_network`.

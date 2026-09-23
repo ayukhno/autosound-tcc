@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: open · left by the wave of 2026-09-19 (hub `#181`), worth about a minute
+**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: open · measured while doing hub `#181` (CI sharding), 2026-09-19
+**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2146,7 +2146,7 @@ construction. This one was found while chasing it.
 
 ### F-071 — `test_only_the_current_phase_starts_expanded` crashes its worker under `-n 4`
 
-**Статус**: open 2026-09-20 · named, not diagnosed — first stumble
+**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: machinery with no product effect, not reproduced in 3 runs · returns: when it shows again, or at the next wave's review
 
 Reproduced 2026-09-20 while working on `SKL-047`, and measured against a clean tree so it is not
 mistaken for a regression: with `tests/test_plan_panel.py` in the same `-n 4` run as
