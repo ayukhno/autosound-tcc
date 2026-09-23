@@ -297,7 +297,8 @@ full window back. Both borders can be dragged, and TCC remembers where you left 
 - **Appearance**: theme, language, text size.
 - **Tools**: diagnostics and updates, importing from a Resonalyze project, the
   [target-curve tool](HOUSE-CURVE.md).
-- **Help and support**: message the developer. The support links are next to it.
+- **Help and support**: **📖 User guide** opens this guide on GitHub, at the version you have
+  installed. Then message the developer, and the support links.
 
 ## Dialogs
 

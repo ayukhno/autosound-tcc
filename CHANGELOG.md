@@ -19,6 +19,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 - **A user guide with screenshots, in English.** [TCC in eight screens](docs/guide/QUICK-GUIDE.md)
   is a short tour of the window; [the full reference](docs/guide/REFERENCE.md) covers every panel,
   dialog and button. The screenshots come from a real project, its notes translated into English.
+- **Help → 📖 User guide.** Opens the guide on GitHub at the version you have installed, since the
+  guide is not part of the installed package and its screens change between versions.
 - **A guide to the house curve in TCC.** [The house curve in TCC](docs/guide/HOUSE-CURVE.md): where
   the window shows the target curve, how it opens the method's target-curve tool, and the tool's
   buttons (loading curves and measurements, Compare, Analyze), with screenshots. What a target curve

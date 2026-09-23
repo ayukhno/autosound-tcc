@@ -62,6 +62,7 @@ from autosound_tcc.core import (
     contract_check,
     critic,
     form_report,
+    guide,
     handoff,
     install_report,
     intake_form,
@@ -1116,6 +1117,13 @@ class MainWindow(QMainWindow):
         target_action.triggered.connect(self._open_target_curve_tool)
 
         self._menu_section(menu, "menuHelp")
+        # Online, at this build's own tag: `docs/` is not in the installed package, and a link to
+        # `main` would show the screens of another version (tcc #49, hub #202 SKL-053).
+        guide_action = menu.addAction("📖 " + i18n.t("menuGuide"))
+        guide_action.setToolTip(i18n.t("menuGuideTip"))
+        guide_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(guide.installed_guide_url()))
+        )
         feedback_action = menu.addAction("💬 " + i18n.t("fbBig"))
         feedback_action.setToolTip(i18n.t("fbBigTip"))
         feedback_action.triggered.connect(self._open_feedback)

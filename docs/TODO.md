@@ -2010,6 +2010,16 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-085 — Help → User guide, at the installed tag (#49)
+
+**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK («зроби 49 зараз»), ships with W-3
+
+`core/guide.py`: the guide's GitHub page at the ref this build is: the tag it was installed at
+(`requested_revision`, a release or a candidate), else `v<version>`, else `main`. The menu entry in
+Help and support opens it; strings in four languages through the Advisor. Tests:
+`tests/test_guide.py` (6), `test_the_guide_entry_opens_the_guide_at_the_installed_version`. The
+menu screenshot in `docs/guide/img/menu.webp` shows the entry.
+
 ### F-084 — The house-curve page (#48, hub #202 SKL-053)
 
 **Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it

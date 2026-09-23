@@ -3094,6 +3094,29 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     assert any(a.menu() and a.text() == i18n.t("menuLanguage") for a in actions)
 
 
+def test_the_guide_entry_opens_the_guide_at_the_installed_version(monkeypatch):
+    """Help → the user guide, on GitHub at this build's own tag (tcc #49, hub #202 SKL-053).
+    `docs/` is not in the installed package, so the menu opens the page rather than a file."""
+    from PySide6.QtGui import QDesktopServices
+
+    from autosound_tcc.core import guide
+
+    _app()
+    monkeypatch.setattr(guide, "installed_guide_url", lambda page=guide.QUICK_GUIDE:
+                        f"https://example.invalid/v9.9.9/{page}")
+    opened: list[str] = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    actions = window._menu_btn.menu().actions()
+    help_at = next(i for i, a in enumerate(actions) if a.text() == i18n.t("menuHelp").upper())
+    entry = next(a for a in actions[help_at:] if i18n.t("menuGuide") in a.text())
+    entry.trigger()
+
+    assert opened == ["https://example.invalid/v9.9.9/QUICK-GUIDE.md"]
+
+
 def test_the_main_menu_follows_a_language_switch():
     """A menu item's label is set once, at construction -- so before this the menu kept the
     language it was born in while the window changed around it. It is rebuilt now, which is also
