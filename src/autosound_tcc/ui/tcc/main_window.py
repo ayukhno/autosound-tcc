@@ -128,7 +128,6 @@ from autosound_tcc.ui.tcc.sidebar_section import (
 from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
 from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
-from autosound_tcc.ui.tcc.title_fix_dialog import TitleFixDialog, TitleFixWorker
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 from autosound_tcc.ui.tcc.workers import (
@@ -3548,30 +3547,11 @@ class MainWindow(QMainWindow):
         if not fixes or key == getattr(self, "_title_fixes_said", None):
             return
         self._title_fixes_said = key
+        # The fix is made where names are given: the import form, whose New name column opens
+        # with these filled in and unticked (the Arbiter, 2026-09-23).
         self._status_strip.notify(
             i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
-            action=(i18n.t("tfAction"), lambda f=tuple(fixes): self._open_title_fixes(list(f))))
-
-    def _open_title_fixes(self, fixes) -> None:
-        dialog = TitleFixDialog(fixes, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.chosen():
-            return
-        project = config.chosen_project_dir()
-        if project is None or getattr(self, "_title_fix_worker", None) is not None:
-            return
-        worker = TitleFixWorker(RewBridge(), dialog.chosen(), project)
-        worker.done.connect(self._on_title_fixes_done)
-        worker.failed.connect(lambda msg: self._status_strip.notify(
-            i18n.t("tfFailed").format(said=msg), level="warn"))
-        worker.finished.connect(lambda: setattr(self, "_title_fix_worker", None))
-        self._title_fix_worker = worker
-        worker.start()
-
-    def _on_title_fixes_done(self, good: list, said: list) -> None:
-        self._meas_panel.forget_titles([f.wrong for f in good])
-        self._meas_panel._remember_titles([f.right for f in good])
-        self._status_strip.notify(i18n.t("tfDone").format(n=len(good)))
-        self._refresh_process()
+            action=(i18n.t("tfAction"), self._meas_panel.open_import))
 
     def _on_capture_check_done(self, output: str) -> None:
         """Put the verdict on screen. The checker's own words, not a paraphrase.
@@ -3580,7 +3560,10 @@ class MainWindow(QMainWindow):
         reason -- "silence in band" and "covers 200-2000 Hz, asked for 20-20000" lead to different
         actions at the car.
         """
-        bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")]
+        # A curve that is not there is waiting, not unusable (the Arbiter, 2026-09-23): only a curve
+        # REW holds and the check failed is a retake to decide on.
+        bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")
+               and "no measurement titled" not in line.lower()]
         # One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into
         # the strip took half the window and nothing could close it. A list closed by hand stays
         # closed until it CHANGES -- the same sixteen again are not news.

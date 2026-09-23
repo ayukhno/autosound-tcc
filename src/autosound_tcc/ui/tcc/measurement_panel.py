@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import capture_import, config, process_writer, protective
+from autosound_tcc.core import capture_import, config, process_writer, protective, title_fixes
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
@@ -1144,6 +1144,10 @@ class MeasurementPanel(QWidget):
         titles = [t for t in rows if t in known] or known or rows
         self.curvesRequested.emit(titles)
 
+    def open_import(self) -> None:
+        """⤓ from outside the card: the strip's «Виправити в REW…» (A17) opens the same form."""
+        self._on_read_clicked()
+
     def _on_read_clicked(self) -> None:
         """Fetch what REW is showing, then ask which of it comes in.
 
@@ -1219,6 +1223,7 @@ class MeasurementPanel(QWidget):
         simply comes back on the next ⤓ — untouched, and still unprocessed.
         """
         rows = self._taking if only is None else [r for r in self._taking if r.uuid in only]
+        self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
         if titles:
@@ -1229,6 +1234,16 @@ class MeasurementPanel(QWidget):
         # off it (`main_window._on_rew_titles_changed`).
         self.titlesChanged.emit()
         self._write_ledger(rows, titles)
+
+    def _supersede_renamed(self, rows: list, titles: dict) -> None:
+        """A rename of a title the open round had ALREADY taken: the round learns the right one
+        through the method's `capture-supersede`, after REW was renamed (A17, hub #201's order).
+        A title the round never took needs nothing more — the import records the right one."""
+        taken = set(((process_view.capture_round() or {}).get("taken") or {}))
+        for row in rows:
+            new = (titles or {}).get(row.uuid)
+            if new and row.title != new and row.title in taken:
+                title_fixes.supersede(config.project_dir(), row.title, new)
 
     def _write_ledger(self, rows: list, titles: dict) -> None:
         """Tell the ledger about the pass: open the round if there is none, record each capture

@@ -2012,15 +2012,18 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · live check: the next round with a `sw_01`-style title
+**Статус**: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
 
-While a round is open and REW's list changes, the method's own comparison (`naming.
-validate_series` → `renames`) finds titles the round asked for under another spelling; a title
-matching nothing, close to a missing expected one, is offered as a likely typo. The strip offers
-«Виправити в REW…» once per list; the dialog ticks spelling fixes and leaves typos unticked; Apply
-renames in REW by the title REW holds now, reads REW back, and runs `capture-supersede` only for
-what REW shows done — REW first, then the round (#201). Red stays for a capture that is absent or
-fails the check.
+The fix is made in the REW import form: its New name column opens with the name found by
+matching — the round's spelling where the grammar matched (`sw_01` → `sw_1`), the closest missing
+expected name for a likely typo — and the row UNTICKED, marked `≈`: «галочку треба поставити
+свідомо, бо це автоматичний підбір». While a round is open and REW's list changes, the strip says
+there is something to fix and opens that form. After the renames, a title the open round had
+already taken under the wrong name is superseded through the method's `capture-supersede`.
+
+Colours, on the same word: red is ONLY for a curve that is there and fails the check (a retake);
+a curve that is not there — the check's «No measurement titled …» — is yellow, waiting, and is not
+reported as unusable.
 
 ### F-080 — The next phase in a clean session: the method's `handoff`, offered (hub #201, S-044)
 

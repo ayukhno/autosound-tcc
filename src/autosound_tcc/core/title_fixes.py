@@ -6,15 +6,16 @@
 
 * **grammar** — the method's own comparison already matches it, and says so: `validate_series`
   returns `renames`, `{title in REW: canonical title}` (`sw_01 (sw)` → `sw_1 (sw)`, skill #47). The
-  fix is a rename, never a re-measurement; the uuid survives it. Offered ticked.
+  fix is a rename, never a re-measurement; the uuid survives it.
 * **typo** — a title the grammar does not match to anything expected, or matches to a series the
   round did not ask for, while an expected title is still missing and reads almost the same.
-  Offered unticked: a typo's intended name is a guess until the Arbiter confirms it.
 
-The order is the method's (hub #201): rename in REW, read REW back to confirm the right title is
-there and the wrong one is gone, and only then `capture-supersede` in the open round — so the
-round never names a title REW does not have. A round that never took the wrong title answers exit
-1 for it, which is not a failure here: the rename alone was the fix.
+Where the fix is made is the import form (the Arbiter, 2026-09-23): its New name column opens with
+the found name filled in and the row UNTICKED — an automatic match is his to accept. The strip
+only says there is something to fix and opens that form. The order is the method's (hub #201):
+the import renames in REW first; a title the open round had already taken under the wrong name is
+then superseded in the round (`supersede`). A round that never took it answers exit 1, which is
+not a failure here: the rename and the import were the whole fix.
 """
 
 from __future__ import annotations
@@ -71,12 +72,6 @@ def supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
     app_log.logger().info("capture-supersede %r -> %r: exit %s", wrong, right, proc.returncode)
     said = (proc.stdout.strip() or proc.stderr.strip())
     return proc.returncode in (0, 1), said
-
-
-def confirmed(fixes: Iterable[TitleFix], rew_titles_after: Iterable[str]) -> list[TitleFix]:
-    """The fixes REW now shows done: the right title there, the wrong one gone."""
-    after = set(rew_titles_after)
-    return [f for f in fixes if f.right in after and f.wrong not in after]
 
 
 def glossary_for(project_dir: Path):

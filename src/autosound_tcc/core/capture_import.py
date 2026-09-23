@@ -34,6 +34,8 @@ format tells us what it is instead of just degrading.
 
 from __future__ import annotations
 
+import difflib
+
 import json
 import os
 import re
@@ -367,11 +369,19 @@ class Preselect:
     #: (finding 28). A REW title that differs only in how the grammar reads it (`_01` for `_1`)
     #: becomes a rename to the round's spelling, which the method's own check now asks for.
     names: dict = field(default_factory=dict)
+    #: Rows whose New name was FOUND rather than already right: a spelling the grammar matched
+    #: (`_01` for `_1`), or a close match to a name the round still misses (a likely typo). Filled
+    #: in and left UNTICKED — an automatic match is the Arbiter's to accept (A17, 2026-09-23).
+    proposed: frozenset = frozenset()
 
     @property
     def shown(self) -> frozenset:
         """Everything the window must put on screen even if it falls outside the tail."""
         return self.ticked | self.ambiguous
+
+
+#: How alike a title has to be to a missing expected name to be offered as its typo.
+_TYPO_CUTOFF = 0.8
 
 
 def preselect(rows: Iterable[Candidate], expected: Iterable[str],
@@ -401,14 +411,31 @@ def preselect(rows: Iterable[Candidate], expected: Iterable[str],
         key = read(row.title)
         if key in wanted:
             by_key.setdefault(key, []).append(row)
-    ticked, ambiguous, names = set(), set(), {}
+    ticked, ambiguous, names, proposed = set(), set(), {}, set()
     for key, group in by_key.items():
         if len(group) == 1:
-            ticked.add(group[0].uuid)
-            names[group[0].uuid] = spelled[key]
+            row = group[0]
+            names[row.uuid] = spelled[key]
+            if row.title == spelled[key]:
+                ticked.add(row.uuid)
+            else:
+                proposed.add(row.uuid)
         else:
             ambiguous.update(row.uuid for row in group)
-    return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous), names=names)
+    # A likely typo: a row that answers to nothing the round expects, whose title reads almost
+    # like a name the round is still missing (`r-R_1 (se)` for `r-R_1 (sw)`).
+    missing = [spelled[key] for key in wanted if key not in by_key]
+    grouped = {row.uuid for group in by_key.values() for row in group}
+    for row in rows:
+        if not missing or not row.identified or row.imported or row.uuid in grouped:
+            continue
+        close = difflib.get_close_matches(row.title, missing, n=1, cutoff=_TYPO_CUTOFF)
+        if close:
+            names[row.uuid] = close[0]
+            proposed.add(row.uuid)
+            missing.remove(close[0])
+    return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous), names=names,
+                     proposed=frozenset(proposed))
 
 
 @dataclass(frozen=True)

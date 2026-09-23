@@ -171,6 +171,9 @@ class CaptureImportDialog(QDialog):
         #: The New name opens with the name each ticked row was matched to, in the round's own
         #: spelling (finding 28) -- it was the one column left empty, and it is what the form is for.
         self._names.update(picked.names)
+        #: Rows whose New name was found by matching, not already right — filled, NOT ticked:
+        #: an automatic match is the Arbiter's to accept (A17, 2026-09-23).
+        self._proposed = set(picked.proposed)
         #: How many the DIALOG ticked, kept apart from `_ticked`, which the tuner then edits. The
         #: line under the table is about what was decided for them, not about the running total.
         self._picked = len(picked.ticked)
@@ -374,6 +377,10 @@ class CaptureImportDialog(QDialog):
                 # came out is the person's call (user, 2026-09-06).
                 title.setText(f"{row.title} ⧉")
                 title.setToolTip(i18n.t("capImportDupTip"))
+            elif row.uuid in self._proposed and row.uuid not in self._ticked:
+                # Its New name was matched, not typed: said, and left for a conscious tick.
+                title.setText(f"{row.title}  ≈")
+                title.setToolTip(i18n.t("capImportProposed"))
             self._table.setItem(index, _COL_TITLE, title)
 
             # REW's own string, verbatim. It is a display date formatted by REW's locale, and

@@ -167,6 +167,18 @@ def applicable(verdict: dict) -> bool:
     return (verdict or {}).get("applicable", True) is not False
 
 
+def absent(verdict: dict) -> bool:
+    """The check found NO curve under that title — an absent capture, not a bad one.
+
+    The Arbiter, 2026-09-23: red is for a curve that is there and fails (retake it); a curve that
+    is not there is yellow, waiting to be taken. The method's check reports both as `ok: false`,
+    the absent one with REW's own «No measurement titled …» — sixteen of those once painted a
+    whole round red while nothing had been measured badly at all.
+    """
+    return any("no measurement titled" in str(issue).lower()
+               for issue in (verdict or {}).get("issues") or [])
+
+
 def _round_is_at(round_: dict, version, naming, glossary) -> bool:
     """Whether a round was captured at series `version`: by its own `version`, or by the `_N` its
     titles carry (hub #153 C).
@@ -321,6 +333,8 @@ def build_session(
         if name in recorded_skipped or (key is not None and key in skipped_keys):
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
         verdict = verdicts.get(name) or verdicts_by_key.get(key)
+        if verdict and absent(verdict):
+            return not_taken(key)  # not there: yellow, waiting — not a bad curve
         if verdict and not verdict.get("ok") and applicable(verdict):
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is.
@@ -451,6 +465,8 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         if entry is None:
             return STATUS_WAIT  # asked for, never taken, and the round closed anyway
         verdict = entry.get("verified") or {}
+        if absent(verdict):
+            return STATUS_WAIT
         return STATUS_DONE if verdict.get("ok", True) or not applicable(verdict) else STATUS_STALE
 
     def issues_for(name: str) -> Optional[str]:
