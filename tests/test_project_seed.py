@@ -86,10 +86,13 @@ def test_the_installation_travels_and_the_tune_stays_behind(seeder, tmp_path):
     # it now, because the docs had claimed for months that the critic key was gitignored while
     # nothing wrote one. The list is theirs to decide — this test pins that we report what was
     # actually written, not a list we keep in our head.
+    # Since v3.0.60: the tune's purpose (`preference-profile.md`) belongs to the project, not to
+    # the car, and does not travel; and a copy is made a git repository with a first commit
+    # (hub #199), which the report names as `.git`.
     assert report.written == [
-        "project.json", ".gitignore", "dsp_profile.json", "autosound_context.md",
-        "preference-profile.md",
+        "project.json", ".gitignore", "dsp_profile.json", "autosound_context.md", ".git",
     ]
+    assert not (target / "preference-profile.md").exists()
     seeded = json.loads((target / "project.json").read_text(encoding="utf-8"))
     original = json.loads((source / "project.json").read_text(encoding="utf-8"))
     for key in ("car", "dsp", "amps", "mic", "channels", "glossary", "presets"):
