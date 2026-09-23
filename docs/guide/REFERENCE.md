@@ -33,7 +33,7 @@ translated into English. The conversation in the dialog panel is an example.
 
 | Word | Meaning |
 |---|---|
-| **Arbiter** | You. You decide; nothing is recorded behind you. |
+| **Arbiter** | You. You decide; nothing is recorded without you. |
 | **Generator** | The main AI (*AI main*): it reads the measurements and proposes the next step. |
 | **Critic** | The reviewer (*AI critic*), a model from another vendor that checks the Generator's proposal. |
 | **Configuration** | What is in the processor, recorded as a ledger version `v_NNN`. |
@@ -322,7 +322,7 @@ reads back, and your words are what you meant. **The whole cheat sheet** shows e
 ![The protective filters of a capture round](img/protection.webp)
 
 A protective filter in the signal path, such as a high-pass that keeps a tweeter safe during a raw
-sweep, rotates the phase well past its own corner frequency. Record it here, and the analysis takes
+sweep, shifts the phase well past its own corner frequency. Record it here, and the analysis takes
 it back out of the curve before reading it. Leave it empty, and the curve is read as measured, which
 is right for a sweep taken through the tune you are building.
 
