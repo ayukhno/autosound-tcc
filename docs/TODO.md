@@ -2010,6 +2010,26 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-077 — The reviewer key from the skill's secret store: TCC's half
+
+**Статус**: W-2 · waits for the skill's interface (`key status` / `key set` / migrate), its ticket to:tcc not filed yet
+
+The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
+as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`
+itself (`core/critic_env.py`, `model_choices.critic_reaches`). A key that lives only in Keychain
+would read as "unreachable": the footer says so, the start-of-session probe is skipped
+(`main_window.py` ~4095), and the MCP payload tells the model to hand out a clipboard package
+(`mcp_server.py` ~168, ~231). That is the refusal the skill's option 3 warns about.
+
+**Що зробити**:
+1. Reachability asks the skill (`key status`, machine-readable, never the value) instead of
+   mirroring its files — one door, no drift; `critic_env.py` keeps only the non-secret pins.
+2. A «Ключ рецензента» screen: masked field → the skill's `key set <provider>` over stdin (never
+   argv); shows WHERE the key is (Keychain / file / shell export), never the value; «Перенести з
+   ~/.zshrc» runs the skill's migrate offer with the Arbiter's yes.
+3. Texts that send the key to `critic-env` (`mcp_server.py` "how", i18n) name the screen instead.
+4. Keep finding 32's drop of `GEMINI_API_KEY` for a CLI pick as a second belt.
+
 ### F-076 — Closing "edit project parameters" prints a hard-coded demo result as if it were true
 
 **Статус**: done on `wave-0.1.43` 2026-09-22 · the four edit-mode lines say what happened (a signal to the session), and nothing when there is no bus
