@@ -29,6 +29,13 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   the EQ, level, delay and phase views; below, the left and right panels side by side. Both
   borders drag, and stay where you leave them; the mode is remembered per project (F-069).
 
+- **«Ключ рецензента…» in the menu** (hub #197): where each provider's reviewer key is used from —
+  the OS keystore, the `critic-env` file, the environment, or nowhere — never the key itself; a
+  hidden field that hands a new key to the method over stdin; and, for a key still exported from a
+  shell profile, its file and line and the method's own move, opened in a terminal where it asks
+  first. Reachability now asks the method, so a key kept only in the Keychain is not called
+  unreachable. With a method older than its key commands, everything reads the file as before.
+
 ### Changed
 
 - **The vocabulary the method settled is the window's.** A capture series `_N` is never called a

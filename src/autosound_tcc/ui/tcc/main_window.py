@@ -69,6 +69,7 @@ from autosound_tcc.core import (
     process_writer,
     project_settings,
     project_trust,
+    reviewer_key,
     self_check,
     target_curve,
     terminal_launcher,
@@ -119,6 +120,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
     SidebarSection,
     clear_layout,
 )
+from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
@@ -703,6 +705,9 @@ class MainWindow(QMainWindow):
         # launched from (core/app_log.py). Silence would be worse than the terminal was, though:
         # a failure the user cannot see is a failure they report as "it just did nothing".
         app_log.set_ui_sink(self._on_logged_error)
+        # Where the reviewer's key lives is the METHOD's answer (`key status`, hub #197), a child
+        # process: asked in the background now, so the footer's first paint does not wait for it.
+        reviewer_key.prefetch()
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -1042,6 +1047,9 @@ class MainWindow(QMainWindow):
         self._models_action = menu.addAction(i18n.t("menuModels"))
         self._models_action.setToolTip(i18n.t("menuModelsTip"))
         self._models_action.triggered.connect(self._open_model_config)
+        self._reviewer_key_action = menu.addAction(i18n.t("menuReviewerKey"))
+        self._reviewer_key_action.setToolTip(i18n.t("menuReviewerKeyTip"))
+        self._reviewer_key_action.triggered.connect(self._open_reviewer_key)
         gate_menu = self._tip_menu(menu)
         gate_menu.setTitle(i18n.t("gateMode"))
         menu.addMenu(gate_menu)
@@ -4394,6 +4402,12 @@ class MainWindow(QMainWindow):
         # Deferred out of the dialog's own accept path: refilling both combos tears down and
         # rebuilds their item views, and doing that while the dialog is still unwinding is the
         # same class of fault as the placeholder removal above.
+        QTimer.singleShot(0, self._reload_after_model_config)
+
+    def _open_reviewer_key(self) -> None:
+        """Where the reviewer's key is, and a safe place to enter one (hub #197)."""
+        ReviewerKeyDialog(self).exec()
+        # A key stored or moved there changes what the footer can reach.
         QTimer.singleShot(0, self._reload_after_model_config)
 
     def _reload_after_model_config(self) -> None:

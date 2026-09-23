@@ -1302,7 +1302,8 @@ def test_the_advice_never_tells_anyone_to_export_the_key(tmp_path, monkeypatch):
     how = mcp_server._reviewer_state(tmp_path)["how"]
 
     assert "export" not in how.lower()
-    assert "critic-env" in how, "the advice has to name where the key actually goes"
+    assert "Reviewer key" in how, "the advice names where the key is entered now (hub #197)"
+    assert "never ask for the key in the chat" in how
 
 
 def test_a_reviewer_that_cannot_run_yet_does_not_report_a_green_light(tmp_path, monkeypatch):

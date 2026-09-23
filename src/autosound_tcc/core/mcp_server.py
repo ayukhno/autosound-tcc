@@ -162,14 +162,16 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         "substituted": resolved.note,
         "label": choice.label,
         "reachable": model_choices.critic_reaches(choice),
-        # Where the key GOES, not where it could be exported to: the method keeps it in
-        # `~/.config/autosound/critic-env` precisely so it never enters a shell profile or the
-        # project folder, which is one `git push` from leaking it (HUB-025).
+        # Where the key GOES, not where it could be exported to: the method keeps it in the OS
+        # keystore (or its `critic-env` file), entered through TCC's «Reviewer key» screen, so it
+        # never enters a shell profile or the project folder, which is one `git push` from
+        # leaking it (HUB-025, hub #197).
         "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
                else ("call `call_critic`; with no key it hands you a clipboard package for this "
-                     "model. To make the channel answer directly, the key goes in this machine's "
-                     "`~/.config/autosound/critic-env` (`%APPDATA%\\autosound\\critic-env` on "
-                     "Windows) — never in a shell profile and never in the project folder"),
+                     "model. To make the channel answer directly, the Arbiter enters the key in "
+                     "TCC: Menu → Reviewer key, which stores it in this computer's keystore — "
+                     "never ask for the key in the chat, never put it in a shell profile or the "
+                     "project folder"),
         # Reported once and asked back: the model read this, then put "confirm that this is your
         # independent reviewer?" to the Arbiter. Naming a field `configured` says what the value
         # is; it does not say who decided it. This does.
@@ -239,7 +241,8 @@ def clipboard_reason(project_dir: Path) -> str:
         )
     return (
         f"{choice.model!r} is a {vendor} model and this machine has neither that vendor's API key "
-        f"nor its CLI, so the package is the only way through"
+        f"nor its CLI, so the package is the only way through. A key is entered in TCC (Menu → "
+        f"Reviewer key), never in this chat"
     )
 
 

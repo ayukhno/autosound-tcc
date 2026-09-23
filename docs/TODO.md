@@ -2010,9 +2010,9 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
-### F-077 — The reviewer key from the skill's secret store: TCC's half
+### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
-**Статус**: W-2 · waits for the skill's interface (`key status` / `key set` / migrate), its ticket to:tcc not filed yet
+**Статус**: built on `wave-0.1.43` 2026-09-23 against #197's contract, with the file reader as fallback · live check waits for the skill's `key status|set|move-shell` to be vendored
 
 The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
 as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`
@@ -2029,6 +2029,13 @@ would read as "unreachable": the footer says so, the start-of-session probe is s
    ~/.zshrc» runs the skill's migrate offer with the Arbiter's yes.
 3. Texts that send the key to `critic-env` (`mcp_server.py` "how", i18n) name the screen instead.
 4. Keep finding 32's drop of `GEMINI_API_KEY` for a CLI pick as a second belt.
+
+Built: `core/reviewer_key.py` (one reader, cached, prefetched at start; `set_key` over stdin),
+`ui/tcc/reviewer_key_dialog.py` (Menu → «Ключ рецензента…»), `critic_reaches` through it, the MCP
+advice names the screen and says never to ask for a key in the chat. A method older than the key
+commands answers nothing and everything reads the file as before. On the way:
+`test_a_launch_failure_is_logged_and_still_reports_done` failed once in three `-n 4` runs of
+`test_main_window.py`, with and without this change — "not checked" availability, the F-053 class.
 
 ### F-076 — Closing "edit project parameters" prints a hard-coded demo result as if it were true
 

@@ -304,6 +304,14 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     # and nobody could tell until there was a second machine (CI, 2026-09-07). Tests that need a
     # reachable critic patch it back themselves; their patch runs later and wins.
     monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: False, raising=False)
+    # ...and where the reviewer's key lives, which the METHOD answers by running its own script
+    # (`key status`, hub #197). A test must not run it: it would read this developer's Keychain.
+    # "The method cannot answer" is the neutral reply — reachability falls back to the file, which
+    # the tests already control. Tests of the reader patch `_run` themselves.
+    from autosound_tcc.core import reviewer_key
+
+    monkeypatch.setattr(reviewer_key, "_ask", lambda: None, raising=False)
+    monkeypatch.setattr(reviewer_key, "_STATUS", False, raising=False)
     # ...and the same probe for Claude. A window's catalogue worker asks `claude auth status`, and
     # on a machine with Claude Code that ran the real CLI: with HOME in `tmp_path` it wrote
     # `.claude.json` there, and the window's project watcher reloaded over the test (2026-09-14).
