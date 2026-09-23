@@ -2012,7 +2012,7 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-083 — A GUI guide with English screenshots (#47)
 
-**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's terminology review is being applied
+**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's review applied (`696cc54`) · waits for the Arbiter to read the pages
 
 `docs/guide/QUICK-GUIDE.md` (eight screens) and `docs/guide/REFERENCE.md` (every panel, dialog
 and button), 25 lossless WebP screenshots in `docs/guide/img/`, linked from the README. The window
