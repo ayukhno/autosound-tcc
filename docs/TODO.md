@@ -2010,6 +2010,20 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-082 — W-3: the collection continues, then the planning
+
+**Статус**: open 2026-09-23 · the Arbiter's «добраніч» during the W-3 collection
+
+The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
+pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
+menus and the EQ dead end), with 12 still open. Also back at this review: F-071, F-065 and F-066,
+F-068 (waiting on the method, hub #185), and hub #83 (untouched).
+
+**Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
+says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and
+what the method put off to its next wave), mark each item "in" or "deferred, with the reason" in
+`docs/PLAN-W-3.md`, and review it with him.
+
 ### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
 
 **Статус**: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
