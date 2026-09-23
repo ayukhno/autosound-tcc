@@ -1665,7 +1665,8 @@ moment before the next `started:` line, which is a quit. No crash was reported.
    (Рівень · Затримки · Фази, and on EQ also Таблиця · EQ). It duplicates the main tabs, which is
    confusing.
 2. In the left panel, a click on «params · усі параметри таблицею» opens no table: not the virtual
-   one, not the output one, not the input one (which exists, even though it is empty).
+   one, not the output one, not the input one (which exists, even though it is empty). A click on
+   EQ in the left panel does nothing either.
 3. «Закрити ✕» is not needed in this mode: hide it.
 4. «порівняти з» belongs up at the level of the main tabs, and the full-mode menu should be hidden
    entirely.
