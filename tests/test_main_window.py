@@ -3654,7 +3654,12 @@ def test_the_first_ledger_snapshot_is_watched_for_before_state_exists(tmp_path, 
     window._reload_project_files()
 
     watched = window._watched_project_dirs()
-    assert str(ledger) in watched and str(ledger / "FULL") in watched
+    # Where the next version appears: `state/versions/` on the per-project line the method seeds
+    # since v3.0.60 (hub #195), `state/<preset>/` before it.
+    from autosound_tcc.state import ledger_line
+
+    grows = ledger / "versions" if ledger_line.is_project_line(ledger) else ledger / "FULL"
+    assert str(ledger) in watched and str(grows) in watched
     assert window._preset_combo.currentData() == "FULL"
 
 

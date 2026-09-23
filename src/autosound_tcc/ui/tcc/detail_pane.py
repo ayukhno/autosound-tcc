@@ -356,17 +356,20 @@ class DetailPane(QFrame):
         if self._mode == "param" and self._param:
             self.open_param(self._param)
 
-    def set_compare_choices(self, versions: list, default: Optional[str], loader) -> None:
+    def set_compare_choices(self, versions: list, default: Optional[str], loader,
+                            labels: Optional[dict] = None) -> None:
         """Offer these versions to compare with; `loader(version)` returns that version's view.
 
-        `default` is the one selected (the previous version, by the window's choice); None, or no
-        versions at all, compares with nothing and hides the control."""
+        `default` is the one selected (the previous configuration, by the window's choice); None,
+        or no versions at all, compares with nothing and hides the control. `labels` names a
+        version the way the list shows it — `v_003 · SQ-1`, with the names it was saved under in
+        the device (hub #198)."""
         self._compare_loader = loader
         blocked = self._compare_combo.blockSignals(True)
         self._compare_combo.clear()
         self._compare_combo.addItem("—", None)
         for version in versions:
-            self._compare_combo.addItem(str(version), str(version))
+            self._compare_combo.addItem(str((labels or {}).get(version, version)), str(version))
         index = self._compare_combo.findData(default) if default else 0
         self._compare_combo.setCurrentIndex(max(index, 0))
         self._compare_combo.blockSignals(blocked)

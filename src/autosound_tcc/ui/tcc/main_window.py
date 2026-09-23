@@ -82,6 +82,7 @@ from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import (
     acoustics_view,
+    ledger_line,
     measurement_view,
     plan_audit,
     process_view,
@@ -122,6 +123,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
     clear_layout,
 )
 from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
+from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
@@ -1975,6 +1977,15 @@ class MainWindow(QMainWindow):
         self._dsp_section = SidebarSection(
             "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False
         )
+        # «Збережено в DSP…» (hub #198): the name this configuration went into the device under.
+        # Shown on the per-project line, where the method records it, and only with a version.
+        self._cfg_btn = QPushButton(i18n.t("cfgButton"))
+        self._cfg_btn.setProperty("class", "link-btn")
+        self._cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cfg_tip = attach_tip(self._cfg_btn, i18n.t("cfgButtonTip"))
+        self._cfg_btn.clicked.connect(self._open_save_config)
+        self._cfg_btn.setVisible(False)
+        self._dsp_section.add_header_widget(self._cfg_btn)
         # No stretch. It was here so the tree would fill the panel instead of sitting at its
         # content height with a gap under it (user, 2026-07-28) -- and what it actually did was
         # hand the tree the leftover viewport and let it scroll inside the column's own scroll.
@@ -2205,37 +2216,55 @@ class MainWindow(QMainWindow):
         self._version_shown = (view, profile)  # a language switch re-says the tooltip
         prof = profile.get("dsp_profile", profile)
         processor = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
+        self._cfg_btn.setVisible(bool(view.version)
+                                 and ledger_line.is_project_line(config.state_root()))
         if not view.version:
             self._dsp_section.set_sub(processor)
             self._dsp_section.set_dot(None)
             self._dsp_section.set_sub_tip("")
             return
         state = view.state
-        self._dsp_section.set_sub(view.version)
+        # By the name it was saved under in the device, when it was (hub #198): `SQ-2 · v_006`.
+        root = config.state_root()
+        standing = ledger_line.config_of(root, view.version)
+        self._dsp_section.set_sub(f"{standing[0]} · {view.version}" if standing else view.version)
         self._dsp_section.set_dot(None if state is None else
                                   ("wait" if state == "proposed" else "done"))
         counts = dict(view.status_counts)
-        self._dsp_section.set_sub_tip(i18n.t("dspNowTip").format(
+        tip = i18n.t("dspNowTip").format(
             dsp=processor, version=view.version, preset=view.preset,
             applied=counts.get("applied", 0), proposed=counts.get("proposed", 0),
-            measured=counts.get("measured", 0)))
+            measured=counts.get("measured", 0))
+        if standing:
+            code, rec = standing
+            number = ledger_line.dsp_preset(root, rec.get("slot") or "")
+            tip += " " + i18n.t("dspConfigTip").format(
+                code=code, slot=rec.get("slot") or "?",
+                preset=i18n.t("dspConfigPreset").format(n=number) if number else "",
+                purpose=f" — {rec['purpose']}" if rec.get("purpose") else "")
+        self._dsp_section.set_sub_tip(tip)
 
     def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:
-        """«Порівняти з» for the channel tables: this preset's other versions, newest first, the
-        one before the current selected (the Arbiter, 2026-09-23: «за замовчанням попередній»)."""
-        folder = Path(root) / preset
-        versions = sorted((p.stem for p in folder.glob("v_*.json")),
-                          key=lambda name: int(name[2:]) if name[2:].isdigit() else -1, reverse=True)
+        """«Порівняти з» for the channel tables: the other versions, newest first, each with the
+        names it was saved under in the device; selected by default is the PREVIOUS one (the
+        Arbiter, 2026-09-23: «за замовчанням попередній»).
+
+        Previous is the ancestry, never the number below (hub #198): SQ-2 (v_006) is compared with
+        SQ-1 (v_003) even with v_004 and v_005 banked for another preset between them. The method
+        stores that at save time; `ledger_line.previous_of` reads it."""
+        versions = list(reversed(ledger_line.versions(root, preset)))
         others = [v for v in versions if v != current]
-        number = int(current[2:]) if current and current[2:].isdigit() else None
-        previous = next((v for v in others if number is not None and v[2:].isdigit()
-                         and int(v[2:]) < number), None)
+        previous = ledger_line.previous_of(root, preset, current)
+        if previous not in others:
+            previous = None
+        names = ledger_line.saved_names(root)
+        labels = {v: ledger_line.label(root, v, names) for v in others}
 
         def loader(version: str, _root=str(root), _preset=preset, _profile=profile):
             return load_project_view(_root, _preset, _profile, version=version)
 
-        self._compare_args = (others, previous, loader)
-        self._detail.set_compare_choices(others, previous, loader)
+        self._compare_args = (others, previous, loader, labels)
+        self._detail.set_compare_choices(others, previous, loader, labels=labels)
 
     def _on_layout_toggle(self) -> None:
         """Switch between the in-app session's layout and the control layout, and remember it."""
@@ -2936,8 +2965,9 @@ class MainWindow(QMainWindow):
         # and until now the only way to see it was the ↻ button. HEAD is a file (it is rewritten in
         # place, so nothing but a file watch catches it); the preset dir is watched separately for
         # the new `v_NNN.json` beside it.
+        # On the per-project line (hub #195) that file is `state/slots.json`.
         root = config.state_root()
-        paths += [str(root / preset / "HEAD") for preset in config.available_presets(root)]
+        paths += ledger_line.watched_files(root, config.available_presets(root))
         return paths
 
     def _watched_project_dirs(self) -> list[str]:
@@ -2971,7 +3001,7 @@ class MainWindow(QMainWindow):
         root = config.state_root()
         if not root.is_dir():
             return [str(project_dir)]
-        return [str(root)] + [str(root / preset) for preset in config.available_presets(root)]
+        return ledger_line.watched_dirs(root, config.available_presets(root))
 
     def _arm_project_watcher(self) -> None:
         """(Re)watch the project's own files. Re-armed after every change: an atomic write replaces
@@ -4426,6 +4456,20 @@ class MainWindow(QMainWindow):
         # same class of fault as the placeholder removal above.
         QTimer.singleShot(0, self._reload_after_model_config)
 
+    def _open_save_config(self) -> None:
+        """«Збережено в DSP…»: record the name the shown version went into the device under."""
+        view = self._view
+        if view is None or not view.version:
+            return
+        root = config.state_root()
+        dialog = SaveConfigDialog(root, view.version, view.preset,
+                                  config.available_presets(root), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._status_strip.notify(i18n.t("cfgSaved").format(said=dialog.said or ""))
+        # `slots.json` is watched, but the answer should not wait for the watcher's debounce.
+        QTimer.singleShot(0, self._reload_project_files)
+
     def _open_reviewer_key(self) -> None:
         """Where the reviewer's key is, and a safe place to enter one (hub #197)."""
         ReviewerKeyDialog(self).exec()
@@ -4971,6 +5015,8 @@ class MainWindow(QMainWindow):
         # with the bare "no data yet".
         self._rebuild_acoustics()
         self._dsp_section.set_title(i18n.t("dspPanel"))
+        self._cfg_btn.setText(i18n.t("cfgButton"))
+        self._cfg_tip.set_text(i18n.t("cfgButtonTip"))
         self._set_project_params(self._view)
         self._plan_title.setText(i18n.t("planTitle"))
         self._plan_sub.setText(i18n.t("planSub"))

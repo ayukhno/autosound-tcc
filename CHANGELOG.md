@@ -36,8 +36,18 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   first. Reachability now asks the method, so a key kept only in the Keychain is not called
   unreachable. With a method older than its key commands, everything reads the file as before.
 
+- **Saved configurations by their names** (hub #198): «Збережено в DSP…» in the DSP header
+  records that the shown version went into a device preset under a name (`SQ-2`), a slot, a
+  preset number and a purpose — through the method, which finds the configuration it continues.
+  The header then reads `SQ-2 · v_006`; «порівняти з» lists every version with the names it was
+  saved under, and compares by default with the configuration this one continues, never merely
+  the number below.
+
 ### Changed
 
+- **The register's per-project layout is read** (hub #195): `state/versions/` and
+  `state/slots.json`, which the method uses for every new project from v3.0.60, beside the old
+  per-preset tree, chosen per project. The method is vendored at `48e2c10` of its W-2 branch.
 - **Each card in the right column scrolls on its own.** The capture list scrolls, up and down and
   sideways, while the picker, its buttons and the legend stay where they are; the plan card has
   its own scroll; the border between the two cards moves and is remembered. Capture names are

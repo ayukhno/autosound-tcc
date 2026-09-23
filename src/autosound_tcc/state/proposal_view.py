@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.core import config
+from autosound_tcc.state import ledger_line
 
 
 def delta_path(version: str, preset: str, project_dir: Optional[Path] = None) -> Path:
     root = config.state_root() if project_dir is None else Path(project_dir) / "state"
-    return Path(root) / preset / "proposals" / f"{version}.json"
+    # `state/proposals/` on the per-project line, `state/<preset>/proposals/` before it (hub #195).
+    return ledger_line.proposals_dir(root, preset) / f"{version}.json"
 
 
 def load_delta(version: str, preset: str, project_dir: Optional[Path] = None) -> Optional[dict]:

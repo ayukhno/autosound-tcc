@@ -228,9 +228,11 @@ def bundled_profiles_dir() -> Path:
 
 
 def _preset_dirs(root: Path) -> list[str]:
-    if not root.is_dir():
-        return []
-    return sorted(p.name for p in root.iterdir() if p.is_dir() and any(p.glob("v_*.json")))
+    # Both layouts of the register (hub #195): `state/slots.json` present means one version line
+    # per project, and the presets are its slots; otherwise a directory per preset.
+    from autosound_tcc.state import ledger_line
+
+    return ledger_line.presets(root)
 
 
 def resolve_preset(root: Optional[Path] = None) -> Optional[str]:

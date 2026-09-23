@@ -74,6 +74,7 @@ class SidebarSection(QWidget):
         self._sub_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._sub_label, 1)
         head_layout.addStretch(1)
+        self._head_layout = head_layout
         self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]
         outer.addWidget(self._header, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -120,6 +121,11 @@ class SidebarSection(QWidget):
 
     def sub_text(self) -> str:
         return self._sub_label.text()
+
+    def add_header_widget(self, widget: QWidget) -> None:
+        """A control at the right end of the header — clicked, it does its own thing and does not
+        fold the section."""
+        self._head_layout.addWidget(widget)
 
     def _on_header_clicked(self, event) -> None:
         self._set_collapsed(not self._body.isHidden())

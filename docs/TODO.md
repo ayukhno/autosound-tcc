@@ -2010,6 +2010,20 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
+
+**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored skill moved `c27cd7a` → `48e2c10` (branch head: #195 layout, #197 keys) · `config save` is not pushed by the skill yet, so the save answers "update the method" until the next vendoring
+
+The method now numbers versions once per project (`state/versions/`, `state/slots.json`), and a new
+project starts that way; the tuner saves a version into a DSP preset under a name (`SQ-2`), and
+"previous" is the ancestry, not the number below (the Arbiter's example: SQ-2 = v_006 continues
+SQ-1 = v_003, not v_005). Built: `state/ledger_line.py` reads both layouts and the `configs`;
+presets, watched files and dirs, proposals follow the layout; «порівняти з» offers every version on
+the line, labelled with its names, defaulting to the stored previous (or the parent); the DSP
+header says `SQ-2 · v_006` with slot, device preset and purpose on hover; «Збережено в DSP…»
+records a save through `state.py config save`. Live check: on a migrated copy of the Passat, once
+the skill pushes `config`.
+
 ### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
 **Статус**: built on `wave-0.1.43` 2026-09-23 against #197's contract, with the file reader as fallback · live check waits for the skill's `key status|set|move-shell` to be vendored
