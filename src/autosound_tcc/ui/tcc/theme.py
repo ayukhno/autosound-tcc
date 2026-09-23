@@ -218,15 +218,35 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* .status-strip — "what TCC found on disk" (MCP up/down, terminal-launch result), read-only
     and shown in both view/control modes -- deliberately NOT a dialog bubble, see TCC-TZ.md §8.
     One line, hidden when there's nothing to say; `status-warn` recolors it for an error. */
-    QLabel[class~="status-strip"] {{
+    QFrame[class~="status-strip"] {{
         background: {t.panel2};
         border-bottom: 1px solid {t.border};
+    }}
+    QLabel[class~="status-strip-text"] {{
+        background: transparent;
         color: {t.info};
         font-size: 11px;
         padding: 5px 14px;
     }}
-    QLabel[class~="status-strip status-warn"] {{
+    /* `~=` matches ONE word: the old `~="status-strip status-warn"` never matched, and warnings
+    came out in the info blue. */
+    QLabel[class~="status-strip-text"][class~="status-warn"] {{
         color: {t.warn};
+    }}
+    QScrollArea[class~="status-strip-scroll"],
+    QScrollArea[class~="status-strip-scroll"] > QWidget,
+    QScrollArea[class~="status-strip-scroll"] > QWidget > QWidget {{
+        background: transparent;
+    }}
+    QToolButton[class~="status-strip-close"] {{
+        background: transparent;
+        border: none;
+        color: {t.muted};
+        font-size: 13px;
+        padding: 2px 6px;
+    }}
+    QToolButton[class~="status-strip-close"]:hover {{
+        color: {t.text};
     }}
 
     /* .sidebar-head — the left panel's top-level accordion header bar (System params / Project

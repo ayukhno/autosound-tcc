@@ -35,9 +35,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   DSP configuration; what the ledger banks is a *configuration (version v_NNN)*, fixed in a
   *preset*; the Ukrainian, Polish and German windows say *register of configurations* where they
   said *ledger*.
-- **The header shows the configuration standing in the preset** — `v_007` beside the preset with a
-  dot, yellow while any channel is only proposed, green once all of it is entered; the processor's
-  name is on its hover (F-070).
+- **The DSP section names the configuration in the processor** — `v_007` in its header with a
+  dot, yellow while any channel is only proposed, green once all of it is entered — and the
+  channel tables can be compared with another version, the previous one by default, the changed
+  cells marked (F-070).
 - **The capture card**: protection sits in the picker's row, the legend is one word per status on
   one line, the status line is above the row in blue, and **Готово** hands the round's captures to
   the AI — as a signal, so a session in a terminal gets it too (TEST-FINDINGS 31).
@@ -68,14 +69,16 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   `HP1k · LP3.5k` — and the full wording on hover (TEST-FINDINGS 30).
 - **A sweep listed under RTA is no longer called `(sw) (rta)`**, and an RTA row no longer trails
   a cut-off "this check does not apply" (TEST-FINDINGS 30).
-- **The set picker names the series and the round** in every entry, with the live task apart from
-  the past rounds; «серія 1» no longer vanishes when a round opens (TEST-FINDINGS 33).
+- **The set picker lists rounds**, with the live task apart from the past ones and the series on
+  the hover; «серія 1» no longer stands in for a round (TEST-FINDINGS 33).
 - **With a round open, the protection dialog offers output channels only**, as it already did
   with none (TEST-FINDINGS 22).
 - **Closing "edit project parameters" says what happened** — a signal to the session — instead of
   printing a made-up fix with another car's channel names (F-076).
 - **Sixteen unusable captures are one line, not half the window.** The count and the first
-  reason, "show all" for the list, and a close link (TEST-FINDINGS 29).
+  reason, "show all" for the list (TEST-FINDINGS 29). Any long message in the status strip now
+  scrolls inside three lines, every warning has a ✕ that stays in view, and warnings are red —
+  the style rule meant for them had never matched.
 
 
 ## [v0.1.42] — 2026-09-20 · the curve window stops lying and stops dying, the method at v3.0.59

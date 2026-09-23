@@ -42,7 +42,8 @@ def test_a_warning_stays_until_something_replaces_it():
     strip.notify("journal: could not write", level="warn")
 
     assert strip.timer_is_running() is False
-    assert strip.text() == "journal: could not write"
+    assert strip.text().startswith("journal: could not write")
+    assert strip.can_close(), "and the Arbiter can close it (2026-09-23)"
 
 
 def test_a_second_fact_replaces_the_first_and_restarts_the_clock():
@@ -79,13 +80,51 @@ def test_a_plain_message_after_an_offer_has_no_link():
     assert strip.timer_is_running()
 
 
-def test_a_dismissible_message_carries_a_close_link_that_clears_it():
+def test_a_dismissible_message_carries_a_close_button_that_clears_it():
     _app()
     strip = StatusStrip()
     closed = []
     strip.notify("16 unusable", level="warn", action=("show all", lambda: None),
                  dismissible=True, on_dismiss=lambda: closed.append(1))
-    assert 'href="close"' in strip.text()
-    strip.linkActivated.emit("close")
+    assert strip.can_close()
+    strip._close.click()
     assert not strip.isVisible()
     assert closed == [1]
+
+
+def test_a_long_warning_scrolls_inside_three_lines_instead_of_taking_the_window():
+    """The Arbiter, 2026-09-23, about the half-screen banner: a long message scrolls, and it can be
+    closed — for every warning, not only the unusable captures."""
+    _app()
+    strip = StatusStrip()
+    strip.resize(600, 400)
+    strip.notify("\n".join(f"line {n}: something went wrong here" for n in range(30)), level="warn")
+    strip.show()
+    QApplication.processEvents()
+    line = strip._label.fontMetrics().lineSpacing()
+    assert strip.height() <= line * 4 + 24, "three lines and its padding, not thirty"
+    bar = strip._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "the rest is one scroll away"
+    bar.setValue(bar.maximum())
+    assert strip._close.isVisible(), "the ✕ stays in view at the last line too"
+    strip._close.click()
+    assert not strip.isVisible()
+
+
+def test_one_line_takes_one_line():
+    _app()
+    strip = StatusStrip()
+    strip.resize(600, 200)
+    strip.notify("16 unusable", level="warn")
+    strip.show()
+    QApplication.processEvents()
+    line = strip._label.fontMetrics().lineSpacing()
+    assert strip.height() < line * 2 + 12, "not a three-line box around one line"
+
+
+def test_a_passing_fact_has_no_close_button():
+    _app()
+    strip = StatusStrip()
+    strip.notify("opened a terminal running claude")
+    assert "<a " not in strip.text()
+    assert not strip.can_close()
