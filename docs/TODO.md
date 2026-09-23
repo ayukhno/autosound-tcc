@@ -2054,12 +2054,17 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · the Arbiter's «добраніч» during the W-3 collection
+**Статус**: open 2026-09-23 · the Arbiter's second «добраніч» (evening) · resume: `hub/bin/role tcc --resume 467b9ccb-334b-4cd7-bb7e-e3fa4f614a9c`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
 menus and the EQ dead end), with 12 still open. Also back at this review: F-071, F-065 and F-066,
 F-068 (waiting on the method, hub #185), and hub #83 (untouched).
+
+Built during the collection on the Arbiter's explicit OK, all on this branch: #47 the GUI guide
+(F-083), #48 the house-curve page (F-084), #49 Help → User guide (F-085). Hub #202 SKL-053 is
+taken and closes once the guides are on `main` (tag + three file URLs); #203 TCC-029 waits on the
+skill. The full suite has not run on these commits: once before the wave's PR, VM suspended.
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
 says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and
