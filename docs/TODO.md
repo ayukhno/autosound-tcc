@@ -2081,7 +2081,12 @@ with git's line is the point of finding 40 — and bring the two tests to it. Be
 
 ### F-074 — Check the project's GitHub backup after the broken-git spell
 
-**Статус**: open 2026-09-20 · not checked, named at the Arbiter's stop
+**Статус**: answered 2026-09-23 · `EPY-Sep2026` is not a git repository at all (the Arbiter ran
+`git remote -v` there: "not a git repository"), so there was no backup to fail, and nothing
+failed silently. The real gap: the method's «set up at NEW-PROJECT start» backup
+(`naming-and-structure.md §4a`) has no carrier — no code makes a project a repo, only prose for
+the session — and TCC is silent about a project without one by design (`project_view.git_facts`).
+Where that goes is the Arbiter's call.
 
 `/usr/bin/git` could not run on the Arbiter's Mac for an unknown length of time (TEST-FINDINGS
 40), and the project's backup to GitHub goes through the same git the update probe does. So it
