@@ -58,6 +58,11 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   method's `handoff` whether everything the next session needs is on disk, shows what is missing
   if anything is, and otherwise starts the clean session with its first message on the clipboard.
 
+- **A capture under a wrong title is fixed, not refused** (the Arbiter's A17): with a round open,
+  a title REW holds under another spelling of an expected one (`sw_01` for `sw_1`), or with a
+  likely typo, is offered as «Виправити в REW…» — renamed in REW, read back, then recorded in the
+  round through the method's `capture-supersede`. Red is kept for a capture that is not there.
+
 ### Changed
 
 - **The register's per-project layout is read** (hub #195): `state/versions/` and

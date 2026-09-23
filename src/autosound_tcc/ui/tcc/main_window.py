@@ -76,6 +76,7 @@ from autosound_tcc.core import (
     self_check,
     target_curve,
     terminal_launcher,
+    title_fixes,
     updates,
 )
 from autosound_tcc.core.contract_check import ContractReport
@@ -127,6 +128,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
 from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
 from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
+from autosound_tcc.ui.tcc.title_fix_dialog import TitleFixDialog, TitleFixWorker
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 from autosound_tcc.ui.tcc.workers import (
@@ -3510,6 +3512,7 @@ class MainWindow(QMainWindow):
         round_ = process_view.capture_round() or {}
         if not round_ or round_.get("closed"):
             return
+        self._offer_title_fixes(round_)
         titles = set(self._meas_panel.known_titles())
         def settled(title: str) -> bool:
             """Checked and fine, or a capture the check does not apply to (hub #154 §1)."""
@@ -3528,6 +3531,47 @@ class MainWindow(QMainWindow):
         self._capture_check = _CaptureCheckWorker(config.project_dir())
         self._capture_check.result.connect(self._on_capture_check_done)
         self._capture_check.start()
+
+    def _offer_title_fixes(self, round_: dict) -> None:
+        """A title REW holds that the round asked for under another spelling, or with a typo:
+        offered as a fix, not left to be refused as unusable (the Arbiter's A17)."""
+        project = config.chosen_project_dir()
+        if project is None:
+            return
+        try:
+            fixes = title_fixes.proposals(self._meas_panel.rew_titles(),
+                                          round_.get("expected") or [],
+                                          title_fixes.glossary_for(project))
+        except Exception:  # noqa: BLE001 — no method, or a grammar it cannot read: nothing to offer
+            return
+        key = frozenset((f.wrong, f.right) for f in fixes)
+        if not fixes or key == getattr(self, "_title_fixes_said", None):
+            return
+        self._title_fixes_said = key
+        self._status_strip.notify(
+            i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
+            action=(i18n.t("tfAction"), lambda f=tuple(fixes): self._open_title_fixes(list(f))))
+
+    def _open_title_fixes(self, fixes) -> None:
+        dialog = TitleFixDialog(fixes, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.chosen():
+            return
+        project = config.chosen_project_dir()
+        if project is None or getattr(self, "_title_fix_worker", None) is not None:
+            return
+        worker = TitleFixWorker(RewBridge(), dialog.chosen(), project)
+        worker.done.connect(self._on_title_fixes_done)
+        worker.failed.connect(lambda msg: self._status_strip.notify(
+            i18n.t("tfFailed").format(said=msg), level="warn"))
+        worker.finished.connect(lambda: setattr(self, "_title_fix_worker", None))
+        self._title_fix_worker = worker
+        worker.start()
+
+    def _on_title_fixes_done(self, good: list, said: list) -> None:
+        self._meas_panel.forget_titles([f.wrong for f in good])
+        self._meas_panel._remember_titles([f.right for f in good])
+        self._status_strip.notify(i18n.t("tfDone").format(n=len(good)))
+        self._refresh_process()
 
     def _on_capture_check_done(self, output: str) -> None:
         """Put the verdict on screen. The checker's own words, not a paraphrase.

@@ -1071,6 +1071,18 @@ class MeasurementPanel(QWidget):
         return [with_method(row.item_name, row.method_suffix) for row in self._rows
                 if row.status in ("wait", "found") and not row.additional]
 
+    def rew_titles(self) -> list[str]:
+        """What REW showed this session — not what the project imported. For the title fixes
+        (A17): only a title REW holds can be renamed there."""
+        return sorted(self._known_titles)
+
+    def forget_titles(self, titles) -> None:
+        """Titles REW no longer holds — renamed away from under the name this panel remembers."""
+        before = len(self._known_titles)
+        self._known_titles.difference_update(titles)
+        if len(self._known_titles) != before:
+            self.titlesChanged.emit()
+
     def _remember_titles(self, titles) -> None:
         before = len(self._known_titles)
         self._known_titles.update(t for t in titles if str(t).strip())

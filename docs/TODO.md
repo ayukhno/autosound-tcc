@@ -2010,6 +2010,18 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
+
+**Статус**: built on `wave-0.1.43` 2026-09-23 · live check: the next round with a `sw_01`-style title
+
+While a round is open and REW's list changes, the method's own comparison (`naming.
+validate_series` → `renames`) finds titles the round asked for under another spelling; a title
+matching nothing, close to a missing expected one, is offered as a likely typo. The strip offers
+«Виправити в REW…» once per list; the dialog ticks spelling fixes and leaves typos unticked; Apply
+renames in REW by the title REW holds now, reads REW back, and runs `capture-supersede` only for
+what REW shows done — REW first, then the round (#201). Red stays for a capture that is absent or
+fails the check.
+
 ### F-080 — The next phase in a clean session: the method's `handoff`, offered (hub #201, S-044)
 
 **Статус**: built on `wave-0.1.43` 2026-09-23 against #201's contract (skill `38c6049`) · the vendored method answers "update" until re-vendored
