@@ -2026,7 +2026,7 @@ the skill pushes `config`.
 
 ### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 against #197's contract, with the file reader as fallback · live check waits for the skill's `key status|set|move-shell` to be vendored
+**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored at `48e2c10`: `key status` checked live on the Mac (env + ~/.zshrc line 3 seen) · left: `key set` / `move-shell` from the screen, DPAPI on the VM
 
 The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
 as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`
