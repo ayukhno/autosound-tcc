@@ -2616,6 +2616,41 @@ class MainWindow(QMainWindow):
         self._dialog.clear_for_no_project()
         self._refresh_process()
 
+    def _show_git_state(self) -> None:
+        section = self._project_section
+        if config.chosen_project_dir() is None:
+            section.set_sub("")
+            section.set_dot(None)
+            section.set_sub_tip("")
+            return
+        git = project_view.git_status()
+        if not git.works:
+            sub, tip = i18n.t("gitSubBroken"), i18n.t("gitTipBroken")
+        elif not git.repo:
+            sub, tip = i18n.t("gitSubNoRepo"), i18n.t("gitTipNoRepo")
+        elif not git.remote:
+            sub, tip = i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(
+                name=config.chosen_project_dir().name)
+        elif git.unpushed:
+            sub, tip = (i18n.t("gitSubBehind").format(n=git.unpushed),
+                        i18n.t("gitTipBehind").format(n=git.unpushed, remote=git.remote))
+        else:
+            sub, tip = i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=git.remote)
+        section.set_sub(sub)
+        section.set_dot(git.level)
+        section.set_sub_tip(tip)
+        body = section.body_layout()
+        if not git.works or not git.repo:
+            body.addWidget(_kv_row(i18n.t("gitRow"), sub))
+            return
+        body.addWidget(_kv_row(i18n.t("gitRow"), git.branch or "—"))
+        if git.changed is not None:
+            body.addWidget(_kv_row(i18n.t("gitChanges"),
+                                   str(git.changed) if git.changed else i18n.t("gitClean")))
+        body.addWidget(_kv_row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
+        if git.unpushed:
+            body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed)))
+
     def _set_project_params(self, view: ProjectView | None) -> None:
         """(Re)builds the "Project params" section body from `project.json`'s channel-tier summary
         (SCR-016, e.g. "8 virtual channels (1 off)") and any `_open_questions` as onboarding TODO
@@ -2632,10 +2667,11 @@ class MainWindow(QMainWindow):
         # the amps, the mic, the REW port. They were in the wrong section (user, 2026-08-06).
         for label, value in self._app_config_rows():
             self._project_section.body_layout().addWidget(_kv_row(label, value))
-        # The project folder is a git repo by the skill's own design, and none of it was visible:
-        # "am I on the branch I think, is anything unsaved?" meant leaving the app.
-        for label, value in project_view.git_facts():
-            self._project_section.body_layout().addWidget(_kv_row(label, value))
+        # The tune's history and its backup, in the section's header where they show even folded
+        # (the Arbiter, 2026-09-23: «добре бачити чи є репо для проекту, чи є гіт взагалі»), and
+        # the facts as rows. The folder was silent when it was not a repository — and the live
+        # project was exactly that, with no history and no backup (F-074).
+        self._show_git_state()
         # The channel-tier summary used to render here; it is a fact about the rig, so it moved to
         # System params (`_rebuild_system_params`, 2026-09-06).
         open_questions = project_view.load_open_questions() if view else ()

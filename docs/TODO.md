@@ -2010,6 +2010,18 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-079 — Whether the tune's history is kept and backed up, visible in the window
+
+**Статус**: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026)
+
+F-074 found the Arbiter's live project with no repository: no history, no backup, and TCC silent
+by design (`git_facts` said nothing for a folder that is not a repo). He asked to see whether
+there is a repository for the project and whether there is git at all. Built: `project_view.
+git_status` (git runs — asked without the Mac's developer-tools dialog —, repo, branch, changes,
+remote, commits not pushed); the Project params header carries a dot and a word even folded — red
+«git не працює» / «історія не зберігається», yellow «без резервної копії» / «не відправлено: N»,
+green «копія є» — with the next command on hover; the rows inside name branch, changes, backup.
+
 ### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
 
 **Статус**: built on `wave-0.1.43` 2026-09-23 · vendored skill moved `c27cd7a` → `48e2c10` (branch head: #195 layout, #197 keys) · `config save` is not pushed by the skill yet, so the save answers "update the method" until the next vendoring

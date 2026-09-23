@@ -43,6 +43,11 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   saved under, and compares by default with the configuration this one continues, never merely
   the number below.
 
+- **Whether the tune's history is kept and backed up is on screen.** The Project params header
+  carries a dot and a word even when folded: red when git does not run or the folder is not a
+  repository, yellow when there is no backup or commits are not pushed, green when it is backed up
+  — with the next command on hover. The rows inside name the branch, the changes and the backup.
+
 ### Changed
 
 - **The register's per-project layout is read** (hub #195): `state/versions/` and

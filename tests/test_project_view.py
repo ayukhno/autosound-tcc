@@ -261,3 +261,67 @@ def test_open_questions_by_file_is_empty_when_there_is_no_project(tmp_path, monk
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
 
     assert project_view.open_questions_by_file(tmp_path) == frozenset()
+
+
+def test_git_status_says_whether_history_is_kept_and_backed_up(tmp_path):
+    """The Arbiter's live project had no repository — no history, no backup — and TCC said nothing
+    (F-074). He asked to see whether there is a repository and whether there is git at all."""
+    import subprocess
+
+    from autosound_tcc.state import project_view
+
+    project = tmp_path / "car"
+    project.mkdir()
+    assert project_view.git_status(project).level == "bad"
+    assert not project_view.git_status(project).repo
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    for key, value in (("user.email", "t@t"), ("user.name", "t")):
+        subprocess.run(["git", "-C", str(project), "config", key, value], check=True)
+    (project / "note.md").write_text("hi")
+    subprocess.run(["git", "-C", str(project), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(project), "commit", "-qm", "first"], check=True)
+    state = project_view.git_status(project)
+    assert state.repo and not state.remote and state.level == "wait", "kept, not backed up"
+
+    backup = tmp_path / "backup.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(backup)], check=True)
+    subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(backup)], check=True)
+    subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "HEAD"], check=True)
+    assert project_view.git_status(project).level == "done"
+
+    (project / "note.md").write_text("more")
+    subprocess.run(["git", "-C", str(project), "commit", "-qam", "second"], check=True)
+    state = project_view.git_status(project)
+    assert state.unpushed == 1 and state.level == "wait", "one commit the backup does not have"
+
+
+def test_git_that_does_not_run_is_said_so(tmp_path, monkeypatch):
+    from autosound_tcc.state import project_view
+
+    monkeypatch.setattr(project_view.shutil, "which", lambda name: None)
+    state = project_view.git_status(tmp_path)
+    assert not state.works and state.level == "bad"
+
+
+def test_a_remote_is_named_the_way_a_person_reads_it():
+    from autosound_tcc.state import project_view
+
+    assert project_view._remote_label("git@github.com:ayukhno/EPY.git") == "github.com/ayukhno/EPY"
+    assert project_view._remote_label("https://github.com/ayukhno/EPY") == "github.com/ayukhno/EPY"
+
+
+def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    window = MainWindow()
+    window._set_project_params(None)
+    assert window._project_section.sub_text() == i18n.t("gitSubNoRepo")
+    assert window._project_section.dot_status() == "bad"

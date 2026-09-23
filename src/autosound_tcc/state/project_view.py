@@ -30,7 +30,12 @@ error.
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -315,34 +320,106 @@ def open_questions_by_file(project_dir_: Optional[Path] = None) -> frozenset[str
     return frozenset(out)
 
 
-def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
-    """Branch and working-tree state of the project folder, when it is a git repo.
+@dataclass(frozen=True)
+class GitStatus:
+    """Is the tune's history kept, and is it backed up — the project folder's git, in facts.
 
-    The skill makes a new project a git repo on purpose -- the tune's history is the point, and
-    `naming-and-structure.md §4a` says which files are tracked. TCC showed none of it, so "am I on
-    the branch I think, and is anything unsaved?" meant leaving the app. Two rows, read-only, and
-    silent when the folder is not a repo: not every project is one, and saying "not a git repo"
-    would be noise on the ones that are not.
+    `works` is whether `git` runs on this machine at all: on the Arbiter's Mac it did not, for an
+    unknown while (TEST-FINDINGS 40), and every question below would then just go unanswered.
+    """
 
-    Never raises and never blocks for long: a missing `git`, a repo mid-rebase or a folder on a
-    slow mount all resolve to "say nothing" rather than to a spinner in a panel.
+    works: bool
+    repo: bool
+    branch: str = ""
+    changed: Optional[int] = None
+    #: Where the backup goes, as a person reads it (`github.com/owner/name`); "" for none.
+    remote: str = ""
+    #: Commits the remote does not have yet; None when there is no upstream to count against.
+    unpushed: Optional[int] = None
+
+    @property
+    def level(self) -> str:
+        """`bad` — no history kept; `wait` — kept but not backed up, or behind; `done` — backed up."""
+        if not self.works or not self.repo:
+            return "bad"
+        if not self.remote or self.unpushed:
+            return "wait"
+        return "done"
+
+
+def _remote_label(url: str) -> str:
+    """`git@github.com:owner/name.git` / `https://github.com/owner/name` → `github.com/owner/name`."""
+    text = url.strip()
+    text = re.sub(r"^[a-z+]+://", "", text)
+    text = re.sub(r"^[^@/]+@", "", text)
+    text = text.replace(":", "/", 1) if "/" not in text.split(":", 1)[0] and ":" in text else text
+    return text[:-4] if text.endswith(".git") else text
+
+
+def _git_works() -> bool:
+    """Does `git` run here — asked without setting off the Mac's "install the developer tools" window.
+
+    On a Mac `/usr/bin/git` is a shim: with the Command Line Tools missing it does not run git, it
+    opens an installer dialog. `xcode-select -p` answers the same question with no window.
+    """
+    exe = shutil.which("git")
+    if not exe:
+        return False
+    if sys.platform == "darwin" and os.path.realpath(exe) == "/usr/bin/git":
+        try:
+            probe = subprocess.run(["xcode-select", "-p"], capture_output=True,
+                                   timeout=_GIT_TIMEOUT_S, **child.quiet())
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if probe.returncode != 0:
+            return False
+    return _git(Path.home(), "--version") is not None
+
+
+def git_status(project_dir_: Optional[Path] = None) -> GitStatus:
+    """What the project's git says, never raising and never blocking for long.
+
+    It used to say NOTHING for a folder that is not a repository — "not a git repo would be noise
+    on the ones that are not". The Arbiter's live project turned out to be exactly that, with no
+    history and no backup, and nothing told him (TCC F-074, 2026-09-23); he asked to see whether
+    there is a repository and whether there is git at all.
     """
     project = Path(project_dir_ or config.project_dir())
-    if not (project / ".git").exists():
-        return ()
-    rows: list[tuple[str, str]] = []
+    works = _git_works()
+    if not works:
+        return GitStatus(works=False, repo=(project / ".git").exists())
+    if not (project / ".git").exists() or _git(project, "rev-parse", "--git-dir") is None:
+        return GitStatus(works=True, repo=False)
     # `rev-parse HEAD` fails on a repo with no commits yet -- which a project is for its whole
     # first session -- so the branch comes from the ref itself, with rev-parse as the fallback for
     # a detached head.
     branch = _git(project, "symbolic-ref", "--short", "HEAD") or _git(
         project, "rev-parse", "--short", "HEAD"
-    )
-    if branch:
-        rows.append(("Git", branch))
+    ) or ""
     status = _git(project, "status", "--porcelain")
-    if status is not None:
-        changed = len([line for line in status.splitlines() if line.strip()])
-        rows.append(("Git changes", str(changed) if changed else "clean"))
+    changed = (len([line for line in status.splitlines() if line.strip()])
+               if status is not None else None)
+    url = _git(project, "remote", "get-url", "origin") or ""
+    if not url:
+        remotes = (_git(project, "remote") or "").split()
+        url = _git(project, "remote", "get-url", remotes[0]) or "" if remotes else ""
+    ahead = _git(project, "rev-list", "--count", "@{u}..HEAD") if url else None
+    return GitStatus(works=True, repo=True, branch=branch, changed=changed,
+                     remote=_remote_label(url) if url else "",
+                     unpushed=int(ahead) if ahead and ahead.isdigit() else None)
+
+
+def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
+    """Branch and working-tree state of the project folder, when it is a git repo — the two rows
+    it has always had; `git_status` is the whole answer."""
+    state = git_status(project_dir_)
+    if not state.repo or not state.works:
+        return ()
+    rows: list[tuple[str, str]] = []
+    if state.branch:
+        rows.append(("Git", state.branch))
+    if state.changed is not None:
+        rows.append(("Git changes", str(state.changed) if state.changed else "clean"))
     return tuple(rows)
 
 
