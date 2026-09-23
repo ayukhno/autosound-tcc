@@ -1592,3 +1592,47 @@ becomes `agy`). `get_tcc_state(model=…)` asks the session to name its model. T
 «⌁ у терміналі: agy · <model>» beside the picker, which keeps saying what TCC would start. TCC's
 own in-app session is not mistaken for it. Live check: the next `agy` session on this project.
 
+## The Arbiter's test of v0.1.43 on Windows (2026-09-23) — the W-3 pool
+
+Recorded, not diagnosed (`WAVES.md`: while the user tests, a session only records).
+
+### 42. The key screen's answer mixes two languages
+
+**What.** Saving a key in an English window reads «Stored: GEMINI_API_KEY збережено: сховище
+Windows, зашифроване вашим входом (DPAPI)». TCC's own prefix follows the UI language; the method's
+sentence is Ukrainian whatever the UI says.
+
+**Where.** Windows VM, v0.1.43 with method v3.0.60, the Reviewer key screen.
+
+**Weight.** Low: wording.
+
+### 43. Starting from the desktop shortcut: two terminal windows before the splash
+
+**What.** A terminal, then a second one behind it, then the splash. The window itself now comes up
+on the first start (F-039's question answered: it does). Seen the same way on both Windows
+machines.
+
+**Where.** Windows VM and the Arbiter's second Windows machine, v0.1.43.
+
+**Weight.** Medium: the console flashes are the class TCC-006 was about.
+
+### 44. A pin made from the desktop shortcut does not merge with the running window (F-044, narrowed)
+
+**What.** Pinned through the desktop icon's menu (More → Pin to taskbar), a start from the taskbar
+gives two icons. Unpinned and pinned again from the RUNNING window's taskbar icon, it stays one
+icon whether TCC is started from the desktop or from the taskbar. No second terminal in any of
+these starts.
+
+**Where.** Windows VM, v0.1.43.
+
+**Weight.** Low: two icons, both work.
+
+### 45. Entering «Режим контролю» on Windows flashes a series of windows in the middle of the screen
+
+**What.** On the switch INTO control mode, several windows (not terminals) appear one after
+another in the centre of the screen. Switching back is clean.
+
+**Where.** Windows VM, v0.1.43.
+
+**Weight.** Medium: visible on every switch.
+
