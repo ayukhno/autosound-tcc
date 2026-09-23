@@ -845,18 +845,6 @@ class MainWindow(QMainWindow):
         self._preset_combo.currentIndexChanged.connect(self._on_preset_index)
         layout.addWidget(self._preset_combo)
 
-        # The configuration standing in that preset, and whether all of it is entered in the DSP
-        # (F-070, the Arbiter 2026-09-19): what is IN the processor changes every round, while the
-        # processor itself never does -- so its name moved into this tooltip. Beside the preset,
-        # because a configuration is fixed IN a preset (the vocabulary of 2026-09-20).
-        self._version_dot = TrafficLight("wait")
-        self._version_dot.setVisible(False)
-        layout.addWidget(self._version_dot)
-        self._version_label = QLabel("")
-        self._version_label.setProperty("class", "slot-val")
-        self._version_tip = attach_tip(self._version_label, "")
-        layout.addWidget(self._version_label)
-
         self._slot_label = QLabel("")
         self._slot_label.setProperty("class", "slot-val")
         layout.addWidget(self._slot_label)
@@ -2157,8 +2145,10 @@ class MainWindow(QMainWindow):
             self._save_label.setText("")
             self._target_label.setText("")
             # No configuration yet, so no version and nothing to be yellow or green about.
-            self._version_label.setText("")
-            self._version_dot.setVisible(False)
+            self._dsp_section.set_dot(None)
+            self._dsp_section.set_sub_tip("")
+            self._compare_args = None
+            self._detail.set_compare_choices([], None, None)
             self._refresh_process()
             return
         try:
@@ -2167,9 +2157,7 @@ class MainWindow(QMainWindow):
             self._show_left_status(f"Could not load ledger {preset!r}:\n{type(exc).__name__}: {exc}")
             return
 
-        prof = profile.get("dsp_profile", profile)
         self._has_project = True
-        self._dsp_section.set_sub(f"{prof.get('vendor', '?')} {prof.get('name', '?')}")
         self._left_status.setVisible(False)
         self._create_project_btn.setVisible(False)
         self._bank_first_btn.setVisible(False)
@@ -2195,24 +2183,48 @@ class MainWindow(QMainWindow):
         self._save_label.setText(view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._show_version(view, profile)
+        self._offer_compare(root, preset, profile, view.version)
         self._show_banked_delta(view.version, preset)
 
     def _show_version(self, view, profile: dict) -> None:
-        """`v_008` with its dot: yellow while any channel is only proposed, green once all of it
-        is entered (`attest`), and the processor's name with the counts on hover (F-070)."""
+        """The configuration in the processor NOW, in the DSP section's header: `v_008` with its
+        dot — yellow while any channel is only proposed, green once all of it is entered
+        (`attest`) — and the processor's name with the counts on hover (F-070; placed there by the
+        Arbiter, 2026-09-23: «в шапці розділу ДСП в лівій панелі як поточний в процесорі»)."""
         self._version_shown = (view, profile)  # a language switch re-says the tooltip
-        self._version_label.setText(view.version or "")
-        state = view.state if view.version else None
-        self._version_dot.setVisible(state is not None)
-        if state is not None:
-            self._version_dot.set_status("wait" if state == "proposed" else "done")
         prof = profile.get("dsp_profile", profile)
+        processor = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
+        if not view.version:
+            self._dsp_section.set_sub(processor)
+            self._dsp_section.set_dot(None)
+            self._dsp_section.set_sub_tip("")
+            return
+        state = view.state
+        self._dsp_section.set_sub(view.version)
+        self._dsp_section.set_dot(None if state is None else
+                                  ("wait" if state == "proposed" else "done"))
         counts = dict(view.status_counts)
-        self._version_tip.set_text(i18n.t("versionTip").format(
-            dsp=f"{prof.get('vendor', '?')} {prof.get('name', '?')}",
-            version=view.version or "—", preset=view.preset,
+        self._dsp_section.set_sub_tip(i18n.t("dspNowTip").format(
+            dsp=processor, version=view.version, preset=view.preset,
             applied=counts.get("applied", 0), proposed=counts.get("proposed", 0),
-            measured=counts.get("measured", 0)) if view.version else "")
+            measured=counts.get("measured", 0)))
+
+    def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:
+        """«Порівняти з» for the channel tables: this preset's other versions, newest first, the
+        one before the current selected (the Arbiter, 2026-09-23: «за замовчанням попередній»)."""
+        folder = Path(root) / preset
+        versions = sorted((p.stem for p in folder.glob("v_*.json")),
+                          key=lambda name: int(name[2:]) if name[2:].isdigit() else -1, reverse=True)
+        others = [v for v in versions if v != current]
+        number = int(current[2:]) if current and current[2:].isdigit() else None
+        previous = next((v for v in others if number is not None and v[2:].isdigit()
+                         and int(v[2:]) < number), None)
+
+        def loader(version: str, _root=str(root), _preset=preset, _profile=profile):
+            return load_project_view(_root, _preset, _profile, version=version)
+
+        self._compare_args = (others, previous, loader)
+        self._detail.set_compare_choices(others, previous, loader)
 
     def _on_layout_toggle(self) -> None:
         """Switch between the in-app session's layout and the control layout, and remember it."""

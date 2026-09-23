@@ -44,7 +44,6 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import DetailPane
-from autosound_tcc.ui.tcc.group_table import GroupTable
 
 #: How many journal events the feed shows, newest last.
 _FEED_EVENTS = 80
@@ -138,34 +137,49 @@ def _group(view, group_id: str):
     return next((g for g in getattr(view, "groups", ()) or () if g.id == group_id), None)
 
 
-def _table_tab(view, group_id: str, empty_key: str) -> QWidget:
+def _bare(pane: DetailPane, window) -> DetailPane:
+    """The pane without its own tab row and close button — the tab above IS the choice here — but
+    WITH «порівняти з», offered the same versions the window offers (the Arbiter, 2026-09-23)."""
+    for widget in (pane._tab_table, pane._tab_eq, pane._pair_btn, pane._close_btn,
+                   *pane._param_tabs.values()):
+        widget.setVisible(False)
+    compare = getattr(window, "_compare_args", None)
+    if compare is not None:
+        pane.set_compare_choices(*compare)
+    pane.setVisible(True)
+    return pane
+
+
+def _table_tab(window, view, group_id: str, empty_key: str) -> QWidget:
+    """A tier's table — the same table the detail pane shows, so «порівняти з» works here too."""
     group = _group(view, group_id)
     if group is None:
         label = QLabel(i18n.t(empty_key))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setProperty("class", "phead-sub")
         return label
-    table = GroupTable()
-    table.set_group(group)
-    return table
-
-
-def _param_tab(view, field: str) -> QWidget:
     pane = DetailPane()
     pane.set_view(view)
-    pane.open_param(field)
-    pane.setVisible(True)
-    # The pane's own tab row would repeat the tabs above it; here the tab IS the choice.
-    head = pane.layout().itemAt(0).widget()
-    if head is not None:
-        head.setVisible(False)
+    _bare(pane, window)
+    pane.open_table(group)
     return pane
 
 
-def _eq_tab(view) -> QWidget:
+def _param_tab(window, view, field: str) -> QWidget:
+    pane = DetailPane()
+    pane.set_view(view)
+    _bare(pane, window)
+    pane.open_param(field)
+    return pane
+
+
+def _eq_tab(window, view) -> QWidget:
     """The outputs table; a row opens that channel's EQ (the pane keeps its table/EQ switch)."""
     pane = DetailPane()
     pane.set_view(view)
+    compare = getattr(window, "_compare_args", None)
+    if compare is not None:
+        pane.set_compare_choices(*compare)
     outputs = _group(view, "physical_outputs")
     if outputs is not None:
         pane.open_table(outputs)
@@ -304,12 +318,13 @@ class ControlLayout:
             page = self.tabs.widget(0)
             self.tabs.removeTab(0)
             page.deleteLater()
-        self.tabs.addTab(MonitorFeed(self.window), i18n.t("ctlMonitor"))
-        self.tabs.addTab(_table_tab(view, "virtual_channels", "ctlNoVirtual"), i18n.t("ctlTableV"))
-        self.tabs.addTab(_table_tab(view, "physical_outputs", "ctlNoOutputs"), i18n.t("ctlTableO"))
-        self.tabs.addTab(_eq_tab(view), "EQ")
+        w = self.window
+        self.tabs.addTab(MonitorFeed(w), i18n.t("ctlMonitor"))
+        self.tabs.addTab(_table_tab(w, view, "virtual_channels", "ctlNoVirtual"), i18n.t("ctlTableV"))
+        self.tabs.addTab(_table_tab(w, view, "physical_outputs", "ctlNoOutputs"), i18n.t("ctlTableO"))
+        self.tabs.addTab(_eq_tab(w, view), "EQ")
         for field, key in (("gain_db", "tabGain"), ("ta_ms", "tabDelay"), ("phase_deg", "tabPhase")):
-            self.tabs.addTab(_param_tab(view, field), i18n.t(key))
+            self.tabs.addTab(_param_tab(w, view, field), i18n.t(key))
         if current >= 0:
             self.tabs.setCurrentIndex(min(current, self.tabs.count() - 1))
 

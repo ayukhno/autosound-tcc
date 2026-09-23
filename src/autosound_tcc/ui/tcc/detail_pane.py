@@ -18,6 +18,7 @@ from typing import Optional
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -186,6 +187,10 @@ def _band_flow(
     return container
 
 
+#: Marks a cell whose value differs from the compared version (the Arbiter, 2026-09-23).
+CHANGED_ROLE = Qt.ItemDataRole.UserRole + 7
+
+
 class DetailPane(QFrame):
     """The whole `.detail` panel: tabs, title, close, and a body that shows either a table or an
     EQ view. Hidden by default (`.detail` starts at max-height 0 in the prototype)."""
@@ -209,6 +214,9 @@ class DetailPane(QFrame):
         #: 2026-08-23), and a single group cannot answer that.
         self._view = None
         self._param: Optional[str] = None
+        #: The version the tables are compared with, and how to load one (set by the window).
+        self._compare_view = None
+        self._compare_loader = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -262,6 +270,18 @@ class DetailPane(QFrame):
         head_layout.addWidget(self._title)
         head_layout.addStretch(1)
 
+        # «Порівняти з» (the Arbiter, 2026-09-23): what changed since another version of this preset
+        # — the previous one by default — is marked in the tables, with what it was on hover.
+        self._compare_label = QLabel(i18n.t("cmpWith"))
+        self._compare_label.setProperty("class", "phead-sub")
+        head_layout.addWidget(self._compare_label)
+        self._compare_combo = QComboBox()
+        self._compare_combo.setProperty("class", "mini-select")
+        self._compare_combo.currentIndexChanged.connect(self._on_compare_changed)
+        head_layout.addWidget(self._compare_combo)
+        self._compare_label.setVisible(False)
+        self._compare_combo.setVisible(False)
+
         self._close_btn = QPushButton(i18n.t("close"))
         self._close_btn.setProperty("class", "d-close")
         self._close_btn.clicked.connect(self.close_pane)
@@ -285,6 +305,7 @@ class DetailPane(QFrame):
         "Table", "close ✕", "Channel" and "shared frequencies:" behind in an otherwise translated
         window.
         """
+        self._compare_label.setText(i18n.t("cmpWith"))
         self._tab_table.setText(i18n.t("tabTable"))
         for field, tab in getattr(self, "_param_tabs", {}).items():
             tab.setText(_PARAM_TABS[field]())
@@ -334,6 +355,51 @@ class DetailPane(QFrame):
         self._sync_param_tabs()
         if self._mode == "param" and self._param:
             self.open_param(self._param)
+
+    def set_compare_choices(self, versions: list, default: Optional[str], loader) -> None:
+        """Offer these versions to compare with; `loader(version)` returns that version's view.
+
+        `default` is the one selected (the previous version, by the window's choice); None, or no
+        versions at all, compares with nothing and hides the control."""
+        self._compare_loader = loader
+        blocked = self._compare_combo.blockSignals(True)
+        self._compare_combo.clear()
+        self._compare_combo.addItem("—", None)
+        for version in versions:
+            self._compare_combo.addItem(str(version), str(version))
+        index = self._compare_combo.findData(default) if default else 0
+        self._compare_combo.setCurrentIndex(max(index, 0))
+        self._compare_combo.blockSignals(blocked)
+        shown = bool(versions)
+        self._compare_label.setVisible(shown)
+        self._compare_combo.setVisible(shown)
+        self._load_compare()
+
+    def _load_compare(self) -> None:
+        version = self._compare_combo.currentData()
+        self._compare_view = None
+        if version and self._compare_loader is not None:
+            try:
+                self._compare_view = self._compare_loader(version)
+            except Exception:  # noqa: BLE001 — a version that cannot be read compares with nothing
+                self._compare_view = None
+
+    def _on_compare_changed(self, _index: int) -> None:
+        self._load_compare()
+        if self._mode == "param" and self._param:
+            self.open_param(self._param)
+        elif self._mode == "table" and self._group is not None:
+            self.open_table(self._group)
+
+    def _compared_row(self, group_id: Optional[str], row: GroupRow) -> tuple[bool, Optional[GroupRow]]:
+        """`(compared, the same channel in the compared version or None)`."""
+        view = self._compare_view
+        if view is None or group_id is None:
+            return False, None
+        group = next((g for g in getattr(view, "groups", ()) or () if g.id == group_id), None)
+        if group is None:
+            return True, None
+        return True, next((r for r in group.rows if r.id == row.id), None)
 
     def _param_groups(self, field: str) -> list:
         """Every tier that declares this control and has channels to show, in the view's order."""
@@ -507,7 +573,7 @@ class DetailPane(QFrame):
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             table.setItem(r, 1, name_item)
             for c, field in enumerate(columns, start=2):
-                table.setItem(r, c, self._styled_cell(field, row, t))
+                table.setItem(r, c, self._styled_cell(field, row, t, group.id))
             table.setRowHeight(r, 26)
 
         def _activate(r: int, _c: int) -> None:
@@ -579,7 +645,7 @@ class DetailPane(QFrame):
             name_item = QTableWidgetItem(row.name)
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             table.setItem(r, 1, name_item)
-            table.setItem(r, 2, self._styled_cell(field, row, t))
+            table.setItem(r, 2, self._styled_cell(field, row, t, group.id))
             table.setRowHeight(r, 26)
 
         def _activate(clicked: int, _c: int) -> None:
@@ -623,7 +689,8 @@ class DetailPane(QFrame):
 
         table.customContextMenuRequested.connect(_copy)
 
-    def _styled_cell(self, field: str, row: GroupRow, t) -> QTableWidgetItem:
+    def _styled_cell(self, field: str, row: GroupRow, t,
+                     group_id: Optional[str] = None) -> QTableWidgetItem:
         """A value cell with prototype-style alignment + colour: numbers right-aligned, gain
         green/orange by sign, INV highlighted, the EQ count an accent link. Mirrors the web
         `.ptable` cell classes (`.gpos/.gneg/.tinv/.eqcell`)."""
@@ -660,6 +727,20 @@ class DetailPane(QFrame):
             color = t.faint
         if color:
             item.setForeground(QColor(color))
+        compared, old = self._compared_row(group_id, row)
+        if compared:
+            before = self._cell_text(field, old) if old is not None else None
+            if before != self._cell_text(field, row):
+                item.setData(CHANGED_ROLE, True)
+                # Blue and bold: the table's stylesheet paints over an item's background, and the
+                # change has to read at a glance — blue is the window's "new" (in REW, import it).
+                item.setForeground(QColor(t.info))
+                item.setBackground(QColor(t.mix("info", 14, "panel")))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setToolTip(i18n.t("cmpWas").format(value=before) if before is not None
+                                else i18n.t("cmpNew"))
         return item
 
     @staticmethod

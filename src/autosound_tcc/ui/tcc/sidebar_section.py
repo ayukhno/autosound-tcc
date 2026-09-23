@@ -8,6 +8,8 @@ list, or a "no data yet" placeholder) -- this module only owns the collapsible c
 
 from __future__ import annotations
 
+from typing import Optional
+
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -61,6 +63,13 @@ class SidebarSection(QWidget):
         self._title_label.setProperty("class", "sidebar-title")
         apply_caps(self._title_label, spacing_px=1.4)
         head_layout.addWidget(self._title_label)
+        # A state dot before the sub, for a section whose sub is a thing with a state — the DSP's
+        # configuration in the processor, yellow or green (the Arbiter, 2026-09-23). The `tl-*`
+        # classes are the traffic lights the rest of the window uses.
+        self._dot = QLabel()
+        self._dot.setFixedSize(9, 9)
+        self._dot.setVisible(False)
+        head_layout.addWidget(self._dot)
         self._sub_label = ElidedLabel("")
         self._sub_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._sub_label, 1)
@@ -90,6 +99,24 @@ class SidebarSection(QWidget):
 
     def set_sub(self, text: str) -> None:
         self._sub_label.setText(text)
+
+    def set_dot(self, status: Optional[str]) -> None:
+        """A `tl-<status>` dot before the sub, or none."""
+        self._dot.setVisible(status is not None)
+        if status is not None:
+            self._dot.setProperty("class", f"tl tl-{status}")
+            self._dot.style().unpolish(self._dot)
+            self._dot.style().polish(self._dot)
+
+    def set_sub_tip(self, text: str) -> None:
+        self._sub_label.setToolTip(text)
+        self._dot.setToolTip(text)
+
+    def dot_status(self) -> Optional[str]:
+        if not self._dot.isVisible() and self._dot.isHidden():
+            return None
+        cls = str(self._dot.property("class") or "")
+        return cls.rsplit("tl-", 1)[-1] if "tl-" in cls else None
 
     def sub_text(self) -> str:
         return self._sub_label.text()

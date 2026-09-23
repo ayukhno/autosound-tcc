@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.state.dsp_state import EqBand  # noqa: E402
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.detail_pane import EqBandCard, _band_flow, _is_left, _sibling_name  # noqa: E402
 
 
@@ -496,3 +497,50 @@ def test_the_crossover_cell_copies_its_frequency_alone():
 
     assert QGuiApplication.clipboard().text() == "350"
 
+
+
+def _rig_view_changed():
+    """`_rig_view` one version later: w-L's delay moved, sw's gain moved, VFL unchanged."""
+    from autosound_tcc.state.dsp_state import ProjectView
+
+    base = _rig_view()
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "virtual_channels", "label": "Virtual channels",
+         "fields": ["gain_db", "ta_ms", "phase_deg", "eq"]},
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"]},
+    ]}}
+    ledger = {"preset": "FULL", "sample_rate": 96000,
+              "channels": {"w-L": {"gain_db": -1.0, "ta_ms": 4.80},
+                           "sw": {"gain_db": -2.0, "ta_ms": 0.0}},
+              "virtual_channels": {"VFL": {"gain_db": 0.0, "ta_ms": 0.0}}}
+    identities = {"w-L": {"code": "w-L", "slot": "C", "tier": "channels"},
+                  "sw": {"code": "sw", "slot": "K", "tier": "channels"},
+                  "VFL": {"code": "VFL", "slot": "A", "tier": "virtual_channels"}}
+    assert base is not None
+    return ProjectView.from_dict(ledger, profile, channels=identities)
+
+
+def test_a_value_that_changed_since_the_compared_version_is_marked_with_what_it_was():
+    """The Arbiter, 2026-09-23: the channel table offers «порівняти з» (the previous version by
+    default), and what changed is visible."""
+    from autosound_tcc.ui.tcc import detail_pane
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view_changed())
+    pane.set_compare_choices(["v_006", "v_005"], "v_006", lambda version: _rig_view())
+    pane.open_param("ta_ms")
+
+    outputs = _param_columns(pane)[1]
+    cells = {outputs.item(r, 1).text(): outputs.item(r, 2) for r in range(outputs.rowCount())}
+    assert cells["w-L"].data(detail_pane.CHANGED_ROLE) is True
+    assert i18n.t("cmpWas").format(value="5.22") in cells["w-L"].toolTip()
+    assert cells["sw"].data(detail_pane.CHANGED_ROLE) is not True, "its delay did not move"
+    assert pane._compare_combo.currentData() == "v_006"
+
+    pane._compare_combo.setCurrentIndex(pane._compare_combo.findData(None))
+    outputs = _param_columns(pane)[1]
+    assert all(outputs.item(r, 2).data(detail_pane.CHANGED_ROLE) is not True
+               for r in range(outputs.rowCount())), "no comparison, nothing marked"

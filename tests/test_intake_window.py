@@ -200,9 +200,10 @@ def test_create_opens_the_new_window_on_the_form(tmp_path, monkeypatch):
     assert launched == [], "the terminal waits for the gate, it does not start at Create"
 
 
-def test_the_header_shows_the_version_with_its_state_and_the_processor_on_hover(tmp_path, monkeypatch):
-    """F-070: `v_NNN` beside the preset, a yellow dot while anything is only proposed and a green
-    one once all of it is entered; the processor's name is in the tooltip."""
+def test_the_dsp_section_shows_the_configuration_in_the_processor(tmp_path, monkeypatch):
+    """F-070, placed by the Arbiter on 2026-09-23 in the left column's DSP header «як поточний в
+    процесорі»: `v_NNN` with a yellow dot while anything is only proposed and a green one once all
+    of it is entered; the processor's name is on the hover."""
     from types import SimpleNamespace
 
     window, _ = _window(tmp_path, monkeypatch)
@@ -210,13 +211,13 @@ def test_the_header_shows_the_version_with_its_state_and_the_processor_on_hover(
     view = SimpleNamespace(version="v_008", preset="SQ", state="proposed",
                            status_counts=(("applied", 9), ("proposed", 1)))
     window._show_version(view, profile)
-    assert window._version_label.text() == "v_008"
-    assert not window._version_dot.isHidden()
-    assert "tl-wait" in window._version_dot.property("class")
+    section = window._dsp_section
+    assert section.sub_text() == "v_008"
+    assert section.dot_status() == "wait"
     view.state = "applied"
     window._show_version(view, profile)
-    assert "tl-done" in window._version_dot.property("class")
-    assert "Helix DSP Ultra S" in window._version_tip._text
+    assert section.dot_status() == "done"
+    assert "Helix DSP Ultra S" in section._sub_label.toolTip()
 
 
 def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(tmp_path, monkeypatch):
