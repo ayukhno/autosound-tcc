@@ -62,6 +62,7 @@ from autosound_tcc.core import (
     contract_check,
     critic,
     form_report,
+    handoff,
     install_report,
     intake_form,
     model_choices,
@@ -3197,6 +3198,7 @@ class MainWindow(QMainWindow):
         self._refresh_capture_task(state)
         self._notify_stale(stale)
         self._notify_missing_records(state)
+        self._offer_handoff(state)
 
         review = process_view.reviewer(state)
         if review:
@@ -3341,6 +3343,59 @@ class MainWindow(QMainWindow):
             return  # nothing here that has not already been handed a turn
         if self._dialog.nudge_for_signals(count, i18n.t("signalNudgePrompt")):
             self._nudged_signal_ids = open_ids | ids
+
+    def _offer_handoff(self, state: dict) -> None:
+        """At the END of a phase, offer the next one in a clean session (hub #201, S-044).
+
+        Offered once per phase: the file is polled, the Arbiter is not. An offer, not an act —
+        the click asks the method whether everything is on disk first."""
+        phase = process_view.phase_finished(state)
+        offered = self.__dict__.setdefault("_handoff_offered", set())
+        if phase is None or phase in offered:
+            return
+        offered.add(phase)
+        self._status_strip.notify(i18n.t("hoOffer").format(phase=phase),
+                                  action=(i18n.t("hoAction"), self._on_handoff))
+
+    def _on_handoff(self) -> None:
+        project = config.chosen_project_dir()
+        if project is None:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            answer = handoff.check(project)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if answer is None:
+            self._status_strip.notify(i18n.t("hoTooOld"), level="warn")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.t("hoTitle"))
+        if not answer.get("ok"):
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(i18n.t("hoMissing").format(
+                missing="\n".join(f"• {m}" for m in answer["missing"]) or "—"))
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.exec()
+            return
+        first = str(answer.get("next_message") or "")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(i18n.t("hoReady").format(message=first,
+                                             resume=answer.get("resume") or "—"))
+        in_app = getattr(self, "_agent_worker", None) is not None
+        start = box.addButton(i18n.t("hoStartInApp" if in_app else "hoStartTerminal"),
+                              QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(i18n.t("npCancel"), QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is not start:
+            return
+        # The first message goes on the clipboard: the new session starts with it.
+        QApplication.clipboard().setText(first)
+        if in_app:
+            self._start_fresh_session()
+        else:
+            self._open_terminal()
+        self._status_strip.notify(i18n.t("hoCopied").format(message=first))
 
     def _notify_missing_records(self, state: dict) -> None:
         """Say when a decision the method leans on exists only in the conversation.

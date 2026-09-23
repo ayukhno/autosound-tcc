@@ -2010,6 +2010,16 @@ thread (the F-053 class). Measured on this file: 1 run in 10 before this change,
 a layout change that shifts timing by milliseconds is enough to find it. The test now says its
 availability out loud, the way it already said `critic_reaches`. 6 runs of the file green after.
 
+### F-080 — The next phase in a clean session: the method's `handoff`, offered (hub #201, S-044)
+
+**Статус**: built on `wave-0.1.43` 2026-09-23 against #201's contract (skill `38c6049`) · the vendored method answers "update" until re-vendored
+
+At a phase's END — no step left `todo`/`in_progress`, which is when `handoff` answers — the strip
+offers «Перевірити й почати начисто», once per phase. The click runs `process.py <dir> handoff
+--json`: `missing` is shown as the method prints it (each line names its fix); when ready, the
+first message («продовжуй») goes on the clipboard and a clean session starts — the in-app one
+through the existing fresh start, else a terminal — with `resume` said beside it.
+
 ### F-079 — Whether the tune's history is kept and backed up, visible in the window
 
 **Статус**: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026)

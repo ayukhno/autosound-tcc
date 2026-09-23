@@ -54,6 +54,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   agy · <model>», from the MCP handshake and the model the session names for itself in
   `get_tcc_state`, beside the picker that keeps saying what TCC would start.
 
+- **At a phase's end, the next phase is offered in a clean session** (hub #201): TCC asks the
+  method's `handoff` whether everything the next session needs is on disk, shows what is missing
+  if anything is, and otherwise starts the clean session with its first message on the clipboard.
+
 ### Changed
 
 - **The register's per-project layout is read** (hub #195): `state/versions/` and

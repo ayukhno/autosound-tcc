@@ -278,6 +278,24 @@ def _to_step(step: dict, stale: Optional[dict] = None,
     )
 
 
+def phase_finished(state: Optional[dict]) -> Optional[str]:
+    """The active phase, when its plan has steps and none is left `todo` or `in_progress`.
+
+    That is the moment the method's `handoff` answers (hub #201): at the END of a phase, right
+    after the event that closed its last step. Just after `phase_entered` the new phase's steps are
+    `todo`, and `handoff` refuses.
+    """
+    if not state:
+        return None
+    active = state.get("active_phase")
+    steps = [s for s in state.get("plan", []) if str(s.get("phase")) == str(active)]
+    if active is None or not steps:
+        return None
+    if any(s.get("status", "todo") in ("todo", "in_progress") for s in steps):
+        return None
+    return str(active)
+
+
 def done_step_ids(state: dict) -> set[str]:
     """Steps the skill considers done — the panel's checkboxes should reflect these, not guess."""
     return {
