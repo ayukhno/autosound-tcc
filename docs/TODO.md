@@ -2022,6 +2022,11 @@ remote, commits not pushed); the Project params header carries a dot and a word 
 «git не працює» / «історія не зберігається», yellow «без резервної копії» / «не відправлено: N»,
 green «копія є» — with the next command on hover; the rows inside name branch, changes, backup.
 
+Then (hub #199 answered, skill `336af4b`): «Зробити репозиторій» runs the method's
+`project_repo.py init`; «Копія на GitHub» shows the method's `gh repo create … --private --push`
+whole and runs it only on yes (`core/project_repo.py`). Until the vendored method has
+`project_repo.py`, both answer "update the method".
+
 ### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
 
 **Статус**: built on `wave-0.1.43` 2026-09-23 · vendored skill moved `c27cd7a` → `48e2c10` (branch head: #195 layout, #197 keys) · `config save` is not pushed by the skill yet, so the save answers "update the method" until the next vendoring

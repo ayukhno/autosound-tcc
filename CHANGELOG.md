@@ -47,6 +47,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   carries a dot and a word even when folded: red when git does not run or the folder is not a
   repository, yellow when there is no backup or commits are not pushed, green when it is backed up
   — with the next command on hover. The rows inside name the branch, the changes and the backup.
+  «Зробити репозиторій» and «Копія на GitHub» run the method's own commands; the GitHub one is
+  shown whole and runs only on yes.
 
 ### Changed
 

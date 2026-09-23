@@ -69,6 +69,7 @@ from autosound_tcc.core import (
     omp_session,
     process_writer,
     project_settings,
+    project_repo,
     project_trust,
     reviewer_key,
     self_check,
@@ -2642,6 +2643,8 @@ class MainWindow(QMainWindow):
         body = section.body_layout()
         if not git.works or not git.repo:
             body.addWidget(_kv_row(i18n.t("gitRow"), sub))
+            if git.works:
+                body.addWidget(self._git_button("gitInitBtn", "gitInitTip", self._on_git_init))
             return
         body.addWidget(_kv_row(i18n.t("gitRow"), git.branch or "—"))
         if git.changed is not None:
@@ -2650,6 +2653,73 @@ class MainWindow(QMainWindow):
         body.addWidget(_kv_row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
         if git.unpushed:
             body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed)))
+        if not git.remote:
+            body.addWidget(self._git_button("gitBackupBtn", "gitBackupTip", self._on_git_backup))
+
+    def _git_button(self, text_key: str, tip_key: str, slot) -> QWidget:
+        """A one-click fix under the git rows: the method's own command, run on the click."""
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(12, 2, 12, 6)
+        button = QPushButton(i18n.t(text_key))
+        button.setProperty("class", "link-btn")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        attach_tip(button, i18n.t(tip_key))
+        button.clicked.connect(slot)
+        layout.addWidget(button)
+        layout.addStretch(1)
+        return row
+
+    def _after_git(self, ok: bool, said: str, too_old: bool = False) -> None:
+        if too_old:
+            self._status_strip.notify(i18n.t("gitTooOld"), level="warn")
+        elif ok:
+            self._status_strip.notify(i18n.t("gitDone").format(said=said.splitlines()[-1]
+                                                              if said else ""))
+        else:
+            self._status_strip.notify(i18n.t("gitFailed").format(said=said or "—"), level="warn")
+        self._set_project_params(self._view)
+
+    def _on_git_init(self) -> None:
+        """«Зробити репозиторій»: the method's `project_repo.py init` on this project (hub #199)."""
+        project = config.chosen_project_dir()
+        if project is None:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = project_repo.init(project)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._after_git(result.ok, result.said, result.too_old)
+
+    def _on_git_backup(self) -> None:
+        """«Копія на GitHub»: the method's offer, shown whole, and run only on the Arbiter's yes."""
+        project = config.chosen_project_dir()
+        if project is None:
+            return
+        if not project_repo.available():
+            self._after_git(False, "", too_old=True)
+            return
+        state = project_repo.status(project) or {}
+        offer = state.get("offer")
+        if not offer:
+            key = "gitNoGh" if state.get("gh") == "absent" else "gitGhSignedOut"
+            self._status_strip.notify(i18n.t(key), level="warn")
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("gitBackupBtn"))
+        box.setText(i18n.t("gitBackupAsk").format(command=offer))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = project_repo.run_offer(offer, project)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._after_git(result.ok, result.said)
 
     def _set_project_params(self, view: ProjectView | None) -> None:
         """(Re)builds the "Project params" section body from `project.json`'s channel-tier summary
