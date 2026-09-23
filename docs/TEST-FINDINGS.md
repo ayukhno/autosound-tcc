@@ -1573,3 +1573,22 @@ session — which is the same lesson finding 35 bought: an event logged without 
 every outcome look alike.
 
 **If it comes back:** `grep "git ls-remote exited" ~/Library/Logs/autosound-tcc/tcc.log`.
+
+### 41. A session started in a terminal is not named: the footer shows TCC's own pick
+
+**What.** The Arbiter started a project with `agy` in a terminal, then opened TCC on the folder.
+Everything worked: the MCP connected, the fields updated, the dialog area showed updates. But the
+AI model in TCC's footer was TCC's own pick, not the model the session was running. «Ідеально було
+б підхопити поточну модель і показати (хоч там у нас такої моделі не може бути).»
+
+**Where.** The Arbiter's Mac, 2026-09-23, with `agy`.
+
+**Ours or external.** Ours.
+
+**Weight.** Medium. The footer names a model that is not answering.
+
+**Status.** Built 2026-09-23 on `wave-0.1.43`. The MCP handshake names the client (`antigravity`
+becomes `agy`). `get_tcc_state(model=…)` asks the session to name its model. The footer shows
+«⌁ у терміналі: agy · <model>» beside the picker, which keeps saying what TCC would start. TCC's
+own in-app session is not mistaken for it. Live check: the next `agy` session on this project.
+

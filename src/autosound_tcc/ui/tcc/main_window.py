@@ -162,6 +162,10 @@ _LISTENING_PHASE = "4"
 #: read which phase is open and what the current step is, which is the whole reason it is on
 #: screen while a round is being captured.
 _PLAN_MIN_PX = 180
+#: How an MCP client names itself in the handshake → the command a person knows it by.
+_CLIENT_NAMES = {"antigravity": "agy", "antigravity-cli": "agy", "gemini-cli": "gemini",
+                 "gemini-cli-mcp-client": "gemini", "claude-code": "claude", "codex": "codex",
+                 "codex-mcp-client": "codex"}
 #: The border between the plan and the capture card in the right column, where it was left.
 _RIGHT_SPLIT_KEY = "ui/right_split"
 #: How often the REW-online dot re-asks, while this window has the focus. Thirty seconds because
@@ -1173,6 +1177,16 @@ class MainWindow(QMainWindow):
         self._main_warn_tip = attach_tip(self._main_warn, "")
         self._main_warn_detail = ""
         layout.addWidget(self._main_warn)
+        # The session in a terminal, as it named itself over MCP (finding 41): the picker says
+        # what TCC would START, this says what is answering now — which may be a model TCC's list
+        # does not have at all. Hidden until such a session calls in.
+        # Eliding: the footer row is ~12 px short of a 1280 px window already (TODO F-060).
+        self._ext_session_lbl = ElidedLabel("", min_width=60)
+        self._ext_session_lbl.setProperty("class", "phead-sub")
+        self._ext_session_tip = attach_tip(self._ext_session_lbl, "")
+        self._ext_session_lbl.setVisible(False)
+        self._ext_session: Optional[dict] = None
+        layout.addWidget(self._ext_session_lbl)
 
         # Beside the model, because it is fixed for the session exactly like the model is: the
         # Agent SDK takes effort at client construction, so this is a choice made when a session
@@ -3676,6 +3690,7 @@ class MainWindow(QMainWindow):
         self._bridge.refreshRequested.connect(self._reload_from_disk)
         self._bridge.sessionClosed.connect(lambda: setattr(self, "_session_saved", True))
         self._bridge.sessionChanged.connect(lambda: setattr(self, "_session_saved", False))
+        self._bridge.externalSession.connect(self._on_external_session)
         self._publish_snapshot()
         self._refresh_critic_status()
 
@@ -4562,6 +4577,29 @@ class MainWindow(QMainWindow):
         # same class of fault as the placeholder removal above.
         QTimer.singleShot(0, self._reload_after_model_config)
 
+    def _on_external_session(self, info: dict) -> None:
+        """A session outside this window called TCC's MCP server: name it in the footer.
+
+        TCC's own in-app session reaches the same server, and it already has its name in the
+        picker — so while one runs here, the call is its own and nothing is added."""
+        if getattr(self, "_agent_worker", None) is not None:
+            return
+        self._ext_session = dict(info)
+        self._show_external_session()
+
+    def _show_external_session(self) -> None:
+        info = self._ext_session
+        if not info:
+            self._ext_session_lbl.setVisible(False)
+            return
+        client = str(info.get("client") or "")
+        who = _CLIENT_NAMES.get(client.lower(), client) or "?"
+        model = str(info.get("model") or "") or i18n.t("extNoModel")
+        self._ext_session_lbl.setText(i18n.t("extTerminal").format(who=who, model=model))
+        self._ext_session_tip.set_text(i18n.t("extTip").format(
+            client=client or "?", version=info.get("version") or "?"))
+        self._ext_session_lbl.setVisible(True)
+
     def _open_save_config(self) -> None:
         """«Збережено в DSP…»: record the name the shown version went into the device under."""
         view = self._view
@@ -5122,6 +5160,7 @@ class MainWindow(QMainWindow):
         self._rebuild_acoustics()
         self._dsp_section.set_title(i18n.t("dspPanel"))
         self._cfg_btn.setText(i18n.t("cfgButton"))
+        self._show_external_session()
         self._cfg_tip.set_text(i18n.t("cfgButtonTip"))
         self._set_project_params(self._view)
         self._plan_title.setText(i18n.t("planTitle"))

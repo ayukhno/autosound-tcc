@@ -38,6 +38,8 @@ class QtUiBridge(QObject):
     refreshRequested = Signal()
     sessionClosed = Signal()
     sessionChanged = Signal()
+    #: `{client, version, model}` — the session on the other end of the MCP server (finding 41).
+    externalSession = Signal(dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -89,3 +91,6 @@ class QtUiBridge(QObject):
 
     def session_changed(self) -> None:
         self.sessionChanged.emit()
+
+    def external_session(self, info: dict) -> None:
+        self.externalSession.emit(dict(info))

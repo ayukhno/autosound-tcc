@@ -361,7 +361,8 @@ def build_server(
         SERVER_NAME,
         instructions=(
             "Tuning Command Center — the GUI the human tuner (the Arbiter) is looking at. "
-            "Read its state instead of asking them to describe it, and check for user signals "
+            "Read its state instead of asking them to describe it (call get_tcc_state first, "
+            "with your own model id), and check for user signals "
             "before proposing a change. Every mutation here is shown to the Arbiter and takes "
             "effect only if they confirm. Nothing in this server writes to the DSP."
         ),
@@ -403,13 +404,41 @@ def build_server(
 
     # ---- reads -------------------------------------------------------------
 
+    #: The model a session named for itself; kept, so a later call without it does not erase it.
+    said_model: dict[str, str] = {}
+
+    def _note_client(model: str) -> None:
+        """Tell the window which session is on the other end of this server (finding 41).
+
+        The Arbiter started a project with `agy` in a terminal and then opened TCC on the folder:
+        everything worked, and the footer named TCC's own pick, not the model that was answering.
+        The MCP handshake names the CLIENT (`antigravity`, `claude-code`); the model is only known
+        if the session says it, which is what `get_tcc_state(model=…)` asks for.
+        """
+        client = version = ""
+        try:
+            info = mcp.get_context().session.client_params.clientInfo
+            client, version = info.name or "", info.version or ""
+        except Exception:  # noqa: BLE001 — outside a request (tests), or a client that sent none
+            pass
+        if model.strip():
+            said_model["model"] = model.strip()[:80]
+        method = getattr(bridge, "external_session", None)
+        if callable(method) and (client or said_model):
+            method({"client": client, "version": version, "model": said_model.get("model", "")})
+
     @tool()
-    async def get_tcc_state() -> str:
+    async def get_tcc_state(model: str = "") -> str:
         """What the Arbiter currently has on screen: preset, ledger version, selection, edit mode.
 
         Call this before proposing anything, so a proposal refers to what they are actually
         looking at rather than to state you inferred earlier in the conversation.
+
+        `model`: your own model id, as your CLI names it (e.g. `gemini-3.1-pro-high`,
+        `claude-opus-5`). TCC shows it in its footer, so the Arbiter sees which model the session
+        in the terminal is running. Pass it on your first call; leave it empty if you do not know.
         """
+        _note_client(model)
         process_state, error = _load_process_state()
         ui = bridge.snapshot()
         open_signals = bus.pending_count

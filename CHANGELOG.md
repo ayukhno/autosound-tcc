@@ -50,6 +50,10 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   «Зробити репозиторій» and «Копія на GitHub» run the method's own commands; the GitHub one is
   shown whole and runs only on yes.
 
+- **A session running in a terminal is named in the footer** (TEST-FINDINGS 41): «⌁ у терміналі:
+  agy · <model>», from the MCP handshake and the model the session names for itself in
+  `get_tcc_state`, beside the picker that keeps saying what TCC would start.
+
 ### Changed
 
 - **The register's per-project layout is read** (hub #195): `state/versions/` and
