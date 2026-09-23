@@ -166,3 +166,15 @@ def test_an_older_method_disables_entry_and_says_why(monkeypatch):
     assert "critic-env" in dialog._blurb.text()
     assert dialog._shell.isHidden()
     dialog.close()
+
+
+def test_the_key_really_reaches_the_childs_stdin(tmp_path, monkeypatch):
+    """Found live against v3.0.60: `child.quiet()` closes stdin, and `input=` beside it is a
+    ValueError — every tested path had replaced `_run`, so none saw it."""
+    script = tmp_path / "autosound_ai.py"
+    script.write_text("import sys; line = sys.stdin.readline().strip(); "
+                      "print('got', len(line), 'chars') if sys.argv[1:3] == ['key', 'set'] "
+                      "else sys.exit(3)", encoding="utf-8")
+    monkeypatch.setattr(reviewer_key, "script_path", lambda: script)
+    stored, said = reviewer_key.set_key("google", "AIza" + "k" * 35)
+    assert stored and said == "got 39 chars"

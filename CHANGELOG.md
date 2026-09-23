@@ -68,7 +68,7 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 - **The register's per-project layout is read** (hub #195): `state/versions/` and
   `state/slots.json`, which the method uses for every new project from v3.0.60, beside the old
-  per-preset tree, chosen per project. The method is vendored at `48e2c10` of its W-2 branch.
+  per-preset tree, chosen per project. The method is vendored at its tag **`v3.0.60`** (`03ba97c`).
 - **Each card in the right column scrolls on its own.** The capture list scrolls, up and down and
   sideways, while the picker, its buttons and the legend stay where they are; the plan card has
   its own scroll; the border between the two cards moves and is remembered. Capture names are

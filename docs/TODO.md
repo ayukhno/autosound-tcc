@@ -2027,7 +2027,7 @@ reported as unusable.
 
 ### F-080 — The next phase in a clean session: the method's `handoff`, offered (hub #201, S-044)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 against #201's contract (skill `38c6049`) · the vendored method answers "update" until re-vendored
+**Статус**: built on `wave-0.1.43` 2026-09-23 against #201's contract · live at `v3.0.60`: `handoff --json` answers (a fresh project: refused, «no phase is recorded»)
 
 At a phase's END — no step left `todo`/`in_progress`, which is when `handoff` answers — the strip
 offers «Перевірити й почати начисто», once per phase. The click runs `process.py <dir> handoff
@@ -2037,7 +2037,7 @@ through the existing fresh start, else a terminal — with `resume` said beside 
 
 ### F-079 — Whether the tune's history is kept and backed up, visible in the window
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026)
+**Статус**: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026) · live at `v3.0.60`: `init` made a repository and a first commit, `status` then offered `gh repo create … --private --push` (not run)
 
 F-074 found the Arbiter's live project with no repository: no history, no backup, and TCC silent
 by design (`git_facts` said nothing for a folder that is not a repo). He asked to see whether
@@ -2054,7 +2054,7 @@ whole and runs it only on yes (`core/project_repo.py`). Until the vendored metho
 
 ### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored skill moved `c27cd7a` → `48e2c10` (branch head: #195 layout, #197 keys) · `config save` is not pushed by the skill yet, so the save answers "update the method" until the next vendoring
+**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored at `v3.0.60`; live on a seeded project: SQ-1/FULL-1/SQ-2 saved through `config save`, SQ-2 (v_005) compared with SQ-1 (v_002), not v_004 · left: a migrated copy of the Passat
 
 The method now numbers versions once per project (`state/versions/`, `state/slots.json`), and a new
 project starts that way; the tuner saves a version into a DSP preset under a name (`SQ-2`), and
@@ -2068,7 +2068,7 @@ the skill pushes `config`.
 
 ### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored at `48e2c10`: `key status` checked live on the Mac (env + ~/.zshrc line 3 seen) · left: `key set` / `move-shell` from the screen, DPAPI on the VM
+**Статус**: built on `wave-0.1.43` 2026-09-23 · live on the Mac at `v3.0.60`: `key status` (env + ~/.zshrc line 3 seen), `key set` over stdin (a malformed key refused with the method's reason, nothing stored — this found and fixed `quiet()`'s closed stdin) · left: a real key and `move-shell` are the Arbiter's, DPAPI on the VM
 
 The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
 as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`

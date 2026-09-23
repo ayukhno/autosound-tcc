@@ -50,11 +50,15 @@ def _run(args: list[str], *, stdin: Optional[str] = None) -> Optional[subprocess
     script = script_path()
     if not script.is_file():
         return None
+    quiet = child.quiet()
+    if stdin is not None:
+        # `quiet()` closes the child's stdin, and `input=` needs it open: the key goes there.
+        quiet.pop("stdin", None)
     try:
         return subprocess.run(
             [child.script_interpreter(), str(script), *args],
             input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=_TIMEOUT_S, env=vendor_loader.child_env(), **child.quiet())
+            timeout=_TIMEOUT_S, env=vendor_loader.child_env(), **quiet)
     except (OSError, subprocess.SubprocessError) as exc:
         # The exception names the command, never the input: a key cannot reach the log this way.
         app_log.logger().info("reviewer key: %s failed: %s", " ".join(args[:2]), type(exc).__name__)
