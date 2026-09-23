@@ -492,24 +492,24 @@ def _step_label(step_id: str) -> str:
 _SERIES_ID = re.compile(r"^v(\d+)$")
 
 
-def _picker_label(session) -> str:
-    """The series AND the round, whichever the session has (finding 33).
+def _picker_label(session, live: bool = False) -> str:
+    """A round by its id — the one thing that names one pass of captures (the Arbiter, 2026-09-23:
+    «не розумію ідеї "серія х" — навіщо вона, як є cap_xxx»). The live entry with no round open yet
+    is the next round; the series `_N` goes to the hover, where it explains the titles' number.
+    A session with neither (an older journal, the fixture) keeps its series name."""
+    round_id = getattr(session, "round_id", "") or ("" if _SERIES_ID.match(session.id) else session.id)
+    if round_id:
+        return round_id
+    if live:
+        return i18n.t("measNextRound")
+    series = _series_of(session)
+    return i18n.t("seriesItem").format(v=series) if series else session.id
 
-    The series is spelled in words: `v6` read as a version of something and explained nothing
-    (user, 2026-08-21), and the curve window spells the same number the same way.
 
-    The live entry took the open round's id (`cap_006`) and the series it belonged to vanished from
-    the list; a past round said nothing about its series. Two axes, both named: «серія 1 · cap_006».
-    """
+def _series_of(session) -> str:
     series = getattr(session, "series", "") or ""
     found = _SERIES_ID.match(session.id)
-    if not series and found:
-        series = found.group(1)
-    round_id = getattr(session, "round_id", "") or ("" if found else session.id)
-    parts = [i18n.t("seriesItem").format(v=series)] if series else []
-    if round_id:
-        parts.append(round_id)
-    return " · ".join(parts) or session.id
+    return series or (found.group(1) if found else "")
 
 
 class MeasurementPanel(QWidget):
@@ -808,7 +808,12 @@ class MeasurementPanel(QWidget):
             if index == 1:
                 self._session_combo.insertSeparator(self._session_combo.count())
             marker = " ●" if index == 0 else ""
-            self._session_combo.addItem(_picker_label(session) + marker, session.id)
+            self._session_combo.addItem(_picker_label(session, live=index == 0) + marker, session.id)
+            series = _series_of(session)
+            if series:
+                self._session_combo.setItemData(
+                    self._session_combo.count() - 1,
+                    i18n.t("measRoundSeriesTip").format(v=series), Qt.ItemDataRole.ToolTipRole)
 
     def viewing_session_id(self) -> str:
         """Which capture series the grid is showing. The curve window scopes its delay bank by

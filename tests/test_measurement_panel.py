@@ -412,8 +412,9 @@ def test_session_dropdown_lists_all_sessions_live_one_marked():
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)  # the mock is a fixture, not a default
     items = [panel._session_combo.itemText(i) for i in range(panel._session_combo.count())]
-    # A separator between what is being taken now and what was taken before (finding 33).
-    assert items == ["series 10 ●", "", "series 9", "series 8"]
+    # A separator between what is being taken now and what was taken before (finding 33); the live
+    # entry with no round open is the next round (the Arbiter, 2026-09-23).
+    assert items == [i18n.t("measNextRound") + " ●", "", "series 9", "series 8"]
     assert [panel._session_combo.itemData(i) for i in range(panel._session_combo.count())] == \
         ["v10", None, "v9", "v8"], "the id is what the panel is keyed on and it did not change"
 
@@ -1124,8 +1125,11 @@ def test_an_open_round_does_not_hide_its_series_and_a_past_round_names_its_own()
     ])
     combo = panel._session_combo
     items = [combo.itemText(i) for i in range(combo.count())]
-    series = i18n.t("seriesItem").format(v="1")
-    assert items == [f"{series} · cap_006 ●", "", f"{series} · cap_005", series]
+    # Rounds by their id; the series is on the hover (the Arbiter, 2026-09-23).
+    assert items == ["cap_006 ●", "", "cap_005", i18n.t("seriesItem").format(v="1")]
+    from PySide6.QtCore import Qt
+
+    assert combo.itemData(0, Qt.ItemDataRole.ToolTipRole) == i18n.t("measRoundSeriesTip").format(v="1")
 
 
 def test_a_name_that_says_its_method_is_not_given_a_second_one():
