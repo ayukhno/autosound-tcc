@@ -1755,3 +1755,13 @@ session does not start.
 **Where.** Windows, light theme, the in-app AI dialog, route omp (screenshot, 2026-09-24).
 
 **Weight.** High: the omp route cannot run a session at all.
+
+### 54. Switching away from a model that never started still runs «save state before the model change»
+
+**What.** Right after finding 53 (the omp session failed to start), switching the model shows
+«SYSTEM · LEDGER: Зберігаю стан проєкту перед зміною моделі…». No session was running, so there
+was nothing to save before the switch.
+
+**Where.** Windows, light theme, the in-app AI dialog (screenshot, 2026-09-24).
+
+**Weight.** Low: a needless step and a misleading line; depends on how long it takes.
