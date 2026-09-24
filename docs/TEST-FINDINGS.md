@@ -1912,3 +1912,29 @@ his word (2026-09-24), from the code:
 
 **Weight.** Medium: the one voice the loop exists for is not visible as itself, and a proposal
 looks like something already recorded.
+
+### 64. «У фокусі зараз» shows the phase plan, not the open round: 24 positions and five columns for a round of six
+
+**What.** Round `cap_016` is open with six positions (`capture_task_issued` in the journal). The
+panel shows 24, in five columns: SOLO (SW), SOLO (RTA), PAIRS (RTA), SIDES (RTA), JOINTS (RTA),
+including `r-L`/`r-R`, which the project's registry has switched off, and the centre, frozen until
+phase 5. The Arbiter asked whether the last three columns are TCC's logic or the method's data.
+
+**Checked (2026-09-24, against the code; the project's AI traced the same).**
+
+- **The columns and names are the method's.** `rew_tool/naming.py`, `_CAPTURE_PLAN["2"]`:
+  `channels` (sw and rta), `pairs`, `sides`, `joints_sw_ws` (rta), and `expected_groups()` makes
+  one group per (scope, method), labelled pairs · sides · joints. TCC draws one column per group.
+  `channels` takes the glossary's ACTIVE channels (`active_only=True`), so `r-L`/`r-R` showing means
+  the glossary still has them on while the registry has them off.
+- **Plan over round is TCC's.** `state/measurement_view.py` (`measurement_session`) asks the
+  method's phase plan first and reads the open round's own `expected` only when the plan is empty
+  (phase 1). In phase 2 the plan is not empty, so the round is never read, although the same
+  function says «a round is a fact, a phase plan is a prediction about it».
+
+**Related.** Finding 57 (next round shows a full, green list). The project's AI mentions the
+Arbiter's rule to merge pairs, sides and joints into one «Group» column; not looked up here.
+
+**Where.** Mac, the Arbiter's project, round `cap_016`, phase 2 (screenshot, 2026-09-24).
+
+**Weight.** High: the task the tuner reads is not the task the session issued.
