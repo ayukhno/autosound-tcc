@@ -1809,3 +1809,43 @@ closing) names tcc#39: a live round is marked done from what REW holds, so the i
 «expects no captures».
 
 **Weight.** Medium: the list says the round is finished when it has not started.
+
+### 58. A critic through omp does not answer: the model name goes out with the `google-antigravity/` prefix
+
+**What.** Two tries at a review from a Gemini picked through omp, both ending in `mode:
+choose_model`, `model: null`, and the footer status «choose_model · just now»:
+
+1. «OMP · Gemini 3.5 Flash Lite»: the call went through the API («Підключення до API», not «Виклик
+   локального CLI 'agy'») as `google-antigravity/gemini-3.5-flash-lite`, and the key answered
+   HTTP 404. The API's own list has `gemini-3.5-flash-lite` without the prefix.
+2. `google-antigravity/gemini-3.8-flash-high`: TCC saw a tiered agy name, said «API її не
+   обслуговує: шлях — CLI», called `agy`, and agy answered «model
+   google-antigravity/gemini-3.8-flash-high is not recognized». agy's list has
+   `gemini-3.8-flash-high` without the prefix.
+
+The ledger then says «The reviewer needs a model name: this key can call gemini-3.8-flash-high, …
+gemini-3.1-pro-high. Pick one and pin it as AUTOSOUND_CRITIC_MODEL=<model> in
+~/.config/autosound/critic-env».
+
+**The Generator's reading (not checked).** Neither route takes the `google-antigravity/` prefix:
+the API takes names without a tier, agy takes names with a tier, both without the vendor.
+
+**Where.** Windows, light theme, the in-app AI dialog, route omp for the critic (the Generator's
+two answers pasted by the Arbiter, screenshots, 2026-09-24).
+
+**Ours or the method's.** Not decided.
+
+**Weight.** High: no omp-picked critic can answer.
+
+### 59. The critic chosen in the footer does not reach the project parameters
+
+**What.** The footer's «AI CRITIC» reads «OMP · Gemini 3.5 Flash Lite»; «PROJECT PARAMS» still
+reads «AI reviewer: Claude Sonnet 5»; the Generator, asked which critic it uses, names a third one,
+`google-antigravity/gemini-3.8-flash-high`.
+
+**The Arbiter's rule.** The parameter is updated right after the change. If the update goes
+through the AI's queue, TCC shows that the change is waiting.
+
+**Where.** Windows, light theme, the footer and «PROJECT PARAMS» (screenshots, 2026-09-24).
+
+**Weight.** Medium: three places, three different critics.
