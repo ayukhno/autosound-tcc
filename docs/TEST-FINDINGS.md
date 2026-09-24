@@ -1858,3 +1858,19 @@ so no version can be told from another.
 **Where.** Windows, light theme, the table's «порівняти з» picker (screenshot, 2026-09-24).
 
 **Weight.** Medium: the version cannot be chosen by name.
+
+### 61. The critic through agy is cut off mid-stream, and the channel steps down to the API
+
+**What.** A review request came back as «Рецензент не відповів, і нічого не збережено як рецензію:
+· CLI 'agy': The stream was interrupted. Please continue the task you were working on. Наступна
+сходинка — буфер обміну (нижче); з ключем API — `--via api` для цього запуску
+(setup-critic-channel.md §7)», with the package at
+`process/reviews/2026-09-24T13-08-24-critic-package.md`. The Generator ran the same package with
+`--via api`, and the critic answered.
+
+**Where.** The in-app AI dialog (screenshot, 2026-09-24).
+
+**Ours or the method's.** The method's: the message and the ladder are `autosound_ai.py`'s. Sent to
+the skill as hub #204 TCC-030, on the Arbiter's word.
+
+**Weight.** Medium: the review got through, but one cut stream moved it onto the metered API.
