@@ -1781,3 +1781,17 @@ picker its own three colours: grey, not known yet; green, works; red, does not w
 model this launch saw refused.
 
 **Weight.** Medium: the red says "broken" about a model that works.
+
+### 56. The curve window tries to read from REW when REW is already known to be offline
+
+**What.** With the REW indicator red, the curve analysis window («Where exactly?») still tries to
+read the chosen curves, waits for the timeout, and only then says «Could not read from REW: m-L_1
+(sw): URLError; sw_1 (sw): URLError; tw-L_1 (sw): URLError». TCC already knows at that moment that
+REW is offline, so the wait and the per-curve error list are avoidable; the Arbiter expects it to
+say so up front.
+
+**Where.** Windows, light theme, the curve analysis window, series 1 · impulse · no group, three
+curves chosen (screenshot, 2026-09-24).
+
+**Weight.** Medium: a wait for a result that is known in advance, and a technical error in place
+of "REW is offline".
