@@ -1678,3 +1678,18 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 
 **Weight.** High for 5 (a dead end); medium for the rest.
 
+
+### 48. The SDK list still offers Opus 5 and Fable 5 after Anthropic shipped Opus 5.5 and Fable 5.1
+
+**What.** The model picker's Claude rows are «SDK · Claude Opus 5», «Sonnet 5», «Fable 5», while
+Anthropic now serves Opus 5.5 and Fable 5.1. The AGY rows below them are current (Gemini 3.8, 3.7,
+3.6 Flash). The Arbiter's question: do the old ones still work, and how is the list kept current?
+
+**Where.** Windows, the AI model picker (two screenshots, 2026-09-24).
+
+**Context (from the code, not a diagnosis).** The Claude rows are a list shipped in
+`core/model_choices.py` (`SDK_MODELS`, dated `SDK_MODELS_VERIFIED = "2026-08"`). It is refreshed from
+Anthropic's Models API only when `ANTHROPIC_API_KEY` is set, which the SDK route (own `claude`
+login) normally does not have. The AGY rows come live from `agy models`.
+
+**Weight.** Medium: the newest Claude models cannot be picked, and nothing says the list is old.
