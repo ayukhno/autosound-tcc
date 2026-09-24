@@ -1795,3 +1795,17 @@ curves chosen (screenshot, 2026-09-24).
 
 **Weight.** Medium: a wait for a result that is known in advance, and a technical error in place
 of "REW is offline".
+
+### 57. «next round» is picked, and its capture list is full and all green
+
+**What.** The round picker in «In focus now» reads «next round ●»; the Arbiter: that is right, it
+should be there. But the list under it shows every capture of the round (`tw-L_1` … `sw_1`, SW
+and RTA) and every one of them green, «done», for a round that has not captured anything yet.
+
+**Where.** Windows VM, «In focus now», measurement task, REW red (screenshot, 2026-09-24).
+
+**Possibly related.** The Generator's greeting in the same project (screenshot of finding 18's
+closing) names tcc#39: a live round is marked done from what REW holds, so the import form says
+«expects no captures».
+
+**Weight.** Medium: the list says the round is finished when it has not started.
