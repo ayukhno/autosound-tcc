@@ -1874,3 +1874,16 @@ so no version can be told from another.
 the skill as hub #204 TCC-030, on the Arbiter's word.
 
 **Weight.** Medium: the review got through, but one cut stream moved it onto the metered API.
+
+### 62. After the cut-off critic call, every model in the critic list turns red, Anthropic's too, then black again
+
+**What.** Right after finding 61 (the agy stream cut off, the review then done through the API),
+the critic picker's open list showed every model in red, the SDK Claude rows included. A while
+later they were all black again. The critic itself worked.
+
+**Where.** The footer's critic picker (the Arbiter's words, 2026-09-24; no screenshot).
+
+**Related.** Finding 55 (the closed picker stays red whatever is picked) and W-2's S20 (a model
+this launch saw refused turns red).
+
+**Weight.** Medium: red on every row says nothing works, while the review had just come back.
