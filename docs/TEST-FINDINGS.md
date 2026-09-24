@@ -1849,3 +1849,12 @@ through the AI's queue, TCC shows that the change is waiting.
 **Where.** Windows, light theme, the footer and «PROJECT PARAMS» (screenshots, 2026-09-24).
 
 **Weight.** Medium: three places, three different critics.
+
+### 60. «порівняти з»: on Windows the open list shows «…» in place of every version
+
+**What.** The closed picker reads «v_009»; opened, its list shows «—» and then «…» on every row,
+so no version can be told from another.
+
+**Where.** Windows, light theme, the table's «порівняти з» picker (screenshot, 2026-09-24).
+
+**Weight.** Medium: the version cannot be chosen by name.
