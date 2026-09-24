@@ -1733,3 +1733,14 @@ built after it.
 **Where.** Windows, the main menu, light and dark theme (two screenshots, 2026-09-24).
 
 **Weight.** Medium: it is felt all the time, and it is everywhere this grey is used.
+
+### 52. Dark theme: the search box in «Моделі у виборі генератора» hides what is typed
+
+**What.** In the dark theme the dialog's search field is white, and the text typed into it
+(«sonnet») is pale grey on that white, so what is being typed can barely be seen. The list below
+does filter by it.
+
+**Where.** Windows, dark theme, the dialog «Моделі у виборі генератора» (omp's catalogue, 28
+models), screenshot 2026-09-24.
+
+**Weight.** Medium: the field cannot be read while typing.
