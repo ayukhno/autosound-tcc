@@ -1927,10 +1927,13 @@ phase 5. The Arbiter asked whether the last three columns are TCC's logic or the
   one group per (scope, method), labelled pairs · sides · joints. TCC draws one column per group.
   `channels` takes the glossary's ACTIVE channels (`active_only=True`), so `r-L`/`r-R` showing means
   the glossary still has them on while the registry has them off.
-- **Plan over round is TCC's.** `state/measurement_view.py` (`measurement_session`) asks the
+- **Plan over round is TCC's.** `state/measurement_view.py` (`build_session`) asks the
   method's phase plan first and reads the open round's own `expected` only when the plan is empty
   (phase 1). In phase 2 the plan is not empty, so the round is never read, although the same
   function says «a round is a fact, a phase plan is a prediction about it».
+
+**Sent.** The method's side as hub #205 TCC-031, to be matched with the skill's own capture-round
+tasks (the Arbiter has written to the skill about this already).
 
 **Related.** Finding 57 (next round shows a full, green list). The project's AI mentions the
 Arbiter's rule to merge pairs, sides and joints into one «Group» column; not looked up here.
