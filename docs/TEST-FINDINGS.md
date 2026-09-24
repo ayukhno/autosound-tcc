@@ -1898,10 +1898,13 @@ his word (2026-09-24), from the code:
    rationale under it is the `propose_change` tool's output, which `_on_proposal`
    (`main_window.py`) sends through `_add_system_message`, whose default label is «SYSTEM ·
    ledger». So the Generator's own proposal reads as a system record.
-2. **The critic's reply had no bubble of its own.** A «Critic · <model>» bubble is drawn only for
-   a reply that comes through TCC's `call_critic` tool. That tool has no way to ask for the API
-   route, and after the cut-off agy call (finding 61) the Generator ran the same package `--via
-   api` itself, so the reply went to the journal and never through TCC. All the dialog shows of it
+2. **The critic's reply had no bubble of its own.** The critic is always called by the
+   Generator, never by TCC on its own, and the Generator has two ways to do it: TCC's MCP tool
+   `call_critic`, which runs the method's `autosound_ai.py` and hands the reply to the window, or
+   `autosound_ai.py` run directly. A «Critic · <model>» bubble is drawn only on the first way.
+   `call_critic` has no way to ask for the API route, so after the cut-off agy call (finding 61)
+   the Generator ran the same package `--via api` directly, and the reply went to the journal
+   without passing through TCC. All the dialog shows of it
    is the Generator's retelling, «Що сказав Критик». (The route is read from the Generator's
    words; the session log was not checked.)
 
