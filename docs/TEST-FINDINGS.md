@@ -735,6 +735,10 @@ else in the window.
 Mac — possibly because he works in terminal mode, with the in-app AI dialog not active. No change
 was made for it. It is not a VM-session item; the next time it shows, it is taken with a screenshot.
 
+**Closed 2026-09-24 by the Arbiter.** Seen again with the in-app dialog active: the space on the
+right is how a long AI message looks (the Generator's bubble stops short of the right edge, the
+Arbiter's own message sits there), and that is OK. No change.
+
 ### 19. Feedback has one way out: GitHub
 
 **What.** The feedback dialog ("Відгук про прототип TCC") offers a single radio button, "GitHub
