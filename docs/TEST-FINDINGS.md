@@ -1887,3 +1887,25 @@ later they were all black again. The critic itself worked.
 this launch saw refused turns red).
 
 **Weight.** Medium: red on every row says nothing works, while the review had just come back.
+
+### 63. The critic's reply is not shown as the critic's, and the Generator's proposal is labelled «SYSTEM · LEDGER»
+
+**What.** The Arbiter suspected the critic's answer arrives as the blue system bubble. Checked on
+his word (2026-09-24), from the code:
+
+1. **The blue «SYSTEM · LEDGER» bubble in the screenshot is the Generator's proposal**, not the
+   critic: «m-L · EQ (крок 2.8, пакет раунду): без корекції у 2–2,5 кГц → PK 2251 Гц … » with its
+   rationale under it is the `propose_change` tool's output, which `_on_proposal`
+   (`main_window.py`) sends through `_add_system_message`, whose default label is «SYSTEM ·
+   ledger». So the Generator's own proposal reads as a system record.
+2. **The critic's reply had no bubble of its own.** A «Critic · <model>» bubble is drawn only for
+   a reply that comes through TCC's `call_critic` tool. That tool has no way to ask for the API
+   route, and after the cut-off agy call (finding 61) the Generator ran the same package `--via
+   api` itself, so the reply went to the journal and never through TCC. All the dialog shows of it
+   is the Generator's retelling, «Що сказав Критик». (The route is read from the Generator's
+   words; the session log was not checked.)
+
+**Where.** The in-app AI dialog (screenshot, 2026-09-24).
+
+**Weight.** Medium: the one voice the loop exists for is not visible as itself, and a proposal
+looks like something already recorded.
