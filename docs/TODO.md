@@ -2054,11 +2054,15 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · the Arbiter's second «добраніч» (evening) · resume: `hub/bin/role tcc --resume 467b9ccb-334b-4cd7-bb7e-e3fa4f614a9c`
+**Статус**: open 2026-09-23 · collection went on 2026-09-24, stopped at the Arbiter's «добраніч» · resume: `hub/bin/role tcc --resume ed346fc5-4f04-4e43-9b43-ad1bfb82c9e1`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
-menus and the EQ dead end), with 12 still open. Also back at this review: F-071, F-065 and F-066,
+menus and the EQ dead end), with 12 still open. On 2026-09-24 the collection went on: findings
+48–64 recorded (high: 53 omp session TypeError, 58 omp critic's vendor prefix, 64 the capture panel
+shows the phase plan instead of the open round), and 18 closed by the Arbiter. Two went to the
+skill: hub #204 TCC-030 (agy critic cut off mid-stream, finding 61) and hub #205 TCC-031 (the
+round's list and columns, to be matched with the skill's own capture-round issues, finding 64). Also back at this review: F-071, F-065 and F-066,
 F-068 (waiting on the method, hub #185), and hub #83 (untouched).
 
 Built during the collection on the Arbiter's explicit OK, all on this branch: #47 the GUI guide
