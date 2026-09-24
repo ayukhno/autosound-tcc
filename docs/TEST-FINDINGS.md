@@ -1765,3 +1765,19 @@ was nothing to save before the switch.
 **Where.** Windows, light theme, the in-app AI dialog (screenshot, 2026-09-24).
 
 **Weight.** Low: a needless step and a misleading line; depends on how long it takes.
+
+### 55. The critic picker stays red whatever model is picked
+
+**What.** The «ШІ CRITIC» picker is red with «OMP · Gemini 3 Pro»; switched to a working model,
+«SDK · Claude Opus 5», it is still red. The status beside it reads «gemini-3.8-flash-medium ·
+6 d ago» with a red «!» both times, a model other than the one picked.
+
+**The Arbiter's proposal.** If the red belongs to the status, let the status be red, and give the
+picker its own three colours: grey, not known yet; green, works; red, does not work.
+
+**Where.** Windows, light theme, the footer (two screenshots, 2026-09-24).
+
+**History.** The red picker is W-2's S20 (`DECISIONS-W-2.md`): the closed picker turns red for a
+model this launch saw refused.
+
+**Weight.** Medium: the red says "broken" about a model that works.
