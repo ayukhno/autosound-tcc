@@ -1744,3 +1744,14 @@ does filter by it.
 models), screenshot 2026-09-24.
 
 **Weight.** Medium: the field cannot be read while typing.
+
+### 53. A model through omp does not start: `OmpSession.__init__() got an unexpected keyword argument 'language'`
+
+**What.** Picking «Claude 4 Sonnet» through omp and sending a message: TCC says «Запускаю Claude 4
+Sonnet — перший хід читає скіл і стан проєкту, тому повільний», and right after it «ПОМИЛКА
+СЕСІЇ: ⚠️ TypeError: OmpSession.__init__() got an unexpected keyword argument 'language'». The
+session does not start.
+
+**Where.** Windows, light theme, the in-app AI dialog, route omp (screenshot, 2026-09-24).
+
+**Weight.** High: the omp route cannot run a session at all.
