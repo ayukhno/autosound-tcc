@@ -1693,3 +1693,14 @@ Anthropic's Models API only when `ANTHROPIC_API_KEY` is set, which the SDK route
 login) normally does not have. The AGY rows come live from `agy models`.
 
 **Weight.** Medium: the newest Claude models cannot be picked, and nothing says the list is old.
+
+### 49. «In focus now»: a tall panel stretches the measurement rows apart
+
+**What.** When the bottom-right zone is taller than its content, the rows of the measurement list
+(`tw-L_1 (sw)` … `sw_1 (rta)`, seven per column) spread out to fill the height, with large gaps
+between them, and the column headers («SOLO (SW)», «SOLO (RTA)») grow too. The rows should stay
+compact at the top.
+
+**Where.** Windows VM, «In focus now», measurement task (screenshot, 2026-09-24).
+
+**Weight.** Low: layout; everything stays readable.
