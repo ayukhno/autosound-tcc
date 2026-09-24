@@ -1935,6 +1935,6 @@ phase 5. The Arbiter asked whether the last three columns are TCC's logic or the
 **Related.** Finding 57 (next round shows a full, green list). The project's AI mentions the
 Arbiter's rule to merge pairs, sides and joints into one «Group» column; not looked up here.
 
-**Where.** Mac, the Arbiter's project, round `cap_016`, phase 2 (screenshot, 2026-09-24).
+**Where.** The Arbiter's project, round `cap_016`, phase 2 (screenshot, 2026-09-24).
 
 **Weight.** High: the task the tuner reads is not the task the session issued.
