@@ -1708,3 +1708,16 @@ compact at the top.
 **Where.** Windows VM, «In focus now», measurement task (screenshot, 2026-09-24).
 
 **Weight.** Low: layout; everything stays readable.
+
+### 50. The theme button: the icon alone is enough, the word «theme» is not needed
+
+**What.** The header's theme switch reads «◐ theme». The Arbiter: the icon was enough and clear on
+its own; the word adds nothing.
+
+**Where.** Windows, the window header (screenshot, 2026-09-24).
+
+**Context (from the code, not a diagnosis).** The button has read «◐ theme» since the first Qt shell
+(`ef59ecf`, 2026-07-26). Since `e5ab9fc` (2026-09-23, in v0.1.43) it shrinks to «◐» alone when
+the header is squeezed, so a narrow window showed the icon only and a wide one shows the word too.
+
+**Weight.** Low: wording.
