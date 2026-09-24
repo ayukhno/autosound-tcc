@@ -1721,3 +1721,15 @@ its own; the word adds nothing.
 the header is squeezed, so a narrow window showed the icon only and a wide one shows the word too.
 
 **Weight.** Low: wording.
+
+### 51. The light-grey text strains the eyes, in both themes and in more places than one
+
+**What.** The faint grey used for secondary text is hard to read and tires the eyes. The example
+is the menu's section header «ПРОЄКТ» above «Відкрити теку проєкту»: pale grey on light grey in the
+light theme, dim grey on dark in the dark one. The Arbiter: "it is not only here", and asked for a
+colour that reads easily. Asked as "let's change it" during the collection, so recorded here and
+built after it.
+
+**Where.** Windows, the main menu, light and dark theme (two screenshots, 2026-09-24).
+
+**Weight.** Medium: it is felt all the time, and it is everywhere this grey is used.
