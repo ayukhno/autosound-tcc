@@ -1,0 +1,589 @@
+<title>Режими таблиць DSP</title>
+<!-- PROTOTYPE — throwaway. TCC finding 47 (W-3): the DSP tables in «Режим контролю» and the full window,
+     plus the Arbiter's status dots (2026-09-25) on the tree's groups and on the tabs.
+     Two modes × three EQ views (A/B/C), switched from the strip, the floating bar or ←/→. No TCC code touched. -->
+<style>
+:root{
+  --ground:#eef1f5;--panel:#ffffff;--panel2:#f4f6f9;--panel3:#e9edf2;
+  --border:#d7dee6;--border2:#c4cdd8;
+  --text:#1b2430;--muted:#5c6875;--faint:#93a0ad;--off:#8492a0;
+  --accent:#c56f18;--ok:#1f9c63;--warn:#c0392b;--info:#2f7fc4;
+  --page:#e3e8ee;--bar:#1b2430;--bar-text:#eef1f5;
+  --accent-soft:color-mix(in srgb,var(--accent) 13%,transparent);
+  --info-soft:color-mix(in srgb,var(--info) 14%,transparent);
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){color-scheme:dark;
+    --ground:#0f1318;--panel:#161b22;--panel2:#1c232c;--panel3:#222b36;--border:#263040;--border2:#33404f;
+    --text:#dfe6ee;--muted:#8b97a6;--faint:#5f6b7a;--off:#6a7686;--accent:#e8973c;--ok:#4bbf87;--warn:#e05c5c;--info:#5aa9e6;
+    --page:#0a0d11;--bar:#dfe6ee;--bar-text:#0f1318}
+}
+:root[data-theme="dark"]{color-scheme:dark;
+  --ground:#0f1318;--panel:#161b22;--panel2:#1c232c;--panel3:#222b36;--border:#263040;--border2:#33404f;
+  --text:#dfe6ee;--muted:#8b97a6;--faint:#5f6b7a;--off:#6a7686;--accent:#e8973c;--ok:#4bbf87;--warn:#e05c5c;--info:#5aa9e6;
+  --page:#0a0d11;--bar:#dfe6ee;--bar-text:#0f1318}
+
+body{background:var(--page);color:var(--text);font-family:var(--sans)}
+.page{max-width:1300px;margin:0 auto;padding-inline:16px;padding-block:22px 96px}
+.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700}
+h1{font-size:24px;font-weight:650;margin:6px 0 6px;text-wrap:balance}
+.lead{color:var(--muted);max-width:74ch;line-height:1.5;margin:0 0 4px}
+.lead b{color:var(--text);font-weight:600}
+.strip{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;margin:14px 0 12px}
+.strip .lbl2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-right:8px}
+.seg{display:inline-flex;border:1px solid var(--border2);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{font:inherit;font-size:13px;border:none;background:none;color:var(--text);padding:6px 12px;cursor:pointer;border-left:1px solid var(--border)}
+.seg button:first-child{border-left:none}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--panel)}
+.seg button b{font-weight:700;margin-right:4px}
+.dotkey{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--muted)}
+.dotkey .sdot{margin:0 5px 0 0}
+:focus-visible{outline:2px solid var(--info);outline-offset:1px}
+
+.scroller{overflow-x:auto;border-radius:12px}
+.win{width:1240px;background:var(--ground);border:1px solid var(--border2);border-radius:12px;overflow:hidden;font-size:13px;position:relative}
+.state{display:flex;flex-wrap:wrap;gap:6px 18px;margin:10px 2px 0;font-size:12.5px}
+.state i{font-style:normal;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-right:5px}
+
+/* status dots — the Arbiter's ask, 2026-09-25: grey none · green set · blue changed */
+.sdot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-left:7px;vertical-align:middle;flex:none}
+.s-none{background:var(--off)}.s-set{background:var(--ok)}.s-chg{background:var(--info)}
+
+/* window chrome */
+.hdr{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.btn{border:1px solid var(--border2);background:var(--panel);color:var(--text);border-radius:7px;padding:5px 11px;font:inherit;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.acc{color:var(--accent);border-color:var(--accent)}
+.modebtn{border-color:var(--accent);color:var(--accent);font-weight:600}
+.proj{font-weight:650;font-size:14px}
+.lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.preset{border:1px solid var(--border2);border-radius:6px;padding:4px 10px;background:var(--panel2);min-width:150px}
+.target{color:var(--accent);text-decoration:underline;font-weight:600}
+.sp{flex:1}
+.muted{color:var(--muted)}
+.prop{color:var(--muted);font-weight:700;font-size:10px;margin-left:5px;cursor:help}
+
+/* control mode */
+.ctl{display:grid;grid-template-rows:auto 350px 400px}
+.tabbar{display:flex;align-items:flex-end;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--border2)}
+.tab{border:1px solid var(--border);border-bottom:none;background:var(--panel2);color:var(--muted);padding:7px 14px;border-radius:8px 8px 0 0;font:inherit;cursor:pointer;display:inline-flex;align-items:center}
+.tab:hover{color:var(--text)}
+.tab.on{background:var(--panel);color:var(--text);border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent);font-weight:600}
+.cmpbox{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--muted);padding-bottom:6px;font-size:12.5px}
+.cmpbox.off{opacity:.45}
+.cfgtag{font-size:11px;color:var(--info);border:1px solid var(--info);background:var(--info-soft);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.pmenu .cmpbox{padding-bottom:0;margin-left:0}
+select{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border2);border-radius:6px;padding:3px 6px}
+.zone{background:var(--panel);overflow:auto;position:relative;min-height:0}
+.bottom{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px;border-top:4px solid var(--border);min-height:0}
+.bottom>*{overflow:auto;min-height:0}
+
+/* full mode */
+.full{display:grid;grid-template-columns:290px 1fr 300px;gap:6px;padding:6px;height:760px}
+.full>*{min-height:0;overflow:auto}
+.center{display:grid;grid-template-rows:370px 1fr;gap:6px;overflow:hidden}
+.center.closed{grid-template-rows:1fr}
+.pane{background:var(--panel);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;min-height:0}
+.pmenu{display:flex;align-items:center;gap:3px;padding:6px 8px;border-bottom:1px solid var(--border)}
+.dtab{border:1px solid transparent;background:none;color:var(--muted);padding:4px 10px;border-radius:7px;font:inherit;cursor:pointer;display:inline-flex;align-items:center}
+.dtab:hover{color:var(--text)}
+.dtab.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.pcap{color:var(--faint);margin-left:6px;white-space:nowrap}
+.pbody{flex:1;overflow:auto;min-height:0;position:relative}
+.ghost{border:1px solid var(--border2);background:var(--panel);color:var(--text);border-radius:6px;padding:3px 10px;font:inherit;cursor:pointer;white-space:nowrap}
+.ghost:hover{border-color:var(--accent)}
+.ghost.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+
+/* left panel */
+.lp{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding-bottom:6px}
+.sec{display:flex;gap:8px;align-items:center;padding:8px 12px;font-size:11px;letter-spacing:.14em;font-weight:700;background:var(--panel3)}
+.sec .n{font-weight:400;letter-spacing:0;font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.warn{background:var(--warn)}.dot.ok{background:var(--ok)}
+.grp{display:flex;align-items:center;width:100%;text-align:left;background:none;border:none;font:inherit;font-size:11px;letter-spacing:.14em;font-weight:600;color:var(--muted);padding:8px 12px 5px;cursor:pointer}
+.grp:hover{color:var(--text)}
+.params{display:flex;gap:7px;align-items:center;width:100%;text-align:left;background:none;border:none;border-left:3px solid transparent;font:inherit;color:var(--text);padding:4px 12px 4px 22px;cursor:pointer}
+.params:hover{background:var(--panel2)}
+.params.act{background:var(--accent-soft);border-left-color:var(--accent)}
+.params .ic{color:var(--accent)}
+.chn{display:grid;grid-template-columns:16px 1fr auto;column-gap:8px;padding:4px 12px 4px 22px;cursor:pointer;border-left:3px solid transparent}
+.chn:hover{background:var(--panel2)}
+.chn.act{background:var(--accent-soft);border-left-color:var(--accent)}
+.chn .id{color:var(--accent);font:700 11px var(--mono);align-self:center}
+.chn b{font-weight:600}
+.chn .sum{grid-column:2/4;font:11.5px var(--mono);color:var(--muted)}
+.inv{font:700 10px var(--mono);color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:1px 6px;margin-left:6px;letter-spacing:.08em}
+.eqb{font:11px var(--mono);color:var(--accent);border:1px solid var(--accent);background:var(--accent-soft);border-radius:4px;padding:1px 7px;cursor:pointer;align-self:center}
+.eqb.on{background:var(--accent);color:var(--panel)}
+
+/* right panel + dialog (outside the finding) */
+.rp,.dialog{background:var(--panel);border:1px solid var(--border);border-radius:8px}
+.ph{display:flex;gap:9px;align-items:center;padding:6px 12px;color:var(--muted)}
+.ph .pd{width:12px;height:12px;border-radius:50%;background:var(--panel3);flex:none}
+.ph.cur{color:var(--accent);font-weight:600}.ph.cur .pd{background:var(--accent)}
+.focus{display:flex;gap:8px;padding:10px 12px}
+.outside{font-size:11px;color:var(--faint);padding:8px 12px;font-style:italic}
+.dialog{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.dh{padding:9px 12px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+.msgs{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.msg{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--panel2);max-width:82%;line-height:1.45;color:var(--muted)}
+.msg.me{align-self:flex-end}
+.inp{display:flex;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--border);color:var(--faint)}
+.inp span{flex:1;border:1px solid var(--border2);border-radius:6px;padding:6px 8px}
+.send{background:var(--info);color:#fff;border:none;border-radius:6px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer}
+
+/* tables */
+table.dt{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.dt th{font-size:10.5px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:right;padding:8px 12px;border-bottom:1px solid var(--border2);position:sticky;top:0;background:var(--panel);z-index:1;white-space:nowrap}
+.dt th:nth-child(-n+2),.dt td:nth-child(-n+2){text-align:left}
+.dt td{padding:6px 12px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.dt td.id{color:var(--accent);font-weight:600}
+.dt tr.sel td{background:var(--accent-soft)}
+.neg{color:var(--warn)}.pos{color:var(--ok)}.zero,.off{color:var(--faint)}
+.invc{color:var(--accent)}
+.eqlink{background:none;border:none;color:var(--accent);font:inherit;cursor:pointer;padding:0}
+.eqlink:hover{text-decoration:underline}
+/* a changed cell: blue, as TCC's compare already paints it (detail_pane: info on info-14%) */
+.dt td.chg{background:var(--info-soft);color:var(--info)}
+.old{color:var(--faint);text-decoration:line-through;font-size:11px;margin-left:6px}
+.tnote{padding:8px 12px;color:var(--muted);font-size:12px}
+.empty{padding:22px 12px;color:var(--muted)}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 0 8px}
+.ptitle{font-size:12px;color:var(--muted);padding:8px 12px 0}
+
+/* EQ, shared */
+.eqhead{display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:2}
+.crumb{border:1px solid var(--accent);color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:3px 10px;font:inherit;cursor:pointer;font-weight:600}
+.bands{display:flex;flex-wrap:wrap;gap:8px;padding:10px 12px}
+.band{width:120px;border:1px solid var(--border2);border-top:3px solid var(--border2);border-radius:6px;background:var(--panel2);padding:5px 8px;font:12px var(--mono);font-variant-numeric:tabular-nums}
+.band.shared{border-top-color:var(--text)}
+.band.chg{border-color:var(--info);background:var(--info-soft)}
+.band .bt{text-align:center;color:var(--muted);font:700 11px var(--sans);margin-bottom:3px}
+.band dl{display:grid;grid-template-columns:auto 1fr;gap:1px 6px;margin:0}
+.band dt{color:var(--muted);font-family:var(--sans)}
+.band dd{margin:0;text-align:right}
+.band .byp{text-align:center;color:var(--faint);font:10px var(--sans);letter-spacing:.1em;margin-top:4px}
+.band .was{font:10.5px var(--sans);color:var(--info);text-align:center;margin-top:2px}
+.pairh{padding:8px 12px 0;font-weight:600}
+.sw{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.sw.dash{border-top:2px dashed var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted);margin:2px 0 8px}
+svg text{fill:var(--muted);font:10px var(--sans)}
+.gl{stroke:var(--border);stroke-width:1}
+.gl0{stroke:var(--border2);stroke-width:1.2}
+.pb{fill:var(--panel2)}
+.cv{fill:none;stroke-width:2;stroke-linejoin:round}
+.cur{stroke:var(--accent)}.sib{stroke:var(--text);stroke-width:1.3;opacity:.7}
+.cmp{stroke:var(--info);stroke-dasharray:4 3;stroke-width:1.4}
+.spk{stroke:var(--accent);stroke-width:1.2}
+.mk{fill:var(--panel);stroke:var(--accent);stroke-width:1.5}
+.mkc{fill:var(--accent)}.mkb{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}
+.mko{fill:none;stroke:var(--info);stroke-dasharray:2 2;stroke-width:1.3}
+
+/* EQ variant A */
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:9px 12px 2px;align-items:center}
+.chipgrp{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 2px 0 8px}
+.chipgrp:first-child{margin-left:0}
+.chip{border:1px solid var(--border2);background:var(--panel2);border-radius:999px;padding:3px 11px;font:inherit;cursor:pointer;color:var(--text)}
+.chip i{font-style:normal;color:var(--muted);font-size:11px;margin-left:5px}
+.chip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+/* EQ variant B */
+.vb{display:grid;grid-template-columns:190px 1fr}
+.chlist{border-right:1px solid var(--border);padding:4px 0}
+.chlist h4{margin:8px 12px 4px;font-size:10.5px;letter-spacing:.12em;color:var(--muted);font-weight:600;text-transform:uppercase}
+.chrow{display:grid;grid-template-columns:14px 1fr 64px 18px;align-items:center;gap:6px;width:100%;padding:4px 10px;background:none;border:none;border-left:3px solid transparent;font:inherit;color:var(--text);cursor:pointer;text-align:left}
+.chrow:hover{background:var(--panel2)}
+.chrow.on{background:var(--accent-soft);border-left-color:var(--accent)}
+.chrow.pair{border-left-color:var(--text)}
+.chrow .id{color:var(--accent);font:700 11px var(--mono)}
+.chrow .n{color:var(--muted);font-size:11px;text-align:right}
+.vbmain{padding:8px 12px;min-width:0}
+/* EQ variant C */
+.crow{display:grid;grid-template-columns:120px 1fr;align-items:center;border-bottom:1px solid var(--border);cursor:pointer}
+.crow:hover{background:var(--panel2)}
+.crow.on{background:var(--accent-soft)}
+.crow.axis{cursor:default;background:var(--panel);position:sticky;top:41px;z-index:1}
+.crow .cl{padding:4px 12px;display:flex;gap:7px;align-items:baseline}
+.crow .cl .id{color:var(--accent);font:700 11px var(--mono)}
+.crow .cl .n{color:var(--muted);font-size:11px;margin-left:auto}
+.cgh{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:9px 12px 3px}
+.cexp{border-bottom:1px solid var(--border);background:var(--panel2)}
+.cexp .band{background:var(--panel)}
+
+.toast{position:absolute;top:50px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--panel);padding:7px 14px;border-radius:7px;font-size:12.5px;z-index:9;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+@keyframes flash{from{box-shadow:0 0 0 3px var(--accent)}to{box-shadow:0 0 0 3px transparent}}
+.flash{animation:flash 1s ease-out}
+
+/* notes */
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px 28px;margin-top:22px}
+.notes section{border-top:2px solid var(--border2);padding-top:10px}
+.notes h2{font-size:13px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 8px;color:var(--muted);font-weight:700}
+.notes h2 .prop{font-size:12px}
+.notes ol,.notes ul{margin:0;padding-left:20px;line-height:1.5;font-size:13.5px}
+.notes li{margin-bottom:6px}
+.notes b{font-weight:600}
+.notes .sdot{margin:0 4px 0 0}
+
+/* floating variant bar */
+.fbar{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--bar);color:var(--bar-text);border-radius:999px;display:flex;align-items:center;gap:2px;padding:5px 6px;box-shadow:0 8px 28px rgba(0,0,0,.28);font-size:13px;z-index:20;max-width:calc(100vw - 32px);white-space:nowrap}
+.fbar button{background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:5px 10px;border-radius:999px}
+.fbar button:hover{background:color-mix(in srgb,var(--bar-text) 14%,transparent)}
+.fbar #fb-label{padding:0 6px;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.fsep{width:1px;height:18px;background:color-mix(in srgb,var(--bar-text) 30%,transparent);margin:0 4px}
+@media (prefers-reduced-motion: reduce){.flash{animation:none}}
+@media (max-width:560px){h1{font-size:20px}.fbar .fmode{display:none}}
+</style>
+
+<div class="page">
+  <div class="eyebrow">TCC · хвиля W-3 · знахідка 47 · макет</div>
+  <h1>Таблиці DSP у режимах Контроль і Повний</h1>
+  <p class="lead">Макет, на якому можна клікати. Це не сам застосунок: код TCC не змінено. Дані взято для прикладу з гайда (passat-b8-2026, стан v_007). Смуги EQ вигадані, крім m-L.</p>
+  <p class="lead"><b>Спробуйте:</b> у «Таблиці-О» натисніть «7 смуг ▸» біля m-L. Відкриється вкладка EQ, а над нею буде кнопка «← Таблиця-О». Потім у «порівняти з» виберіть v_004 · SQ-2 з іншого пресету: зміняться і клітинки, і крапки на вкладках та групах.</p>
+
+  <div class="strip">
+    <div><span class="lbl2">Режим</span><span class="seg" role="group" aria-label="Режим"><button data-act="modeset" data-m="control">Контроль</button><button data-act="modeset" data-m="full">Повний</button></span></div>
+    <div><span class="lbl2">Вигляд EQ</span><span class="seg" role="group" aria-label="Вигляд вкладки EQ"><button data-act="variant" data-v="A"><b>A</b>Смуга каналів</button><button data-act="variant" data-v="B"><b>B</b>Список і крива</button><button data-act="variant" data-v="C"><b>C</b>Усі канали разом</button></span></div>
+    <div class="dotkey"><span><span class="sdot s-none"></span>налаштувань нема</span><span><span class="sdot s-set"></span>налаштування є</span><span><span class="sdot s-chg"></span>є зміни відносно «порівняти з»</span></div>
+  </div>
+
+  <div class="scroller"><div class="win" id="win"></div></div>
+  <div class="state" id="state" aria-live="polite"></div>
+
+  <div class="notes">
+    <section>
+      <h2>Знахідка 47 у макеті</h2>
+      <ol>
+        <li>Меню повного вікна всередині вкладок прибрано. У Контролі ходимо лише головними вкладками.</li>
+        <li>У лівій панелі «params · усі параметри таблицею» відкриває свою таблицю: віртуальних каналів, вихідних чи входів. «EQ n» біля каналу відкриває вкладку EQ з цим каналом, а клік по самому каналу — його рядок у таблиці.</li>
+        <li>У Контролі кнопки «Закрити ✕» нема.</li>
+        <li>«порівняти з» стоїть праворуч у рядку головних вкладок і працює на всіх вкладках із даними DSP. На «Моніторингу» воно неактивне.</li>
+        <li>«n смуг ▸» перемикає на вкладку EQ із цим каналом, а таблиця лишається таблицею. Повернутися можна вкладкою «Таблиця-О» або кнопкою «← Таблиця-О» над EQ. Вкладка «EQ» показує сам EQ, а не таблицю.</li>
+      </ol>
+    </section>
+    <section>
+      <h2>Крапки стану — слова Арбітра, 25.09</h2>
+      <ul>
+        <li>Крапка стоїть біля груп у лівій панелі (ВІРТУАЛЬНІ, ВИХІДНІ, ВХОДИ) і на вкладках (Таблиця-V, Таблиця-О, EQ, Рівень, Затримки, Фази). У Повному режимі — ще й у меню панелі.</li>
+        <li><span class="sdot s-none"></span>сіра — налаштувань нема (входи, фази); <span class="sdot s-set"></span>зелена — налаштування є; <span class="sdot s-chg"></span>синя — вони відрізняються від версії в «порівняти з».</li>
+        <li>Кольори взято з тих, що вже є в TCC: сірий «вимкнено», зелений як у крапки DSP v_007, синій як у змінених клітинок при порівнянні. Коли в «порівняти з» стоїть «—», синіх крапок нема.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Порівняння з іншими конфігураціями — слова Арбітра, 25.09</h2>
+      <ul>
+        <li>Зараз «порівняти з» пропонує лише версії поточного пресету (FULL).</li>
+        <li>У макеті список поділено на групи: спершу «FULL — цей пресет», під ним «SQ — інший пресет». Кожна версія підписана назвою, під якою її записано в DSP (v_004 · SQ-2).</li>
+        <li>Коли вибрано версію іншої конфігурації, біля списку з’являється позначка «інша конфігурація», а під таблицею написано, з чим саме порівнюємо.</li>
+        <li>За замовчуванням порівнюємо з попередньою версією цього ж пресету, як і зараз.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Повний режим</h2>
+      <ul>
+        <li>Меню панелі й «Закрити ✕» лишаються, бо головних вкладок там нема.</li>
+        <li>EQ працює так само, як у Контролі: «EQ» завжди показує EQ, «n смуг ▸» відкриває його, а «Таблиця» чи «← Таблиця» повертають назад.</li>
+        <li>Меню більше не перебудовується в «EQ m-L · ⇄ L + R · Копіювати EQ»: ці кнопки переїжджають у шапку EQ <span class="prop">◇</span></li>
+      </ul>
+    </section>
+    <section>
+      <h2><span class="prop">◇</span> Пропозиції сесії — не зі слів Арбітра</h2>
+      <ul>
+        <li>Вкладка «Таблиця-I» для входів. Зараз її нема; коли входів 0, вона порожня.</li>
+        <li>«⇄ L + R» і «Копіювати EQ» — у шапці EQ, а не в меню.</li>
+        <li>Три вигляди вкладки EQ. <b>A</b> — канали кнопками, під ними смуги, як зараз. <b>B</b> — список каналів, крива EQ і таблиця смуг. <b>C</b> — усі канали на одній осі частот, клік розгортає смуги. Можна вибрати один або скласти з частин.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+
+<div class="fbar" role="toolbar" aria-label="Перемикач варіантів EQ">
+  <button data-act="vprev" aria-label="Попередній вигляд EQ">←</button>
+  <span id="fb-label"></span>
+  <button data-act="vnext" aria-label="Наступний вигляд EQ">→</button>
+  <span class="fsep"></span>
+  <button data-act="mode" class="fmode">Контроль ⇄ Повний</button>
+</div>
+
+<script>
+// ---- data (example from the guide: passat-b8-2026, v_007) ------------------------------------
+const OUT=[
+ {id:'B',name:'c',hp:'560 LR4',lp:'1000 LR4',hpN:560,lpN:1000,gain:-8.5,delay:1.95,inv:false,eq:4},
+ {id:'C',name:'w-L',hp:'92 LR4',lp:'215 LR4',hpN:92,lpN:215,gain:-0.3,delay:4.33,inv:false,eq:4},
+ {id:'D',name:'w-R',hp:'92 LR4',lp:'215 LR4',hpN:92,lpN:215,gain:0.6,delay:3.05,inv:false,eq:6},
+ {id:'E',name:'m-L',hp:'350 LR4',lp:'2500 LR4',hpN:350,lpN:2500,gain:-3.5,delay:3.53,inv:true,eq:7},
+ {id:'F',name:'m-R',hp:'350 LR4',lp:'2500 LR4',hpN:350,lpN:2500,gain:0.9,delay:2.09,inv:true,eq:8},
+ {id:'G',name:'tw-L',hp:'3000 BW4',lp:'OFF',hpN:3000,lpN:20000,gain:-5.8,delay:3.53,inv:true,eq:7},
+ {id:'H',name:'tw-R',hp:'3000 BW4',lp:'OFF',hpN:3000,lpN:20000,gain:-4.2,delay:2.09,inv:true,eq:5},
+ {id:'K',name:'sw',hp:'OFF',lp:'80 LR4',hpN:20,lpN:80,gain:0,delay:0,inv:false,eq:8},
+];
+const VIRT=[
+ {id:'A',name:'VFL',gain:0,delay:0,inv:false,eq:12,hpN:20,lpN:20000},
+ {id:'B',name:'VFR',gain:0,delay:0,inv:false,eq:9,hpN:20,lpN:20000},
+ {id:'C',name:'VRL',gain:0,delay:0,inv:false,eq:0},
+ {id:'D',name:'VRR',gain:0,delay:0,inv:false,eq:0},
+ {id:'E',name:'VC',gain:0,delay:0,inv:false,eq:0},
+ {id:'G',name:'VSW',gain:0,delay:0,inv:false,eq:0},
+];
+const GROUPS={
+ virt:{tab:'tv',title:'Віртуальні канали',tree:'ВІРТУАЛЬНІ',count:'6/8',chips:'Віртуальні',rows:VIRT},
+ out:{tab:'to',title:'Вихідні канали',tree:'ВИХІДНІ',count:'8/12',chips:'Вихідні',rows:OUT},
+ inp:{tab:'ti',title:'Входи',tree:'ВХОДИ',count:'0',chips:'Входи',rows:[]},
+};
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
+const RANGE={c:[420,1500],'w-L':[45,240],'w-R':[45,240],'m-L':[300,3000],'m-R':[300,3000],'tw-L':[2800,15000],'tw-R':[2800,15000],sw:[25,100],VFL:[60,12000],VFR:[60,12000]};
+function gen(key,name,n){const r=rng(hash(key)),[lo,hi]=RANGE[name],out=[];
+ for(let i=0;i<n;i++){const f=Math.exp(Math.log(lo)+r()*(Math.log(hi)-Math.log(lo)));
+  out.push({t:'PK',f:f<1000?Math.round(f):Math.round(f/10)*10,q:+(0.8+r()*3).toFixed(2),g:+(-6+r()*8).toFixed(1)})}
+ return out}
+const BANDS={};
+for(const g of ['virt','out'])for(const r of GROUPS[g].rows)if(r.eq)BANDS[g+':'+r.id]=gen(g+':'+r.id,r.name,r.eq);
+BANDS['out:E']=[[2357,3,-5.4],[1250,1.4,3],[2357,3,-2.7],[482,3,-1.7],[320,2,-2.5],[520,1.8,1.2],[1120,2.2,-2.5]].map(([f,q,g])=>({t:'PK',f,q,g}));
+BANDS['out:F'][0].f=2357;BANDS['out:F'][2].f=482;
+const COMPARE={
+ v_006:{rows:{'out:C':{gain:-0.8},'out:F':{delay:2.19},'out:H':{gain:-4.6}},bands:{'out:E':{1:{g:2.0}},'out:F':{0:{g:-3.0}}}},
+ v_005:{rows:{'out:B':{gain:-9.0},'out:C':{gain:-0.8},'out:D':{delay:3.15}},bands:{'virt:A':{2:{g:-2.0}},'out:K':{0:{g:-1.0}}}},
+ v_004:{rows:{'out:B':{gain:-12.0},'out:C':{delay:3.10},'out:D':{delay:4.60},'out:G':{gain:-6.4},'out:K':{gain:-2.5}},bands:{'out:E':{0:{g:-4.0},1:{g:1.5}},'virt:A':{0:{g:-1.0}}}},
+ v_003:{rows:{'out:B':{gain:-12.0},'out:H':{delay:2.40},'out:K':{gain:-3.5}},bands:{'out:G':{2:{g:-3.0}}}},
+};
+// «порівняти з»: this preset's versions first, then the other presets' (the Arbiter, 2026-09-25)
+const CMP_LIST=[
+ {cfg:'FULL',label:'FULL — цей пресет',items:[['v_006','v_006 · FULL-v2'],['v_005','v_005 · FULL-v1']]},
+ {cfg:'SQ',label:'SQ — інший пресет',items:[['v_004','v_004 · SQ-2'],['v_003','v_003 · SQ-1']]},
+];
+const CMP_LABEL={'—':'—'},CMP_CFG={};
+for(const g of CMP_LIST)for(const[v,l]of g.items){CMP_LABEL[v]=l;CMP_CFG[v]=g.cfg}
+const cmpLabel=()=>CMP_LABEL[S.compare];
+const cmpOther=()=>!!CMP_CFG[S.compare]&&CMP_CFG[S.compare]!=='FULL';
+const JOURNAL=[['10:42','step_added','B7 для AYA 17.10: фінальна перевірка й заморозка 15.10'],['11:07','user_decision','freeze-15-10'],['11:07','user_decision','Кандидати для AYA (sub 27/31, 1 kHz U2 / m-L 1120, фронтальний бас)'],['11:08','step_added','PC-Tool 6.03.04 → 6.04.02: спершу зберегти SQ і FULL у новий .pct6'],['07:52','user_decision','pctool-6-04-02'],['09:14','capture_task_issued','cap_017 · 6 позицій']];
+const PHASES=['Фаза −1 · Інтейк проєкту й чекліст','Фаза 0 · Базова лінія й вибір цілі','Фаза 1 · Кросовери, рівні, затримки','Фаза 2 · EQ і акустичне вирівнювання','Фаза 3 · Технічний вердикт і фіксація','Фаза 4 · Прицільне прослуховування','Фаза 5 · Варіації (циклічно)'];
+const TABS=[['mon','Моніторинг'],['tv','Таблиця-V'],['to','Таблиця-О'],['ti','Таблиця-I'],['eq','EQ'],['gain','Рівень'],['delay','Затримки'],['phase','Фази']];
+const TABLABEL=Object.fromEntries(TABS);
+const TABSCOPE={tv:'virt',to:'out',ti:'inp',eq:'eq',gain:'gain',delay:'delay',phase:'phase'};
+const FV=[['table','Таблиця'],['eq','EQ'],['gain','Рівень'],['delay','Затримки'],['phase','Фази']];
+const FVL=Object.fromEntries(FV);
+const VNAMES={A:'Смуга каналів',B:'Список і крива',C:'Усі канали разом'};
+
+// ---- state -------------------------------------------------------------------------------------
+const S={mode:'control',variant:'A',tab:'to',fullView:'table',fullGroup:'out',paneOpen:true,eqCh:'out:E',eqFrom:null,
+ pair:false,compare:'v_006',selRow:null,open:{virt:false,out:false,inp:false},flash:null,scrollEq:false};
+try{const m=/^#(control|full)-([abc])$/.exec(location.hash);if(m){S.mode=m[1];S.variant=m[2].toUpperCase()}}catch(e){}
+
+// ---- helpers -----------------------------------------------------------------------------------
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fg=v=>(v<0?'-':'+')+Math.abs(v).toFixed(1);
+const fd=v=>v===0?'0':v.toFixed(2);
+const gcls=v=>v<0?'neg':v>0?'pos':'zero';
+function plural(n){const a=n%10,b=n%100;if(a===1&&b!==11)return'смуга';if(a>=2&&a<=4&&(b<12||b>14))return'смуги';return'смуг'}
+function rowOf(k){const[g,id]=k.split(':');return GROUPS[g].rows.find(x=>x.id===id)}
+const chName=k=>rowOf(k).name;
+function sibling(k){const g=k.split(':')[0],n=chName(k);let m=null;
+ if(/L$/.test(n))m=n.replace(/L$/,'R');else if(/R$/.test(n))m=n.replace(/R$/,'L');
+ if(!m)return null;const s=GROUPS[g].rows.find(x=>x.name===m&&x.eq);return s?g+':'+s.id:null}
+function oldRow(k,f){const c=COMPARE[S.compare];return c&&c.rows[k]&&f in c.rows[k]?c.rows[k][f]:undefined}
+function oldBand(k,i){const c=COMPARE[S.compare];return c&&c.bands[k]&&c.bands[k][i]}
+function eqChanged(k){const c=COMPARE[S.compare];return!!(c&&c.bands[k])}
+function bandsAt(k,v){const b=BANDS[k]||[],c=COMPARE[v],ch=c&&c.bands[k];return ch?b.map((x,i)=>ch[i]?{...x,...ch[i]}:x):b}
+
+// status of a scope: a group's whole table ('virt'|'out'|'inp') or one parameter across all ('eq'|'gain'|'delay'|'phase')
+function statusOf(scope){let has=false,chg=false;
+ const groups=['virt','out','inp'].includes(scope)?[scope]:['virt','out','inp'];
+ for(const g of groups)for(const r of GROUPS[g].rows){const k=g+':'+r.id;
+  const cg=oldRow(k,'gain')!==undefined,cd=oldRow(k,'delay')!==undefined,ce=eqChanged(k);
+  if(scope==='eq'){has=has||r.eq>0;chg=chg||ce}
+  else if(scope==='gain'){has=has||r.gain!==0;chg=chg||cg}
+  else if(scope==='delay'){has=has||r.delay!==0;chg=chg||cd}
+  else if(scope==='phase'){}
+  else{has=has||r.eq>0||r.gain!==0||r.delay!==0||r.inv||(r.hp&&r.hp!=='OFF')||(r.lp&&r.lp!=='OFF');chg=chg||cg||cd||ce}}
+ return chg?'chg':has?'set':'none'}
+function dotHTML(scope){const s=statusOf(scope),t={none:'налаштувань нема',set:'налаштування є',chg:'є зміни відносно '+cmpLabel()}[s];
+ return `<span class="sdot s-${s}" title="${t}" aria-label="${t}"></span>`}
+
+// RBJ peaking biquad, magnitude in dB
+const FS=48000,FMIN=20,FMAX=20000;
+function pkDb(f,b){const A=Math.pow(10,b.g/40),w0=2*Math.PI*b.f/FS,al=Math.sin(w0)/(2*b.q),c=Math.cos(w0);
+ const b0=1+al*A,b1=-2*c,b2=1-al*A,a0=1+al/A,a1=-2*c,a2=1-al/A,w=2*Math.PI*f/FS;
+ const cr=Math.cos(w),ci=-Math.sin(w),c2r=Math.cos(2*w),c2i=-Math.sin(2*w);
+ const nr=b0+b1*cr+b2*c2r,ni=b1*ci+b2*c2i,dr=a0+a1*cr+a2*c2r,di=a1*ci+a2*c2i;
+ return 10*Math.log10((nr*nr+ni*ni)/(dr*dr+di*di))}
+const respDb=(bands,f)=>bands.reduce((s,b)=>s+pkDb(f,b),0);
+const lx=(f,x0,w)=>x0+w*Math.log(f/FMIN)/Math.log(FMAX/FMIN);
+function curvePath(bands,x0,w,y,N=220){let d='';for(let i=0;i<=N;i++){const f=FMIN*Math.pow(FMAX/FMIN,i/N);d+=(i?'L':'M')+lx(f,x0,w).toFixed(1)+' '+y(respDb(bands,f)).toFixed(1)}return d}
+const TICKS=[20,50,100,200,500,1000,2000,5000,10000,20000];
+const tk=f=>f>=1000?f/1000+'k':String(f);
+
+// ---- window chrome -----------------------------------------------------------------------------
+function hdrHTML(){const c=S.mode==='control';
+ return `<div class="hdr"><button class="btn" data-act="noop">≡${c?'':' Меню'}</button><span class="proj">⌂ passat-b8-2026</span>${c?'':'<span class="lbl">Пресет</span>'}<span class="preset">"FULL" (daily)</span>${c?'':'<span class="lbl">Цільова крива</span>'}<span class="target">EMMA Ref v3${c?'':' (NTT, 55 dB) ↗'}</span><span class="sp"></span><button class="btn modebtn" data-act="mode">${c?'Активний TCC':'Режим контролю'}</button><button class="btn" data-act="noop" aria-label="Оновити">↻</button><button class="btn acc" data-act="noop" aria-label="Налаштування">⚙</button></div>`}
+function cmpHTML(off){return `<label class="cmpbox ${off?'off':''}" title="${off?'Моніторинг не має з чим порівнювати':'Діє на всі вкладки з даними DSP'}">порівняти з <select id="cmp" ${off?'disabled':''}><option value="—" ${S.compare==='—'?'selected':''}>—</option>${CMP_LIST.map(g=>`<optgroup label="${g.label}">${g.items.map(([v,l])=>`<option value="${v}" ${v===S.compare?'selected':''}>${l}</option>`).join('')}</optgroup>`).join('')}</select>${cmpOther()&&!off?'<span class="cfgtag">інша конфігурація</span>':''}</label>`}
+
+function activeKey(){const r={table:null,ch:null,eq:null};
+ if(S.mode==='control'){r.table={tv:'virt',to:'out',ti:'inp'}[S.tab]||null}
+ else if(S.paneOpen&&S.fullView==='table')r.table=S.fullGroup;
+ const eq=S.mode==='control'?S.tab==='eq':(S.paneOpen&&S.fullView==='eq');
+ if(eq){r.eq=S.eqCh;r.ch=S.eqCh}else if(r.table&&S.selRow&&S.selRow.startsWith(r.table+':'))r.ch=S.selRow;
+ return r}
+function leftHTML(){const a=activeKey();
+ const grp=g=>{const G=GROUPS[g],open=S.open[g];
+  let h=`<button class="grp" data-act="grp" data-g="${g}" aria-expanded="${open}">${open?'▾':'▸'}&nbsp; ${G.tree} ${G.count}${dotHTML(g)}</button>`;
+  if(!open)return h;
+  h+=`<button class="params ${a.table===g&&!a.ch?'act':''}" data-act="table" data-g="${g}"><span class="ic">⊞</span> params · усі параметри таблицею</button>`;
+  h+=G.rows.map(r=>{const k=g+':'+r.id,sum=g==='out'?`HP ${r.hp} · LP ${r.lp} · ${fg(r.gain)}dB`:`${fg(r.gain)}dB · ${fd(r.delay)} ms`;
+   return `<div class="chn ${a.ch===k?'act':''}" data-act="row" data-g="${g}" data-id="${r.id}" role="button" tabindex="0"><span class="id">${r.id}</span><span><b>${esc(r.name)}</b>${r.inv?'<span class="inv">INV</span>':''}</span>${r.eq?`<button class="eqb ${a.eq===k?'on':''}" data-act="eq" data-ch="${k}" data-from="tree">EQ ${r.eq}</button>`:'<span></span>'}<span class="sum">${sum}</span></div>`}).join('');
+  return h};
+ return `<div class="lp"><div class="sec">▸ ПАРАМЕТРИ ПРОЄКТУ <span class="dot warn"></span><span class="muted n">історію не ведемо</span></div><div class="sec">▸ СИСТЕМНІ ПАРАМЕТРИ</div><div class="sec">▸ АНАЛІЗ АВТОЗВУКУ <span class="muted n">10 з 18</span></div><div class="sec">▾ DSP <span class="dot ok"></span><span class="muted n">v_007</span></div>${grp('virt')}${grp('out')}${grp('inp')}</div>`}
+function rightHTML(){return `<div class="rp"><div class="sec">ПЛАН — ФАКТ <span class="muted n">фази й кроки</span></div>${PHASES.map((p,i)=>`<div class="ph ${i===6?'cur':''}"><span class="pd"></span>${p}</div>`).join('')}<div class="sec" style="margin-top:8px">◆ У ФОКУСІ ЗАРАЗ <span class="muted n">завдання на заміри</span></div><div class="focus"><span class="preset">cap_017</span><span class="preset">Захист</span></div><div class="outside">Поза знахідкою 47, у макеті без змін.</div></div>`}
+function dialogHTML(){return `<div class="dialog"><div class="dh"><span class="lbl">AI діалог</span><span class="muted">Generator ⇄ Critic ⇄ Arbiter</span></div><div class="msgs"><div class="msg me">Бас досі сидить позаду на The Phone Book. Що спробувати першим, найдешевше?</div><div class="msg">Крок 1 нічого не коштує: опустити стик між сабом і дверними вуферами — sw LP 80 → 63 Hz, w-L / w-R HP 92 → 63–70 Hz.</div></div><div class="inp"><span>Повідомлення для Generator…</span><button class="send" data-act="noop">Надіслати</button></div><div class="outside">Поза знахідкою 47.</div></div>`}
+function monHTML(){return `<div style="padding:8px 12px;line-height:1.7">${JOURNAL.map(([t,k,w])=>`<div><span class="muted">${t}</span>&nbsp; <b>${k}</b>&nbsp; ${esc(w)}</div>`).join('')}</div><div style="display:flex;gap:8px;align-items:center;padding:4px 12px 10px"><button class="ghost" data-act="noop">Готово</button><button class="ghost" data-act="noop">Слухаю</button><span class="muted">Пишете в терміналі. Ці кнопки йдуть у сесію як сигнали.</span></div>`}
+
+// ---- tables ------------------------------------------------------------------------------------
+function tableHTML(g){const G=GROUPS[g];
+ const cols=g==='virt'?['ID','Канал','Підсил. дБ','Затримка мс','Пол.','Фаза','Mute','EQ byp','EQ']:['ID','Канал','HPF','LPF','Підсил. дБ','Затримка мс','Пол.','Фаза','Mute','EQ'];
+ const th=cols.map(c=>`<th>${c}</th>`).join('');
+ if(!G.rows.length)return `<table class="dt"><thead><tr>${th}</tr></thead></table><div class="empty">У пресеті «FULL» входів 0. Таблиця відкривається, але вона порожня.</div>`;
+ let changed=0;
+ const body=G.rows.map(r=>{const k=g+':'+r.id,og=oldRow(k,'gain'),od=oldRow(k,'delay'),ec=eqChanged(k);
+  changed+=(og!==undefined)+(od!==undefined)+ec;
+  const c=[`<td class="id">${r.id}</td>`,`<td>${esc(r.name)}</td>`];
+  if(g==='out')c.push(`<td class="${r.hp==='OFF'?'off':''}">${r.hp}</td>`,`<td class="${r.lp==='OFF'?'off':''}">${r.lp}</td>`);
+  c.push(`<td class="${og!==undefined?'chg':gcls(r.gain)}">${fg(r.gain)}${og!==undefined?`<span class="old">${fg(og)}</span>`:''}</td>`);
+  c.push(`<td class="${od!==undefined?'chg':''}">${fd(r.delay)}${od!==undefined?`<span class="old">${fd(od)}</span>`:''}</td>`);
+  c.push(`<td class="${r.inv?'invc':''}">${r.inv?'INV':'NORM'}</td>`,'<td class="off">—</td>','<td class="off">—</td>');
+  if(g==='virt')c.push('<td class="off">—</td>');
+  c.push(`<td class="${ec?'chg':''}">${r.eq?`<button class="eqlink" data-act="eq" data-ch="${k}" data-from="table">${r.eq} ${plural(r.eq)} ▸</button>`:'<span class="off">—</span>'}</td>`);
+  return `<tr class="${S.selRow===k?'sel':''}" data-act="rowsel" data-key="${k}">${c.join('')}</tr>`}).join('');
+ const note=S.compare!=='—'?`<div class="tnote">Порівняння з ${cmpLabel()}${cmpOther()?' — це інша конфігурація, пресет SQ':''}: ${changed?`змінено ${changed}. Синім — змінене, закреслено — як було у ${S.compare}.`:'різниці нема.'}</div>`:'';
+ return `<table class="dt"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>${note}`}
+function paramHTML(field){const lab={gain:'Підсил. дБ',delay:'Затримка мс',phase:'Фаза °'}[field];
+ const t=g=>{const G=GROUPS[g];return `<div><div class="ptitle">${G.title}</div><table class="dt"><thead><tr><th>ID</th><th>Канал</th><th>${lab}</th></tr></thead><tbody>${G.rows.map(r=>{const k=g+':'+r.id;let v='—',o;
+   if(field==='gain'){v=fg(r.gain);o=oldRow(k,'gain');if(o!==undefined)o=fg(o)}
+   if(field==='delay'){v=fd(r.delay);o=oldRow(k,'delay');if(o!==undefined)o=fd(o)}
+   return `<tr class="${S.selRow===k?'sel':''}"><td class="id">${r.id}</td><td>${esc(r.name)}</td><td class="${o!==undefined?'chg':''} ${field==='phase'?'off':''}">${v}${o!==undefined?`<span class="old">${o}</span>`:''}</td></tr>`}).join('')}</tbody></table></div>`};
+ return `<div class="pgrid">${t('virt')}${t('out')}</div>`}
+
+// ---- EQ ----------------------------------------------------------------------------------------
+function sharedFreqs(a,b){const A=new Set(BANDS[a].map(x=>x.f));return new Set(BANDS[b].map(x=>x.f).filter(f=>A.has(f)))}
+function cardsHTML(k,shared){return BANDS[k].map((b,i)=>{const o=oldBand(k,i);
+ return `<div class="band ${shared.has(b.f)?'shared':''} ${o?'chg':''}"><div class="bt">${b.t} ${i+1}</div><dl><dt>Част.</dt><dd>${b.f} Hz</dd><dt>Q</dt><dd>${b.q.toFixed(2)}</dd><dt>Підсил.</dt><dd>${fg(b.g)} dB</dd></dl><div class="byp">○ BYPASS</div>${o?`<div class="was">у ${S.compare}: ${fg(o.g)} dB</div>`:''}</div>`}).join('')}
+function eqHTML(){const k=S.eqCh,r=rowOf(k),g=k.split(':')[0],sib=sibling(k),pair=!!(S.pair&&sib);
+ const from=S.eqFrom?(S.mode==='control'?TABLABEL[S.eqFrom]:'Таблиця'):'';
+ const head=`<div class="eqhead">${S.eqFrom?`<button class="crumb" data-act="back">← ${from}</button>`:''}<b>EQ · ${esc(r.name)}${pair?' + '+esc(chName(sib)):''}</b><span class="muted">${GROUPS[g].title} · ${r.eq} ${plural(r.eq)}</span><span class="sp"></span>${sib?`<button class="ghost ${pair?'on':''}" data-act="pair" aria-pressed="${pair}">⇄ L + R</button>`:''}<button class="ghost" data-act="copy">Копіювати EQ ${esc(r.name)}</button><span class="prop" title="Пропозиція сесії: дії каналу — у шапці EQ, а не в меню">◇</span></div>`;
+ const shared=pair?sharedFreqs(k,sib):new Set();
+ return head+(S.variant==='A'?eqA(k,sib,pair,shared):S.variant==='B'?eqB(k,sib,pair):eqC(k,sib,pair,shared))}
+function eqList(render){return ['virt','out'].map(g=>render(g,GROUPS[g].rows.filter(r=>r.eq))).join('')}
+function eqA(k,sib,pair,shared){
+ const chips=eqList((g,rows)=>`<span class="chipgrp">${GROUPS[g].chips}</span>`+rows.map(r=>{const c=g+':'+r.id;return `<button class="chip ${c===k||(pair&&c===sib)?'on':''}" data-act="eqsel" data-ch="${c}">${esc(r.name)}<i>${r.eq}</i></button>`}).join(''));
+ const block=c=>`${pair?`<div class="pairh">${esc(chName(c))}</div>`:''}<div class="bands">${cardsHTML(c,shared)}</div>`;
+ return `<div class="chips">${chips}</div>${block(k)}${pair?block(sib):''}${pair&&shared.size?`<div class="tnote"><span class="sw" style="border-color:var(--text)"></span>темна риска зверху — спільна частота в L і R</div>`:''}`}
+function sparkSVG(k){const W=64,H=16,y=d=>Math.max(1,Math.min(H-1,H/2-d*(H/2-1)/8));
+ return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><line x1="0" x2="${W}" y1="${H/2}" y2="${H/2}" class="gl"/><path d="${curvePath(BANDS[k],0,W,y,60)}" class="cv spk"/></svg>`}
+function curveSVG(k,sib,cmp,W,H){const L=30,R=8,T=8,B=18,w=W-L-R,h=H-T-B,top=6,bot=-12;
+ const y=d=>T+h*(top-Math.max(bot,Math.min(top,d)))/(top-bot),r=rowOf(k);
+ const x1=lx(Math.max(FMIN,r.hpN),L,w),x2=lx(Math.min(FMAX,r.lpN),L,w);
+ let s=`<rect x="${x1}" y="${T}" width="${x2-x1}" height="${h}" class="pb"/>`;
+ for(const f of TICKS){const x=lx(f,L,w);s+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${T+h}" class="gl"/><text x="${x}" y="${H-5}" text-anchor="middle">${tk(f)}</text>`}
+ for(const d of [6,0,-6,-12])s+=`<line x1="${L}" x2="${L+w}" y1="${y(d)}" y2="${y(d)}" class="${d===0?'gl0':'gl'}"/><text x="${L-4}" y="${y(d)+3}" text-anchor="end">${d>0?'+'+d:d}</text>`;
+ if(sib)s+=`<path d="${curvePath(BANDS[sib],L,w,y)}" class="cv sib"/>`;
+ if(cmp)s+=`<path d="${curvePath(bandsAt(k,S.compare),L,w,y)}" class="cv cmp"/>`;
+ s+=`<path d="${curvePath(BANDS[k],L,w,y)}" class="cv cur"/>`;
+ for(const b of BANDS[k])s+=`<circle cx="${lx(b.f,L,w).toFixed(1)}" cy="${y(respDb(BANDS[k],b.f)).toFixed(1)}" r="3" class="mk"><title>${b.f} Hz · Q ${b.q.toFixed(2)} · ${fg(b.g)} dB</title></circle>`;
+ return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Сумарна АЧХ EQ каналу ${esc(r.name)}">${s}</svg>`}
+function eqB(k,sib,pair){
+ const list=eqList((g,rows)=>`<h4>${GROUPS[g].chips}</h4>`+rows.map(r=>{const c=g+':'+r.id;return `<button class="chrow ${c===k?'on':''} ${pair&&c===sib?'pair':''}" data-act="eqsel" data-ch="${c}"><span class="id">${r.id}</span><span>${esc(r.name)}</span>${sparkSVG(c)}<span class="n">${r.eq}</span></button>`}).join(''));
+ const cmp=S.compare!=='—'&&eqChanged(k),W=S.mode==='control'?960:400;
+ const legend=`<div class="legend"><span><span class="sw" style="border-color:var(--accent)"></span>${esc(chName(k))}</span>${pair?`<span><span class="sw" style="border-color:var(--text);opacity:.7"></span>${esc(chName(sib))}</span>`:''}${cmp?`<span><span class="sw dash" style="border-top-color:var(--info)"></span>${esc(chName(k))} у ${cmpLabel()}</span>`:''}<span>сіре тло — смуга каналу між HPF і LPF</span></div>`;
+ const tbl=`<table class="dt"><thead><tr><th>№</th><th>Тип</th><th>Частота Hz</th><th>Q</th><th>Підсил. дБ</th><th>Bypass</th></tr></thead><tbody>${BANDS[k].map((b,i)=>{const o=oldBand(k,i);return `<tr><td>${i+1}</td><td>${b.t}</td><td>${b.f}</td><td>${b.q.toFixed(2)}</td><td class="${o?'chg':gcls(b.g)}">${fg(b.g)}${o?`<span class="old">${fg(o.g)}</span>`:''}</td><td class="off">○</td></tr>`}).join('')}</tbody></table>`;
+ return `<div class="vb"><div class="chlist">${list}</div><div class="vbmain">${curveSVG(k,pair?sib:null,cmp,W,160)}${legend}${tbl}</div></div>`}
+const rad=q=>Math.max(2.5,Math.min(7,7/q+1.5));
+function trackSVG(k,W,H){const r=rowOf(k),x=f=>lx(f,6,W-12),mid=H/2,yy=g=>mid-g*1.7;
+ const x1=x(Math.max(FMIN,r.hpN)),x2=x(Math.min(FMAX,r.lpN));
+ let s=`<rect x="${x1}" y="3" width="${x2-x1}" height="${H-6}" rx="3" class="pb"/><line x1="6" x2="${W-6}" y1="${mid}" y2="${mid}" class="gl0"/>`;
+ BANDS[k].forEach((b,i)=>{const o=oldBand(k,i);if(o)s+=`<circle cx="${x(b.f)}" cy="${yy(o.g)}" r="${rad(b.q)}" class="mko"/>`;
+  s+=`<circle cx="${x(b.f)}" cy="${yy(b.g)}" r="${rad(b.q)}" class="${b.g<0?'mkc':'mkb'}"><title>${b.f} Hz · Q ${b.q.toFixed(2)} · ${fg(b.g)} dB</title></circle>`});
+ return `<svg viewBox="0 0 ${W} ${H}" width="100%" aria-hidden="true">${s}</svg>`}
+function eqC(k,sib,pair,shared){const W=S.mode==='control'?1080:470,H=34;
+ let ax='';for(const f of TICKS){const x=lx(f,6,W-12);ax+=`<text x="${x}" y="13" text-anchor="middle">${tk(f)}</text>`}
+ const axis=`<div class="crow axis"><div class="cl muted" style="font-size:11px">канал</div><svg viewBox="0 0 ${W} 18" width="100%" aria-hidden="true">${ax}</svg></div>`;
+ const rows=eqList((g,rs)=>`<div class="cgh">${GROUPS[g].chips}</div>`+rs.map(r=>{const c=g+':'+r.id,on=c===k||(pair&&c===sib);
+  return `<div class="crow ${on?'on':''}" data-act="eqsel" data-ch="${c}" role="button" tabindex="0" aria-expanded="${on}"><div class="cl"><span class="id">${r.id}</span><b>${esc(r.name)}</b><span class="n">${r.eq}</span></div>${trackSVG(c,W,H)}</div>${on?`<div class="cexp"><div class="bands">${cardsHTML(c,shared)}</div></div>`:''}`}).join(''));
+ const leg=`<div class="tnote"><span style="color:var(--accent)">●</span> зріз &nbsp; <span style="color:var(--accent)">○</span> підйом &nbsp; <span style="color:var(--info)">◌</span> як було у порівнюваній версії &nbsp;·&nbsp; більше коло — ширша смуга (менше Q) &nbsp;·&nbsp; без EQ: VRL, VRR, VC, VSW</div>`;
+ return leg+axis+rows}
+
+// ---- layouts -----------------------------------------------------------------------------------
+function zoneHTML(){switch(S.tab){case'mon':return monHTML();case'tv':return tableHTML('virt');case'to':return tableHTML('out');case'ti':return tableHTML('inp');case'eq':return eqHTML();default:return paramHTML(S.tab)}}
+function ctlHTML(){
+ const tabs=TABS.map(([id,l])=>`<button class="tab ${S.tab===id?'on':''} ${S.flash===id?'flash':''}" data-act="tab" data-tab="${id}" role="tab" aria-selected="${S.tab===id}">${l}${id==='ti'?'<span class="prop" title="Пропозиція сесії: зараз такої вкладки нема">◇</span>':''}${TABSCOPE[id]?dotHTML(TABSCOPE[id]):''}</button>`).join('');
+ return `<div class="ctl"><div class="tabbar" role="tablist">${tabs}${cmpHTML(S.tab==='mon')}</div><div class="zone">${zoneHTML()}</div><div class="bottom">${leftHTML()}${rightHTML()}</div></div>`}
+function paneCaption(){if(S.fullView==='table'){const G=GROUPS[S.fullGroup];return `${G.title} · ${G.rows.length}`}
+ if(S.fullView==='eq')return 'EQ · '+esc(chName(S.eqCh));return FVL[S.fullView]+' · кожен канал'}
+function fullBody(){switch(S.fullView){case'table':return tableHTML(S.fullGroup);case'eq':return eqHTML();default:return paramHTML(S.fullView)}}
+function fullHTML(){
+ const pane=S.paneOpen?`<div class="pane"><div class="pmenu">${FV.map(([v,l])=>`<button class="dtab ${S.fullView===v?'on':''} ${S.flash==='f-'+v?'flash':''}" data-act="fview" data-v="${v}">${l}${dotHTML(v==='table'?S.fullGroup:v)}</button>`).join('')}<span class="pcap">${paneCaption()}</span><span class="sp"></span>${cmpHTML(false)}<button class="ghost" data-act="close">Закрити ✕</button></div><div class="pbody">${fullBody()}</div></div>`:'';
+ return `<div class="full">${leftHTML()}<div class="center ${S.paneOpen?'':'closed'}">${pane}${dialogHTML()}</div>${rightHTML()}</div>`}
+function stateHTML(){const p=[['режим',S.mode==='control'?'Контроль':'Повний']];
+ if(S.mode==='control')p.push(['вкладка',TABLABEL[S.tab]]);
+ else p.push(['панель',S.paneOpen?FVL[S.fullView]+(S.fullView==='table'?' · '+GROUPS[S.fullGroup].title:''):'закрита']);
+ const eq=S.mode==='control'?S.tab==='eq':(S.paneOpen&&S.fullView==='eq');
+ if(eq){const s=sibling(S.eqCh);p.push(['канал',chName(S.eqCh)+(S.pair&&s?' + '+chName(s):'')])}
+ p.push(['прийшли з',S.eqFrom?(S.mode==='control'?TABLABEL[S.eqFrom]:'Таблиця'):'—'],['порівняти з',cmpLabel()+(cmpOther()?' (інша конфігурація)':'')],['вигляд EQ',S.variant+' · '+VNAMES[S.variant]]);
+ return p.map(([k,v])=>`<span><i>${k}</i>${esc(v)}</span>`).join('')}
+
+function render(){
+ const win=document.getElementById('win');
+ win.innerHTML=hdrHTML()+(S.mode==='control'?ctlHTML():fullHTML())+'<div class="toast" id="toast" hidden></div>';
+ document.querySelectorAll('[data-act="modeset"]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.m===S.mode)));
+ document.querySelectorAll('[data-act="variant"]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.variant)));
+ document.getElementById('fb-label').textContent='EQ '+S.variant+' — '+VNAMES[S.variant];
+ document.getElementById('state').innerHTML=stateHTML();
+ if(S.scrollEq){const el=win.querySelector('.crow.on'),sc=el&&el.closest('.zone,.pbody');if(sc)sc.scrollTop=Math.max(0,el.offsetTop-70);S.scrollEq=false}
+ S.flash=null;
+ try{history.replaceState(null,'','#'+S.mode+'-'+S.variant.toLowerCase())}catch(e){}
+}
+
+// ---- actions -----------------------------------------------------------------------------------
+let tt;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>{t.hidden=true},2400)}
+function openTable(g,key){S.selRow=key;S.eqFrom=null;
+ if(S.mode==='control'){S.tab=GROUPS[g].tab;S.flash=S.tab}else{S.fullGroup=g;S.fullView='table';S.paneOpen=true;S.flash='f-table'}}
+function openEq(ch,from){S.eqCh=ch;S.selRow=ch;S.scrollEq=true;
+ S.eqFrom=from==='table'?(S.mode==='control'?S.tab:'table'):null;
+ if(S.mode==='control'){S.tab='eq';S.flash='eq'}else{S.fullView='eq';S.paneOpen=true;S.flash='f-eq'}}
+function setMode(m){if(m===S.mode)return;
+ if(m==='full'){const t=S.tab;
+  if(t==='tv'||t==='to'||t==='ti'){S.fullView='table';S.fullGroup={tv:'virt',to:'out',ti:'inp'}[t]}else S.fullView=t==='mon'?'table':t;
+  S.paneOpen=true;if(S.eqFrom)S.eqFrom='table'}
+ else{S.tab=S.fullView==='table'?GROUPS[S.fullGroup].tab:S.fullView;if(S.eqFrom)S.eqFrom=GROUPS[S.fullGroup].tab}
+ S.mode=m}
+function cycle(d){const v=['A','B','C'];S.variant=v[(v.indexOf(S.variant)+d+3)%3]}
+function act(a,d){
+ switch(a){
+  case'mode':setMode(S.mode==='control'?'full':'control');break;
+  case'modeset':setMode(d.m);break;
+  case'variant':S.variant=d.v;break;
+  case'vprev':cycle(-1);break;
+  case'vnext':cycle(1);break;
+  case'tab':S.tab=d.tab;if(d.tab!=='eq')S.eqFrom=null;break;
+  case'fview':S.fullView=d.v;if(d.v!=='eq')S.eqFrom=null;break;
+  case'table':openTable(d.g,null);break;
+  case'row':openTable(d.g,d.g+':'+d.id);break;
+  case'rowsel':S.selRow=d.key;break;
+  case'eq':openEq(d.ch,d.from);break;
+  case'eqsel':S.eqCh=d.ch;S.selRow=d.ch;break;
+  case'back':S.selRow=S.eqCh;if(S.mode==='control'){S.tab=S.eqFrom;S.flash=S.eqFrom}else{S.fullView='table';S.flash='f-table'}S.eqFrom=null;break;
+  case'pair':S.pair=!S.pair;break;
+  case'copy':toast('У макеті кнопка нічого не копіює: вона лише показує, де стоїть');return;
+  case'close':S.paneOpen=false;break;
+  case'grp':S.open[d.g]=!S.open[d.g];break;
+  case'noop':toast('Поза знахідкою 47: у макеті не працює');return;
+  default:return;
+ }
+ render()}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(el)act(el.dataset.act,el.dataset)});
+document.addEventListener('change',e=>{if(e.target.id==='cmp'){S.compare=e.target.value;render()}});
+document.addEventListener('keydown',e=>{
+ if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role="button"][data-act]')){e.preventDefault();act(e.target.dataset.act,e.target.dataset);return}
+ if(e.target.closest('input,textarea,select,[contenteditable]'))return;
+ if(e.key==='ArrowLeft'){cycle(-1);render()}else if(e.key==='ArrowRight'){cycle(1);render()}});
+render();
+</script>
