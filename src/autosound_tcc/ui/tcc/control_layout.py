@@ -369,7 +369,9 @@ class ControlLayout:
                   i18n.t("ctlTableO"))
         # The input table exists even while it is empty (finding 47, 2): «params» under ВХОДИ opens
         # it, so it needs a tab — but only on a rig whose profile has inputs at all.
-        if _group(view, "inputs") is not None:
+        # No tab over nothing: «Таблиця-I» only when the rig HAS inputs (finding 71, 4).
+        inputs = _group(view, "inputs")
+        if inputs is not None and inputs.rows_visible():
             self._add("inputs", _table_tab(w, view, "inputs", "ctlNoOutputs"), i18n.t("ctlTableI"))
         self._add("eq", _eq_tab(w, view), "EQ")
         for field, key in (("gain_db", "tabGain"), ("ta_ms", "tabDelay"), ("phase_deg", "tabPhase")):
@@ -519,7 +521,8 @@ class ControlLayout:
                 status = field_status(groups, key, old, compared) if groups else None
             dot = self._dots.get(index)
             if dot is None:
-                dot = StatusDot(width=12, align_right=True)
+                # Close to the text, not at the tab's edge (finding 71, 1).
+                dot = StatusDot(width=12)
                 bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, dot)
                 self._dots[index] = dot
             dot.set_status(status, said)

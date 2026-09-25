@@ -2072,3 +2072,5 @@ Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in 
 
 **Weight.** Medium for 5 (a bypassed band with settings and an empty one read the same); low for
 the rest.
+
+**Built:** tcc#53 (all six), the commit that records this line.

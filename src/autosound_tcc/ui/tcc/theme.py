@@ -1011,18 +1011,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="band-pk"] {{ color: {t.info}; }}
     QLabel[class~="band-apf"] {{ color: {t.yellow}; }}
     QLabel[class~="band-other"] {{ color: {t.muted}; }}
-    /* The EQ's channel list, tier by tier (finding 67, 5). */
-    QWidget[class~="tier-head"] {{ border-radius: 5px; }}
-    QWidget[class~="tier-head"]:hover {{ background: {t.panel2}; }}
-    QLabel[class~="tier-row"] {{
-        color: {t.text};
-        padding: 3px 8px;
+    /* The EQ's tier pickers, «V: VFL/VFR   O: tw-L/tw-R   I: -/-» (finding 71, 6). */
+    QToolButton[class~="tier-pick"] {{
+        color: {t.muted};
+        background: transparent;
+        border: 1px solid {t.border2};
         border-radius: 5px;
-        font-size: 12px;
+        padding: 2px 8px;
+        font-size: 11px;
     }}
-    QLabel[class~="tier-row"]:hover {{ background: {t.panel2}; }}
-    QLabel[class~="tier-row"][class~="on"] {{
+    QToolButton[class~="tier-pick"]::menu-indicator {{ image: none; width: 0; }}
+    QToolButton[class~="tier-pick"]:hover {{ color: {t.text}; }}
+    QToolButton[class~="tier-pick"][class~="on"] {{
         color: {t.accent};
+        border-color: {t.accent_dim};
         background: {t.mix('accent', 12)};
     }}
 
@@ -1540,7 +1542,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     /* «Режим контролю»: eight tabs with their dots and «порівняти з» on half a screen. */
     QTabWidget#ctl-tabs QTabBar::tab {{
-        padding: 6px 2px 6px 8px;
+        padding: 6px 6px 6px 8px;
         margin-right: 2px;
     }}
 

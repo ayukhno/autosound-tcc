@@ -553,7 +553,7 @@ def test_a_value_that_changed_since_the_compared_version_is_marked_with_what_it_
 _PK = {"type": "PK", "f": 482, "gain_db": -1.7, "q": 3.0}
 
 
-def _rig_with_eq(inputs: bool = False):
+def _rig_with_eq(inputs: bool = False, empty_inputs: bool = False):
     """Both tiers (and inputs, when asked), EQ on VFL, c, m-L and m-R; m-L/m-R a pair, c alone."""
     from autosound_tcc.state.dsp_state import ProjectView
 
@@ -574,8 +574,9 @@ def _rig_with_eq(inputs: bool = False):
                   "m-R": {"code": "m-R", "slot": "F", "tier": "channels"},
                   "sw": {"code": "sw", "slot": "K", "tier": "channels"},
                   "VFL": {"code": "VFL", "slot": "A", "tier": "virtual_channels"}}
-    if inputs:
+    if inputs or empty_inputs:
         groups.append({"id": "inputs", "label": "Inputs", "fields": ["gain_db", "ta_ms"]})
+    if inputs:
         ledger["inputs"] = {"IN1": {"gain_db": -2.0}}
         identities["IN1"] = {"code": "IN1", "slot": "1", "tier": "inputs"}
     profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": groups}}
@@ -671,31 +672,37 @@ def test_the_back_button_says_where_it_leads_and_goes_there():
     assert not pane._back_btn.isVisibleTo(pane)
 
 
-def test_the_eq_view_offers_the_channels_tier_by_tier():
-    """Finding 67, 5 (the Arbiter, 2026-09-25): the button row grew too long; wanted three lists,
-    one open and the others closed, each with its coloured status dot."""
+def test_the_tiers_are_pickers_in_the_eq_header():
+    """Finding 71, 6: «V: VFL/VFR   O: tw-L/tw-R   I: -/-» in the EQ's header row; a click on a tier
+    drops down its channels."""
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
 
     _app()
-    view = _rig_with_eq()
+    view = _rig_with_eq(inputs=True)
     outputs = _grp(view, "physical_outputs")
     pane = DetailPane()
+    pane.set_embedded(True)
     pane.set_view(view)
     pane.open_eq(outputs, _row(outputs, "m-L"))
-    tiers = pane._tiers
-    assert list(tiers) == ["virtual_channels", "physical_outputs"]
-    assert tiers["physical_outputs"].is_open() and not tiers["virtual_channels"].is_open(), \
-        "the tier of the channel on screen is the open one"
-    assert tiers["virtual_channels"].dot.status() == "set", "VFL carries an EQ"
-    shown = [gid_rid[1] for gid_rid, row in pane._tier_rows.items() if row.isVisibleTo(pane)]
-    assert shown == ["c", "m-L", "m-R", "sw"], "the open tier's channels, name and details"
-    assert pane._tier_rows[("physical_outputs", "m-L")].property("class") == "tier-row on"
+    texts = {gid: p.text() for gid, p in pane._tier_pickers.items()}
+    assert texts == {"virtual_channels": "V: VFL", "physical_outputs": "O: m-L", "inputs": "I: -"}
+    assert pane._head.isAncestorOf(pane._tier_pickers["physical_outputs"]), "in the header row"
+    assert "on" in pane._tier_pickers["physical_outputs"].property("class").split()
+    assert pane._tier_dots["virtual_channels"].status() == "set"
 
-    tiers["virtual_channels"].header.clicked.emit()
-    assert tiers["virtual_channels"].is_open() and not tiers["physical_outputs"].is_open()
-    pane._tier_rows[("virtual_channels", "VFL")].clicked.emit()
+    pane._on_pair_toggle()
+    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R"
+    assert pane._tier_pickers["inputs"].text() == "I: -/-"
+
+    menu = pane._tier_pickers["virtual_channels"].menu()
+    pick = next(a for a in menu.actions() if a.text().startswith("VFL"))
+    pick.trigger()
     QApplication.processEvents()
     assert pane._row.name == "VFL"
+    assert "on" in pane._tier_pickers["virtual_channels"].property("class").split()
+    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R", "each tier keeps its pick"
+    pane.open_eq(outputs, _row(outputs, "m-R"))
+    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R", "L first, whichever is picked"
 
 
 def test_pair_mode_survives_a_channel_that_has_no_pair():
@@ -807,10 +814,10 @@ def test_cards_follow_the_band_numbers_and_an_empty_slot_draws_nothing():
     from autosound_tcc.ui.tcc.detail_pane import EqBandCard
 
     _app()
-    flow = _band_flow((EqBand(type="PK", freq_hz=700.0, index=7),
-                       EqBand(type="PK", freq_hz=100.0, index=1),
+    flow = _band_flow((EqBand(type="PK", freq_hz=700.0, gain_db=-1.0, q=2.0, index=7),
+                       EqBand(type="PK", freq_hz=100.0, gain_db=-1.0, q=2.0, index=1),
                        EqBand(type="OFF", freq_hz=0.0, index=2),
-                       EqBand(type="LSH", freq_hz=60.0, index=3)))
+                       EqBand(type="LSH", freq_hz=60.0, gain_db=2.0, q=0.7, index=3)))
     assert [c._title.text() for c in flow.findChildren(EqBandCard)] == ["PK (1)", "LSH (3)", "PK (7)"]
 
 
@@ -845,3 +852,31 @@ def test_the_compare_list_is_wide_enough_for_whole_lines():
                        [("2.S-shelf", [("2.S-shelf/v_001", "v_001 · 2.S-shelf")])])
     view = combo.view()
     assert view.minimumWidth() >= view.sizeHintForColumn(0)
+
+
+
+# ---- third pass (finding 71; tcc#53) ------------------------------------------------------------
+
+def test_an_empty_band_is_skipped_and_a_bypassed_one_with_settings_is_shown():
+    """Finding 71, 5: PC-Tool's white slot (a frequency, no gain, no Q) is not a band."""
+    from PySide6.QtWidgets import QHBoxLayout
+
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    _app()
+    flow = _band_flow((EqBand(type="PK", freq_hz=50.0, bypass=True, index=4),
+                       EqBand(type="PK", freq_hz=420.0, gain_db=-3.0, q=1.0, bypass=True, index=9),
+                       EqBand(type="PK", freq_hz=100.0, gain_db=-1.0, q=2.0, index=1)))
+    assert [c._title.text() for c in flow.findChildren(EqBandCard)] == ["PK (1)", "PK (9)"]
+    assert isinstance(flow.layout(), QHBoxLayout), "one row and a scroll, not a wrap (71, 2)"
+
+
+def test_the_band_count_reads_active_of_configured():
+    """Finding 71, 3 and 5: «(8/12)» — 8 active of 12 configured, the empty ones not counted."""
+    from autosound_tcc.ui.tcc.detail_pane import band_count
+
+    bands = tuple(EqBand(type="PK", freq_hz=100.0 + i, gain_db=-1.0, q=1.0, bypass=i < 4, index=i)
+                  for i in range(12))
+    empty = (EqBand(type="PK", freq_hz=50.0, bypass=True, index=13),)
+    assert band_count(bands + empty) == "(8/12)"
+    assert band_count(()) == ""

@@ -25,8 +25,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QMenu,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -34,7 +36,6 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
-from autosound_tcc.ui.tcc.flow_layout import FlowLayout
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.setting_status import StatusDot, field_status
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
@@ -147,8 +148,19 @@ def _band_kind(kind: Optional[str]) -> str:
 
 
 def _band_empty(band: EqBand) -> bool:
-    """A slot with nothing in it: not drawn (PAS-011) — the gap shows in the band numbers."""
-    return (band.type or "").upper() in ("", "OFF", "NONE") or not band.freq_hz
+    """A slot with nothing in it: not drawn (PAS-011) — the gap shows in the band numbers. PC-Tool's
+    white slot is one: a frequency and no gain, no Q (finding 71, 5); a BYPASSED band with its
+    settings is a band, and is drawn."""
+    return ((band.type or "").upper() in ("", "OFF", "NONE") or not band.freq_hz
+            or (band.gain_db is None and band.q is None))
+
+
+def band_count(bands) -> str:
+    """«(8/12)»: active of configured, the empty slots not counted (finding 71, 3 and 5)."""
+    configured = [b for b in bands if not _band_empty(b)]
+    if not configured:
+        return ""
+    return f"({sum(not b.bypass for b in configured)}/{len(configured)})"
 
 
 class EqBandCard(QFrame):
@@ -221,9 +233,10 @@ def _band_flow(
     order: tuple = _ORDER_DEFAULT,
 ) -> QWidget:
     container = QWidget()
-    # Wrapping, not one long row: beside the tier list (finding 67, 5) a row of 15 bands was a
-    # sideways scroll.
-    layout = FlowLayout(container, spacing=8)
+    # One row and the pane's scroll, not a wrap (the Arbiter, finding 71, 2).
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
     # By the DSP's band number, as PC-Tool lists them; an empty slot draws nothing (PAS-011).
     shown = sorted((b for b in bands if not _band_empty(b)),
                    key=lambda b: (b.index is None, b.index or 0))
@@ -231,53 +244,12 @@ def _band_flow(
         color = (match_map or {}).get(band.freq_hz)
         mismatch = band.freq_hz in (gain_mismatch_freqs or ())
         layout.addWidget(EqBandCard(band, color, mismatch, order))
+    layout.addStretch(1)
     return container
 
 
-class _ClickRow(QWidget):
-    clicked = Signal()
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        event.accept()
-        self.clicked.emit()
-
-
-class _Tier(QWidget):
-    """One tier in the EQ's channel list: a header (twist, name, status dot) over its channels."""
-
-    def __init__(self, title: str) -> None:
-        super().__init__()
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        self.header = _ClickRow()
-        self.header.setProperty("class", "tier-head")
-        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
-        head = QHBoxLayout(self.header)
-        head.setContentsMargins(4, 4, 4, 4)
-        head.setSpacing(6)
-        self._twist = QLabel("▸")
-        self._twist.setProperty("class", "tw")
-        head.addWidget(self._twist)
-        name = QLabel(title)
-        name.setProperty("class", "kv-lbl")
-        head.addWidget(name)
-        self.dot = StatusDot()
-        head.addWidget(self.dot)
-        head.addStretch(1)
-        outer.addWidget(self.header)
-        self.body = QWidget()
-        self.body_layout = QVBoxLayout(self.body)
-        self.body_layout.setContentsMargins(14, 0, 0, 4)
-        self.body_layout.setSpacing(1)
-        outer.addWidget(self.body)
-
-    def is_open(self) -> bool:
-        return not self.body.isHidden()
-
-    def set_open(self, on: bool) -> None:
-        self.body.setHidden(not on)
-        self._twist.setText("▾" if on else "▸")
+#: A tier's letter on its picker: «V: VFL/VFR   O: tw-L/tw-R   I: -/-» (finding 71, 6).
+_TIER_LETTER = {"virtual_channels": "V", "physical_outputs": "O", "inputs": "I"}
 
 
 #: Marks a cell whose value differs from the compared version (the Arbiter, 2026-09-23).
@@ -344,8 +316,10 @@ class DetailPane(QFrame):
         self._compare_text = ""
         self._selected: Optional[str] = None
         self._eq_order: tuple = _ORDER_DEFAULT
-        self._tiers: dict = {}
-        self._tier_rows: dict = {}
+        #: Each tier's own pick, kept while another tier is on screen (finding 71, 6).
+        self._tier_choice: dict = {}
+        self._tier_pickers: dict = {}
+        self._tier_dots: dict = {}
         #: The whole project view, for the one-parameter tabs: gain, delay and phase are asked
         #: about ACROSS the rig ("show the table for all channels, physical and virtual" -- user,
         #: 2026-08-23), and a single group cannot answer that.
@@ -401,6 +375,14 @@ class DetailPane(QFrame):
         self._eq_copy.clicked.connect(self._on_copy_eq_bank)
         self._eq_copy.setVisible(False)
         head_layout.addWidget(self._eq_copy)
+        # In a control-mode tab the tier pickers sit here, in the header row (finding 71, 6); the
+        # full window's head is full already, so there they open the EQ's body instead.
+        self._pick_holder = QWidget()
+        self._pick_layout = QHBoxLayout(self._pick_holder)
+        self._pick_layout.setContentsMargins(6, 0, 0, 0)
+        self._pick_layout.setSpacing(4)
+        self._pick_holder.setVisible(False)
+        head_layout.addWidget(self._pick_holder)
 
         # At the END of the left cluster, after the buttons that belong to what is on screen
         # (user, 2026-08-23: "the new buttons at the end of the left set, not in the middle").
@@ -734,6 +716,7 @@ class DetailPane(QFrame):
                                        and is_other_preset(self._compare_version))
         # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy.
         self._head.setVisible(menu or eq_on)
+        self._pick_holder.setVisible(self._embedded and eq_on)
 
     def _on_tab_table(self) -> None:
         if self._group is not None:
@@ -1040,66 +1023,75 @@ class DetailPane(QFrame):
 
     # ---- EQ view ----------------------------------------------------------
 
-    def _tier_column(self, open_group: str, shown: set) -> Optional[QWidget]:
-        """The channels to pick from, tier by tier: virtual · outputs · inputs, the tier on screen
-        open and the others closed, each with its coloured status dot — «списки назва — деталі,
-        з трьох один відкритий, інші закриті і з крапочками» (the Arbiter, 2026-09-25, finding
-        67, 5: the row of buttons grew too long)."""
-        self._tiers, self._tier_rows = {}, {}
-        groups = [g for g in (getattr(self._view, "groups", ()) or ()) if g.rows_visible()]
-        if not groups:
-            return None
+    def _fill_pickers(self, layout, group: ProfileGroup, row: GroupRow,
+                      sib_row: Optional[GroupRow]) -> None:
+        """«V: VFL/VFR   O: tw-L/tw-R   I: -/-»: one picker per tier with channels, the tier on
+        screen lit, each with its coloured status dot; a click drops down the tier's channels with
+        their «(active/configured)» (finding 71, 6 — the left list of 67, 5, laid flat)."""
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+        self._tier_pickers, self._tier_dots = {}, {}
+        self._tier_choice[group.id] = row.id
+        paired = self._pair_mode
         old = getattr(self._compare_view, "groups", ()) or ()
         compared = self._compare_view is not None
-        column = QWidget()
-        column.setMinimumWidth(170)
-        column.setMaximumWidth(230)
-        col = QVBoxLayout(column)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
-        for group in groups:
-            said = i18n.t(f"chanSum_{group.id}")
-            tier = _Tier(said if said != f"chanSum_{group.id}" else group.label)
-            tier.dot.set_status(field_status([group], "eq", old, compared), self._compare_text)
-            for row in group.rows_visible():
-                n = row.eq_count()
-                pick = _DTab(f"{row.name} — EQ {n}" if n else f"{row.name} — EQ —")
-                pick.setProperty("class", "tier-row on" if (group.id, row.id) in shown
-                                 else "tier-row")
-                # Deferred: the row sits in the view it replaces (see `_build_table`'s click).
-                pick.clicked.connect(lambda _c=False, g=group, r=row:
-                                     QTimer.singleShot(0, lambda: self.open_eq(g, r)))
-                tier.body_layout.addWidget(pick)
-                self._tier_rows[(group.id, row.id)] = pick
-            tier.set_open(group.id == open_group)
-            tier.header.clicked.connect(lambda gid=group.id: self._open_tier(gid))
-            col.addWidget(tier)
-            self._tiers[group.id] = tier
-        col.addStretch(1)
-        return column
-
-    def _open_tier(self, group_id: str) -> None:
-        for gid, tier in self._tiers.items():
-            tier.set_open(gid == group_id)
+        for tier in (g for g in (getattr(self._view, "groups", ()) or ()) if g.rows_visible()):
+            rows = tier.rows_visible()
+            if tier.id == group.id:
+                pick, partner = row, sib_row
+            else:
+                chosen = self._tier_choice.get(tier.id)
+                pick = (next((r for r in rows if r.id == chosen), None)
+                        or next((r for r in rows if r.eq_count() > 0), None))
+                partner_name = _sibling_name(pick.name) if pick is not None else None
+                partner = next((r for r in rows if r.name == partner_name), None)
+            if pick is None:
+                said = "-/-" if paired else "-"
+            else:
+                pair = (pick, partner) if _is_left(pick.name) else (partner, pick)
+                said = (f"{pair[0].name}/{pair[1].name}" if paired and partner is not None
+                        else pick.name)
+            letter = _TIER_LETTER.get(tier.id, (tier.label or "?")[:1].upper())
+            button = QToolButton()
+            button.setText(f"{letter}: {said}")
+            button.setProperty("class", "tier-pick on" if tier.id == group.id else "tier-pick")
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            menu = QMenu(button)
+            for r in rows:
+                count = band_count(r.eq_bands())
+                action = menu.addAction(f"{r.name} {count}" if count else f"{r.name} —")
+                action.setCheckable(True)
+                action.setChecked(tier.id == group.id and r.id in {row.id, getattr(sib_row, "id", None)})
+                # Deferred: the menu belongs to the picker this call replaces.
+                action.triggered.connect(lambda _c=False, g=tier, rr=r:
+                                         QTimer.singleShot(0, lambda: self.open_eq(g, rr)))
+            button.setMenu(menu)
+            dot = StatusDot()
+            dot.set_status(field_status([tier], "eq", old, compared), self._compare_text)
+            layout.addWidget(button)
+            layout.addWidget(dot)
+            self._tier_pickers[tier.id] = button
+            self._tier_dots[tier.id] = dot
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
 
         container = QWidget()
-        outer = QHBoxLayout(container)
-        outer.setContentsMargins(12, 8, 12, 12)
-        outer.setSpacing(12)
-        shown = {(group.id, row.id)}
-        if self._pair_mode and sib_row:
-            shown.add((group.id, sib_row.id))
-        column = self._tier_column(group.id, shown)
-        if column is not None:
-            outer.addWidget(column, 0, Qt.AlignmentFlag.AlignTop)
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(8)
-        outer.addWidget(body, 1)
+        if self._embedded:
+            self._fill_pickers(self._pick_layout, group, row, sib_row)
+        else:
+            row_of_pickers = QWidget()
+            self._fill_pickers(QHBoxLayout(row_of_pickers), group, row, sib_row)
+            row_of_pickers.layout().setContentsMargins(0, 0, 0, 0)
+            row_of_pickers.layout().addStretch(1)
+            layout.addWidget(row_of_pickers)
 
         if self._pair_mode and sib_row:
             l_row, r_row = (row, sib_row) if _is_left(row.name) else (sib_row, row)
@@ -1134,7 +1126,7 @@ class DetailPane(QFrame):
                 heading_row = QHBoxLayout(heading)
                 heading_row.setContentsMargins(0, 0, 0, 0)
                 heading_row.setSpacing(8)
-                row_label = QLabel(f"{label} · {r.name} ({len(r.eq_bands())})")
+                row_label = QLabel(f"{label} · {r.name} {band_count(r.eq_bands())}")
                 row_label.setProperty("class", "eq-rowlab")
                 heading_row.addWidget(row_label)
                 if eq_export.available() and r.raw.get("eq"):

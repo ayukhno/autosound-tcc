@@ -389,8 +389,8 @@ def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
 
 
 
-def test_the_tab_dots_sit_at_the_tab_s_edge(tmp_path, monkeypatch):
-    """Finding 67, 3."""
+def test_the_tab_dots_sit_close_to_the_text(tmp_path, monkeypatch):
+    """Finding 71, 1 (after 67, 3 put them at the edge)."""
     from PySide6.QtWidgets import QTabBar
 
     window = _window(tmp_path, monkeypatch)
@@ -398,5 +398,22 @@ def test_the_tab_dots_sit_at_the_tab_s_edge(tmp_path, monkeypatch):
     layout = window._control_layout
     layout.enter()
     dot = layout.tabs.tabBar().tabButton(_tab(layout, "EQ"), QTabBar.ButtonPosition.RightSide)
-    assert dot.align_right
+    assert not dot.align_right
+    layout.leave()
+
+
+def test_a_tier_with_nothing_in_it_has_no_tab_and_no_tree_group(tmp_path, monkeypatch):
+    """Finding 71, 4: «Таблиця-I» with no inputs, and «ВХОДИ 0» in the left panel."""
+    from tests.test_detail_pane import _rig_with_eq
+
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    view = _rig_with_eq(empty_inputs=True)
+    window._view = view
+    window._tree.set_view(view)
+    assert "inputs" not in window._tree._sections
+    layout = window._control_layout
+    layout.enter()
+    names = [layout.tabs.tabText(i) for i in range(layout.tabs.count())]
+    assert i18n.t("ctlTableI") not in names
     layout.leave()

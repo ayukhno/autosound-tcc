@@ -581,7 +581,8 @@ class DspTreeWidget(QWidget):
             params = ParamsSection("params", i18n.t("params"), view.features, self._settings)
             self._layout.insertWidget(self._layout.count() - 1, params)
         self._sections = {}
-        for group in view.groups:
+        # A tier with nothing in it is not drawn: «ВХОДИ 0» on a rig with no inputs (finding 71, 4).
+        for group in (g for g in view.groups if g.rows_visible()):
             section = TreeGroupSection(group, self._settings)
             self._sections[group.id] = section
             if group.id == self._active[0]:
