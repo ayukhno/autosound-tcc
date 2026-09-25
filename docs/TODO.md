@@ -2054,7 +2054,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
+**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
@@ -2081,6 +2081,16 @@ and gave his OK marked urgent: built as tcc#51, one commit `3b7003a` on this bra
 #209 PAS-009 (the band card: number, bypass) with findings 67–69 (full suite 2331 passed). Still his
 to say: whether #51 and #52 ship ahead of the wave, and whether tcc#50 (a state file's name and its
 `version` field disagree) goes into the pool and onto the milestone; it is not recorded yet.
+
+Later on 2026-09-25, built at once on his word: tcc#53 (finding 71 and his looks at it) —
+`8fbbab6`, `02f2812`, `ce6a261`, `b985279`, `8a39e92`, `9e18ba3`: tier pickers «Virtual: / Output:
+/ Input:» in the EQ header, counts «(active/configured)» in the pickers, table and tree, no empty
+tabs or tree groups, tab dots drawn by the bar itself, the EQ's actions after «Фази» before
+«порівняти з». He asked for no tag: this Mac runs `9e18ba3` from git (`uv tool install … @<sha>`).
+Recorded, not built: finding 70 (a «Налаштування» menu, the card's field order among the
+settings; no OK yet) and 72 (other presets' ledgers carry no band `i` — the car session's side; I
+offered to send it a ticket, no answer yet). Hub #211 PAS-011 and #209 PAS-009 are taken and close
+with the tag that ships them. Full suite at `9e18ba3`: 2337 passed (-n 4).
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
 says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and
