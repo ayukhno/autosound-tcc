@@ -2054,7 +2054,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · collection went on 2026-09-24, stopped at the Arbiter's «добраніч» · resume: `hub/bin/role tcc --resume ed346fc5-4f04-4e43-9b43-ad1bfb82c9e1`
+**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
@@ -2069,6 +2069,14 @@ Built during the collection on the Arbiter's explicit OK, all on this branch: #4
 (F-083), #48 the house-curve page (F-084), #49 Help → User guide (F-085). Hub #202 SKL-053 is
 taken and closes once the guides are on `main` (tag + three file URLs); #203 TCC-029 waits on the
 skill. The full suite has not run on these commits: once before the wave's PR, VM suspended.
+
+On 2026-09-25, on the Arbiter's word, a throwaway prototype for finding 47: both modes, three EQ
+views (A/B/C), https://claude.ai/artifact/12URm52ozKpbTRhPnLRPiU, source
+`hub/scratch/tcc/dsp-tables-prototype.html` (not in git; to a throwaway branch once a view is
+chosen). While it was built the Arbiter added findings 65 (status dots on the tree's groups and the
+tabs) and 66 («порівняти з» across configurations); both are in the prototype. Waiting on him: which
+EQ view, and whether tcc#50 (a state file's name and its `version` field disagree) goes into the pool
+and onto the milestone; it is not recorded yet.
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
 says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and

@@ -1682,6 +1682,12 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 
 **Weight.** High for 5 (a dead end); medium for the rest.
 
+**Prototype (2026-09-25, on the Arbiter's word).** A clickable mockup of both modes, three EQ views
+(A/B/C) and findings 65–66: https://claude.ai/artifact/12URm52ozKpbTRhPnLRPiU (source
+`hub/scratch/tcc/dsp-tables-prototype.html`; it goes to a throwaway branch once a view is chosen).
+The session's own proposals are marked ◇ there: a «Таблиця-I» tab, the EQ's channel actions in the
+EQ's own header, and the three views themselves.
+
 
 ### 48. The SDK list still offers Opus 5 and Fable 5 after Anthropic shipped Opus 5.5 and Fable 5.1
 
@@ -1941,3 +1947,33 @@ Arbiter's rule to merge pairs, sides and joints into one «Group» column; not l
 **Where.** The Arbiter's project, round `cap_016`, phase 2 (screenshot, 2026-09-24).
 
 **Weight.** High: the task the tuner reads is not the task the session issued.
+
+### 65. Status dots on the tree's DSP groups and on the tabs: none, set, changed
+
+**What.** The Arbiter's ask (2026-09-25, two screenshots): beside «ВІРТУАЛЬНІ 6/8 · ВИХІДНІ 8/12 ·
+ВХОДИ 0» in the left panel, and on the tabs «Таблиця-V · Таблиця-О · EQ · Рівень · Затримки · Фази»,
+a dot says at a glance whether there are settings there: grey — none, one colour — there are,
+another — there are changes. In the colours TCC already has.
+
+**In the prototype (finding 47).** Grey `off` for none, green `ok` as on the DSP section's version
+dot for set, blue `info` as the compare's changed cells for «differs from the version in «порівняти
+з»»; no blue while nothing is compared. The full mode's pane menu carries the same dots.
+
+**Where.** v0.1.43, the left panel and «Режим контролю».
+
+**Weight.** Medium: a wish, nothing is broken.
+
+### 66. «порівняти з» offers only the current preset's versions
+
+**What.** The Arbiter (2026-09-25): comparing must work not only with the v_xxx of the current
+configuration but with other configurations too. Today the list is `ledger_line.versions(root,
+preset)`, the open preset's versions only (`main_window._offer_compare`).
+
+**In the prototype (finding 47).** The list is grouped: this preset first, then the other presets,
+each version under the name it was saved with in the DSP (`v_004 · SQ-2`). A version of another
+configuration shows an «інша конфігурація» tag beside the list and in the table's note. The default
+stays the configuration this one continues.
+
+**Where.** v0.1.43, «порівняти з» in both modes.
+
+**Weight.** Medium: a whole kind of comparison (SQ against FULL) cannot be made.
