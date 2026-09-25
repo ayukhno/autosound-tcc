@@ -2052,3 +2052,23 @@ Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in 
 **Where.** TCC's menu; the band card's order (`detail_pane.eq_field_order`, since `305cd47`).
 
 **Weight.** Medium: a place for settings that today are scattered or built in.
+
+### 71. The EQ view and the tabs, third pass (the Arbiter, 2026-09-25, on `985c097`)
+
+**What.** With screenshots, to be built at once («зразу зробимо коміт»):
+
+1. The tab dots closer to the text, not at the tab's right edge (reverses 67, 3 as built).
+2. The band cards do not wrap: a scroll instead.
+3. The count of configured bands in brackets.
+4. No tab when there is nothing in it («Таблиця-I» with no inputs), and the same for the left panel
+   («ВХОДИ 0»).
+5. A band that has settings but is bypassed is shown; a band with none (empty, white in PC-Tool)
+   is skipped. The count reads «(8/12)»: 8 active of 12 configured, the empty ones not counted.
+6. The tier list (67, 5 as built, on the left) goes horizontal into the EQ's header row:
+   «V: VFL/VFR   O: tw-L/tw-R   I: -/-»; in single mode one channel per tier; a click on a tier
+   drops down its list of channels, as the left list does now.
+
+**Where.** `wave-0.1.44` at `985c097`, both modes.
+
+**Weight.** Medium for 5 (a bypassed band with settings and an empty one read the same); low for
+the rest.
