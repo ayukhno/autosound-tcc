@@ -896,6 +896,17 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-color: {t.accent_dim};
         background: {t.mix('accent', 12)};
     }}
+    /* Copy the bank: active is an accent button, passive (pair mode's header) plainly is not —
+       they read the same before (finding 67, 4). */
+    QLabel[class~="d-copy"] {{
+        color: {t.accent};
+        border-color: {t.accent_dim};
+    }}
+    QLabel[class~="d-copy"]:disabled {{
+        color: {t.faint};
+        border: 1px dashed {t.border2};
+        background: transparent;
+    }}
     QPushButton[class~="d-close"] {{
         background: transparent;
         border: 1px solid {t.border2};
@@ -989,6 +1000,30 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         letter-spacing: 1px;
         text-transform: uppercase;
         padding: 4px 0 7px;
+    }}
+    /* A band bypassed in the DSP (hub #209 PAS-009): lit, as PC-Tool's orange Bypass. */
+    QLabel[class~="band-byp"][class~="on"] {{
+        color: {t.accent};
+        font-weight: 700;
+    }}
+    /* The filter type by family (finding 69): green a shelf, blue PK, yellow APF. */
+    QLabel[class~="band-shelf"] {{ color: {t.ok}; }}
+    QLabel[class~="band-pk"] {{ color: {t.info}; }}
+    QLabel[class~="band-apf"] {{ color: {t.yellow}; }}
+    QLabel[class~="band-other"] {{ color: {t.muted}; }}
+    /* The EQ's channel list, tier by tier (finding 67, 5). */
+    QWidget[class~="tier-head"] {{ border-radius: 5px; }}
+    QWidget[class~="tier-head"]:hover {{ background: {t.panel2}; }}
+    QLabel[class~="tier-row"] {{
+        color: {t.text};
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 12px;
+    }}
+    QLabel[class~="tier-row"]:hover {{ background: {t.panel2}; }}
+    QLabel[class~="tier-row"][class~="on"] {{
+        color: {t.accent};
+        background: {t.mix('accent', 12)};
     }}
 
     /* ---- Plan-Fact panel ---- */
@@ -1505,7 +1540,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     /* «Режим контролю»: eight tabs with their dots and «порівняти з» on half a screen. */
     QTabWidget#ctl-tabs QTabBar::tab {{
-        padding: 6px 7px;
+        padding: 6px 2px 6px 8px;
         margin-right: 2px;
     }}
 

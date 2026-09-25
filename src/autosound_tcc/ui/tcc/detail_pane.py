@@ -36,6 +36,7 @@ from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, Profil
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+from autosound_tcc.ui.tcc.setting_status import StatusDot, field_status
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # field token -> (column header, cell-renderer). Order here is the fallback display order when a
@@ -121,12 +122,43 @@ class _DTab(QLabel):
         self.style().polish(self)
 
 
+#: Freq first, then Q and Gain in the order the processor's own software shows them (finding 68,
+#: the Arbiter, 2026-09-25): PC-Tool (Helix, Audiotec-Fischer) reads Freq · Gain · Q; a MUSWAY
+#: reads Freq · Q · Gain. The profile does not state it, so the vendor decides.
+_ORDER_DEFAULT = ("freq", "q", "gain")
+_ORDER_GAIN_FIRST = ("freq", "gain", "q")
+
+
+def eq_field_order(vendor: Optional[str], name: Optional[str] = "") -> tuple:
+    said = f"{vendor or ''} {name or ''}".lower()
+    return _ORDER_GAIN_FIRST if ("audiotec" in said or "helix" in said) else _ORDER_DEFAULT
+
+
+def _band_kind(kind: Optional[str]) -> str:
+    """The filter type's family, for its colour (finding 69): shelf · pk · apf · other."""
+    k = (kind or "").upper()
+    if k in ("LSH", "HSH", "LS", "HS", "LSF", "HSF") or "SHELF" in k:
+        return "shelf"
+    if k in ("PK", "PEQ", "PEAK", "BELL"):
+        return "pk"
+    if k in ("APF", "AP", "ALLPASS") or k.startswith("AP"):
+        return "apf"
+    return "other"
+
+
+def _band_empty(band: EqBand) -> bool:
+    """A slot with nothing in it: not drawn (PAS-011) — the gap shows in the band numbers."""
+    return (band.type or "").upper() in ("", "OFF", "NONE") or not band.freq_hz
+
+
 class EqBandCard(QFrame):
-    """One EQ band card: Type/Freq/Q/Gain + a read-only ByPass row. `match_color`, when given,
-    draws the colored top border used to flag a shared frequency between paired L/R channels."""
+    """One EQ band card: «Type (band)» + Freq/Q/Gain in the processor's order + the band's own
+    bypass. `match_color`, when given, draws the colored top border used to flag a shared frequency
+    between paired L/R channels."""
 
     def __init__(
-        self, band: EqBand, match_color: Optional[str] = None, gain_mismatch: bool = False
+        self, band: EqBand, match_color: Optional[str] = None, gain_mismatch: bool = False,
+        order: tuple = _ORDER_DEFAULT,
     ) -> None:
         super().__init__()
         self.setProperty("class", "band")
@@ -141,14 +173,19 @@ class EqBandCard(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        bid = QLabel(band.type)
-        bid.setProperty("class", "band-id")
-        bid.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(bid)
+        # The DSP's own band number in brackets (hub #211 PAS-011, finding 69): PC-Tool names a band
+        # by it, and the check «band N in the DSP = card N here» was done by eye.
+        title = f"{band.type} ({band.index})" if band.index is not None else band.type
+        self._title = QLabel(title)
+        self._title.setProperty("class", f"band-id band-{_band_kind(band.type)}")
+        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._title)
 
-        for label, value in (("Freq", f"{band.freq_hz:g} Hz"),
-                              ("Q", f"{band.q:.2f}" if band.q is not None else "—"),
-                              ("Gain", f"{band.gain_db:+.1f} dB" if band.gain_db is not None else "—")):
+        values = {"freq": ("Freq", f"{band.freq_hz:g} Hz"),
+                  "q": ("Q", f"{band.q:.2f}" if band.q is not None else "—"),
+                  "gain": ("Gain", f"{band.gain_db:+.1f} dB" if band.gain_db is not None else "—")}
+        self._field_names = [values[key][0] for key in order]
+        for label, value in (values[key] for key in order):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(8, 3, 8, 3)
@@ -164,28 +201,83 @@ class EqBandCard(QFrame):
             row_layout.addWidget(fv)
             layout.addWidget(row)
 
-        byp = QLabel("○ ByPass")
-        byp.setProperty("class", "band-byp")
-        apply_caps(byp, spacing_px=0.8)
-        byp.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(byp)
+        # The band's own bypass (hub #209 PAS-009): the same grey «○ ByPass» stood on every band,
+        # and a band switched off in the DSP could not be told from one that was on. A band with
+        # no `bypass` (older files) is on — the ledger's own reading.
+        self._byp = QLabel(("● " if band.bypass else "○ ") + "ByPass")
+        self._byp.setProperty("class", "band-byp on" if band.bypass else "band-byp")
+        apply_caps(self._byp, spacing_px=0.8)
+        self._byp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._byp)
+
+    def field_names(self) -> list:
+        return list(self._field_names)
 
 
 def _band_flow(
     bands: tuple[EqBand, ...],
     match_map: Optional[dict[float, str]] = None,
     gain_mismatch_freqs: Optional[set] = None,
+    order: tuple = _ORDER_DEFAULT,
 ) -> QWidget:
     container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(8)
-    for band in bands:
+    # Wrapping, not one long row: beside the tier list (finding 67, 5) a row of 15 bands was a
+    # sideways scroll.
+    layout = FlowLayout(container, spacing=8)
+    # By the DSP's band number, as PC-Tool lists them; an empty slot draws nothing (PAS-011).
+    shown = sorted((b for b in bands if not _band_empty(b)),
+                   key=lambda b: (b.index is None, b.index or 0))
+    for band in shown:
         color = (match_map or {}).get(band.freq_hz)
         mismatch = band.freq_hz in (gain_mismatch_freqs or ())
-        layout.addWidget(EqBandCard(band, color, mismatch))
-    layout.addStretch(1)
+        layout.addWidget(EqBandCard(band, color, mismatch, order))
     return container
+
+
+class _ClickRow(QWidget):
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        event.accept()
+        self.clicked.emit()
+
+
+class _Tier(QWidget):
+    """One tier in the EQ's channel list: a header (twist, name, status dot) over its channels."""
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.header = _ClickRow()
+        self.header.setProperty("class", "tier-head")
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        head = QHBoxLayout(self.header)
+        head.setContentsMargins(4, 4, 4, 4)
+        head.setSpacing(6)
+        self._twist = QLabel("▸")
+        self._twist.setProperty("class", "tw")
+        head.addWidget(self._twist)
+        name = QLabel(title)
+        name.setProperty("class", "kv-lbl")
+        head.addWidget(name)
+        self.dot = StatusDot()
+        head.addWidget(self.dot)
+        head.addStretch(1)
+        outer.addWidget(self.header)
+        self.body = QWidget()
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(14, 0, 0, 4)
+        self.body_layout.setSpacing(1)
+        outer.addWidget(self.body)
+
+    def is_open(self) -> bool:
+        return not self.body.isHidden()
+
+    def set_open(self, on: bool) -> None:
+        self.body.setHidden(not on)
+        self._twist.setText("▾" if on else "▸")
 
 
 #: Marks a cell whose value differs from the compared version (the Arbiter, 2026-09-23).
@@ -209,6 +301,9 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
         combo.model().item(combo.count() - 1).setEnabled(False)
         for key, label in items:
             combo.addItem(str(label), str(key))
+    # The open list as wide as its longest line: it wrapped «2.S-shelf — інший пресет» (67, 2).
+    view = combo.view()
+    view.setMinimumWidth(view.sizeHintForColumn(0) + 24)
 
 
 def is_other_preset(key: Optional[str]) -> bool:
@@ -248,6 +343,9 @@ class DetailPane(QFrame):
         self._compare_version: Optional[str] = None
         self._compare_text = ""
         self._selected: Optional[str] = None
+        self._eq_order: tuple = _ORDER_DEFAULT
+        self._tiers: dict = {}
+        self._tier_rows: dict = {}
         #: The whole project view, for the one-parameter tabs: gain, delay and phase are asked
         #: about ACROSS the rig ("show the table for all channels, physical and virtual" -- user,
         #: 2026-08-23), and a single group cannot answer that.
@@ -299,6 +397,7 @@ class DetailPane(QFrame):
         # the method can produce one for this DSP: a copy button that yields nothing, or
         # something nobody can identify, is worse than no button (user, 2026-08-23).
         self._eq_copy = _DTab(i18n.t("copyEqBank"))
+        self._eq_copy.setProperty("class", "d-tab d-copy")
         self._eq_copy.clicked.connect(self._on_copy_eq_bank)
         self._eq_copy.setVisible(False)
         head_layout.addWidget(self._eq_copy)
@@ -382,6 +481,12 @@ class DetailPane(QFrame):
         self._compare_label.setVisible(False)
         self._compare_combo.setVisible(False)
         self._sync_tabs()
+
+    def set_eq_order(self, order: tuple) -> None:
+        """Freq · Q · Gain or Freq · Gain · Q — the processor's own order (finding 68)."""
+        self._eq_order = tuple(order)
+        if self._mode == "eq" and self._group is not None and self._row is not None:
+            self.open_eq(self._group, self._row)
 
     def set_back(self, label: Optional[str], callback=None) -> None:
         """Name the way back from the EQ on screen, or say there is none."""
@@ -935,45 +1040,66 @@ class DetailPane(QFrame):
 
     # ---- EQ view ----------------------------------------------------------
 
-    def _chip_row(self, shown: set) -> Optional[QWidget]:
-        """Every channel that has an EQ, as a button, tier by tier — view A of the prototype, the
-        one the Arbiter kept (2026-09-25). The one on screen is lit; a click shows that one."""
-        self._eq_chips = {}
-        groups = getattr(self._view, "groups", ()) or ()
-        tiers = [(g, [r for r in g.rows_visible() if r.eq_count() > 0]) for g in groups]
-        tiers = [(g, rows) for g, rows in tiers if rows]
-        if not tiers:
+    def _tier_column(self, open_group: str, shown: set) -> Optional[QWidget]:
+        """The channels to pick from, tier by tier: virtual · outputs · inputs, the tier on screen
+        open and the others closed, each with its coloured status dot — «списки назва — деталі,
+        з трьох один відкритий, інші закриті і з крапочками» (the Arbiter, 2026-09-25, finding
+        67, 5: the row of buttons grew too long)."""
+        self._tiers, self._tier_rows = {}, {}
+        groups = [g for g in (getattr(self._view, "groups", ()) or ()) if g.rows_visible()]
+        if not groups:
             return None
-        holder = QWidget()
-        flow = FlowLayout(holder, spacing=6)
-        for group, rows in tiers:
+        old = getattr(self._compare_view, "groups", ()) or ()
+        compared = self._compare_view is not None
+        column = QWidget()
+        column.setMinimumWidth(170)
+        column.setMaximumWidth(230)
+        col = QVBoxLayout(column)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        for group in groups:
             said = i18n.t(f"chanSum_{group.id}")
-            tier = QLabel(said if said != f"chanSum_{group.id}" else group.label)
-            tier.setProperty("class", "kv-lbl")
-            flow.addWidget(tier)
-            for row in rows:
-                chip = _DTab(f"{row.name} · {row.eq_count()}")
-                chip.set_on((group.id, row.id) in shown)
-                # Deferred: the chip sits in the view it replaces (see `_build_table`'s click).
-                chip.clicked.connect(lambda _c=False, g=group, r=row:
+            tier = _Tier(said if said != f"chanSum_{group.id}" else group.label)
+            tier.dot.set_status(field_status([group], "eq", old, compared), self._compare_text)
+            for row in group.rows_visible():
+                n = row.eq_count()
+                pick = _DTab(f"{row.name} — EQ {n}" if n else f"{row.name} — EQ —")
+                pick.setProperty("class", "tier-row on" if (group.id, row.id) in shown
+                                 else "tier-row")
+                # Deferred: the row sits in the view it replaces (see `_build_table`'s click).
+                pick.clicked.connect(lambda _c=False, g=group, r=row:
                                      QTimer.singleShot(0, lambda: self.open_eq(g, r)))
-                flow.addWidget(chip)
-                self._eq_chips[(group.id, row.id)] = chip
-        return holder
+                tier.body_layout.addWidget(pick)
+                self._tier_rows[(group.id, row.id)] = pick
+            tier.set_open(group.id == open_group)
+            tier.header.clicked.connect(lambda gid=group.id: self._open_tier(gid))
+            col.addWidget(tier)
+            self._tiers[group.id] = tier
+        col.addStretch(1)
+        return column
+
+    def _open_tier(self, group_id: str) -> None:
+        for gid, tier in self._tiers.items():
+            tier.set_open(gid == group_id)
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
 
         container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(12, 8, 12, 12)
-        layout.setSpacing(8)
+        outer = QHBoxLayout(container)
+        outer.setContentsMargins(12, 8, 12, 12)
+        outer.setSpacing(12)
         shown = {(group.id, row.id)}
         if self._pair_mode and sib_row:
             shown.add((group.id, sib_row.id))
-        chips = self._chip_row(shown)
-        if chips is not None:
-            layout.addWidget(chips)
+        column = self._tier_column(group.id, shown)
+        if column is not None:
+            outer.addWidget(column, 0, Qt.AlignmentFlag.AlignTop)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        outer.addWidget(body, 1)
 
         if self._pair_mode and sib_row:
             l_row, r_row = (row, sib_row) if _is_left(row.name) else (sib_row, row)
@@ -1013,15 +1139,17 @@ class DetailPane(QFrame):
                 heading_row.addWidget(row_label)
                 if eq_export.available() and r.raw.get("eq"):
                     copy_btn = _DTab(i18n.t("copyEqBank"))
+                    copy_btn.setProperty("class", "d-tab d-copy")
                     copy_btn.clicked.connect(
                         lambda _checked=False, target=r: self._copy_bank_of(group, target)
                     )
                     heading_row.addWidget(copy_btn)
                 heading_row.addStretch(1)
                 layout.addWidget(heading)
-                layout.addWidget(_band_flow(r.eq_bands(), match_map, gain_mismatch))
+                layout.addWidget(_band_flow(r.eq_bands(), match_map, gain_mismatch,
+                                            self._eq_order))
         else:
-            layout.addWidget(_band_flow(row.eq_bands()))
+            layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order))
 
         layout.addStretch(1)
         self._scroll.setWidget(container)

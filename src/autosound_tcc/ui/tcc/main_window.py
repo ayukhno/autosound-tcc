@@ -100,7 +100,7 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
-from autosound_tcc.ui.tcc.detail_pane import DetailPane, is_other_preset
+from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
@@ -2129,6 +2129,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 — surface any load/parse failure, don't crash
             self._show_left_status(f"Could not load DSP profile:\n{type(exc).__name__}: {exc}")
             return
+        # The band card's Q and Gain in the processor's own order (finding 68).
+        described = profile.get("dsp_profile", profile)
+        self._eq_order = eq_field_order(described.get("vendor"), described.get("name"))
+        self._detail.set_eq_order(self._eq_order)
 
         root = config.state_root()
         available = config.available_presets(root)
@@ -2197,8 +2201,7 @@ class MainWindow(QMainWindow):
             self._detail.set_view(rig)
             self._set_project_params(rig)
             self._refresh_open_detail()
-            self._slot_label.setText("")
-            self._save_label.setText("")
+            self._show_slot_and_save("", "")
             self._target_label.setText("")
             # No configuration yet, so no version and nothing to be yellow or green about.
             self._dsp_section.set_dot(None)
@@ -2237,12 +2240,19 @@ class MainWindow(QMainWindow):
         self._set_project_params(view)
         self._refresh_open_detail()
 
-        self._slot_label.setText(view.slot_label or "")
-        self._save_label.setText(view.save or "")
+        self._show_slot_and_save(view.slot_label or "", view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._show_version(view, profile)
         self._offer_compare(root, preset, profile, view.version)
         self._show_banked_delta(view.version, preset)
+
+    def _show_slot_and_save(self, slot: str, save: str) -> None:
+        """An empty label takes no room: its spacing pushed the target link away from the preset
+        field, and at half a screen the header ran out of width (finding 67, 1)."""
+        self._slot_label.setText(slot)
+        self._slot_label.setVisible(bool(slot))
+        self._save_label.setText(save)
+        self._save_label.setVisible(bool(save))
 
     def _show_version(self, view, profile: dict) -> None:
         """The configuration in the processor NOW, in the DSP section's header: `v_008` with its

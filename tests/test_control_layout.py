@@ -366,3 +366,37 @@ def test_the_tree_lights_what_the_full_window_s_pane_shows(tmp_path, monkeypatch
     assert window._tree.active() == ("physical_outputs", "m-L")
     window._detail.close_pane()
     assert window._tree.active() == (None, None)
+
+
+def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
+    """Finding 67, 1: at half a screen the header's widgets ran over each other — «SQ-Comp» on top
+    of «порівняти з». The link moves left, up to the preset field; nothing overlaps."""
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    window._preset_combo.addItem("1.B-base")
+    window._show_slot_and_save("", "")
+    window._target_label.setText("SQ-Comp ↗")
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    window.resize(756, 900)
+    for _ in range(3):
+        QApplication.processEvents()
+    target, corner = window._target_label.geometry(), layout._corner.geometry()
+    assert target.right() < corner.left(), (target, corner)
+    assert not window._save_label.isVisibleTo(window), "an empty label takes no room"
+    layout.leave()
+
+
+
+def test_the_tab_dots_sit_at_the_tab_s_edge(tmp_path, monkeypatch):
+    """Finding 67, 3."""
+    from PySide6.QtWidgets import QTabBar
+
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    layout = window._control_layout
+    layout.enter()
+    dot = layout.tabs.tabBar().tabButton(_tab(layout, "EQ"), QTabBar.ButtonPosition.RightSide)
+    assert dot.align_right
+    layout.leave()

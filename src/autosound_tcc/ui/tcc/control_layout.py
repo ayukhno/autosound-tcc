@@ -50,7 +50,12 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import config
 from autosound_tcc.ui.tcc import i18n
-from autosound_tcc.ui.tcc.detail_pane import DetailPane, fill_compare_combo, is_other_preset
+from autosound_tcc.ui.tcc.detail_pane import (
+    DetailPane,
+    eq_field_order,
+    fill_compare_combo,
+    is_other_preset,
+)
 from autosound_tcc.ui.tcc.setting_status import StatusDot, field_status, group_status
 
 #: How many journal events the feed shows, newest last.
@@ -158,6 +163,7 @@ def _embedded(window, view) -> DetailPane:
     what the window compares with, which the one list by the tabs sets (finding 47, 1 and 4)."""
     pane = DetailPane()
     pane.set_embedded(True)
+    pane.set_eq_order(getattr(window, "_eq_order", None) or eq_field_order(None))
     pane.set_view(view)
     pane.use_compare(*_compare_now(window))
     pane.setVisible(True)
@@ -434,7 +440,7 @@ class ControlLayout:
         self.compare_combo.setProperty("class", "mini-select")
         self.compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.compare_combo.setMinimumContentsLength(10)
+        self.compare_combo.setMinimumContentsLength(6)
         self.compare_combo.currentIndexChanged.connect(self._on_compare_picked)
         layout.addWidget(self.compare_combo)
         self._compare_other = QLabel(i18n.t("cmpOtherTag"))
@@ -513,7 +519,7 @@ class ControlLayout:
                 status = field_status(groups, key, old, compared) if groups else None
             dot = self._dots.get(index)
             if dot is None:
-                dot = StatusDot(width=12)
+                dot = StatusDot(width=12, align_right=True)
                 bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, dot)
                 self._dots[index] = dot
             dot.set_status(status, said)
@@ -546,14 +552,21 @@ class ControlLayout:
             w._preset_combo.setMinimumWidth(0)
             w._preset_combo.setSizeAdjustPolicy(
                 QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            w._preset_combo.setMinimumContentsLength(8)
+            w._preset_combo.setMinimumContentsLength(6)
             w._preset_combo.setMaximumWidth(140)
             self._target_policy = w._target_label.sizePolicy()
-            w._target_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            # Preferred, not Ignored: an Ignored item is laid out below its own minimum, and the
+            # link then painted its 60 px over whatever came next («порівняти з», finding 67, 1).
+            w._target_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             w._target_label.setMinimumWidth(60)
             w._target_label.setMaximumWidth(170)
             self._menu_text = w._menu_btn.text()
             w._menu_btn.setText("☰")
+            # The header's 14 px between each of its items was the half screen it did not have:
+            # «SQ-Comp» ran over «порівняти з» (finding 67, 1).
+            header = w._layout_btn.parentWidget().layout()
+            self._header_spacing = header.spacing()
+            header.setSpacing(6)
         else:
             for widget, was in self._hidden:
                 widget.setVisible(was)
@@ -570,6 +583,8 @@ class ControlLayout:
                 w._target_label.setSizePolicy(self._target_policy)
             if getattr(self, "_menu_text", None):
                 w._menu_btn.setText(self._menu_text)
+            if getattr(self, "_header_spacing", None) is not None:
+                w._layout_btn.parentWidget().layout().setSpacing(self._header_spacing)
 
     def _place_on_screen(self) -> None:
         """TCC on the right half of its screen; the terminal on the left (A12)."""

@@ -2029,7 +2029,7 @@ to follow the DSP it shows.
 1. The card shows the band's number in brackets — the processor's own «Band» (finding 68's Helix
    screenshot: Band 4).
 2. The filter type's name is coloured by type: grey — an empty band (better not shown at all);
-   green — a shelf filter; blue — «PR» (as written; the card calls it PK); yellow — APF.
+   green — a shelf filter; blue — PK (a peaking filter); yellow — APF.
 
 **Where.** The EQ view's band cards, both modes.
 

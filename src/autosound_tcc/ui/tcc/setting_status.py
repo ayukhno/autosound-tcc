@@ -100,11 +100,14 @@ def field_status(groups: Iterable[ProfileGroup], field: str,
 class StatusDot(QWidget):
     """The dot: painted small, hovered large, with its meaning on hover."""
 
-    def __init__(self, parent: Optional[QWidget] = None, width: int = _TARGET) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, width: int = _TARGET,
+                 align_right: bool = False) -> None:
         """`width` narrower than the target where room is short — a tab, whose own tooltip then
-        carries the hint over the whole tab."""
+        carries the hint over the whole tab. `align_right` paints the dot at the right edge (a
+        tab's, finding 67, 3)."""
         super().__init__(parent)
         self.setFixedSize(width, _TARGET)
+        self.align_right = align_right
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._status: Optional[str] = None
         self._tip_text = ""
@@ -134,7 +137,7 @@ class StatusDot(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor({"none": t.off, "set": t.ok, "chg": t.info}[self._status]))
-        x = (self.width() - DOT_DIAMETER) / 2
+        x = (self.width() - DOT_DIAMETER - 1) if self.align_right else (self.width() - DOT_DIAMETER) / 2
         y = (self.height() - DOT_DIAMETER) / 2
         painter.drawEllipse(QRectF(x, y, DOT_DIAMETER, DOT_DIAMETER))
         painter.end()

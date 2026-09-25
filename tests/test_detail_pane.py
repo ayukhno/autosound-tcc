@@ -671,8 +671,9 @@ def test_the_back_button_says_where_it_leads_and_goes_there():
     assert not pane._back_btn.isVisibleTo(pane)
 
 
-def test_the_eq_view_offers_every_channel_with_an_eq_as_a_button():
-    """The Arbiter chose view A of the prototype: the channels as buttons, their bands below."""
+def test_the_eq_view_offers_the_channels_tier_by_tier():
+    """Finding 67, 5 (the Arbiter, 2026-09-25): the button row grew too long; wanted three lists,
+    one open and the others closed, each with its coloured status dot."""
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
 
     _app()
@@ -681,13 +682,20 @@ def test_the_eq_view_offers_every_channel_with_an_eq_as_a_button():
     pane = DetailPane()
     pane.set_view(view)
     pane.open_eq(outputs, _row(outputs, "m-L"))
-    chips = pane._eq_chips
-    assert sorted(name for _gid, name in chips) == ["VFL", "c", "m-L", "m-R"], "sw has no EQ"
-    assert chips[("physical_outputs", "m-L")].property("class") == "d-tab on"
+    tiers = pane._tiers
+    assert list(tiers) == ["virtual_channels", "physical_outputs"]
+    assert tiers["physical_outputs"].is_open() and not tiers["virtual_channels"].is_open(), \
+        "the tier of the channel on screen is the open one"
+    assert tiers["virtual_channels"].dot.status() == "set", "VFL carries an EQ"
+    shown = [gid_rid[1] for gid_rid, row in pane._tier_rows.items() if row.isVisibleTo(pane)]
+    assert shown == ["c", "m-L", "m-R", "sw"], "the open tier's channels, name and details"
+    assert pane._tier_rows[("physical_outputs", "m-L")].property("class") == "tier-row on"
 
-    chips[("physical_outputs", "c")].clicked.emit()
+    tiers["virtual_channels"].header.clicked.emit()
+    assert tiers["virtual_channels"].is_open() and not tiers["physical_outputs"].is_open()
+    pane._tier_rows[("virtual_channels", "VFL")].clicked.emit()
     QApplication.processEvents()
-    assert pane._row.name == "c"
+    assert pane._row.name == "VFL"
 
 
 def test_pair_mode_survives_a_channel_that_has_no_pair():
@@ -744,3 +752,96 @@ def test_level_delays_and_phases_take_a_third_column_for_the_inputs():
     pane.set_view(_rig_with_eq(inputs=True))
     pane.open_param("gain_db")
     assert len(_param_columns(pane)) == 3
+
+
+
+# ---- the band card, second pass (hub #211 PAS-011, #209 PAS-009, findings 68, 69; tcc#52) ------
+
+def test_the_card_names_its_dsp_band_in_brackets():
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    _app()
+    numbered = EqBandCard(EqBand(type="PK", freq_hz=114.0, gain_db=-10, q=5, index=4))
+    bare = EqBandCard(EqBand(type="PK", freq_hz=114.0))
+    assert numbered._title.text() == "PK (4)"
+    assert bare._title.text() == "PK", "no number, none"
+
+
+def test_the_filter_type_has_a_colour_of_its_own():
+    """Finding 69: green a shelf, blue PK, yellow APF."""
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    _app()
+    cards = {t: EqBandCard(EqBand(type=t, freq_hz=100.0)) for t in ("LSH", "HSH", "PK", "APF")}
+    kinds = {t: card._title.property("class") for t, card in cards.items()}
+    assert kinds == {"LSH": "band-id band-shelf", "HSH": "band-id band-shelf",
+                     "PK": "band-id band-pk", "APF": "band-id band-apf"}
+
+
+def test_a_bypassed_band_says_so_and_an_old_band_without_the_field_is_on():
+    """PAS-009: the card drew the same «○ ByPass» on every band. And (the Arbiter, the same day):
+    old files carry no `bypass` on some bands; there the band is on."""
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    _app()
+    off = EqBandCard(EqBand.from_dict({"type": "PK", "f": 100, "bypass": True, "i": 2}))
+    old = EqBandCard(EqBand.from_dict({"type": "PK", "f": 100, "i": 3}))
+    assert "on" in off._byp.property("class").split() and off._byp.text().startswith("●")
+    assert "on" not in old._byp.property("class").split() and old._byp.text().startswith("○")
+
+
+def test_the_fields_follow_the_processor_s_own_order():
+    """Finding 68: a Helix reads Freq · Gain · Q (PC-Tool), a MUSWAY Freq · Q · Gain."""
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard, eq_field_order
+
+    _app()
+    band = EqBand(type="PK", freq_hz=114.0, gain_db=-10, q=5)
+    helix = EqBandCard(band, order=eq_field_order("Audiotec-Fischer", "Helix DSP Ultra S"))
+    musway = EqBandCard(band, order=eq_field_order("MUSWAY", "M6v8"))
+    assert helix.field_names() == ["Freq", "Gain", "Q"]
+    assert musway.field_names() == ["Freq", "Q", "Gain"]
+
+
+def test_cards_follow_the_band_numbers_and_an_empty_slot_draws_nothing():
+    """PAS-011: ordered by the DSP's band number; a gap shows in the numbering, not as a card."""
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    _app()
+    flow = _band_flow((EqBand(type="PK", freq_hz=700.0, index=7),
+                       EqBand(type="PK", freq_hz=100.0, index=1),
+                       EqBand(type="OFF", freq_hz=0.0, index=2),
+                       EqBand(type="LSH", freq_hz=60.0, index=3)))
+    assert [c._title.text() for c in flow.findChildren(EqBandCard)] == ["PK (1)", "LSH (3)", "PK (7)"]
+
+
+def test_the_passive_copy_does_not_look_like_the_active_ones(monkeypatch):
+    """Finding 67, 4: the header's passive copy and the ones beside each name looked the same."""
+    from autosound_tcc.core import eq_export
+    from autosound_tcc.ui.tcc import theme
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane, _DTab
+
+    _app()
+    monkeypatch.setattr(eq_export, "available", lambda: True)
+    pane = DetailPane()
+    group = _pair_view()
+    pane.open_eq(group, group.rows[0])
+    pane._on_pair_toggle()
+    beside = pane._scroll.widget().findChildren(_DTab)
+    assert all("d-copy" in b.property("class").split() and b.isEnabled() for b in beside)
+    assert "d-copy" in pane._eq_copy.property("class").split() and not pane._eq_copy.isEnabled()
+    qss = theme.build_qss(theme.get_theme("dark"))
+    assert 'QLabel[class~="d-copy"]:disabled' in qss, "the passive one has a look of its own"
+
+
+def test_the_compare_list_is_wide_enough_for_whole_lines():
+    """Finding 67, 2: the open list wrapped «2.S-shelf — інший пресет» / «v_001»."""
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    combo = QComboBox()
+    fill_compare_combo(combo, ["v_006"], {"v_006": "v_006 · FULL-2"},
+                       [("2.S-shelf", [("2.S-shelf/v_001", "v_001 · 2.S-shelf")])])
+    view = combo.view()
+    assert view.minimumWidth() >= view.sizeHintForColumn(0)
