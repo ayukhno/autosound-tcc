@@ -913,3 +913,25 @@ def test_the_table_and_the_tree_count_bands_as_the_pickers_do():
     group = ProfileGroup(id="virtual_channels", label="Virtual", fields=("eq",), rows=(row,))
     chan = ChannelRow(group, row)
     assert chan._eq_chip.text() == "EQ 1/2"
+
+
+def test_the_full_window_s_eq_actions_close_the_row_and_the_close_button_elides():
+    """The Arbiter, 2026-09-25: in the full window «⇄ L + R · ? · Копіювати EQ» sat between
+    «EQ» and «Рівень», and the tabs jumped as they came and went; to the row's end. And a squeezed
+    «закрити ×» was cut on both sides («(риті»): shorten from the end instead."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.labels import ElidedButton
+
+    _app()
+    pane = DetailPane()
+    head = pane._head.layout()
+    order = [head.indexOf(w) for w in (pane._tab_eq, pane._param_tabs["phase_deg"],
+                                       pane._compare_combo, pane._close_btn, pane._eq_copy,
+                                       pane._pair_btn, pane._eq_help)]
+    assert order == sorted(order), order
+    assert isinstance(pane._close_btn, ElidedButton)
+    group = _pair_view()
+    pane.open_eq(group, group.rows[0])
+    assert not pane._title.isVisibleTo(pane), "the «EQ m-L» tab already says it"
+    pane.open_table(group)
+    assert pane._title.isVisibleTo(pane), "a table keeps its title"

@@ -23,9 +23,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
-    QScrollArea,
     QMenu,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -36,6 +35,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
+from autosound_tcc.ui.tcc.labels import ElidedButton
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.setting_status import field_status, tip_for
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
@@ -420,6 +420,10 @@ class DetailPane(QFrame):
         head_layout.addWidget(self._compare_label)
         self._compare_combo = QComboBox()
         self._compare_combo.setProperty("class", "mini-select")
+        # As wide as a version's name, not as the longest line in its list: the head is full.
+        self._compare_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._compare_combo.setMinimumContentsLength(6)
         self._compare_combo.currentIndexChanged.connect(self._on_compare_changed)
         head_layout.addWidget(self._compare_combo)
         # Said beside the list when the version picked is another preset's (finding 66).
@@ -430,10 +434,18 @@ class DetailPane(QFrame):
         self._compare_combo.setVisible(False)
         self._compare_other.setVisible(False)
 
-        self._close_btn = QPushButton(i18n.t("close"))
+        # Shortened from its end when the row is short, not cut on both sides («(риті», the
+        # Arbiter, 2026-09-25).
+        self._close_btn = ElidedButton(i18n.t("close"))
         self._close_btn.setProperty("class", "d-close")
         self._close_btn.clicked.connect(self.close_pane)
         head_layout.addWidget(self._close_btn)
+        # The EQ's actions close the row, copy before the pair toggle: between «EQ» and «Рівень»
+        # they made the tabs jump as they came and went, and with copy after the toggle the toggle
+        # moved when copy went (the Arbiter, 2026-09-25: «в кінець, так щоб не скакало»).
+        for widget in (self._eq_copy, self._pair_btn, self._eq_help):
+            head_layout.removeWidget(widget)
+            head_layout.addWidget(widget)
         outer.addWidget(head)
 
         self._scroll = QScrollArea()
@@ -481,11 +493,6 @@ class DetailPane(QFrame):
             head = self._head.layout()
             head.removeWidget(self._pick_holder)
             head.insertWidget(head.indexOf(self._back_btn) + 1, self._pick_holder)
-            # Copy BEFORE the pair toggle: copy goes in pair mode, and with it after the toggle the
-            # toggle moved under the pointer (the Arbiter, 2026-09-25: «щоб не скакало»).
-            for widget in (self._eq_copy, self._pair_btn, self._eq_help):
-                head.removeWidget(widget)
-                head.addWidget(widget)
         self._sync_tabs()
 
     def set_eq_order(self, order: tuple) -> None:
@@ -738,10 +745,11 @@ class DetailPane(QFrame):
             widget.setVisible(menu)
         self._compare_other.setVisible(menu and self._compare_combo.isVisibleTo(self)
                                        and is_other_preset(self._compare_version))
-        # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy —
-        # and no grey «EQ · m-L»: the lit picker says which one it is.
+        # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy.
+        # No grey «EQ · m-L» over an EQ in either mode: the lit picker, or the «EQ m-L» tab, says
+        # which one it is, and in the full window the head needed the room for the copy.
         self._head.setVisible(menu or eq_on)
-        self._title.setVisible(menu)
+        self._title.setVisible(menu and not eq_on)
         self._pick_holder.setVisible(self._embedded and eq_on)
 
     def _on_tab_table(self) -> None:
