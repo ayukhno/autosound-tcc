@@ -2000,9 +2000,9 @@ stays the configuration this one continues.
 4. The header's passive «Копіювати EQ» (pair mode) and the active one beside each channel look the
    same; nothing tells them apart.
 5. The EQ's channel-button row can get too long. Wanted: lists of «name — details» where, of the
-   three, one is open and the others closed, «з крапочками». Whether the three are the tiers
-   (virtual · outputs · inputs) and whether «крапочки» are an ellipsis or the status dots is not
-   said: to be asked at the review, not guessed.
+   three, one is open and the others closed, «з крапочками». Answered the same day: the three are
+   the tiers (virtual · outputs · inputs), and the dots are the coloured status dots of finding 65
+   (none · set · changed), on each tier's header.
 
 **Where.** `wave-0.1.44` at `3b7003a`, «Режим контролю».
 
