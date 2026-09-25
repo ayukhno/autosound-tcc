@@ -1688,6 +1688,12 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 The session's own proposals are marked ◇ there: a «Таблиця-I» tab, the EQ's channel actions in the
 EQ's own header, and the three views themselves.
 
+**Built (2026-09-25, the Arbiter's OK and «терміново»):** tcc#51, commit `3b7003a` on
+`wave-0.1.44`, EQ view A. The prototype itself is kept on the throwaway branch
+`proto/f47-dsp-tables` (`f6e13db`). One placement differs from the prototype: in control mode
+«порівняти з» sits in the header left of «Активний TCC», not at the right of the tab row, because
+half a screen holds the eight tabs with their dots or the list, not both (measured offscreen).
+
 
 ### 48. The SDK list still offers Opus 5 and Fable 5 after Anthropic shipped Opus 5.5 and Fable 5.1
 
@@ -1963,6 +1969,8 @@ dot for set, blue `info` as the compare's changed cells for «differs from the v
 
 **Weight.** Medium: a wish, nothing is broken.
 
+**Built:** tcc#51, `3b7003a` (with finding 47).
+
 ### 66. «порівняти з» offers only the current preset's versions
 
 **What.** The Arbiter (2026-09-25): comparing must work not only with the v_xxx of the current
@@ -1977,3 +1985,5 @@ stays the configuration this one continues.
 **Where.** v0.1.43, «порівняти з» in both modes.
 
 **Weight.** Medium: a whole kind of comparison (SQ against FULL) cannot be made.
+
+**Built:** tcc#51, `3b7003a` (with finding 47).
