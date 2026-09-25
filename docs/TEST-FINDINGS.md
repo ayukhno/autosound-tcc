@@ -1987,3 +1987,24 @@ stays the configuration this one continues.
 **Weight.** Medium: a whole kind of comparison (SQ against FULL) cannot be made.
 
 **Built:** tcc#51, `3b7003a` (with finding 47).
+
+### 67. Control mode after #51: the header overlaps, the compare list wraps, and four more
+
+**What.** The Arbiter's list on the build of #51 (`3b7003a`), 2026-09-25, with screenshots:
+
+1. In the header the target-curve link («SQ-Comp») runs over the «порівняти з» label. Move the link
+   left, up to the field before it.
+2. The open «порівняти з» list wraps its lines («2.S-shelf — інший пресет» / «v_001»). Make it wide
+   enough for each line to fit whole.
+3. The tab dots: put them at the tab's edge.
+4. The header's passive «Копіювати EQ» (pair mode) and the active one beside each channel look the
+   same; nothing tells them apart.
+5. The EQ's channel-button row can get too long. Wanted: lists of «name — details» where, of the
+   three, one is open and the others closed, «з крапочками». Whether the three are the tiers
+   (virtual · outputs · inputs) and whether «крапочки» are an ellipsis or the status dots is not
+   said: to be asked at the review, not guessed.
+
+**Where.** `wave-0.1.44` at `3b7003a`, «Режим контролю».
+
+**Weight.** Medium for 1 and 2 (text over text, a list that cannot be read in one line); low for
+3–5.
