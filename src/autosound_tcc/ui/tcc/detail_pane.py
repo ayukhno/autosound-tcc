@@ -440,12 +440,15 @@ class DetailPane(QFrame):
         self._close_btn.setProperty("class", "d-close")
         self._close_btn.clicked.connect(self.close_pane)
         head_layout.addWidget(self._close_btn)
-        # The EQ's actions close the row, copy before the pair toggle: between «EQ» and «Рівень»
-        # they made the tabs jump as they came and went, and with copy after the toggle the toggle
-        # moved when copy went (the Arbiter, 2026-09-25: «в кінець, так щоб не скакало»).
+        # The EQ's actions after «Фази», right before «порівняти з», copy before the pair toggle:
+        # between «EQ» and «Рівень» they made the tabs jump as they came and went, and with copy
+        # after the toggle the toggle moved when copy went (the Arbiter, 2026-09-25). Past the
+        # stretch, so nothing on either side moves when copy goes.
         for widget in (self._eq_copy, self._pair_btn, self._eq_help):
             head_layout.removeWidget(widget)
-            head_layout.addWidget(widget)
+        at = head_layout.indexOf(self._compare_label)
+        for offset, widget in enumerate((self._eq_copy, self._pair_btn, self._eq_help)):
+            head_layout.insertWidget(at + offset, widget)
         outer.addWidget(head)
 
         self._scroll = QScrollArea()

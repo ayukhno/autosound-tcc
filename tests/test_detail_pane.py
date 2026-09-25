@@ -925,9 +925,10 @@ def test_the_full_window_s_eq_actions_close_the_row_and_the_close_button_elides(
     _app()
     pane = DetailPane()
     head = pane._head.layout()
+    # After «Фази», before «порівняти з» (the Arbiter, 2026-09-25: «ти мене не зрозумів»).
     order = [head.indexOf(w) for w in (pane._tab_eq, pane._param_tabs["phase_deg"],
-                                       pane._compare_combo, pane._close_btn, pane._eq_copy,
-                                       pane._pair_btn, pane._eq_help)]
+                                       pane._eq_copy, pane._pair_btn, pane._eq_help,
+                                       pane._compare_label, pane._compare_combo, pane._close_btn)]
     assert order == sorted(order), order
     assert isinstance(pane._close_btn, ElidedButton)
     group = _pair_view()
@@ -935,3 +936,15 @@ def test_the_full_window_s_eq_actions_close_the_row_and_the_close_button_elides(
     assert not pane._title.isVisibleTo(pane), "the «EQ m-L» tab already says it"
     pane.open_table(group)
     assert pane._title.isVisibleTo(pane), "a table keeps its title"
+
+
+def test_a_squeezed_close_button_keeps_its_start_like_copy():
+    """The Arbiter, 2026-09-25: «закрити» stayed centred and cut on both sides («‹рі»); left, as
+    «Копіювати» is."""
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    qss = theme.build_qss(theme.get_theme("dark"))
+    block = re.search(r'QPushButton\[class~="d-close"\] \{([^}]*)\}', qss).group(1)
+    assert "text-align: left" in block

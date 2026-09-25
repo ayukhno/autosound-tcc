@@ -914,6 +914,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-radius: 5px;
         padding: 2px 9px;
         font-size: 11px;
+        /* Squeezed, it keeps its start, as «Копіювати» does — centred it was cut on both sides
+           («‹рі», the Arbiter, 2026-09-25). */
+        text-align: left;
     }}
     QPushButton[class~="d-close"]:hover {{
         color: {t.text};
