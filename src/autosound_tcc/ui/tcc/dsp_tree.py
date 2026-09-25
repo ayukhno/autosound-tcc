@@ -35,6 +35,7 @@ from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
+from autosound_tcc.ui.tcc.detail_pane import band_count
 from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -116,9 +117,10 @@ class _EqChip(QLabel):
 
     clicked = Signal()
 
-    def __init__(self, count: int) -> None:
-        super().__init__(f"EQ {count}" if count else "EQ —")
-        self.setProperty("class", "eq-chip" if count else "eq-chip muted")
+    def __init__(self, said: str) -> None:
+        """`said` is «12/15» — active of configured, the empty slots not counted — or empty."""
+        super().__init__(f"EQ {said}" if said else "EQ —")
+        self.setProperty("class", "eq-chip" if said else "eq-chip muted")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -214,8 +216,7 @@ class ChannelRow(QWidget):
             line1.addWidget(tag)
 
         line1.addStretch(1)
-        eq_count = row.eq_count()
-        self._eq_chip = _EqChip(eq_count)
+        self._eq_chip = _EqChip(band_count(row.eq_bands()).strip("()"))
         self._eq_chip.clicked.connect(self.eqRequested.emit)
         line1.addWidget(self._eq_chip)
         layout.addLayout(line1)

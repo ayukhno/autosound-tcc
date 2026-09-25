@@ -698,8 +698,9 @@ def test_the_tiers_are_pickers_in_the_eq_header():
     checked = [a.text() for a in picker.menu().actions() if a.isChecked()]
     assert checked == ["m-L (2/2)"], "single: one channel marked, not the pair"
     head = pane._head.layout()
-    assert head.indexOf(pane._pick_holder) < head.indexOf(pane._pair_btn) < \
-        head.indexOf(pane._eq_copy) < head.indexOf(pane._eq_help), "the actions close the row"
+    assert head.indexOf(pane._pick_holder) < head.indexOf(pane._eq_copy) < \
+        head.indexOf(pane._pair_btn) < head.indexOf(pane._eq_help), \
+        "the actions close the row; copy before the pair, so the pair does not move when copy goes"
     assert not pane._title.isVisibleTo(pane), "the lit field already says which EQ"
     width = picker.width()
 
@@ -893,3 +894,22 @@ def test_the_band_count_reads_active_of_configured():
     empty = (EqBand(type="PK", freq_hz=50.0, bypass=True, index=13),)
     assert band_count(bands + empty) == "(8/12)"
     assert band_count(()) == ""
+
+
+def test_the_table_and_the_tree_count_bands_as_the_pickers_do():
+    """The Arbiter, 2026-09-25: the virtual table read «15 bands ▸» where the picker read
+    «VFR (10/12)» — the table counted the empty slots. The fraction there too, and in the tree."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.dsp_tree import ChannelRow
+
+    _app()
+    row = GroupRow(id="VFR", name="VFR", slot="B", raw={"eq": [
+        {"type": "PK", "f": 100, "gain_db": -1.0, "q": 2.0, "i": 1},
+        {"type": "PK", "f": 200, "gain_db": -2.0, "q": 2.0, "bypass": True, "i": 2},
+        {"type": "PK", "f": 50, "bypass": True, "i": 3},
+    ]})
+    assert DetailPane._cell_text("eq", row) == "(1/2) ▸"
+    group = ProfileGroup(id="virtual_channels", label="Virtual", fields=("eq",), rows=(row,))
+    chan = ChannelRow(group, row)
+    assert chan._eq_chip.text() == "EQ 1/2"

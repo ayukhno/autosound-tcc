@@ -481,7 +481,9 @@ class DetailPane(QFrame):
             head = self._head.layout()
             head.removeWidget(self._pick_holder)
             head.insertWidget(head.indexOf(self._back_btn) + 1, self._pick_holder)
-            for widget in (self._pair_btn, self._eq_copy, self._eq_help):
+            # Copy BEFORE the pair toggle: copy goes in pair mode, and with it after the toggle the
+            # toggle moved under the pointer (the Arbiter, 2026-09-25: «щоб не скакало»).
+            for widget in (self._eq_copy, self._pair_btn, self._eq_help):
                 head.removeWidget(widget)
                 head.addWidget(widget)
         self._sync_tabs()
@@ -1041,8 +1043,9 @@ class DetailPane(QFrame):
         if field == "eq_bypass":
             return "Y" if raw.get("eq_bypass") else "—"
         if field == "eq":
-            n = row.eq_count()
-            return f"{n} band{'s' if n != 1 else ''} ▸" if n else "—"
+            # «(active/configured)», as the pickers say it: «15 bands» counted the empty slots.
+            count = band_count(row.eq_bands())
+            return f"{count} ▸" if count else "—"
         return "—"
 
     # ---- EQ view ----------------------------------------------------------
