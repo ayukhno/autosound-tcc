@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtWidgets import QStyle, QStyleOptionTab, QStylePainter, QTabBar, QWidget
 
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import i18n
@@ -45,6 +45,11 @@ def _is_set(field: str, raw: dict) -> bool:
     if field == "polarity":
         return value == "INV"
     return bool(value)
+
+
+def tip_for(status: Optional[str], version: str = "") -> str:
+    """What a dot means, in the window's language — its hover text."""
+    return "" if status is None else i18n.t(_TIP_KEY[status]).format(version=version or "")
 
 
 def _judge(row: GroupRow, old: Optional[GroupRow], compared: bool,
@@ -118,8 +123,7 @@ class StatusDot(QWidget):
         """`None` hides the dot: a tab with nothing to judge carries none."""
         self._status = status
         self.setHidden(status is None)
-        self._tip_text = ("" if status is None
-                          else i18n.t(_TIP_KEY[status]).format(version=version or ""))
+        self._tip_text = tip_for(status, version or "")
         self._tip.set_text(self._tip_text)
         self.update()
 
@@ -141,3 +145,75 @@ class StatusDot(QWidget):
         y = (self.height() - DOT_DIAMETER) / 2
         painter.drawEllipse(QRectF(x, y, DOT_DIAMETER, DOT_DIAMETER))
         painter.end()
+
+
+#: Between a tab's text and its dot.
+_TAB_GAP = 5
+
+
+class DotTabBar(QTabBar):
+    """A tab bar that draws each tab's status dot itself, just after the text (finding 71, 1).
+
+    A tab BUTTON was the first try, and on macOS the style puts it at the tab's very edge whatever
+    the stylesheet's padding says — «з крапками в заголовках закладок не вийшло» (the Arbiter, on
+    8fbbab6). So the style draws the tab's shape only, and the text and the dot are placed here:
+    the same on every platform. The hint is the whole tab's tooltip, not the dot's own.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._dots: dict[int, Optional[str]] = {}
+
+    def set_dot(self, index: int, status: Optional[str]) -> None:
+        self._dots[index] = status
+        self.updateGeometry()
+        self.update()
+
+    def dot(self, index: int) -> Optional[str]:
+        return self._dots.get(index)
+
+    def _font(self, index: int) -> QFont:
+        font = QFont(self.font())
+        if index == self.currentIndex():
+            font.setWeight(QFont.Weight.DemiBold)
+        return font
+
+    def tabSizeHint(self, index: int):  # noqa: N802 (Qt override)
+        size = super().tabSizeHint(index)
+        if self._dots.get(index):
+            size.setWidth(size.width() + _TAB_GAP + DOT_DIAMETER)
+        return size
+
+    def label_geometry(self, index: int) -> tuple[QRect, QRect]:
+        """`(text rect, dot rect)` for a tab: the two centred together in the tab."""
+        rect = self.tabRect(index)
+        width = QFontMetrics(self._font(index)).horizontalAdvance(self.tabText(index))
+        has_dot = bool(self._dots.get(index))
+        group = width + (_TAB_GAP + DOT_DIAMETER if has_dot else 0)
+        left = rect.left() + (rect.width() - group) // 2
+        text = QRect(left, rect.top(), width, rect.height())
+        top = rect.center().y() - DOT_DIAMETER // 2 + 1
+        dot = QRect(text.right() + 1 + _TAB_GAP, top, DOT_DIAMETER, DOT_DIAMETER)
+        return text, (dot if has_dot else QRect())
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+        painter = QStylePainter(self)
+        t = current_theme()
+        for index in range(self.count()):
+            option = QStyleOptionTab()
+            self.initStyleOption(option, index)
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
+            text_rect, dot_rect = self.label_geometry(index)
+            selected = index == self.currentIndex()
+            painter.setFont(self._font(index))
+            painter.setPen(QColor(t.text if selected or option.state & QStyle.StateFlag.State_MouseOver
+                                  else t.muted))
+            painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                             self.tabText(index))
+            status = self._dots.get(index)
+            if status:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor({"none": t.off, "set": t.ok, "chg": t.info}[status]))
+                painter.drawEllipse(QRectF(dot_rect))
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)

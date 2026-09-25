@@ -41,7 +41,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
-    QTabBar,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -56,7 +55,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
     fill_compare_combo,
     is_other_preset,
 )
-from autosound_tcc.ui.tcc.setting_status import StatusDot, field_status, group_status
+from autosound_tcc.ui.tcc.setting_status import DotTabBar, field_status, group_status, tip_for
 
 #: How many journal events the feed shows, newest last.
 _FEED_EVENTS = 80
@@ -243,7 +242,6 @@ class ControlLayout:
         self._hidden: list = []
         #: Which tab holds what: a group id, "eq", a parameter field, or "monitor".
         self._index: dict[str, int] = {}
-        self._dots: dict[int, StatusDot] = {}
         self._corner: Optional[QWidget] = None
         self.compare_combo: Optional[QComboBox] = None
         self._compare_other: Optional[QLabel] = None
@@ -287,6 +285,8 @@ class ControlLayout:
         self._confirm_home = (home, home.indexOf(bar))
         top_layout.addWidget(bar)
         self.tabs = QTabWidget()
+        # The bar draws each tab's status dot itself, just after the text (finding 71, 1).
+        self.tabs.setTabBar(DotTabBar())
         # Eight tabs, their dots and «порівняти з» share half a screen: tighter tabs than the
         # window's own (theme, `#ctl-tabs`).
         self.tabs.setObjectName("ctl-tabs")
@@ -339,7 +339,7 @@ class ControlLayout:
             self._corner.deleteLater()
         self.vertical = self.horizontal = self.tabs = None
         self._corner = self.compare_combo = self._compare_other = None
-        self._index, self._dots = {}, {}
+        self._index = {}
         self._compact(False)
         if self._saved_geometry is not None:
             w.setGeometry(self._saved_geometry)
@@ -360,7 +360,7 @@ class ControlLayout:
             page = self.tabs.widget(0)
             self.tabs.removeTab(0)
             page.deleteLater()
-        self._index, self._dots = {}, {}
+        self._index = {}
         w = self.window
         self._add("monitor", MonitorFeed(w), i18n.t("ctlMonitor"))
         self._add("virtual_channels", _table_tab(w, view, "virtual_channels", "ctlNoVirtual"),
@@ -519,16 +519,10 @@ class ControlLayout:
                           if group is not None else None)
             else:
                 status = field_status(groups, key, old, compared) if groups else None
-            dot = self._dots.get(index)
-            if dot is None:
-                # Close to the text, not at the tab's edge (finding 71, 1).
-                dot = StatusDot(width=12)
-                bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, dot)
-                self._dots[index] = dot
-            dot.set_status(status, said)
+            bar.set_dot(index, status)
             # The whole tab answers the hover, not just the dot: «зону спрацювання трохи більше,
             # бо важко попасти» (the Arbiter, 2026-09-25).
-            bar.setTabToolTip(index, dot.tip_text())
+            bar.setTabToolTip(index, tip_for(status, said))
 
     # ---- fitting half a screen ----------------------------------------------------------------
 

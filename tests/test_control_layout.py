@@ -298,7 +298,6 @@ def test_the_left_panel_opens_its_table_and_its_eq_in_the_tabs(tmp_path, monkeyp
 def test_one_compare_drives_every_tab_and_the_dots(tmp_path, monkeypatch):
     """Findings 47, 4 and 65."""
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
-    from autosound_tcc.ui.tcc.setting_status import StatusDot
 
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
@@ -307,18 +306,17 @@ def test_one_compare_drives_every_tab_and_the_dots(tmp_path, monkeypatch):
     bar = layout.tabs.tabBar()
 
     def dot(text):
-        from PySide6.QtWidgets import QTabBar
+        return bar.dot(_tab(layout, text))
 
-        return bar.tabButton(_tab(layout, text), QTabBar.ButtonPosition.RightSide)
-
-    assert isinstance(dot(i18n.t("ctlTableO")), StatusDot)
-    assert dot(i18n.t("ctlTableO")).status() == "chg", "m-L's gain moved since v_006"
-    assert dot(i18n.t("ctlTableV")).status() == "set"
-    assert dot(i18n.t("tabPhase")).status() == "none"
+    assert dot(i18n.t("ctlTableO")) == "chg", "m-L's gain moved since v_006"
+    assert dot(i18n.t("ctlTableV")) == "set"
+    assert dot(i18n.t("tabPhase")) == "none"
     assert dot(i18n.t("ctlMonitor")) is None
+    assert bar.tabToolTip(_tab(layout, i18n.t("ctlTableO"))) == i18n.t("dotChg").format(
+        version="v_006 · FULL-2"), "the whole tab carries the hint"
 
     layout.compare_combo.setCurrentIndex(layout.compare_combo.findData(None))
-    assert dot(i18n.t("ctlTableO")).status() == "set", "nothing compared, nothing blue"
+    assert dot(i18n.t("ctlTableO")) == "set", "nothing compared, nothing blue"
     panes = [layout.tabs.widget(i) for i in range(layout.tabs.count())
              if isinstance(layout.tabs.widget(i), DetailPane)]
     assert all(p._compare_view is None for p in panes)
@@ -390,15 +388,19 @@ def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
 
 
 def test_the_tab_dots_sit_close_to_the_text(tmp_path, monkeypatch):
-    """Finding 71, 1 (after 67, 3 put them at the edge)."""
-    from PySide6.QtWidgets import QTabBar
-
+    """Finding 71, 1: on macOS a tab button sits at the tab's very edge whatever the stylesheet
+    says (the Arbiter's screenshot after 8fbbab6), so the bar draws the dot itself, just after the
+    text, the same on every platform."""
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
     layout = window._control_layout
     layout.enter()
-    dot = layout.tabs.tabBar().tabButton(_tab(layout, "EQ"), QTabBar.ButtonPosition.RightSide)
-    assert not dot.align_right
+    bar = layout.tabs.tabBar()
+    for text in ("EQ", i18n.t("tabDelay"), i18n.t("ctlTableV")):
+        index = _tab(layout, text)
+        text_rect, dot_rect = bar.label_geometry(index)
+        assert 0 <= dot_rect.left() - text_rect.right() <= 7, text
+        assert bar.tabRect(index).right() - dot_rect.right() >= 5, "not at the edge"
     layout.leave()
 
 
