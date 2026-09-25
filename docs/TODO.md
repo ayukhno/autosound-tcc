@@ -2076,9 +2076,11 @@ views (A/B/C), https://claude.ai/artifact/12URm52ozKpbTRhPnLRPiU, source
 chosen). While it was built the Arbiter added findings 65 (status dots on the tree's groups and the
 tabs) and 66 («порівняти з» across configurations); both are in the prototype. He chose EQ view A
 and gave his OK marked urgent: built as tcc#51, one commit `3b7003a` on this branch (full suite
-2322 passed, -n 4), the prototype kept on branch `proto/f47-dsp-tables`. Still his to say: whether
-#51 ships ahead of the wave, and whether tcc#50 (a state file's name and its `version` field
-disagree) goes into the pool and onto the milestone; it is not recorded yet.
+2322 passed, -n 4), the prototype kept on branch `proto/f47-dsp-tables`. The collection went on
+(findings 67–69) and he gave a second urgent OK: tcc#52, commit `305cd47` — hub #211 PAS-011 and
+#209 PAS-009 (the band card: number, bypass) with findings 67–69 (full suite 2331 passed). Still his
+to say: whether #51 and #52 ship ahead of the wave, and whether tcc#50 (a state file's name and its
+`version` field disagree) goes into the pool and onto the milestone; it is not recorded yet.
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
 says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and

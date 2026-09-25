@@ -2009,6 +2009,8 @@ stays the configuration this one continues.
 **Weight.** Medium for 1 and 2 (text over text, a list that cannot be read in one line); low for
 3–5.
 
+**Built:** tcc#52, `305cd47` (all five; the Arbiter's OK and «терміново», 2026-09-25).
+
 ### 68. The EQ band card lists Freq · Q · Gain; the Helix lists Freq · Gain · Q
 
 **What.** The Arbiter (2026-09-25, two screenshots): for a Helix it would be handier to swap Gain
@@ -2022,6 +2024,9 @@ jumps a line.
 for all: for a MUSWAY, TCC's Freq · Q · Gain is right (the Arbiter, the same day), so the card has
 to follow the DSP it shows.
 
+**Built:** tcc#52, `305cd47` — by vendor (Audiotec-Fischer / Helix: Freq · Gain · Q), since the
+profile does not state the order.
+
 ### 69. The EQ card: the band's number, and the filter type in a colour of its own
 
 **What.** The Arbiter (2026-09-25):
@@ -2034,3 +2039,6 @@ to follow the DSP it shows.
 **Where.** The EQ view's band cards, both modes.
 
 **Weight.** Low: reading aid; nothing is wrong.
+
+**Built:** tcc#52, `305cd47`, with hub #211 PAS-011 (numbered cards, no empty ones) and hub #209
+PAS-009 (the card's bypass).
