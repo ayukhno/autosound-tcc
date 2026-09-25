@@ -2081,3 +2081,19 @@ the rest.
 drop-down checked the pair's partner too). Built in the commit that records this: fixed widths,
 the dot inside the field, «⇄ L + R · Копіювати EQ · ?» at the row's end, no grey «EQ · …» title,
 and no header copy in pair mode (each channel's heading has its own).
+
+### 72. Other presets show no band numbers: their ledgers do not carry `i`
+
+**What.** The Arbiter (2026-09-25, screenshot): after switching to another configuration the EQ
+cards lost their band numbers; back on the first one they are there.
+
+**Checked (the data, not TCC).** `car/passat-b8-2026-aya/state/*/HEAD`: `1.B-base` v_006 — 83 bands,
+83 with `i`; `2.S-shelf`, `3.C-cut`, `4.P-punch`, `5.R-right`, `6.E-epy` v_001 — 72–77 bands, 3
+with `i` each. PAS-011 (hub #211) added the numbers to `1.B-base` only. TCC shows `i` where the
+ledger has it and invents none: a position in the list is not the DSP's band, since the gaps are
+not recorded.
+
+**Whose.** The numbers belong in those ledgers, read from PC-Tool — the car session's side, not
+TCC's.
+
+**Weight.** Medium: the band-by-band check against PC-Tool works on one preset of six.
