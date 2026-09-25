@@ -2021,3 +2021,16 @@ jumps a line.
 **Weight.** Low: nothing is wrong, the entry order is off. The order is the processor's, not one
 for all: for a MUSWAY, TCC's Freq · Q · Gain is right (the Arbiter, the same day), so the card has
 to follow the DSP it shows.
+
+### 69. The EQ card: the band's number, and the filter type in a colour of its own
+
+**What.** The Arbiter (2026-09-25):
+
+1. The card shows the band's number in brackets — the processor's own «Band» (finding 68's Helix
+   screenshot: Band 4).
+2. The filter type's name is coloured by type: grey — an empty band (better not shown at all);
+   green — a shelf filter; blue — «PR» (as written; the card calls it PK); yellow — APF.
+
+**Where.** The EQ view's band cards, both modes.
+
+**Weight.** Low: reading aid; nothing is wrong.
