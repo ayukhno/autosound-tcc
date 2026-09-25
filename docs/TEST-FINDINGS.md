@@ -2008,3 +2008,15 @@ stays the configuration this one continues.
 
 **Weight.** Medium for 1 and 2 (text over text, a list that cannot be read in one line); low for
 3–5.
+
+### 68. The EQ band card lists Freq · Q · Gain; the Helix lists Freq · Gain · Q
+
+**What.** The Arbiter (2026-09-25, two screenshots): for a Helix it would be handier to swap Gain
+and Q on the band card, because that is the order the processor's own software shows (Parametric
+EQ: Band · Freq · Gain · Q). TCC's card reads Freq · Q · Gain, so reading a band across into PC-Tool
+jumps a line.
+
+**Where.** The EQ view's band cards, both modes.
+
+**Weight.** Low: nothing is wrong, the entry order is off. Said for the Helix; whether other
+processors want the same order was not said.
