@@ -2042,3 +2042,13 @@ profile does not state the order.
 
 **Built:** tcc#52, `305cd47`, with hub #211 PAS-011 (numbered cards, no empty ones) and hub #209
 PAS-009 (the card's bypass).
+
+### 70. A «Налаштування» menu for TCC's technical settings; the band card's field order among them
+
+**What.** The Arbiter (2026-09-25): the EQ card's field order (finding 68 — Freq · Gain · Q or
+Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in by #52. And a separate
+«Налаштування» menu should hold all of TCC's technical settings.
+
+**Where.** TCC's menu; the band card's order (`detail_pane.eq_field_order`, since `305cd47`).
+
+**Weight.** Medium: a place for settings that today are scattered or built in.
