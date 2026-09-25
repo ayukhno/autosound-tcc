@@ -422,9 +422,9 @@ def test_with_both_channels_on_screen_each_heading_carries_its_own_copy(monkeypa
 
     pane._on_pair_toggle()
 
-    # Passive, not gone (the Arbiter, 2026-09-25): the place stays, the copy is beside each name.
-    assert pane._eq_copy.isVisibleTo(pane) and not pane._eq_copy.isEnabled(), \
-        "two channels: the header would name one of them"
+    # Gone in pair mode (the Arbiter, 2026-09-25, on the passive one: «дублює сірим»): the copy is
+    # beside each name.
+    assert not pane._eq_copy.isVisibleTo(pane), "two channels: the header would name one of them"
     per_heading = [b for b in pane._scroll.widget().findChildren(_DTab)]
     assert len(per_heading) == 2
     per_heading[1].clicked.emit()
@@ -673,8 +673,10 @@ def test_the_back_button_says_where_it_leads_and_goes_there():
 
 
 def test_the_tiers_are_pickers_in_the_eq_header():
-    """Finding 71, 6: «V: VFL/VFR   O: tw-L/tw-R   I: -/-» in the EQ's header row; a click on a tier
-    drops down its channels."""
+    """Finding 71, 6, and the Arbiter's look at it: «Virtual: / Output: / Input:» written out, wide
+    fields that do not jump, the actions at the end of the row, no grey doubles."""
+    from PySide6.QtCore import Qt
+
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
 
     _app()
@@ -685,14 +687,27 @@ def test_the_tiers_are_pickers_in_the_eq_header():
     pane.set_view(view)
     pane.open_eq(outputs, _row(outputs, "m-L"))
     texts = {gid: p.text() for gid, p in pane._tier_pickers.items()}
-    assert texts == {"virtual_channels": "V: VFL", "physical_outputs": "O: m-L", "inputs": "I: -"}
-    assert pane._head.isAncestorOf(pane._tier_pickers["physical_outputs"]), "in the header row"
-    assert "on" in pane._tier_pickers["physical_outputs"].property("class").split()
-    assert pane._tier_dots["virtual_channels"].status() == "set"
+    assert texts == {"virtual_channels": "Virtual: VFL", "physical_outputs": "Output: m-L",
+                     "inputs": "Input: -"}, "single: one name"
+    picker = pane._tier_pickers["physical_outputs"]
+    assert picker.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon, \
+        "the name shows beside the dot (an icon alone hid it)"
+    assert pane._head.isAncestorOf(picker), "in the header row"
+    assert "on" in picker.property("class").split()
+    assert pane._tier_status["virtual_channels"] == "set"
+    checked = [a.text() for a in picker.menu().actions() if a.isChecked()]
+    assert checked == ["m-L (2/2)"], "single: one channel marked, not the pair"
+    head = pane._head.layout()
+    assert head.indexOf(pane._pick_holder) < head.indexOf(pane._pair_btn) < \
+        head.indexOf(pane._eq_copy) < head.indexOf(pane._eq_help), "the actions close the row"
+    assert not pane._title.isVisibleTo(pane), "the lit field already says which EQ"
+    width = picker.width()
 
     pane._on_pair_toggle()
-    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R"
-    assert pane._tier_pickers["inputs"].text() == "I: -/-"
+    picker = pane._tier_pickers["physical_outputs"]
+    assert picker.text() == "Output: m-L/m-R"
+    assert picker.width() == width, "the field keeps its width: nothing jumps"
+    assert pane._tier_pickers["inputs"].text() == "Input: -/-"
 
     menu = pane._tier_pickers["virtual_channels"].menu()
     pick = next(a for a in menu.actions() if a.text().startswith("VFL"))
@@ -700,9 +715,9 @@ def test_the_tiers_are_pickers_in_the_eq_header():
     QApplication.processEvents()
     assert pane._row.name == "VFL"
     assert "on" in pane._tier_pickers["virtual_channels"].property("class").split()
-    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R", "each tier keeps its pick"
+    assert pane._tier_pickers["physical_outputs"].text() == "Output: m-L/m-R", "each keeps its pick"
     pane.open_eq(outputs, _row(outputs, "m-R"))
-    assert pane._tier_pickers["physical_outputs"].text() == "O: m-L/m-R", "L first, whichever is picked"
+    assert pane._tier_pickers["physical_outputs"].text() == "Output: m-L/m-R", "L first"
 
 
 def test_pair_mode_survives_a_channel_that_has_no_pair():
@@ -821,10 +836,10 @@ def test_cards_follow_the_band_numbers_and_an_empty_slot_draws_nothing():
     assert [c._title.text() for c in flow.findChildren(EqBandCard)] == ["PK (1)", "LSH (3)", "PK (7)"]
 
 
-def test_the_passive_copy_does_not_look_like_the_active_ones(monkeypatch):
-    """Finding 67, 4: the header's passive copy and the ones beside each name looked the same."""
+def test_the_copies_beside_the_names_look_active(monkeypatch):
+    """Finding 67, 4, then «дублює сірим»: the header's copy is gone in pair mode, and the ones
+    beside each name are accent buttons."""
     from autosound_tcc.core import eq_export
-    from autosound_tcc.ui.tcc import theme
     from autosound_tcc.ui.tcc.detail_pane import DetailPane, _DTab
 
     _app()
@@ -834,10 +849,8 @@ def test_the_passive_copy_does_not_look_like_the_active_ones(monkeypatch):
     pane.open_eq(group, group.rows[0])
     pane._on_pair_toggle()
     beside = pane._scroll.widget().findChildren(_DTab)
-    assert all("d-copy" in b.property("class").split() and b.isEnabled() for b in beside)
-    assert "d-copy" in pane._eq_copy.property("class").split() and not pane._eq_copy.isEnabled()
-    qss = theme.build_qss(theme.get_theme("dark"))
-    assert 'QLabel[class~="d-copy"]:disabled' in qss, "the passive one has a look of its own"
+    assert beside and all("d-copy" in b.property("class").split() and b.isEnabled() for b in beside)
+    assert not pane._eq_copy.isVisibleTo(pane)
 
 
 def test_the_compare_list_is_wide_enough_for_whole_lines():

@@ -2074,3 +2074,10 @@ Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in 
 the rest.
 
 **Built:** tcc#53 (all six), the commit that records this line.
+
+**After `02f2812`, the Arbiter's look at the pickers (2026-09-25):** «не подобається і не зручно:
+скакають поля, дублює сірим», then: the actions to the end of the row, wider fields named in full
+(«Virtual: / Output: / Input:»), one name in single mode, and not two marked in single mode (the
+drop-down checked the pair's partner too). Built in the commit that records this: fixed widths,
+the dot inside the field, «⇄ L + R · Копіювати EQ · ?» at the row's end, no grey «EQ · …» title,
+and no header copy in pair mode (each channel's heading has its own).

@@ -15,8 +15,8 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -37,7 +37,7 @@ from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.setting_status import StatusDot, field_status
+from autosound_tcc.ui.tcc.setting_status import field_status, tip_for
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # field token -> (column header, cell-renderer). Order here is the fallback display order when a
@@ -248,8 +248,21 @@ def _band_flow(
     return container
 
 
-#: A tier's letter on its picker: «V: VFL/VFR   O: tw-L/tw-R   I: -/-» (finding 71, 6).
-_TIER_LETTER = {"virtual_channels": "V", "physical_outputs": "O", "inputs": "I"}
+#: A tier's name on its picker, written out as the Arbiter asked: «Virtual: / Output: / Input:».
+_TIER_NAME = {"virtual_channels": "Virtual", "physical_outputs": "Output", "inputs": "Input"}
+
+
+def _dot_icon(colour: QColor) -> QIcon:
+    """A tier's status dot, drawn inside its picker (not beside it, where it floated)."""
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(colour)
+    painter.drawEllipse(0, 0, 16, 16)
+    painter.end()
+    return QIcon(pixmap)
 
 
 #: Marks a cell whose value differs from the compared version (the Arbiter, 2026-09-23).
@@ -319,7 +332,7 @@ class DetailPane(QFrame):
         #: Each tier's own pick, kept while another tier is on screen (finding 71, 6).
         self._tier_choice: dict = {}
         self._tier_pickers: dict = {}
-        self._tier_dots: dict = {}
+        self._tier_status: dict = {}
         #: The whole project view, for the one-parameter tabs: gain, delay and phase are asked
         #: about ACROSS the rig ("show the table for all channels, physical and virtual" -- user,
         #: 2026-08-23), and a single group cannot answer that.
@@ -462,6 +475,15 @@ class DetailPane(QFrame):
         self._embedded = on
         self._compare_label.setVisible(False)
         self._compare_combo.setVisible(False)
+        if on:
+            # The row reads: the way back, the channels, then the actions at its end (the
+            # Arbiter, 2026-09-25: «ось це в кінець строчки»).
+            head = self._head.layout()
+            head.removeWidget(self._pick_holder)
+            head.insertWidget(head.indexOf(self._back_btn) + 1, self._pick_holder)
+            for widget in (self._pair_btn, self._eq_copy, self._eq_help):
+                head.removeWidget(widget)
+                head.addWidget(widget)
         self._sync_tabs()
 
     def set_eq_order(self, order: tuple) -> None:
@@ -696,16 +718,16 @@ class DetailPane(QFrame):
         self._eq_help.setVisible(eq_on)
         self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}' if single
                               else i18n.t("copyEqBank"))
+        # Gone in pair mode: with two channels on screen it would name one of them, each heading
+        # carries its own, and a passive grey one only doubled them (the Arbiter, 2026-09-25:
+        # «дублює сірим»).
         self._eq_copy.setVisible(
             eq_on
+            and not paired
             and self._row is not None
             and bool(self._row.raw.get("eq"))
             and eq_export.available()
         )
-        # Passive in pair mode, not gone (the Arbiter, 2026-09-25): with two channels on screen it
-        # would name one of them, and each heading carries its own copy instead.
-        self._eq_copy.setEnabled(not paired)
-        self._eq_copy.setToolTip(i18n.t("copyEqPairTip") if paired else "")
         self._back_btn.setVisible(eq_on and self._back is not None)
         if self._back is not None:
             self._back_btn.setText(self._back[0])
@@ -714,8 +736,10 @@ class DetailPane(QFrame):
             widget.setVisible(menu)
         self._compare_other.setVisible(menu and self._compare_combo.isVisibleTo(self)
                                        and is_other_preset(self._compare_version))
-        # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy.
+        # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy —
+        # and no grey «EQ · m-L»: the lit picker says which one it is.
         self._head.setVisible(menu or eq_on)
+        self._title.setVisible(menu)
         self._pick_holder.setVisible(self._embedded and eq_on)
 
     def _on_tab_table(self) -> None:
@@ -1025,57 +1049,73 @@ class DetailPane(QFrame):
 
     def _fill_pickers(self, layout, group: ProfileGroup, row: GroupRow,
                       sib_row: Optional[GroupRow]) -> None:
-        """«V: VFL/VFR   O: tw-L/tw-R   I: -/-»: one picker per tier with channels, the tier on
-        screen lit, each with its coloured status dot; a click drops down the tier's channels with
-        their «(active/configured)» (finding 71, 6 — the left list of 67, 5, laid flat)."""
+        """«Virtual: VFL/VFR   Output: tw-L/tw-R   Input: -/-»: one picker per tier with channels,
+        the tier on screen lit, its status dot inside, a click dropping down the tier's channels
+        with their «(active/configured)» (finding 71, 6, and the Arbiter's look at it: full names,
+        a width that does not jump, one name and one mark in single mode)."""
         while layout.count():
             item = layout.takeAt(0)
             if item.widget() is not None:
                 item.widget().setParent(None)
                 item.widget().deleteLater()
-        self._tier_pickers, self._tier_dots = {}, {}
+        self._tier_pickers, self._tier_status = {}, {}
         self._tier_choice[group.id] = row.id
         paired = self._pair_mode
+        shown = {row.id} | ({sib_row.id} if paired and sib_row is not None else set())
         old = getattr(self._compare_view, "groups", ()) or ()
         compared = self._compare_view is not None
+        colours = current_theme()
         for tier in (g for g in (getattr(self._view, "groups", ()) or ()) if g.rows_visible()):
             rows = tier.rows_visible()
+            by_name = {r.name: r for r in rows}
             if tier.id == group.id:
                 pick, partner = row, sib_row
             else:
                 chosen = self._tier_choice.get(tier.id)
                 pick = (next((r for r in rows if r.id == chosen), None)
                         or next((r for r in rows if r.eq_count() > 0), None))
-                partner_name = _sibling_name(pick.name) if pick is not None else None
-                partner = next((r for r in rows if r.name == partner_name), None)
-            if pick is None:
-                said = "-/-" if paired else "-"
-            else:
-                pair = (pick, partner) if _is_left(pick.name) else (partner, pick)
-                said = (f"{pair[0].name}/{pair[1].name}" if paired and partner is not None
-                        else pick.name)
-            letter = _TIER_LETTER.get(tier.id, (tier.label or "?")[:1].upper())
+                partner = by_name.get(_sibling_name(pick.name) or "") if pick is not None else None
+            name = _TIER_NAME.get(tier.id, tier.label or "?")
             button = QToolButton()
-            button.setText(f"{letter}: {said}")
+            button.setText(f"{name}: {self._pair_text(pick, partner, paired)}")
             button.setProperty("class", "tier-pick on" if tier.id == group.id else "tier-pick")
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            status = field_status([tier], "eq", old, compared)
+            button.setIcon(_dot_icon(QColor({"none": colours.off, "set": colours.ok,
+                                             "chg": colours.info}[status])))
+            button.setIconSize(QSize(8, 8))
+            # With an icon a tool button shows ONLY the icon unless told otherwise.
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setToolTip(tip_for(status, self._compare_text))
+            # As wide as the longest thing it can say, so switching never moves the row.
+            button.ensurePolished()
+            longest = max((f"{name}: {self._pair_text(r, by_name.get(_sibling_name(r.name) or ''), p)}"
+                           for r in rows for p in (False, True)), key=len, default=f"{name}: -/-")
+            button.setFixedWidth(button.fontMetrics().horizontalAdvance(longest) + 40)
             menu = QMenu(button)
             for r in rows:
                 count = band_count(r.eq_bands())
                 action = menu.addAction(f"{r.name} {count}" if count else f"{r.name} —")
                 action.setCheckable(True)
-                action.setChecked(tier.id == group.id and r.id in {row.id, getattr(sib_row, "id", None)})
+                action.setChecked(tier.id == group.id and r.id in shown)
                 # Deferred: the menu belongs to the picker this call replaces.
                 action.triggered.connect(lambda _c=False, g=tier, rr=r:
                                          QTimer.singleShot(0, lambda: self.open_eq(g, rr)))
             button.setMenu(menu)
-            dot = StatusDot()
-            dot.set_status(field_status([tier], "eq", old, compared), self._compare_text)
             layout.addWidget(button)
-            layout.addWidget(dot)
             self._tier_pickers[tier.id] = button
-            self._tier_dots[tier.id] = dot
+            self._tier_status[tier.id] = status
+
+    @staticmethod
+    def _pair_text(pick: Optional[GroupRow], partner: Optional[GroupRow], paired: bool) -> str:
+        """`m-L`, or `m-L/m-R` in pair mode — L first whichever was picked; `-` / `-/-` for none."""
+        if pick is None:
+            return "-/-" if paired else "-"
+        if not paired or partner is None:
+            return pick.name
+        left, right = (pick, partner) if _is_left(pick.name) else (partner, pick)
+        return f"{left.name}/{right.name}"
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
