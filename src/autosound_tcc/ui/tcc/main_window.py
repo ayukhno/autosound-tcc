@@ -11,6 +11,7 @@ section gets wired to real data, but the outer structure built here should not n
 from __future__ import annotations
 
 import atexit
+import functools
 import json
 import os
 import threading
@@ -99,7 +100,8 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
-from autosound_tcc.ui.tcc.detail_pane import DetailPane
+from autosound_tcc.ui.tcc.detail_pane import DetailPane, is_other_preset
+from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
@@ -2202,7 +2204,9 @@ class MainWindow(QMainWindow):
             self._dsp_section.set_dot(None)
             self._dsp_section.set_sub_tip("")
             self._compare_args = None
+            self._compare_key = None
             self._detail.set_compare_choices([], None, None)
+            self._sync_status_dots()
             self._refresh_process()
             return
         try:
@@ -2283,20 +2287,87 @@ class MainWindow(QMainWindow):
 
         Previous is the ancestry, never the number below (hub #198): SQ-2 (v_006) is compared with
         SQ-1 (v_003) even with v_004 and v_005 banked for another preset between them. The method
-        stores that at save time; `ledger_line.previous_of` reads it."""
-        versions = list(reversed(ledger_line.versions(root, preset)))
-        others = [v for v in versions if v != current]
-        previous = ledger_line.previous_of(root, preset, current)
-        if previous not in others:
-            previous = None
+        stores that at save time; `ledger_line.previous_of` reads it.
+
+        After this preset's versions come the other presets' (the Arbiter, 2026-09-25, finding 66:
+        «порівнювати не тільки v_xxx в поточній конфігурації, але і з іншими конфігураціями»),
+        keyed `SQ/v_004` so the loader reads each from its own preset."""
+        groups = ledger_line.compare_groups(root, preset, current)
+        own = groups[0][1] if groups else []
         names = ledger_line.saved_names(root)
-        labels = {v: ledger_line.label(root, v, names) for v in others}
+        labels = {v: ledger_line.label(root, v, names) for v in own}
+        others = [(p, [(f"{p}/{v}", ledger_line.label(root, v, names)) for v in versions])
+                  for p, versions in groups[1:]]
+        previous = ledger_line.previous_of(root, preset, current)
+        if previous in own:
+            default = previous
+        else:  # the project line: a configuration may continue another preset's
+            default = next((key for _p, items in others for key, _label in items
+                            if previous and key.split("/", 1)[1] == previous), None)
 
-        def loader(version: str, _root=str(root), _preset=preset, _profile=profile):
-            return load_project_view(_root, _preset, _profile, version=version)
+        def load(key: str, _root=str(root), _preset=preset, _profile=profile):
+            of, version = key.split("/", 1) if is_other_preset(key) else (_preset, key)
+            return load_project_view(_root, of, _profile, version=version)
 
-        self._compare_args = (others, previous, loader, labels)
-        self._detail.set_compare_choices(others, previous, loader, labels=labels)
+        # One read per version: the pane, the control layout's tabs and the dots all ask for it.
+        loader = functools.lru_cache(maxsize=16)(load)
+        self._compare_args = (own, default, loader, labels, others)
+        self._compare_key = default
+        self._detail.set_compare_choices(own, default, loader, labels=labels, others=others)
+        self._sync_status_dots()
+
+    def _compare_view_now(self):
+        """The version «порівняти з» names now, loaded — or None when nothing is compared."""
+        key = getattr(self, "_compare_key", None)
+        args = getattr(self, "_compare_args", None)
+        if not key or not args or args[2] is None:
+            return None
+        try:
+            return args[2](key)
+        except Exception:  # noqa: BLE001 — a version that cannot be read compares with nothing
+            return None
+
+    def _compare_said(self) -> str:
+        """How the list names the version compared with — for the dots' hints."""
+        key = getattr(self, "_compare_key", None)
+        args = getattr(self, "_compare_args", None)
+        if not key or not args:
+            return ""
+        own_labels = args[3] if len(args) > 3 and args[3] else {}
+        others = args[4] if len(args) > 4 and args[4] else []
+        return own_labels.get(key) or next(
+            (label for _p, items in others for k, label in items if k == key), key)
+
+    def _on_compare_chosen(self, key) -> None:
+        """«Порівняти з» picked in the pane or by the control layout's tabs: ONE choice for the
+        window, so the tables, the tabs and the dots never disagree about what is compared."""
+        self._compare_key = key
+        if self._detail._compare_version != key:
+            self._detail.select_compare(key)
+        control = getattr(self, "_control_layout", None)
+        if control is not None and control.active:
+            control.use_compare(key, self._compare_view_now(), self._compare_said())
+        self._sync_status_dots()
+
+    def _on_pane_focus(self, group_id, what) -> None:
+        """The full window's pane lights what it shows in the tree; in «Режим контролю» the tabs
+        do (`ControlLayout._light_tree`)."""
+        if not self._control_active():
+            self._tree.set_active(group_id, what)
+
+    def _sync_status_dots(self) -> None:
+        """Grey, green or blue beside each DSP group in the tree, and on the control layout's
+        tabs (the Arbiter, 2026-09-25, finding 65)."""
+        groups = getattr(getattr(self, "_view", None), "groups", ()) or ()
+        compared_view = self._compare_view_now()
+        old = getattr(compared_view, "groups", ()) or ()
+        compared = compared_view is not None
+        statuses = {g.id: group_status(g, next((o for o in old if o.id == g.id), None), compared)
+                    for g in groups}
+        self._tree.set_status(statuses, self._compare_said())
+        control = getattr(self, "_control_layout", None)
+        if control is not None and control.active:
+            control.sync_dots()
 
     def _on_layout_toggle(self) -> None:
         """Switch between the in-app session's layout and the control layout, and remember it."""
@@ -2827,22 +2898,39 @@ class MainWindow(QMainWindow):
         else:
             self._detail.refresh_with(fresh_group)
 
+    def _control_active(self) -> bool:
+        control = getattr(self, "_control_layout", None)
+        return control is not None and control.active
+
+    # In «Режим контролю» the centre pane is out of sight, and the tree opened its tables and EQs
+    # there: «params» opened nothing, EQ did nothing (finding 47, 2). The tabs take them instead.
+
     def _on_table_requested(self, group_id: str) -> None:
+        if self._control_active():
+            self._control_layout.show_table(group_id)
+            return
         group = self._find_group(group_id)
         if group is not None:
             self._detail.open_table(group)
 
     def _on_channel_clicked(self, group_id: str, row_id: str) -> None:
+        if self._control_active():
+            self._control_layout.show_table(group_id, row_id)
+            return
         group = self._find_group(group_id)
         if group is not None:
             self._detail.open_table(group, select_row_id=row_id)
 
     def _on_eq_requested(self, group_id: str, row_id: str) -> None:
+        if self._control_active():
+            self._control_layout.show_eq(group_id, row_id)
+            return
         group = self._find_group(group_id)
         if group is None:
             return
         row = next((r for r in group.rows if r.id == row_id), None)
         if row is not None:
+            self._detail.set_back(None)
             self._detail.open_eq(group, row)
 
     def _build_center(self) -> QWidget:
@@ -2852,6 +2940,8 @@ class MainWindow(QMainWindow):
         self._detail = DetailPane()
         # What was copied and in what format, said where every other outcome is said.
         self._detail.bankCopied.connect(lambda said: self._status_strip.notify(said))
+        self._detail.compareChanged.connect(self._on_compare_chosen)
+        self._detail.focusChanged.connect(self._on_pane_focus)
         splitter.addWidget(self._detail)
 
         self._dialog_frame = _panel()

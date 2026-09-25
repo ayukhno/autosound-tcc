@@ -89,6 +89,42 @@ def versions(root, preset: str) -> list[str]:
     return sorted(names, key=_number)
 
 
+def _made_for(root, version: str) -> Optional[str]:
+    """The preset a project-line version was proposed for, as its own file says."""
+    try:
+        data = json.loads(version_path(root, "", version).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    preset = data.get("preset") if isinstance(data, dict) else None
+    return preset if isinstance(preset, str) and preset else None
+
+
+def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str, list[str]]]:
+    """What «порівняти з» offers, newest first: `preset`'s own versions, then each other preset's
+    (the Arbiter, 2026-09-25, finding 66: «порівнювати не тільки v_xxx в поточній конфігурації,
+    але і з іншими конфігураціями»).
+
+    The old layout numbers each preset on its own, so another preset's `v_002` is a different
+    state from this one's — the caller keys it with its preset. The project line numbers once, and
+    each version's file names the preset it was made for; one never made for any stays with this
+    preset, where it was offered before.
+    """
+    root = Path(root)
+    if is_project_line(root):
+        every = [v for v in reversed(versions(root, preset)) if v != current]
+        made_for = {v: _made_for(root, v) for v in every}
+        groups = [(preset, [v for v in every if made_for[v] in (None, preset)])]
+        for other in sorted({p for p in made_for.values() if p and p != preset}):
+            groups.append((other, [v for v in every if made_for[v] == other]))
+        return groups
+    groups = [(preset, [v for v in reversed(versions(root, preset)) if v != current])]
+    for other in presets(root):
+        theirs = list(reversed(versions(root, other))) if other != preset else []
+        if theirs:
+            groups.append((other, theirs))
+    return groups
+
+
 def proposals_dir(root, preset: str) -> Path:
     """Where the change sheet beside a proposal lives (SCR-026): `state/proposals/` on the
     project line, `state/<preset>/proposals/` before it."""

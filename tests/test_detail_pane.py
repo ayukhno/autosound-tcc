@@ -422,7 +422,9 @@ def test_with_both_channels_on_screen_each_heading_carries_its_own_copy(monkeypa
 
     pane._on_pair_toggle()
 
-    assert not pane._eq_copy.isVisibleTo(pane), "two channels: the header would name one of them"
+    # Passive, not gone (the Arbiter, 2026-09-25): the place stays, the copy is beside each name.
+    assert pane._eq_copy.isVisibleTo(pane) and not pane._eq_copy.isEnabled(), \
+        "two channels: the header would name one of them"
     per_heading = [b for b in pane._scroll.widget().findChildren(_DTab)]
     assert len(per_heading) == 2
     per_heading[1].clicked.emit()
@@ -544,3 +546,201 @@ def test_a_value_that_changed_since_the_compared_version_is_marked_with_what_it_
     outputs = _param_columns(pane)[1]
     assert all(outputs.item(r, 2).data(detail_pane.CHANGED_ROLE) is not True
                for r in range(outputs.rowCount())), "no comparison, nothing marked"
+
+
+# ---- «Режим контролю» and the EQ view (the Arbiter, 2026-09-25: findings 47, 65, 66; tcc#51) ----
+
+_PK = {"type": "PK", "f": 482, "gain_db": -1.7, "q": 3.0}
+
+
+def _rig_with_eq(inputs: bool = False):
+    """Both tiers (and inputs, when asked), EQ on VFL, c, m-L and m-R; m-L/m-R a pair, c alone."""
+    from autosound_tcc.state.dsp_state import ProjectView
+
+    groups = [
+        {"id": "virtual_channels", "label": "Virtual channels",
+         "fields": ["gain_db", "ta_ms", "phase_deg", "eq"]},
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db", "ta_ms", "phase_deg", "eq"]},
+    ]
+    ledger = {"preset": "FULL", "sample_rate": 96000,
+              "channels": {"c": {"gain_db": -8.5, "eq": [_PK]},
+                           "m-L": {"gain_db": -3.5, "eq": [_PK, dict(_PK, f=1250)]},
+                           "m-R": {"gain_db": 0.9, "eq": [dict(_PK, f=320)]},
+                           "sw": {"gain_db": 0.0}},
+              "virtual_channels": {"VFL": {"gain_db": 0.0, "eq": [dict(_PK, f=100)]}}}
+    identities = {"c": {"code": "c", "slot": "B", "tier": "channels"},
+                  "m-L": {"code": "m-L", "slot": "E", "tier": "channels"},
+                  "m-R": {"code": "m-R", "slot": "F", "tier": "channels"},
+                  "sw": {"code": "sw", "slot": "K", "tier": "channels"},
+                  "VFL": {"code": "VFL", "slot": "A", "tier": "virtual_channels"}}
+    if inputs:
+        groups.append({"id": "inputs", "label": "Inputs", "fields": ["gain_db", "ta_ms"]})
+        ledger["inputs"] = {"IN1": {"gain_db": -2.0}}
+        identities["IN1"] = {"code": "IN1", "slot": "1", "tier": "inputs"}
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": groups}}
+    return ProjectView.from_dict(ledger, profile, channels=identities)
+
+
+def _grp(view, gid):
+    return next(g for g in view.groups if g.id == gid)
+
+
+def _row(group, name):
+    return next(r for r in group.rows if r.name == name)
+
+
+def _menu(pane):
+    return [pane._tab_table, pane._tab_eq, pane._close_btn, pane._compare_combo,
+            pane._compare_label, *pane._param_tabs.values()]
+
+
+def test_an_embedded_pane_carries_no_menu_of_its_own():
+    """Finding 47, 1 and 3: in control mode the tabs above ARE the navigation; the pane's own
+    Table · EQ · Level · Delays · Phases row and its «Закрити ✕» came back on every render."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_embedded(True)
+    pane.set_view(view)
+    for show in (lambda: pane.open_table(outputs), lambda: pane.open_param("gain_db"),
+                 lambda: pane.open_eq(outputs, _row(outputs, "m-L"))):
+        show()
+        assert not [w for w in _menu(pane) if w.isVisibleTo(pane)], "no menu inside a tab"
+
+
+def test_an_embedded_table_asks_for_the_eq_tab_instead_of_turning_into_it():
+    """Finding 47, 5: «1 band ▸» turned the table tab into the EQ view with no way back."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_embedded(True)
+    pane.set_view(view)
+    pane.open_table(outputs)
+    asked = []
+    pane.eqRequested.connect(lambda gid, rid: asked.append((gid, rid)))
+    names = [r.name for r in outputs.rows_visible()]
+    pane._scroll.widget().cellClicked.emit(names.index("m-L"), 1)
+    QApplication.processEvents()
+    assert asked == [("physical_outputs", "m-L")]
+    assert pane._mode == "table", "the table stays a table"
+
+
+def test_the_full_window_s_way_back_is_its_table_tab_not_a_second_button():
+    """The control tabs name the way back («← Таблиця-О»); the full window's pane has «Таблиця»
+    right beside the EQ, and its head has no room for the same way twice."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_view(view)
+    pane.open_table(outputs)
+    names = [r.name for r in outputs.rows_visible()]
+    pane._scroll.widget().cellClicked.emit(names.index("m-L"), 1)
+    QApplication.processEvents()
+    assert pane._mode == "eq" and pane._row.name == "m-L"
+    assert not pane._back_btn.isVisibleTo(pane)
+    assert pane._tab_table.isVisibleTo(pane)
+    pane._tab_table.clicked.emit()
+    assert pane._mode == "table"
+
+
+def test_the_back_button_says_where_it_leads_and_goes_there():
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_embedded(True)
+    pane.set_view(view)
+    went = []
+    pane.set_back("← Таблиця-О", lambda: went.append(1))
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+    assert pane._back_btn.isVisibleTo(pane) and pane._back_btn.text() == "← Таблиця-О"
+    pane._back_btn.clicked.emit()
+    assert went == [1]
+    assert not pane._back_btn.isVisibleTo(pane)
+
+
+def test_the_eq_view_offers_every_channel_with_an_eq_as_a_button():
+    """The Arbiter chose view A of the prototype: the channels as buttons, their bands below."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_view(view)
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+    chips = pane._eq_chips
+    assert sorted(name for _gid, name in chips) == ["VFL", "c", "m-L", "m-R"], "sw has no EQ"
+    assert chips[("physical_outputs", "m-L")].property("class") == "d-tab on"
+
+    chips[("physical_outputs", "c")].clicked.emit()
+    QApplication.processEvents()
+    assert pane._row.name == "c"
+
+
+def test_pair_mode_survives_a_channel_that_has_no_pair():
+    """«Коли включив парний режим і вибрав не парний драйвер, то повертаючись до парного — знову
+    бачу пару» (the Arbiter, 2026-09-25): it used to switch itself off."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq()
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_view(view)
+
+    def headings():
+        return [w for w in pane._scroll.widget().findChildren(QLabel)
+                if w.property("class") == "eq-rowlab"]
+
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+    pane._on_pair_toggle()
+    assert len(headings()) == 2
+    pane.open_eq(outputs, _row(outputs, "c"))
+    assert not pane._pair_btn.isVisibleTo(pane) and not headings()
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+    assert len(headings()) == 2, "back on a pair, the pair is shown again"
+
+
+def test_a_moved_band_marks_the_eq_cell_even_with_the_same_count():
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc import detail_pane
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+
+    def outputs(gain):
+        return ProfileGroup(id="physical_outputs", label="Output", fields=("eq",), rows=(
+            GroupRow(id="m-L", name="m-L", slot="E", raw={"eq": [dict(_PK, gain_db=gain)]}),))
+
+    before = type("V", (), {"groups": (outputs(-2.7),)})()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_006"], "v_006", lambda _v: before)
+    pane.open_table(outputs(-1.7))
+    cell = pane._scroll.widget().item(0, 2)
+    assert cell.data(detail_pane.CHANGED_ROLE) is True
+
+
+def test_level_delays_and_phases_take_a_third_column_for_the_inputs():
+    """«Рівень, затримки, фази можуть мати 3 стовпчики (ще Вхідні), коли вони всі є»."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_with_eq(inputs=True))
+    pane.open_param("gain_db")
+    assert len(_param_columns(pane)) == 3

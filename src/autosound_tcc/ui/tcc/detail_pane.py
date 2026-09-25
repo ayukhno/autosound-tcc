@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
+from autosound_tcc.ui.tcc.flow_layout import FlowLayout
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -191,6 +192,30 @@ def _band_flow(
 CHANGED_ROLE = Qt.ItemDataRole.UserRole + 7
 
 
+def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] = None,
+                       others: Optional[list] = None) -> None:
+    """«Порівняти з»: «—», this preset's versions, then each other preset's under its name.
+
+    `others` is `[(preset, [(key, label), …]), …]` (finding 66). The key of another preset's
+    version carries that preset (`SQ/v_004`) because on the old layout each preset numbers its
+    own, and the loader has to know where to read it from."""
+    combo.clear()
+    combo.addItem("—", None)
+    for version in versions:
+        combo.addItem(str((labels or {}).get(version, version)), str(version))
+    for preset, items in others or ():
+        combo.insertSeparator(combo.count())
+        combo.addItem(i18n.t("cmpOtherPreset").format(preset=preset), None)
+        combo.model().item(combo.count() - 1).setEnabled(False)
+        for key, label in items:
+            combo.addItem(str(label), str(key))
+
+
+def is_other_preset(key: Optional[str]) -> bool:
+    """A compare key of another preset's version (`SQ/v_004`)."""
+    return bool(key) and "/" in key
+
+
 class DetailPane(QFrame):
     """The whole `.detail` panel: tabs, title, close, and a body that shows either a table or an
     EQ view. Hidden by default (`.detail` starts at max-height 0 in the prototype)."""
@@ -200,6 +225,10 @@ class DetailPane(QFrame):
     #: What was copied and in what format, for the window's status line.
     bankCopied = Signal(str)  # group_id, row_id -> caller opens EQ for it
     eqRequested = Signal(str, str)
+    #: The compare key the Arbiter picked here (None = «—»), for the window to follow.
+    compareChanged = Signal(object)
+    #: What is on screen, for the tree to light: `(group id, "params" | row id)`, or `(None, None)`.
+    focusChanged = Signal(object, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -208,7 +237,17 @@ class DetailPane(QFrame):
         self._mode: Optional[str] = None  # "table" | "eq" | "param"
         self._group: Optional[ProfileGroup] = None
         self._row: Optional[GroupRow] = None
+        self._sib_row: Optional[GroupRow] = None
         self._pair_mode = False
+        #: Inside a tab of «Режим контролю»: the tabs above are the navigation, so the pane carries
+        #: no menu of its own, and a row asks for the EQ tab instead of turning into it (finding 47).
+        self._embedded = False
+        #: Where «← …» returns from an EQ: `(label, callback)`, or None.
+        self._back: Optional[tuple] = None
+        self._eq_chips: dict = {}
+        self._compare_version: Optional[str] = None
+        self._compare_text = ""
+        self._selected: Optional[str] = None
         #: The whole project view, for the one-parameter tabs: gain, delay and phase are asked
         #: about ACROSS the rig ("show the table for all channels, physical and virtual" -- user,
         #: 2026-08-23), and a single group cannot answer that.
@@ -227,6 +266,16 @@ class DetailPane(QFrame):
         head_layout = QHBoxLayout(head)
         head_layout.setContentsMargins(12, 6, 12, 6)
         head_layout.setSpacing(6)
+        self._head = head
+
+        # «← Таблиця-О» (the Arbiter, 2026-09-25: «ось це супер»): in a control-mode tab an EQ
+        # opened from a table names the way back to it. The full window needs none: «Таблиця»
+        # stands right beside it, and the head has no room for the same way twice.
+        self._back_btn = _DTab("←")
+        self._back_btn.setProperty("class", "d-tab on")
+        self._back_btn.clicked.connect(self._on_back)
+        self._back_btn.setVisible(False)
+        head_layout.addWidget(self._back_btn)
 
         self._tab_table = _DTab(i18n.t("tabTable"))
         self._tab_table.clicked.connect(self._on_tab_table)
@@ -279,8 +328,13 @@ class DetailPane(QFrame):
         self._compare_combo.setProperty("class", "mini-select")
         self._compare_combo.currentIndexChanged.connect(self._on_compare_changed)
         head_layout.addWidget(self._compare_combo)
+        # Said beside the list when the version picked is another preset's (finding 66).
+        self._compare_other = QLabel(i18n.t("cmpOtherTag"))
+        self._compare_other.setProperty("class", "cmp-other")
+        head_layout.addWidget(self._compare_other)
         self._compare_label.setVisible(False)
         self._compare_combo.setVisible(False)
+        self._compare_other.setVisible(False)
 
         self._close_btn = QPushButton(i18n.t("close"))
         self._close_btn.setProperty("class", "d-close")
@@ -306,6 +360,7 @@ class DetailPane(QFrame):
         window.
         """
         self._compare_label.setText(i18n.t("cmpWith"))
+        self._compare_other.setText(i18n.t("cmpOtherTag"))
         self._tab_table.setText(i18n.t("tabTable"))
         for field, tab in getattr(self, "_param_tabs", {}).items():
             tab.setText(_PARAM_TABS[field]())
@@ -319,6 +374,26 @@ class DetailPane(QFrame):
 
     # ---- public API ----------------------------------------------------
 
+    def set_embedded(self, on: bool) -> None:
+        """Inside a tab of «Режим контролю»: no menu of its own, no «Закрити ✕», no «порівняти з»
+        (one sits by the tabs and drives them all), and a row asks for the EQ tab (`eqRequested`)
+        instead of turning this table into an EQ with no way back (finding 47)."""
+        self._embedded = on
+        self._compare_label.setVisible(False)
+        self._compare_combo.setVisible(False)
+        self._sync_tabs()
+
+    def set_back(self, label: Optional[str], callback=None) -> None:
+        """Name the way back from the EQ on screen, or say there is none."""
+        self._back = (label, callback) if label and callback is not None else None
+        self._sync_tabs()
+
+    def _on_back(self) -> None:
+        back, self._back = self._back, None
+        if back is not None:
+            back[1]()
+        self._sync_tabs()
+
     def close_pane(self) -> None:
         self.setVisible(False)
         # Clear what's "open" along with visibility -- otherwise `current_group_id()`/
@@ -326,11 +401,22 @@ class DetailPane(QFrame):
         # otherwise touched by closing), and a later reload would silently re-open a pane the user
         # explicitly closed.
         self._group, self._row, self._mode = None, None, None
+        self._back = None
         self.closed.emit()
+        self.focusChanged.emit(None, None)
+
+    def focus(self) -> tuple:
+        """`(group id, "params" | row id)` of what is on screen, or `(None, None)`."""
+        if self._mode == "eq" and self._group is not None and self._row is not None:
+            return self._group.id, self._row.id
+        if self._mode == "table" and self._group is not None:
+            return self._group.id, self._selected or "params"
+        return None, None
 
     def open_table(self, group: ProfileGroup, select_row_id: Optional[str] = None) -> None:
         self._group, self._row, self._mode = group, None, "table"
-        self._pair_btn.setVisible(False)
+        self._back = None
+        self._selected = select_row_id
         # `rows_visible()` and not `rows`: an off channel is not part of the rig being tuned, and
         # counting it here said "· 8" over six rows (user, 2026-08-21).
         self._title.setText(f"{group.label} · {len(group.rows_visible())}")
@@ -343,6 +429,7 @@ class DetailPane(QFrame):
                     break
         self._sync_tabs()
         self.setVisible(True)
+        self.focusChanged.emit(*self.focus())
 
     def set_view(self, view) -> None:
         """The project view behind the panel, refreshed on every load.
@@ -357,29 +444,47 @@ class DetailPane(QFrame):
             self.open_param(self._param)
 
     def set_compare_choices(self, versions: list, default: Optional[str], loader,
-                            labels: Optional[dict] = None) -> None:
-        """Offer these versions to compare with; `loader(version)` returns that version's view.
+                            labels: Optional[dict] = None, others: Optional[list] = None) -> None:
+        """Offer these versions to compare with; `loader(key)` returns that version's view.
 
         `default` is the one selected (the previous configuration, by the window's choice); None,
         or no versions at all, compares with nothing and hides the control. `labels` names a
         version the way the list shows it — `v_003 · SQ-1`, with the names it was saved under in
-        the device (hub #198)."""
+        the device (hub #198). `others` are the other presets' versions, after this one's
+        (`fill_compare_combo`, finding 66)."""
         self._compare_loader = loader
         blocked = self._compare_combo.blockSignals(True)
-        self._compare_combo.clear()
-        self._compare_combo.addItem("—", None)
-        for version in versions:
-            self._compare_combo.addItem(str((labels or {}).get(version, version)), str(version))
+        fill_compare_combo(self._compare_combo, versions, labels, others)
         index = self._compare_combo.findData(default) if default else 0
         self._compare_combo.setCurrentIndex(max(index, 0))
         self._compare_combo.blockSignals(blocked)
-        shown = bool(versions)
+        shown = bool(versions or others) and not self._embedded
         self._compare_label.setVisible(shown)
         self._compare_combo.setVisible(shown)
         self._load_compare()
+        self._sync_tabs()
+
+    def select_compare(self, key: Optional[str]) -> None:
+        """Pick `key` as the window picked it elsewhere — the same list, no echo back."""
+        index = self._compare_combo.findData(key) if key else 0
+        blocked = self._compare_combo.blockSignals(True)
+        self._compare_combo.setCurrentIndex(max(index, 0))
+        self._compare_combo.blockSignals(blocked)
+        self._load_compare()
+        self._rerender()
+
+    def use_compare(self, key: Optional[str], view, text: str = "") -> None:
+        """Compare with a version somebody else already loaded: the control layout's one list
+        drives every tab (finding 47, 4), and reading the same file seven times is not a feature."""
+        self._compare_version = key
+        self._compare_text = text or (key or "")
+        self._compare_view = view if key else None
+        self._rerender()
 
     def _load_compare(self) -> None:
         version = self._compare_combo.currentData()
+        self._compare_version = version
+        self._compare_text = self._compare_combo.currentText() if version else ""
         self._compare_view = None
         if version and self._compare_loader is not None:
             try:
@@ -387,12 +492,18 @@ class DetailPane(QFrame):
             except Exception:  # noqa: BLE001 — a version that cannot be read compares with nothing
                 self._compare_view = None
 
-    def _on_compare_changed(self, _index: int) -> None:
-        self._load_compare()
+    def _rerender(self) -> None:
         if self._mode == "param" and self._param:
             self.open_param(self._param)
         elif self._mode == "table" and self._group is not None:
             self.open_table(self._group)
+        else:
+            self._sync_tabs()
+
+    def _on_compare_changed(self, _index: int) -> None:
+        self._load_compare()
+        self._rerender()
+        self.compareChanged.emit(self._compare_version)
 
     def _compared_row(self, group_id: Optional[str], row: GroupRow) -> tuple[bool, Optional[GroupRow]]:
         """`(compared, the same channel in the compared version or None)`."""
@@ -413,7 +524,7 @@ class DetailPane(QFrame):
         """A control no tier declares is not offered -- a processor without phase does not get a
         Phase tab that opens an empty table."""
         for field, tab in self._param_tabs.items():
-            tab.setVisible(bool(self._param_groups(field)))
+            tab.setVisible(not self._embedded and bool(self._param_groups(field)))
             tab.set_on(self._mode == "param" and self._param == field)
 
     def open_param(self, field: str) -> None:
@@ -428,24 +539,27 @@ class DetailPane(QFrame):
         if not groups:
             return
         self._mode, self._param, self._row = "param", field, None
-        self._pair_btn.setVisible(False)
+        self._back = None
         # The tab's own word, not the column header's: the header is the DSP's vocabulary
         # ("Delay ms", as PC-Tool spells it) and the title is the window's.
         self._title.setText(i18n.t("paramAllChannels").format(param=_PARAM_TABS[field]()))
         self._scroll.setWidget(self._build_param_table(field, groups))
         self._sync_tabs()
         self.setVisible(True)
+        self.focusChanged.emit(None, None)
 
     def open_eq(self, group: ProfileGroup, row: GroupRow) -> None:
         self._group, self._row, self._mode = group, row, "eq"
         sib_name = _sibling_name(row.name)
         sib_row = next((r for r in group.rows if r.name == sib_name), None) if sib_name else None
-        self._pair_btn.setVisible(sib_row is not None)
-        if not sib_row:
-            self._pair_mode = False
+        # Pair mode is the Arbiter's, not the channel's: a channel with no pair shows alone and
+        # leaves the mode on for the next pair (2026-09-25: «повертаючись до парного — знову бачу
+        # пару — це супер (було не так — скидувалось)»).
+        self._sib_row = sib_row
         self._render_eq(group, row, sib_row)
         self._sync_tabs()
         self.setVisible(True)
+        self.focusChanged.emit(group.id, row.id)
 
     def current_group_id(self) -> Optional[str]:
         """The id of the group currently shown (table or EQ), or None if nothing's open --
@@ -479,31 +593,42 @@ class DetailPane(QFrame):
     # ---- tabs -----------------------------------------------------------
 
     def _sync_tabs(self) -> None:
+        eq_on = self._mode == "eq"
+        paired = eq_on and self._pair_mode and self._sib_row is not None
         self._tab_table.set_on(self._mode == "table")
-        self._tab_eq.set_on(self._mode == "eq")
+        self._tab_eq.set_on(eq_on)
         # The tab says WHOSE bank is on screen. With one channel showing, nothing else on the
         # left of the header did: the only name was on the copy button, and the title that
         # carries it sits greyed at the far end of the row (user, 2026-08-23). In pair mode it
         # stays plain -- each heading names its own channel there.
-        single = (self._mode == "eq" and self._row is not None
-                  and not (self._pair_mode and self._pair_btn.isVisible()))
+        single = eq_on and self._row is not None and not paired
         self._tab_eq.setText(f"EQ {self._row.name}" if single else "EQ")
         self._sync_param_tabs()
         self._pair_btn.set_on(self._pair_mode)
-        self._eq_help.setVisible(self._mode == "eq")
-        if self._mode == "eq" and self._row is not None:
-            self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}')
-        else:
-            self._eq_copy.setText(i18n.t("copyEqBank"))
-        # Gone in pair mode: with two channels on screen it would name one of them, and each
-        # heading carries its own copy instead.
+        self._pair_btn.setVisible(eq_on and self._sib_row is not None)
+        self._eq_help.setVisible(eq_on)
+        self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}' if single
+                              else i18n.t("copyEqBank"))
         self._eq_copy.setVisible(
-            self._mode == "eq"
+            eq_on
             and self._row is not None
-            and not (self._pair_mode and self._pair_btn.isVisible())
             and bool(self._row.raw.get("eq"))
             and eq_export.available()
         )
+        # Passive in pair mode, not gone (the Arbiter, 2026-09-25): with two channels on screen it
+        # would name one of them, and each heading carries its own copy instead.
+        self._eq_copy.setEnabled(not paired)
+        self._eq_copy.setToolTip(i18n.t("copyEqPairTip") if paired else "")
+        self._back_btn.setVisible(eq_on and self._back is not None)
+        if self._back is not None:
+            self._back_btn.setText(self._back[0])
+        menu = not self._embedded
+        for widget in (self._tab_table, self._tab_eq, self._close_btn):
+            widget.setVisible(menu)
+        self._compare_other.setVisible(menu and self._compare_combo.isVisibleTo(self)
+                                       and is_other_preset(self._compare_version))
+        # Inside a control-mode tab the head is only for the EQ: its way back, its pair, its copy.
+        self._head.setVisible(menu or eq_on)
 
     def _on_tab_table(self) -> None:
         if self._group is not None:
@@ -587,7 +712,7 @@ class DetailPane(QFrame):
             # old widget synchronously), which would destroy `table` while it is still executing
             # its own C++ event handler -- a use-after-free that crashes with SIGSEGV. Deferring
             # to the next event-loop tick lets mouseReleaseEvent return first.
-            QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
+            self._open_eq_from_here(group, row_obj)
 
         table.cellClicked.connect(_activate)
         self._copy_on_right_click(table)
@@ -656,12 +781,22 @@ class DetailPane(QFrame):
             self.tableRowActivated.emit(group.id, row_obj.id)
             # Deferred for the same reason as the group table's: this runs inside the table's own
             # mouse handler, and opening the EQ replaces (and destroys) the widget under it.
-            QTimer.singleShot(0, lambda: self.open_eq(group, row_obj))
+            self._open_eq_from_here(group, row_obj)
 
         table.cellClicked.connect(_activate)
         self._copy_on_right_click(table)
         layout.addWidget(table)
         return block
+
+    def _open_eq_from_here(self, group: ProfileGroup, row: GroupRow) -> None:
+        """A row was clicked: its EQ, with the way back to what was on screen.
+
+        Embedded, the table stays a table and the control layout opens the EQ tab (finding 47, 5:
+        the table tab turned into the EQ, and there was no way back without leaving the mode)."""
+        if self._embedded:
+            self.eqRequested.emit(group.id, row.id)
+            return
+        QTimer.singleShot(0, lambda: self.open_eq(group, row))
 
     def _copy_on_right_click(self, table: QTableWidget) -> None:
         """Right-click a cell and its value is on the clipboard, with a tip saying which.
@@ -733,7 +868,10 @@ class DetailPane(QFrame):
         compared, old = self._compared_row(group_id, row)
         if compared:
             before = self._cell_text(field, old) if old is not None else None
-            if before != self._cell_text(field, row):
+            # «7 bands ▸» reads the same with a band moved; the bands are what changed.
+            bands_moved = (field == "eq" and old is not None
+                           and old.raw.get("eq") != row.raw.get("eq"))
+            if before != self._cell_text(field, row) or bands_moved:
                 item.setData(CHANGED_ROLE, True)
                 # Blue and bold: the table's stylesheet paints over an item's background, and the
                 # change has to read at a glance — blue is the window's "new" (in REW, import it).
@@ -742,8 +880,12 @@ class DetailPane(QFrame):
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)
-                item.setToolTip(i18n.t("cmpWas").format(value=before) if before is not None
-                                else i18n.t("cmpNew"))
+                if before is None:
+                    item.setToolTip(i18n.t("cmpNew"))
+                elif before == self._cell_text(field, row):
+                    item.setToolTip(i18n.t("cmpEqChanged"))
+                else:
+                    item.setToolTip(i18n.t("cmpWas").format(value=before))
         return item
 
     @staticmethod
@@ -793,6 +935,32 @@ class DetailPane(QFrame):
 
     # ---- EQ view ----------------------------------------------------------
 
+    def _chip_row(self, shown: set) -> Optional[QWidget]:
+        """Every channel that has an EQ, as a button, tier by tier — view A of the prototype, the
+        one the Arbiter kept (2026-09-25). The one on screen is lit; a click shows that one."""
+        self._eq_chips = {}
+        groups = getattr(self._view, "groups", ()) or ()
+        tiers = [(g, [r for r in g.rows_visible() if r.eq_count() > 0]) for g in groups]
+        tiers = [(g, rows) for g, rows in tiers if rows]
+        if not tiers:
+            return None
+        holder = QWidget()
+        flow = FlowLayout(holder, spacing=6)
+        for group, rows in tiers:
+            said = i18n.t(f"chanSum_{group.id}")
+            tier = QLabel(said if said != f"chanSum_{group.id}" else group.label)
+            tier.setProperty("class", "kv-lbl")
+            flow.addWidget(tier)
+            for row in rows:
+                chip = _DTab(f"{row.name} · {row.eq_count()}")
+                chip.set_on((group.id, row.id) in shown)
+                # Deferred: the chip sits in the view it replaces (see `_build_table`'s click).
+                chip.clicked.connect(lambda _c=False, g=group, r=row:
+                                     QTimer.singleShot(0, lambda: self.open_eq(g, r)))
+                flow.addWidget(chip)
+                self._eq_chips[(group.id, row.id)] = chip
+        return holder
+
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
 
@@ -800,6 +968,12 @@ class DetailPane(QFrame):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(8)
+        shown = {(group.id, row.id)}
+        if self._pair_mode and sib_row:
+            shown.add((group.id, sib_row.id))
+        chips = self._chip_row(shown)
+        if chips is not None:
+            layout.addWidget(chips)
 
         if self._pair_mode and sib_row:
             l_row, r_row = (row, sib_row) if _is_left(row.name) else (sib_row, row)

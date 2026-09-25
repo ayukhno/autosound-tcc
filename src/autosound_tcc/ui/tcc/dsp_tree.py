@@ -18,6 +18,7 @@ without them still renders.
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
@@ -34,6 +35,7 @@ from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
+from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # Short, translatable header labels for the known DSP tiers (matches the prototype's T.virtual /
@@ -140,6 +142,15 @@ def _eq_bank_text(row, group_id: str) -> str:
         channel=row.name,
     )
     return bank.text if bank else ""
+
+
+def _light(widget: QWidget, on: bool) -> None:
+    """Add or drop `act` in a row's class — the row the window is showing (the Arbiter, on the
+    prototype, 2026-09-25: «поточна група активна!»)."""
+    words = [w for w in str(widget.property("class") or "").split() if w != "act"]
+    widget.setProperty("class", " ".join(words + (["act"] if on else [])))
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
 
 
 class ChannelRow(QWidget):
@@ -457,6 +468,10 @@ class TreeGroupSection(QWidget):
         count = QLabel(count_text)
         count.setProperty("class", "cnt")
         head_layout.addWidget(count)
+        # Whether the tier carries settings, and whether they moved since «порівняти з» (the
+        # Arbiter, 2026-09-25, finding 65). The window says which; until it does, no dot.
+        self.dot = StatusDot()
+        head_layout.addWidget(self.dot)
         head_layout.addStretch(1)
         self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]
         outer.addWidget(self._header)
@@ -469,9 +484,12 @@ class TreeGroupSection(QWidget):
         params_row = _ParamsOpenRow()
         params_row.clicked.connect(lambda: self.tableRequested.emit(group.id))
         children_layout.addWidget(params_row)
+        self._params_row = params_row
+        self._rows: dict[str, ChannelRow] = {}
 
         for row in visible_rows:
             chan = ChannelRow(group, row)
+            self._rows[row.id] = chan
             chan.clicked.connect(lambda r=row: self.channelClicked.emit(group.id, r.id))
             chan.eqRequested.connect(lambda r=row: self.eqRequested.emit(group.id, r.id))
             chan.toggleRequested.connect(
@@ -489,6 +507,12 @@ class TreeGroupSection(QWidget):
     def _set_collapsed(self, collapsed: bool) -> None:
         self._children.setHidden(collapsed)
         self._twist.setText("▸" if collapsed else "▾")
+
+    def set_active(self, what: Optional[str]) -> None:
+        """Light «params» (`"params"`), one channel (its row id), or nothing (`None`)."""
+        _light(self._params_row, what == "params")
+        for row_id, chan in self._rows.items():
+            _light(chan, what == row_id)
 
 
 class DspTreeWidget(QWidget):
@@ -521,6 +545,25 @@ class DspTreeWidget(QWidget):
         self._layout.setContentsMargins(0, 6, 0, 12)
         self._layout.setSpacing(2)
         self._layout.addStretch(1)
+        self._sections: dict[str, TreeGroupSection] = {}
+        self._active: tuple = (None, None)
+
+    def set_active(self, group_id: Optional[str], what: Optional[str]) -> None:
+        """What the window shows now: a tier's table (`"params"`), a channel, or nothing."""
+        self._active = (group_id, what) if group_id else (None, None)
+        for gid, section in self._sections.items():
+            section.set_active(what if gid == group_id else None)
+
+    def active(self) -> tuple:
+        return self._active
+
+    def set_status(self, statuses: dict, version: str = "") -> None:
+        """`{group id: "none" | "set" | "chg"}` — the dot beside each tier's name."""
+        for group_id, section in self._sections.items():
+            section.dot.set_status(statuses.get(group_id), version)
+
+    def status_dots(self) -> dict:
+        return {group_id: section.dot for group_id, section in self._sections.items()}
 
     def set_view(self, view: ProjectView) -> None:
         # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so
@@ -537,8 +580,12 @@ class DspTreeWidget(QWidget):
         if view.features:
             params = ParamsSection("params", i18n.t("params"), view.features, self._settings)
             self._layout.insertWidget(self._layout.count() - 1, params)
+        self._sections = {}
         for group in view.groups:
             section = TreeGroupSection(group, self._settings)
+            self._sections[group.id] = section
+            if group.id == self._active[0]:
+                section.set_active(self._active[1])
             section.channelClicked.connect(self.channelClicked.emit)
             section.eqRequested.connect(self.eqRequested.emit)
             section.tableRequested.connect(self.tableRequested.emit)

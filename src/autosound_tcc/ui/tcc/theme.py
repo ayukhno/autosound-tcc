@@ -764,6 +764,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QWidget[class~="chan"]:hover {{
         background: {t.panel2};
     }}
+    /* What the window is showing now (the Arbiter on the prototype, 2026-09-25: «поточна група
+       активна!»): the tier's «params» row, or the channel whose EQ is open. */
+    QWidget[class~="chan"][class~="act"], QWidget[class~="prow-params"][class~="act"] {{
+        background: {t.mix('accent', 12)};
+        border-left: 3px solid {t.accent};
+    }}
     QWidget[class~="chan-dim"] {{
         color: {t.faint};
     }}
@@ -1072,6 +1078,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="meas-legend-label"] {{ color: {t.muted}; font-size: 10px; }}
     /* What the last import or read did, above the capture panel's row (finding 31): blue. */
     QLabel[class~="meas-status"] {{ color: {t.info}; font-size: 11px; }}
+    /* «інша конфігурація» beside «порівняти з» (finding 66): blue, as what it marks is. */
+    QLabel[class~="cmp-other"] {{
+        color: {t.info};
+        border: 1px solid {t.info};
+        border-radius: 8px;
+        padding: 0 7px;
+        font-size: 11px;
+    }}
     QLabel[class~="tl"] {{ border-radius: 4px; }}
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
     QLabel[class~="tl-found"] {{ background: {t.info}; }}
@@ -1488,6 +1502,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: 1px solid {t.info};
         border-bottom: 2px solid {t.info};
         font-weight: 600;
+    }}
+    /* «Режим контролю»: eight tabs with their dots and «порівняти з» on half a screen. */
+    QTabWidget#ctl-tabs QTabBar::tab {{
+        padding: 6px 7px;
+        margin-right: 2px;
     }}
 
     /* ---- every button nobody gave a class to ----

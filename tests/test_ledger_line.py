@@ -168,3 +168,46 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
     window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
     assert window._dsp_section.sub_text() == "SQ-2 · v_006"
     assert not window._cfg_btn.isHidden(), "the save is offered on the per-project line"
+
+
+def test_compare_offers_this_preset_first_then_the_others_on_the_old_layout(tmp_path):
+    """«Треба мати можливість порівнювати не тільки v_xxx в поточній конфігурації, але і з іншими
+    конфігураціями» (the Arbiter, 2026-09-25, finding 66). The old layout numbers each preset on
+    its own, so the other presets' versions are a second list, not more of the same one."""
+    _old_layout(tmp_path)
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_003") == [
+        ("SQ", ["v_002", "v_001"]), ("FULL", ["v_002", "v_001"])]
+
+
+def test_compare_groups_the_project_line_by_the_preset_each_version_was_made_for(tmp_path):
+    _arbiter_example(tmp_path)
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == [
+        ("SQ", ["v_003", "v_002", "v_001"]), ("FULL", ["v_005", "v_004"])]
+
+
+def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkeypatch):
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc import main_window
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    loaded = []
+    monkeypatch.setattr(main_window, "load_project_view",
+                        lambda root, preset, profile, version=None: loaded.append((preset, version)))
+    root = tmp_path / "ledger"
+    _old_layout(root)
+    window = MainWindow()
+    window._offer_compare(root, "SQ", {}, "v_003")
+    combo = window._detail._compare_combo
+    keys = [combo.itemData(i) for i in range(combo.count())]
+    assert keys[:3] == [None, "v_002", "v_001"], "this preset's versions come first, as before"
+    assert keys.index("FULL/v_002") > keys.index("v_001")
+    header = next(i for i in range(combo.count())
+                  if combo.itemData(i) is None and "FULL" in combo.itemText(i))
+    assert not combo.model().item(header).isEnabled(), "the preset's name heads its versions"
+
+    combo.setCurrentIndex(combo.findData("FULL/v_002"))
+    assert loaded[-1] == ("FULL", "v_002"), "another preset's version is read from that preset"
+    assert window._detail._compare_other.isVisibleTo(window._detail)
