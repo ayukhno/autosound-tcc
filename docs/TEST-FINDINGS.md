@@ -2018,5 +2018,6 @@ jumps a line.
 
 **Where.** The EQ view's band cards, both modes.
 
-**Weight.** Low: nothing is wrong, the entry order is off. Said for the Helix; whether other
-processors want the same order was not said.
+**Weight.** Low: nothing is wrong, the entry order is off. The order is the processor's, not one
+for all: for a MUSWAY, TCC's Freq · Q · Gain is right (the Arbiter, the same day), so the card has
+to follow the DSP it shows.
