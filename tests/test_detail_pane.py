@@ -8,7 +8,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 
 from autosound_tcc.state.dsp_state import EqBand  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -948,3 +948,91 @@ def test_a_squeezed_close_button_keeps_its_start_like_copy():
     qss = theme.build_qss(theme.get_theme("dark"))
     block = re.search(r'QPushButton\[class~="d-close"\] \{([^}]*)\}', qss).group(1)
     assert "text-align: left" in block
+
+
+# ---- the compared version's EQ row and the band marks (finding 73, tcc#54) ----------------------
+
+def _eq_versions():
+    """m-L now: 100 Hz same, 1000 Hz gain moved, 4000 Hz new; before: 2500 Hz, gone since."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+
+    def outputs(bands):
+        return ProfileGroup(id="physical_outputs", label="Output", fields=("eq",), rows=(
+            GroupRow(id="m-L", name="m-L", slot="E", raw={"eq": bands}),
+            GroupRow(id="m-R", name="m-R", slot="F", raw={"eq": [dict(_PK, f=320)]}),))
+
+    now = outputs([dict(_PK, f=100, i=1), dict(_PK, f=1000, gain_db=-4.0, i=2),
+                   dict(_PK, f=4000, i=4)])
+    was = outputs([dict(_PK, f=100, i=1), dict(_PK, f=1000, i=2), dict(_PK, f=2500, i=3)])
+    return now, type("V", (), {"groups": (was,)})()
+
+
+def _card_rows(pane):
+    from autosound_tcc.ui.tcc.detail_pane import EqBandCard
+
+    rows = []
+    for widget in pane._scroll.widget().findChildren(QWidget):
+        cards = [c for c in widget.children() if isinstance(c, EqBandCard)]
+        if cards:
+            rows.append(cards)
+    return rows
+
+
+def test_the_compare_button_is_passive_with_nothing_chosen_and_gone_in_pair_mode():
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, before = _eq_versions()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_005"], None, lambda _v: before)
+    pane.open_eq(now, now.rows[0])
+    assert pane._cmp_btn.isVisibleTo(pane) and not pane._cmp_btn.isEnabled()
+
+    pane.select_compare("v_005")
+    assert pane._cmp_btn.isEnabled()
+
+    pane._on_pair_toggle()
+    assert not pane._cmp_btn.isVisibleTo(pane), "two channels on screen: no compared row"
+
+
+def test_the_marks_stand_whenever_a_version_is_chosen():
+    """«в шапці EQ band кольоровий маркер — завжди, якщо є сет для порівняння»: new and changed
+    on the current row; removed has no card to stand on until the compared row is shown."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, before = _eq_versions()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_005"], "v_005", lambda _v: before)
+    pane.open_eq(now, now.rows[0])
+    rows = _card_rows(pane)
+    assert len(rows) == 1
+    assert [c.mark for c in rows[0]] == [None, "chg", "new"]
+    assert rows[0][1].changed_fields() == [], "the values are coloured with the compared row only"
+
+    pane.select_compare(None)
+    assert [c.mark for c in _card_rows(pane)[0]] == [None, None, None]
+
+
+def test_pressed_the_compared_version_s_row_stands_under_the_current_one():
+    """«показується рядок EQ нижче поточного і підписується v_xxx; цвітова показує, що
+    змінилося; копіювання залишається вверху»."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, before = _eq_versions()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_005"], "v_005", lambda _v: before)
+    pane.open_eq(now, now.rows[0])
+    pane._cmp_btn.clicked.emit()
+
+    top, lower = _card_rows(pane)
+    assert [c.mark for c in top] == [None, "chg", "new"]
+    assert [c.mark for c in lower] == [None, None, "removed"], "removed only below"
+    assert top[1].changed_fields() == ["Gain"] and lower[1].changed_fields() == ["Gain"]
+    labels = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
+    assert any(t.startswith("v_005") for t in labels), "the lower row names its version"
+    assert pane._cmp_btn.property("class") == "d-tab on"
+
+    pane._cmp_btn.clicked.emit()
+    assert len(_card_rows(pane)) == 1

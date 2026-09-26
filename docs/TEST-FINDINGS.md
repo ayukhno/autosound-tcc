@@ -2123,4 +2123,12 @@ status dots.
 
 **Weight.** Medium: a feature; a band-by-band comparison of two versions inside TCC.
 
-**Issue:** tcc#54 on W-3, assessed, no `ok`.
+**Issue:** tcc#54 on W-3; the Arbiter's OK the same day («робимо зараз - мій ОК», «коміт
+достатньо!» — a commit, no tag).
+
+**Built:** tcc#54, the commit that records this line. «⇅ Порівняти» left of the copy; the marks
+are a dot in the card's heading — green new, blue changed, red removed — with a legend over the
+rows and what moved on hover. The changed values are blue in both rows while the compared row is
+on. A band is matched by the DSP number `i` where both versions carry it on every band, otherwise
+by order and (type, frequency) (`state/eq_diff.py`): a band put in the middle is new, the rest
+stay the same; a frequency moved in its place is a change.

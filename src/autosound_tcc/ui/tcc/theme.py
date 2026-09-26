@@ -896,6 +896,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-color: {t.accent_dim};
         background: {t.mix('accent', 12)};
     }}
+    /* A tab with nothing to act on — «⇅ Порівняти» with no version chosen (tcc#54). */
+    QLabel[class~="d-tab"]:disabled {{
+        color: {t.faint};
+        border: 1px dashed {t.border2};
+    }}
     /* Copy the bank: active is an accent button, passive (pair mode's header) plainly is not —
        they read the same before (finding 67, 4). */
     QLabel[class~="d-copy"] {{
@@ -997,6 +1002,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.warn};
         font-weight: 700;
     }}
+    /* A value that differs from the compared version (tcc#54): the change colour of the tables. */
+    QLabel[class~="band-fv-chg"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 11px;
+        color: {t.info};
+        font-weight: 700;
+    }}
     QLabel[class~="band-byp"] {{
         color: {t.faint};
         font-size: 9.5px;
@@ -1007,6 +1019,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* A band bypassed in the DSP (hub #209 PAS-009): lit, as PC-Tool's orange Bypass. */
     QLabel[class~="band-byp"][class~="on"] {{
         color: {t.accent};
+        font-weight: 700;
+    }}
+    QLabel[class~="band-byp"][class~="chg"] {{
+        color: {t.info};
         font-weight: 700;
     }}
     /* The filter type by family (finding 69): green a shelf, blue PK, yellow APF. */

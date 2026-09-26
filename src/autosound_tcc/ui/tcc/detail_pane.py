@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
+from autosound_tcc.state.eq_diff import BandDiff, compare_bands
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.labels import ElidedButton
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -163,17 +164,53 @@ def band_count(bands) -> str:
     return f"({sum(not b.bypass for b in configured)}/{len(configured)})"
 
 
+#: A band against the compared version (tcc#54): green new, blue changed — the window's colour for
+#: a change, as the changed cells and dots — red removed. The theme's token, read when drawn.
+_MARK_TOKEN = {"new": "ok", "chg": "info", "removed": "warn"}
+_MARK_WORD = {"new": "bandNew", "chg": "bandChg", "removed": "bandGone"}
+
+
+def _band_value(name: str, band: EqBand) -> str:
+    if name == "freq":
+        return f"{band.freq_hz:g} Hz"
+    if name == "gain":
+        return f"{band.gain_db:+.1f} dB" if band.gain_db is not None else "—"
+    if name == "q":
+        return f"{band.q:.2f}" if band.q is not None else "—"
+    if name == "bypass":
+        return "● ByPass" if band.bypass else "○ ByPass"
+    return band.type or "—"
+
+
+def _mark_tip(diff: BandDiff, version: str) -> str:
+    """What the mark means for THIS band: new against which version, what moved and from what."""
+    word = i18n.t(_MARK_WORD[diff.status])
+    if diff.status == "new":
+        return f"{word}: {i18n.t('bandNewTip').format(version=version)}"
+    if diff.status == "removed":
+        return f"{word}: {i18n.t('bandGoneTip')}"
+    moved = [f"{_band_value(f, diff.other)} → {_band_value(f, diff.band)}"
+             for f in ("type", "freq", "gain", "q", "bypass") if f in diff.fields]
+    return f"{word}: {' · '.join(moved)}"
+
+
 class EqBandCard(QFrame):
     """One EQ band card: «Type (band)» + Freq/Q/Gain in the processor's order + the band's own
     bypass. `match_color`, when given, draws the colored top border used to flag a shared frequency
-    between paired L/R channels."""
+    between paired L/R channels.
+
+    Against a compared version (tcc#54): `mark` — "new" · "chg" · "removed" — puts a coloured dot
+    in the heading, `mark_tip` says what it means; `changed` names the values drawn in the change
+    colour, and `was` the band they were, for «було: …» on hover."""
 
     def __init__(
         self, band: EqBand, match_color: Optional[str] = None, gain_mismatch: bool = False,
-        order: tuple = _ORDER_DEFAULT,
+        order: tuple = _ORDER_DEFAULT, mark: Optional[str] = None, mark_tip: str = "",
+        changed: frozenset = frozenset(), was: Optional[EqBand] = None,
     ) -> None:
         super().__init__()
         self.setProperty("class", "band")
+        self.mark = mark
         self.setFixedWidth(112)
         if match_color:
             # A bare (selector-less) setStyleSheet() rule is implicitly "*" and cascades to every
@@ -191,13 +228,18 @@ class EqBandCard(QFrame):
         self._title = QLabel(title)
         self._title.setProperty("class", f"band-id band-{_band_kind(band.type)}")
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if mark in _MARK_TOKEN:
+            colour = getattr(current_theme(), _MARK_TOKEN[mark])
+            self._title.setTextFormat(Qt.TextFormat.RichText)
+            self._title.setText(f'<span style="color:{colour}">●</span>&nbsp;{title}')
+            self._title.setToolTip(mark_tip)
         layout.addWidget(self._title)
 
-        values = {"freq": ("Freq", f"{band.freq_hz:g} Hz"),
-                  "q": ("Q", f"{band.q:.2f}" if band.q is not None else "—"),
-                  "gain": ("Gain", f"{band.gain_db:+.1f} dB" if band.gain_db is not None else "—")}
+        values = {key: (name, _band_value(key, band))
+                  for key, name in (("freq", "Freq"), ("q", "Q"), ("gain", "Gain"))}
         self._field_names = [values[key][0] for key in order]
-        for label, value in (values[key] for key in order):
+        self._changed_labels: list = []
+        for key, (label, value) in ((key, values[key]) for key in order):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(8, 3, 8, 3)
@@ -208,6 +250,12 @@ class EqBandCard(QFrame):
             # identical to a same-freq/same-gain match -- flag the Gain value specifically so the
             # asymmetry is visible at a glance (user request 2026-07-27).
             fv.setProperty("class", "band-fv-mismatch" if (label == "Gain" and gain_mismatch) else "band-fv")
+            if key in changed:
+                # What changed against the compared version, not what is the same (tcc#54).
+                fv.setProperty("class", "band-fv-chg")
+                if was is not None:
+                    fv.setToolTip(i18n.t("cmpWas").format(value=_band_value(key, was)))
+                self._changed_labels.append(label)
             row_layout.addWidget(fk)
             row_layout.addStretch(1)
             row_layout.addWidget(fv)
@@ -217,7 +265,8 @@ class EqBandCard(QFrame):
         # and a band switched off in the DSP could not be told from one that was on. A band with
         # no `bypass` (older files) is on — the ledger's own reading.
         self._byp = QLabel(("● " if band.bypass else "○ ") + "ByPass")
-        self._byp.setProperty("class", "band-byp on" if band.bypass else "band-byp")
+        self._byp.setProperty("class", ("band-byp on" if band.bypass else "band-byp")
+                              + (" chg" if "bypass" in changed else ""))
         apply_caps(self._byp, spacing_px=0.8)
         self._byp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._byp)
@@ -225,25 +274,46 @@ class EqBandCard(QFrame):
     def field_names(self) -> list:
         return list(self._field_names)
 
+    def changed_fields(self) -> list:
+        """The value rows drawn as changed, by their names («Gain», «Q»)."""
+        return list(self._changed_labels)
+
+
+def _shown(bands) -> list:
+    """By the DSP's band number, as PC-Tool lists them; an empty slot draws nothing (PAS-011)."""
+    return sorted((b for b in bands if not _band_empty(b)),
+                  key=lambda b: (b.index is None, b.index or 0))
+
 
 def _band_flow(
     bands: tuple[EqBand, ...],
     match_map: Optional[dict[float, str]] = None,
     gain_mismatch_freqs: Optional[set] = None,
     order: tuple = _ORDER_DEFAULT,
+    diff: Optional[list] = None,
+    marks: tuple = (),
+    paint: bool = False,
+    version: str = "",
+    hover_was: bool = True,
 ) -> QWidget:
+    """One row of cards. With `diff` (the row's `BandDiff`s, in `_shown` order) the bands come
+    from it: the statuses in `marks` get their dot, and `paint` draws the changed values —
+    with «було: …» on hover unless `hover_was` is off (the compared row IS what it was)."""
     container = QWidget()
     # One row and the pane's scroll, not a wrap (the Arbiter, finding 71, 2).
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
-    # By the DSP's band number, as PC-Tool lists them; an empty slot draws nothing (PAS-011).
-    shown = sorted((b for b in bands if not _band_empty(b)),
-                   key=lambda b: (b.index is None, b.index or 0))
-    for band in shown:
+    for entry in diff if diff is not None else (BandDiff(b, "same") for b in _shown(bands)):
+        band = entry.band
         color = (match_map or {}).get(band.freq_hz)
         mismatch = band.freq_hz in (gain_mismatch_freqs or ())
-        layout.addWidget(EqBandCard(band, color, mismatch, order))
+        mark = entry.status if entry.status in marks else None
+        layout.addWidget(EqBandCard(
+            band, color, mismatch, order, mark=mark,
+            mark_tip=_mark_tip(entry, version) if mark else "",
+            changed=entry.fields if paint else frozenset(),
+            was=entry.other if hover_was else None))
     layout.addStretch(1)
     return container
 
@@ -319,6 +389,9 @@ class DetailPane(QFrame):
         self._row: Optional[GroupRow] = None
         self._sib_row: Optional[GroupRow] = None
         self._pair_mode = False
+        #: The compared version's EQ row under the current one (tcc#54): the Arbiter's, like the
+        #: pair mode — it stays on from channel to channel.
+        self._cmp_rows = False
         #: Inside a tab of «Режим контролю»: the tabs above are the navigation, so the pane carries
         #: no menu of its own, and a row asks for the EQ tab instead of turning into it (finding 47).
         self._embedded = False
@@ -378,6 +451,13 @@ class DetailPane(QFrame):
         self._eq_help.setVisible(False)
         self._eq_help_tip = attach_tip(self._eq_help)
         head_layout.addWidget(self._eq_help)
+
+        # The compared version's EQ under this one (tcc#54, finding 73): left of the copy, passive
+        # with no version chosen, gone in pair mode — two channels leave no room for a third row.
+        self._cmp_btn = _DTab(i18n.t("cmpRowBtn"))
+        self._cmp_btn.clicked.connect(self._on_cmp_rows_toggle)
+        self._cmp_btn.setVisible(False)
+        head_layout.addWidget(self._cmp_btn)
 
         # The bank of the channel on screen, in the format its processor takes -- named after the
         # channel, because in the single-channel view that is what "copy EQ" means. Hidden unless
@@ -444,10 +524,11 @@ class DetailPane(QFrame):
         # between «EQ» and «Рівень» they made the tabs jump as they came and went, and with copy
         # after the toggle the toggle moved when copy went (the Arbiter, 2026-09-25). Past the
         # stretch, so nothing on either side moves when copy goes.
-        for widget in (self._eq_copy, self._pair_btn, self._eq_help):
+        eq_actions = (self._cmp_btn, self._eq_copy, self._pair_btn, self._eq_help)
+        for widget in eq_actions:
             head_layout.removeWidget(widget)
         at = head_layout.indexOf(self._compare_label)
-        for offset, widget in enumerate((self._eq_copy, self._pair_btn, self._eq_help)):
+        for offset, widget in enumerate(eq_actions):
             head_layout.insertWidget(at + offset, widget)
         outer.addWidget(head)
 
@@ -478,6 +559,7 @@ class DetailPane(QFrame):
         # With the pane closed it does not run, and the button kept the language the pane was
         # built in until it was next opened — invisible, and wrong the moment it appeared (F-033).
         self._eq_copy.setText(i18n.t("copyEqBank"))
+        self._cmp_btn.setText(i18n.t("cmpRowBtn"))
         if self._group is not None:
             self.refresh_with(self._group)
 
@@ -618,6 +700,9 @@ class DetailPane(QFrame):
             self.open_param(self._param)
         elif self._mode == "table" and self._group is not None:
             self.open_table(self._group)
+        elif self._mode == "eq" and self._group is not None and self._row is not None:
+            # The band marks follow the version chosen (tcc#54).
+            self.open_eq(self._group, self._row)
         else:
             self._sync_tabs()
 
@@ -727,6 +812,12 @@ class DetailPane(QFrame):
         self._sync_param_tabs()
         self._pair_btn.set_on(self._pair_mode)
         self._pair_btn.setVisible(eq_on and self._sib_row is not None)
+        comparing = self._compare_view is not None
+        self._cmp_btn.setVisible(eq_on and not paired)
+        self._cmp_btn.setEnabled(comparing)
+        self._cmp_btn.set_on(comparing and self._cmp_rows)
+        self._cmp_btn.setToolTip(i18n.t("cmpRowTip").format(version=self._compare_text)
+                                 if comparing else i18n.t("cmpRowOff"))
         self._eq_help.setVisible(eq_on)
         self._eq_copy.setText(f'{i18n.t("copyEqBank")} {self._row.name}' if single
                               else i18n.t("copyEqBank"))
@@ -790,6 +881,13 @@ class DetailPane(QFrame):
             return
         QGuiApplication.clipboard().setText(bank.text)
         self.bankCopied.emit(_bank_sentence(row.name, bank))
+
+    def _on_cmp_rows_toggle(self) -> None:
+        if self._compare_view is None:
+            return
+        self._cmp_rows = not self._cmp_rows
+        if self._row is not None:
+            self.open_eq(self._group, self._row)
 
     def _on_pair_toggle(self) -> None:
         self._pair_mode = not self._pair_mode
@@ -1131,6 +1229,51 @@ class DetailPane(QFrame):
         left, right = (pick, partner) if _is_left(pick.name) else (partner, pick)
         return f"{left.name}/{right.name}"
 
+    def _band_diff(self, group: ProfileGroup, row: GroupRow) -> tuple:
+        """`(current side, compared side, the compared channel)`; `(None, None, None)` with no
+        version chosen. A channel the compared version lacks: every band of it is new."""
+        compared, old_row = self._compared_row(group.id, row)
+        if not compared:
+            return None, None, None
+        old = _shown(old_row.eq_bands()) if old_row is not None else []
+        now_side, was_side = compare_bands(_shown(row.eq_bands()), old)
+        return now_side, was_side, old_row
+
+    def _single_rows(self, layout, group: ProfileGroup, row: GroupRow) -> None:
+        """One channel's bands, marked against the version chosen; with «⇅ Порівняти» on, that
+        version's bands under them, named, with what changed in colour (tcc#54, finding 73)."""
+        now_side, was_side, old_row = self._band_diff(group, row)
+        rows_on = self._cmp_rows and now_side is not None
+        marks = [d.status for d in now_side or () if d.status in ("new", "chg")]
+        marks += [d.status for d in was_side or () if rows_on and d.status == "removed"]
+        if marks:
+            legend = QWidget()
+            legend_layout = QHBoxLayout(legend)
+            legend_layout.setContentsMargins(0, 0, 0, 0)
+            t = current_theme()
+            for status in ("new", "chg", "removed"):
+                if status in marks:
+                    chip = QLabel(f"● {i18n.t(_MARK_WORD[status])}")
+                    chip.setStyleSheet(f"color: {getattr(t, _MARK_TOKEN[status])};")
+                    legend_layout.addWidget(chip)
+            legend_layout.addStretch(1)
+            layout.addWidget(legend)
+        layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order, diff=now_side,
+                                    marks=("new", "chg"), paint=rows_on,
+                                    version=self._compare_text))
+        if not rows_on:
+            return
+        if old_row is None:
+            said = QLabel(f"{self._compare_text} · {i18n.t('cmpNew')}")
+            said.setProperty("class", "eq-rowlab")
+            layout.addWidget(said)
+            return
+        heading = QLabel(f"{self._compare_text} · {old_row.name} {band_count(old_row.eq_bands())}")
+        heading.setProperty("class", "eq-rowlab")
+        layout.addWidget(heading)
+        layout.addWidget(_band_flow(old_row.eq_bands(), order=self._eq_order, diff=was_side,
+                                    marks=("removed",), paint=True, hover_was=False))
+
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
 
@@ -1193,9 +1336,10 @@ class DetailPane(QFrame):
                 heading_row.addStretch(1)
                 layout.addWidget(heading)
                 layout.addWidget(_band_flow(r.eq_bands(), match_map, gain_mismatch,
-                                            self._eq_order))
+                                            self._eq_order, diff=self._band_diff(group, r)[0],
+                                            marks=("new", "chg"), version=self._compare_text))
         else:
-            layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order))
+            self._single_rows(layout, group, row)
 
         layout.addStretch(1)
         self._scroll.setWidget(container)
