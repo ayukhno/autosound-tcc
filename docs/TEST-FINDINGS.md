@@ -2153,3 +2153,6 @@ top border, and the legend lists them as chips in those colours («⬤ 1000→11
 green and red («синій ок»). Built in the commit that records this: changed values and a switched
 bypass in red, an unchanged bypass keeps its own look; the pair palette is blue, orange, violet,
 yellow, pink and tan.
+Then: «там, де точки зелена чи червона, можна було б малювати і в шапці колір — щоб краще було
+видно». Built in the next commit: a new band's card is topped green, a removed one's red, in
+single mode (in pair mode the top says «shared frequency»).

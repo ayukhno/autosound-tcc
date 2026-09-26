@@ -1069,12 +1069,12 @@ def test_a_changed_band_and_what_it_was_share_a_colour_as_the_pair_mode_does():
     pane = DetailPane()
     pane.set_compare_choices(["v_005"], "v_005", lambda _v: before)
     pane.open_eq(now, now.rows[0])
-    assert all(c.match_color is None for c in _card_rows(pane)[0]), "with no row below, no pairs"
+    assert _card_rows(pane)[0][1].match_color is None, "with no row below, no pairs"
 
     pane._cmp_btn.clicked.emit()
     top, lower = _card_rows(pane)
     assert top[1].match_color == lower[1].match_color == _CMP_PALETTE[0]
-    assert [c.match_color for c in top[::2] + lower[::2]] == [None] * 4
+    assert [c.match_color for c in (top[0], lower[0])] == [None, None], "the same: none"
     said = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
     assert "⬤ 1000 Hz" in said, "the legend names the pair in its colour, as «спільні» does"
 
@@ -1090,3 +1090,22 @@ def test_the_pair_colours_are_not_the_new_and_removed_marks():
     for mode in get_args(Mode):
         t = get_theme(mode)
         assert not {t.ok.lower(), t.warn.lower()} & {c.lower() for c in _CMP_PALETTE}
+
+
+def test_a_new_or_removed_band_carries_its_colour_on_the_card_top_too():
+    """«там, де точки зелена чи червона, малювати і в шапці колір — щоб краще було видно»."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    t = current_theme()
+    now, before = _eq_versions()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_005"], "v_005", lambda _v: before)
+    pane.open_eq(now, now.rows[0])
+    assert [c.match_color for c in _card_rows(pane)[0]] == [None, None, t.ok], \
+        "new: green on top, with the compared row off too"
+
+    pane._cmp_btn.clicked.emit()
+    top, lower = _card_rows(pane)
+    assert top[2].match_color == t.ok and lower[2].match_color == t.warn

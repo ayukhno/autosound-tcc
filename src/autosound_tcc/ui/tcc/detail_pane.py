@@ -346,11 +346,14 @@ def _band_flow(
     version: str = "",
     hover_was: bool = True,
     pair_colours: Optional[dict] = None,
+    mark_tops: bool = False,
 ) -> QWidget:
     """One row of cards. With `diff` (the row's `BandDiff`s, in `_shown` order) the bands come
     from it: the statuses in `marks` get their dot, and `paint` draws the changed values —
     with «було: …» on hover unless `hover_was` is off (the compared row IS what it was).
-    `pair_colours` (`_pair_colours`) tops a changed band with its pair's colour."""
+    `pair_colours` (`_pair_colours`) tops a changed band with its pair's colour; `mark_tops` a new
+    or removed one with its mark's green or red («щоб краще було видно»). Not in pair mode, where
+    the top already says «shared frequency»."""
     container = QWidget()
     # One row and the pane's scroll, not a wrap (the Arbiter, finding 71, 2).
     layout = QHBoxLayout(container)
@@ -361,6 +364,8 @@ def _band_flow(
         color = (pair_colours or {}).get(id(band)) or (match_map or {}).get(band.freq_hz)
         mismatch = band.freq_hz in (gain_mismatch_freqs or ())
         mark = entry.status if entry.status in marks else None
+        if mark_tops and mark in ("new", "removed"):
+            color = getattr(current_theme(), _MARK_TOKEN[mark])
         layout.addWidget(EqBandCard(
             band, color, mismatch, order, mark=mark,
             mark_tip=_mark_tip(entry, version) if mark else "",
@@ -1301,7 +1306,8 @@ class DetailPane(QFrame):
             layout.addWidget(_compare_legend(now_side, was_side, colours))
         layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order, diff=now_side,
                                     marks=("new", "chg"), paint=rows_on,
-                                    version=self._compare_text, pair_colours=colours))
+                                    version=self._compare_text, pair_colours=colours,
+                                    mark_tops=True))
         if not rows_on:
             return
         if old_row is None:
@@ -1314,7 +1320,7 @@ class DetailPane(QFrame):
         layout.addWidget(heading)
         layout.addWidget(_band_flow(old_row.eq_bands(), order=self._eq_order, diff=was_side,
                                     marks=("removed",), paint=True, hover_was=False,
-                                    pair_colours=colours))
+                                    pair_colours=colours, mark_tops=True))
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))
