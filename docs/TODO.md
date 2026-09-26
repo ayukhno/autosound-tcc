@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: at the W-3 review 2026-09-26 as tcc#69 (proposed: deferred again) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: at the W-3 review 2026-09-26 as tcc#69 (proposed: deferred again) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2054,7 +2054,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25, went on 2026-09-26 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
+**Статус**: collection closed 2026-09-26 («збір завершено») · the pool is on the milestone as #50, #56–#69, assessed; `docs/PLAN-W-3.md` written · waits for the Arbiter's OK task by task · earlier: collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25, went on 2026-09-26 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
@@ -2100,10 +2100,10 @@ channels: the band changes as coloured dots with counts, left of the EQ chip) as
 OK, built in one commit (2357). Hub #211 PAS-011 and #209 PAS-009 are taken and close
 with the tag that ships them. Full suite at `9e18ba3`: 2337 passed (-n 4).
 
-**Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he
-says the collection is done, gather the whole pool (bus tickets, tcc issues, TODO, findings, and
-what the method put off to its next wave), mark each item "in" or "deferred, with the reason" in
-`docs/PLAN-W-3.md`, and review it with him.
+**Що зробити**: review `docs/PLAN-W-3.md` with the Arbiter, task by task: his OK puts `ok` on
+the issue; a task he does not take leaves the milestone, back to the pool. Then planning and work on
+the `ok` tasks only, in the plan's order (the loop first). Owed decisions: #69 (F-065/F-066 deferred
+again, F-071 closed?) and finding 72 (a ticket to the car session?).
 
 ### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
 
@@ -2271,7 +2271,7 @@ construction. This one was found while chasing it.
 
 ### F-071 — `test_only_the_current_phase_starts_expanded` crashes its worker under `-n 4`
 
-**Статус**: deferred 2026-09-23 · out of W-2 by the Arbiter's word: machinery with no product effect, not reproduced in 3 runs · returns: when it shows again, or at the next wave's review
+**Статус**: at the W-3 review 2026-09-26 as tcc#69 (proposed: closed as not reproduced) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: machinery with no product effect, not reproduced in 3 runs · returns: when it shows again, or at the next wave's review
 
 Reproduced 2026-09-20 while working on `SKL-047`, and measured against a clean tree so it is not
 mistaken for a regression: with `tests/test_plan_panel.py` in the same `-n 4` run as

@@ -1613,6 +1613,8 @@ sentence is Ukrainian whatever the UI says.
 
 **Weight.** Low: wording.
 
+**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 43. Starting from the desktop shortcut: two terminal windows before the splash
 
 **What.** A terminal, then a second one behind it, then the splash. The window itself now comes up
@@ -1628,6 +1630,8 @@ the model check.
 
 **Weight.** Medium: the console flashes are the class TCC-006 was about.
 
+**Issue:** tcc#62 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 44. A pin made from the desktop shortcut does not merge with the running window (F-044, narrowed)
 
 **What.** Pinned through the desktop icon's menu (More → Pin to taskbar), a start from the taskbar
@@ -1638,6 +1642,8 @@ these starts.
 **Where.** Windows VM, v0.1.43.
 
 **Weight.** Low: two icons, both work.
+
+**Issue:** tcc#62 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 45. Entering «Режим контролю» on Windows flashes a series of windows in the middle of the screen
 
@@ -1652,6 +1658,8 @@ another in the centre of the screen. Switching back is clean.
 
 **Weight.** Medium: visible on every switch.
 
+**Issue:** tcc#62 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 46. Quitting while REW is being pinged: "worker destroyed on the GUI thread while it had NOT finished"
 
 **What.** The log line finding 35 names as the abort, six times in one sitting. Each one comes a
@@ -1660,6 +1668,8 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 **Where.** Windows VM, v0.1.43, `tcc.log` 14:38:02 – 14:42:25 (`_RewPingWorker`).
 
 **Weight.** Medium: it is the line that preceded the crashes of finding 35.
+
+**Issue:** tcc#63 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 47. Control mode: the tables carry the full window's own menus, and EQ has no way back
 
@@ -1710,6 +1720,8 @@ login) normally does not have. The AGY rows come live from `agy models`.
 
 **Weight.** Medium: the newest Claude models cannot be picked, and nothing says the list is old.
 
+**Issue:** tcc#64 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 49. «In focus now»: a tall panel stretches the measurement rows apart
 
 **What.** When the bottom-right zone is taller than its content, the rows of the measurement list
@@ -1720,6 +1732,8 @@ compact at the top.
 **Where.** Windows VM, «In focus now», measurement task (screenshot, 2026-09-24).
 
 **Weight.** Low: layout; everything stays readable.
+
+**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 50. The theme button: the icon alone is enough, the word «theme» is not needed
 
@@ -1734,6 +1748,8 @@ the header is squeezed, so a narrow window showed the icon only and a wide one s
 
 **Weight.** Low: wording.
 
+**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 51. The light-grey text strains the eyes, in both themes and in more places than one
 
 **What.** The faint grey used for secondary text is hard to read and tires the eyes. The example
@@ -1746,6 +1762,8 @@ built after it.
 
 **Weight.** Medium: it is felt all the time, and it is everywhere this grey is used.
 
+**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 52. Dark theme: the search box in «Моделі у виборі генератора» hides what is typed
 
 **What.** In the dark theme the dialog's search field is white, and the text typed into it
@@ -1756,6 +1774,8 @@ does filter by it.
 models), screenshot 2026-09-24.
 
 **Weight.** Medium: the field cannot be read while typing.
+
+**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 53. A model through omp does not start: `OmpSession.__init__() got an unexpected keyword argument 'language'`
 
@@ -1768,6 +1788,8 @@ session does not start.
 
 **Weight.** High: the omp route cannot run a session at all.
 
+**Issue:** tcc#56 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 54. Switching away from a model that never started still runs «save state before the model change»
 
 **What.** Right after finding 53 (the omp session failed to start), switching the model shows
@@ -1777,6 +1799,8 @@ was nothing to save before the switch.
 **Where.** Windows, light theme, the in-app AI dialog (screenshot, 2026-09-24).
 
 **Weight.** Low: a needless step and a misleading line; depends on how long it takes.
+
+**Issue:** tcc#56 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 55. The critic picker stays red whatever model is picked
 
@@ -1794,6 +1818,8 @@ model this launch saw refused.
 
 **Weight.** Medium: the red says "broken" about a model that works.
 
+**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 56. The curve window tries to read from REW when REW is already known to be offline
 
 **What.** With the REW indicator red, the curve analysis window («Where exactly?») still tries to
@@ -1808,6 +1834,8 @@ curves chosen (screenshot, 2026-09-24).
 **Weight.** Medium: a wait for a result that is known in advance, and a technical error in place
 of "REW is offline".
 
+**Issue:** tcc#61 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 57. «next round» is picked, and its capture list is full and all green
 
 **What.** The round picker in «In focus now» reads «next round ●»; the Arbiter: that is right, it
@@ -1821,6 +1849,8 @@ closing) names tcc#39: a live round is marked done from what REW holds, so the i
 «expects no captures».
 
 **Weight.** Medium: the list says the round is finished when it has not started.
+
+**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 58. A critic through omp does not answer: the model name goes out with the `google-antigravity/` prefix
 
@@ -1849,6 +1879,8 @@ two answers pasted by the Arbiter, screenshots, 2026-09-24).
 
 **Weight.** High: no omp-picked critic can answer.
 
+**Issue:** tcc#57 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 59. The critic chosen in the footer does not reach the project parameters
 
 **What.** The footer's «AI CRITIC» reads «OMP · Gemini 3.5 Flash Lite»; «PROJECT PARAMS» still
@@ -1862,6 +1894,8 @@ through the AI's queue, TCC shows that the change is waiting.
 
 **Weight.** Medium: three places, three different critics.
 
+**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 60. «порівняти з»: on Windows the open list shows «…» in place of every version
 
 **What.** The closed picker reads «v_009»; opened, its list shows «—» and then «…» on every row,
@@ -1870,6 +1904,8 @@ so no version can be told from another.
 **Where.** Windows, light theme, the table's «порівняти з» picker (screenshot, 2026-09-24).
 
 **Weight.** Medium: the version cannot be chosen by name.
+
+**Issue:** tcc#66 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 61. The critic through agy is cut off mid-stream, and the channel steps down to the API
 
@@ -1900,6 +1936,8 @@ this launch saw refused turns red).
 
 **Weight.** Medium: red on every row says nothing works, while the review had just come back.
 
+**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+
 ### 63. The critic's reply is not shown as the critic's, and the Generator's proposal is labelled «SYSTEM · LEDGER»
 
 **What.** The Arbiter suspected the critic's answer arrives as the blue system bubble. Checked on
@@ -1924,6 +1962,8 @@ his word (2026-09-24), from the code:
 
 **Weight.** Medium: the one voice the loop exists for is not visible as itself, and a proposal
 looks like something already recorded.
+
+**Issue:** tcc#59 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 64. «У фокусі зараз» shows the phase plan, not the open round: 24 positions and five columns for a round of six
 
@@ -1953,6 +1993,8 @@ Arbiter's rule to merge pairs, sides and joints into one «Group» column; not l
 **Where.** The Arbiter's project, round `cap_016`, phase 2 (screenshot, 2026-09-24).
 
 **Weight.** High: the task the tuner reads is not the task the session issued.
+
+**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 65. Status dots on the tree's DSP groups and on the tabs: none, set, changed
 
@@ -2052,6 +2094,8 @@ Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in 
 **Where.** TCC's menu; the band card's order (`detail_pane.eq_field_order`, since `305cd47`).
 
 **Weight.** Medium: a place for settings that today are scattered or built in.
+
+**Issue:** tcc#67 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
 
 ### 71. The EQ view and the tabs, third pass (the Arbiter, 2026-09-25, on `985c097`)
 
