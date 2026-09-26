@@ -546,6 +546,28 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QRadioButton[class~="delay-radio"]::indicator:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .check-list — a list of check boxes (the omp models, finding 75, tcc#70): the native box drew
+    nothing when empty in the dark theme and sat over the text in the light one. */
+    QListWidget[class~="check-list"] {{
+        background: {t.panel2};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+    }}
+    QListWidget[class~="check-list"]::item {{
+        padding: 4px 6px;
+        color: {t.text};
+    }}
+    QListWidget[class~="check-list"]::indicator {{
+        width: 13px;
+        height: 13px;
+        border: 2px solid {t.muted};
+        border-radius: 3px;
+        background: {t.panel};
+    }}
+    QListWidget[class~="check-list"]::indicator:checked {{
+        border-color: {t.accent};
+        background: {t.accent};
+    }}
     QRadioButton[class~="delay-radio"]::indicator:checked {{
         border: 2px solid {t.accent};
         background: {t.accent};

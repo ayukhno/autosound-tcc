@@ -49,6 +49,10 @@ class ModelConfigDialog(QDialog):
         #: this window comes back to the front afterwards — see `changeEvent`.
         self._setup_launched = False
 
+        # Twice the width it opened at (the Arbiter, finding 75): a row reads «K2.7 Code Highspeed ·
+        # kimi-code/kimi-for-coding-highspeed · безкоштовно», and it was cut on the right.
+        self.setMinimumWidth(720)
+        self.resize(760, 560)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
@@ -63,6 +67,9 @@ class ModelConfigDialog(QDialog):
         layout.addWidget(self._filter)
 
         self._list = QListWidget()
+        # Its own check boxes: the native ones drew nothing for an empty box in the dark theme and
+        # sat over the row's text in the light one (finding 75, tcc#70).
+        self._list.setProperty("class", "check-list")
         self._list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         layout.addWidget(self._list, 1)
 
