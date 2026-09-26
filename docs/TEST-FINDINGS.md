@@ -2159,3 +2159,22 @@ single mode (in pair mode the top says «shared frequency»).
 Then: «в порівнянні не виділяти червоним, як було, а тільки там, де треба вводити». Built in the
 next commit: red only on the current row, what is entered into the DSP; the compared row's values
 and bypass are plain, the pair colour on top ties each to its band above.
+
+### 74. The tree's channels: the compared bands as coloured dots with counts, left of «EQ n/m»
+
+**What.** The Arbiter (2026-09-26, two screenshots — the tree's «EQ 11/12» chips and the EQ view's
+legend «однакові (11) ● нова (0) ● змінена (1) ● видалена (3)»): in compare mode, left of each
+channel's EQ chip, the coloured dots with their counts in brackets and no names. «роби зараз — мій
+ОК».
+
+**Where.** `wave-0.1.44` at `0fca226`, the DSP tree (`dsp_tree.ChannelRow`), fed by the same match
+as the EQ view (`state/eq_diff.py`, tcc#54).
+
+**Weight.** Medium: which channels' bands moved against the compared version, without opening each.
+
+**Issue:** tcc#55 on W-3, the Arbiter's OK the same day.
+
+**Built:** tcc#55, the commit that records this line. Only the kinds that are there: a channel
+whose bands did not move shows no dots, and none shows with nothing compared. A channel the
+compared version lacks counts every band as new. The tree now also gets its dots back after a
+language switch rebuilds it.

@@ -882,6 +882,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.faint};
         border-color: {t.border2};
     }}
+    /* The channel's band changes against «порівняти з», left of its chip (finding 74). */
+    QLabel[class~="eq-cmp"] {{
+        font-family: "SF Mono", Menlo, monospace;
+        font-size: 10px;
+    }}
 
     /* ---- detail pane: tabs / close / table / EQ bands ---- */
     QLabel[class~="d-tab"] {{

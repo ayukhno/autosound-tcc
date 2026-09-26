@@ -2375,6 +2375,7 @@ class MainWindow(QMainWindow):
         statuses = {g.id: group_status(g, next((o for o in old if o.id == g.id), None), compared)
                     for g in groups}
         self._tree.set_status(statuses, self._compare_said())
+        self._tree.set_compared(list(old) if compared else None)
         control = getattr(self, "_control_layout", None)
         if control is not None and control.active:
             control.sync_dots()
@@ -5406,3 +5407,5 @@ class MainWindow(QMainWindow):
         # has no live binding, so rebuild it in the new language (cheap -- a handful of widgets).
         if self._view is not None:
             self._tree.set_view(self._view)
+            # A rebuilt tree has no dots and no band changes until told again.
+            self._sync_status_dots()

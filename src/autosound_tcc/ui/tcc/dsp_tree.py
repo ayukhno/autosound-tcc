@@ -35,7 +35,7 @@ from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
-from autosound_tcc.ui.tcc.detail_pane import band_count
+from autosound_tcc.ui.tcc.detail_pane import band_changes, band_count, mark_colour
 from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -168,6 +168,8 @@ class ChannelRow(QWidget):
         super().__init__()
         self.setProperty("class", "chan")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._row = row
+        self._changes: Optional[dict] = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 4, 8, 5)
         layout.setSpacing(1)
@@ -216,6 +218,13 @@ class ChannelRow(QWidget):
             line1.addWidget(tag)
 
         line1.addStretch(1)
+        # Against «порівняти з»: the EQ legend's dots with their counts, no names, left of the
+        # chip (the Arbiter, 2026-09-26, finding 74). Nothing moved, or nothing compared — none.
+        self._cmp = QLabel()
+        self._cmp.setProperty("class", "eq-cmp")
+        self._cmp.setTextFormat(Qt.TextFormat.RichText)
+        self._cmp.setVisible(False)
+        line1.addWidget(self._cmp)
         self._eq_chip = _EqChip(band_count(row.eq_bands()).strip("()"))
         self._eq_chip.clicked.connect(self.eqRequested.emit)
         line1.addWidget(self._eq_chip)
@@ -252,6 +261,17 @@ class ChannelRow(QWidget):
             row=lambda: f"{row.name}: {summary}" if summary else row.name,
             hint=lambda: copy_menu.plain(self._tip.text()),
         )
+
+    def set_compared(self, old_row: Optional[GroupRow], compared: bool) -> None:
+        """This channel against the same one in the compared version; `compared` False clears."""
+        self._changes = band_changes(self._row, old_row) if compared else None
+        parts = [f'<span style="color:{mark_colour(status)}">●&nbsp;({n})</span>'
+                 for status, n in (self._changes or {}).items() if n]
+        self._cmp.setText("&nbsp;&nbsp;".join(parts))
+        self._cmp.setVisible(bool(parts))
+
+    def band_changes(self) -> Optional[dict]:
+        return dict(self._changes) if self._changes is not None else None
 
     @staticmethod
     def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:
@@ -509,6 +529,12 @@ class TreeGroupSection(QWidget):
         self._children.setHidden(collapsed)
         self._twist.setText("▸" if collapsed else "▾")
 
+    def set_compared(self, old_group: Optional[ProfileGroup], compared: bool) -> None:
+        """Each channel against its namesake in `old_group` (finding 74)."""
+        olds = {r.id: r for r in old_group.rows} if old_group is not None else {}
+        for row_id, chan in self._rows.items():
+            chan.set_compared(olds.get(row_id), compared)
+
     def set_active(self, what: Optional[str]) -> None:
         """Light «params» (`"params"`), one channel (its row id), or nothing (`None`)."""
         _light(self._params_row, what == "params")
@@ -562,6 +588,13 @@ class DspTreeWidget(QWidget):
         """`{group id: "none" | "set" | "chg"}` — the dot beside each tier's name."""
         for group_id, section in self._sections.items():
             section.dot.set_status(statuses.get(group_id), version)
+
+    def set_compared(self, groups) -> None:
+        """The compared version's groups, or None when nothing is compared: each channel's band
+        changes beside its EQ chip (finding 74)."""
+        by_id = {g.id: g for g in groups or ()}
+        for group_id, section in self._sections.items():
+            section.set_compared(by_id.get(group_id), groups is not None)
 
     def status_dots(self) -> dict:
         return {group_id: section.dot for group_id, section in self._sections.items()}

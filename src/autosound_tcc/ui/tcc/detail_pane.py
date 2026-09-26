@@ -197,6 +197,22 @@ def _mark_tip(diff: BandDiff, version: str) -> str:
     return f"{word}: {' · '.join(moved)}"
 
 
+def mark_colour(status: str) -> str:
+    """The mark's colour in the theme on now: green new, blue changed, red removed."""
+    return getattr(current_theme(), _MARK_TOKEN[status])
+
+
+def band_changes(row: GroupRow, old_row: Optional[GroupRow]) -> dict:
+    """`{"new": n, "chg": n, "removed": n}`: `row`'s bands against the same channel in the
+    compared version, by the EQ view's own match; `old_row` None — that version lacks the channel,
+    and every band is new (finding 74)."""
+    now_side, was_side = compare_bands(_shown(row.eq_bands()),
+                                       _shown(old_row.eq_bands()) if old_row is not None else [])
+    return {"new": sum(d.status == "new" for d in now_side),
+            "chg": sum(d.status == "chg" for d in now_side),
+            "removed": sum(d.status == "removed" for d in was_side)}
+
+
 def _pair_colours(now_side: list) -> dict:
     """Each changed band and its compared self in one colour of the pair palette, keyed by the
     band object: «кольорово однаковими "змінені", як у нас правий-лівий» (the Arbiter,
