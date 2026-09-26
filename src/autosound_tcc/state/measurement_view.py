@@ -129,6 +129,32 @@ def groups_from_titles(titles) -> list[dict]:
     ]
 
 
+def _canonical(naming, glossary, title: str) -> str:
+    """A round's title in the derived spelling — `sw_01 (sw)` as `sw_1 (sw)` — the way the plan
+    and every other row spell it. As typed when it is not in the grammar."""
+    entry = naming.parse_name(str(title), glossary)
+    if not entry:
+        return str(title)
+    version = "final" if entry.get("version") == "final" else entry.get("version_n")
+    try:
+        return naming.generate_name(entry["code"], version, entry.get("method"),
+                                    modifier=entry.get("modifier"), position=entry.get("position"),
+                                    control=entry.get("control"), params=entry.get("params"))
+    except Exception:  # noqa: BLE001 — a title the writer will not rebuild is shown as typed
+        return str(title)
+
+
+def _round_groups(round_: dict, naming, glossary) -> list[dict]:
+    """An open round's columns: the ones it carries (skill #83), else its list by method."""
+    carried = [
+        {"label": str(g.get("label") or g.get("method") or ""), "method": g.get("method"),
+         "names": [_canonical(naming, glossary, n) for n in g.get("names") or []]}
+        for g in round_.get("groups") or [] if isinstance(g, dict) and g.get("names")
+    ]
+    return carried or groups_from_titles(
+        [_canonical(naming, glossary, t) for t in round_.get("expected") or []])
+
+
 def protective_phrase(legs) -> str:
     """What was in the chain, as a phrase for a row — `"HP 80 LR24 · LP 3500 LR24"`, or `""`.
 
@@ -227,24 +253,31 @@ def build_session(
         return None
 
     glossary = naming.Glossary.for_project(str(project))
-    groups_spec = naming.expected_groups(phase, glossary, version)
     live_round = process_view.capture_round(project) or {}
+    round_open = bool(live_round) and not live_round.get("closed")
+    # An OPEN round is the task, whatever the phase plan predicts (finding 64, tcc#60): round
+    # `cap_016` was issued with six positions and the panel showed phase 2's 24, in five columns,
+    # because the plan was read first and the round only when the plan was empty. A round is a
+    # fact, a phase plan is a prediction about it. Its own `groups` when it carries them (skill
+    # #83: label, method, names beside `expected`), else its list grouped by method.
+    groups_spec = _round_groups(live_round, naming, glossary) if round_open else []
+    if not groups_spec:
+        groups_spec = naming.expected_groups(phase, glossary, version)
     if not groups_spec:
         # A phase whose plan captures nothing (the skill's `_CAPTURE_PLAN["1"]` is literally `[]`
-        # — phase 1 computes from what phase 0 took) still gets a task if the session OPENED one.
-        # This used to return before it ever looked, so an ad-hoc round in such a phase rendered
-        # as "no captures here": the panel showed the derivation and ignored the record, which is
-        # the wrong way round — a round is a fact, a phase plan is a prediction about it.
-        outstanding = [] if live_round.get("closed") else list(live_round.get("expected") or [])
-        if not outstanding:
-            return MeasSession(
-                id=f"v{version}",
-                series=str(version),
-                version={"en": f"Phase {phase} · no capture",
-                         "uk": f"Фаза {phase} · без замірів"},
-                groups=(),
-            )
-        groups_spec = groups_from_titles(outstanding)
+        # — phase 1 computes from what phase 0 took) and no round open: nothing asked for.
+        return MeasSession(
+            id=f"v{version}",
+            series=str(version),
+            version={"en": f"Phase {phase} · no capture",
+                     "uk": f"Фаза {phase} · без замірів"},
+            groups=(),
+        )
+    # With no round open the live task is the NEXT round, a new pass (finding 57): the closed
+    # pass's takes credited it, and «next round ●» listed every capture green before anything was
+    # captured. Those takes stay on that round's own entry in the picker. A project that has
+    # never run a round keeps the checklist it had, credited from the import store.
+    next_round = not round_open and bool(process_view.capture_rounds(project))
 
     # Keyed by parsed identity, not by raw title, so `c_01 (rta)` counts as `c_1 (rta)` -- REW
     # titles are hand-typed and zero-padding is common.
@@ -292,7 +325,7 @@ def build_session(
     # this panel used to be built on entirely, which meant closing REW turned a finished round back
     # into an empty checklist. What was recorded is a fact; what REW happens to have open is a
     # snapshot of another application's session.
-    round_ = live_round
+    round_ = live_round if round_open or not next_round else {}
     recorded_taken = {str(t) for t in (round_.get("taken") or {})}
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
     # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
@@ -319,7 +352,9 @@ def build_session(
     # list painted it green (live project, 2026-09-14). For those names only a take recorded in
     # THIS round answers; the import store is history here too, so it does not either.
     asked_again = set()
-    if not round_.get("closed"):
+    if next_round:
+        asked_again = {_key(n) for spec in groups_spec for n in spec["names"]} - {None}
+    elif not round_.get("closed"):
         asked_again = {_key(t) for t in (round_.get("expected") or [])} - {None}
     taken_here = {_key(t) for t in recorded_taken} - {None}
 

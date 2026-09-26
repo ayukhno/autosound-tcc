@@ -920,6 +920,9 @@ class MeasurementPanel(QWidget):
         # last one would keep reserving room for columns that no longer exist.
         for column in range(len(getattr(self, "_col_methods", ()))):
             self._cols_layout.setColumnStretch(column, 0)
+        # The same for the row that takes the spare height (below).
+        for row_at in range(self._cols_layout.rowCount()):
+            self._cols_layout.setRowStretch(row_at, 0)
         self._col_next_row = []
         self._col_methods: list[str] = []
         # A phase that captures nothing (phase 1 analyses the series phase 0 took) is a real
@@ -947,6 +950,10 @@ class MeasurementPanel(QWidget):
                 self._rows.append(row)
                 self._cols_layout.addWidget(row, r, c)
             self._col_next_row.append(len(group.items) + 1)
+        # The spare height goes below the last row, not between the rows: with the zone taller
+        # than its content the rows and the headers spread out to fill it (finding 49, tcc#60).
+        if session.groups:
+            self._cols_layout.setRowStretch(max(self._col_next_row), 1)
 
     def _fit_fact_buttons(self) -> None:
         """Keep the two word buttons wide enough for the words actually on them.

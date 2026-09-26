@@ -318,7 +318,8 @@ def test_a_recorded_capture_survives_rew_being_closed(project):
 
     statuses = {item.name: item.status for group in session.groups for item in group.items}
     assert statuses["sw_1 (sw)"] == mv.STATUS_DONE
-    assert statuses["sw_1 (rta)"] == mv.STATUS_WAIT  # not recorded, and REW cannot vouch for it
+    # The open round lists what it asked for, not phase 0's plan (finding 64).
+    assert "sw_1 (rta)" not in statuses
 
 
 def test_a_capture_decided_against_is_not_a_capture_still_waiting(project):
@@ -351,7 +352,11 @@ def test_a_closed_round_stops_being_the_live_task(project):
 
     assert session.id == "v1"  # back to the version, since no round is open
     statuses = {item.name: item.status for group in session.groups for item in group.items}
-    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE  # what it produced is still on the record
+    # The next round is a new pass (finding 57); what cap_001 produced is on its own entry.
+    assert statuses["sw_1 (sw)"] == mv.STATUS_WAIT
+    past = mv.build_sessions("0", 1, [], project)[1]  # a past round keeps its titles as typed
+    assert {i.name: i.status for g in past.groups for i in g.items}[_as_typed("sw_1 (sw)")] \
+        == mv.STATUS_DONE
 
 
 def test_a_capture_that_failed_the_check_is_not_done(project):
@@ -496,7 +501,8 @@ def test_a_phase_whose_plan_captures_nothing_still_shows_a_round_the_session_ope
 
     session = mv.build_session("1", 4, ["w-L_04 (sw)"], project)
 
-    assert _names(session) == ["w-L_04 (sw)", "w-R_04 (sw)"]
+    # In the derived spelling, as every other row (tcc#60).
+    assert _names(session) == ["w-L_4 (sw)", "w-R_4 (sw)"]
     assert session.id == "cap_002"
 
 
@@ -510,7 +516,7 @@ def test_a_phase_that_really_captures_nothing_still_says_so(project):
 def test_the_round_says_what_was_in_each_channel_chain(project):
     """The record is per channel and per pass, and until now nothing rendered it: a capture taken
     behind a protective high-pass looked exactly like one taken clean (tcc#15)."""
-    process = _round(project, expected=["w-L_1 (sw)"])
+    process = _round(project, expected=["w-L_1 (sw)", "w-R_1 (sw)"])
     process.set_protective("w-L", {"hp": {"f": 100, "type": "LR", "slope": 24}})
 
     session = mv.build_session("0", 1, ["w-L_1 (sw)"], project, taken=["w-L_1 (sw)"])
@@ -536,14 +542,16 @@ def test_a_round_that_closed_did_not_un_take_its_measurements(project):
     every one verified `ok`, the round was closed — and the checklist above it said "waiting" for
     all fourteen. Two causes, both here: only the OPEN round was consulted, and the comparison was
     raw strings, so the round's `tw-L_01 (sw)` never met the checklist's `tw-L_1 (sw)`."""
-    process = _round(project, version=1, expected=["w-L_01 (sw)"], taken=["w-L_01 (sw)"])
+    process = _round(project, version=1, expected=["w-L_01 (sw)", "w-R_01 (sw)"],
+                     taken=["w-L_01 (sw)"])
     process.close_capture("зроблено")
 
-    session = mv.build_session("0", 1, [], project, taken=[])
-    statuses = {item.name: item.status for g in session.groups for item in g.items}
+    # Since finding 57 the closed round's results are on ITS OWN entry, not the next round's.
+    past = mv.build_sessions("0", 1, [], project, taken=[])[1]
+    statuses = {item.name: item.status for g in past.groups for item in g.items}
 
-    assert statuses["w-L_1 (sw)"] == mv.STATUS_DONE, "the record says it was taken"
-    assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT, "and the one nobody took is still waiting"
+    assert statuses["w-L_01 (sw)"] == mv.STATUS_DONE, "the record says it was taken"
+    assert statuses["w-R_01 (sw)"] != mv.STATUS_DONE, "and the one nobody took is not done"
 
 
 def test_the_round_fixture_writes_titles_the_way_a_person_types_them(project):
@@ -585,7 +593,7 @@ def test_a_new_round_does_not_inherit_what_an_earlier_round_took(project):
 
     assert statuses["w-L_1 (sw)"] == mv.STATUS_WAIT, "asked for again, not taken again yet"
     assert statuses["w-R_1 (sw)"] == mv.STATUS_WAIT
-    assert statuses["sw_1 (sw)"] == mv.STATUS_DONE, "not asked for by this pass: the earlier take stands"
+    assert "sw_1 (sw)" not in statuses, "not asked for by this pass: not on its list (finding 64)"
 
     process.record_capture(_as_typed("w-L_1 (sw)"))
 
@@ -619,10 +627,12 @@ def test_an_old_round_opened_with_the_ledger_version_counts_by_the_series_of_its
     _bank_next_version(project)
     process.start_capture("v_002", expected=["w-R_49 (sw)"])
 
-    session = mv.build_session("0", 49, [], project, taken=[])
-    statuses = {item.name: item.status for g in session.groups for item in g.items}
+    # Not on the open round's list (finding 64), so it reaches the task as an extra REW holds —
+    # green because the old round, found by the series of its titles, took it.
+    session = mv.build_session("0", 49, ["w-L_49 (sw)"], project, taken=[])
+    extras = {i.name: i.status for g in session.groups if g.type == "additional" for i in g.items}
 
-    assert statuses["w-L_49 (sw)"] == mv.STATUS_DONE
+    assert extras["w-L_49 (sw)"] == mv.STATUS_DONE
 
 
 def test_the_series_is_read_by_the_grammar(project):
@@ -702,3 +712,45 @@ def test_an_rta_the_check_does_not_apply_to_carries_no_explanation_on_its_row():
     item = session.groups[0].items[0]
     assert item.extra is None
     assert item.status == measurement_view.STATUS_DONE
+
+
+# ---- an open round is the task; the next round is a new pass (findings 64, 57; tcc#60) ----------
+
+def test_an_open_round_shows_its_own_list_not_the_phase_plan(project):
+    """Finding 64: round `cap_016` was issued with six positions and the panel showed phase 2's
+    plan — 24, in five columns. TCC read the plan first and the round only when the plan was
+    empty. A round is a fact, a phase plan is a prediction about it."""
+    _round(project, version=1, expected=["sw_1 (sw)", "w-L_1 (rta)"])
+
+    session = mv.build_session("2", 1, [], project)
+
+    assert sorted(_names(session)) == ["sw_1 (sw)", "w-L_1 (rta)"]
+
+
+def test_an_open_round_s_own_groups_are_its_columns(project):
+    """skill #83 (hub #205): the round stores `groups` (label, method, names) beside `expected`,
+    and TCC draws those rather than grouping by itself."""
+    process = _round(project, version=1, expected=["sw_1 (sw)", "w-L_1 (sw)"], pad=False)
+    state_path = process_view.process_dir(project) / "process-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["capture"]["groups"] = [{"label": "Solo (sw)", "method": "sw", "names": ["sw_1 (sw)"]},
+                      {"label": "Group (sw)", "method": "sw", "names": ["w-L_1 (sw)"]}]
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    del process
+
+    session = mv.build_session("2", 1, [], project)
+
+    assert [g.type for g in session.groups] == ["Solo (sw)", "Group (sw)"]
+
+
+def test_the_next_round_is_a_new_pass_not_the_last_one_s_results(project):
+    """Finding 57: «next round ●» listed every capture of the round, all green «done», before
+    anything was captured — the closed pass's takes credited the next one. They stay on that
+    round's own entry in the picker."""
+    process = _round(project, version=1, expected=["sw_1 (sw)"], taken=["sw_1 (sw)"])
+    process.close_capture("session ended")
+
+    session = mv.build_session("0", 1, [], project)
+
+    statuses = {item.name: item.status for group in session.groups for item in group.items}
+    assert statuses["sw_1 (sw)"] == mv.STATUS_WAIT

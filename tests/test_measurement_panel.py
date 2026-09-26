@@ -1210,3 +1210,19 @@ def test_a_saved_order_is_what_the_panel_reads_back(tmp_path, monkeypatch):
     monkeypatch.setattr(panel._settings, "value", lambda k, d=None: store.get(k, d))
     panel._store_order("sw", ["B", "A"])
     assert panel._saved_order("sw") == ["B", "A"]
+
+
+def test_a_tall_panel_keeps_the_rows_compact_at_the_top():
+    """Finding 49 (tcc#60): with the zone taller than its content, the rows spread out to fill
+    the height, the column headers too. The room goes below the last row."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel.resize(700, 2000)
+    panel.show()
+    QApplication.processEvents()
+    try:
+        row = panel._rows[0]
+        assert row.height() <= row.sizeHint().height() + 4
+    finally:
+        panel.hide()

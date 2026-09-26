@@ -1733,7 +1733,10 @@ compact at the top.
 
 **Weight.** Low: layout; everything stays readable.
 
-**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#60 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#60. The spare height goes below the last row (a row stretch), so the rows and the
+headers stay compact at the top.
 
 ### 50. The theme button: the icon alone is enough, the word «theme» is not needed
 
@@ -1868,7 +1871,11 @@ closing) names tcc#39: a live round is marked done from what REW holds, so the i
 
 **Weight.** Medium: the list says the round is finished when it has not started.
 
-**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#60 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#60. With no round open the live task is the next round, a new pass: the closed
+pass's takes no longer credit it (they stay on that round's own entry in the picker). A project
+that never ran a round keeps its checklist, credited from the import store.
 
 ### 58. A critic through omp does not answer: the model name goes out with the `google-antigravity/` prefix
 
@@ -2035,7 +2042,12 @@ Arbiter's rule to merge pairs, sides and joints into one «Group» column; not l
 
 **Weight.** High: the task the tuner reads is not the task the session issued.
 
-**Issue:** tcc#60 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#60 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#60 (TCC's half). An open round is the task: its own `groups` when it carries them
+(skill #83: label, method, names beside `expected`), else its list grouped by method, in the
+derived spelling; the phase plan only when no round is open. The columns become the method's four
+(Solo/Group × sw/rta) once skill #79 and #83 ship; `r-L`/`r-R` is #83's (one source for "active").
 
 ### 65. Status dots on the tree's DSP groups and on the tabs: none, set, changed
 
