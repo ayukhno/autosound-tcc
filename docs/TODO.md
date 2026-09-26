@@ -2095,7 +2095,7 @@ built in one commit on this branch (full suite 2347 passed, -n 4); his look at i
 more (the legend, the list locked on the monitor tab, bands matched by content), built in a second
 commit (full suite 2350 passed), and a third: changed pairs share a colour, as L/R does (2351); then changed values and a
 switched bypass in red, pair colours off green and red, and new / removed cards topped green / red
-(2353). Hub #211 PAS-011 and #209 PAS-009 are taken and close
+(2353); red kept to the current row, what is entered (2353). Hub #211 PAS-011 and #209 PAS-009 are taken and close
 with the tag that ships them. Full suite at `9e18ba3`: 2337 passed (-n 4).
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he

@@ -1029,7 +1029,10 @@ def test_pressed_the_compared_version_s_row_stands_under_the_current_one():
     top, lower = _card_rows(pane)
     assert [c.mark for c in top] == [None, "chg", "new"]
     assert [c.mark for c in lower] == [None, None, "removed"], "removed only below"
-    assert top[1].changed_fields() == ["Gain"] and lower[1].changed_fields() == ["Gain"]
+    assert top[1].changed_fields() == ["Gain"]
+    # Red only where it is to be entered, the current row (the Arbiter, 2026-09-26: «не виділяти
+    # червоним, як було, а тільки там, де треба вводити»); the pair colour ties the two.
+    assert lower[1].changed_fields() == []
     labels = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
     assert any(t.startswith("v_005") for t in labels), "the lower row names its version"
     assert pane._cmp_btn.property("class") == "d-tab on"

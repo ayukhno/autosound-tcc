@@ -344,13 +344,12 @@ def _band_flow(
     marks: tuple = (),
     paint: bool = False,
     version: str = "",
-    hover_was: bool = True,
     pair_colours: Optional[dict] = None,
     mark_tops: bool = False,
 ) -> QWidget:
     """One row of cards. With `diff` (the row's `BandDiff`s, in `_shown` order) the bands come
-    from it: the statuses in `marks` get their dot, and `paint` draws the changed values —
-    with «було: …» on hover unless `hover_was` is off (the compared row IS what it was).
+    from it: the statuses in `marks` get their dot, and `paint` draws the changed values, with
+    «було: …» on hover.
     `pair_colours` (`_pair_colours`) tops a changed band with its pair's colour; `mark_tops` a new
     or removed one with its mark's green or red («щоб краще було видно»). Not in pair mode, where
     the top already says «shared frequency»."""
@@ -370,7 +369,7 @@ def _band_flow(
             band, color, mismatch, order, mark=mark,
             mark_tip=_mark_tip(entry, version) if mark else "",
             changed=entry.fields if paint else frozenset(),
-            was=entry.other if hover_was else None))
+            was=entry.other))
     layout.addStretch(1)
     return container
 
@@ -1298,7 +1297,8 @@ class DetailPane(QFrame):
 
     def _single_rows(self, layout, group: ProfileGroup, row: GroupRow) -> None:
         """One channel's bands, marked against the version chosen; with «⇅ Порівняти» on, that
-        version's bands under them, named, with what changed in colour (tcc#54, finding 73)."""
+        version's bands under them, named, each changed pair in one colour and the values to enter
+        in red (tcc#54, finding 73)."""
         now_side, was_side, old_row = self._band_diff(group, row)
         rows_on = self._cmp_rows and now_side is not None
         colours = _pair_colours(now_side) if rows_on else None
@@ -1318,9 +1318,10 @@ class DetailPane(QFrame):
         heading = QLabel(f"{self._compare_text} · {old_row.name} {band_count(old_row.eq_bands())}")
         heading.setProperty("class", "eq-rowlab")
         layout.addWidget(heading)
+        # Its values plain: red is for what is to be entered, the row above (the Arbiter,
+        # 2026-09-26); the pair colour on top says which band above it was.
         layout.addWidget(_band_flow(old_row.eq_bands(), order=self._eq_order, diff=was_side,
-                                    marks=("removed",), paint=True, hover_was=False,
-                                    pair_colours=colours, mark_tops=True))
+                                    marks=("removed",), pair_colours=colours, mark_tops=True))
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))

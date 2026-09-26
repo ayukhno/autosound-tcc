@@ -2156,3 +2156,6 @@ yellow, pink and tan.
 Then: «там, де точки зелена чи червона, можна було б малювати і в шапці колір — щоб краще було
 видно». Built in the next commit: a new band's card is topped green, a removed one's red, in
 single mode (in pair mode the top says «shared frequency»).
+Then: «в порівнянні не виділяти червоним, як було, а тільки там, де треба вводити». Built in the
+next commit: red only on the current row, what is entered into the DSP; the compared row's values
+and bypass are plain, the pair colour on top ties each to its band above.
