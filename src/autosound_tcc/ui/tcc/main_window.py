@@ -1694,6 +1694,9 @@ class MainWindow(QMainWindow):
         for dot in self._rew_dots():
             dot.set_status(self._rew_status_class())
         self._retip_rew_dots()
+        dialog = getattr(self, "_curve_dialog", None)
+        if dialog is not None:
+            dialog.rew_state_changed(online)
 
     def _ping_rew(self) -> None:
         """Ask REW whether it is there, unless a previous ask is still out.
@@ -1900,7 +1903,8 @@ class MainWindow(QMainWindow):
         # tuner takes one off again.
         if dialog is None:
             dialog = CurveDialog(
-                titles, markers=markers or [], kind=kind, available=available, parent=self
+                titles, markers=markers or [], kind=kind, available=available, parent=self,
+                rew_online=lambda: getattr(self, "_rew_online", None),
             )
             # The reading lands in the composer rather than being sent: it is the Arbiter's
             # statement, and they see and edit it before it goes out. Nothing is recorded behind

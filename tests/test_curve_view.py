@@ -4572,3 +4572,36 @@ def test_a_note_that_means_nothing_can_be_shown_is_red_too():
     dialog._render_note()
     assert "curve-status-bad" not in str(dialog._status.property("class") or ""), \
         "a partial answer is still an answer"
+
+
+def test_a_rew_known_to_be_offline_is_said_at_once_not_waited_for(monkeypatch):
+    """Finding 56 (tcc#61): with the REW indicator red the window still read every curve, waited
+    for the timeout and listed «URLError» per curve. The window already knows REW is offline."""
+    from autosound_tcc.ui.tcc import curve_dialog
+
+    started = []
+
+    class _Worker:
+        def __init__(self, *a, **kw):
+            started.append(a)
+            for name in ("done", "failed", "unreadable"):
+                setattr(self, name, type("S", (), {"connect": lambda self, f: None})())
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr(curve_dialog, "_CurveWorker", _Worker)
+    online = {"now": False}
+    dialog = _dialog(["w-L_01 (sw)"], rew_online=lambda: online["now"])
+
+    assert started == [], "nothing is read from a REW known to be offline"
+    assert dialog._status.text() == i18n.t("curveRewOffline")
+
+    online["now"] = True
+    dialog.show()
+    dialog.rew_state_changed(True)
+    dialog.hide()
+    assert len(started) == 1, "and the read happens once it is back"

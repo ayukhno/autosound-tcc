@@ -1855,7 +1855,11 @@ curves chosen (screenshot, 2026-09-24).
 **Weight.** Medium: a wait for a result that is known in advance, and a technical error in place
 of "REW is offline".
 
-**Issue:** tcc#61 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#61 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#61. The curve window reads the window's own REW indicator: red, and it reads
+nothing, clears the plot and says «REW не відповідає … криві завантажаться, щойно він з'явиться»;
+when the indicator turns green the held read goes by itself.
 
 ### 57. «next round» is picked, and its capture list is full and all green
 

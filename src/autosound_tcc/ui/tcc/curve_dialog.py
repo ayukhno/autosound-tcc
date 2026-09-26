@@ -468,11 +468,18 @@ class CurveDialog(QDialog):
         bridge: Optional[RewBridge] = None,
         available: Sequence[str] = (),
         parent=None,
+        rew_online=None,
     ) -> None:
         """`titles` is what to plot. `available` is everything REW holds, for the choose menu and the
         group picker — pass it and the Arbiter can change their mind about which drivers are being
-        argued about without closing the window and finding a different button."""
+        argued about without closing the window and finding a different button.
+
+        `rew_online` — `() -> True | False | None` — is the window's own REW indicator: False and no
+        curve is read (finding 56)."""
         super().__init__(parent)
+        #: Set before anything reads: construction ends in the first `_reload`.
+        self._rew_online = rew_online
+        self._waiting_for_rew = False
         self.setWindowTitle(i18n.t("curveTitle"))
         self.resize(880, 560)
         self._kind = kind_for(titles, kind)
@@ -1267,6 +1274,11 @@ class CurveDialog(QDialog):
 
     # ---- the delay bank -----------------------------------------------------
 
+    def rew_state_changed(self, online) -> None:
+        """The window's REW indicator moved: a read held back for it goes now."""
+        if online and self._waiting_for_rew and self.isVisible():
+            self._reload()
+
     def set_delays_provider(self, provider) -> None:
         self._delays_provider = provider
         self._sync_channel_delay()
@@ -1626,6 +1638,15 @@ class CurveDialog(QDialog):
             return
         _stop_worker(self._worker)
         self._status.setVisible(True)
+        # REW known to be offline — the window's red indicator — is said at once: every curve was
+        # read anyway, the timeout waited out, and a «URLError» listed per curve (finding 56,
+        # tcc#61). The read happens when it is back (`rew_state_changed`).
+        self._waiting_for_rew = self._rew_online is not None and self._rew_online() is False
+        if self._waiting_for_rew:
+            self._view.set_traces([])
+            self._status.setText(i18n.t("curveRewOffline"))
+            self._status_bad(True)
+            return
         self._status.setText(i18n.t("curveLoading"))
         self._sync_protection_button()
         self._worker = _CurveWorker(self._bridge, titles, self._kind, self._legs_by_title())
