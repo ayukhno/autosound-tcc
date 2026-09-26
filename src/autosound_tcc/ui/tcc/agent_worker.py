@@ -18,6 +18,8 @@ from typing import Any, Callable, Optional, Protocol
 
 from PySide6.QtCore import QThread, Signal
 
+from autosound_tcc.core.agent_events import TextDelta, ToolCall
+
 
 class AgentSession(Protocol):
     """The shape `AgentWorker` drives: two async generators and a closer."""
@@ -50,6 +52,10 @@ class AgentWorker(QThread):
         self._session: Optional[AgentSession] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
+        #: Whether the model has said anything in this session — text or a tool call. A session
+        #: whose model never did (omp refusing the prompt for want of a key) has nothing to write
+        #: down before a model switch (finding 77, tcc#56).
+        self.spoke = False
         #: Signal bus to hand to the session, so un-acked user signals ride into every turn
         #: (F-009). Set by `DialogPanel.attach_agent` before `start()` -- the panel is the one
         #: place that holds both the worker and the bus, and routing it through the session
@@ -156,6 +162,10 @@ class AgentWorker(QThread):
         finally:
             self.closed.emit()
 
+    def _note_speech(self, item) -> None:
+        if not self.spoke and isinstance(item, (TextDelta, ToolCall)):
+            self.spoke = True
+
     async def _main(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._task = asyncio.current_task()
@@ -173,6 +183,7 @@ class AgentWorker(QThread):
                 else self._session.start()
             )
             async for item in start:
+                self._note_speech(item)
                 self.chunk.emit(item)
             self.turn_done.emit()
 
@@ -184,6 +195,7 @@ class AgentWorker(QThread):
                 if user_text is None:
                     break
                 async for item in self._session.send(user_text):
+                    self._note_speech(item)
                     self.chunk.emit(item)
                 self.turn_done.emit()
         finally:

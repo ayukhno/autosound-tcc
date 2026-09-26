@@ -72,9 +72,6 @@ from autosound_tcc.core.tuning_session import (
 
 DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
 
-# The omp profile TCC runs sessions in. Named rather than default so a tuning session cannot pick
-# up the user's own MCP servers -- see `_argv`.
-OMP_PROFILE = "tcc"
 
 # What omp reads for a Google model, checked in its binary rather than assumed: `GEMINI_API_KEY`
 # and `GOOGLE_API_KEY`, *not* the `GOOGLE_GENERATIVE_AI_API_KEY` that OpenCode wanted. Worth
@@ -400,21 +397,14 @@ class OmpSession:
             self.effort,
             "--approval-mode",
             "always-ask",
-            # Its own settings, sessions and caches, so a tuning session is not affected by what
-            # the user did to their own omp. Cheap: the credential broker is per profile, but the
-            # working path is the environment (`GEMINI_API_KEY`), which every profile shares.
-            #
-            # **It does NOT isolate MCP servers, despite a first measurement that said it did.**
-            # That reading was a cold cache: a fresh profile has not connected the servers omp
-            # imports from `~/.claude.json` yet, so an early request sees a short catalogue. Once
-            # warm they are all back -- 166 foreign tools on this machine, 156 of them Home
-            # Assistant, ~600 KB of schemas in every call. omp 17.2.5 has no switch for that
-            # source: `mcp.enableProjectConfig` governs the project file only, the per-source
-            # toggles exist for skills and not for MCP, and `disabledExtensions` was tried and has
-            # no effect. What is left is the user's own `~/.claude.json` -- servers declared at the
-            # top level load in every directory, the same ones scoped to a project do not.
-            "--profile",
-            OMP_PROFILE,
+            # The person's OWN omp profile, not one of TCC's (the Arbiter, 2026-09-26, tcc#56,
+            # finding 77). A `tcc` profile ran sessions until then, for its own settings and
+            # caches -- and it cut them off from the logins: the credential store is per profile,
+            # so Opus 5 answered in the Arbiter's terminal and was «No API key found for anthropic»
+            # in TCC. What a session needs of its own is passed here explicitly (model, thinking,
+            # approval mode, tools, the overlay, the session folder). The profile never isolated
+            # MCP servers anyway: omp imports `~/.claude.json`'s top-level servers in every
+            # profile, and 17.2.5 has no switch for that source.
             "--tools",
             ",".join(_ENABLED_TOOLS),
             "--config",
@@ -758,7 +748,10 @@ class OmpSession:
             # leaves a session that is up, connected and permanently silent -- so it gets said out
             # loud rather than dropped for being an outbound frame's business.
             reason = frame.get("error") or frame.get("message") or ""
-            return [Notice(f"omp refused `{frame.get('command')}`: {reason}")]
+            said = Notice(f"omp refused `{frame.get('command')}`: {reason}")
+            # A refused PROMPT starts no model call, so nothing is coming for this turn: it ended
+            # here, and waited forever behind «120s with no output» (finding 77, tcc#56).
+            return [said, TurnEnd()] if frame.get("command") == "prompt" else [said]
 
         return []
 
@@ -948,7 +941,7 @@ class OmpSession:
         return (
             f"No {' or '.join(_GOOGLE_KEY_VARS)} for this process. omp will have nothing to "
             f"authenticate `{self.model}` with, and that failure is silent — the turn comes back "
-            f"empty. Log the profile in once: `omp --profile {OMP_PROFILE} auth login`."
+            f"empty. Sign in once in omp itself (`omp`, then `/login`), or «Налаштувати omp…»."
         )
 
     def skill_warning(self) -> Optional[str]:

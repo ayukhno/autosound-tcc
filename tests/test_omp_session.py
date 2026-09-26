@@ -592,16 +592,14 @@ def test_the_model_is_shown_one_skill_not_the_users_library(tmp_path):
     assert 'includeSkills: ["autosound-tuning"]' in overlay
 
 
-def test_the_session_runs_in_its_own_omp_profile(tmp_path):
-    """Its own settings, sessions and caches, so a tuning session is not affected by what the user
-    did to their own omp — and free, because the credential path is the environment.
-
-    It does *not* isolate MCP servers: a first measurement said so and was wrong (a cold profile
-    has not connected them yet). That is recorded in `_argv` rather than fixed, because omp 17.2.5
-    has no switch for the `~/.claude.json` source."""
+def test_the_session_runs_in_the_person_s_own_omp_profile(tmp_path):
+    """Whatever works in the person's terminal works in TCC: the logins live in omp's profile, and
+    TCC's own profile had none of them."""
     argv = OmpSession(project_dir=tmp_path)._argv()
 
-    assert argv[argv.index("--profile") + 1] == omp_session_module.OMP_PROFILE
+    # The person's own profile since 2026-09-26 (tcc#56, finding 77): a `tcc` profile kept the
+    # logins out — Opus 5 answered in the terminal and was «No API key found» in TCC.
+    assert "--profile" not in argv
 
 
 def test_a_project_with_no_skill_is_called_out_before_the_turn(tmp_path):
@@ -817,3 +815,17 @@ def test_the_project_language_reaches_omp_as_an_appended_rule(tmp_path):
     argv = OmpSession(project_dir=tmp_path, language="uk")._argv()
     rule = Path(argv[argv.index("--append-system-prompt") + 1]).read_text(encoding="utf-8")
     assert "Ukrainian" in rule and "EVERY word you emit" in rule
+
+
+def test_a_refused_prompt_ends_the_turn(tmp_path):
+    """Finding 77 (tcc#56): «omp refused `prompt`: No API key found for kimi-code …», then «120s with
+    no output» and a turn that never ended. A prompt omp refused starts no model call; nothing is
+    coming for that turn."""
+    session = OmpSession(project_dir=tmp_path)
+    events = session._handle({"type": "response", "command": "prompt", "success": False,
+                              "error": "No API key found for kimi-code."})
+    assert any(isinstance(e, TurnEnd) for e in events)
+
+    other = session._handle({"type": "response", "command": "negotiate_protocol",
+                             "success": False, "error": "Unsupported RPC protocol version"})
+    assert not any(isinstance(e, TurnEnd) for e in other), "only the prompt's refusal ends a turn"
