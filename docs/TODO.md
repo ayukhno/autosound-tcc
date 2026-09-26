@@ -2054,7 +2054,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: reviewed 2026-09-26: the Arbiter's OK on #50, #56–#68 («з усім згоден. го»), #69 deferred, finding 72 → hub #212 · work in the plan's order, the loop (#56) first · collection closed 2026-09-26 («збір завершено») · earlier: collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25, went on 2026-09-26 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
+**Статус**: reviewed 2026-09-26: the Arbiter's OK on #50, #56–#68 («з усім згоден. го»), #69 deferred, finding 72 → hub #212 · built so far on `wave-0.1.44`: #56 `fc0986d`, #57 `e34e27b`, #58 `6fab613`, #59 `47582b7`, #60 `1586282`, #61 `1c26098`, #63 `4b2bca6` (full suite 2369 passed after #59) · next: #64, #65, #50, #67, then Windows #62/#66, then #68 · collection closed 2026-09-26 («збір завершено») · earlier: collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25, went on 2026-09-26 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
