@@ -74,7 +74,9 @@ def apply_caps(widget: QWidget, spacing_px: float = 1.0, upper: bool = True) -> 
 PALETTE_DARK: dict[str, str] = {
     "ground": "#0f1318", "panel": "#161b22", "panel2": "#1c232c", "panel3": "#222b36",
     "border": "#263040", "border2": "#33404f",
-    "text": "#dfe6ee", "muted": "#8b97a6", "faint": "#5f6b7a",
+    # `faint` read at 2.6–3.2:1 on the panels and strained the eyes (finding 51, tcc#65); it
+    # is ~4.5:1 on a card now (WCAG AA for text), and still a step below `muted`.
+    "text": "#dfe6ee", "muted": "#8b97a6", "faint": "#7d8999",
     "accent": "#e8973c", "accent_dim": "#b3712c",
     "ok": "#4bbf87", "inv": "#e8973c", "off": "#6a7686", "warn": "#e05c5c",
     "info": "#5aa9e6", "yellow": "#e8c34a",
@@ -90,7 +92,7 @@ PALETTE_DARK: dict[str, str] = {
 PALETTE_LIGHT: dict[str, str] = {
     "ground": "#eef1f5", "panel": "#ffffff", "panel2": "#f4f6f9", "panel3": "#e9edf2",
     "border": "#d7dee6", "border2": "#c4cdd8",
-    "text": "#1b2430", "muted": "#5c6875", "faint": "#93a0ad",
+    "text": "#1b2430", "muted": "#5c6875", "faint": "#687380",
     "accent": "#c56f18", "accent_dim": "#a95f14",
     "ok": "#1f9c63", "inv": "#c56f18", "off": "#8492a0", "warn": "#c0392b",
     "info": "#2f7fc4", "yellow": "#c99a12",
@@ -1641,6 +1643,26 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     /* ---- feedback modal (.fb-*) ---- */
     QDialog {{
         background: {t.panel};
+    }}
+    /* Every plain text field, in both themes. Unstyled, Windows drew it white under the dark
+    theme's light text, and what was typed could not be read (finding 52, tcc#65). The field
+    inside an editable combo or a spin box is part of that control and draws nothing of its own. */
+    QLineEdit {{
+        background: {t.panel2};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 3px 6px;
+        selection-background-color: {t.mix('info', 40)};
+        selection-color: {t.text};
+    }}
+    QLineEdit:focus {{
+        border-color: {t.info};
+    }}
+    QComboBox QLineEdit, QAbstractSpinBox QLineEdit {{
+        background: transparent;
+        border: none;
+        padding: 0;
     }}
     QLabel[class~="fb-head"] {{
         font-size: 15px;

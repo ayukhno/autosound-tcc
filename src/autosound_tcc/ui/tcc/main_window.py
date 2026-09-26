@@ -977,7 +977,9 @@ class MainWindow(QMainWindow):
         zg_layout.addWidget(zoom_in)
         layout.addWidget(zoom_group)
 
-        self._theme_btn = ElidedButton("◐ " + i18n.t("theme"))  # down to ◐ when squeezed
+        # The icon alone (finding 50, tcc#65: «іконки достатньо»); the word is the hover.
+        self._theme_btn = ElidedButton("◐")
+        self._theme_btn.setToolTip(i18n.t("theme"))
         self._theme_btn.setProperty("class", "theme-btn")
         self._theme_btn.clicked.connect(self._toggle_theme)
         layout.addWidget(self._theme_btn)
@@ -5447,7 +5449,7 @@ class MainWindow(QMainWindow):
         # follow the choice that was just made.
         self._build_main_menu()
         self._menu_btn.setText(i18n.t("menuButton"))
-        self._theme_btn.setText("◐ " + i18n.t("theme"))
+        self._theme_btn.setToolTip(i18n.t("theme"))
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
         self._feedback_tip.set_text(i18n.t("fbBigTip"))
         self._coffee_btn.setText(i18n.t("coffeeBtn"))

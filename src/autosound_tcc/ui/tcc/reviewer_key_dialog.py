@@ -122,20 +122,38 @@ class ReviewerKeyDialog(QDialog):
         for widget in (self._provider, self._field, self._save):
             widget.setEnabled(supported)
 
+    def _where_now(self, provider) -> str:
+        """`GEMINI_API_KEY — in the secure store (this Mac's Keychain)`, or "" with no answer."""
+        answer = reviewer_key.status(refresh=True) or {}
+        entry = (answer.get("providers") or {}).get(provider)
+        if not isinstance(entry, dict) or entry.get("used") not in ("keystore", "file", "env"):
+            return ""
+        where = i18n.t(f"rkUsed_{entry['used']}")
+        store = answer.get("keystore")
+        if entry["used"] == "keystore" and store in ("keychain", "dpapi"):
+            where = f"{where} ({i18n.t(f'rkStore_{store}')})"
+        return f"{entry.get('var') or provider} — {where}"
+
     def _on_save(self) -> None:
         value = self._field.text()
         # The field lets go of the key whatever happens next: it is the method's to keep.
         self._field.clear()
         if not value.strip():
             return
-        stored, said = reviewer_key.set_key(self._provider.currentData(), value)
+        provider = self._provider.currentData()
+        stored, said = reviewer_key.set_key(provider, value)
         del value
         if stored:
-            self._result.setText(i18n.t("rkSaved").format(where=said or "—"))
+            # In the window's language, from the method's answer; the method's own sentence is
+            # Ukrainian whatever the window speaks, so it is the hover (finding 42, tcc#65).
+            self._result.setText(i18n.t("rkSaved").format(where=self._where_now(provider) or said
+                                                          or "—"))
+            self._result.setToolTip(said)
         else:
             self._result.setText(i18n.t("rkRefused").format(why=said) if said
                                  else i18n.t("rkNoAnswer"))
-        self.refresh(ask=True)
+        # A stored key was asked about just now (`_where_now`); asking twice is a second child.
+        self.refresh(ask=not stored)
 
     def _on_move(self) -> None:
         try:

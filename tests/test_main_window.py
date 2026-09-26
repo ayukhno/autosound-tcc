@@ -4799,3 +4799,12 @@ def test_a_running_session_is_told_the_reviewer_changed(monkeypatch):
     assert any("Gemini 3.5 Flash Lite" in text for text in said)
     window._mcp_server = None
     window._agent_worker = None
+
+
+def test_the_theme_button_is_its_icon_alone():
+    """Finding 50 (tcc#65): «◐ theme» — the icon alone is enough; the word is the hover."""
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    assert window._theme_btn.text() == "◐"
+    assert window._theme_btn.toolTip() == i18n.t("theme")

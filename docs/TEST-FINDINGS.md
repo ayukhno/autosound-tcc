@@ -1613,7 +1613,9 @@ sentence is Ukrainian whatever the UI says.
 
 **Weight.** Low: wording.
 
-**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#65 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#65. The saved line is TCC's now, in the window's language, from the method's `key status` (which store holds it); the method's own sentence is the hover.
 
 ### 43. Starting from the desktop shortcut: two terminal windows before the splash
 
@@ -1765,7 +1767,9 @@ the header is squeezed, so a narrow window showed the icon only and a wide one s
 
 **Weight.** Low: wording.
 
-**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#65 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#65. The button is «◐» alone; the word is its hover.
 
 ### 51. The light-grey text strains the eyes, in both themes and in more places than one
 
@@ -1779,7 +1783,9 @@ built after it.
 
 **Weight.** Medium: it is felt all the time, and it is everywhere this grey is used.
 
-**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#65 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#65. `faint` read at 2.3–3.2 : 1 on the panels; it is #7d8999 dark and #687380 light now, about 4.5 : 1 on a card (WCAG AA for text), still a step below `muted`.
 
 ### 52. Dark theme: the search box in «Моделі у виборі генератора» hides what is typed
 
@@ -1792,7 +1798,9 @@ models), screenshot 2026-09-24.
 
 **Weight.** Medium: the field cannot be read while typing.
 
-**Issue:** tcc#65 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#65 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#65. Every plain text field is themed (background, text, border, focus); unstyled, Windows drew it white under the dark theme's light text. The field inside an editable combo or a spin box draws nothing of its own.
 
 ### 53. A model through omp does not start: `OmpSession.__init__() got an unexpected keyword argument 'language'`
 

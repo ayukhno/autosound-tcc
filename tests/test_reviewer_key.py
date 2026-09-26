@@ -178,3 +178,31 @@ def test_the_key_really_reaches_the_childs_stdin(tmp_path, monkeypatch):
     monkeypatch.setattr(reviewer_key, "script_path", lambda: script)
     stored, said = reviewer_key.set_key("google", "AIza" + "k" * 35)
     assert stored and said == "got 39 chars"
+
+
+def test_the_saved_line_speaks_the_window_s_language(monkeypatch):
+    """tcc#65, finding 42: «Stored: GEMINI_API_KEY збережено: сховище Windows…» in an English
+    window — TCC's prefix followed the UI, the method's sentence is Ukrainian whatever the UI says.
+    The line is TCC's now, from the method's answer; its own words go to the hover."""
+    from autosound_tcc.core import reviewer_key
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
+
+    QApplication.instance() or QApplication([])
+    was = i18n.current_language()
+    i18n.set_language("en")
+    said = "GEMINI_API_KEY збережено: сховище Windows, зашифроване вашим входом (DPAPI)"
+    monkeypatch.setattr(reviewer_key, "set_key", lambda provider, value: (True, said))
+    monkeypatch.setattr(reviewer_key, "status", lambda refresh=False: {
+        "keystore": "dpapi", "shell_exports": [],
+        "providers": {"google": {"var": "GEMINI_API_KEY", "used": "keystore"}}})
+    try:
+        dialog = ReviewerKeyDialog()
+        dialog._provider.setCurrentIndex(dialog._provider.findData("google"))
+        dialog._field.setText("AQ." + "x" * 50)
+        dialog._on_save()
+        text = dialog._result.text()
+        assert "збережено" not in text and "GEMINI_API_KEY" in text
+        assert said in dialog._result.toolTip()
+    finally:
+        i18n.set_language(was)

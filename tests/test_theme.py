@@ -52,3 +52,33 @@ def test_no_tint_is_written_as_a_fraction_when_mix_takes_a_percentage():
     assert guilty == [], (
         f"these are fractions where a percentage is meant: {guilty}. "
         "0.18 is not 18% — it is eighteen hundredths of one percent, and it draws as nothing.")
+
+
+def _contrast(a: str, b: str) -> float:
+    def lum(h):
+        h = h.lstrip("#")
+        r, g, b_ = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4  # noqa: E731
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b_)
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_the_faint_grey_reads_on_every_panel():
+    """Finding 51 (tcc#65): the faint grey strained the eyes, in both themes and in many places —
+    2.3 to 3.2 : 1. Now close to WCAG AA's 4.5 on a card, and still below `muted`."""
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+
+    for palette in (PALETTE_DARK, PALETTE_LIGHT):
+        assert _contrast(palette["faint"], palette["panel"]) >= 4.5
+        assert _contrast(palette["faint"], palette["panel2"]) >= 4.4
+        assert _contrast(palette["faint"], palette["panel"]) < _contrast(palette["muted"],
+                                                                          palette["panel"])
+
+
+def test_a_plain_text_field_is_themed():
+    """Finding 52: the dark theme's search field was white with pale text on Windows."""
+    from autosound_tcc.ui.tcc.theme import build_qss, get_theme
+
+    qss = build_qss(get_theme("dark"))
+    assert "QLineEdit {" in qss.replace("QLineEdit {{", "QLineEdit {")
