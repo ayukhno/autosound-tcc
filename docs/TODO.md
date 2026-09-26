@@ -2035,7 +2035,8 @@ refresh").
 
 Sent to the skill as hub #203 TCC-029: Compare's band cell is the band AVERAGE, Analyze's Δ dB is
 one feature's depth, and the page does not say so (−1.2 dB and −5.1 dB for one band). When the page
-says it, the guide drops its own Δ dB sentence. The in-app "Guide" entry is #49 on W-3 (no `ok`).
+says it, the guide drops its own Δ dB sentence — done 2026-09-26 with skill v3.0.62 (#67 there,
+`816431b`: a line under each table says what its numbers are). The in-app "Guide" entry is #49 on W-3 (no `ok`).
 SKL-053 (hub #202) closes when the guides are on `main`, with the three file URLs.
 
 ### F-083 — A GUI guide with English screenshots (#47)

@@ -211,8 +211,10 @@ def test_phase_2_adds_the_group_pass(project):
     session = mv.build_session("2", 2, [], project)
     labels = [g.type for g in session.groups]
 
-    assert "solo (sw)" in labels and "solo (rta)" in labels
-    assert "pairs (rta)" in labels and "sides (rta)" in labels and "joints (rta)" in labels
+    # The method's columns since v3.0.62 (skill #79): Solo and Group per method; pairs, sides and
+    # joints are the Group pass.
+    assert "Solo (sw)" in labels and "Solo (rta)" in labels
+    assert "Group (rta)" in labels
 
 
 def test_off_convention_titles_are_reported_separately(project):

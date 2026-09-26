@@ -160,7 +160,9 @@ def test_real_step_names_are_plain_strings_not_fake_translations(process, projec
 
     step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "2.1")
 
-    assert step.name == "per-driver EQ (v4.5)"
+    # Since method v3.0.62 a step's name leads with its id (skill #72: one label in the text and on
+    # the panel), and the panel shows the name alone, so the id is said once.
+    assert step.name == "2.1 per-driver EQ (v4.5)"
 
 
 def test_done_ids_and_reviewer_are_exposed_for_the_panel_and_footer(process, project):

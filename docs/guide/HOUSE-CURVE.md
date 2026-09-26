@@ -95,8 +95,7 @@ above the target, blue where it is below.
 **Band-by-band analysis** lists what stands out, one peak, dip or null per row. There can be two
 rows in one band.
 
-- **Δ dB** is the height or depth of that one feature. It is not the band average that *Compare* shows, so
-  the two can differ for the same band.
+- **Δ dB**: the line under the table says what the number is, and why it can differ from *Compare*.
 - **Feature** says what it is (PEAK, DIP, NULL) and where.
 - **Tonal shift** says how it sounds, and the line under it says what may be done about it, with the
   feature's approximate Q.

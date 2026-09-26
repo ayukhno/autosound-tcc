@@ -984,13 +984,15 @@ def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
     # `written_by` first: the provenance header, method v3.0.37. Checked in full in
     # `test_the_process_tools_actually_write_the_journal`; here it is only stepped over.
     assert types[0] == "written_by"
-    assert types[1:] == [
+    assert types[1:5] == [
         "phase_entered",
         "capture_task_issued",
         "capture_taken",
         "capture_skipped",
-        "capture_round_closed",
     ]
+    # Since method v3.0.62 (skill #77) closing reads the round against REW and checks what was
+    # taken before it closes; with no REW here it says it did not check, and still closes.
+    assert "capture_reconciled" in types[5:] and types[-1] == "capture_round_closed"
 
 
 def test_skipping_a_capture_without_a_reason_is_refused(tmp_path):
