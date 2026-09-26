@@ -194,10 +194,27 @@ def _mark_tip(diff: BandDiff, version: str) -> str:
     return f"{word}: {' · '.join(moved)}"
 
 
-def _compare_legend(now_side: list, was_side: list) -> QWidget:
+def _pair_colours(now_side: list) -> dict:
+    """Each changed band and its compared self in one colour of the pair palette, keyed by the
+    band object: «кольорово однаковими "змінені", як у нас правий-лівий» (the Arbiter,
+    2026-09-26). By the current row's order, as the cards stand."""
+    colours = {}
+    for k, d in enumerate(d for d in now_side if d.status == "chg"):
+        colour = _MATCH_PALETTE[k % len(_MATCH_PALETTE)]
+        colours[id(d.band)] = colours[id(d.other)] = colour
+    return colours
+
+
+def _freq_said(d: BandDiff) -> str:
+    return (f"{d.other.freq_hz:g}→{d.band.freq_hz:g}" if "freq" in d.fields and d.other
+            else f"{d.band.freq_hz:g}")
+
+
+def _compare_legend(now_side: list, was_side: list, colours: Optional[dict] = None) -> QWidget:
     """«однакові (7) ● нова (1): 1250 Hz ● змінена (2): 250 · 1000→1120 Hz ● видалена (0)»: all
     three colours always, the same bands by count only, the rest with their frequencies (the
-    Arbiter, 2026-09-26)."""
+    Arbiter, 2026-09-26). With `colours` (the compared row on) each changed one is a chip in its
+    pair colour, «⬤ 1000→1120 Hz», as the pair mode's «спільні» are."""
     legend = QWidget()
     legend_layout = QHBoxLayout(legend)
     legend_layout.setContentsMargins(0, 0, 0, 0)
@@ -209,13 +226,16 @@ def _compare_legend(now_side: list, was_side: list) -> QWidget:
     for status, side in (("new", now_side), ("chg", now_side), ("removed", was_side)):
         entries = sorted((d for d in side if d.status == status), key=lambda d: d.band.freq_hz)
         said = f"● {i18n.t(_MARK_WORD[status])} ({len(entries)})"
-        if entries:
-            said += ": " + " · ".join(
-                f"{d.other.freq_hz:g}→{d.band.freq_hz:g}" if "freq" in d.fields and d.other
-                else f"{d.band.freq_hz:g}" for d in entries) + " Hz"
-        chip = QLabel(said)
+        paired = status == "chg" and colours and entries
+        if entries and not paired:
+            said += ": " + " · ".join(_freq_said(d) for d in entries) + " Hz"
+        chip = QLabel(said + (":" if paired else ""))
         chip.setStyleSheet(f"color: {getattr(t, _MARK_TOKEN[status])};")
         legend_layout.addWidget(chip)
+        for d in entries if paired else ():
+            pair = QLabel(f"⬤ {_freq_said(d)} Hz")
+            pair.setStyleSheet(f"color: {colours.get(id(d.band), t.info)};")
+            legend_layout.addWidget(pair)
     legend_layout.addStretch(1)
     return legend
 
@@ -237,6 +257,7 @@ class EqBandCard(QFrame):
         super().__init__()
         self.setProperty("class", "band")
         self.mark = mark
+        self.match_color = match_color
         self.setFixedWidth(112)
         if match_color:
             # A bare (selector-less) setStyleSheet() rule is implicitly "*" and cascades to every
@@ -321,10 +342,12 @@ def _band_flow(
     paint: bool = False,
     version: str = "",
     hover_was: bool = True,
+    pair_colours: Optional[dict] = None,
 ) -> QWidget:
     """One row of cards. With `diff` (the row's `BandDiff`s, in `_shown` order) the bands come
     from it: the statuses in `marks` get their dot, and `paint` draws the changed values —
-    with «було: …» on hover unless `hover_was` is off (the compared row IS what it was)."""
+    with «було: …» on hover unless `hover_was` is off (the compared row IS what it was).
+    `pair_colours` (`_pair_colours`) tops a changed band with its pair's colour."""
     container = QWidget()
     # One row and the pane's scroll, not a wrap (the Arbiter, finding 71, 2).
     layout = QHBoxLayout(container)
@@ -332,7 +355,7 @@ def _band_flow(
     layout.setSpacing(8)
     for entry in diff if diff is not None else (BandDiff(b, "same") for b in _shown(bands)):
         band = entry.band
-        color = (match_map or {}).get(band.freq_hz)
+        color = (pair_colours or {}).get(id(band)) or (match_map or {}).get(band.freq_hz)
         mismatch = band.freq_hz in (gain_mismatch_freqs or ())
         mark = entry.status if entry.status in marks else None
         layout.addWidget(EqBandCard(
@@ -1270,11 +1293,12 @@ class DetailPane(QFrame):
         version's bands under them, named, with what changed in colour (tcc#54, finding 73)."""
         now_side, was_side, old_row = self._band_diff(group, row)
         rows_on = self._cmp_rows and now_side is not None
+        colours = _pair_colours(now_side) if rows_on else None
         if now_side is not None:
-            layout.addWidget(_compare_legend(now_side, was_side))
+            layout.addWidget(_compare_legend(now_side, was_side, colours))
         layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order, diff=now_side,
                                     marks=("new", "chg"), paint=rows_on,
-                                    version=self._compare_text))
+                                    version=self._compare_text, pair_colours=colours))
         if not rows_on:
             return
         if old_row is None:
@@ -1286,7 +1310,8 @@ class DetailPane(QFrame):
         heading.setProperty("class", "eq-rowlab")
         layout.addWidget(heading)
         layout.addWidget(_band_flow(old_row.eq_bands(), order=self._eq_order, diff=was_side,
-                                    marks=("removed",), paint=True, hover_was=False))
+                                    marks=("removed",), paint=True, hover_was=False,
+                                    pair_colours=colours))
 
     def _render_eq(self, group: ProfileGroup, row: GroupRow, sib_row: Optional[GroupRow]) -> None:
         self._eq_help_tip.set_text(i18n.t("eqHint"))

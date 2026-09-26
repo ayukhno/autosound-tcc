@@ -2142,3 +2142,8 @@ there. Built in the commit that records this: the legend «однакові (10)
 250 · 350→302 · 1000→1120 · 2700 Hz ● видалена (1): 420 Hz», the list open on every tab, and
 unnumbered bands matched by content — identical first, then the same frequency, then the nearest
 of the same type within a third of an octave.
+
+**Third look (2026-09-26):** «давай ще зробимо кольорово однаковими "змінені", як це у нас
+правий-лівий зроблено. в цілому супер!». Built in the commit that records this: with the compared
+row on, each changed band and its compared self share a colour of the pair palette on the card's
+top border, and the legend lists them as chips in those colours («⬤ 1000→1120 Hz»).
