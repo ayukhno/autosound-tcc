@@ -2588,8 +2588,9 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     assert i18n.t("criticSameVendor") in window._critic_warn_tip._text
     # ...and the click has the room the row does not, including what actually runs.
     assert generator.key in window._critic_warn_detail
-    # The field itself is tinted, so the thing that is wrong is the thing that looks wrong.
-    assert "is-warn" in str(window._ai_critic_combo.property("class"))
+    # The warnings are the «!», not the field's colour: a red field said "broken" about a model
+    # that works (the Arbiter, finding 55, tcc#58 — reverses the tint of 2026-08-23).
+    assert "is-warn" not in str(window._ai_critic_combo.property("class"))
 
 
 def test_a_claude_route_with_no_claude_login_says_so_on_the_generator(tmp_path, monkeypatch):
@@ -4653,3 +4654,131 @@ def test_a_session_that_never_started_is_not_asked_to_save_before_the_swap(monke
     assert i18n.t("sessionHandoff") not in said
     assert launched == [True], "the new model starts at once"
     assert getattr(window, "_handoff_timer", None) is None
+
+
+
+# ---- the reviewer picker's own three colours, and the params following it (tcc#58) --------------
+
+def _reviewer_window(monkeypatch, *entries):
+    from autosound_tcc.core import availability
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._critic_choices = list(entries)
+    MainWindow._fill_combo(window._ai_critic_combo, list(entries), entries[0].key, critic=True)
+    availability.reset()
+    return window
+
+
+def test_the_reviewer_picker_is_grey_until_known_green_once_it_answered_red_when_refused(monkeypatch):
+    """Finding 55, the Arbiter's proposal: the picker's own three colours — grey, not known yet;
+    green, it works; red, it does not."""
+    from autosound_tcc.core import availability, model_choices
+
+    pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    window = _reviewer_window(monkeypatch, pro)
+    combo = window._ai_critic_combo
+    try:
+        window._refresh_critic_status()
+        assert not {"is-ok", "is-missing", "is-warn"} & set(str(combo.property("class")).split())
+
+        availability.succeeded(pro.key)
+        window._refresh_critic_status()
+        assert "is-ok" in str(combo.property("class"))
+
+        availability.refused(pro.key, availability.LOCATION, "selected location")
+        window._refresh_critic_status()
+        assert "is-missing" in str(combo.property("class"))
+        assert "is-ok" not in str(combo.property("class"))
+    finally:
+        availability.reset()
+
+
+def test_the_status_is_red_when_the_last_review_came_from_another_model(monkeypatch):
+    """Finding 55: «gemini-3.8-flash-medium · 6 d ago» with a red «!» beside a picker holding
+    another model. The Arbiter: if the red belongs to the status, let the status be red."""
+    from autosound_tcc.core import availability, critic, model_choices
+
+    pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    window = _reviewer_window(monkeypatch, pro)
+    try:
+        critic.log_call(critic.CriticResult(critic.MODE_API_OR_CLI, "ok", "gemini-3.8-flash-medium",
+                                            "critic", "", 1.0, "2026-09-20T00:00:00+00:00"), None)
+        window._refresh_critic_status()
+        assert "kv-warn" in str(window._critic_status.property("class"))
+
+        critic.log_call(critic.CriticResult(critic.MODE_API_OR_CLI, "ok", "gemini-3.1-pro-high",
+                                            "critic", "", 1.0, "2026-09-21T00:00:00+00:00"), None)
+        window._refresh_critic_status()
+        assert "kv-warn" not in str(window._critic_status.property("class"))
+    finally:
+        availability.reset()
+
+
+def test_a_model_not_checked_yet_is_grey_in_the_list_not_red(monkeypatch):
+    """Finding 62: after one cut-off call every row went red, Anthropic's too, then black again —
+    the one state that paints every row at once is "not checked yet" while the catalogues are
+    read. Not known is not broken: grey, with its word."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    combo = QComboBox()
+    sdk = model_choices.Choice(harness="sdk", model="claude-opus-5", label="Opus 5",
+                               provider="anthropic")
+    availability.reset()
+    availability.begin_reading(["sdk"])
+    try:
+        MainWindow._fill_combo(combo, [sdk], sdk.key, critic=True)
+    finally:
+        availability.reset()
+    assert combo.itemData(0, Qt.ItemDataRole.ForegroundRole) != QColor(current_theme().warn)
+
+
+def test_picking_a_reviewer_puts_it_in_the_project_params_at_once(monkeypatch):
+    """Finding 59: the footer read one critic, «PROJECT PARAMS» another. The Generator, the effort
+    and the gate refreshed the panel; the reviewer did not."""
+    from autosound_tcc.core import model_choices
+
+    pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    flash = model_choices.Choice(harness="agy", model="gemini-3.1-flash", label="Gemini 3.1 Flash")
+    window = _reviewer_window(monkeypatch, pro, flash)
+    refreshed = []
+    monkeypatch.setattr(window, "_set_project_params", lambda view: refreshed.append(view))
+
+    window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
+    QApplication.processEvents()
+
+    assert refreshed, "the panel names the reviewer, so it must not lag the picker"
+
+
+def test_a_running_session_is_told_the_reviewer_changed(monkeypatch):
+    """Finding 59: the Generator named a third reviewer — the one its shell was started with. A
+    live session learns of the change through the signal queue, and the dialog says it waits."""
+    from autosound_tcc.core import model_choices, signal_bus
+
+    pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    flash = model_choices.Choice(harness="omp", model="google-antigravity/gemini-3.5-flash-lite",
+                                 label="Gemini 3.5 Flash Lite")
+    window = _reviewer_window(monkeypatch, pro, flash)
+    bus = signal_bus.SignalBus()
+    window._mcp_server = SimpleNamespace(bus=bus, project_dir=None)
+    worker = _HandoffWorker()
+    worker.isRunning = lambda: True
+    window._agent_worker = worker
+    said = []
+    monkeypatch.setattr(window._dialog, "_add_system_message", lambda text, *a, **kw: said.append(text))
+
+    window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
+
+    sent = [s for s in bus.deliver() if s.kind == signal_bus.REVIEWER]
+    assert sent and sent[0].payload["model"] == "gemini-3.5-flash-lite"
+    assert any("Gemini 3.5 Flash Lite" in text for text in said)
+    window._mcp_server = None
+    window._agent_worker = None

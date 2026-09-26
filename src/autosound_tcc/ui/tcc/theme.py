@@ -593,6 +593,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.warn};
         border-color: {t.warn};
     }}
+    /* .is-ok — the reviewer picker's model answered this launch (finding 55, tcc#58): its own
+    green, beside grey for "not known yet" and red for "does not run". */
+    QComboBox[class~="is-ok"] {{
+        border-color: {t.ok};
+    }}
     /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
     clickable; hover says what, click says why. */
     QPushButton[class~="warn-mark"] {{

@@ -116,7 +116,7 @@ def _harness_only(from_key: str, to_key: str) -> bool:
     and not worth the sentence about cross-vendor review, which is about a different thing
     entirely.
 
-    Not called `_same_model`: there is one of those already, further down, comparing a picker key
+    Not called `same_model`: there is one of those already, further down, comparing a picker key
     against a name a reviewer script recorded, loosely, on letters and digits. Two functions of
     that name in one module is a bug waiting for whoever adds the third caller.
     """
@@ -242,7 +242,7 @@ def _reviewer_actual_check() -> Check:
         return Check("reviewer_actual", OK, _t("selfReviewerNeverTitle"), _t("selfReviewerNeverDetail"))
     wanted_key = project_settings.get(config.tcc_dir(), "critic", "") or ""
     wanted = wanted_key.partition(":")[2] or wanted_key
-    if not wanted or _same_model(wanted, answered):
+    if not wanted or same_model(wanted, answered):
         return Check("reviewer_actual", OK, _t("selfReviewerOkTitle").format(model=answered))
     return Check(
         "reviewer_actual",
@@ -266,7 +266,7 @@ def reviewer_mismatch() -> Optional[tuple[str, str]]:
     return (wanted_key.partition(":")[2] or wanted_key, str(entry.get("model") or "?"))
 
 
-def _same_model(wanted: str, answered: str) -> bool:
+def same_model(wanted: str, answered: str) -> bool:
     """Loose on purpose: the picker's key and the script's recorded name are two spellings of one
     model (`gemini-3.1-pro-high` vs `Gemini 3.1 Pro (High)`). Compare on the letters and digits."""
     strip = lambda text: "".join(ch for ch in text.lower() if ch.isalnum())  # noqa: E731

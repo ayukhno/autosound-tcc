@@ -1830,7 +1830,13 @@ model this launch saw refused.
 
 **Weight.** Medium: the red says "broken" about a model that works.
 
-**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#58 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#58. The cause: the red was the WARNING tint — «the last review came from another
+model» — and the last call, six days old, was made under an earlier pick, so it stayed red whatever
+was picked. The picker now has its own three colours: grey not known yet, green it answered this
+launch (`availability.answered`), red it cannot run. The warnings stay on the «!»; the status line
+is red when the last review came from another model than the one picked.
 
 ### 56. The curve window tries to read from REW when REW is already known to be offline
 
@@ -1912,7 +1918,13 @@ through the AI's queue, TCC shows that the change is waiting.
 
 **Weight.** Medium: three places, three different critics.
 
-**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#58 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#58. The panel: the Generator, the effort and the gate refreshed it on change, the
+reviewer did not — now it does. The third name was the session shell's `AUTOSOUND_CRITIC_MODEL`,
+fixed when the session starts. `call_critic` reads the pick when called, so the next review goes
+to the new one; a running session is told through the signal queue (`reviewer`), and the dialog
+says it is sent and waits for the answer.
 
 ### 60. «порівняти з»: on Windows the open list shows «…» in place of every version
 
@@ -1954,7 +1966,12 @@ this launch saw refused turns red).
 
 **Weight.** Medium: red on every row says nothing works, while the review had just come back.
 
-**Issue:** tcc#58 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#58 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#58, by the Arbiter's rule for 55. No log of the moment (the Mac's log keeps warnings
+only, and it was not on the VM's copy): the one state that paints every row at once, Anthropic's
+too, is "not checked yet" while the catalogues are read. It is grey now, with its word; red is for
+what cannot run.
 
 ### 63. The critic's reply is not shown as the critic's, and the Generator's proposal is labelled «SYSTEM · LEDGER»
 

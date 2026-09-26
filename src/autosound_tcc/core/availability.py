@@ -43,6 +43,9 @@ class Status:
 _lock = threading.Lock()
 _refusals: dict[str, tuple[str, str]] = {}
 _reading: set[str] = set()
+#: Keys that ANSWERED this launch — the reviewer picker's green (finding 55, tcc#58). Ready is only
+#: "nothing known against it"; this is the one positive fact.
+_answered: set[str] = set()
 
 
 def begin_reading(harnesses: Iterable[str]) -> None:
@@ -58,11 +61,19 @@ def finish_reading(harness: str) -> None:
 def refused(key: str, reason: str, detail: str = "") -> None:
     with _lock:
         _refusals[key] = (reason, detail)
+        _answered.discard(key)
 
 
 def succeeded(key: str) -> None:
     with _lock:
         _refusals.pop(key, None)
+        _answered.add(key)
+
+
+def answered(key: str) -> bool:
+    """Whether a call to `key` came back with an answer this launch."""
+    with _lock:
+        return key in _answered
 
 
 def forget_refusals() -> None:
@@ -76,6 +87,7 @@ def reset() -> None:
     with _lock:
         _refusals.clear()
         _reading.clear()
+        _answered.clear()
     _startup = None
 
 

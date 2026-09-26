@@ -4051,15 +4051,62 @@ class MainWindow(QMainWindow):
 
     def _on_critic_model_changed(self, _index: int) -> None:
         """The footer picker steers the reviewer subprocess through its own env var."""
-        _mark_missing(self._ai_critic_combo, self._critic_choices)
         # The status, not only the warning: the footer names the reviewer, and a warning refresh
-        # alone left the previous one there in red.
+        # alone left the previous one there in red. It tints the picker too.
         self._refresh_critic_status()
         choice = self._critic_choice()
         if choice is None:
             return
+        before = self._project_setting(_CRITIC_KEY)
         self._set_project_setting(_CRITIC_KEY, choice.key)
-        self._bridge.set_snapshot(critic_model=choice.model)
+        self._bridge.set_snapshot(critic_model=model_choices.reviewer_model(choice))
+        # The panel names the reviewer, so it must not lag the picker (finding 59): the Generator,
+        # the effort and the gate refreshed it, the reviewer did not.
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+        if before != choice.key:
+            self._tell_session_reviewer(choice)
+
+    def _tell_session_reviewer(self, choice) -> None:
+        """A running session learns the new reviewer through the signal queue (finding 59).
+
+        `call_critic` reads the pick when it is called, so the next review goes to it anyway. The
+        session's own shell does not: it was started with the previous one in
+        `AUTOSOUND_CRITIC_MODEL`, and the Generator named that one as its reviewer. The dialog says
+        it is sent and waits, as a channel switch does."""
+        server = getattr(self, "_mcp_server", None)
+        worker = getattr(self, "_agent_worker", None)
+        if server is None or worker is None or _ended(worker):
+            return
+        model = model_choices.reviewer_model(choice)
+        server.bus.push(
+            signal_bus.REVIEWER, model=model, label=choice.label, route=choice.harness,
+            note=("call_critic uses it from now on; this session's shell still has the previous "
+                  "reviewer in AUTOSOUND_CRITIC_MODEL, so do not run the reviewer script directly"),
+        )
+        self._dialog._add_system_message(i18n.t("criticChangedSent").format(label=choice.label))
+
+    def _tint_critic_combo(self) -> None:
+        """The reviewer picker's own three colours (the Arbiter, finding 55): grey — not known
+        yet, green — it answered this launch, red — it cannot run.
+
+        Its warnings (substituted, same vendor, clipboard only, answered by another model) are the
+        «!» beside it and the status line, not this colour: tinted by them, the field stayed red
+        whatever was picked and said "broken" about a model that works."""
+        combo = self._ai_critic_combo
+        current = str(combo.currentData() or "")
+        resolved = model_choices.resolve(self._critic_choices, current) if current else None
+        choice = resolved.choice if resolved is not None else None
+        tint = ""
+        if current:
+            state = availability.status(choice) if choice is not None else None
+            if choice is None or not choice.available or (
+                    not state.ready and state.reason != availability.NOT_CHECKED):
+                tint = " is-missing"
+            elif availability.answered(resolved.key):
+                tint = " is-ok"
+        combo.setProperty("class", "mini-select" + tint)
+        combo.style().unpolish(combo)
+        combo.style().polish(combo)
 
     def _refresh_critic_warning(self) -> None:
         """Say when the reviewer is not what the picker appears to promise.
@@ -4124,9 +4171,9 @@ class MainWindow(QMainWindow):
         # reason a mark can stand in for a sentence at all.
         self._critic_warn_tip.set_text(headline)
         self._critic_warn_detail = "\n\n".join([headline] + tips) if headline else ""
-        # The picker itself is tinted, so the thing that is wrong is the thing that looks wrong —
-        # a mark beside a normal-looking field still leaves you hunting for what it refers to.
-        _mark_missing(self._ai_critic_combo, self._critic_choices, warn=bool(notes))
+        # The picker keeps its own three colours (`_tint_critic_combo`); the warnings are this
+        # mark — tinted by them, it stayed red whatever was picked (finding 55).
+        self._tint_critic_combo()
 
     def _refresh_main_warning(self) -> None:
         """The Generator's own caveat, and it is only ever one.
@@ -4171,16 +4218,28 @@ class MainWindow(QMainWindow):
             if not state.ready:
                 self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
                 self._critic_status.setToolTip(state.detail or availability_view.phrase(state))
+                self._paint_critic_status(state.reason != availability.NOT_CHECKED)
                 return
         self._critic_status.setToolTip("")
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
+            self._paint_critic_status(False)
             return
         # Short (user, 2026-08-11): the model name alone, and how long ago. The word "Critic" is
         # already three widgets to the left, and the vendor prefix is in the picker beside it.
         model = str(entry.get("model") or entry.get("mode", "?"))
         self._critic_status.setText(f"{model.split('/')[-1]} · {_ago(entry.get('at', ''))}")
+        # Red when the last review came from another model than the one picked (finding 55: «if
+        # the red belongs to the status, let the status be red»).
+        wanted = model_choices.reviewer_model(chosen) if chosen is not None else ""
+        self._paint_critic_status(bool(wanted) and not self_check.same_model(wanted, model))
+
+    def _paint_critic_status(self, bad: bool) -> None:
+        label = self._critic_status
+        label.setProperty("class", "kv-val kv-warn" if bad else "kv-val")
+        label.style().unpolish(label)
+        label.style().polish(label)
 
     def _on_dialog_start_requested(self, text: str) -> None:
         """The Arbiter typed the first message instead of clicking start — same intent."""
@@ -4692,7 +4751,12 @@ class MainWindow(QMainWindow):
                 tip += "\n" + state.detail
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
             if not state.ready:
-                combo.setItemData(row, QColor(current_theme().warn), Qt.ItemDataRole.ForegroundRole)
+                # Red for what cannot run; grey for what is not known yet — while the catalogues
+                # are read every row is "not checked", and all of them went red at once, Anthropic's
+                # too (finding 62).
+                colour = (current_theme().faint if state.reason == availability.NOT_CHECKED
+                          else current_theme().warn)
+                combo.setItemData(row, QColor(colour), Qt.ItemDataRole.ForegroundRole)
             if not choice.available:
                 # Not selectable, and greyed by the style rather than by a colour written here:
                 # a row nobody can pick has to look like one before it is clicked.

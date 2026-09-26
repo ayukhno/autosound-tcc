@@ -54,6 +54,10 @@ CHANNEL_TOGGLE = "channel_toggle"
 # taken and the model should start on them. Carries the round and what it has taken. A signal, so
 # a session in a terminal gets it through `get_pending_signals` the same way the in-app one does.
 CAPTURE_READY = "capture_ready"
+# The Arbiter picked another reviewer while the session runs (finding 59, tcc#58). `call_critic`
+# takes it at once; the session's own shell was started with the previous one in
+# `AUTOSOUND_CRITIC_MODEL`, and the model had named that one as its reviewer.
+REVIEWER = "reviewer"
 
 # Ack outcomes. Plain strings for the same reason the kinds are: they cross the JSON boundary,
 # and the value the agent writes should be the value the audit log keeps.
