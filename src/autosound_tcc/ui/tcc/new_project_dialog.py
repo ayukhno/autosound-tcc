@@ -296,6 +296,12 @@ class NewProjectDialog(QDialog):
         self._ai_combo = QComboBox()
         self._ai_combo.setProperty("class", "mini-select")
         self._ai_combo.addItems(AI_MAIN_MODELS)
+        # The default by name, not the list's first row: the list is newest first, and a new
+        # model joining it must not move what a new project starts on (tcc#64).
+        default = {model: name for name, model in model_choices.SDK_MODELS}.get(
+            model_choices.DEFAULT_SDK_MODEL)
+        if default:
+            self._ai_combo.setCurrentText(default)
         layout.addWidget(self._ai_combo)
 
         # Terminal path's own model field: free-text, since each CLI has its own model-name
