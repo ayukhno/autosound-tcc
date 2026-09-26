@@ -711,6 +711,19 @@ def resolve_critic(key: str) -> tuple[Resolved, Optional[Choice]]:
                             label=resolved.key, provider="")
 
 
+def reviewer_model(choice: Choice) -> str:
+    """The name the skill's reviewer script takes for this pick (tcc#57, finding 58).
+
+    omp names a model by its own selector, `provider/model`, and the reviewer script runs no omp:
+    it calls the vendor's API or CLI, and neither takes the prefix. «OMP · Gemini 3.5 Flash Lite»
+    went out as `google-antigravity/gemini-3.5-flash-lite` — the API answered 404, and agy «not
+    recognized» for the tiered `google-antigravity/gemini-3.8-flash-high`. Without it, the API
+    takes the first and agy the second."""
+    if choice.harness == "omp":
+        return choice.model.partition("/")[2] or choice.model
+    return choice.model
+
+
 # What the skill's reviewer script needs per vendor, mirroring its own provider table (SCR-033):
 # an API key in the environment, or one of that vendor's CLIs on PATH. Kept here rather than read
 # out of the script because this runs on the GUI thread while a combo box is being filled — the

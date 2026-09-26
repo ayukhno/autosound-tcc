@@ -155,7 +155,8 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     because = list(missing) + ([availability.PHRASES[state.reason]] if not state.ready else [])
     return {
         "configured": True,
-        "model": choice.model,
+        # The name the reviewer is called with, as `call_critic` sends it (tcc#57).
+        "model": model_choices.reviewer_model(choice),
         # What the Arbiter picked, versus what this machine will actually run. Empty unless the
         # install has an alias — and when it does, the model must not be able to report the
         # project's stored name as if it were the one that answered.

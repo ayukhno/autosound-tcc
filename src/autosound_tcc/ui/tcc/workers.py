@@ -196,7 +196,8 @@ class _ReviewerProbeWorker(QThread):
                 package = scratch / "reviewer-probe.md"
                 package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
                 result = critic.run(str(package), project_dir=self._project_dir, role="ask",
-                                    model=reviewer.model, harness=reviewer.harness,
+                                    model=model_choices.reviewer_model(reviewer),
+                                    harness=reviewer.harness,
                                     timeout_s=_REVIEWER_PROBE_TIMEOUT_S,
                                     extra_env={"AUTOSOUND_PROJECT_DIR": str(scratch),
                                                "PROJECT_MIRROR": str(mirror)})

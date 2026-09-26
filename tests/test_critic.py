@@ -644,3 +644,19 @@ def test_the_session_is_told_to_reach_the_reviewer_through_tcc():
     from autosound_tcc.core import tuning_session
 
     assert "call_critic" in tuning_session.SYSTEM_PROMPT_APPEND
+
+
+def test_an_omp_pick_reaches_the_reviewer_without_omp_s_provider_prefix(tmp_path):
+    """tcc#57, finding 58: «OMP · Gemini 3.5 Flash Lite» went to the reviewer as
+    `google-antigravity/gemini-3.5-flash-lite` — the API answered 404, and agy «not recognized»
+    for `google-antigravity/gemini-3.8-flash-high`. The reviewer script runs no omp: it calls the
+    vendor's API or CLI, and neither takes omp's `provider/` selector."""
+    from autosound_tcc.core import config, critic, model_choices, project_settings
+
+    for key, sent in (("omp:google-antigravity/gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
+                      ("omp:google-antigravity/gemini-3.8-flash-high", "gemini-3.8-flash-high"),
+                      ("agy:gemini-3.8-flash-high", "gemini-3.8-flash-high")):
+        project_settings.set_value(config.tcc_dir(tmp_path), "critic", key)
+        assert critic.configured(tmp_path)[0] == sent, key
+        _, choice = model_choices.resolve_critic(key)
+        assert model_choices.reviewer_model(choice) == sent, key

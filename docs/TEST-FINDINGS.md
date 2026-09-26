@@ -1891,7 +1891,13 @@ two answers pasted by the Arbiter, screenshots, 2026-09-24).
 
 **Weight.** High: no omp-picked critic can answer.
 
-**Issue:** tcc#57 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#57 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#57. TCC's: an omp pick is omp's selector, `provider/model`, and TCC handed it to the
+reviewer script as it was; the script runs no omp. `model_choices.reviewer_model` drops the
+provider for an omp pick, and every path that names the reviewer's model uses it — `call_critic`,
+the session's `AUTOSOUND_CRITIC_MODEL`, the start-up probe and the state payload. Not checked live
+(no API call spent); the Arbiter's next review from an omp pick is the check.
 
 ### 59. The critic chosen in the footer does not reach the project parameters
 

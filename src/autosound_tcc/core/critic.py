@@ -244,7 +244,7 @@ def configured(project_dir: Path) -> tuple[str, str]:
 
     resolved, choice = model_choices.resolve_critic(
         project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
-    model = choice.model if choice is not None else ""
+    model = model_choices.reviewer_model(choice) if choice is not None else ""
     route = resolved.key.partition(":")[0] if ":" in resolved.key else ""
     return model, route
 
