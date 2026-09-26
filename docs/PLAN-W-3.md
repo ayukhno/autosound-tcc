@@ -93,7 +93,7 @@ Plus the skill's W-3: its capture-round and reviewer issues have TCC halves (#68
 |---|---|---|
 | 61 the agy stream cut off, the ladder steps down | the skill's | hub #204 TCC-030 → skill #68, on its W-3 |
 | 64, the method's half | the skill's | hub #205 TCC-031 → skill #83, on its W-3 |
-| 72 other presets' ledgers carry no band `i` | the car session's | no ticket yet — offered, not answered |
+| 72 other presets' ledgers carry no band `i` | the car session's | hub #212 TCC-032, sent 2026-09-26 |
 
 ## Order
 
@@ -109,8 +109,8 @@ Plus the skill's W-3: its capture-round and reviewer issues have TCC halves (#68
 pinned to the skill's published W-3 tag (skill first), the installer walked on macOS and the update
 path on the Windows VM. The tag closes hub #202, #209 and #211.
 
-## Decisions the review owes
+## The review, 2026-09-26
 
-- The Arbiter's OK, task by task, on #50 and #56–#68 — the label `ok` on each.
-- #69: F-065 and F-066 deferred again, F-071 closed as not reproduced — or not.
-- Finding 72: a ticket to the car session (the band numbers in the other presets' ledgers) — or not.
+The Arbiter took the plan as proposed («з усім згоден. го»): `ok` on #50 and #56–#68; #69 off the
+milestone (F-065, F-066 deferred again; F-071 closed as not reproduced); finding 72 sent to the car
+session as hub #212.

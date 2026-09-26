@@ -2142,6 +2142,8 @@ TCC's.
 
 **Weight.** Medium: the band-by-band check against PC-Tool works on one preset of six.
 
+**Sent:** hub #212 TCC-032 to the car session, on the Arbiter's word at the W-3 review (2026-09-26).
+
 ### 73. The EQ row of the compared version under the current one; new / changed / removed marks on the bands
 
 **What.** The Arbiter (2026-09-26, screenshot of the EQ header's «Копіювати EQ w-L · ⇄ L + R · ?»),
