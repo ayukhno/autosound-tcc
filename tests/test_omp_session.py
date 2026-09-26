@@ -829,3 +829,51 @@ def test_a_refused_prompt_ends_the_turn(tmp_path):
     other = session._handle({"type": "response", "command": "negotiate_protocol",
                              "success": False, "error": "Unsupported RPC protocol version"})
     assert not any(isinstance(e, TurnEnd) for e in other), "only the prompt's refusal ends a turn"
+
+
+def test_omp_is_spawned_with_room_for_the_frames_it_announces(tmp_path, monkeypatch):
+    """tcc#72, finding 80: every omp turn with a built-in tool hung. asyncio's default line limit is
+    64 KiB; omp announces frames up to 1 MiB (`maxFrameBytes`, and 64 MiB reassembled), a `read`'s
+    frames passed the limit, `readline` raised, and the reader task died without a word — the
+    turn then waited forever behind «120s with no output»."""
+    import asyncio as aio
+
+    seen = {}
+
+    async def fake_spawn(*argv, **kwargs):
+        seen.update(kwargs)
+        raise OSError("not starting omp in a test")
+
+    monkeypatch.setattr(omp_session_module.asyncio, "create_subprocess_exec", fake_spawn)
+    session = OmpSession(project_dir=tmp_path)
+    try:
+        aio.run(session._spawn())
+    except OSError:
+        pass
+    assert seen.get("limit", 0) >= omp_session_module.FRAME_LIMIT_BYTES >= 64 * 1024 * 1024
+
+
+def test_a_frame_the_reader_cannot_read_ends_the_turn_out_loud(tmp_path):
+    """Defence behind the limit: a reader that fails says so and ends the turn, instead of
+    leaving it hanging with nothing in the log."""
+    import asyncio as aio
+    from types import SimpleNamespace
+
+    from autosound_tcc.core.agent_events import Notice
+
+    session = OmpSession(project_dir=tmp_path)
+
+    async def run():
+        reader = aio.StreamReader(limit=1024)
+        reader.feed_data(b'{"type": "message_update", "pad": "' + b"x" * 5000 + b'"}\n')
+        reader.feed_eof()
+        session._proc = SimpleNamespace(stdout=reader)
+        await session._read_frames()
+        events = []
+        while not session._events.empty():
+            events.append(session._events.get_nowait())
+        return events
+
+    events = aio.run(run())
+    assert any(isinstance(e, Notice) and "could not read" in e.text for e in events)
+    assert events[-1] is None, "the drain is told nothing more is coming"

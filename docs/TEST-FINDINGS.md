@@ -2398,6 +2398,17 @@ line at 2:16). The model is omp's Claude Opus 5, which answers in the Arbiter's 
 
 **Built for the next time:** a tool that has not returned in 20 s writes every thread's stack into the log (`app_log.dump_threads`, through `faulthandler`, which takes no lock).
 
+**Found and built (2026-09-26, night):** the Arbiter's next run hung again, «Still inside
+`mcp__tcc_get_pending_signals`», and TCC's log showed both tools answered in 2 ms — the hang was in
+TCC's side of the omp pipe. Driven directly (TCC's `OmpSession`, no window, no MCP server), one
+`read` of a plain file hung the same way in `rpc-ui` and `rpc` while `omp -p` with every TCC flag
+answered in seconds; the frame reader had died: `ValueError('Separator is found, but chunk is
+longer than limit')`. asyncio reads a subprocess's lines up to 64 KiB, omp's frames go to 1 MiB
+(`maxFrameBytes` in its `ready`), a built-in tool's frames passed it, and the reader task died
+without a word. omp is spawned with a 64 MiB line limit now, and a reader that fails says so in the
+dialog and ends the turn. Checked live: `read README.md` and `read skill://autosound-tuning`
+through `rpc-ui` both end, and the turn goes on.
+
 ### 81. Quitting TCC while the omp session hung: Python aborts
 
 **What.** The quit ended in a crash report, `SIGABRT`, `abort() called`.

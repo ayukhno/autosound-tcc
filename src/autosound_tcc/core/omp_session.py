@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import openers
-from autosound_tcc.core import child, config, critic, model_choices, signal_bus, vendor_loader
+from autosound_tcc.core import app_log, child, config, critic, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -189,6 +189,11 @@ SETTLE_CAP_S = 45.0
 # of an exchange, a transcript wiped mid-turn, a free-text question answered as a permission. The
 # frames are the only place those are visible, and they are cheap to keep.
 FRAME_LOG = "omp-frames.jsonl"
+#: The longest line TCC reads from omp. asyncio's default is 64 KiB, and omp announces frames up to
+#: 1 MiB (`maxFrameBytes`) and 64 MiB reassembled (`maxReassembledFrameBytes`, both in `ready`): a
+#: built-in tool's frames passed 64 KiB, `readline` raised, and the reader died without a word, so
+#: every omp turn that used `read` waited forever (tcc#72, finding 80).
+FRAME_LIMIT_BYTES = 64 * 1024 * 1024
 FRAME_LOG_MAX_BYTES = 4_000_000
 # Big frames are shrunk field by field rather than by cutting the line, so every line parses --
 # see `_shrink`.
@@ -633,18 +638,26 @@ class OmpSession:
         """
         proc = self._proc
         assert proc is not None and proc.stdout is not None
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").strip()
-            if not line:
-                continue
-            try:
-                frame = json.loads(line)
-            except ValueError:
-                continue
-            self._last_frame_at = time.time()
-            self._log("in", frame)
-            for event in self._handle(frame):
-                await self._events.put(event)
+        try:
+            async for raw in proc.stdout:
+                line = raw.decode(errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    frame = json.loads(line)
+                except ValueError:
+                    continue
+                self._last_frame_at = time.time()
+                self._log("in", frame)
+                for event in self._handle(frame):
+                    await self._events.put(event)
+        except (ValueError, asyncio.LimitOverrunError, OSError) as exc:
+            # A reader that dies must say so and end the turn: it died silently once, on a frame
+            # past asyncio's line limit, and every turn after it hung (tcc#72, finding 80).
+            app_log.logger().warning("omp: the frame reader stopped: %s", exc)
+            await self._events.put(Notice(
+                f"TCC could not read what omp sent ({type(exc).__name__}: {exc}); the session "
+                "stopped here. Start a new session to go on."))
         self._ended.set()
         self._ready.set()  # nothing more is coming; unblock a startup still waiting for it
         await self._events.put(None)  # the process ended; unblock whoever is draining
@@ -840,20 +853,7 @@ class OmpSession:
         # Before the process starts: omp scans for skills at startup, so a link created later in
         # the turn would not be seen until the next session.
         vendor_loader.link_skill_into(self.project_dir)
-        self._proc = await asyncio.create_subprocess_exec(
-            *self._argv(),
-            cwd=str(self.project_dir),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # omp shells out to the skill, whose scripts are in a git submodule; without this its
-            # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
-            # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`).
-            env=vendor_loader.child_env(**critic.session_env(self.project_dir)),
-            # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
-            # the other half — no console window on Windows (see core/child.py).
-            **child.flags(),
-        )
+        await self._spawn()
         self._stderr_task = asyncio.create_task(self._drain_stderr())
         # Started before anything is awaited, so no frame is read anywhere else: whatever arrives
         # during startup is classified, answered and logged like every other frame.
@@ -870,6 +870,24 @@ class OmpSession:
                 yield Notice(warning)
         async for event in self._prompt(self._opening(prompt or "")):
             yield event
+
+    async def _spawn(self) -> None:
+        self._proc = await asyncio.create_subprocess_exec(
+            *self._argv(),
+            cwd=str(self.project_dir),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            # A frame is one line, and omp's can be far longer than asyncio's 64 KiB (tcc#72).
+            limit=FRAME_LIMIT_BYTES,
+            # omp shells out to the skill, whose scripts are in a git submodule; without this its
+            # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
+            # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`).
+            env=vendor_loader.child_env(**critic.session_env(self.project_dir)),
+            # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
+            # the other half — no console window on Windows (see core/child.py).
+            **child.flags(),
+        )
 
     async def _drain_stderr(self) -> None:
         proc = self._proc
