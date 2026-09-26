@@ -2255,8 +2255,12 @@ class MainWindow(QMainWindow):
         self._show_slot_and_save(view.slot_label or "", view.save or "")
         self._target_label.setText(f"{view.target} ↗" if view.target else "")
         self._show_version(view, profile)
-        self._offer_compare(root, preset, profile, view.version)
-        self._show_banked_delta(view.version, preset)
+        # By the name the snapshot was READ by: with a file whose `version` field names another,
+        # the field left the file itself on offer to compare with — an empty diff that read as
+        # "no changes" (tcc#50).
+        read_as = getattr(view, "file_version", None) or view.version
+        self._offer_compare(root, preset, profile, read_as)
+        self._show_banked_delta(read_as, preset)
 
     def _show_slot_and_save(self, slot: str, save: str) -> None:
         """An empty label takes no room: its spacing pushed the target link away from the preset
@@ -2301,6 +2305,16 @@ class MainWindow(QMainWindow):
                 preset=i18n.t("dspConfigPreset").format(n=number) if number else "",
                 purpose=f" — {rec['purpose']}" if rec.get("purpose") else "")
         self._dsp_section.set_sub_tip(tip)
+        if getattr(view, "version_mismatch", False):
+            self._say_version_mismatch(view)
+
+    def _say_version_mismatch(self, view) -> None:
+        """A snapshot whose file and `version` field disagree, said where it is seen (tcc#50):
+        the header names both, and the strip says what is shown and where to take it."""
+        said = i18n.t("stateVersionMismatch").format(file=view.file_version, inner=view.version)
+        self._dsp_section.set_sub(f"{view.file_version} ≠ {view.version}")
+        self._dsp_section.set_sub_tip(said)
+        self._status_strip.notify(said, level="warn", dismissible=True)
 
     def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:
         """«Порівняти з» for the channel tables: the other versions, newest first, each with the

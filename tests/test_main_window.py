@@ -4808,3 +4808,19 @@ def test_the_theme_button_is_its_icon_alone():
     _KEEP_WINDOWS.append(window)
     assert window._theme_btn.text() == "◐"
     assert window._theme_btn.toolTip() == i18n.t("theme")
+
+
+def test_a_state_whose_file_and_version_disagree_is_said_in_the_header_and_the_strip():
+    """tcc#50: the header read the file's field, the comparison the file's name, and nothing on
+    screen said they disagreed."""
+    from autosound_tcc.state.dsp_state import ProjectView
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    view = ProjectView(preset="FULL", sample_rate=None, groups=(), version="v_012",
+                       file_version="v_011")
+    window._show_version(view, {"dsp_profile": {"vendor": "X", "name": "Y"}})
+
+    said = i18n.t("stateVersionMismatch").format(file="v_011", inner="v_012")
+    assert window._status_strip.text() == said

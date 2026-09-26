@@ -421,6 +421,16 @@ class ProjectView:
     #: How many channels of this version stand at each step of the method's lifecycle —
     #: `proposed` -> `applied` -> `measured` (the skill's `state.STATUSES`) — as `(status, n)`.
     status_counts: tuple[tuple[str, int], ...] = ()
+    #: The name the snapshot was READ by — its file, `v_011.json` → `v_011`. `version` is the
+    #: file's own field, and the two can disagree (tcc#50).
+    file_version: Optional[str] = None
+
+    @property
+    def version_mismatch(self) -> bool:
+        """The file and its `version` field name different versions (tcc#50): `v_011.json` held
+        `"version": "v_012"` after a variant was copied over it, and a revision was lost in place.
+        The header read the field, the diff the file, and an empty diff read as "no changes"."""
+        return bool(self.file_version and self.version and self.file_version != self.version)
 
     @property
     def state(self) -> Optional[str]:
@@ -568,6 +578,7 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     # exactly when `AUTOSOUND_STATE_ROOT` points somewhere else, the case this repo's own dogfood
     # ledger uses. It reads `project.json` from there for `project_rev` and the settings sheet.
     history = vstate.PresetHistory(root, preset, project_dir=str(config.project_dir()))
+    read_as = version or history.head()
     raw = history.load(version)
     hardware_controls = load_hardware_controls()
     # The SCR-001 join resolves against `project.json` as it is NOW, which is right for the current
@@ -584,6 +595,7 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     # found on a live tune). The header was reading the snapshot, so "set a target, see it in the
     # header" did not work. Falls back to the snapshot's field, which is right for an old version
     # and the only answer before any pointer exists.
+    view = replace(view, file_version=read_as)
     current = current_target(preset)
     return replace(view, target=current) if current else view
 

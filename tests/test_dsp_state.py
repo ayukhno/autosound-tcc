@@ -641,3 +641,35 @@ def test_a_channel_with_no_status_counts_as_proposed_as_the_method_reads_it():
     n = len(LEDGER["channels"])
     view = _view(_with_statuses([None] + ["applied"] * (n - 1)))
     assert view.state == "proposed"
+
+
+def test_a_state_file_whose_version_field_names_another_is_said_not_drawn(tmp_path, monkeypatch):
+    """tcc#50: `v_011.json` carried `"version": "v_012"` after a variant was copied over it. TCC
+    loaded it without a word: the header read the field, the diff resolved by the file name, and
+    the empty diff read as "no changes". The view now knows the name it was READ BY."""
+    from autosound_tcc.core import config, vendor_loader
+    from autosound_tcc.state.dsp_state import load_project_view
+    from tests import _intake
+
+    _intake.seed(tmp_path)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    root = tmp_path / "state"
+    history = vendor_loader.load_dsp_state().PresetHistory(str(root), "FULL",
+                                                            project_dir=str(tmp_path))
+    ledger = {"preset": "FULL", "sample_rate": 96000,
+              "channels": {"w-L": {"hp": None, "lp": None, "gain_db": 0.0, "ta_ms": 0.0,
+                                   "polarity": "NORM"}}}
+    history.snapshot(ledger, note="one")
+    second = history.snapshot(ledger, note="two")
+    path = Path(history._path(second))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = "v_099"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    view = load_project_view(str(root), "FULL", PROFILE)
+
+    assert view.version == "v_099" and view.file_version == second
+    assert view.version_mismatch
+
+    clean = load_project_view(str(root), "FULL", PROFILE, version=history.versions()[0])
+    assert not clean.version_mismatch
