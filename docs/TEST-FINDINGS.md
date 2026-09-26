@@ -2438,3 +2438,14 @@ OpenAI and finds `codex` installed, while no transport of the reviewer script ru
 **Where.** Mac, the footer's AI CRITIC, pick «OMP · GPT-OSS 120B».
 
 **Task.** None yet — recorded.
+
+### 83. Every omp session opens with «SYSTEM · LEDGER: this project's settings.json applies: hook SessionStart …»
+
+**What.** Seen on the Arbiter's screenshots, not reported by him — recorded by the session. At each
+omp session start the dialog shows a «SYSTEM · LEDGER» bubble quoting the car project's
+`.claude/settings.json` SessionStart hook (`printf '%s порода=%s метод=%s голова=%s' …`): omp's own
+notice about project settings, labelled as a ledger record, with shell text nobody needs to read.
+
+**Where.** Mac, the in-app AI dialog, omp route (screenshots 14 and 16).
+
+**Task.** None — for the Arbiter to decide whether it is noise to hide.
