@@ -237,6 +237,12 @@ _HANDOFF_PROMPT = (
 # An agent that never finishes must not strand the restart: the handoff saves what can be saved,
 # it does not make the swap conditional on saving it.
 _HANDOFF_TIMEOUT_MS = 180_000
+
+
+def _ended(worker) -> bool:
+    """Whether a session worker's thread has run and finished (QThread's `isFinished`)."""
+    finished = getattr(worker, "isFinished", None)
+    return bool(finished is not None and finished())
 # When a channel request stops being "just asked" and starts being a fact worth flagging. The
 # model answers a signal within a turn; a minute of silence means the turn is long, the queue was
 # missed, or nobody is listening -- all three are things the Arbiter should see rather than guess.
@@ -4246,6 +4252,9 @@ class MainWindow(QMainWindow):
         """
         if getattr(self, "_handoff_timer", None) is not None:
             return  # already saving; a second click must not start a second handoff
+        if _ended(worker):
+            self._drop_ended_worker(mode)
+            return
         self._handoff_mode = mode
         # One handoff, three reasons, and the message has to say which: "before the model changes"
         # under a plain Save is TCC narrating something the Arbiter did not ask for.
@@ -4281,6 +4290,23 @@ class MainWindow(QMainWindow):
         self._handoff_timer.timeout.connect(self._finish_handoff)
         self._handoff_timer.start(_HANDOFF_TIMEOUT_MS)
         worker.send(_HANDOFF_PROMPT)
+
+    def _drop_ended_worker(self, mode: str) -> None:
+        """A session whose thread has ended — one that never started, like omp dying in its
+        constructor (finding 54, tcc#56) — has nothing to write down, and a save turn sent to it
+        is never read: the handoff only waited its timeout out behind «Зберігаю стан…». So it is
+        dropped, and what the Arbiter asked for happens at once."""
+        self._agent_worker = None
+        self._running_model = None
+        self._sync_layout_button()
+        if mode == "save":
+            self._dialog._add_system_message(i18n.t("savedTccOnly"))
+            self._status_strip.notify(i18n.t("savedTccOnly"))
+            self._update_session_button()
+        elif mode == "quit":
+            self.close()
+        else:
+            self._launch_session(fresh=mode == "fresh")
 
     def _tick_quit_saving(self) -> None:
         """Count the wait out loud, so a slow turn is visibly slow rather than indistinguishable
@@ -4367,6 +4393,40 @@ class MainWindow(QMainWindow):
         )
         self._launch_session(fresh=mode == "fresh")
 
+    def _session_factory(self, choice, server, resumed: bool, effort: Optional[str]):
+        """How the session for `choice` is built — called on the worker's thread, once.
+
+        Both routes get the project's language, the same one the interview has always been given.
+        It went into `get_tcc_state` and nowhere else, so the model could only learn it by asking —
+        and the first turn answers before it has. Put into the omp factory alone (wave 2.1), it
+        was a keyword omp did not take, and the SDK route it was meant for never got it (tcc#56).
+        """
+        language = i18n.current_language()
+        if choice.harness == "omp":
+            # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
+            # needs no url/token of its own.
+            return lambda: omp_session.OmpSession(
+                project_dir=server.project_dir,
+                bridge=self._bridge,
+                model=choice.model,
+                resume=resumed,
+                gate=self._effective_gate(),
+                always_allowed=self._always_allowed(),
+                effort=effort,
+                language=language,
+            )
+        return lambda: TuningSession(
+            project_dir=server.project_dir,
+            mcp_url=server.url,
+            mcp_token=server.token,
+            bridge=self._bridge,
+            model=choice.model,
+            gate=self._effective_gate(),
+            always_allowed=self._always_allowed(),
+            effort=effort,
+            language=language,
+        )
+
     def _launch_session(self, opening: Optional[str] = None, fresh: bool = False) -> None:
         if self._mcp_server is None:
             # WITH the reason. "Start TCC again" is advice that does not survive a second failure,
@@ -4395,33 +4455,7 @@ class MainWindow(QMainWindow):
         # Fixed for the session's whole life on both routes (the SDK takes it at client
         # construction), so it is read here, once, at the moment the session is built.
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
-        if choice.harness == "omp":
-            # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
-            # needs no url/token of its own.
-            factory = lambda: omp_session.OmpSession(  # noqa: E731
-                project_dir=server.project_dir,
-                bridge=self._bridge,
-                model=choice.model,
-                resume=resumed,
-                gate=self._effective_gate(),
-                always_allowed=self._always_allowed(),
-                effort=effort,
-                # The project's language, the same one the interview has always been given. It
-                # went into `get_tcc_state` and nowhere else, so the model could only learn it by
-                # asking — and the first turn answers before it has.
-                language=i18n.current_language(),
-            )
-        else:
-            factory = lambda: TuningSession(  # noqa: E731
-                project_dir=server.project_dir,
-                mcp_url=server.url,
-                mcp_token=server.token,
-                bridge=self._bridge,
-                model=choice.model,
-                gate=self._effective_gate(),
-                always_allowed=self._always_allowed(),
-                effort=effort,
-            )
+        factory = self._session_factory(choice, server, resumed, effort)
         self._agent_worker = AgentWorker(session_factory=factory, opening_prompt=opening)
         self._sync_layout_button()
         self._dialog.attach_agent(

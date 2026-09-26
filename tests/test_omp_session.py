@@ -805,3 +805,15 @@ def test_signals_delivered_but_not_acked_survive_an_omp_turn(tmp_path):
 
     # `wait` only sees *pending* signals, so returning here proves the restore.
     assert [s.id for s in session.bus.wait(timeout=0.05)] == [signal.id]
+
+
+def test_the_project_language_reaches_omp_as_an_appended_rule(tmp_path):
+    """tcc#56, finding 53: the language went to this constructor as a keyword it did not take, and
+    every omp start died on it. Now it is taken, and reaches the model the way the SDK route's
+    does — the same rule, appended to omp's system prompt. From a FILE, not the text itself: a long
+    argument through a Windows `.cmd` shim is what broke the reviewer CLIs (skill #60)."""
+    from pathlib import Path
+
+    argv = OmpSession(project_dir=tmp_path, language="uk")._argv()
+    rule = Path(argv[argv.index("--append-system-prompt") + 1]).read_text(encoding="utf-8")
+    assert "Ukrainian" in rule and "EVERY word you emit" in rule

@@ -1788,7 +1788,14 @@ session does not start.
 
 **Weight.** High: the omp route cannot run a session at all.
 
-**Issue:** tcc#56 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#56 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#56. The cause: wave 2.1 (`357f851`, 2026-09-11) put `language=` into the omp
+factory instead of the SDK one beside it, so every omp start died on it — and the SDK session, the
+one it was meant for, never got the language: its prompt said the project's language was English.
+Both routes get it now (`MainWindow._session_factory`); omp takes the same rule through
+`--append-system-prompt`, from a file (`.tcc/omp-language.md`). A live omp start reports ready
+with it.
 
 ### 54. Switching away from a model that never started still runs «save state before the model change»
 
@@ -1800,7 +1807,12 @@ was nothing to save before the switch.
 
 **Weight.** Low: a needless step and a misleading line; depends on how long it takes.
 
-**Issue:** tcc#56 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#56 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#56. The cause: the failed session's thread had ended, and the window still held
+its worker as live, so a model switch sent the save turn to a thread that never reads it and waited
+the handoff's three-minute timeout. An ended worker is dropped now, and the switch starts the new
+model at once (a Save says «only TCC's own state», a quit closes).
 
 ### 55. The critic picker stays red whatever model is picked
 

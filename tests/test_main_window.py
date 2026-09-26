@@ -870,6 +870,10 @@ class _HandoffWorker:
         self.failed = self._signals.failed
         self.sent: list[str] = []
         self.shutdowns = 0
+        self.finished = False
+
+    def isFinished(self):  # noqa: N802 (QThread's name)
+        return self.finished
 
     def send(self, text):
         self.sent.append(text)
@@ -4604,3 +4608,48 @@ def test_quitting_also_lets_go_of_the_ping_the_contract_check_and_the_capture_ch
     assert contract in detached, "the contract check"
     assert check in detached, "the capture check"
     assert contract.cancelled, "and the child is still killed first — that is the lever"
+
+
+def test_both_routes_are_given_the_project_language(monkeypatch, tmp_path):
+    """tcc#56, finding 53. «TypeError: OmpSession.__init__() got an unexpected keyword argument
+    'language'» on every omp start: the language (wave 2.1, 2026-09-11) was put into the omp
+    factory, and the SDK factory beside it — the one it was meant for — never got it, so the SDK
+    session's prompt said the project's language was English."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    server = SimpleNamespace(project_dir=tmp_path, url="http://127.0.0.1:1/mcp", token="t")
+    was = i18n.current_language()
+    i18n.set_language("uk")
+    try:
+        for harness in ("omp", "sdk"):
+            choice = SimpleNamespace(harness=harness, model="some-model")
+            session = window._session_factory(choice, server, resumed=False, effort=None)()
+            assert session.language == "uk", harness
+    finally:
+        i18n.set_language(was)
+
+
+def test_a_session_that_never_started_is_not_asked_to_save_before_the_swap(monkeypatch):
+    """tcc#56, finding 54: omp died in its constructor, the worker's thread ended, and switching
+    the model still said «Зберігаю стан проєкту перед зміною моделі…» and sent the save turn to a
+    thread that would never read it — then waited the handoff's timeout out."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    worker.finished = True
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    launched, said = [], []
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(True))
+    monkeypatch.setattr(window._dialog, "_add_system_message", lambda text, *a, **kw: said.append(text))
+
+    window._start_tuning_session()
+
+    assert worker.sent == [], "nothing to ask a session that is not there"
+    assert i18n.t("sessionHandoff") not in said
+    assert launched == [True], "the new model starts at once"
+    assert getattr(window, "_handoff_timer", None) is None

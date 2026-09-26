@@ -63,7 +63,12 @@ from autosound_tcc.core.agent_events import (
     TurnEnd,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
-from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, bash_is_read_only
+from autosound_tcc.core.tuning_session import (
+    SKILL_NAME,
+    _read_roots_for,
+    bash_is_read_only,
+    language_rule,
+)
 
 DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
 
@@ -305,6 +310,17 @@ def overlay_path(project_dir: Path) -> Path:
     return path
 
 
+def language_rule_path(project_dir: Path, language: str) -> Path:
+    """The project's language rule as a file, for `--append-system-prompt` (tcc#56).
+
+    A file and not the text: omp takes either, and on Windows a long argument through a `.cmd`
+    shim is parsed by cmd.exe, which is what broke the reviewer CLIs (skill #60)."""
+    path = config.tcc_dir(project_dir) / "omp-language.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(language_rule(language), encoding="utf-8")
+    return path
+
+
 class OmpSession:
     """A tuning conversation bound to one project folder, run by an `omp` subprocess."""
 
@@ -317,8 +333,12 @@ class OmpSession:
         gate: str = GATE_WRITES,
         always_allowed: Optional[frozenset[str]] = None,
         effort: Optional[str] = None,
+        language: str = "en",
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
+        # The project's language, stated to the model as the SDK route states it (tcc#56): it
+        # was passed here as a keyword this constructor did not take, and every omp start died.
+        self.language = language
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
         self.model = model
         # See `_argv`: on a metered route the thinking level is a price, so it is chosen rather
@@ -403,6 +423,8 @@ class OmpSession:
             # and no session id has to be carried across processes.
             "--session-dir",
             str(config.tcc_dir(self.project_dir) / "omp-sessions"),
+            "--append-system-prompt",
+            str(language_rule_path(self.project_dir, self.language)),
         ]
         if self.resume:
             argv.append("--continue")

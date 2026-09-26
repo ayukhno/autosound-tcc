@@ -194,9 +194,14 @@ different speaker.
 """
 
 
+def language_rule(language: str = "en") -> str:
+    """The `## Language` section alone — what the omp route appends (tcc#56)."""
+    return _LANGUAGE_RULE.format(language=language_name(language))
+
+
 def system_prompt_append(language: str = "en") -> str:
     """What TCC adds to the harness's own preset, for a session in `language`."""
-    return SYSTEM_PROMPT_APPEND + _LANGUAGE_RULE.format(language=language_name(language))
+    return SYSTEM_PROMPT_APPEND + language_rule(language)
 
 
 def _is_within(path: Path, root: Path) -> bool:
