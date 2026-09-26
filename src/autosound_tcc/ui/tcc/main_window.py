@@ -4039,7 +4039,7 @@ class MainWindow(QMainWindow):
             f"<b>{proposal.get('channel')}</b> · {proposal.get('param')}: "
             f"{proposal.get('from')} → <b>{proposal.get('to')}</b><br>{proposal.get('rationale', '')}"
         )
-        self._dialog._add_system_message(text)
+        self._dialog.add_proposal(text)
 
     def _on_critique(self, critique: dict) -> None:
         self._dialog.add_critique(critique)

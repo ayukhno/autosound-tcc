@@ -660,3 +660,31 @@ def test_an_omp_pick_reaches_the_reviewer_without_omp_s_provider_prefix(tmp_path
         assert critic.configured(tmp_path)[0] == sent, key
         _, choice = model_choices.resolve_critic(key)
         assert model_choices.reviewer_model(choice) == sent, key
+
+
+def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, monkeypatch):
+    """tcc#59, finding 63: after a cut-off agy stream the method said «з ключем API — `--via api`
+    для цього запуску», and `call_critic` could not ask for it — so the Generator ran the script
+    itself, and the critique never reached the window. With a CLI picked, finding 32 keeps the API
+    key out of the child; a run that asks for the API must keep it."""
+    from autosound_tcc.core import critic
+
+    monkeypatch.setenv("GEMINI_API_KEY", "AQ." + "x" * 50)
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def capture(argv, **kwargs):
+        seen["argv"], seen["env"] = list(argv), dict(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+    critic.run("a package", project_dir=tmp_path, harness="agy", model="gemini-3.8-flash-high",
+               via="api")
+    assert seen["argv"][-2:] == ["--via", "api"]
+    assert "GEMINI_API_KEY" in seen["env"]
+
+    critic.run("a package", project_dir=tmp_path, harness="agy", model="gemini-3.8-flash-high")
+    assert "--via" not in seen["argv"] and "GEMINI_API_KEY" not in seen["env"]

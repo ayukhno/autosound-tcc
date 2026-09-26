@@ -1104,7 +1104,7 @@ def build_server(
 
     @tool()
     async def call_critic(
-        package: str, trace_path: str = "", model: str = "", step: str = ""
+        package: str, trace_path: str = "", model: str = "", step: str = "", via: str = ""
     ) -> str:
         """Send a proposal package to the Critic (a different vendor's model) and return its reply.
 
@@ -1119,6 +1119,11 @@ def build_server(
         `clipboard` means no API or CLI was reachable so the package is on the Arbiter's clipboard
         for them to paste into any web chat and bring the reply back by hand; `error` explains why
         nothing ran. Never present `clipboard` as a critique — there isn't one yet.
+
+        `via` — `api`, `cli` or `clipboard` — takes THIS call down one route: when the reviewer's
+        CLI was cut off and it says to use the key for one run, call this again with `via="api"`.
+        Never run the reviewer script yourself for it: a direct run's reply never reaches the
+        Arbiter's window, only the journal.
         """
         # The Arbiter's pick is the default. Without this the call went out with NO model, the
         # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
@@ -1135,6 +1140,7 @@ def build_server(
             # came to disagree: the pick said `agy`, the machine's `GEMINI_BIN` said `gemini`, and
             # the reviewer script reads the env var first (TCC-002).
             harness=configured_critic_harness(project_dir),
+            via=via,
         )
         critic.log_call(result, None, project_dir)
         try:
@@ -1188,6 +1194,13 @@ def build_server(
             result.detail, harness=configured_critic_harness(project_dir), project_dir=project_dir)
         if fix:
             detail = f"{detail}\n\nWhat to do: {fix}".strip() if detail else f"What to do: {fix}"
+        if result.mode == critic.MODE_REFUSED and not via:
+            # The method's own message names `--via api` for the script; the route that brings the
+            # answer back to the window is this tool (finding 63, tcc#59).
+            detail = (f"{detail}\n\n" if detail else "") + (
+                "To take this one review through the API key, call call_critic again with "
+                "via=\"api\" — not the reviewer script directly: a direct run's reply never "
+                "reaches the Arbiter's window.")
         return json.dumps(
             {
                 "mode": result.mode,

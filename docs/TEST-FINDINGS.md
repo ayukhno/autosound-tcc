@@ -1998,7 +1998,13 @@ his word (2026-09-24), from the code:
 **Weight.** Medium: the one voice the loop exists for is not visible as itself, and a proposal
 looks like something already recorded.
 
-**Issue:** tcc#59 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#59 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#59. The proposal comes as the Generator's bubble, «Generator · proposal»
+(`DialogPanel.add_proposal`). `call_critic` takes `via` — `api`, `cli`, `clipboard`, the script's
+own `--via` for one run — and keeps the API key for a run that asks for the API (finding 32 kept it
+out for a CLI pick); a refusal tells the model to retry through `call_critic` with `via="api"`,
+not the script, whose reply never reaches the window.
 
 ### 64. «У фокусі зараз» shows the phase plan, not the open round: 24 positions and five columns for a round of six
 

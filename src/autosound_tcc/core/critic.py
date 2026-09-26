@@ -264,6 +264,9 @@ def session_env(project_dir: Path) -> dict:
     return env
 
 
+#: The routes one reviewer run may ask for by name — the script's own `--via` (skill `VIA_ROUTES`).
+VIA_ROUTES = ("api", "cli", "clipboard")
+
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
 _CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",)}
@@ -279,6 +282,7 @@ def run(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     python_executable: Optional[str] = None,
     extra_env: Optional[Mapping[str, str]] = None,
+    via: str = "",
 ) -> CriticResult:
     """Call the reviewer once. `package` is either markdown or a path to an existing package file.
 
@@ -287,6 +291,9 @@ def run(
     subprocess without this module knowing anything about model names.
 
     `extra_env` carries variables for this call only, applied last.
+
+    `via` — `api`, `cli` or `clipboard` — is the route for THIS run, the script's own `--via`
+    (tcc#59): after a cut-off CLI stream the method says to take one review through the key.
     """
     # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
     python_executable = python_executable or child.script_interpreter()
@@ -309,6 +316,9 @@ def run(
     argv = [python_executable, str(script_path()), role, str(package_path)]
     if trace_path:
         argv.append(str(trace_path))
+    via = (via or "").strip().lower()
+    if via in VIA_ROUTES:
+        argv += ["--via", via]
 
     env_overrides = {"PROJECT_MIRROR": str(_project_mirror(project_dir))}
     if model:
@@ -332,7 +342,9 @@ def run(
     # and the call failed two different ways on one machine without saying which. With a CLI
     # picked, the key that would reroute it stays out of this child's environment. The person's
     # own `critic-env` file is the reviewer's to read and is not touched.
-    dropped = [var for var in _CLI_REROUTING_KEYS.get((harness or "").lower(), ()) if env.pop(var, None)]
+    # Unless this run ASKS for the API: then the key is the route (tcc#59).
+    rerouting = () if via == "api" else _CLI_REROUTING_KEYS.get((harness or "").lower(), ())
+    dropped = [var for var in rerouting if env.pop(var, None)]
     if dropped:
         app_log.logger().info("critic: %s left out for the %s pick", ", ".join(dropped), harness)
     # Said out loud, because not saying it cost a whole round trip. `AUTOSOUND_CRITIC_BIN` is put

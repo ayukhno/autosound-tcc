@@ -1323,6 +1323,12 @@ class DialogPanel(QWidget):
             self._show_queue_row()
             self._add_system_message(i18n.t("messageNotSent"))
 
+    def add_proposal(self, html: str) -> None:
+        """The Generator's `propose_change`, as the Generator's — it came as «SYSTEM · ledger», so
+        its own proposal read as something already recorded (finding 63, tcc#59)."""
+        self._add_bubble("gen", "Generator · proposal", html)
+        self._scroll_to_end()
+
     def add_critique(self, critique: dict) -> None:
         """Render a reviewer reply as a Critic bubble — or say plainly that there isn't one yet.
 

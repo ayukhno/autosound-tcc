@@ -1757,3 +1757,26 @@ def test_a_close_that_names_open_work_marks_nothing(tmp_path, monkeypatch):
 
     assert bridge.events == []
 
+
+
+def test_call_critic_takes_the_route_for_one_run_and_a_refusal_names_it(tmp_path, monkeypatch):
+    """tcc#59, finding 63: the Generator ran the reviewer script directly for `--via api`, which
+    `call_critic` could not ask for, and the reply went to the journal past the window — no Critic
+    bubble. Now the tool takes it, and a refusal says to retry through it rather than the script."""
+    from autosound_tcc.core import critic
+
+    seen = {}
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, via="", **kw):
+        seen["via"] = via
+        return critic.CriticResult(critic.MODE_REFUSED, "", None, "critic",
+                                   "CLI 'agy': The stream was interrupted.", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    out = asyncio.run(mcp.call_tool("call_critic", {"package": "hello", "via": "api"}))
+    assert seen["via"] == "api"
+
+    out = asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
+    text = json.dumps(out, ensure_ascii=False, default=str)
+    assert "via" in text and "call_critic" in text

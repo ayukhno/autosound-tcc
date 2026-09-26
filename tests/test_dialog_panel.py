@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QMimeData  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from autosound_tcc.ui.tcc.dialog_panel import DialogPanel, MessageBubble  # noqa: E402
 from autosound_tcc.ui.tcc.mock_data import DIALOG  # noqa: E402
@@ -304,3 +304,16 @@ def test_a_refused_review_says_why_and_where_the_package_is():
     assert "quota exhausted" in said
     assert "process/reviews/x-critic-package.md" in said
 
+
+
+def test_a_proposal_is_the_generator_s_not_a_ledger_record():
+    """tcc#59, finding 63: the Generator's `propose_change` arrived as the blue «SYSTEM · ledger»
+    bubble, so its own proposal read as something already recorded."""
+    from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
+
+    _app()
+    panel = DialogPanel()
+    panel.add_proposal("<b>m-L</b> · EQ: — → <b>PK 2251 Hz</b>")
+    bubble = panel._bubbles[-1]
+    assert bubble.property("class") == "msg msg-gen"
+    assert "SYSTEM" not in bubble.findChildren(QLabel)[0].text()
