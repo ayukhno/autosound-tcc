@@ -2323,7 +2323,9 @@ Arbiter: make the window twice as wide.
 
 **Weight.** Medium: which models are offered cannot be read.
 
-**Task.** None yet — new.
+**Task.** tcc#70, the Arbiter's OK the same day («полагодь що описав»).
+
+**Built:** tcc#70 (`2056af8`). The list draws its own boxes — an empty square, a filled one when ticked — in both themes, and the window opens at 760 px, 720 at least.
 
 ### 76. After trying several models, every row of the reviewer list is red
 
@@ -2338,6 +2340,8 @@ every row in red, the SDK Claude rows and the AGY rows included; the picked one 
 
 **Task.** tcc#58 (reopened by this test).
 
+**Built:** tcc#58 (`6c968c9`). The combo's own delegate painted the open list with the combo's palette: a refused pick (red) turned every row red, and a row's own red was never drawn (measured offscreen: 50–77 red pixels on every row, 0 on the refused one). The model pickers use the standard delegate now: working rows plain, a refused row red.
+
 ### 77. A model that did not start, and switching away still runs «save state»
 
 **What.** Kimi K2.5 through omp: «omp refused `prompt`: No API key found for kimi-code …», then
@@ -2351,6 +2355,8 @@ answered with a refusal and stayed.
 
 **Task.** tcc#56 (reopened by this test).
 
+**Built:** tcc#56 (`6c968c9`, `8da5f84`). A refused prompt ends its turn; a session whose model never spoke is closed without the save turn. And the reason no model could be picked: TCC ran omp in its own `--profile tcc`, whose credential store had none of the Arbiter's logins — Opus 5 answered in his terminal and was «No API key found for anthropic» in TCC. On his decision TCC runs his own omp profile now.
+
 ### 78. «Налаштувати omp…» opens a terminal that hides behind TCC
 
 **What.** The terminal omp's configurator runs in opens behind TCC's window, which is maximised
@@ -2360,4 +2366,6 @@ answered with a refusal and stayed.
 
 **Weight.** Medium: the step looks like it did nothing.
 
-**Task.** None yet — new.
+**Task.** tcc#71, the Arbiter's OK the same day.
+
+**Built:** tcc#71. Since macOS 14 activation is cooperative: TCC in front has to yield before the terminal can come forward, and osascript's `activate` alone was ignored. TCC yields to Terminal / iTerm first (`NSApplication.yieldActivationToApplicationWithBundleIdentifier:`, through ctypes). Not checked live — it would take the Arbiter's focus; his next «Налаштувати omp…» is the check.

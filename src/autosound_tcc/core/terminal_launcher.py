@@ -118,6 +118,7 @@ def run_line(line: str) -> None:
     if sys.platform == "darwin":
         app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
         log.info("terminal: %s via osascript", app)
+        _yield_focus_to(app)
         if app == "iTerm":
             script = (
                 'tell application "iTerm"\n'
@@ -168,6 +169,53 @@ def run_line(line: str) -> None:
     raise TerminalLaunchError("no supported terminal emulator found on PATH")
 
 
+#: The bundle each macOS terminal app answers to, for yielding the focus to it.
+_MAC_BUNDLES = {"Terminal": "com.apple.Terminal", "iTerm": "com.googlecode.iterm2"}
+
+
+def _yield_focus_to(app: str) -> None:
+    """Let `app` come to the front: TCC yields the activation first (finding 78, tcc#71).
+
+    Since macOS 14 activation is cooperative: an app comes forward only when the active one
+    yields to it, and an `activate` sent through osascript while TCC is in front was ignored —
+    the terminal opened behind TCC's maximised window. `yieldActivationToApplication…` is the
+    API for exactly this. Through the Objective-C runtime with ctypes, so no new dependency;
+    silent where the call does not exist (an older macOS) or AppKit is not loaded."""
+    bundle = _MAC_BUNDLES.get(app)
+    if sys.platform != "darwin" or not bundle:
+        return
+    try:
+        import ctypes
+        import ctypes.util
+
+        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = ctypes.cast(objc.objc_msgSend, ctypes.c_void_p).value
+        call0 = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(send)
+        call_ptr = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p)(send)
+        call_str = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_char_p)(send)
+        call_bool = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p,
+                                     ctypes.c_void_p)(send)
+        ns_app_class = objc.objc_getClass(b"NSApplication")
+        if not ns_app_class:
+            return
+        ns_app = call0(ns_app_class, objc.sel_registerName(b"sharedApplication"))
+        selector = objc.sel_registerName(b"yieldActivationToApplicationWithBundleIdentifier:")
+        if not ns_app or not call_bool(ns_app, objc.sel_registerName(b"respondsToSelector:"),
+                                       selector):
+            return
+        ns_string = call_str(objc.objc_getClass(b"NSString"),
+                             objc.sel_registerName(b"stringWithUTF8String:"), bundle.encode())
+        call_ptr(ns_app, selector, ns_string)
+    except Exception:  # noqa: BLE001 — a terminal that opens behind is not worth a failed launch
+        app_log.logger().info("terminal: could not yield the focus to %s", app)
+
+
 def _applescript_literal(text: str) -> str:
     """Quote a Python string as an AppleScript string literal.
 
@@ -187,6 +235,7 @@ def _launch_macos(
 ) -> None:
     command = _posix_command(project_dir, cli, hint, model, extra)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
+    _yield_focus_to(app)
     if app == "iTerm":
         script = (
             'tell application "iTerm"\n'

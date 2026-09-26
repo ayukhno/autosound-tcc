@@ -346,3 +346,28 @@ def test_the_plain_terminal_also_opens_one_console(monkeypatch):
 
     assert seen["argv"][:2] == ["cmd", "/k"], seen["argv"]
     assert seen["kwargs"].get("shell") is not True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the macOS path")
+def test_macos_yields_the_focus_to_the_terminal_before_activating_it(recorded, monkeypatch, tmp_path):
+    """Finding 78 (tcc#71): «Налаштувати omp…» opened a terminal behind TCC's maximised window.
+    Since macOS 14 activation is cooperative — TCC has to yield before the terminal can come
+    forward — so the yield comes first, then the AppleScript."""
+    order = []
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: order.append(("yield", app)))
+    monkeypatch.setattr(terminal_launcher.subprocess, "run",
+                        lambda argv, **kw: order.append(("run", argv[0])))
+
+    launch(tmp_path, "claude")
+
+    assert order[0][0] == "yield" and order[0][1] in ("Terminal", "iTerm")
+    assert order[1] == ("run", "osascript")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Objective-C runtime is macOS's")
+def test_yielding_the_focus_never_raises():
+    """A terminal that opens behind is not worth a failed launch: no AppKit, an older macOS,
+    anything — the call is silent."""
+    terminal_launcher._yield_focus_to("Terminal")
+    terminal_launcher._yield_focus_to("NoSuchApp")

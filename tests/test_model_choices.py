@@ -779,7 +779,8 @@ def test_the_omp_key_warning_points_at_the_profile_not_at_a_shell(monkeypatch):
 
     assert warning is not None
     assert "shell" not in warning.lower(), warning
-    assert "auth login" in warning
+    # omp's own sign-in, in the person's own profile since tcc#56 (2026-09-26).
+    assert "/login" in warning and "--profile" not in warning
 
 
 
