@@ -59,6 +59,9 @@ _PARAM_TABS: dict[str, "object"] = {
 }
 
 _MATCH_PALETTE = ["#5aa9e6", "#4bbf87", "#e8973c", "#c98fe0", "#e8c34a", "#e05c5c"]
+#: The compared pairs' colours: not the marks' green and red, which say new and removed (the
+#: Arbiter, 2026-09-26: «кольори, відмінні від зеленого і червоного, як у точок — синій ок»).
+_CMP_PALETTE = ["#5aa9e6", "#e8973c", "#c98fe0", "#e8c34a", "#f28cc8", "#c9a27e"]
 
 
 def _bank_sentence(channel: str, bank) -> str:
@@ -200,7 +203,7 @@ def _pair_colours(now_side: list) -> dict:
     2026-09-26). By the current row's order, as the cards stand."""
     colours = {}
     for k, d in enumerate(d for d in now_side if d.status == "chg"):
-        colour = _MATCH_PALETTE[k % len(_MATCH_PALETTE)]
+        colour = _CMP_PALETTE[k % len(_CMP_PALETTE)]
         colours[id(d.band)] = colours[id(d.other)] = colour
     return colours
 

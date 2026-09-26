@@ -1002,11 +1002,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.warn};
         font-weight: 700;
     }}
-    /* A value that differs from the compared version (tcc#54): the change colour of the tables. */
+    /* A value that differs from the compared version (tcc#54): red, not the blue of the «змінена»
+    dot (the Arbiter, 2026-09-26: «в цифрах зміни червоним»). */
     QLabel[class~="band-fv-chg"] {{
         font-family: "SF Mono", Menlo, monospace;
         font-size: 11px;
-        color: {t.info};
+        color: {t.warn};
         font-weight: 700;
     }}
     QLabel[class~="band-byp"] {{
@@ -1021,8 +1022,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.accent};
         font-weight: 700;
     }}
+    /* Bypass switched between the versions: red, as a changed value («якщо статус зміниться — то
+    червоним»); unchanged it keeps its own look, orange when on. */
     QLabel[class~="band-byp"][class~="chg"] {{
-        color: {t.info};
+        color: {t.warn};
         font-weight: 700;
     }}
     /* The filter type by family (finding 69): green a shelf, blue PK, yellow APF. */

@@ -2147,3 +2147,9 @@ of the same type within a third of an octave.
 правий-лівий зроблено. в цілому супер!». Built in the commit that records this: with the compared
 row on, each changed band and its compared self share a colour of the pair palette on the card's
 top border, and the legend lists them as chips in those colours («⬤ 1000→1120 Hz»).
+
+**Fourth look (2026-09-26, screenshot of PK (7)):** «bypass не треба підсвічувати синім; якщо
+статус зміниться — то червоним, і в цифрах зміни червоним», and the pairs' colours not the dots'
+green and red («синій ок»). Built in the commit that records this: changed values and a switched
+bypass in red, an unchanged bypass keeps its own look; the pair palette is blue, orange, violet,
+yellow, pink and tan.

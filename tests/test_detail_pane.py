@@ -1062,7 +1062,7 @@ def test_the_legend_names_all_three_and_the_frequencies_of_what_differs():
 def test_a_changed_band_and_what_it_was_share_a_colour_as_the_pair_mode_does():
     """The Arbiter, 2026-09-26: «кольорово однаковими "змінені", як у нас правий-лівий»: each
     changed band and its compared self get one colour of the pair palette; the rest none."""
-    from autosound_tcc.ui.tcc.detail_pane import _MATCH_PALETTE, DetailPane
+    from autosound_tcc.ui.tcc.detail_pane import _CMP_PALETTE, DetailPane
 
     _app()
     now, before = _eq_versions()
@@ -1073,7 +1073,20 @@ def test_a_changed_band_and_what_it_was_share_a_colour_as_the_pair_mode_does():
 
     pane._cmp_btn.clicked.emit()
     top, lower = _card_rows(pane)
-    assert top[1].match_color == lower[1].match_color == _MATCH_PALETTE[0]
+    assert top[1].match_color == lower[1].match_color == _CMP_PALETTE[0]
     assert [c.match_color for c in top[::2] + lower[::2]] == [None] * 4
     said = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
     assert "⬤ 1000 Hz" in said, "the legend names the pair in its colour, as «спільні» does"
+
+
+def test_the_pair_colours_are_not_the_new_and_removed_marks():
+    """«кольори, відмінні від зеленого і червоного (як у точок) — синій ок»: a pair must not read
+    as a new or a removed band."""
+    from typing import get_args
+
+    from autosound_tcc.ui.tcc.detail_pane import _CMP_PALETTE
+    from autosound_tcc.ui.tcc.theme import Mode, get_theme
+
+    for mode in get_args(Mode):
+        t = get_theme(mode)
+        assert not {t.ok.lower(), t.warn.lower()} & {c.lower() for c in _CMP_PALETTE}
