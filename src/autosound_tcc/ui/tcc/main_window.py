@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStyledItemDelegate,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -518,6 +519,18 @@ def _cap_combo_width(combo) -> None:
     # while the row has room and gives them up -- down to a few and the arrow -- before anything
     # is pushed off.
     combo.setMinimumWidth(90)
+
+
+def _rows_keep_their_colour(combo) -> None:
+    """Draw the open list with the standard item delegate, so each row has its OWN colour.
+
+    The combo's own delegate paints the rows with the combo's palette: a pick gone red (a refused
+    model, `is-missing`) painted every row of the list red, Claude's too, and a row's own red from
+    the model was never drawn at all (findings 62, 76 — measured offscreen: 50-77 red pixels on
+    every row, 0 on the refused one). The standard delegate reads the row's foreground and the
+    stylesheet's `::item` rule. It draws no check mark by the current row; the closed picker
+    names it."""
+    combo.setItemDelegate(QStyledItemDelegate(combo))
 
 
 def _replacements_for(key: str, entries: list) -> list:
@@ -1239,6 +1252,7 @@ class MainWindow(QMainWindow):
         # by inference.
         ai_main = _mini_combo()
         _cap_combo_width(ai_main)
+        _rows_keep_their_colour(ai_main)
         self._ai_main_combo = ai_main
         ai_main.currentIndexChanged.connect(self._on_generator_model_changed)
         layout.addWidget(ai_main)
@@ -1300,6 +1314,7 @@ class MainWindow(QMainWindow):
         # lands in clipboard mode and says so here rather than after the wait.
         ai_critic = _mini_combo()
         _cap_combo_width(ai_critic)
+        _rows_keep_their_colour(ai_critic)
         self._ai_critic_combo = ai_critic
         ai_critic.currentIndexChanged.connect(self._on_critic_model_changed)
         layout.addWidget(ai_critic)
@@ -4383,8 +4398,8 @@ class MainWindow(QMainWindow):
         """
         if getattr(self, "_handoff_timer", None) is not None:
             return  # already saving; a second click must not start a second handoff
-        if _ended(worker):
-            self._drop_ended_worker(mode)
+        if _ended(worker) or not getattr(worker, "spoke", True):
+            self._skip_handoff(worker, mode)
             return
         self._handoff_mode = mode
         # One handoff, three reasons, and the message has to say which: "before the model changes"
@@ -4422,20 +4437,28 @@ class MainWindow(QMainWindow):
         self._handoff_timer.start(_HANDOFF_TIMEOUT_MS)
         worker.send(_HANDOFF_PROMPT)
 
-    def _drop_ended_worker(self, mode: str) -> None:
-        """A session whose thread has ended — one that never started, like omp dying in its
-        constructor (finding 54, tcc#56) — has nothing to write down, and a save turn sent to it
-        is never read: the handoff only waited its timeout out behind «Зберігаю стан…». So it is
-        dropped, and what the Arbiter asked for happens at once."""
+    def _skip_handoff(self, worker, mode: str) -> None:
+        """A session with nothing to write down gets no save turn (tcc#56): one whose thread has
+        ended — omp dying in its constructor (finding 54) — never reads it, and one whose model has
+        not said a word — omp refusing the prompt for want of a key (finding 77) — has nothing to
+        save. The handoff only waited behind «Зберігаю стан…». What the Arbiter asked for happens
+        at once; a Save keeps a live session, the rest close it."""
+        if mode == "save":
+            self._dialog._add_system_message(i18n.t("savedTccOnly"))
+            self._status_strip.notify(i18n.t("savedTccOnly"))
+            if not _ended(worker):
+                return
+        elif mode == "quit":
+            self.close()
+            return
+        if not _ended(worker):
+            worker.shutdown()
+            self._record_session_stop()
         self._agent_worker = None
         self._running_model = None
         self._sync_layout_button()
         if mode == "save":
-            self._dialog._add_system_message(i18n.t("savedTccOnly"))
-            self._status_strip.notify(i18n.t("savedTccOnly"))
             self._update_session_button()
-        elif mode == "quit":
-            self.close()
         else:
             self._launch_session(fresh=mode == "fresh")
 

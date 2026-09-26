@@ -4852,3 +4852,71 @@ def test_the_eq_card_order_is_a_setting_the_processor_s_by_default(monkeypatch):
         assert window._detail._eq_order == ("freq", "gain", "q"), "back to the processor's"
     finally:
         mw.get_settings().remove(mw._EQ_ORDER_KEY)
+
+
+def test_a_red_pick_does_not_paint_every_row_of_its_list_red():
+    """Findings 62, 76 (tcc#58): after one refused reviewer every row of the open list was red,
+    Claude's too. The combo's own delegate drew the rows with the combo's palette, so the pick's red
+    filled the list and a row's own red was never drawn. Measured on the pixels of each row."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    combo = window._ai_critic_combo
+    combo.clear()
+    for text in ("SDK · Claude Opus 5", "AGY · Gemini 3.8 Flash (High)", "OMP · GPT-OSS 120B"):
+        combo.addItem(text)
+    combo.setItemData(2, QColor(current_theme().warn), Qt.ItemDataRole.ForegroundRole)
+    combo.setProperty("class", "mini-select is-missing")
+    combo.style().unpolish(combo)
+    combo.style().polish(combo)
+    combo.resize(360, 30)
+    combo.show()
+    combo.showPopup()
+    QApplication.processEvents()
+    try:
+        view = combo.view()
+        image = view.grab().toImage()
+
+        def red(row):
+            rect = view.visualRect(view.model().index(row, 0))
+            count = 0
+            for x in range(rect.left(), min(rect.right(), image.width() - 1), 2):
+                for y in range(rect.top(), min(rect.bottom(), image.height() - 1), 2):
+                    c = QColor(image.pixel(x, y))
+                    count += c.red() > 150 and c.green() < 110 and c.blue() < 110
+            return count
+
+        assert red(0) == 0 and red(1) == 0, "rows that work are not red"
+        assert red(2) > 0, "the refused row keeps its own red"
+    finally:
+        combo.hidePopup()
+        combo.hide()
+
+
+
+def test_a_session_whose_model_never_spoke_is_not_asked_to_save(monkeypatch):
+    """Finding 77 (tcc#56): omp refused the prompt (no kimi-code key) and stayed up; switching the
+    model sent it «save state» anyway. A model that has not said a word has nothing to write down."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    window._running_model = "sdk:claude-opus-5"
+    worker = _HandoffWorker()
+    worker.spoke = False
+    window._agent_worker = worker
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    launched, said = [], []
+    monkeypatch.setattr(MainWindow, "_launch_session", lambda self, *a, **kw: launched.append(True))
+    monkeypatch.setattr(window._dialog, "_add_system_message", lambda text, *a, **kw: said.append(text))
+
+    window._start_tuning_session()
+
+    assert worker.sent == [] and i18n.t("sessionHandoff") not in said
+    assert worker.shutdowns == 1, "the silent session is closed, not left running"
+    assert launched == [True]
