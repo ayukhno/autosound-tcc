@@ -238,6 +238,11 @@ _HANDOFF_PROMPT = (
 # it does not make the swap conditional on saving it.
 _HANDOFF_TIMEOUT_MS = 180_000
 
+#: The EQ card's field order the Arbiter fixed in «Налаштування» (tcc#67); "auto" is the
+#: processor's own (finding 68).
+_EQ_ORDER_KEY = "eqFieldOrder"
+_EQ_ORDERS = {"auto": None, "gain_first": ("freq", "gain", "q"), "q_first": ("freq", "q", "gain")}
+
 
 def _ended(worker) -> bool:
     """Whether a session worker's thread has run and finished (QThread's `isFinished`)."""
@@ -1001,6 +1006,46 @@ class MainWindow(QMainWindow):
         menu.aboutToHide.connect(rounded_tooltip.RoundedTooltip.instance().hide_tip)
         return menu
 
+    def _build_eq_order_menu(self, settings: QMenu) -> None:
+        """The EQ card's Freq / Gain / Q order: the processor's own by default, or fixed by the
+        Arbiter (finding 70, tcc#67 — finding 68 built only the vendor's rule). Per machine: it
+        is how this person reads a card, not a fact about the car."""
+        order_menu = self._tip_menu(settings)
+        order_menu.setTitle(i18n.t("eqOrderMenu"))
+        settings.addMenu(order_menu)
+        chosen = self._eq_order_pref()
+        self._eq_order_actions = {}
+        for pref, label in (("auto", i18n.t("eqOrderAuto")),
+                            ("gain_first", "Freq · Gain · Q"), ("q_first", "Freq · Q · Gain")):
+            action = order_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(pref == chosen)
+            action.triggered.connect(lambda _c=False, p=pref: self._set_eq_order_pref(p))
+            self._eq_order_actions[pref] = action
+
+    @staticmethod
+    def _eq_order_pref() -> str:
+        value = str(get_settings().value(_EQ_ORDER_KEY, "auto") or "auto")
+        return value if value in _EQ_ORDERS else "auto"
+
+    def _set_eq_order_pref(self, pref: str) -> None:
+        get_settings().setValue(_EQ_ORDER_KEY, pref)
+        for key, action in getattr(self, "_eq_order_actions", {}).items():
+            action.setChecked(key == pref)
+        self._apply_eq_order()
+
+    def _apply_eq_order(self) -> None:
+        """The order the cards use: the Arbiter's, when he fixed one, else the processor's."""
+        fixed = _EQ_ORDERS.get(self._eq_order_pref())
+        self._eq_order = fixed or getattr(self, "_eq_order_vendor", None) or eq_field_order(None)
+        self._detail.set_eq_order(self._eq_order)
+        control = getattr(self, "_control_layout", None)
+        tabs = getattr(control, "tabs", None) if control is not None else None
+        for index in range(tabs.count() if tabs is not None else 0):
+            page = tabs.widget(index)
+            if isinstance(page, DetailPane):
+                page.set_eq_order(self._eq_order)
+
     def _menu_section(self, menu: QMenu, key: str) -> None:
         """A visible section heading.
 
@@ -1074,15 +1119,23 @@ class MainWindow(QMainWindow):
         self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
         self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
         self._fresh_session_action.triggered.connect(self._start_fresh_session)
-        self._models_action = menu.addAction(i18n.t("menuModels"))
+        # «Налаштування»: every technical setting of TCC in one place (finding 70, tcc#67) — they
+        # were scattered over the session and view sections, and the EQ card's field order had no
+        # place at all.
+        settings = self._tip_menu(menu)
+        settings.setTitle("⚙ " + i18n.t("menuSettings"))
+        menu.addMenu(settings)
+        self._settings_menu = settings
+        self._build_eq_order_menu(settings)
+        self._models_action = settings.addAction(i18n.t("menuModels"))
         self._models_action.setToolTip(i18n.t("menuModelsTip"))
         self._models_action.triggered.connect(self._open_model_config)
-        self._reviewer_key_action = menu.addAction(i18n.t("menuReviewerKey"))
+        self._reviewer_key_action = settings.addAction(i18n.t("menuReviewerKey"))
         self._reviewer_key_action.setToolTip(i18n.t("menuReviewerKeyTip"))
         self._reviewer_key_action.triggered.connect(self._open_reviewer_key)
-        gate_menu = self._tip_menu(menu)
+        gate_menu = self._tip_menu(settings)
         gate_menu.setTitle(i18n.t("gateMode"))
-        menu.addMenu(gate_menu)
+        settings.addMenu(gate_menu)
         self._gate_actions = {}
         for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
                             (omp_session.GATE_FOREIGN, "gateForeign"),
@@ -1094,20 +1147,19 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
             self._gate_actions[mode] = action
 
-        self._menu_section(menu, "menuView")
-        theme_action = menu.addAction("◐ " + i18n.t("menuTheme"))
+        theme_action = settings.addAction("◐ " + i18n.t("menuTheme"))
         theme_action.triggered.connect(self._toggle_theme)
-        lang_menu = self._tip_menu(menu)
+        lang_menu = self._tip_menu(settings)
         lang_menu.setTitle(i18n.t("menuLanguage"))
-        menu.addMenu(lang_menu)
+        settings.addMenu(lang_menu)
         for code, label in i18n.language_choices():
             action = lang_menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(i18n.current_language() == code)
             action.triggered.connect(lambda _c=False, lang=code: self._on_language_selected(lang))
-        zoom_in_action = menu.addAction(i18n.t("menuZoomIn"))
+        zoom_in_action = settings.addAction(i18n.t("menuZoomIn"))
         zoom_in_action.triggered.connect(self._zoom_in)
-        zoom_out_action = menu.addAction(i18n.t("menuZoomOut"))
+        zoom_out_action = settings.addAction(i18n.t("menuZoomOut"))
         zoom_out_action.triggered.connect(self._zoom_out)
 
         self._menu_section(menu, "menuTools")
@@ -2143,8 +2195,8 @@ class MainWindow(QMainWindow):
             return
         # The band card's Q and Gain in the processor's own order (finding 68).
         described = profile.get("dsp_profile", profile)
-        self._eq_order = eq_field_order(described.get("vendor"), described.get("name"))
-        self._detail.set_eq_order(self._eq_order)
+        self._eq_order_vendor = eq_field_order(described.get("vendor"), described.get("name"))
+        self._apply_eq_order()
 
         root = config.state_root()
         available = config.available_presets(root)

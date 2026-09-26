@@ -3101,19 +3101,25 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
 
     actions = window._menu_btn.menu().actions()
     labels = [a.text() for a in actions]
-    for key in ("menuProject", "menuSession", "menuView", "menuTools", "menuHelp"):
+    for key in ("menuProject", "menuSession", "menuTools", "menuHelp"):
         assert i18n.t(key).upper() in labels, key
     headings = [a for a in actions if a.text() in {i18n.t(k).upper() for k in
-                ("menuProject", "menuSession", "menuView", "menuTools", "menuHelp")}]
+                ("menuProject", "menuSession", "menuTools", "menuHelp")}]
     assert all(not a.isEnabled() for a in headings), "a heading is not a thing you can press"
 
     # Every act the chrome no longer carries has a home here.
     for key in ("projectOpen", "projectNew", "menuCopyCar", "riImport", "menuReload",
-                "menuStartSession", "menuTerminal", "menuModels", "menuTheme",
+                "menuStartSession", "menuTerminal",
                 "menuDiagnostics", "menuTargetTool", "supportGithub", "supportMonobank"):
         assert any(i18n.t(key) in label for label in labels), key
-    assert any(a.menu() and a.text() == i18n.t("gateMode") for a in actions)
-    assert any(a.menu() and a.text() == i18n.t("menuLanguage") for a in actions)
+    # The technical settings in one submenu (finding 70, tcc#67).
+    settings = next(a.menu() for a in actions if a.menu() and i18n.t("menuSettings") in a.text())
+    inside = settings.actions()
+    inner = [a.text() for a in inside]
+    for key in ("menuModels", "menuReviewerKey", "menuTheme", "menuZoomIn", "menuZoomOut"):
+        assert any(i18n.t(key) in label for label in inner), key
+    for key in ("eqOrderMenu", "gateMode", "menuLanguage"):
+        assert any(a.menu() and a.text() == i18n.t(key) for a in inside), key
 
 
 def test_the_guide_entry_opens_the_guide_at_the_installed_version(monkeypatch):
@@ -3151,7 +3157,9 @@ def test_the_main_menu_follows_a_language_switch():
         labels = [a.text() for a in window._menu_btn.menu().actions()]
         assert i18n.t("projectNew") in labels and "Новий проєкт…" in labels
 
-        lang_menu = next(a.menu() for a in window._menu_btn.menu().actions()
+        settings = next(a.menu() for a in window._menu_btn.menu().actions()
+                        if a.menu() and i18n.t("menuSettings") in a.text())
+        lang_menu = next(a.menu() for a in settings.actions()
                          if a.menu() and a.text() == i18n.t("menuLanguage"))
         checked = [a.text() for a in lang_menu.actions() if a.isChecked()]
         assert checked == [i18n.t("langNameUk")]
@@ -4824,3 +4832,23 @@ def test_a_state_whose_file_and_version_disagree_is_said_in_the_header_and_the_s
 
     said = i18n.t("stateVersionMismatch").format(file="v_011", inner="v_012")
     assert window._status_strip.text() == said
+
+
+
+def test_the_eq_card_order_is_a_setting_the_processor_s_by_default(monkeypatch):
+    """Finding 70 (tcc#67): the field order as a TCC setting, not only the vendor's rule (68)."""
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._eq_order_vendor = ("freq", "gain", "q")  # a Helix
+    try:
+        window._set_eq_order_pref("q_first")
+        assert window._detail._eq_order == ("freq", "q", "gain")
+        assert window._eq_order_actions["q_first"].isChecked()
+
+        window._set_eq_order_pref("auto")
+        assert window._detail._eq_order == ("freq", "gain", "q"), "back to the processor's"
+    finally:
+        mw.get_settings().remove(mw._EQ_ORDER_KEY)

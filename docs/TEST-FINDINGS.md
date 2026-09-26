@@ -2174,7 +2174,12 @@ Freq · Q · Gain) should be a TCC setting, not only the vendor's rule built in 
 
 **Weight.** Medium: a place for settings that today are scattered or built in.
 
-**Issue:** tcc#67 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#67 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#67. «⚙ Налаштування» in the main menu holds TCC's technical settings: the EQ card's
+field order (as the processor shows it · Freq · Gain · Q · Freq · Q · Gain, per machine, the
+processor's by default), the models, the reviewer key, the permissions, the theme, the language and
+the text size — before, they sat in the session and view sections, and the order had no place.
 
 ### 71. The EQ view and the tabs, third pass (the Arbiter, 2026-09-25, on `985c097`)
 
