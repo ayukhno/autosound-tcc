@@ -2054,7 +2054,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-082 — W-3: the collection continues, then the planning
 
-**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
+**Статус**: open 2026-09-23 · collection went on 2026-09-24 and 2026-09-25, stopped at the Arbiter's «добраніч» 2026-09-25, went on 2026-09-26 · resume: `hub/bin/role tcc --resume 5f019402-1f8a-4e6d-a3d1-b9710a12e70f`
 
 The milestone `W-3 · v0.1.44` is open (#3), and the collection started on the Arbiter's word. The
 pool is on branch `wave-0.1.44`, in `docs/TEST-FINDINGS.md` 42–47 (47 is control mode's tables,
@@ -2089,7 +2089,9 @@ tabs or tree groups, tab dots drawn by the bar itself, the EQ's actions after «
 «порівняти з». He asked for no tag: this Mac runs `9e18ba3` from git (`uv tool install … @<sha>`).
 Recorded, not built: finding 70 (a «Налаштування» menu, the card's field order among the
 settings; no OK yet) and 72 (other presets' ledgers carry no band `i` — the car session's side; I
-offered to send it a ticket, no answer yet). Hub #211 PAS-011 and #209 PAS-009 are taken and close
+offered to send it a ticket, no answer yet). On 2026-09-26 finding 73 (the compared version's EQ row under the
+current one, new / changed / removed marks on the bands) was recorded as tcc#54 on W-3, assessed,
+no `ok`. Hub #211 PAS-011 and #209 PAS-009 are taken and close
 with the tag that ships them. Full suite at `9e18ba3`: 2337 passed (-n 4).
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he

@@ -2097,3 +2097,30 @@ not recorded.
 TCC's.
 
 **Weight.** Medium: the band-by-band check against PC-Tool works on one preset of six.
+
+### 73. The EQ row of the compared version under the current one; new / changed / removed marks on the bands
+
+**What.** The Arbiter (2026-09-26, screenshot of the EQ header's «Копіювати EQ w-L · ⇄ L + R · ?»),
+an idea:
+
+1. A button left of «Копіювати EQ»: compare with the version chosen in «порівняти з». Nothing
+   chosen — the button is passive. In pair mode (⇄ L + R) the button is hidden.
+2. Pressed — a second EQ row appears under the current one, labelled with the compared version
+   (`v_xxx`). The colour shows what CHANGED, not what is the same.
+3. «Копіювати EQ» stays in the header and copies the current set; the compared row gets no copy.
+4. Each band card's heading carries a coloured mark whenever a compared version is chosen: «new»
+   and «changed» on the current row; «removed» only on the lower (compared) row, so only while the
+   button is on.
+
+**Where.** `wave-0.1.44` at `9e18ba3`, EQ view, single mode. The compare choice exists since tcc#51
+(finding 66: `detail_pane.use_compare`, `setting_status._judge`); the band card is
+`detail_pane.EqBandCard`, whose top border already carries the pair mode's shared-frequency colour.
+
+**Open for the build (not answered yet).** What makes a band «the same band» in two versions: the
+DSP band number `i` where the ledger has it — five presets of six lack it (finding 72) — or the
+position, or the frequency. And which colours and words the three marks use beside the existing
+status dots.
+
+**Weight.** Medium: a feature; a band-by-band comparison of two versions inside TCC.
+
+**Issue:** tcc#54 on W-3, assessed, no `ok`.
