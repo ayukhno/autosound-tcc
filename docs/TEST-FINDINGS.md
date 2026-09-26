@@ -2132,3 +2132,13 @@ rows and what moved on hover. The changed values are blue in both rows while the
 on. A band is matched by the DSP number `i` where both versions carry it on every band, otherwise
 by order and (type, frequency) (`state/eq_diff.py`): a band put in the middle is new, the rest
 stay the same; a frequency moved in its place is a change.
+
+**After `21dc2af`, the Arbiter's look (2026-09-26, three screenshots):** «видалена» in the legend
+always; the compare list was passive on «Моніторинг», the tab a project opens on («давай не
+обмежувати вибір»); the same bands by count, without frequencies, and the changed, new and removed
+ones with theirs. His screenshot also showed the order match failing: 6.E-epy carries no `i` and its
+order is not 1.B-base's, so an identical 4800 Hz read as changed and 1250 Hz as new here and removed
+there. Built in the commit that records this: the legend «однакові (10) ● нова (0) ● змінена (4):
+250 · 350→302 · 1000→1120 · 2700 Hz ● видалена (1): 420 Hz», the list open on every tab, and
+unnumbered bands matched by content — identical first, then the same frequency, then the nearest
+of the same type within a third of an octave.

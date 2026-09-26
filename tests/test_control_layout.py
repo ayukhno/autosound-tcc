@@ -234,9 +234,9 @@ def test_no_tab_carries_a_menu_of_its_own_and_one_compare_serves_them_all(tmp_pa
                      if w.isVisibleTo(pane)]
             assert not shown, layout.tabs.tabText(i)
     layout.tabs.setCurrentIndex(0)
-    assert not corner.isEnabled(), "the monitor has nothing to compare"
-    layout.tabs.setCurrentIndex(_tab(layout, i18n.t("ctlTableO")))
-    assert corner.isEnabled()
+    # Not locked on the monitor: a project opens on it, and the Arbiter could not pick a version
+    # until he went to another tab (2026-09-26: «давай не обмежувати вибір»).
+    assert corner.isEnabled(), "the choice is open on every tab"
     layout.leave()
     assert corner.parentWidget() is None, "leaving takes the list out of the header"
 

@@ -194,6 +194,32 @@ def _mark_tip(diff: BandDiff, version: str) -> str:
     return f"{word}: {' · '.join(moved)}"
 
 
+def _compare_legend(now_side: list, was_side: list) -> QWidget:
+    """«однакові (7) ● нова (1): 1250 Hz ● змінена (2): 250 · 1000→1120 Hz ● видалена (0)»: all
+    three colours always, the same bands by count only, the rest with their frequencies (the
+    Arbiter, 2026-09-26)."""
+    legend = QWidget()
+    legend_layout = QHBoxLayout(legend)
+    legend_layout.setContentsMargins(0, 0, 0, 0)
+    legend_layout.setSpacing(12)
+    same = QLabel(f"{i18n.t('bandSame')} ({sum(d.status == 'same' for d in now_side)})")
+    same.setProperty("class", "eq-rowlab")
+    legend_layout.addWidget(same)
+    t = current_theme()
+    for status, side in (("new", now_side), ("chg", now_side), ("removed", was_side)):
+        entries = sorted((d for d in side if d.status == status), key=lambda d: d.band.freq_hz)
+        said = f"● {i18n.t(_MARK_WORD[status])} ({len(entries)})"
+        if entries:
+            said += ": " + " · ".join(
+                f"{d.other.freq_hz:g}→{d.band.freq_hz:g}" if "freq" in d.fields and d.other
+                else f"{d.band.freq_hz:g}" for d in entries) + " Hz"
+        chip = QLabel(said)
+        chip.setStyleSheet(f"color: {getattr(t, _MARK_TOKEN[status])};")
+        legend_layout.addWidget(chip)
+    legend_layout.addStretch(1)
+    return legend
+
+
 class EqBandCard(QFrame):
     """One EQ band card: «Type (band)» + Freq/Q/Gain in the processor's order + the band's own
     bypass. `match_color`, when given, draws the colored top border used to flag a shared frequency
@@ -1244,20 +1270,8 @@ class DetailPane(QFrame):
         version's bands under them, named, with what changed in colour (tcc#54, finding 73)."""
         now_side, was_side, old_row = self._band_diff(group, row)
         rows_on = self._cmp_rows and now_side is not None
-        marks = [d.status for d in now_side or () if d.status in ("new", "chg")]
-        marks += [d.status for d in was_side or () if rows_on and d.status == "removed"]
-        if marks:
-            legend = QWidget()
-            legend_layout = QHBoxLayout(legend)
-            legend_layout.setContentsMargins(0, 0, 0, 0)
-            t = current_theme()
-            for status in ("new", "chg", "removed"):
-                if status in marks:
-                    chip = QLabel(f"● {i18n.t(_MARK_WORD[status])}")
-                    chip.setStyleSheet(f"color: {getattr(t, _MARK_TOKEN[status])};")
-                    legend_layout.addWidget(chip)
-            legend_layout.addStretch(1)
-            layout.addWidget(legend)
+        if now_side is not None:
+            layout.addWidget(_compare_legend(now_side, was_side))
         layout.addWidget(_band_flow(row.eq_bands(), order=self._eq_order, diff=now_side,
                                     marks=("new", "chg"), paint=rows_on,
                                     version=self._compare_text))

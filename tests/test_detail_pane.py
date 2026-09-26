@@ -1036,3 +1036,24 @@ def test_pressed_the_compared_version_s_row_stands_under_the_current_one():
 
     pane._cmp_btn.clicked.emit()
     assert len(_card_rows(pane)) == 1
+
+
+def test_the_legend_names_all_three_and_the_frequencies_of_what_differs():
+    """The Arbiter, 2026-09-26: «видалена» in the legend always; the same bands by count, without
+    their frequencies; the new, changed and removed ones with theirs."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, before = _eq_versions()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_005"], "v_005", lambda _v: before)
+    pane.open_eq(now, now.rows[0])
+    said = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
+    assert f"{i18n.t('bandSame')} (1)" in said
+    assert f"● {i18n.t('bandNew')} (1): 4000 Hz" in said
+    assert f"● {i18n.t('bandChg')} (1): 1000 Hz" in said
+    assert f"● {i18n.t('bandGone')} (1): 2500 Hz" in said, "removed, with the compared row off"
+
+    pane.open_eq(now, now.rows[1])  # m-R: the same in both
+    said = [w.text() for w in pane._scroll.widget().findChildren(QLabel)]
+    assert f"● {i18n.t('bandGone')} (0)" in said, "all three, even with none"

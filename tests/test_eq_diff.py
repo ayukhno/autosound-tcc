@@ -34,14 +34,38 @@ def test_every_field_that_moved_is_named():
 
 
 def test_without_numbers_an_inserted_band_does_not_shift_the_rest():
-    """No `i` (five presets of six, finding 72): the order and the frequency decide. A band put
-    in the middle is new; the ones after it are not all "changed"."""
+    """No `i` (five presets of six, finding 72): a band put in the middle is new; the ones after
+    it are not all "changed"."""
     now = [_pk(100), _pk(300), _pk(1000), _pk(4000)]
     was = [_pk(100), _pk(1000), _pk(4000)]
     current, compared = compare_bands(now, was)
     assert _statuses(current) == [(100.0, "same"), (300.0, "new"), (1000.0, "same"),
                                   (4000.0, "same")]
     assert [d.status for d in compared] == ["same", "same", "same"]
+
+
+def test_without_numbers_an_identical_band_is_the_same_wherever_it_stands():
+    """The Arbiter's first look (2026-09-26): the current version carries no `i`, and its order is
+    not the compared one's — 4800 Hz second here, seventh there. Matched by order, an identical
+    band read as changed; 1250 Hz read as new here and removed there."""
+    now = [_pk(150, kind="LSH"), _pk(2700, gain=1.0, q=1.1), _pk(4800, gain=2.0, q=1.0),
+           _pk(1250, gain=-1.0, q=1.4), _pk(1120, gain=1.5, q=1.5)]
+    was = [_pk(150, kind="LSH", i=1), _pk(4800, gain=2.0, q=1.0, i=2),
+           _pk(2700, gain=-2.0, q=1.0, i=7), _pk(420, i=9), _pk(1000, gain=1.0, q=2.0, i=13),
+           _pk(1250, gain=-1.0, q=1.4, i=14)]
+    current, compared = compare_bands(now, was)
+    assert _statuses(current) == [(150.0, "same"), (2700.0, "chg"), (4800.0, "same"),
+                                  (1250.0, "same"), (1120.0, "chg")]
+    assert current[1].fields == frozenset({"gain", "q"})
+    assert current[4].other.freq_hz == 1000.0, "moved a sixth of an octave: the same band"
+    assert _statuses(compared) == [(150.0, "same"), (4800.0, "same"), (2700.0, "chg"),
+                                   (420.0, "removed"), (1000.0, "chg"), (1250.0, "same")]
+
+
+def test_a_band_moved_further_than_a_third_of_an_octave_is_another_band():
+    current, compared = compare_bands([_pk(100), _pk(2000)], [_pk(100), _pk(1000)])
+    assert [d.status for d in current] == ["same", "new"]
+    assert [d.status for d in compared] == ["same", "removed"]
 
 
 def test_without_numbers_a_moved_frequency_in_its_place_is_a_change():

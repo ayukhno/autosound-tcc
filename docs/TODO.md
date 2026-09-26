@@ -2091,7 +2091,9 @@ Recorded, not built: finding 70 (a «Налаштування» menu, the card's
 settings; no OK yet) and 72 (other presets' ledgers carry no band `i` — the car session's side; I
 offered to send it a ticket, no answer yet). On 2026-09-26 finding 73 (the compared version's EQ row under the
 current one, new / changed / removed marks on the bands) was recorded as tcc#54 on W-3; he gave his OK at once («коміт достатньо!» — no tag) and it is
-built in one commit on this branch (full suite 2347 passed, -n 4). Hub #211 PAS-011 and #209 PAS-009 are taken and close
+built in one commit on this branch (full suite 2347 passed, -n 4); his look at it gave three
+more (the legend, the list locked on the monitor tab, bands matched by content), built in a second
+commit (full suite 2350 passed). Hub #211 PAS-011 and #209 PAS-009 are taken and close
 with the tag that ships them. Full suite at `9e18ba3`: 2337 passed (-n 4).
 
 **Що зробити**: go on recording what the Arbiter sends, with no diagnosis and no fixes. When he

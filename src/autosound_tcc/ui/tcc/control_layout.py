@@ -487,9 +487,6 @@ class ControlLayout:
         self.sync_dots()
 
     def _on_tab_changed(self, index: int) -> None:
-        if self._corner is not None:
-            # The monitor has nothing to compare.
-            self._corner.setEnabled(index != self._index.get("monitor"))
         self._light_tree(self.tabs.widget(index) if self.tabs is not None else None)
 
     def _light_tree(self, page) -> None:

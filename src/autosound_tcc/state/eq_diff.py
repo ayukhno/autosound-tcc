@@ -3,16 +3,18 @@ finding 73): which band is new, which changed and in what, which is gone.
 
 Which band is "the same band" in two versions is the whole question. The DSP's own band number
 `i` answers it where both versions carry it on every band. Five presets of six do not (finding 72),
-and a position in the list is not the DSP's band, since empty slots are not recorded — so without
-the numbers the bands are aligned by order and (type, frequency): a band put in the middle is new,
-and the ones after it do not all read as changed. A band whose frequency moved in its place pairs
-with the one it replaced, as a change.
+and there the ledger's order is not the DSP's either: the Arbiter's first look (2026-09-26) had
+4800 Hz second in one version and seventh in the other, and matched by order an identical band
+read as changed. So without the numbers a band is matched by what it is, whatever its place:
+first a band identical in every field, then one at the same frequency (its values changed), then
+the nearest of the same type within a third of an octave (its frequency moved). What is left is
+new on one side and removed on the other.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 from typing import Optional, Sequence
 
 from autosound_tcc.state.dsp_state import EqBand
@@ -31,7 +33,7 @@ class BandDiff:
 
 
 def _moved(now: EqBand, was: EqBand) -> frozenset:
-    pairs = {"type": ((now.type or "").upper(), (was.type or "").upper()),
+    pairs = {"type": (_kind(now), _kind(was)),
              "freq": (now.freq_hz, was.freq_hz), "gain": (now.gain_db, was.gain_db),
              "q": (now.q, was.q), "bypass": (bool(now.bypass), bool(was.bypass))}
     return frozenset(name for name, (a, b) in pairs.items() if a != b)
@@ -42,19 +44,46 @@ def _numbered(bands: Sequence[EqBand]) -> bool:
     return None not in numbers and len(set(numbers)) == len(numbers)
 
 
+#: How far a band's frequency may move and still be the same band: a third of an octave.
+_MOVE_OCTAVES = 1 / 3
+
+
+def _kind(band: EqBand) -> str:
+    return (band.type or "").upper()
+
+
+def _by_content(current: Sequence[EqBand], compared: Sequence[EqBand]) -> list[tuple[int, int]]:
+    free_now, free_was = set(range(len(current))), set(range(len(compared)))
+    pairs = []
+
+    def take(same) -> None:
+        for n in sorted(free_now):
+            w = next((w for w in sorted(free_was) if same(current[n], compared[w])), None)
+            if w is not None:
+                pairs.append((n, w))
+                free_now.discard(n)
+                free_was.discard(w)
+
+    take(lambda a, b: not _moved(a, b))
+    take(lambda a, b: a.freq_hz == b.freq_hz)
+    near = sorted((abs(math.log2(current[n].freq_hz / compared[w].freq_hz)), n, w)
+                  for n in free_now for w in free_was
+                  if _kind(current[n]) == _kind(compared[w])
+                  and current[n].freq_hz > 0 and compared[w].freq_hz > 0)
+    for distance, n, w in near:
+        if distance <= _MOVE_OCTAVES and n in free_now and w in free_was:
+            pairs.append((n, w))
+            free_now.discard(n)
+            free_was.discard(w)
+    return pairs
+
+
 def _pairs(current: Sequence[EqBand], compared: Sequence[EqBand]) -> list[tuple[int, int]]:
     """`(current position, compared position)` of every matched band."""
     if current and compared and _numbered(current) and _numbered(compared):
         where = {b.index: k for k, b in enumerate(compared)}
         return [(k, where[b.index]) for k, b in enumerate(current) if b.index in where]
-    key = lambda b: ((b.type or "").upper(), b.freq_hz)  # noqa: E731
-    matcher = SequenceMatcher(None, [key(b) for b in compared], [key(b) for b in current],
-                              autojunk=False)
-    pairs = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("equal", "replace"):
-            pairs.extend((j1 + k, i1 + k) for k in range(min(i2 - i1, j2 - j1)))
-    return pairs
+    return _by_content(current, compared)
 
 
 def compare_bands(current: Sequence[EqBand],
