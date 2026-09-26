@@ -361,3 +361,29 @@ def test_dropping_every_reference_to_a_running_worker_no_longer_destroys_it():
     still.wait(4000)
     QApplication.processEvents()
     assert still not in qt_shutdown.live()
+
+
+def test_the_watch_does_not_cry_abort_at_interpreter_exit(monkeypatch):
+    """tcc#63, finding 46: «worker _RewPingWorker destroyed on GUI thread while it had NOT
+    finished» six times on the VM, each a moment before a quit, no crash. A ping to an offline REW
+    was still waiting for its timeout at exit, and `weakref.finalize` runs at interpreter exit for
+    what is still ALIVE — the line said "destroyed" about a thread nobody destroyed (the suite's
+    own `_CliCatalogueWorker` lines at its end are the same). At exit the thread that would not
+    stop is named by `destroy_application`; this line is for a real destruction only."""
+    import weakref as real_weakref
+
+    from PySide6.QtCore import QThread
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    made = []
+
+    class _Recording(real_weakref.finalize):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            made.append(self)
+
+    monkeypatch.setattr(qt_shutdown.weakref, "finalize", _Recording)
+    _app()
+    qt_shutdown.watch(QThread())
+    assert made and made[-1].atexit is False

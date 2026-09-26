@@ -135,7 +135,11 @@ def watch(thread: QThread) -> QThread:
         _LIVE.discard(thread)
 
     thread.finished.connect(_ended)
-    weakref.finalize(thread, _gone, name, state)
+    # Not at interpreter exit: `finalize` runs then for what is still ALIVE, and the line said
+    # "destroyed … this is the abort" about a ping to an offline REW that was only waiting for its
+    # timeout — six times on the VM, each before a quit, no crash (finding 46, tcc#63). At exit
+    # the thread that would not stop is named by `destroy_application`.
+    weakref.finalize(thread, _gone, name, state).atexit = False
     return thread
 
 

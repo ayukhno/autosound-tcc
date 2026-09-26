@@ -1669,7 +1669,13 @@ moment before the next `started:` line, which is a quit. No crash was reported.
 
 **Weight.** Medium: it is the line that preceded the crashes of finding 35.
 
-**Issue:** tcc#63 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#63 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#63. Not a destruction: the watch's `weakref.finalize` also runs at interpreter
+exit for what is still ALIVE, and a ping to an offline REW was still waiting for its timeout at
+quit — so the line said "destroyed … this is the abort" about a thread nobody destroyed. The
+suite's own run ended with the same two false lines (`_CliCatalogueWorker`); they are gone with
+`atexit = False`. A thread that would not stop at exit is named by `destroy_application`.
 
 ### 47. Control mode: the tables carry the full window's own menus, and EQ has no way back
 
