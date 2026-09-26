@@ -573,7 +573,24 @@ def test_the_picker_offers_claudes_models_out_of_the_box():
 
     keys = [window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())]
 
-    assert keys[1:] == ["sdk:claude-opus-5", "sdk:claude-sonnet-5", "sdk:claude-fable-5"]
+    # Opus 5.5 and Fable 5.1 beside their predecessors, which are still served (finding 48, tcc#64).
+    assert keys[1:] == ["sdk:claude-opus-5-5", "sdk:claude-opus-5", "sdk:claude-sonnet-5",
+                        "sdk:claude-fable-5-1", "sdk:claude-fable-5"]
+
+
+def test_a_row_from_the_shipped_list_says_when_the_list_was_checked():
+    """Finding 48: «the newest Claude models cannot be picked, and nothing says the list is old».
+    With no key to ask the Models API, the rows are TCC's own list — and the hover says so, dated."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.core import model_choices
+
+    _app()
+    window = MainWindow()
+    combo = window._ai_main_combo
+    row = combo.findData("sdk:claude-opus-5-5")
+    tip = str(combo.itemData(row, Qt.ItemDataRole.ToolTipRole))
+    assert model_choices.SDK_MODELS_VERIFIED in tip
 
 
 def test_nothing_is_chosen_until_someone_chooses_it():

@@ -1726,7 +1726,15 @@ login) normally does not have. The AGY rows come live from `agy models`.
 
 **Weight.** Medium: the newest Claude models cannot be picked, and nothing says the list is old.
 
-**Issue:** tcc#64 on W-3 (collected 2026-09-26), assessed, no `ok` yet.
+**Issue:** tcc#64 on W-3, the Arbiter's OK 2026-09-26.
+
+**Built:** tcc#64. The answers: the old ones still work — Opus 5 and Fable 5 are still served
+(checked against the Claude API reference of 2026-06-24 bundled with Claude Code); the list is
+kept current by the Models API only where an Anthropic API key exists, which the SDK route
+(the person's own `claude` login) normally has not. So: Opus 5.5 (`claude-opus-5-5`) and Fable 5.1
+(`claude-fable-5-1`) added beside their predecessors, the list dated 2026-09-26, and every row it
+supplies says on hover that it is TCC's own list and when it was checked. The default model is
+unchanged (`claude-opus-5`): that is the Arbiter's to move.
 
 ### 49. «In focus now»: a tall panel stretches the measurement rows apart
 

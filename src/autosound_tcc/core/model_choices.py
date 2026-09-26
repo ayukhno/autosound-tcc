@@ -54,8 +54,9 @@ ROUTES: dict[str, tuple[str, str]] = {
 # these are the models this front-end is tested against, and the SDK resolves credentials from the
 # user's own installation.
 #: When this list was last checked against what Anthropic actually serves. It is a floor for
-#: installs that cannot ask (no API key), and it is expected to age — see `sdk_choices`.
-SDK_MODELS_VERIFIED = "2026-08"
+#: installs that cannot ask (no API key), and it is expected to age — see `sdk_choices`. Said on
+#: every row it supplies, so an old list reads as one (finding 48, tcc#64).
+SDK_MODELS_VERIFIED = "2026-09-26"
 
 #: What a session runs when nothing picked a model, per route. Written HERE, once, and imported by
 #: `tuning_session` and `omp_session` — both of them used to hold their own copy, and a generation
@@ -63,9 +64,13 @@ SDK_MODELS_VERIFIED = "2026-08"
 DEFAULT_SDK_MODEL = "claude-opus-5"
 DEFAULT_OMP_MODEL = "gemini-3.1-pro-preview"
 
+#: Opus 5.5 and Fable 5.1 since 2026-09-26 (finding 48, tcc#64): Anthropic served them and the
+#: picker did not offer them. Their predecessors stay while they are served.
 SDK_MODELS: tuple[tuple[str, str], ...] = (
+    ("Claude Opus 5.5", "claude-opus-5-5"),
     ("Claude Opus 5", DEFAULT_SDK_MODEL),
     ("Claude Sonnet 5", "claude-sonnet-5"),
+    ("Claude Fable 5.1", "claude-fable-5-1"),
     ("Claude Fable 5", "claude-fable-5"),
 )
 
@@ -212,7 +217,17 @@ def sdk_choices() -> list[Choice]:
             fetched.append(
                 Choice(harness="sdk", model=model, label=label, provider="anthropic")
             )
+            _SHIPPED.add(f"sdk:{model}")
     return fetched
+
+
+#: SDK entries that came from `SDK_MODELS`, not from the Models API — their hover says so, dated.
+_SHIPPED: set[str] = set()
+
+
+def shipped_note(choice: Choice) -> str:
+    """"From TCC's own list, checked <date>" for a row nothing live confirmed, else ""."""
+    return SDK_MODELS_VERIFIED if choice.key in _SHIPPED else ""
 
 
 def _fetch_sdk_choices() -> list[Choice]:

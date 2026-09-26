@@ -4749,6 +4749,10 @@ class MainWindow(QMainWindow):
             combo.addItem(f"{choice.route} · {choice.label}{suffix}", choice.key)
             row = combo.count() - 1
             tip = f"{choice.route_note}\n{choice.model}"
+            checked = model_choices.shipped_note(choice)
+            if checked:
+                # TCC's own list, not what Anthropic answered today (finding 48, tcc#64).
+                tip += "\n" + i18n.t("modelShippedList").format(date=checked)
             if not choice.available:
                 tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
             if state.detail:

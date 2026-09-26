@@ -67,7 +67,8 @@ def test_the_picker_shows_only_the_omp_models_the_user_marked(catalogue):
 
 
 def test_with_nothing_marked_the_picker_is_the_sdk_alone(catalogue):
-    assert [choice.harness for choice in model_choices.choices([])] == ["sdk", "sdk", "sdk"]
+    assert [choice.harness for choice in model_choices.choices([])] == \
+        ["sdk"] * len(model_choices.SDK_MODELS)
 
 
 def test_a_free_model_is_visibly_free_at_the_moment_of_choosing(catalogue):
