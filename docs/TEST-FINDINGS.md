@@ -2308,3 +2308,56 @@ as the EQ view (`state/eq_diff.py`, tcc#54).
 whose bands did not move shows no dots, and none shows with nothing compared. A channel the
 compared version lacks counts every band as new. The tree now also gets its dots back after a
 language switch rebuilds it.
+
+## The Arbiter's test of `wave-0.1.44` on the Mac (2026-09-26, build `7103d04`)
+
+Recorded, not diagnosed (`WAVES.md`: while the user tests, a session only records).
+
+### 75. «Моделі у виборі генератора»: empty check boxes are not seen, and the window is too narrow
+
+**What.** Dark theme: an unticked box in the list draws nothing — only the ticked one (GPT-OSS
+120B) shows. Light theme: the tick overlaps the row's text and the rows are cut on the right. The
+Arbiter: make the window twice as wide.
+
+**Where.** Mac, both themes, Settings → the omp models (two screenshots).
+
+**Weight.** Medium: which models are offered cannot be read.
+
+**Task.** None yet — new.
+
+### 76. After trying several models, every row of the reviewer list is red
+
+**What.** Having tried several reviewers (Kimi has no login), the reviewer picker's open list shows
+every row in red, the SDK Claude rows and the AGY rows included; the picked one reads «GPT-OSS
+120B · безкоштовно · відмова», Kimi K2.5 «лише буфер». The footer status reads «… · останній
+виклик відхилено» in red.
+
+**Where.** Mac, light theme, the footer's AI CRITIC picker (screenshot).
+
+**Related.** Finding 62 (the same all-red list), built in tcc#58.
+
+**Task.** tcc#58 (reopened by this test).
+
+### 77. A model that did not start, and switching away still runs «save state»
+
+**What.** Kimi K2.5 through omp: «omp refused `prompt`: No API key found for kimi-code …», then
+«120s with no output. omp has said nothing.» Picking another model then ran the state save before
+the change — the Arbiter: this was already a bug (finding 54).
+
+**Where.** Mac, the in-app AI dialog (screenshot).
+
+**Related.** Finding 54, built in tcc#56 for a session whose thread had ended; here the omp process
+answered with a refusal and stayed.
+
+**Task.** tcc#56 (reopened by this test).
+
+### 78. «Налаштувати omp…» opens a terminal that hides behind TCC
+
+**What.** The terminal omp's configurator runs in opens behind TCC's window, which is maximised
+(not full screen), so it is not seen.
+
+**Where.** Mac, Settings → the omp models → «Налаштувати omp…».
+
+**Weight.** Medium: the step looks like it did nothing.
+
+**Task.** None yet — new.
