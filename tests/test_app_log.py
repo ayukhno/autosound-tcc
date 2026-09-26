@@ -240,3 +240,26 @@ def test_the_update_row_says_what_git_said_instead_of_blaming_github(monkeypatch
     assert status.reason == "probe_failed"
     assert "xcrun" in status.detail
     assert "xcrun" in _reason(status.reason, status.detail), "and it reaches the row"
+
+
+def test_a_tool_that_does_not_come_back_leaves_every_thread_s_stack_in_the_log(tmp_path, monkeypatch):
+    """tcc#72, finding 80: an omp turn hung inside `get_tcc_state` — the call in the log, its
+    answer never, and nothing saying where. A slow tool writes every thread's stack."""
+    import asyncio
+
+    from autosound_tcc.core import app_log
+
+    log_file = tmp_path / "tcc.log"
+    monkeypatch.setattr(app_log, "_log_path", log_file)
+    monkeypatch.setattr(app_log, "SLOW_TOOL_S", 0.05)
+
+    @app_log.logged_tool
+    async def slow_tool():
+        import time
+        time.sleep(0.3)  # blocking on purpose: the event loop itself is stuck
+        return "late"
+
+    assert asyncio.run(slow_tool()) == "late"
+    text = log_file.read_text(encoding="utf-8")
+    assert "tool slow_tool has not returned in 0s" in text
+    assert "Thread" in text and "slow_tool" in text

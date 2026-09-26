@@ -4920,3 +4920,66 @@ def test_a_session_whose_model_never_spoke_is_not_asked_to_save(monkeypatch):
     assert worker.sent == [] and i18n.t("sessionHandoff") not in said
     assert worker.shutdowns == 1, "the silent session is closed, not left running"
     assert launched == [True]
+
+
+def test_a_worker_stuck_in_its_turn_is_handed_over_not_left_for_qt_to_destroy():
+    """Finding 81 (tcc#73): quitting with an omp session hung in a tool ended in SIGABRT —
+    `shutdown()` came back False, nobody looked, and Qt destroyed the running QThread at exit."""
+    import threading
+
+    from PySide6.QtCore import QThread
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    release = threading.Event()
+
+    class _Stuck(QThread):
+        session = None
+
+        def run(self):
+            release.wait(10)
+
+        def shutdown(self, *a, **kw):
+            return False
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    worker = _Stuck()
+    worker.start()
+    window._agent_worker = worker
+    try:
+        window._stop_agent_worker()
+        assert worker in qt_shutdown.detached(), "handed over, so the exit path does not destroy it"
+    finally:
+        release.set()
+        worker.wait(5000)
+        window._agent_worker = None
+
+
+def test_the_models_window_is_modal_to_tcc_not_to_every_app(monkeypatch):
+    """Finding 79 (tcc#71): an application-modal dialog sits above every app's windows on macOS,
+    so the terminal «Налаштувати omp…» opens came up behind it. Window-modal, and what it
+    answers is taken when it closes."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog
+
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    reloaded = []
+    monkeypatch.setattr(window, "_reload_after_model_config", lambda: reloaded.append(True))
+    window._open_model_config()
+    dialog = window._model_config_dialog
+    try:
+        assert dialog.windowModality() == Qt.WindowModality.WindowModal
+        dialog.active = ["google/gemini-3.1-pro-preview"]
+        dialog.done(QDialog.DialogCode.Accepted)
+        QApplication.processEvents()
+        assert window._settings.value(mw._ACTIVE_OMP_KEY) == "google/gemini-3.1-pro-preview"
+        assert reloaded == [True]
+    finally:
+        window._settings.remove(mw._ACTIVE_OMP_KEY)

@@ -59,6 +59,31 @@ def brief(value: Any) -> str:
     return text if len(text) <= LOG_VALUE_CHARS else text[:LOG_VALUE_CHARS] + "… (cut)"
 
 
+#: How long a tool may take before every thread's stack goes into the log (tcc#72, finding 80): an
+#: omp turn hung inside `get_tcc_state` with the call logged and its answer never, and nothing on
+#: disk said where. A local tool answers in milliseconds; twenty seconds is a hang.
+SLOW_TOOL_S = 20.0
+
+
+def dump_threads(reason: str) -> None:
+    """Every thread's stack into the log file — through `faulthandler`, which takes no lock.
+
+    Not through `logging`: if the hang is a lock the logging machinery waits on, a dump that needs
+    it would hang too, and the one hang worth a dump would leave none."""
+    import faulthandler
+
+    path = _log_path
+    try:
+        with open(path, "a", encoding="utf-8") if path else open(os.devnull, "w") as sink:
+            target = sink if path else sys.stderr
+            target.write(f"\n{reason}\n")
+            target.flush()
+            faulthandler.dump_traceback(file=target, all_threads=True)
+            target.flush()
+    except Exception:  # noqa: BLE001 — a diagnostic must not become a second failure
+        pass
+
+
 def logged_tool(fn):
     """Wrap an async agent tool so it says, at INFO, that it was called and what it answered.
 
@@ -81,6 +106,12 @@ def logged_tool(fn):
         log = logger()
         shown = kwargs if kwargs else args
         log.info("tool %s(%s)", fn.__name__, brief(shown) if shown else "")
+        # A tool that does not come back says where everything was (tcc#72): on its own thread,
+        # so it fires even when this one — or the whole event loop — is the thing stuck.
+        watch = threading.Timer(SLOW_TOOL_S, dump_threads, args=(
+            f"tool {fn.__name__} has not returned in {SLOW_TOOL_S:.0f}s; every thread's stack:",))
+        watch.daemon = True
+        watch.start()
         try:
             result = await fn(*args, **kwargs)
         except Exception:
@@ -88,6 +119,8 @@ def logged_tool(fn):
             # the file now says which tool produced it.
             log.exception("tool %s raised", fn.__name__)
             raise
+        finally:
+            watch.cancel()
         log.info("tool %s -> %s", fn.__name__, brief(result))
         return result
 

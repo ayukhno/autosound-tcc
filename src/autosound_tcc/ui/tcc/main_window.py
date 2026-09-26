@@ -14,6 +14,7 @@ import atexit
 import functools
 import json
 import os
+import signal
 import threading
 import re
 import sys
@@ -28,6 +29,7 @@ from PySide6.QtCore import (
     QFileSystemWatcher,
     QPoint,
     QProcess,
+    QThread,
     QTimer,
     QUrl,
     Qt,
@@ -4963,8 +4965,18 @@ class MainWindow(QMainWindow):
         self._refresh_project_button()
 
     def _open_model_config(self) -> None:
+        """Modal to this window only, not to the application (finding 79, tcc#71): on macOS an
+        application-modal `exec()` puts the dialog at the modal-panel level, above every other
+        app's windows, and the terminal «Налаштувати omp…» opens came up behind it."""
         dialog = ModelConfigDialog(self._active_omp(), self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.finished.connect(lambda code, d=dialog: self._on_model_config_done(d, code))
+        self._model_config_dialog = dialog
+        dialog.show()  # window-modal already: `show()` is what `open()` does after setting it
+
+    def _on_model_config_done(self, dialog, code: int) -> None:
+        self._model_config_dialog = None
+        if code != QDialog.DialogCode.Accepted:
             return
         self._settings.setValue(_ACTIVE_OMP_KEY, ",".join(dialog.active))
         # Deferred out of the dialog's own accept path: refilling both combos tears down and
@@ -5462,12 +5474,32 @@ class MainWindow(QMainWindow):
         # Deny anything the agent is still waiting on: an unanswered confirmation would otherwise
         # keep an MCP call parked until its timeout, long after the window it belonged to is gone.
         self._dialog.confirm_bar.reject_all()
-        worker = getattr(self, "_agent_worker", None)
-        if worker is not None:
-            # Interrupt-then-wait, not just stop-then-wait: a worker mid-turn never reads the
-            # stop sentinel, and Qt destroying a still-running QThread is undefined behaviour.
-            worker.shutdown()
+        self._stop_agent_worker()
         super().closeEvent(event)  # the MCP server went down with `stop_workers()` above
+
+    def _stop_agent_worker(self) -> None:
+        """Stop the session's worker on the way out — and never leave a running one for Qt.
+
+        Interrupt-then-wait, not just stop-then-wait: a worker mid-turn never reads the stop
+        sentinel. A turn stuck past that (an omp session hung in a tool, finding 81) returned
+        False here and nobody looked: the worker has no parent and was never handed over, so
+        `destroy_application` did not see it and destroyed Qt around a running QThread — SIGABRT
+        at quit (tcc#73). Now its omp process is ended, which ends the turn, and a thread still
+        running after that is handed to `qt_shutdown`, whose exit path leaves without `~QThread`."""
+        worker = getattr(self, "_agent_worker", None)
+        if worker is None or worker.shutdown():
+            return
+        pid = getattr(getattr(getattr(worker, "session", None), "_proc", None), "pid", None)
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        wait = getattr(worker, "wait", None)
+        if callable(wait) and wait(3000):
+            return
+        if isinstance(worker, QThread):
+            qt_shutdown.detach(worker)
 
     def _ask_abandon_save(self) -> bool:
         """True if the person wants to close NOW, losing whatever the model has not written yet.

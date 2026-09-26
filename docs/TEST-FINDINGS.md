@@ -2379,6 +2379,8 @@ behind the models window, and a moment later it went behind TCC as well.
 
 **Task.** tcc#71 (reopened by this test).
 
+**Built:** tcc#71 again. The models window was application-modal (`exec()`), which on macOS sits at the modal-panel level above every app's windows; the terminal came up behind it. It is modal to TCC's window only now (`WindowModal`, shown with `show()`), and its answer is taken when it closes. Not checked live.
+
 ### 80. An omp session hangs inside TCC's own `get_tcc_state`
 
 **What.** «Запускаю Claude Opus 5 …», then «120s with no output. Still inside
@@ -2390,7 +2392,11 @@ line at 2:16). The model is omp's Claude Opus 5, which answers in the Arbiter's 
 
 **Weight.** High: no omp session gets past its first tool call.
 
-**Task.** None yet — new.
+**Task.** tcc#72, the Arbiter's OK the same day.
+
+**Not reproduced.** Headless, the tool answers in 0.13 s on the Arbiter's project; through HTTP against a real (offscreen) window in 13 ms; with the reviewer probe running alongside, 16 ms; and a full in-app omp session with Opus 5 on a copy of the project called `get_tcc_state`, `get_pending_signals` and `ack_signals`, each in milliseconds. What the log does say: at 23:18:34 the call was logged and neither its answer nor the parallel `get_pending_signals` ever was — the server's event loop stood still inside it.
+
+**Built for the next time:** a tool that has not returned in 20 s writes every thread's stack into the log (`app_log.dump_threads`, through `faulthandler`, which takes no lock).
 
 ### 81. Quitting TCC while the omp session hung: Python aborts
 
@@ -2404,4 +2410,20 @@ line at 2:16). The model is omp's Claude Opus 5, which answers in the Arbiter's 
 
 **Where.** Mac, a build before `e7ca15b` (the Arbiter's words), quitting with the omp session hung.
 
-**Task.** None yet — new.
+**Task.** tcc#73, the Arbiter's OK the same day.
+
+**Built:** tcc#73. `worker.shutdown()` came back False for the stuck turn and was not looked at; the worker has no parent and was never handed over, so `destroy_application` did not see it. Now the session's omp process is ended, and a worker still running 3 s later is handed to `qt_shutdown`, whose exit path leaves without destroying Qt.
+
+### 82. GPT-OSS as the reviewer turns red right after a session starts
+
+**What.** The Arbiter: «GPT-OSS ставала червоною після старта сесії».
+
+**Evidence.** TCC's log, 23:08:09: `critic: … model=gpt-oss-120b harness='omp'` — the start-up
+reviewer probe called it, and the refusal it got is what turned the pick red. The red is the probe's
+verdict; the question is why the pick was offered as reachable: `critic_reaches` reads `gpt` as
+OpenAI and finds `codex` installed, while no transport of the reviewer script runs
+`gpt-oss-120b`.
+
+**Where.** Mac, the footer's AI CRITIC, pick «OMP · GPT-OSS 120B».
+
+**Task.** None yet — recorded.
