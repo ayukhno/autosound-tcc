@@ -2369,3 +2369,39 @@ answered with a refusal and stayed.
 **Task.** tcc#71, the Arbiter's OK the same day.
 
 **Built:** tcc#71. Since macOS 14 activation is cooperative: TCC in front has to yield before the terminal can come forward, and osascript's `activate` alone was ignored. TCC yields to Terminal / iTerm first (`NSApplication.yieldActivationToApplicationWithBundleIdentifier:`, through ctypes). Not checked live — it would take the Arbiter's focus; his next «Налаштувати omp…» is the check.
+
+### 79. The configurator's terminal opens behind the models window, then goes behind TCC
+
+**What.** After tcc#71: «Налаштувати omp…» opened the terminal in front of TCC's main window but
+behind the models window, and a moment later it went behind TCC as well.
+
+**Where.** Mac, Settings → the omp models → «Налаштувати omp…».
+
+**Task.** tcc#71 (reopened by this test).
+
+### 80. An omp session hangs inside TCC's own `get_tcc_state`
+
+**What.** «Запускаю Claude Opus 5 …», then «120s with no output. Still inside
+`mcp__tcc__get_tcc_state`», and the turn went on hanging (the dialog's clock at 2:24, the tool
+line at 2:16). The model is omp's Claude Opus 5, which answers in the Arbiter's terminal.
+
+**Where.** Mac, the in-app AI dialog, omp route, the Arbiter's own omp profile (since `8da5f84`)
+(screenshot).
+
+**Weight.** High: no omp session gets past its first tool call.
+
+**Task.** None yet — new.
+
+### 81. Quitting TCC while the omp session hung: Python aborts
+
+**What.** The quit ended in a crash report, `SIGABRT`, `abort() called`.
+
+**Evidence.** `~/Library/Logs/DiagnosticReports/Python-2026-09-26-231647.ips`, the faulting thread:
+`PySide::destroyQCoreApplication` → `QThreadWrapper::~QThreadWrapper` → `QThread::~QThread` →
+`qFatal`. TCC's log, 23:16:44: `CRITICAL Qt: QThread: Destroyed while thread '' is still running`
+— finding 35's class, a running worker destroyed at exit (here the agent worker stuck in finding
+80's turn).
+
+**Where.** Mac, a build before `e7ca15b` (the Arbiter's words), quitting with the omp session hung.
+
+**Task.** None yet — new.
