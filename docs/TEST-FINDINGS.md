@@ -2794,3 +2794,29 @@ answered («OMP · Claude Sonnet 5») looks like one never tried.
 **Task.** None yet.
 
 **Built:** tcc#86 — a reviewer that answered this launch is green in the list.
+
+### 102. Windows: no omp session starts — «Unknown tool in --tools: inspect_image»
+
+**What.** «Запускаю OMP · Claude Opus 5.5 …», then «ПОМИЛКА СЕСІЇ ⚠️ RuntimeError: omp exited before
+reporting ready CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: read, write, edit,
+glob, grep, bash, ask, ast_edit, goal, init_experiment, run_experiment, log_experiment, update_notes.»
+TCC starts omp with `--tools read,write,edit,glob,grep,bash,ask,inspect_image` (`omp_session._ENABLED_TOOLS`);
+the VM's omp has no such tool. The Mac's omp is 17.2.9; the VM's version is not known yet.
+
+**Where.** Windows VM, `3ef4787`, the in-app dialog, omp route (screenshot 28, 2026-09-27).
+
+**Weight.** High: no omp session at all on that machine.
+
+**Task.** None yet.
+
+### 103. Windows: an omp session warns the project has no `.claude/skills/autosound-tuning`
+
+**What.** «Запускаю OMP · Gemini 3.1 Flash Image …», then «⚠️ This project has no
+`.claude/skills/autosound-tuning`. The session will run without the tuning method and improvise one —
+link the skill into the project before trusting anything it says.» Which project, and why the link
+was not made (TCC links the skill in before an omp session starts), is not known yet. Also on screen:
+the generator was «OMP · Gemini 3.1 Flash Image» — an image model offered as a generator.
+
+**Where.** Windows VM, `3ef4787` (screenshot 27, 2026-09-27).
+
+**Task.** None yet.
