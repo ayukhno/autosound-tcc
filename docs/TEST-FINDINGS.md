@@ -2908,6 +2908,8 @@ empty event queue. Tests: `test_the_first_turn_after_the_tools_retry_shows_what_
 
 **Checked live 2026-09-27 (the second Mac, omp 18.x, `75d8c53`):** «OMP · Claude Sonnet 5» answered in the dialog. The
 Arbiter: «досить довго чекав» — the first turn is slow, not timed.
+The reviewer through omp answered too (`omp:anthropic/claude-opus-5-5`, «Зв'язок є», the project's state read from
+disk): the omp route works end to end.
 
 **omp 18 (2026-09-27).** The Arbiter's fresh Windows install brought omp **18.3.5**. omp 18 has no
 `inspect_image` at all (no file names it in the v18.2.4 or v18.3.5 trees), so there every session is refused on
