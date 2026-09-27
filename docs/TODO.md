@@ -486,7 +486,7 @@ F-010, але тепер видно наслідок: вибрати «той с
 
 ### F-023 — per-round identity of a capture, entirely inside TCC
 
-**Статус**: on W-4 as tcc#94 (2026-09-27), for the review · відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
+**Статус**: not taken into W-4 (2026-09-27, tcc#94 deferred) · відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
 
 **Крок 1 із чотирьох уже існує — як побічний ефект** (02.09, вікно «Взяти заміри»): магазин
 узятих `.tcc/imported-measurements.json` тримає рівно те, що просить пункт 1 — `uuid → {title,
@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: on W-4 as tcc#69 (2026-09-27), for the review · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: on W-4 as tcc#69 (2026-09-27), for the review · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-089 — W-4: the collection
 
-**Статус**: open 2026-09-27 · collection (`WAVES.md` §1 step 2); #97 built on the Arbiter's «лагоди зараз» · the milestone `W-4 · v0.1.45` (#4) opened on the Arbiter's word, its number read from the skill's `W-4 · v3.0.64` · twelve issues, all assessed, two `ok` — #101 (the Arbiter's «ок», with W-4) and #97, **fixed on `wave-0.1.45`** 2026-09-27 on the Arbiter's «лагоди зараз», after «поки що все беремо в W-4 разом» (omp 18.3.5 checked in a scratch HOME; a live session on his machine next) (#96: TEST-FINDINGS 105, the control header in a small window; #97: TEST-FINDINGS 106, an omp session hangs after the tools retry — cause found; #99: TEST-FINDINGS 108, the omp models dialog before omp is set up; #100: TEST-FINDINGS 110, time on the dialog's messages; #101: TEST-FINDINGS 111, an RTA capture under SWEEP) · finding 107 went to the skill as hub #219 TCC-035, tcc#98 deferred off the milestone until it answers · resume: `hub/bin/role tcc --resume 548b3dd8-46a7-4ed0-97d4-dca187a7538a`
+**Статус**: open 2026-09-27 · collection goes on (`WAVES.md` §1 step 2) · the milestone `W-4 · v0.1.45` (#4), its number read from the skill's `W-4 · v3.0.64` · **nine issues, all `ok`** (the Arbiter: «бері всі які не відкладені, але ще збираємо»): #91 #92 #93 #95 #96 #97 #99 #100 #101 · #97 fixed on `wave-0.1.45` and checked live (omp 18, generator and reviewer) on «лагоди зараз»; the rest built after the collection · #21, #69, #94 were deferred before the review, not taken, back to the pool · finding 107 went to the skill as hub #219 TCC-035, tcc#98 deferred · resume: `hub/bin/role tcc --resume 548b3dd8-46a7-4ed0-97d4-dca187a7538a`
 
 On the milestone: #91 SKL-056 (hub #217, the skill clone with local changes — waits for the skill's
 S-064 command), #92 F-087 (the desktop-shortcut pin), #93 F-068 (the drivers' Fs checkbox — the method
