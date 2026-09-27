@@ -2922,3 +2922,17 @@ nothing in the window offers them.
 **Weight.** Low to medium: an old omp is what TCC then runs against, and nobody is told.
 
 **Task.** Moved to the skill (the Arbiter: the installer is the skill's): hub #219 TCC-035. TCC's half, tcc#98, is deferred off W-4 until the skill names its command.
+
+### 108. The omp models dialog, before omp is set up: an empty list and omp's raw error nobody can read
+
+**What.** The Arbiter, 2026-09-27: «поки ще не налаштований omp бачу ось таке повідомлення під зоною скрола з
+моделями, який ще пустий, але месседж не зрозумілий». Under the empty model list: «omp: `omp models` ended before
+completing: the event loop drained while it was still pending (rerun with PI_DEBUG_STARTUP=1 to see the last
+phase reached)», then «Налаштувати omp…», OK, Cancel (screenshot 5). Nothing says that omp is not set up yet
+and that «Налаштувати omp…» is the next step.
+
+**Where.** The fresh Windows install, omp 18.3.5 not set up yet, TCC v0.1.44, the omp models dialog.
+
+**Weight.** Medium: the first thing a new omp user sees in TCC.
+
+**Task.** tcc#99 (W-4).
