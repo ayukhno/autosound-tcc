@@ -2512,4 +2512,11 @@ project stays on 3.0.61 or moves to 3.0.62. TCC `de20037` carries the method at 
 **Where.** Mac, the in-app AI dialog, omp route, the Arbiter's own omp profile (screenshot 1,
 2026-09-27).
 
-**Task.** tcc#76, on W-3 by the Arbiter's word 2026-09-27.
+**Task.** tcc#76, on W-3 by the Arbiter's word 2026-09-27; closed the same day as not TCC's.
+
+**Found (2026-09-27):** the method's own refusal, by design. `deployment.py <project>`: `here` and
+`personal` are 3.0.62 (`~/.claude/skills/autosound-tuning` → the skill's working tree), `project` is
+3.0.61 — the car project's `.claude/skills/autosound-tuning` links a detached v3.0.61 checkout made
+2026-09-25. Two checkouts reachable → exit 3; telling a deliberate pin from a split is the skill's
+S-001. TCC runs the personal copy (its title: «skill 3.0.62»). What is left is the Arbiter's choice
+for the project — stay pinned to 3.0.61 or move the link to 3.0.62 — answered in the car session.
