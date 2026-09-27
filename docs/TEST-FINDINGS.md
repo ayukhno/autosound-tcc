@@ -2862,3 +2862,20 @@ pin time). A pin from the running window stays one button (F-037). The Arbiter: 
 in W-4 — the reference and the installer say «pin it from its running window»; W-4's item is TODO F-087.
 
 **Checked live 2026-09-27 (VM, `17dd4fc`):** the switch into control mode flashes nothing.
+
+## W-4 · v0.1.45 — collection
+
+### 105. Control mode's header in a small window: labels cut, and «порівняти з» empty though it has versions
+
+**What.** The Arbiter, 2026-09-27: «в повному режимі при невеликому розмірі вікна … поле "порівняти з"
+обрізано, а в такому варіанті зовсім пусто (хоч там є вибір)».
+- Screenshot 1 (EQ tab, «⇄ L + R» on): the «порівняти з» box shows «v_0(» — the version cut; the tab
+  «Затримки» and the chip «Output: c» cut too.
+- Screenshot 2 (a narrower header with «⇅ П», «Копі», «інша»): every tab label cut («Табл», «EQ v»,
+  «Ріве», «Затр», «Фаз»), «порівнят», «закр», and the compare box is empty while it has versions to pick.
+
+**Where.** Mac, full mode (control mode), a small window; the header of the DSP tables pane.
+
+**Weight.** Medium: the compare box looks empty — nothing says a version can be picked.
+
+**Task.** tcc#96 (W-4).
