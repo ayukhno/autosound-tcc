@@ -973,6 +973,9 @@ def test_an_omp_pick_is_no_reviewer_until_the_method_calls_through_omp(monkeypat
     rather than the vendor's API under a name cut from omp's selector."""
     from autosound_tcc.core import model_choices, reviewer_key
 
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: False)  # a method before v3.0.63
     omp = model_choices.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
                                label="Gemini 3.1 Pro (High)", provider="google-antigravity")
     monkeypatch.setattr(model_choices.shutil, "which", lambda name: f"/usr/bin/{name}")

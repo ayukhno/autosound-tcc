@@ -254,6 +254,12 @@ def clipboard_reason(project_dir: Path) -> str:
     )
     if model_choices.critic_reaches(choice):
         return ""  # it can be reached; whatever happened is the script's to explain
+    if choice.harness == "omp":
+        # Through omp only (tcc#74): the vendor behind the selector is omp's business, not ours.
+        if not critic.omp_route_available():
+            return OMP_REVIEWER_REFUSAL
+        return (f"{choice.model!r} is picked through omp, and omp is not installed on this machine: "
+                "install it, or pick an API, AGY or CODEX reviewer in TCC's footer")
     vendor = model_choices.vendor_of(choice)
     if not vendor:
         return (

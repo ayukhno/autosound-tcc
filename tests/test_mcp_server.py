@@ -1460,10 +1460,20 @@ def test_a_clipboard_fallback_says_why_it_was_always_going_to_be_one(
     # Nothing chosen at all.
     assert "no reviewer is configured" in mcp_server.clipboard_reason(project)
 
-    # A model from a vendor no transport here knows.
+    # An OMP pick goes through omp (tcc#74): whoever is behind the selector, without omp here
+    # there is nothing to call it with — and that is what is said, not a vendor question.
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    monkeypatch.setattr(mcp_server.model_choices.shutil, "which", lambda name: None)
     project_settings.set_value(config.tcc_dir(project), "critic", "omp:kimi-code/kimi-k2.5")
     said = mcp_server.clipboard_reason(project)
-    assert "kimi-code/kimi-k2.5" in said
+    assert "kimi-code/kimi-k2.5" in said and "omp is not installed" in said, said
+
+    # A model from a vendor no transport here knows.
+    project_settings.set_value(config.tcc_dir(project), "critic", "codex:kimi-k2.5")
+    said = mcp_server.clipboard_reason(project)
+    assert "kimi-k2.5" in said
     assert "Google, Anthropic or OpenAI" in said, said
 
     # A vendor with a transport, once that transport is actually present, has nothing to explain.
@@ -1791,6 +1801,7 @@ def test_an_omp_reviewer_pick_is_refused_before_anything_runs(tmp_path, monkeypa
     Google's API as `gemini-3.1-pro` and came back 404 (finding 85). `get_tcc_state` says the same."""
     from autosound_tcc.core import config, critic, project_settings
 
+    monkeypatch.setattr(critic, "omp_route_available", lambda: False)  # a method before v3.0.63
     project_settings.set_value(config.tcc_dir(tmp_path), "critic",
                                "omp:google-antigravity/gemini-3.1-pro-high")
     ran = []

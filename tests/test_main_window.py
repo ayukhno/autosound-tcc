@@ -767,14 +767,17 @@ def test_a_gemini_reviewer_is_not_marked(monkeypatch, real_critic_reaches):
         "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
     }])
     monkeypatch.setenv("GEMINI_API_KEY", "key")
-    monkeypatch.setattr(mc.shutil, "which", lambda _binary: None)
+    monkeypatch.setattr(mc.shutil, "which", lambda binary: "/usr/bin/omp" if binary == "omp" else None)
     _app()
     window = MainWindow()
     window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
     window._reload_model_choices()
 
-    index = window._ai_critic_combo.findData("omp:google/gemini-3.1-pro-preview")
-    assert "clipboard" not in window._ai_critic_combo.itemText(index).lower()
+    # Through the key (tcc#74) and through omp, where the method has the route and omp is here.
+    for key in ("api:gemini-pro-latest", "omp:google/gemini-3.1-pro-preview"):
+        index = window._ai_critic_combo.findData(key)
+        assert index >= 0, key
+        assert "clipboard" not in window._ai_critic_combo.itemText(index).lower(), key
 
 
 def test_the_reviewer_model_reaches_the_subprocess_by_name(monkeypatch):
@@ -5004,14 +5007,17 @@ def test_the_models_window_is_modal_to_tcc_not_to_every_app(monkeypatch):
         window._settings.remove(mw._ACTIVE_OMP_KEY)
 
 
-def test_an_omp_or_flash_row_is_greyed_in_the_reviewer_picker_with_why_and_stays_if_picked():
+def test_an_omp_or_flash_row_is_greyed_in_the_reviewer_picker_with_why_and_stays_if_picked(
+        monkeypatch):
     """tcc#74: an OMP pick goes through omp only, and the reviewer script has no omp route yet; a
     Flash model is no reviewer for the method. Both rows say so and cannot be picked — and one that
     IS the current pick stays selected, as every other row that cannot run does."""
+    from autosound_tcc.core import critic
     from autosound_tcc.core import model_choices as mc
     from autosound_tcc.ui.tcc import i18n
     from PySide6.QtWidgets import QComboBox
 
+    monkeypatch.setattr(critic, "omp_route_available", lambda: False)  # a method before v3.0.63
     _app()
     combo = QComboBox()
     omp = mc.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
