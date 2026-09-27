@@ -2936,3 +2936,23 @@ and that «Налаштувати omp…» is the next step.
 **Weight.** Medium: the first thing a new omp user sees in TCC.
 
 **Task.** tcc#99 (W-4).
+
+### 109. omp 18 on the second Mac: a session fails «omp exited before reporting ready», and the reason is cut off
+
+**What.** The Arbiter, 2026-09-27: «оновив руками omp до останньої версії — пішли запити. але ось що видало:
+⚠️ RuntimeError: omp exited before reporting ready at dot (/$bunfs/root/omp-darwin-arm64:14767:9) at U9 (…:640398:12)
+at async run (…:640622:14) at async iJr (…:1849:16) at async Ipo (…:643770:12)». The model list now fills; a
+session does not start.
+
+**Where.** The second Mac (MacBook Air), omp updated by hand to the latest (18.x), TCC v0.1.44.
+
+**What the screen shows.** TCC's own line plus the last five lines of omp's stderr (`OmpSession._why`), and all
+five are stack frames — omp's own message, the one line that says why, is above them and not shown.
+
+**A hypothesis, not checked:** the same `--tools …,inspect_image` refusal as 106 (omp 18 has no `inspect_image`),
+but omp 18 prints a stack after it, so the «Valid tools: …» line is outside the five-line tail,
+`tools_omp_takes` finds nothing, and the retry never happens.
+
+**Weight.** High: no omp session on omp 18.
+
+**Task.** tcc#97 (W-4), with 106.
