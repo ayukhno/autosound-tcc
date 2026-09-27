@@ -2530,6 +2530,12 @@ session's shell is handed no model. A Flash pick carries a warning in the state.
 asked once at launch and at once when picked. `choose_model` for a named model (the 404 of
 `gemini-2.5-flash`) is a refusal now: red, where it read as ready. Not checked live.
 
+**Checked in a live session 2026-09-27 (Mac, `b2ed5d6`, method v3.0.63):** «OMP · Gemini 3.1 Pro» was
+`ready: false` in `get_tcc_state` before any review, and `call_critic` through omp came back 429
+`RESOURCE_EXHAUSTED` twice (45 s apart): quota, as the check had said. The session substituted
+nothing and offered the Arbiter the choice, noting the clipboard rung does not take the omp route.
+Bubbles read «GENERATOR · OMP · CLAUDE OPUS 5» and «SYSTEM · TCC» (screenshot 18).
+
 ### 86. The method's version check fails at the start of an omp session
 
 **What.** Seen on the Arbiter's screenshot, not reported by him — recorded by the session. The
