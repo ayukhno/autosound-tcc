@@ -996,3 +996,19 @@ def test_a_flash_model_is_marked_not_a_reviewer_and_a_pro_one_is_not():
     assert model_choices.not_a_reviewer(flash) == "flash"
     assert model_choices.not_a_reviewer(lite) == "flash"
     assert model_choices.not_a_reviewer(pro) == ""
+
+
+def test_with_the_omp_route_an_omp_pick_is_a_reviewer_where_omp_is_installed(
+        monkeypatch, real_critic_reaches):
+    """Once the method calls through omp (hub #216 TCC-034), the OMP rows switch on by themselves."""
+    from autosound_tcc.core import critic, model_choices
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    omp = model_choices.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
+                               label="Gemini 3.1 Pro (High)", provider="google-antigravity")
+    assert model_choices.not_a_reviewer(omp) == ""
+    monkeypatch.setattr(model_choices.shutil, "which", lambda name: "/usr/bin/omp"
+                        if name == "omp" else None)
+    assert model_choices.critic_reaches(omp) is True
+    monkeypatch.setattr(model_choices.shutil, "which", lambda name: None)
+    assert model_choices.critic_reaches(omp) is False

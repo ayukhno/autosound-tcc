@@ -756,22 +756,21 @@ def not_a_reviewer(choice: Choice) -> str:
     sides of the question it was called for. Marked, not hidden: an option that is absent reads as
     one that does not exist."""
     if choice.harness == "omp":
-        return NOT_A_REVIEWER_OMP
+        from autosound_tcc.core import critic
+
+        if not critic.omp_route_available():
+            return NOT_A_REVIEWER_OMP
     if tier_of(choice) in ("flash", "lite"):
         return NOT_A_REVIEWER_FLASH
     return ""
 
 
 def reviewer_model(choice: Choice) -> str:
-    """The name the skill's reviewer script takes for this pick (tcc#57, finding 58).
+    """The name the skill's reviewer script takes for this pick — the pick's own model, as is.
 
-    omp names a model by its own selector, `provider/model`, and the reviewer script runs no omp:
-    it calls the vendor's API or CLI, and neither takes the prefix. «OMP · Gemini 3.5 Flash Lite»
-    went out as `google-antigravity/gemini-3.5-flash-lite` — the API answered 404, and agy «not
-    recognized» for the tiered `google-antigravity/gemini-3.8-flash-high`. Without it, the API
-    takes the first and agy the second."""
-    if choice.harness == "omp":
-        return choice.model.partition("/")[2] or choice.model
+    An OMP pick keeps omp's full selector (`google-antigravity/gemini-3.1-pro-high`): it goes
+    through omp, which reads it (the Arbiter, 2026-09-27, tcc#74). tcc#57 cut the prefix while the
+    script ran no omp and the vendor's API was the only road — the road that answered 404."""
     return choice.model
 
 
@@ -832,7 +831,10 @@ def critic_reaches(choice: Choice) -> bool:
     answer, and it makes the clipboard a choice made in advance rather than a surprise.
     """
     if choice.harness == "omp":
-        return False  # no omp route in the reviewer script yet (tcc#74, hub #216 TCC-034)
+        # Through omp only (tcc#74): the script's omp route, and omp on this machine.
+        from autosound_tcc.core import critic
+
+        return critic.omp_route_available() and bool(shutil.which("omp"))
     vendor = vendor_of(choice)
     if not vendor:
         return False

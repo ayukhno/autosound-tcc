@@ -1159,7 +1159,7 @@ def build_server(
         """
         # An OMP pick goes through omp or not at all (tcc#74): with no omp route in the script it
         # went to the vendor's API under a name cut from omp's selector, and came back 404.
-        if configured_critic_harness(project_dir) == "omp":
+        if configured_critic_harness(project_dir) == "omp" and not critic.omp_route_available():
             return json.dumps({"mode": critic.MODE_ERROR, "critique": "", "model": None,
                                "detail": OMP_REVIEWER_REFUSAL, "package": None, "seconds": 0},
                               ensure_ascii=False)

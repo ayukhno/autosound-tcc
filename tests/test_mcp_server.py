@@ -1831,3 +1831,22 @@ def test_start_capture_takes_the_methods_plan_when_no_list_is_given(tmp_path, mo
 
     asyncio.run(mcp.call_tool("start_capture", {"version": "61", "expected": ["sw_61 (sw)"]}))
     assert seen["plan"] is False and seen["expected"] == ["sw_61 (sw)"]
+
+
+def test_with_the_omp_route_an_omp_reviewer_pick_is_called(tmp_path, monkeypatch):
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:google-antigravity/gemini-3.1-pro-high")
+    seen = {}
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, harness="", **kw):
+        seen.update(model=model, harness=harness)
+        return critic.CriticResult(critic.MODE_ERROR, "", None, "critic", "stub", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
+
+    assert seen == {"model": "google-antigravity/gemini-3.1-pro-high", "harness": "omp"}

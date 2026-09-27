@@ -2655,3 +2655,8 @@ note elided in the middle, where the plain rows show it whole.
 **Where.** Mac, `a71dc24`, the footer's AI CRITIC list (screenshot 11, 2026-09-27).
 
 **Task.** The OMP rows: tcc#74 against the skill's tag. The cut note: none yet.
+
+**Built (2026-09-27):** the OMP rows switch on by themselves once the method's reviewer script lists
+`"omp"` in `VIA_ROUTES` (the interface agreed on hub #216): no version pin, so the skill's working
+tree is enough to test on this Mac. An OMP pick then runs `--via omp` with omp's full selector, a
+session's shell gets `AUTOSOUND_CRITIC_BIN=omp`, and `critic_reaches` asks for omp on PATH.

@@ -4821,7 +4821,8 @@ def test_a_running_session_is_told_the_reviewer_changed(monkeypatch):
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
 
     sent = [s for s in bus.deliver() if s.kind == signal_bus.REVIEWER]
-    assert sent and sent[0].payload["model"] == "gemini-3.5-flash-lite"
+    # omp's full selector since tcc#74: an OMP pick goes through omp, which reads it.
+    assert sent and sent[0].payload["model"] == "google-antigravity/gemini-3.5-flash-lite"
     assert any("Gemini 3.5 Flash Lite" in text for text in said)
     window._mcp_server = None
     window._agent_worker = None

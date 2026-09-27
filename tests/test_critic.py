@@ -646,20 +646,58 @@ def test_the_session_is_told_to_reach_the_reviewer_through_tcc():
     assert "call_critic" in tuning_session.SYSTEM_PROMPT_APPEND
 
 
-def test_an_omp_pick_reaches_the_reviewer_without_omp_s_provider_prefix(tmp_path):
-    """tcc#57, finding 58: «OMP · Gemini 3.5 Flash Lite» went to the reviewer as
-    `google-antigravity/gemini-3.5-flash-lite` — the API answered 404, and agy «not recognized»
-    for `google-antigravity/gemini-3.8-flash-high`. The reviewer script runs no omp: it calls the
-    vendor's API or CLI, and neither takes omp's `provider/` selector."""
+def test_an_omp_pick_reaches_the_reviewer_by_omp_s_own_selector(tmp_path):
+    """tcc#57 cut omp's `provider/` prefix, because the reviewer script ran no omp and the vendor's
+    API or CLI takes no prefix. The Arbiter reversed it on 2026-09-27 (tcc#74): an OMP pick goes
+    through omp, which needs its full selector; the bare name went to the API and came back 404."""
     from autosound_tcc.core import config, critic, model_choices, project_settings
 
-    for key, sent in (("omp:google-antigravity/gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
-                      ("omp:google-antigravity/gemini-3.8-flash-high", "gemini-3.8-flash-high"),
+    for key, sent in (("omp:google-antigravity/gemini-3.5-flash-lite",
+                       "google-antigravity/gemini-3.5-flash-lite"),
                       ("agy:gemini-3.8-flash-high", "gemini-3.8-flash-high")):
         project_settings.set_value(config.tcc_dir(tmp_path), "critic", key)
         assert critic.configured(tmp_path)[0] == sent, key
         _, choice = model_choices.resolve_critic(key)
         assert model_choices.reviewer_model(choice) == sent, key
+
+
+def test_the_omp_route_is_read_from_the_methods_own_list(tmp_path, monkeypatch):
+    """No version pin (hub #216): the route exists when the method's script lists it in
+    `VIA_ROUTES`, so the Arbiter can test it on the skill's working tree before the tag."""
+    from autosound_tcc.core import critic
+
+    script = tmp_path / "autosound_ai.py"
+    monkeypatch.setattr(critic, "script_path", lambda: script)
+    assert critic.omp_route_available() is False, "no script, no route"
+    script.write_text('VIA_ROUTES = ("api", "cli", "clipboard")\n', encoding="utf-8")
+    assert critic.omp_route_available() is False
+    script.write_text('VIA_ROUTES = ("api", "cli", "omp", "clipboard")\n', encoding="utf-8")
+    assert critic.omp_route_available() is True
+
+
+def test_with_the_omp_route_an_omp_pick_runs_through_omp_only(tmp_path, monkeypatch):
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    seen = {}
+
+    def _fake(argv, **kw):
+        seen["argv"] = argv
+        raise OSError("stop here")
+
+    monkeypatch.setattr(critic.subprocess, "run", _fake)
+    critic.run("# hi", project_dir=tmp_path, model="google-antigravity/gemini-3.1-pro-high",
+               harness="omp")
+    assert seen["argv"][seen["argv"].index("--via") + 1] == "omp"
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:google-antigravity/gemini-3.1-pro-high")
+    assert critic.session_env(tmp_path) == {
+        "AUTOSOUND_CRITIC_MODEL": "google-antigravity/gemini-3.1-pro-high",
+        "AUTOSOUND_CRITIC_BIN": "omp"}
 
 
 def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, monkeypatch):

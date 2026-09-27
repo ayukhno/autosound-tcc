@@ -120,6 +120,35 @@ def is_available() -> bool:
     return script_path().is_file()
 
 
+_OMP_ROUTE_CACHE: dict = {}
+
+
+def omp_route_available() -> bool:
+    """Whether the method's reviewer script calls through omp — `"omp"` in its `VIA_ROUTES`.
+
+    The Arbiter's rule (tcc#74): an OMP pick goes through omp only, and until the script has the
+    route (hub #216 TCC-034) OMP reviewer picks call nothing. Read from the script, not a version:
+    the Arbiter tests on the skill's working tree before the tag. Cached by the file's size and
+    mtime — the picker asks this while it is being filled."""
+    import re
+
+    path = script_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _OMP_ROUTE_CACHE:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        found = re.search(r"^VIA_ROUTES\s*=\s*\(([^)]*)\)", text, re.MULTILINE)
+        _OMP_ROUTE_CACHE.clear()
+        _OMP_ROUTE_CACHE[key] = bool(found) and re.search(r"[\"']omp[\"']", found.group(1)) is not None
+    return _OMP_ROUTE_CACHE[key]
+
+
 def _project_mirror(project_dir: Path) -> Path:
     """Where the script looks for the data contract and project context."""
     return project_dir / "rew_analitic"
@@ -257,17 +286,21 @@ def session_env(project_dir: Path) -> dict:
     reviewer reads `AUTOSOUND_CRITIC_MODEL` first, and the binary TCC would use goes with it.
     """
     model, route = configured(project_dir)
-    if not model or route == "omp":
-        # An OMP pick goes through omp or not at all (tcc#74), and the script has no omp route
-        # yet: a model handed over here would reach the vendor's API under a cut-down name.
+    if not model:
         return {}
+    if route == "omp":
+        # An OMP pick goes through omp or not at all (tcc#74). Without the script's omp route a
+        # model handed over here would reach the vendor's API under another name.
+        if not omp_route_available():
+            return {}
+        return {"AUTOSOUND_CRITIC_MODEL": model, "AUTOSOUND_CRITIC_BIN": "omp"}
     env = {"AUTOSOUND_CRITIC_MODEL": model}
     env.update(critic_bin_override(harness=route))
     return env
 
 
 #: The routes one reviewer run may ask for by name — the script's own `--via` (skill `VIA_ROUTES`).
-VIA_ROUTES = ("api", "cli", "clipboard")
+VIA_ROUTES = ("api", "cli", "clipboard", "omp")
 
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
@@ -319,8 +352,9 @@ def run(
     if trace_path:
         argv.append(str(trace_path))
     via = (via or "").strip().lower()
-    if not via and (harness or "").strip().lower() == "api":
-        via = "api"  # «API · …» is the key's route and nothing else (tcc#74)
+    if not via and (harness or "").strip().lower() in ("api", "omp"):
+        # «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74).
+        via = (harness or "").strip().lower()
     if via in VIA_ROUTES:
         argv += ["--via", via]
 
