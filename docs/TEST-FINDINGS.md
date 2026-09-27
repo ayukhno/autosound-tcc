@@ -2801,7 +2801,8 @@ answered («OMP · Claude Sonnet 5») looks like one never tried.
 reporting ready CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: read, write, edit,
 glob, grep, bash, ask, ast_edit, goal, init_experiment, run_experiment, log_experiment, update_notes.»
 TCC starts omp with `--tools read,write,edit,glob,grep,bash,ask,inspect_image` (`omp_session._ENABLED_TOOLS`);
-the VM's omp has no such tool. The Mac's omp is 17.2.9; the VM's version is not known yet.
+the VM's omp has no such tool. The VM's omp is **17.4.0**, the Mac's 17.2.9: a newer omp dropped
+`inspect_image`, and TCC names it in a fixed list.
 
 **Where.** Windows VM, `3ef4787`, the in-app dialog, omp route (screenshot 28, 2026-09-27).
 
@@ -2813,8 +2814,10 @@ the VM's omp has no such tool. The Mac's omp is 17.2.9; the VM's version is not 
 
 **What.** «Запускаю OMP · Gemini 3.1 Flash Image …», then «⚠️ This project has no
 `.claude/skills/autosound-tuning`. The session will run without the tuning method and improvise one —
-link the skill into the project before trusting anything it says.» Which project, and why the link
-was not made (TCC links the skill in before an omp session starts), is not known yet. Also on screen:
+link the skill into the project before trusting anything it says.» The project is
+`C:\Users\o.yukhno\dev\testAgy-auto`; TCC links the skill in before an omp session starts
+(`vendor_loader.link_skill_into`), and the VM's log (14:48:22, `omp --mode`) says nothing of why the link
+is not there. Also on screen:
 the generator was «OMP · Gemini 3.1 Flash Image» — an image model offered as a generator.
 
 **Where.** Windows VM, `3ef4787` (screenshot 27, 2026-09-27).
