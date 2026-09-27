@@ -4918,8 +4918,14 @@ def test_a_red_pick_does_not_paint_every_row_of_its_list_red():
                     count += c.red() > 150 and c.green() < 110 and c.blue() < 110
             return count
 
-        assert red(0) == 0 and red(1) == 0, "rows that work are not red"
-        assert red(2) > 0, "the refused row keeps its own red"
+        refused = red(2)
+        assert refused > 0, "the refused row keeps its own red"
+        # Relative, not zero: the fault painted EVERY row as red as the refused one. Linux CI
+        # finds ~5 red samples in the current row (against ~75 in the refused one) that macOS and
+        # Windows do not — a platform's current-row mark, not a row painted red (the wave's PR,
+        # 2026-09-27).
+        assert red(0) * 4 < refused and red(1) * 4 < refused, (
+            f"rows that work are not red: {red(0)}, {red(1)} against {refused}")
     finally:
         combo.hidePopup()
         combo.hide()
