@@ -5061,3 +5061,13 @@ def test_picking_another_reviewer_checks_it_at_once(monkeypatch):
     combo.setCurrentIndex(combo.findData(other))
 
     assert asked, "a changed pick is checked before any session"
+
+
+def test_the_dialog_names_the_generator_with_its_route():
+    """Finding 90 (tcc#80): «Генератор без признаку що то ОМР» — the dialog said «Запускаю Claude
+    Opus 5» and GENERATOR · CLAUDE OPUS 5 on the omp route. It says the route as the picker does."""
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc.main_window import _session_title
+
+    omp = mc.Choice(harness="omp", model="anthropic/claude-opus-5", label="Claude Opus 5")
+    assert _session_title(omp) == "OMP · Claude Opus 5"

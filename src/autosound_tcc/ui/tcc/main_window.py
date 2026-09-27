@@ -106,7 +106,7 @@ from autosound_tcc.ui.tcc import qt_shutdown
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
-from autosound_tcc.ui.tcc.dialog_panel import _SYS_ROLE_TCC, DialogPanel
+from autosound_tcc.ui.tcc.dialog_panel import _SYS_ROLE_TCC, SYS_ROLE_LEDGER, DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
@@ -648,6 +648,12 @@ def _clipboard_snapshot() -> _ClipboardSnapshot:
         image=clipboard.image() if source.hasImage() else None,
     )
 
+
+
+def _session_title(choice) -> str:
+    """How the dialog names the generator: with its route, as the picker does — «OMP · Claude Opus
+    5» (finding 90, tcc#80). The bare model said nothing of which way it runs, or whose bill it is."""
+    return f"{choice.route} · {choice.label}"
 
 class MainWindow(QMainWindow):
     # An error was written to the log. A plain signal because `threading.excepthook` fires on the
@@ -3661,7 +3667,7 @@ class MainWindow(QMainWindow):
         self._delta_shown = version
         if delta is None:
             return
-        self._dialog._add_system_message(proposal_view.to_html(delta))
+        self._dialog._add_system_message(proposal_view.to_html(delta), role=SYS_ROLE_LEDGER)
 
     #: How long after one probe the next activation is allowed to start another. `claude auth
     #: status` is a subprocess: somebody moving between two windows would otherwise spawn one per
@@ -4539,7 +4545,7 @@ class MainWindow(QMainWindow):
             # (w-R_2)" is the part a person can act on, and an open round that outlives TCC is
             # not recoverable — its status lives in REW's measurement list and goes when REW does.
             self._status_strip.notify(report.splitlines()[0], level="warn")
-            self._dialog._add_system_message(report)
+            self._dialog._add_system_message(report, role=SYS_ROLE_LEDGER)
 
     def _finish_handoff(self, *_args) -> None:
         timer, self._handoff_timer = getattr(self, "_handoff_timer", None), None
@@ -4648,7 +4654,7 @@ class MainWindow(QMainWindow):
             server.bus,
             resumed=resumed,
             phase=server.registry.current_phase(),
-            model=choice.label,
+            model=_session_title(choice),
         )
         self._probe_reviewer()
         self._running_model = choice.key

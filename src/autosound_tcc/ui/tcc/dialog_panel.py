@@ -59,6 +59,9 @@ _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
 # Who a system bubble is from. The ledger records what happened to the project; TCC's own lines
 # about the harness are not that, and labelling them the same made a status read as a record.
 _SYS_ROLE_TCC = "SYSTEM · TCC"
+#: A line that IS a record — a banked change, the journal's closing report. Only those say ledger:
+#: TCC's own lines under it read as something recorded (finding 93, tcc#80).
+SYS_ROLE_LEDGER = "SYSTEM · ledger"
 _MSG_BODY_BASE_PX = 13.0
 _DIALOG_FONT_KEY = "ui/dialog_font_scale"
 _DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
@@ -647,7 +650,7 @@ class DialogPanel(QWidget):
     def _font_in(self) -> None:
         self._set_font_scale(self._font_scale + _DIALOG_FONT_STEP)
 
-    def _add_system_message(self, html: str, role: str = "SYSTEM · ledger", level: str = "") -> None:
+    def _add_system_message(self, html: str, role: str = _SYS_ROLE_TCC, level: str = "") -> None:
         """A line from TCC rather than from anyone in the conversation.
 
         `role` because not all of them are ledger events: "omp has said nothing" and "starting

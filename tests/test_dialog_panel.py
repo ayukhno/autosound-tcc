@@ -317,3 +317,17 @@ def test_a_proposal_is_the_generator_s_not_a_ledger_record():
     bubble = panel._bubbles[-1]
     assert bubble.property("class") == "msg msg-gen"
     assert "SYSTEM" not in bubble.findChildren(QLabel)[0].text()
+
+
+def test_tccs_own_lines_are_signed_tcc_and_only_a_record_says_ledger():
+    """Finding 93 (tcc#80): «Рецензент тепер …», «TCC почав хід …» came as SYSTEM · LEDGER — TCC
+    talking about itself, labelled as something recorded. TCC is the default now; a line that IS a
+    record (a banked change, the journal's closing report) says ledger."""
+    from autosound_tcc.ui.tcc import dialog_panel
+
+    _app()
+    panel = DialogPanel()
+    panel._add_system_message("the reviewer is now X")
+    assert panel._bubbles[-1]._who_label.text() == "SYSTEM · TCC"
+    panel._add_system_message("v_007 banked", role=dialog_panel.SYS_ROLE_LEDGER)
+    assert panel._bubbles[-1]._who_label.text() == "SYSTEM · ledger"
