@@ -961,9 +961,12 @@ def test_the_reviewer_says_who_decided_it(tmp_path):
     assert "Arbiter" in _reviewer_state(tmp_path)["decided_by"]
 
 
-def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
+def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path, monkeypatch):
     """SCR-034 through the surface the model actually has: without these it would have to shell out
     to `process.py` for the one kind of process write that has no tool."""
+    # No REW, whatever this machine runs: closing reads REW since v3.0.62, and a developer's open
+    # REW made the journal differ from CI's (the wave's PR, 2026-09-27).
+    monkeypatch.setenv("REW_API_URL", "http://127.0.0.1:9")
     _intake.seed(tmp_path)  # phase 0 does not start on a folder intake never touched
     mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
     asyncio.run(mcp.call_tool("enter_phase", {"phase": "0"}))
@@ -991,9 +994,9 @@ def test_a_capture_round_can_be_recorded_through_the_tools(tmp_path):
         "capture_taken",
         "capture_skipped",
     ]
-    # Since method v3.0.62 (skill #77) closing reads the round against REW and checks what was
-    # taken before it closes; with no REW here it says it did not check, and still closes.
-    assert "capture_reconciled" in types[5:] and types[-1] == "capture_round_closed"
+    # Since method v3.0.62 (skill #77) closing reads the round against REW before it closes; with
+    # no REW it says it did not check, and closes on the record alone.
+    assert types[-1] == "capture_round_closed"
 
 
 def test_skipping_a_capture_without_a_reason_is_refused(tmp_path):
