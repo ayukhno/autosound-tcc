@@ -486,7 +486,7 @@ F-010, але тепер видно наслідок: вибрати «той с
 
 ### F-023 — per-round identity of a capture, entirely inside TCC
 
-**Статус**: відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
+**Статус**: on W-4 as tcc#94 (2026-09-27), for the review · відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
 
 **Крок 1 із чотирьох уже існує — як побічний ефект** (02.09, вікно «Взяти заміри»): магазин
 узятих `.tcc/imported-measurements.json` тримає рівно те, що просить пункт 1 — `uuid → {title,
@@ -1814,7 +1814,7 @@ table read from the ledger; the wider "dynamic zone" after living with the minim
 
 ### F-068 — the drivers' Fs deserves its own checkbox, and the flag does not exist yet
 
-**Статус**: open · waits for the method (hub `#185`, readdressed to skill 2026-09-19)
+**Статус**: open · on W-4 as tcc#93 (2026-09-27): the method has the flag now — `seed(..., include_fs=True)` at the pinned v3.0.63, TCC does not pass it · was: waits for the method (hub `#185`, readdressed to skill 2026-09-19)
 
 **What the user decided (2026-09-19, hub `#185`).** On seeding a new project from an existing one,
 the drivers' `fs_hz` travels behind its own checkbox, TICKED by default — «імпеданс складна штука і
@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: on W-4 as tcc#69 (2026-09-27), for the review · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: on W-4 as tcc#69 (2026-09-27), for the review · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2053,6 +2053,17 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-089 — W-4: the collection
+
+**Статус**: open 2026-09-27 · collection, nothing built (`WAVES.md` §1 step 2) · the milestone `W-4 · v0.1.45` (#4) opened on the Arbiter's word, its number read from the skill's `W-4 · v3.0.64` · seven issues, all assessed, none `ok` · resume: `hub/bin/role tcc --resume 548b3dd8-46a7-4ed0-97d4-dca187a7538a`
+
+On the milestone: #91 SKL-056 (hub #217, the skill clone with local changes — waits for the skill's
+S-064 command), #92 F-087 (the desktop-shortcut pin), #93 F-068 (the drivers' Fs checkbox — the method
+has `include_fs` since v3.0.60, pinned v3.0.63), #94 F-023 (a capture by its round), #95 the vendor pin
+to the skill's W-4 tag, #21 (capture quality at selection) and #69 (F-065, F-066, F-071) back from
+deferred for this review. Not W-4 tasks: F-088 and F-056 are the Arbiter's checks; hub #83 waits for
+`skill-v3.1.0`.
+
 ### F-088 — v0.1.44: the installer path walked by hand
 
 **Статус**: open 2026-09-27 · waiting on the Arbiter (`WAVES.md` §3.1, TCC only)
@@ -2062,7 +2073,7 @@ machine (the Windows VM is the likeliest), started from its shortcut. Whatever i
 
 ### F-087 — W-4: a taskbar pin made from the desktop shortcut is a second button on Windows
 
-**Статус**: open 2026-09-27 · for W-4's collection (the Arbiter: «Підказка зараз, дослідження в W-4»)
+**Статус**: open 2026-09-27 · on W-4 as tcc#92 · for W-4's collection (the Arbiter: «Підказка зараз, дослідження в W-4»)
 
 Windows drops `System.AppUserModel.ID` when it pins the desktop shortcut, and stamping the pinned copy
 afterwards (Explorer restarted) left two buttons (TEST-FINDINGS 104). A pin from the running window is one
