@@ -58,3 +58,73 @@ def test_show_at_does_not_raise_the_tip_because_on_macos_that_activates_tcc(monk
     tip.show_at(QPoint(0, 0), "tip")
     tip.hide_tip()
     assert raised == []
+
+
+def _owner():
+    from PySide6.QtWidgets import QWidget
+
+    owner = QWidget()
+    owner.setGeometry(100, 100, 200, 60)
+    owner.show()
+    _app().processEvents()
+    return owner
+
+
+def test_a_tip_hides_when_tcc_stops_being_the_active_app():
+    """Finding 87 (tcc#78): switched to another app, the tip stayed on top of it. It hides only on
+    the owner's leave event, and switching apps sends none."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QCursor
+
+    app = _app()
+    owner = _owner()
+    QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
+    tip = RoundedTooltip.instance()
+    tip.show_at(QCursor.pos(), "tip", owner=owner)
+    assert tip.isVisible()
+    app.applicationStateChanged.emit(Qt.ApplicationState.ApplicationInactive)
+    assert not tip.isVisible()
+    owner.close()
+
+
+def test_a_tip_hides_when_its_owner_is_gone_or_the_cursor_has_left_it():
+    """Finding 87: «висить над ТСС хоч миша вже в іншому місці» — a dialog closed or a row rebuilt
+    under the cursor sends no leave either. While shown, the tip checks its owner."""
+    from PySide6.QtGui import QCursor
+
+    owner = _owner()
+    tip = RoundedTooltip.instance()
+    QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
+    tip.show_at(QCursor.pos(), "tip", owner=owner)
+    tip._check_owner()
+    assert tip.isVisible(), "the cursor is still on the owner: the tip stays"
+
+    QCursor.setPos(owner.mapToGlobal(owner.rect().bottomRight()) + QPoint(50, 50))
+    tip._check_owner()
+    assert not tip.isVisible()
+
+    QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
+    tip.show_at(QCursor.pos(), "tip", owner=owner)
+    owner.hide()
+    tip._check_owner()
+    assert not tip.isVisible()
+    owner.close()
+
+
+def test_hover_tip_names_its_widget_as_the_owner():
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QCursor, QEnterEvent
+
+    from autosound_tcc.ui.tcc.rounded_tooltip import attach
+
+    owner = _owner()
+    attach(owner, "hint")
+    QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
+    local = QPointF(owner.rect().center())
+    owner.enterEvent(QEnterEvent(local, local, QPointF(QCursor.pos())))
+    tip = RoundedTooltip.instance()
+    assert tip.isVisible()
+    owner.hide()
+    tip._check_owner()
+    assert not tip.isVisible()
+    owner.close()

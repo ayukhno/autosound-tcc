@@ -2530,3 +2530,7 @@ for the project — stay pinned to 3.0.61 or move the link to 3.0.62 — answere
 leave event).
 
 **Task.** tcc#78, on W-3 by the Arbiter's word 2026-09-27 («додай до робіт»).
+
+**Built:** tcc#78. The tip hides when TCC stops being the active app, and while shown it checks
+every 250 ms that its owner is still there, visible and under the cursor. Tips with no owner (a
+menu action's, the «copied» note) keep their callers' hiding. Not checked live.

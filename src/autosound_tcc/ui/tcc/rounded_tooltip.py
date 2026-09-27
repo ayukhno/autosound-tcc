@@ -12,7 +12,10 @@ tooltip in the app should look the same).
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt
+from typing import Optional
+
+import shiboken6
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath
 from PySide6.QtWidgets import QLabel, QWidget
 
@@ -35,6 +38,18 @@ class RoundedTooltip(QLabel):
         self.setTextFormat(Qt.TextFormat.RichText)
         self.setProperty("class", "rounded-tip")
         self.setContentsMargins(9, 6, 9, 6)
+        # A tip was hidden only by its owner's leave event, and nothing sends one when TCC stops
+        # being the active app, or when the owner is hidden or rebuilt under the cursor — so it
+        # stayed on top of the next app, or hung over TCC with the mouse elsewhere (finding 87,
+        # tcc#78). It now hides on either, and while shown checks that the cursor is still on
+        # its owner.
+        self._owner: Optional[QWidget] = None
+        self._watch = QTimer(self)
+        self._watch.setInterval(250)
+        self._watch.timeout.connect(self._check_owner)
+        app = QGuiApplication.instance()
+        if app is not None:
+            app.applicationStateChanged.connect(self._on_app_state)
 
     @classmethod
     def instance(cls) -> "RoundedTooltip":
@@ -42,7 +57,14 @@ class RoundedTooltip(QLabel):
             cls._instance = cls()
         return cls._instance
 
-    def show_at(self, global_pos: QPoint, html: str) -> None:
+    def show_at(self, global_pos: QPoint, html: str, owner: Optional[QWidget] = None) -> None:
+        """`owner` is the widget the tip is about; while it is shown, the tip hides once the cursor
+        is off it or it is gone. Without one (a menu's action, a «copied» note) the caller hides it."""
+        self._owner = owner
+        if owner is None:
+            self._watch.stop()
+        else:
+            self._watch.start()
         self.setText(html)
         self.adjustSize()
         # Offset so the cursor doesn't sit on top of (and immediately re-trigger leave/enter on)
@@ -76,7 +98,24 @@ class RoundedTooltip(QLabel):
         return QPoint(max(x, area.left()), max(y, area.top()))
 
     def hide_tip(self) -> None:
+        self._owner = None
+        self._watch.stop()
         self.hide()
+
+    def _on_app_state(self, state) -> None:
+        if state != Qt.ApplicationState.ApplicationActive:
+            self.hide_tip()
+
+    def _check_owner(self) -> None:
+        owner = self._owner
+        if owner is None:
+            return
+        if (
+            not shiboken6.isValid(owner)
+            or not owner.isVisible()
+            or not owner.rect().contains(owner.mapFromGlobal(QCursor.pos()))
+        ):
+            self.hide_tip()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
         # A WA_TranslucentBackground top-level widget's own QSS `background`/`border-radius`
@@ -112,7 +151,7 @@ class HoverTip:
         def _enter(event, _orig=orig_enter) -> None:
             _orig(event)
             if self._text:
-                RoundedTooltip.instance().show_at(QCursor.pos(), self._text)
+                RoundedTooltip.instance().show_at(QCursor.pos(), self._text, owner=widget)
 
         def _leave(event, _orig=orig_leave) -> None:
             _orig(event)
