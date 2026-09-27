@@ -2595,6 +2595,8 @@ so the name reached Apple's Terminal. The scripts now address `application id "c
 (and iTerm's id), and a refusal carries osascript's own words. Checked live with the VM up: a
 terminal opened in the car project.
 
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
+
 ### 90. The dialog names the generator without its route: no OMP anywhere in the conversation
 
 **What.** The Arbiter, after `a71dc24`: the settings.json bubble is gone, «але Генератор без
@@ -2607,6 +2609,8 @@ CLAUDE OPUS 5», on the omp route.
 
 **Built:** tcc#80 `a216b49` — the generator's bubbles and «Запускаю …» carry the route («OMP · Claude Opus 5»).
 
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
+
 ### 91. «⚙ Налаштування» in the menu: bold, so it reads as a submenu
 
 **What.** The Arbiter: «зроби назву жирним (що це має субменю)». Its place at the end of TOOLS is
@@ -2617,6 +2621,8 @@ right (tcc#79).
 **Task.** None yet.
 
 **Built:** tcc#81 — the submenu title is bold.
+
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
 
 ### 92. After a new reviewer is picked, the footer keeps the previous one's last call in red
 
@@ -2645,6 +2651,8 @@ class, which moved only the project-folder notice to «SYSTEM · TCC».
 **Task.** None yet.
 
 **Built:** tcc#80 `a216b49` — SYSTEM · TCC is the default; only a banked change and the journal's closing report say ledger.
+
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
 
 ### 94. «дивно про версії»: what the diagnostics say about the versions
 
@@ -2692,6 +2700,8 @@ a 404 any more.
 
 **Built:** tcc#84 `0bae511` — each popup row is measured in its own font, so the bold row is not cut.
 
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
+
 ### 96. The reviewer picker turns red-brown under the mouse, over its green «answered»
 
 **What.** The Arbiter: «а мишку навів — червона». «OMP · GPT-5.6-Terra» is framed green (answered
@@ -2704,3 +2714,5 @@ not looked into.
 **Task.** None yet.
 
 **Built:** tcc#82 `0bae511` — the green and red frames hold under the mouse.
+
+**Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
