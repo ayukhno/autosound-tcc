@@ -2430,6 +2430,8 @@ TCC's state and answered.
 
 **Built:** tcc#73. `worker.shutdown()` came back False for the stuck turn and was not looked at; the worker has no parent and was never handed over, so `destroy_application` did not see it. Now the session's omp process is ended, and a worker still running 3 s later is handed to `qt_shutdown`, whose exit path leaves without destroying Qt.
 
+**Checked live 2026-09-27 (Mac, `de20037`):** quitting while omp answered — «закрився нормально».
+
 ### 82. GPT-OSS as the reviewer turns red right after a session starts
 
 **What.** The Arbiter: «GPT-OSS ставала червоною після старта сесії».
