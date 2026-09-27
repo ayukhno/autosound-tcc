@@ -60,3 +60,27 @@ def test_a_settings_file_that_cannot_be_read_is_reported_not_swallowed(tmp_path)
     said = project_trust.inherited(tmp_path)
 
     assert said and "settings.json" in said[0]
+
+
+def test_only_a_problem_is_a_warning_and_a_hook_alone_is_not_one(tmp_path):
+    """Finding 83 (tcc#75): every session opened with the car project's own logging hook quoted in
+    shell — the Arbiter, 2026-09-27: «не несе ніякого змісту для користувача … а якщо там є
+    проблема — червоним … чи помаранчевим». A hook is not shown; a grant made by the folder
+    (tools run without asking, past TCC's own permission choice) and a file nobody can read are."""
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "printf hi"}]}]}
+    }), encoding="utf-8")
+    assert not project_trust.warnings(tmp_path)
+
+    settings.write_text(json.dumps({
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "printf hi"}]}]},
+        "permissions": {"allow": ["Bash(rm:*)", "Write"], "deny": ["WebFetch"]},
+    }), encoding="utf-8")
+    found = project_trust.warnings(tmp_path)
+    assert found and found.allows == ["Bash(rm:*)", "Write"] and found.unknown is None
+
+    settings.write_text("{ not json at all", encoding="utf-8")
+    found = project_trust.warnings(tmp_path)
+    assert found and found.unknown and not found.allows

@@ -27,8 +27,9 @@ opinion about somebody's own configuration, and TCC does not hold one.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 #: Trimmed to keep one line readable in a dialog bubble. The full text is in the file, which is
 #: named in the first line of the report — a truncated command is a prompt to go and look, and it
@@ -73,6 +74,41 @@ def inherited(project_dir: Path) -> list[str]:
     if said:
         said.insert(0, f"this project's {path.name} applies:")
     return said
+
+
+@dataclass
+class Warnings:
+    """What of a folder's settings is a PROBLEM, and so is shown (the Arbiter, 2026-09-27).
+
+    Narrower than `inherited`: every session opened with the car project's own logging hook
+    quoted in shell, and he said it meant nothing to him — only a problem is to be shown, as a
+    warning (finding 83, tcc#75). Two things are one: a file nobody can read (`unknown`), and
+    tools the folder lets run without asking (`allows`), which goes past TCC's own permission
+    choice. Hooks are no longer announced."""
+
+    unknown: Optional[str] = None
+    allows: list[str] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return bool(self.unknown or self.allows)
+
+
+def warnings(project_dir: Path) -> Warnings:
+    """The problems in this project's settings file; empty when it has none. Never raises."""
+    path = settings_path(project_dir)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return Warnings()
+    try:
+        data: Any = json.loads(raw)
+    except ValueError as exc:
+        return Warnings(unknown=f"{path}: {exc}")
+    if not isinstance(data, dict):
+        return Warnings(unknown=f"{path}: not a JSON object")
+    allow = (data.get("permissions") or {}).get("allow")
+    return Warnings(allows=[tool for tool in allow if isinstance(tool, str)]
+                    if isinstance(allow, list) else [])
 
 
 def _commands_of(entries: Any) -> list[str]:

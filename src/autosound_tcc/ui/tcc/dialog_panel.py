@@ -70,9 +70,11 @@ _markdown = chat_text.markdown
 
 
 class MessageBubble(QFrame):
-    def __init__(self, who: str, role: str, html: str, source: str = "") -> None:
+    def __init__(self, who: str, role: str, html: str, source: str = "", level: str = "") -> None:
         super().__init__()
-        self.setProperty("class", f"msg msg-{who}")
+        # `level` — `warn` (orange) or `error` (red) on a system line that reports a problem: the
+        # Arbiter, 2026-09-27 (finding 83), «червоним … як помилку чи помаранчевим якщо попередження».
+        self.setProperty("class", f"msg msg-{who}" + (f" msg-{who}-{level}" if level else ""))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 7, 12, 8)
         layout.setSpacing(3)
@@ -605,9 +607,9 @@ class DialogPanel(QWidget):
         for bubble in self._bubbles:
             self._fit(bubble)
 
-    def _add_bubble(self, who: str, role: str, html: str, source: str = "") -> None:
+    def _add_bubble(self, who: str, role: str, html: str, source: str = "", level: str = "") -> None:
         bubble_row = QHBoxLayout()
-        bubble = MessageBubble(who, role, html, source)
+        bubble = MessageBubble(who, role, html, source, level)
         bubble.apply_font_scale(self._font_scale)
         self._bubbles.append(bubble)
         self._fit(bubble)
@@ -645,14 +647,15 @@ class DialogPanel(QWidget):
     def _font_in(self) -> None:
         self._set_font_scale(self._font_scale + _DIALOG_FONT_STEP)
 
-    def _add_system_message(self, html: str, role: str = "SYSTEM · ledger") -> None:
+    def _add_system_message(self, html: str, role: str = "SYSTEM · ledger", level: str = "") -> None:
         """A line from TCC rather than from anyone in the conversation.
 
         `role` because not all of them are ledger events: "omp has said nothing" and "starting
         <model>" are TCC talking about the machinery, and filing those under the ledger makes a
-        status line look like something that was recorded.
+        status line look like something that was recorded. `level` is `warn` or `error` for a
+        line that reports a problem.
         """
-        self._add_bubble("sys", role, html)
+        self._add_bubble("sys", role, html, level=level)
         self._scroll_to_end()
 
     def _scroll_to_end(self) -> None:

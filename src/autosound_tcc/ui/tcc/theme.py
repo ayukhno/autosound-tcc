@@ -1247,6 +1247,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('info', 10, 'panel2')};
         border: 1px dashed {t.mix('info', 45, 'border')};
     }}
+    /* A system line that reports a problem (finding 83): orange for a warning, red for an error. */
+    QFrame[class~="msg-sys-warn"] {{
+        background: {t.mix('inv', 14, 'panel2')};
+        border: 1px solid {t.inv};
+    }}
+    QFrame[class~="msg-sys-error"] {{
+        background: {t.mix('warn', 14, 'panel2')};
+        border: 1px solid {t.warn};
+    }}
     QLabel[class~="msg-who"] {{
         font-size: 10px;
         letter-spacing: 1px;

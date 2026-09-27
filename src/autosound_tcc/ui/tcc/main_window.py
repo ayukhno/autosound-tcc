@@ -106,7 +106,7 @@ from autosound_tcc.ui.tcc import qt_shutdown
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
-from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
+from autosound_tcc.ui.tcc.dialog_panel import _SYS_ROLE_TCC, DialogPanel
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
@@ -1139,8 +1139,7 @@ class MainWindow(QMainWindow):
         # place at all.
         settings = self._tip_menu(menu)
         settings.setTitle("⚙ " + i18n.t("menuSettings"))
-        menu.addMenu(settings)
-        self._settings_menu = settings
+        self._settings_menu = settings  # placed at the end of TOOLS, below
         self._build_eq_order_menu(settings)
         self._models_action = settings.addAction(i18n.t("menuModels"))
         self._models_action.setToolTip(i18n.t("menuModelsTip"))
@@ -1192,6 +1191,8 @@ class MainWindow(QMainWindow):
         target_action = menu.addAction(i18n.t("menuTargetTool"))
         target_action.setToolTip(i18n.t("targetToolTip"))
         target_action.triggered.connect(self._open_target_curve_tool)
+        # The last line of TOOLS (the Arbiter, 2026-09-27); it closed SESSION before.
+        menu.addMenu(settings)
 
         self._menu_section(menu, "menuHelp")
         # Online, at this build's own tag: `docs/` is not in the installed package, and a link to
@@ -4703,11 +4704,22 @@ class MainWindow(QMainWindow):
 
         Silent when the folder applies nothing. A line on every start is noise, and noise is how
         the one that matters gets scrolled past.
+
+        Narrowed by the Arbiter on 2026-09-27 (finding 83, tcc#75): the car project's own logging
+        hook came up on every start, quoted in shell, and meant nothing to him. Only a problem is
+        shown, as a warning — tools the folder lets run without asking, or a settings file nobody
+        can read (`project_trust.warnings`).
         """
-        said = project_trust.inherited(self._mcp_server.project_dir
+        found = project_trust.warnings(self._mcp_server.project_dir
                                        if self._mcp_server else config.project_dir())
-        if said:
-            self._dialog._add_system_message("\n".join(said))
+        if found.unknown:
+            self._dialog._add_system_message(
+                i18n.t("trustUnknown").format(detail=found.unknown), role=_SYS_ROLE_TCC,
+                level="warn")
+        if found.allows:
+            self._dialog._add_system_message(
+                i18n.t("trustAllows").format(tools=", ".join(found.allows)), role=_SYS_ROLE_TCC,
+                level="warn")
 
     # ---- which model, and therefore which harness --------------------------
 

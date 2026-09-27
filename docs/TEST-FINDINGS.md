@@ -2468,6 +2468,15 @@ notice about project settings, labelled as a ledger record, with shell text nobo
 
 **Task.** tcc#75 (with 84), on W-3 by the Arbiter's word 2026-09-27.
 
+**Found and built (2026-09-27):** not omp's notice — TCC's own (HUB-050, `project_trust`), posted with the
+default «SYSTEM · ledger» role. And untrue on the omp route: the hook appends to the project's
+`.sessions.log`, and none of the five omp sessions of 26–27.09 wrote a line. The Arbiter, told so:
+«воно не несе ніякого змісту для користувача і його можна взагалі не показувати. а якщо там є
+проблема — то червоним показати як помилку чи помаранчевим якщо попередження». Hooks are not
+announced any more; an orange «SYSTEM · TCC» warning stays for a folder that grants tools without
+asking and for a settings file nobody can read (`project_trust.warnings`, bubble level `warn`/`error`).
+pl/de strings through the Advisor (`ask`, gemini-pro-latest).
+
 ### 84. The project panel does not say that the generator and the advisor run through OMP
 
 **What.** «ПАРАМЕТРИ ПРОЄКТУ» shows «ШІ генератор anthropic/claude-opus-5» and «ШІ радник
@@ -2534,3 +2543,13 @@ leave event).
 **Built:** tcc#78. The tip hides when TCC stops being the active app, and while shown it checks
 every 250 ms that its owner is still there, visible and under the cursor. Tips with no owner (a
 menu action's, the «copied» note) keep their callers' hiding. Not checked live.
+
+### 88. «Налаштування» belongs at the end of TOOLS, not of SESSION
+
+**What.** The Arbiter: «перенеси ще "Налаштування" меню в наступний розділ в кінець».
+
+**Where.** Mac, the main menu (tcc#67's submenu).
+
+**Task.** tcc#79, his word 2026-09-27.
+
+**Built:** the submenu is the last line of TOOLS, right above HELP.
