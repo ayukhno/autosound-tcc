@@ -2722,3 +2722,31 @@ not looked into.
 **Built:** tcc#82 `0bae511` — the green and red frames hold under the mouse.
 
 **Checked live 2026-09-27 (Mac, `b2ed5d6`):** ok.
+
+### 97. The session's first `call_critic` through omp was cut without an answer while the reviewer was still working
+
+**What.** The Arbiter asked «перевір критика». The generator (omp, Claude Opus 5) called `call_critic`
+at 13:46:55; «⚠️ 120s with no output. omp has said nothing.», then the generator: «Інструмент обірвався
+без відповіді — це збій транспорту MCP» and «Виклик не дійшов узагалі» — and called again at 13:47:35.
+TCC's log has the first call running `omp -p … --model openai-codex/gpt-5.6-terra` and returning
+`refused` (Codex `usage_limit_reached`) at 13:47:52, about 57 s in — an answer the session never got.
+A real review takes minutes; if omp cuts a tool call short, every review through the omp session is
+lost the same way. Not looked into.
+
+**Where.** Mac, `b2ed5d6`, the in-app dialog, omp route, reviewer «OMP · GPT-5.6-Terra» (screenshots
+19 and 20, 2026-09-27; TCC's log 13:46:55–13:48:03).
+
+**Task.** None yet — a tail of tcc#74.
+
+### 98. After an OMP reviewer refused, TCC's own hint sent the session to the API key
+
+**What.** Seen on the Arbiter's screenshot, recorded by the session. `call_critic`'s refusal carries
+TCC's line «To take this one review through the API key, call call_critic again with via="api"»
+(tcc#59), and the generator did: «Сам інструмент назвав обхід — той самий рецензент, але через
+API-ключ». For an OMP pick that breaks the Arbiter's rule (tcc#74, «якщо вибрана ОМР, то і йти треба
+тільки через цей виклик»); it failed only because there is no OpenAI key («--via api: ключа для
+openai нема»). `call_critic` also takes `via` other than omp for an OMP pick.
+
+**Where.** Mac, `b2ed5d6` (screenshot 20; TCC's log 13:48:03).
+
+**Task.** None yet — a tail of tcc#74.
