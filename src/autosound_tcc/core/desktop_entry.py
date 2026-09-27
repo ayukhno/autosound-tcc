@@ -455,7 +455,12 @@ def _stamp_windows(targets: list[Path], result: Result) -> None:
         **child.quiet(),
     )
     if proc.returncode == 0:
-        result.say(f"They are: {BUNDLE_ID}  (pinned and running are one taskbar button)")
+        # «Pinned and running are one button» held for a pin made from the RUNNING window only: a
+        # pin made from the shortcut loses the id (Windows drops it when it pins a shortcut, and
+        # stamping the pinned copy afterwards did not help — finding 104, tcc#62).
+        result.say(f"They are: {BUNDLE_ID}")
+        result.say("To pin TCC to the taskbar, pin it from its running window: a pin made from "
+                   "the shortcut starts it as a second button.")
     else:
         result.say(
             "note: the shortcuts could not be given the app id — pinning one will show a second "

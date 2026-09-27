@@ -60,6 +60,10 @@ The same window in the dark theme:
 TCC reads the project folder and REW. It **never writes to your processor**: you enter the values in
 your DSP software yourself, or import them there.
 
+**On Windows, pin TCC from its running window.** Right-click its taskbar button while TCC is open and
+choose *Pin to taskbar*. A pin made from the desktop shortcut starts TCC as a second taskbar button:
+Windows drops the app's identity when it pins a shortcut.
+
 ## The header
 
 ![The header bar](img/header.webp)

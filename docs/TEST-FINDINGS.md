@@ -2853,3 +2853,10 @@ window, one per tab, on the way in only. Panes are now born under a hidden paren
 (`child.claim_app_console`): Windows cannot create a console already hidden, so one console with a line
 saying what starts is held while the models are read and then hidden, and every child runs silent inside
 it — his decision of 2026-09-11/13, against a flash per child. Told so, he kept it.
+
+**The second taskbar button — measured, not fixed (2026-09-27).** The desktop `.lnk` carries
+`System.AppUserModel.ID = dev.autosound.tcc`; its pinned copy in `User Pinned\TaskBar` carried none, and a
+fresh pin from the desktop again none — Windows drops the id when it pins a shortcut. TCC's own stamp put
+the id on the pinned copy and Explorer was restarted: still two buttons (Windows keeps what the pin was at
+pin time). A pin from the running window stays one button (F-037). The Arbiter: the hint now, the research
+in W-4 — the reference and the installer say «pin it from its running window»; W-4's item is TODO F-087.
