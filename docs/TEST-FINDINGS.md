@@ -2986,3 +2986,18 @@ turn took cannot be read off the screen.
 **Weight.** Low: a want, not a defect — but it is what would have measured the slow first turn.
 
 **Task.** tcc#100 (W-4).
+
+### 111. «У фокусі зараз»: an RTA capture listed under SWEEP (SW)
+
+**What.** The Arbiter, 2026-09-27: «звернув увагу на REW — там в колонці sw записаний rta!» Round `cap_016`: the
+SWEEP (SW) column holds one row, `L m+tw_55 (rta) inv`, green; the MMM RTA (RTA) column holds `m-L_55 (rta)`,
+`m-R_55 (rta)`, `Ms_55 (rta)`, `ALL_55 (rta)`, `L m+tw_55 (rta)`. A title marked `(rta)` sits in the sweep column
+(screenshot 8). Seen, not examined: it is the one title with `inv`.
+
+**Where.** The second Mac, TCC at `wave-0.1.45`, the «У фокусі зараз» panel, round `cap_016`.
+
+**Weight.** Medium: the panel says a sweep was taken when the capture is an RTA.
+
+**Related.** Finding 30, item 3 — a sweep labelled `(rta)`, the other way round.
+
+**Task.** tcc#101 (W-4).
