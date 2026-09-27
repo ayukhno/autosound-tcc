@@ -2444,7 +2444,7 @@ OpenAI and finds `codex` installed, while no transport of the reviewer script ru
 
 **Where.** Mac, the footer's AI CRITIC, pick «OMP · GPT-OSS 120B».
 
-**Task.** None yet — recorded.
+**Task.** tcc#74 (with 85), on W-3 by the Arbiter's word 2026-09-27.
 
 ### 83. Every omp session opens with «SYSTEM · LEDGER: this project's settings.json applies: hook SessionStart …»
 
@@ -2458,7 +2458,7 @@ notice about project settings, labelled as a ledger record, with shell text nobo
 **The Arbiter, 2026-09-27:** not hidden — the bubble's header should say it comes from OMP
 («було б добре щоб писало в заголовку що це OMP»), not LEDGER. The project panel's half is 84.
 
-**Task.** None yet.
+**Task.** tcc#75 (with 84), on W-3 by the Arbiter's word 2026-09-27.
 
 ### 84. The project panel does not say that the generator and the advisor run through OMP
 
@@ -2468,7 +2468,7 @@ google-antigravity/gemini…» with no route; the Arbiter wants OMP named there 
 
 **Where.** Mac, the project panel (screenshot 2, 2026-09-27).
 
-**Task.** None yet.
+**Task.** tcc#75 (with 83), on W-3 by the Arbiter's word 2026-09-27.
 
 ### 85. A reviewer model is found dead only when the first review fails
 
@@ -2492,7 +2492,7 @@ Three things in it, as the Arbiter met them:
 
 **Where.** Mac, the footer's AI CRITIC, the car project's omp session.
 
-**Task.** None yet — with 82 (GPT-OSS offered as reachable), the same class.
+**Task.** tcc#74 (with 82), on W-3 by the Arbiter's word 2026-09-27.
 
 ### 86. The method's version check fails at the start of an omp session
 
@@ -2504,4 +2504,4 @@ project stays on 3.0.61 or moves to 3.0.62. TCC `de20037` carries the method at 
 **Where.** Mac, the in-app AI dialog, omp route, the Arbiter's own omp profile (screenshot 1,
 2026-09-27).
 
-**Task.** None — not looked into.
+**Task.** tcc#76, on W-3 by the Arbiter's word 2026-09-27.
