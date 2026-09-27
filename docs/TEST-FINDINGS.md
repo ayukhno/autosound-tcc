@@ -2563,6 +2563,8 @@ leave event).
 every 250 ms that its owner is still there, visible and under the cursor. Tips with no owner (a
 menu action's, the «copied» note) keep their callers' hiding. Not checked live.
 
+**Checked live 2026-09-27 (Mac, `a71dc24`):** «ок».
+
 ### 88. «Налаштування» belongs at the end of TOOLS, not of SESSION
 
 **What.** The Arbiter: «перенеси ще "Налаштування" меню в наступний розділ в кінець».
@@ -2584,3 +2586,55 @@ terminal at all — before `a71dc24` it opened, behind TCC.
 omp…» (screenshot 7, 2026-09-27).
 
 **Task.** tcc#71, reopened by this test.
+
+### 90. The dialog names the generator without its route: no OMP anywhere in the conversation
+
+**What.** The Arbiter, after `a71dc24`: the settings.json bubble is gone, «але Генератор без
+признаку що то ОМР». The bubbles read «SYSTEM · TCC — Запускаю Claude Opus 5 …» and «GENERATOR ·
+CLAUDE OPUS 5», on the omp route.
+
+**Where.** Mac, `a71dc24`, the in-app AI dialog, omp route (screenshot 8, 2026-09-27).
+
+**Task.** None yet — with tcc#75's panel half (84).
+
+### 91. «⚙ Налаштування» in the menu: bold, so it reads as a submenu
+
+**What.** The Arbiter: «зроби назву жирним (що це має субменю)». Its place at the end of TOOLS is
+right (tcc#79).
+
+**Where.** Mac, `a71dc24`, the main menu.
+
+**Task.** None yet.
+
+### 92. After a new reviewer is picked, the footer keeps the previous one's last call in red
+
+**What.** The pick «API · gemini-pro-latest» (then «API · gemini-3.1-pro-preview») went green —
+answered at once — and beside it the status stayed «! gpt-5.6-terra · 2 h ago» in red: the last
+call of the reviewer before, which reads as this one being broken. The Arbiter: «і ось це дивно».
+
+**Where.** Mac, `a71dc24`, the footer's AI CRITIC (screenshots 9 and 10, 2026-09-27).
+
+**Task.** None yet.
+
+### 93. TCC's own lines in the dialog still come as «SYSTEM · LEDGER»
+
+**What.** Seen on the Arbiter's screenshots, not reported by him — recorded by the session.
+«Рецензент тепер gemini-pro-latest: наступний виклик call_critic піде до нього …» and «TCC почав хід
+через 1 твій запит з інтерфейсу …» are TCC talking about itself, labelled as ledger records — 83's
+class, which moved only the project-folder notice to «SYSTEM · TCC».
+
+**Where.** Mac, `a71dc24`, the in-app AI dialog (screenshots 9 and 10).
+
+**Task.** None yet.
+
+### 94. «дивно про версії»: what the diagnostics say about the versions
+
+**What.** The Arbiter's words beside the Diagnostics → «Установка» tab. What it shows: «TCC 0.1.43 —
+актуальна» with commit `a71dc24` (the wave's build, past the 0.1.43 tag); «Скіл 3.0.62 — актуальна»
+from `~/.claude/skills/autosound-tuning` → the skill's working tree at `152779b`; the window title
+«TCC 0.1.43 · skill 3.0.62». Beside it the generator asks again «яка версія методу стоїть — 3.0.62 чи
+пін 3.0.61?» (86: the car project pins 3.0.61). What exactly reads wrong is his to say.
+
+**Where.** Mac, `a71dc24` (screenshot 10, 2026-09-27).
+
+**Task.** None yet.
