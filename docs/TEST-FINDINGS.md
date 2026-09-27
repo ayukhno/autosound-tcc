@@ -2660,3 +2660,9 @@ note elided in the middle, where the plain rows show it whole.
 `"omp"` in `VIA_ROUTES` (the interface agreed on hub #216): no version pin, so the skill's working
 tree is enough to test on this Mac. An OMP pick then runs `--via omp` with omp's full selector, a
 session's shell gets `AUTOSOUND_CRITIC_BIN=omp`, and `critic_reaches` asks for omp on PATH.
+
+**Checked live 2026-09-27 (Mac, `bf5d8a1`, method v3.0.63):** «OMP · Gemini 3.1 Pro» was asked at once
+through omp (`google-antigravity/gemini-3.1-pro`) and came back refused in omp's own words — Cloud Code
+Assist 429 `RESOURCE_EXHAUSTED`, the Antigravity account's quota — with the method's remedy under it
+(«квоту або ємність вичерпано — сходинка 0: зачекай і повтори»). The route works; the model is not
+a 404 any more.
