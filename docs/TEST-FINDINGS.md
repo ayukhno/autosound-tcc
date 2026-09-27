@@ -2879,3 +2879,26 @@ in W-4 — the reference and the installer say «pin it from its running window�
 **Weight.** Medium: the compare box looks empty — nothing says a version can be picked.
 
 **Task.** tcc#96 (W-4).
+
+### 106. Windows: an omp session hangs on «Запускаю OMP · …» — the retry of tcc#87 leaves the dead omp's end-marker in the queue
+
+**What.** The Arbiter, 2026-09-27: «в ТСС під віндоус не стартує ШІ на OMP» — «зависання». The dialog shows
+only «Запускаю OMP · Claude Sonnet 5 — перший хід читає скіл і стан проєкту, тому повільний.», nothing after
+(screenshot 3). The VM's log: 20:17:40 and 20:23:01 «omp refused --tools …inspect_image; starting again with
+…», and after the second one omp WORKED — `get_tcc_state`, `report_phase`, `show_plan`, `reconcile_plan` at
+20:23:09–18 — while the dialog stayed empty.
+
+**Where.** Windows VM, omp 17.4.0, TCC at the W-3 branch (title «TCC 0.1.43 · skill 3.0.63»), project
+`testAgy-auto`. Every omp session on a machine whose omp has no `inspect_image` — the Mac too, once its omp
+(17.2.9) updates. In v0.1.44.
+
+**Cause (found 2026-09-27, reproduced on the Mac).** `OmpSession._start_process` (tcc#87): the refused omp
+exits, its frame reader ends and puts `None` — «the process ended» — into `self._events`. The retry makes
+fresh `_ready`/`_ended` events but keeps the queue. The opening turn's `_prompt` then reads that `None` first
+and returns as if omp died mid-turn: no event, no notice, no turn end. The second omp runs the prompt, and
+what it says waits in a queue nobody reads. Reproduced with the test's fake omp: after `_start_process()` the
+queue holds one item, `None`. The test of tcc#87 checks `_start_process` only, never a turn after it.
+
+**Weight.** High: no omp session is usable on that machine.
+
+**Task.** tcc#97 (W-4).
