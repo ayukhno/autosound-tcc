@@ -2635,6 +2635,12 @@ from `~/.claude/skills/autosound-tuning` → the skill's working tree at `152779
 «TCC 0.1.43 · skill 3.0.62». Beside it the generator asks again «яка версія методу стоїть — 3.0.62 чи
 пін 3.0.61?» (86: the car project pins 3.0.61). What exactly reads wrong is his to say.
 
+**The Arbiter:** «чому він питає про версію якщо скіл вже оновлений?» — the update reached the personal
+copy; the project's own `.claude/skills/autosound-tuning` still links the v3.0.61 checkout, and the
+diagnostics, the title and the tab say «3.0.62 — актуальна» without a word of the project's pin. TCC's
+half: name the project's own method beside the personal one, and say when they differ. His answer
+to the session (3.0.61 or 3.0.62) is the project's, given in the car session.
+
 **Where.** Mac, `a71dc24` (screenshot 10, 2026-09-27).
 
 **Task.** None yet.
