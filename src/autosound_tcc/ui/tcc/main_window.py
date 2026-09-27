@@ -1737,13 +1737,20 @@ class MainWindow(QMainWindow):
         """
         generator = self._project_setting(_GENERATOR_KEY)
         critic = self._project_setting(_CRITIC_KEY)
-        entries = model_choices.choices([]) + model_choices.critic_choices([])
+        active = self._active_omp()
+        entries = model_choices.choices(active) + model_choices.critic_choices(active)
 
         def label_for(key: str) -> str:
+            """With its route, as the picker says it — «OMP · Claude Opus 5» (finding 84, tcc#75):
+            the bare model said nothing of which way it runs, and the route is whose bill it is."""
             if not key:
                 return i18n.t("modelUnchosen")
             choice = model_choices.find(entries, key)
-            return choice.label if choice else key.split(":", 1)[-1]
+            if choice:
+                return f"{choice.route} · {choice.label}"
+            harness, _, model = key.partition(":")
+            route = model_choices.ROUTES.get(harness, (harness.upper(), ""))[0]
+            return f"{route} · {model}" if model else key
 
         gate = self._effective_gate()
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))

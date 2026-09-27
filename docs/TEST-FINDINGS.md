@@ -2487,6 +2487,10 @@ google-antigravity/gemini…» with no route; the Arbiter wants OMP named there 
 
 **Task.** tcc#75 (with 83), on W-3 by the Arbiter's word 2026-09-27.
 
+**Built:** each model in «ПАРАМЕТРИ ПРОЄКТУ» carries its route as the picker does — «OMP · Claude
+Opus 5», «AGY · …»; a model the catalogue does not list keeps its selector after the route. The panel
+reads the marked omp models too, so a known one shows its name, not its selector.
+
 ### 85. A reviewer model is found dead only when the first review fails
 
 **What.** The Arbiter: «було б добре з'ясовувати це до запуску». The car session, asked why the

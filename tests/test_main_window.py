@@ -1616,6 +1616,24 @@ def test_system_params_shows_what_tcc_itself_is_set_to():
     assert rows[i18n.t("cfgEffort")] == i18n.t("effort_xhigh")
 
 
+def test_system_params_name_the_route_beside_each_model(monkeypatch):
+    """Finding 84 (tcc#75): «ШІ генератор anthropic/claude-opus-5» with no word of omp — the
+    Arbiter wants the route there as the picker shows it («OMP · …»), known model or not."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+    picked = {mw._GENERATOR_KEY: "omp:anthropic/claude-opus-5",
+              mw._CRITIC_KEY: "agy:gemini-3.8-flash-low"}
+    monkeypatch.setattr(window, "_project_setting", lambda key: picked.get(key, ""))
+    rows = dict(window._app_config_rows())
+
+    assert rows[i18n.t("cfgGenerator")].startswith("OMP · "), rows
+    assert "claude-opus-5" in rows[i18n.t("cfgGenerator")].lower().replace(" ", "-")
+    assert rows[i18n.t("cfgCritic")].startswith("AGY · "), rows
+
+
 def test_the_project_section_comes_before_the_system_one():
     """The car in front of you first; the rig and the app's own settings after (user, 2026-08-06)."""
     _app()
