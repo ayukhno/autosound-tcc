@@ -2848,3 +2848,8 @@ skill's `install.ps1` links.
 **Found and built (the switch):** each control-mode tab's `DetailPane` was made with no parent and shown
 (`_embedded`, then `open_table`/`open_eq`) before its tab took it — a shown widget with no parent is a
 window, one per tab, on the way in only. Panes are now born under a hidden parent. tcc#62.
+
+**The terminal before the splash — by design, kept (the Arbiter, 2026-09-27).** It is TCC's own console
+(`child.claim_app_console`): Windows cannot create a console already hidden, so one console with a line
+saying what starts is held while the models are read and then hidden, and every child runs silent inside
+it — his decision of 2026-09-11/13, against a flash per child. Told so, he kept it.
