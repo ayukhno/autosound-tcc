@@ -2949,9 +2949,13 @@ session does not start.
 **What the screen shows.** TCC's own line plus the last five lines of omp's stderr (`OmpSession._why`), and all
 five are stack frames — omp's own message, the one line that says why, is above them and not shown.
 
-**A hypothesis, not checked:** the same `--tools …,inspect_image` refusal as 106 (omp 18 has no `inspect_image`),
-but omp 18 prints a stack after it, so the «Valid tools: …» line is outside the five-line tail,
-`tools_omp_takes` finds nothing, and the retry never happens.
+**Cause (checked 2026-09-27, omp 18.3.5 downloaded to a scratch folder with its own HOME, the Arbiter's
+machines untouched).** Started with TCC's own flags, omp 18.3.5 exits 1 with 14 lines of stderr: the source
+excerpt, «CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: read, write, …» on line 9, then the
+five frames — the same five, at the same offsets, as on the Arbiter's screen. `_why` keeps the last five lines;
+`tools_omp_takes` on them returns None, so there is no retry and the frames are all the message says. On the
+whole stderr it returns the seven tools. With those seven, omp 18.3.5 reports `ready` in `rpc-ui` (protocol
+1, 2). So on omp 18 two defects stand in a row: this one, and behind it 106's stale end-marker.
 
 **Weight.** High: no omp session on omp 18.
 
