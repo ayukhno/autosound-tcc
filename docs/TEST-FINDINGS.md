@@ -2383,6 +2383,14 @@ behind the models window, and a moment later it went behind TCC as well.
 
 **Checked live 2026-09-27 (Mac, `de20037`):** the terminal still opens behind TCC, «як і було».
 
+**Found and built (2026-09-27):** TCC's log had the models window active again 0.2–0.4 s after each
+`osascript` (its once-only catalogue reload ran), so the terminal did come forward and TCC took the
+front back. A probe on this Mac (a Qt window + window-modal dialog opening the terminal through
+`terminal_launcher`) kept Terminal in front; a `RoundedTooltip.show_at` 0.3 s later put the probe in
+front again, and the same tip shown without `raise_()` did not. Qt's macOS `raise()` activates the
+application, and the button's hover tip called it. The tip no longer raises; the probe against the
+fixed tree keeps Terminal in front.
+
 ### 80. An omp session hangs inside TCC's own `get_tcc_state`
 
 **What.** «Запускаю Claude Opus 5 …», then «120s with no output. Still inside

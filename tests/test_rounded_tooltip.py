@@ -42,3 +42,19 @@ def test_show_at_paints_an_opaque_rounded_box_not_a_fully_transparent_one():
     assert img.pixelColor(w // 2, h - 3).alpha() == 255
 
     tip.hide_tip()
+
+
+def test_show_at_does_not_raise_the_tip_because_on_macos_that_activates_tcc(monkeypatch):
+    """Finding 79 again (tcc#71): «Налаштувати omp…» opened the terminal, and TCC came back over
+    it a moment later. The button's hover tip was shown with `raise_()`, and Qt's macOS `raise()`
+    activates the whole application (`QT_MAC_SET_RAISE_PROCESS`, on by default). Measured on the
+    Arbiter's Mac 2026-09-27: the terminal in front, a tip shown with `raise_()` 0.3 s later put
+    the app in front again, and the same tip shown without it did not. A `ToolTip` window is
+    already above the others, so the raise bought nothing."""
+    _app()
+    tip = RoundedTooltip.instance()
+    raised = []
+    monkeypatch.setattr(tip, "raise_", lambda: raised.append(True))
+    tip.show_at(QPoint(0, 0), "tip")
+    tip.hide_tip()
+    assert raised == []

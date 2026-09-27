@@ -48,8 +48,10 @@ class RoundedTooltip(QLabel):
         # Offset so the cursor doesn't sit on top of (and immediately re-trigger leave/enter on)
         # the popup itself -- same rough offset the native tooltip uses.
         self.move(self._fit_on_screen(global_pos + QPoint(14, 18)))
+        # No `raise_()`: a `ToolTip` window is above the others already, and on macOS Qt's
+        # `raise()` activates the whole application — a tip shown while the terminal
+        # «Налаштувати omp…» opened was in front put TCC back over it (finding 79, tcc#71).
         self.show()
-        self.raise_()
 
     def _fit_on_screen(self, top_left: QPoint) -> QPoint:
         """Keep the whole tip on the screen the cursor is on.
