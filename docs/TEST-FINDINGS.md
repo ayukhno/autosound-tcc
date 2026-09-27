@@ -2572,3 +2572,15 @@ menu action's, the «copied» note) keep their callers' hiding. Not checked live
 **Task.** tcc#79, his word 2026-09-27.
 
 **Built:** the submenu is the last line of TOOLS, right above HELP.
+
+### 89. «Налаштувати omp…» at `a71dc24`: «could not open a terminal», osascript exit 1
+
+**What.** The models window's status line: «could not open a terminal: Command '['osascript', '-e',
+'tell application "Terminal" to do script "cd /Users/o.yukhno/dev/autosound/car/passat-b8-2026-aya &&
+exec omp setup"\ntell application "Terminal" to activate']' returned non-zero exit status 1.» No
+terminal at all — before `a71dc24` it opened, behind TCC.
+
+**Where.** Mac, `a71dc24` (reinstalled for the batch test), Settings → the omp models → «Налаштувати
+omp…» (screenshot 7, 2026-09-27).
+
+**Task.** tcc#71, reopened by this test.
