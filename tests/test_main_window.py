@@ -5071,3 +5071,54 @@ def test_the_dialog_names_the_generator_with_its_route():
 
     omp = mc.Choice(harness="omp", model="anthropic/claude-opus-5", label="Claude Opus 5")
     assert _session_title(omp) == "OMP · Claude Opus 5"
+
+
+def test_a_new_reviewer_that_answered_its_check_is_what_the_status_names(monkeypatch):
+    """Finding 92 (tcc#82): the pick went green and beside it stayed «! gpt-5.6-terra · 2 h ago»
+    in red — the previous reviewer's last review. Once the pick has answered its check, the status
+    names it, not someone else's review from hours ago."""
+    from autosound_tcc.core import availability, critic
+
+    _app()
+    window = MainWindow()
+    combo = window._ai_critic_combo
+    key = "api:gemini-pro-latest"
+    combo.setCurrentIndex(combo.findData(key))
+    monkeypatch.setattr(critic, "last_call", lambda _p=None: {
+        "model": "gpt-5.6-terra", "at": "2026-09-27T08:00:00+00:00", "mode": "answered"})
+    availability.succeeded(key)
+    try:
+        window._refresh_critic_status()
+        text = window._critic_status.text()
+        assert "gemini-pro-latest" in text and "gpt-5.6-terra" not in text, text
+        assert "kv-warn" not in str(window._critic_status.property("class"))
+    finally:
+        availability.reset()
+
+
+def test_a_bold_row_is_measured_in_bold_so_its_note_is_not_cut():
+    """Finding 95 (tcc#84): «OMP · Gemini 3.1 Pro · через …— з наступним оновленням методу» — the
+    recommended row is bold and wider than the regular font it was measured in, so it alone came
+    back cut in the middle."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFontMetrics
+
+    from autosound_tcc.ui.tcc.theme import mini_combo
+
+    _app()
+    combo = mini_combo()
+    text = "OMP · Gemini 3.1 Pro  ·  через omp — з наступним оновленням методу"
+    combo.addItem(text, "a")
+    combo.addItem("SDK · Claude Opus 5", "b")
+    bold = combo.font()
+    bold.setBold(True)
+    # Twice the size too: offscreen, bold and regular can measure the same, and the rule under
+    # test is "each row in its own font", whatever makes it wider.
+    bold.setPointSizeF(combo.font().pointSizeF() * 2)
+    combo.setItemData(0, bold, Qt.ItemDataRole.FontRole)
+    combo.setFixedWidth(60)
+
+    combo.showPopup()
+    combo.hidePopup()
+
+    assert combo.view().minimumWidth() >= QFontMetrics(bold).horizontalAdvance(text)

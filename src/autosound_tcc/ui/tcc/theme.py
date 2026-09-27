@@ -15,7 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QComboBox, QWidget
 
 Mode = Literal["dark", "light"]
@@ -45,8 +46,14 @@ class MiniCombo(QComboBox):
     def showPopup(self) -> None:  # noqa: N802 (Qt override)
         view = self.view()
         if view is not None and self.count():
-            metrics = self.fontMetrics()
-            widest = max(metrics.horizontalAdvance(self.itemText(i)) for i in range(self.count()))
+            # In each row's own font: a bold (recommended) row is wider than the box's, and measured
+            # in the box's it alone came back cut in the middle (finding 95, tcc#84).
+            def advance(i: int) -> int:
+                font = self.itemData(i, Qt.ItemDataRole.FontRole)
+                metrics = QFontMetrics(font) if isinstance(font, QFont) else self.fontMetrics()
+                return metrics.horizontalAdvance(self.itemText(i))
+
+            widest = max(advance(i) for i in range(self.count()))
             view.setMinimumWidth(widest + _POPUP_CHROME_PX)
         super().showPopup()
 
@@ -621,6 +628,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     green, beside grey for "not known yet" and red for "does not run". */
     QComboBox[class~="is-ok"] {{
         border-color: {t.ok};
+    }}
+    /* Under the mouse too: the common hover border drawn over it turned a green «answered» red-brown,
+    which read as a refusal (finding 96, tcc#82). Later in the sheet than that rule, so it wins. */
+    QComboBox[class~="is-ok"]:hover {{
+        border-color: {t.ok};
+    }}
+    QComboBox[class~="is-missing"]:hover {{
+        border-color: {t.warn};
     }}
     /* .warn-mark — the "!" that stands in for a sentence there is no room for. Round, red, and
     clickable; hover says what, click says why. */

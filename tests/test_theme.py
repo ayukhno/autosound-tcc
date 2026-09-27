@@ -82,3 +82,20 @@ def test_a_plain_text_field_is_themed():
 
     qss = build_qss(get_theme("dark"))
     assert "QLineEdit {" in qss.replace("QLineEdit {{", "QLineEdit {")
+
+
+def test_the_reviewer_pickers_state_colour_holds_under_the_mouse():
+    """Finding 96 (tcc#82): a green «answered» frame turned red-brown under the cursor — the
+    pickers' common hover border drawn over the state colour — and read as a refusal."""
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        sheet = theme.build_qss(palette)
+        common = sheet.index('QComboBox[class~="mini-select"]:hover')
+        for state, colour in (("is-ok", palette.ok), ("is-missing", palette.warn)):
+            rule = f'QComboBox[class~="{state}"]:hover'
+            assert rule in sheet, (name, state)
+            at = sheet.index(rule)
+            assert at > common, "later in the sheet, so it wins over the common hover"
+            assert colour in sheet[at:].split("}", 1)[0], (name, state)

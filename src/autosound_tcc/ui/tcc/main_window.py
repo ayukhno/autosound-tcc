@@ -4346,6 +4346,14 @@ class MainWindow(QMainWindow):
                 return
         self._critic_status.setToolTip("")
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
+        if chosen is not None and availability.answered(chosen.key) and not (
+                entry and self_check.same_model(model_choices.reviewer_model(chosen),
+                                                str(entry.get("model") or ""))):
+            # The pick answered its check, and the last review was someone else's: name the pick,
+            # not another reviewer's call from hours ago in red (finding 92, tcc#82).
+            self._critic_status.setText(i18n.t("criticCheckAnswered").format(label=chosen.label))
+            self._paint_critic_status(False)
+            return
         if not entry:
             self._critic_status.setText(i18n.t("criticNever"))
             self._paint_critic_status(False)
