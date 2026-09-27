@@ -371,3 +371,46 @@ def test_yielding_the_focus_never_raises():
     anything — the call is silent."""
     terminal_launcher._yield_focus_to("Terminal")
     terminal_launcher._yield_focus_to("NoSuchApp")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+def test_macos_addresses_the_terminal_by_its_bundle_id_not_its_name(recorded, monkeypatch, tmp_path):
+    """Finding 89 (tcc#71): with a Parallels VM running, `application "Terminal"` named the VM's
+    Windows Terminal (`com.parallels.winapp…`), which has no `do script` — osascript stopped at
+    compile, «A "script" can't go after this identifier (-2740)», and no terminal opened at all."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher.Path, "exists", lambda self: False)  # no iTerm
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+
+    launch(tmp_path, "claude")
+    terminal_launcher.run_line("echo hi")
+
+    for argv in recorded:
+        script = argv[2]
+        assert 'application id "com.apple.Terminal"' in script, script
+        assert 'application "Terminal"' not in script, script
+
+    recorded.clear()
+    monkeypatch.setattr(terminal_launcher.Path, "exists", lambda self: True)  # iTerm is there
+    launch(tmp_path, "claude")
+    assert 'application id "com.googlecode.iterm2"' in recorded[0][2]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+def test_a_refused_applescript_is_reported_in_osascripts_own_words(monkeypatch, tmp_path):
+    """The message said «returned non-zero exit status 1» and nothing else: the reason was on
+    osascript's stderr, which nobody kept (finding 89)."""
+    import subprocess
+
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+
+    def refuse(argv, **kw):
+        raise subprocess.CalledProcessError(
+            1, argv, stderr="31:40: syntax error: A “script” can’t go after this identifier. (-2740)")
+
+    monkeypatch.setattr(terminal_launcher.subprocess, "run", refuse)
+    with pytest.raises(TerminalLaunchError) as refused:
+        launch(tmp_path, "claude")
+    assert "-2740" in str(refused.value)

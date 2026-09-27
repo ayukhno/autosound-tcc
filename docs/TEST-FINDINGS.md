@@ -2587,6 +2587,14 @@ omp…» (screenshot 7, 2026-09-27).
 
 **Task.** tcc#71, reopened by this test.
 
+**Found and built (2026-09-27):** osascript stopped at compile — «31:40: syntax error: A "script" can't
+go after this identifier. (-2740)». `id of application "Terminal"` answered
+`com.parallels.winapp…f51a810d…`: the running VM «Windows 11 (Musway-old)» publishes its Windows
+Terminal to macOS under the same name, and it has no `do script`. In the morning the VM was down,
+so the name reached Apple's Terminal. The scripts now address `application id "com.apple.Terminal"`
+(and iTerm's id), and a refusal carries osascript's own words. Checked live with the VM up: a
+terminal opened in the car project.
+
 ### 90. The dialog names the generator without its route: no OMP anywhere in the conversation
 
 **What.** The Arbiter, after `a71dc24`: the settings.json bubble is gone, «але Генератор без

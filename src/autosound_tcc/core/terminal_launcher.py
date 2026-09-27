@@ -119,20 +119,7 @@ def run_line(line: str) -> None:
         app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
         log.info("terminal: %s via osascript", app)
         _yield_focus_to(app)
-        if app == "iTerm":
-            script = (
-                'tell application "iTerm"\n'
-                "  activate\n"
-                "  set w to (create window with default profile)\n"
-                f"  tell current session of w to write text {_applescript_literal(line)}\n"
-                "end tell"
-            )
-        else:
-            script = (
-                f'tell application "Terminal" to do script {_applescript_literal(line)}\n'
-                'tell application "Terminal" to activate'
-            )
-        subprocess.run(["osascript", "-e", script], check=True)
+        _osascript(_mac_script(app, line))
         return
     if sys.platform.startswith("win"):
         # `/k` keeps the window after the command ends — the whole point here.
@@ -216,6 +203,39 @@ def _yield_focus_to(app: str) -> None:
         app_log.logger().info("terminal: could not yield the focus to %s", app)
 
 
+def _mac_script(app: str, line: str) -> str:
+    """The AppleScript that opens `app` on one shell line — addressed by BUNDLE ID, not by name.
+
+    By name, "Terminal" is whatever answers to it: with a Parallels VM running, that was the VM's
+    Windows Terminal (`com.parallels.winapp…`), which has no `do script`, and osascript stopped at
+    compile — «A "script" can't go after this identifier (-2740)» — with no window at all (finding
+    89, tcc#71). The bundle id names Apple's Terminal and iTerm whatever else is installed."""
+    bundle = _MAC_BUNDLES[app]
+    if app == "iTerm":
+        return (
+            f'tell application id "{bundle}"\n'
+            "  activate\n"
+            "  set w to (create window with default profile)\n"
+            f"  tell current session of w to write text {_applescript_literal(line)}\n"
+            "end tell"
+        )
+    return (
+        f'tell application id "{bundle}" to do script {_applescript_literal(line)}\n'
+        f'tell application id "{bundle}" to activate'
+    )
+
+
+def _osascript(script: str) -> None:
+    """Run it, and keep osascript's own words: «exit status 1» alone named no reason (finding 89)."""
+    try:
+        subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        said = (exc.stderr or "").strip()
+        raise TerminalLaunchError(
+            f"could not open a terminal: osascript: {said or f'exit status {exc.returncode}'}"
+        ) from exc
+
+
 def _applescript_literal(text: str) -> str:
     """Quote a Python string as an AppleScript string literal.
 
@@ -236,20 +256,7 @@ def _launch_macos(
     command = _posix_command(project_dir, cli, hint, model, extra)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     _yield_focus_to(app)
-    if app == "iTerm":
-        script = (
-            'tell application "iTerm"\n'
-            "  activate\n"
-            "  set w to (create window with default profile)\n"
-            f"  tell current session of w to write text {_applescript_literal(command)}\n"
-            "end tell"
-        )
-    else:
-        script = (
-            f'tell application "Terminal" to do script {_applescript_literal(command)}\n'
-            'tell application "Terminal" to activate'
-        )
-    subprocess.run(["osascript", "-e", script], check=True)
+    _osascript(_mac_script(app, command))
 
 
 def _launch_windows(
