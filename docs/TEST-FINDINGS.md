@@ -2614,6 +2614,9 @@ call of the reviewer before, which reads as this one being broken. The Arbiter: 
 
 **Where.** Mac, `a71dc24`, the footer's AI CRITIC (screenshots 9 and 10, 2026-09-27).
 
+Again at `bf5d8a1`: «OMP · GPT-5.6-Terra» green, and beside it «gpt-5.6-terra · 3 h ago» — the last
+real review (then through codex), not the check that had just answered (screenshot 13).
+
 **Task.** None yet.
 
 ### 93. TCC's own lines in the dialog still come as «SYSTEM · LEDGER»
@@ -2666,3 +2669,5 @@ through omp (`google-antigravity/gemini-3.1-pro`) and came back refused in omp's
 Assist 429 `RESOURCE_EXHAUSTED`, the Antigravity account's quota — with the method's remedy under it
 («квоту або ємність вичерпано — сходинка 0: зачекай і повтори»). The route works; the model is not
 a 404 any more.
+
+«OMP · GPT-5.6-Terra» went green the same minute: answered through omp.
