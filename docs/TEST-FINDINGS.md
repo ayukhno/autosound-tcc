@@ -2810,6 +2810,9 @@ the VM's omp has no such tool. The VM's omp is **17.4.0**, the Mac's 17.2.9: a n
 
 **Task.** None yet.
 
+**Built:** tcc#87 — when omp refuses a tool of TCC's allowlist it names the ones it has; TCC starts
+it once more with the allowlist narrowed to those (`tools_omp_takes`), and logs the change.
+
 ### 103. Windows: an omp session warns the project has no `.claude/skills/autosound-tuning`
 
 **What.** «Запускаю OMP · Gemini 3.1 Flash Image …», then «⚠️ This project has no

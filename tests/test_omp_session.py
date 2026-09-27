@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 from concurrent.futures import Future
+
+import pytest
 
 
 from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall, TurnEnd
@@ -899,3 +903,37 @@ def test_omp_waits_for_a_tool_as_long_as_a_review_may_take(tmp_path, monkeypatch
     except OSError:
         pass
     assert int(seen["env"]["OMP_MCP_TIMEOUT_MS"]) > critic.DEFAULT_TIMEOUT_S * 1000
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a POSIX script stands in for omp")
+def test_a_newer_omp_that_dropped_a_tool_is_started_again_with_the_tools_it_names(tmp_path,
+                                                                                   monkeypatch):
+    """Finding 102 (tcc#87): omp 17.4.0 has no `inspect_image`, refused TCC's `--tools` list —
+    «Unknown tool in --tools: inspect_image. Valid tools: read, write, …» — and no omp session
+    started on that machine. omp names what it takes; TCC starts it again with those."""
+    import asyncio as aio
+    import textwrap
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    omp = bindir / "omp"
+    omp.write_text(textwrap.dedent('''\
+        #!/usr/bin/env python3
+        import sys, time
+        tools = sys.argv[sys.argv.index("--tools") + 1].split(",")
+        if "inspect_image" in tools:
+            sys.stderr.write("CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: "
+                             "read, write, edit, glob, grep, bash, ask, ast_edit, goal.\\n")
+            sys.exit(1)
+        print('{"type": "ready"}', flush=True)
+        time.sleep(0.2)
+        '''), encoding="utf-8")
+    omp.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+    session = OmpSession(project_dir=tmp_path)
+
+    aio.run(session._start_process())
+
+    assert session._saw_ready
+    assert "inspect_image" not in session._tools
+    assert set(session._tools) == {"read", "write", "edit", "glob", "grep", "bash", "ask"}

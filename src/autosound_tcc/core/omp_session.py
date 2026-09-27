@@ -95,6 +95,24 @@ _ENABLED_TOOLS = (
     "read", "write", "edit", "glob", "grep", "bash", "ask", "inspect_image",
 )
 
+_UNKNOWN_TOOL = re.compile(r"Unknown tool in --tools: (\S+?)\.\s*Valid tools: ([^\n]+)")
+
+
+def tools_omp_takes(said: str, wanted) -> Optional[list[str]]:
+    """The tools of `wanted` that omp says it has, when it refused one of them; else None.
+
+    omp 17.4.0 dropped `inspect_image` and refused the whole `--tools` list over it — «Unknown tool
+    in --tools: inspect_image. Valid tools: read, write, …» — so no omp session started on that
+    machine (finding 102, tcc#87). omp names what it takes; this keeps the allowlist's meaning (only
+    those tools) and drops what this omp does not have."""
+    found = _UNKNOWN_TOOL.search(said or "")
+    if not found:
+        return None
+    valid = {name.strip().rstrip(".") for name in found.group(2).split(",")}
+    kept = [tool for tool in wanted if tool in valid]
+    return kept if kept and kept != list(wanted) else None
+
+
 # The version omp actually accepts. It advertises `[1, 2]` in its `ready` frame and then rejects 1
 # with "Unsupported RPC protocol version" -- checked, not assumed.
 RPC_PROTOCOL_VERSION = 2
@@ -385,6 +403,8 @@ class OmpSession:
         self._ready = asyncio.Event()
         self._saw_ready = False
         self._ended = asyncio.Event()
+        #: The built-ins this session allows, narrowed to what this omp has (`tools_omp_takes`).
+        self._tools = list(_ENABLED_TOOLS)
         # The UI's signal bus, for delivering un-acknowledged signals inside the turn itself.
         # Same contract as `TuningSession.bus` (F-009): assigned by `AgentWorker` once it builds
         # the session, None in headless runs -- delivery must not depend on which front-end runs.
@@ -417,7 +437,7 @@ class OmpSession:
             # MCP servers anyway: omp imports `~/.claude.json`'s top-level servers in every
             # profile, and 17.2.5 has no switch for that source.
             "--tools",
-            ",".join(_ENABLED_TOOLS),
+            ",".join(self._tools),
             "--config",
             str(overlay_path(self.project_dir)),
             # Sessions live with the project, so resuming is "continue this project's last one"
@@ -859,12 +879,7 @@ class OmpSession:
         # Before the process starts: omp scans for skills at startup, so a link created later in
         # the turn would not be seen until the next session.
         vendor_loader.link_skill_into(self.project_dir)
-        await self._spawn()
-        self._stderr_task = asyncio.create_task(self._drain_stderr())
-        # Started before anything is awaited, so no frame is read anywhere else: whatever arrives
-        # during startup is classified, answered and logged like every other frame.
-        self._reader = asyncio.create_task(self._read_frames())
-        await self._await_ready()
+        await self._start_process()
         self._send(
             {"id": self._next_id(), "type": "negotiate_protocol",
              "protocolVersion": RPC_PROTOCOL_VERSION}
@@ -876,6 +891,36 @@ class OmpSession:
                 yield Notice(warning)
         async for event in self._prompt(self._opening(prompt or "")):
             yield event
+
+    async def _start_process(self) -> None:
+        """Spawn omp and wait for `ready` — once more with the tools it names, if it refused one
+        of ours (a newer omp that dropped a tool, finding 102, tcc#87)."""
+        for attempt in (1, 2):
+            await self._spawn()
+            self._stderr_task = asyncio.create_task(self._drain_stderr())
+            # Started before anything is awaited, so no frame is read anywhere else: whatever
+            # arrives during startup is classified, answered and logged like every other frame.
+            self._reader = asyncio.create_task(self._read_frames())
+            try:
+                await self._await_ready()
+                return
+            except RuntimeError as exc:
+                # The process is gone; let its stderr finish arriving before reading the refusal.
+                try:
+                    await asyncio.wait_for(self._stderr_task, timeout=2)
+                except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                    pass
+                kept = tools_omp_takes(self._why(str(exc)), self._tools)
+                if attempt == 2 or kept is None:
+                    raise RuntimeError(self._why(str(exc).splitlines()[0])) from exc
+                app_log.logger().warning(
+                    "omp refused --tools %s; starting again with %s",
+                    ",".join(self._tools), ",".join(kept))
+                self._tools = kept
+                self._ready = asyncio.Event()
+                self._ended = asyncio.Event()
+                self._saw_ready = False
+                self._stderr_tail = []
 
     async def _spawn(self) -> None:
         self._proc = await asyncio.create_subprocess_exec(
