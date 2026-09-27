@@ -228,7 +228,8 @@ def _mac_script(app: str, line: str) -> str:
 def _osascript(script: str) -> None:
     """Run it, and keep osascript's own words: «exit status 1» alone named no reason (finding 89)."""
     try:
-        subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+        subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     except subprocess.CalledProcessError as exc:
         said = (exc.stderr or "").strip()
         raise TerminalLaunchError(
