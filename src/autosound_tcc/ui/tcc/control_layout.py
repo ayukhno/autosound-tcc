@@ -32,6 +32,7 @@ import subprocess
 import sys
 from typing import Optional
 
+import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -157,10 +158,27 @@ def _compare_now(window) -> tuple:
     return key, view, said
 
 
+_NURSERY: Optional[QWidget] = None
+
+
+def _nursery() -> QWidget:
+    """A parent that is never shown, for a pane between its making and its tab.
+
+    A widget with no parent that is shown IS a window: `_embedded` shows its pane, and
+    `open_table`/`open_eq` show it again, before the tab takes it — on Windows one small window
+    flashed per tab on the way into this mode, and none on the way out (finding 104, tcc#62). A
+    child of a hidden widget can be told to show without anything appearing; the tab reparents it."""
+    global _NURSERY
+    if _NURSERY is None or not shiboken6.isValid(_NURSERY):
+        _NURSERY = QWidget()
+    return _NURSERY
+
+
 def _embedded(window, view) -> DetailPane:
     """A pane inside a tab: no menu of its own — the tab above IS the choice — and compared with
     what the window compares with, which the one list by the tabs sets (finding 47, 1 and 4)."""
     pane = DetailPane()
+    pane.setParent(_nursery())
     pane.set_embedded(True)
     pane.set_eq_order(getattr(window, "_eq_order", None) or eq_field_order(None))
     pane.set_view(view)

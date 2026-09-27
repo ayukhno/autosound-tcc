@@ -419,3 +419,32 @@ def test_a_tier_with_nothing_in_it_has_no_tab_and_no_tree_group(tmp_path, monkey
     names = [layout.tabs.tabText(i) for i in range(layout.tabs.count())]
     assert i18n.t("ctlTableI") not in names
     layout.leave()
+
+
+def test_building_the_tabs_shows_no_window_of_its_own(tmp_path, monkeypatch):
+    """Finding 104 (tcc#62): entering «Режим контролю» on Windows flashed many small windows, and
+    leaving did not. Each tab's `DetailPane` was built with no parent and shown at once
+    (`_embedded`, then `open_table`/`open_eq`), and a widget with no parent that is shown IS a
+    window — one per tab, for the moment before the tab took it."""
+    from PySide6.QtCore import QEvent, QObject
+
+    window = _window(tmp_path, monkeypatch)
+    shown = []
+
+    class Spy(QObject):
+        def eventFilter(self, obj, event):  # noqa: N802
+            if event.type() == QEvent.Type.Show and getattr(obj, "isWindow", lambda: False)() \
+                    and obj is not window:
+                shown.append(type(obj).__name__)
+            return False
+
+    spy = Spy()
+    QApplication.instance().installEventFilter(spy)
+    try:
+        pane = control_layout._embedded(window, getattr(window, "_view", None))
+        assert not pane.isWindow(), "an embedded pane is never a window of its own"
+        window._control_layout.enter()
+    finally:
+        QApplication.instance().removeEventFilter(spy)
+        window._control_layout.leave()
+    assert "DetailPane" not in shown, shown

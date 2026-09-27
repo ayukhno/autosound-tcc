@@ -2844,3 +2844,7 @@ skill's `install.ps1` links.
 **Where.** Windows VM, `3ef4787`, project `testAgy-auto`.
 
 **Task.** tcc#62 (open), tcc#66 (checked live).
+
+**Found and built (the switch):** each control-mode tab's `DetailPane` was made with no parent and shown
+(`_embedded`, then `open_table`/`open_eq`) before its tab took it — a shown widget with no parent is a
+window, one per tab, on the way in only. Panes are now born under a hidden parent. tcc#62.
