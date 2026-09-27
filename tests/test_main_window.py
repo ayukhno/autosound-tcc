@@ -3140,6 +3140,8 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     help_at = labels.index(i18n.t("menuHelp").upper())
     visible = [a for a in actions[:help_at] if not a.isSeparator()]
     assert visible[-1].menu() is settings
+    # Bold, so it reads as a submenu (the Arbiter, finding 91, tcc#81).
+    assert settings.menuAction().font().bold()
     assert labels.index(i18n.t("menuTools").upper()) < actions.index(visible[-1])
 
 

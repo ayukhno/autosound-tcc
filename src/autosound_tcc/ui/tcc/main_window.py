@@ -1191,8 +1191,12 @@ class MainWindow(QMainWindow):
         target_action = menu.addAction(i18n.t("menuTargetTool"))
         target_action.setToolTip(i18n.t("targetToolTip"))
         target_action.triggered.connect(self._open_target_curve_tool)
-        # The last line of TOOLS (the Arbiter, 2026-09-27); it closed SESSION before.
+        # The last line of TOOLS (the Arbiter, 2026-09-27); it closed SESSION before. Bold, so it
+        # reads as a submenu (finding 91, tcc#81).
         menu.addMenu(settings)
+        title_font = settings.menuAction().font()
+        title_font.setBold(True)
+        settings.menuAction().setFont(title_font)
 
         self._menu_section(menu, "menuHelp")
         # Online, at this build's own tag: `docs/` is not in the installed package, and a link to
