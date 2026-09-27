@@ -2903,6 +2903,11 @@ queue holds one item, `None`. The test of tcc#87 checks `_start_process` only, n
 
 **Task.** tcc#97 (W-4).
 
+**omp 18 (2026-09-27).** The Arbiter's fresh Windows install brought omp **18.3.5**. omp 18 has no
+`inspect_image` at all (no file names it in the v18.2.4 or v18.3.5 trees), so there every session is refused on
+`--tools`, takes the retry and hangs, whatever the model. tcc#97's fix is checked against omp 18 too — TCC has
+not run against a major 18 yet.
+
 ### 107. «Оновити TCC» updates TCC alone: omp and the other tools stay where they were
 
 **What.** The Arbiter, 2026-09-27, after «Оновити TCC» on the second Mac (0.1.43 → 0.1.44): «я оновлювався
