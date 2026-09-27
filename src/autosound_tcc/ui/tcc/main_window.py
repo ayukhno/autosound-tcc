@@ -4234,72 +4234,24 @@ class MainWindow(QMainWindow):
         combo.style().polish(combo)
 
     def _refresh_critic_warning(self) -> None:
-        """Say when the reviewer is not what the picker appears to promise.
+        """Say when the reviewer is not what the picker appears to promise — the «!» beside it.
 
-        Two ways it stops being an independent review, both of them silent until now:
-
-        * **Substituted** — the stored key is aliased on this machine, so the model that answers is
-          not the one named. `resolve()` has always known (it is in `get_tcc_state` as
-          `substituted`, which is how the model found out); the footer did not say it.
-        * **Same vendor as the Generator** — the skill's fallback rung when the chosen reviewer is
-          unreachable. It still reviews, but cross-vendor anti-anchoring is the whole reason the
-          reviewer is a different vendor, and losing it quietly is exactly SCR-041's failure: a
-          downgrade that agrees with you instead of erroring.
+        Yellow when all it says is a warning (substituted, answered by another model, the same
+        vendor, a Flash model): the review happens. Red when the pick cannot review at all (no
+        transport, no omp route, no login, the generator's own model). The Arbiter, 2026-09-27:
+        «зроби жовтим не червоним» for the same vendor (finding 100, tcc#86).
         """
         warn = getattr(self, "_critic_warn", None)
         if warn is None:
             return
-        key = str(self._ai_critic_combo.currentData() or "")
-        resolved = model_choices.resolve(self._critic_choices, key)
-        notes, tips = [], []
-        if resolved.note:
-            notes.append(i18n.t("criticSubstituted"))
-            tips.append(resolved.note)
-        # Third condition, and the only one backed by evidence rather than configuration: who
-        # actually answered last. A live session proved the other two can both look clean while a
-        # different model does the reviewing — the script falls back from the API to a local CLI
-        # and that CLI runs whatever it is set to (2026-08-12).
-        actual = self_check.reviewer_mismatch()
-        if actual:
-            notes.append(i18n.t("criticAnswered").format(model=actual[1]))
-            tips.append(i18n.t("selfReviewerDiffDetail").format(wanted=actual[0], answered=actual[1]))
-        generator = self._generator_choice()
-        chosen = resolved.choice
-        # Fourth, and the one that would have saved him two silent clipboard packages: a reviewer
-        # this machine has no transport for. The picker offers every model the Arbiter marked,
-        # including vendors the reviewer SCRIPT cannot call at all -- and until now the first
-        # sign of that was a package where a critique should have been (2026-08-23).
-        for_reach = chosen or model_choices.Choice(
-            harness=key.partition(":")[0] or "omp",
-            model=key.partition(":")[2] or key, label=key, provider="",
-        )
-        why_not = model_choices.not_a_reviewer(for_reach) if key else ""
-        if why_not == model_choices.NOT_A_REVIEWER_OMP:
-            # Not "clipboard only": nothing is called at all until the method goes through omp.
-            notes.append(i18n.t("criticRowViaOmp"))
-            tips.append(i18n.t("criticViaOmpTip"))
-        elif key and not model_choices.critic_reaches(for_reach):
-            notes.append(i18n.t("criticClipboardOnly"))
-            vendor = model_choices.vendor_of(for_reach)
-            tips.append(i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
-                        .format(model=for_reach.model, vendor=vendor))
-        if why_not == model_choices.NOT_A_REVIEWER_FLASH:
-            notes.append(i18n.t("criticRowNotFlash"))
-            tips.append(i18n.t("criticNotFlashTip"))
-        if chosen is not None and generator is not None:
-            # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
-            # does not recognise, which would make any two unknown models look like a matched pair.
-            vendor = model_choices.vendor_of(chosen)
-            if vendor and vendor == model_choices.vendor_of(generator):
-                notes.append(i18n.t("criticSameVendor"))
-                tips.append(i18n.t("criticSameVendorTip").format(vendor=vendor))
-        # ...and the one the Generator has too: the Claude route with nothing to authenticate with.
-        login_note, login_tip = _sdk_login_note(chosen)
-        if login_note:
-            notes.append(login_note)
-            tips.append(login_tip)
+        pairs, hard = self._critic_notes()
+        notes = [note for note, _tip in pairs]
+        tips = [tip for _note, tip in pairs]
         headline = " · ".join(notes)
         warn.setVisible(bool(notes))
+        warn.setProperty("class", "warn-mark" if hard else "warn-mark warn-mark-soft")
+        warn.style().unpolish(warn)
+        warn.style().polish(warn)
         # Hover says WHAT, the click says why — the same split the diagnostics button uses, and the
         # reason a mark can stand in for a sentence at all.
         self._critic_warn_tip.set_text(headline)
@@ -4307,6 +4259,66 @@ class MainWindow(QMainWindow):
         # The picker keeps its own three colours (`_tint_critic_combo`); the warnings are this
         # mark — tinted by them, it stayed red whatever was picked (finding 55).
         self._tint_critic_combo()
+
+    def _critic_notes(self) -> tuple[list[tuple[str, str]], bool]:
+        """What is wrong with the reviewer pick, as (note, why) pairs, and whether any of it means
+        the pick cannot review at all.
+
+        * **Substituted** — the stored key is aliased on this machine, so the model that answers is
+          not the one named (it is in `get_tcc_state` as `substituted`).
+        * **Answered by another model** — the only condition backed by evidence rather than
+          configuration: the script fell back and another model did the reviewing (2026-08-12).
+        * **No transport** — the reviewer script cannot call it; the first sign of that used to be a
+          package where a critique should have been (2026-08-23).
+        * **Same vendor as the Generator** — it reviews, but cross-vendor anti-anchoring is the
+          reason the reviewer is another vendor (SCR-041).
+        """
+        key = str(self._ai_critic_combo.currentData() or "")
+        resolved = model_choices.resolve(self._critic_choices, key)
+        pairs: list[tuple[str, str]] = []
+        hard = False
+        if resolved.note:
+            pairs.append((i18n.t("criticSubstituted"), resolved.note))
+        actual = self_check.reviewer_mismatch()
+        if actual:
+            pairs.append((i18n.t("criticAnswered").format(model=actual[1]),
+                          i18n.t("selfReviewerDiffDetail").format(wanted=actual[0],
+                                                                   answered=actual[1])))
+        generator = self._generator_choice()
+        chosen = resolved.choice
+        for_reach = chosen or model_choices.Choice(
+            harness=key.partition(":")[0] or "omp",
+            model=key.partition(":")[2] or key, label=key, provider="",
+        )
+        why_not = model_choices.not_a_reviewer(for_reach, generator=generator) if key else ""
+        if why_not == model_choices.NOT_A_REVIEWER_SELF:
+            pairs.append((i18n.t("criticRowSelf"), i18n.t("criticSelfTip")))
+            hard = True
+        elif why_not == model_choices.NOT_A_REVIEWER_OMP:
+            # Not "clipboard only": nothing is called at all until the method goes through omp.
+            pairs.append((i18n.t("criticRowViaOmp"), i18n.t("criticViaOmpTip")))
+            hard = True
+        elif key and not model_choices.critic_reaches(for_reach):
+            vendor = model_choices.vendor_of(for_reach)
+            pairs.append((i18n.t("criticClipboardOnly"),
+                          i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
+                          .format(model=for_reach.model, vendor=vendor)))
+            hard = True
+        if why_not == model_choices.NOT_A_REVIEWER_FLASH:
+            pairs.append((i18n.t("criticRowNotFlash"), i18n.t("criticNotFlashTip")))
+        if chosen is not None and generator is not None and why_not != model_choices.NOT_A_REVIEWER_SELF:
+            # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
+            # does not recognise, which would make any two unknown models look like a matched pair.
+            vendor = model_choices.vendor_of(chosen)
+            if vendor and vendor == model_choices.vendor_of(generator):
+                pairs.append((i18n.t("criticSameVendor"),
+                              i18n.t("criticSameVendorTip").format(vendor=vendor)))
+        # ...and the one the Generator has too: the Claude route with nothing to authenticate with.
+        login_note, login_tip = _sdk_login_note(chosen)
+        if login_note:
+            pairs.append((login_note, login_tip))
+            hard = True
+        return pairs, hard
 
     def _refresh_main_warning(self) -> None:
         """The Generator's own caveat, and it is only ever one.
@@ -4831,7 +4843,8 @@ class MainWindow(QMainWindow):
         generator = self._project_setting(_GENERATOR_KEY)
         critic = self._project_setting(_CRITIC_KEY)
         self._fill_combo(self._ai_main_combo, self._model_choices, generator)
-        self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True)
+        self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True,
+                         generator=self._generator_choice())
         # An unset project reads as the default rather than as an empty row: unlike the model,
         # there is no honest "not chosen yet" here -- some level always runs.
         level = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
@@ -4883,7 +4896,7 @@ class MainWindow(QMainWindow):
         self._reload_model_choices()
 
     @staticmethod
-    def _fill_combo(combo, entries, wanted: str, critic: bool = False) -> None:
+    def _fill_combo(combo, entries, wanted: str, critic: bool = False, generator=None) -> None:
         blocked = combo.blockSignals(True)
         combo.clear()
         for choice in entries:
@@ -4899,10 +4912,11 @@ class MainWindow(QMainWindow):
             state = availability.status(choice)
             # No reviewer, whatever the machine has (tcc#74): an OMP pick goes through omp only
             # and the script has no omp route yet; Flash is no reviewer for the method.
-            why_not = model_choices.not_a_reviewer(choice) if critic else ""
+            why_not = model_choices.not_a_reviewer(choice, generator=generator) if critic else ""
             if why_not:
-                notes.append(i18n.t("criticRowViaOmp" if why_not == model_choices.NOT_A_REVIEWER_OMP
-                                    else "criticRowNotFlash"))
+                notes.append(i18n.t({model_choices.NOT_A_REVIEWER_OMP: "criticRowViaOmp",
+                                     model_choices.NOT_A_REVIEWER_SELF: "criticRowSelf"}
+                                    .get(why_not, "criticRowNotFlash")))
             elif not state.ready:
                 notes.append(availability_view.word(state))
             elif critic and not model_choices.critic_reaches(choice):
@@ -4931,6 +4945,10 @@ class MainWindow(QMainWindow):
                 colour = (current_theme().faint if state.reason == availability.NOT_CHECKED
                           else current_theme().warn)
                 combo.setItemData(row, QColor(colour), Qt.ItemDataRole.ForegroundRole)
+            elif critic and availability.answered(choice.key):
+                # Green for a reviewer that answered this launch, beside red for one refused (the
+                # Arbiter: «покрасити зеленим ті моделі що запрацювали», finding 101, tcc#86).
+                combo.setItemData(row, QColor(current_theme().ok), Qt.ItemDataRole.ForegroundRole)
             if not choice.available or why_not:
                 # Not selectable, and greyed by the style rather than by a colour written here:
                 # a row nobody can pick has to look like one before it is clicked.
@@ -4981,6 +4999,10 @@ class MainWindow(QMainWindow):
             self._update_session_button()
             return
         self._set_project_setting(_GENERATOR_KEY, choice.key)
+        # The reviewer list greys the generator's own model (tcc#85), so it follows this pick.
+        self._fill_combo(self._ai_critic_combo, self._critic_choices,
+                         self._project_setting(_CRITIC_KEY), critic=True, generator=choice)
+        self._refresh_critic_warning()
         # The placeholder has served its purpose the moment a real model is chosen -- but it is
         # dropped *after* this signal has finished being delivered. Removing an item from a combo
         # inside that combo's own `currentIndexChanged` frees the view's internals while Qt is

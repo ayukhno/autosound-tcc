@@ -156,6 +156,8 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     why_not = model_choices.not_a_reviewer(choice)
     if why_not == model_choices.NOT_A_REVIEWER_OMP:
         because.append(OMP_REVIEWER_REFUSAL)
+    if _reviews_itself(project_dir):
+        because.append(SELF_REVIEWER_REFUSAL)
     return {
         "configured": True,
         **({"warning": FLASH_REVIEWER_WARNING}
@@ -215,6 +217,22 @@ FLASH_REVIEWER_WARNING = (
     "a Flash-class reviewer: the method does not review with Flash (it praises and misses); "
     "the Arbiter picks a Pro-class one in TCC's footer"
 )
+
+
+SELF_REVIEWER_REFUSAL = (
+    "The reviewer is the generator's own model: a model reviewing itself is no second opinion, and "
+    "through omp the call hangs (finding 99, tcc#85). Nothing was called. Ask the Arbiter to pick a "
+    "reviewer of another model in TCC's footer."
+)
+
+
+def _reviews_itself(project_dir: Path) -> bool:
+    """Whether the picked reviewer is the picked generator's own model (tcc#85)."""
+    settings_dir = config.tcc_dir(project_dir)
+    generator = project_settings.get(settings_dir, "generator", "") or ""
+    reviewer = project_settings.get(settings_dir, "critic", "") or ""
+    return bool(generator and reviewer) and model_choices.same_model(
+        generator.partition(":")[2] or generator, reviewer.partition(":")[2] or reviewer)
 
 
 def configured_critic_model(project_dir: Path) -> str:
@@ -1165,9 +1183,20 @@ def build_server(
         """
         # An OMP pick goes through omp or not at all (tcc#74): with no omp route in the script it
         # went to the vendor's API under a name cut from omp's selector, and came back 404.
-        if configured_critic_harness(project_dir) == "omp" and not critic.omp_route_available():
+        route = configured_critic_harness(project_dir)
+        refusal = ""
+        if route == "omp" and not critic.omp_route_available():
+            refusal = OMP_REVIEWER_REFUSAL
+        elif route == "omp" and via and via.strip().lower() != "omp":
+            # The Arbiter's rule, which TCC's own hint once broke (finding 98, tcc#85).
+            refusal = (f"The reviewer is picked through omp, and an OMP pick goes through omp only "
+                       f"(the Arbiter's rule, tcc#74): via={via!r} is not taken for it. Nothing "
+                       "was called. Ask the Arbiter to pick another reviewer, or wait for omp.")
+        elif _reviews_itself(project_dir):
+            refusal = SELF_REVIEWER_REFUSAL
+        if refusal:
             return json.dumps({"mode": critic.MODE_ERROR, "critique": "", "model": None,
-                               "detail": OMP_REVIEWER_REFUSAL, "package": None, "seconds": 0},
+                               "detail": refusal, "package": None, "seconds": 0},
                               ensure_ascii=False)
         # The Arbiter's pick is the default. Without this the call went out with NO model, the
         # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
@@ -1238,7 +1267,7 @@ def build_server(
             result.detail, harness=configured_critic_harness(project_dir), project_dir=project_dir)
         if fix:
             detail = f"{detail}\n\nWhat to do: {fix}".strip() if detail else f"What to do: {fix}"
-        if result.mode == critic.MODE_REFUSED and not via:
+        if result.mode == critic.MODE_REFUSED and not via and route != "omp":
             # The method's own message names `--via api` for the script; the route that brings the
             # answer back to the window is this tool (finding 63, tcc#59).
             detail = (f"{detail}\n\n" if detail else "") + (

@@ -194,6 +194,12 @@ FRAME_LOG = "omp-frames.jsonl"
 #: built-in tool's frames passed 64 KiB, `readline` raised, and the reader died without a word, so
 #: every omp turn that used `read` waited forever (tcc#72, finding 80).
 FRAME_LIMIT_BYTES = 64 * 1024 * 1024
+
+#: How long omp waits for one of TCC's MCP tools. omp aborts an MCP request after
+#: `OMP_MCP_TIMEOUT_MS`, 30 000 ms by default, and a review is allowed `critic.DEFAULT_TIMEOUT_S`:
+#: the session's `call_critic` was cut ~30 s in and read as «збій транспорту MCP» while the reviewer
+#: still worked (finding 97, tcc#85). A minute over the review's own limit, so the review decides.
+OMP_TOOL_TIMEOUT_MS = int((critic.DEFAULT_TIMEOUT_S + 60) * 1000)
 FRAME_LOG_MAX_BYTES = 4_000_000
 # Big frames are shrunk field by field rather than by cutting the line, so every line parses --
 # see `_shrink`.
@@ -883,7 +889,8 @@ class OmpSession:
             # omp shells out to the skill, whose scripts are in a git submodule; without this its
             # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
             # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`).
-            env=vendor_loader.child_env(**critic.session_env(self.project_dir)),
+            env=vendor_loader.child_env(**critic.session_env(self.project_dir),
+                                        OMP_MCP_TIMEOUT_MS=str(OMP_TOOL_TIMEOUT_MS)),
             # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
             # the other half — no console window on Windows (see core/child.py).
             **child.flags(),

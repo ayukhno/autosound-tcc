@@ -743,9 +743,18 @@ def api_choices() -> list[Choice]:
 #: Why a row is not offered as a reviewer, for the picker and `get_tcc_state` (tcc#74).
 NOT_A_REVIEWER_OMP = "omp"
 NOT_A_REVIEWER_FLASH = "flash"
+NOT_A_REVIEWER_SELF = "self"
 
 
-def not_a_reviewer(choice: Choice) -> str:
+def same_model(one: str, other: str) -> bool:
+    """One model named two ways — `anthropic/claude-opus-5` through omp, `claude-opus-5` through
+    the SDK: the provider prefix is the road, not the model."""
+    def bare(name: str) -> str:
+        return (name or "").strip().lower().rpartition("/")[2]
+    return bool(bare(one)) and bare(one) == bare(other)
+
+
+def not_a_reviewer(choice: Choice, generator: Optional[Choice] = None) -> str:
     """Why this is no reviewer, or "" (tcc#74).
 
     `omp`: the Arbiter, 2026-09-27 — «якщо вибрана ОМР, то і йти треба тільки через цей виклик»,
@@ -754,7 +763,12 @@ def not_a_reviewer(choice: Choice) -> str:
 
     `flash`: the method does not review with Flash — it praises and misses, and once backed both
     sides of the question it was called for. Marked, not hidden: an option that is absent reads as
-    one that does not exist."""
+    one that does not exist.
+
+    `self`: the generator's own model. A model reviewing itself is no second opinion, and through
+    omp it hung twice with no output — the method's warned deadlock (finding 99, tcc#85)."""
+    if generator is not None and same_model(choice.model, generator.model):
+        return NOT_A_REVIEWER_SELF
     if choice.harness == "omp":
         from autosound_tcc.core import critic
 

@@ -651,6 +651,16 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QPushButton[class~="warn-mark"]:hover {{
         background: {t.mix('warn', 30, 'panel')};
     }}
+    /* .warn-mark-soft — the same «!» for a warning: the review happens (same vendor, a Flash model,
+    substituted). Red is for what cannot review (the Arbiter, finding 100, tcc#86). */
+    QPushButton[class~="warn-mark-soft"] {{
+        background: {t.mix('yellow', 16, 'panel')};
+        color: {t.yellow};
+        border: 1px solid {t.yellow};
+    }}
+    QPushButton[class~="warn-mark-soft"]:hover {{
+        background: {t.mix('yellow', 30, 'panel')};
+    }}
     QComboBox[class~="mini-select"]::drop-down {{
         border: none;
         width: 18px;

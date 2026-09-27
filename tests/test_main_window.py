@@ -2617,7 +2617,10 @@ def test_the_footer_says_when_the_reviewer_is_not_what_it_appears_to_be(tmp_path
     # A mark, not a sentence: the row has no width for one, and elided to fit it was unreadable.
     assert window._critic_warn.text() == "!"
     assert i18n.t("criticSubstituted") in window._critic_warn_tip._text
-    assert i18n.t("criticSameVendor") in window._critic_warn_tip._text
+    # Substituted by the Generator's OWN model — said as that since tcc#85, which is more than
+    # "the same vendor", and red: that pick cannot review.
+    assert i18n.t("criticRowSelf") in window._critic_warn_tip._text
+    assert "warn-mark-soft" not in str(window._critic_warn.property("class"))
     # ...and the click has the room the row does not, including what actually runs.
     assert generator.key in window._critic_warn_detail
     # The warnings are the «!», not the field's colour: a red field said "broken" about a model
@@ -5138,3 +5141,55 @@ def test_the_title_names_the_projects_own_method_when_it_is_another(monkeypatch)
     monkeypatch.setattr(install_report, "project_method_version", lambda _p: "3.0.62")
     window._set_title()
     assert "project 3.0" not in window.windowTitle(), "the same method is said once"
+
+
+def test_the_generators_own_model_is_greyed_in_the_reviewer_list_and_follows_the_generator(
+        monkeypatch):
+    """Finding 99 (tcc#85): «OMP · Claude Opus 5» reviewing a Claude Opus 5 session hung twice."""
+    from autosound_tcc.core import critic
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc import i18n
+    from PySide6.QtWidgets import QComboBox
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    _app()
+    combo = QComboBox()
+    opus = mc.Choice(harness="omp", model="anthropic/claude-opus-5", label="Claude Opus 5")
+    sonnet = mc.Choice(harness="omp", model="anthropic/claude-sonnet-5", label="Claude Sonnet 5")
+
+    MainWindow._fill_combo(combo, [opus, sonnet], sonnet.key, critic=True, generator=opus)
+
+    assert i18n.t("criticRowSelf") in combo.itemText(combo.findData(opus.key))
+    assert not combo.model().item(combo.findData(opus.key)).isEnabled()
+    assert combo.model().item(combo.findData(sonnet.key)).isEnabled()
+
+
+def test_the_reviewer_marks_a_warning_yellow_and_an_answered_row_green(monkeypatch):
+    """Findings 100 and 101 (tcc#86): «зроби жовтим не червоним» — the same-vendor «!» is a warning,
+    not a refusal; and «покрасити зеленим ті моделі що запрацювали» in the list."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.core import availability, critic
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    _app()
+    combo = QComboBox()
+    sonnet = mc.Choice(harness="omp", model="anthropic/claude-sonnet-5", label="Claude Sonnet 5")
+    availability.succeeded(sonnet.key)
+    try:
+        MainWindow._fill_combo(combo, [sonnet], sonnet.key, critic=True)
+        colour = combo.itemData(0, Qt.ItemDataRole.ForegroundRole)
+        assert colour is not None and colour.name().lower() == current_theme().ok.lower()
+    finally:
+        availability.reset()
+
+    window = MainWindow()
+    monkeypatch.setattr(window, "_critic_notes", lambda: ([("same vendor", "tip")], False))
+    window._refresh_critic_warning()
+    assert "warn-mark-soft" in str(window._critic_warn.property("class"))
+    monkeypatch.setattr(window, "_critic_notes", lambda: ([("clipboard only", "tip")], True))
+    window._refresh_critic_warning()
+    assert "warn-mark-soft" not in str(window._critic_warn.property("class"))

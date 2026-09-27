@@ -1861,3 +1861,59 @@ def test_with_the_omp_route_an_omp_reviewer_pick_is_called(tmp_path, monkeypatch
     asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
 
     assert seen == {"model": "google-antigravity/gemini-3.1-pro-high", "harness": "omp"}
+
+
+def test_an_omp_reviewer_pick_is_never_sent_down_another_route(tmp_path, monkeypatch):
+    """Finding 98 (tcc#85): after an OMP reviewer refused, TCC's own hint told the session to retry
+    `via="api"`, and it did. For an OMP pick that is the Arbiter's rule broken by TCC: the hint is
+    not given, and a `via` other than omp is refused before anything runs."""
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:openai-codex/gpt-5.6-terra")
+    ran = []
+
+    def _fake_run(package, **kw):
+        ran.append(kw.get("via"))
+        return critic.CriticResult(critic.MODE_REFUSED, "", None, "critic",
+                                   "· omp: Codex error event: usage_limit_reached", 0.0, "now")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    out = json.dumps(asyncio.run(mcp.call_tool("call_critic", {"package": "hello"})),
+                     ensure_ascii=False, default=str)
+    assert 'via="api"' not in out and "via=\\\\\"api\\\\\"" not in out
+    assert "omp" in out
+
+    out = json.dumps(asyncio.run(mcp.call_tool("call_critic", {"package": "hello", "via": "api"})),
+                     ensure_ascii=False, default=str)
+    assert ran == [""], "the api retry never ran"
+    assert "omp only" in out
+
+
+def test_the_generators_own_model_is_no_reviewer(tmp_path, monkeypatch):
+    """Finding 99 (tcc#85): «OMP · Claude Opus 5» as the reviewer of a Claude Opus 5 session hung
+    twice with no output — the method's warned deadlock; Sonnet answered the same package."""
+    from autosound_tcc.core import config, critic, model_choices, project_settings
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    generator = model_choices.Choice(harness="omp", model="anthropic/claude-opus-5",
+                                     label="Claude Opus 5")
+    same = model_choices.Choice(harness="omp", model="anthropic/claude-opus-5", label="Claude Opus 5")
+    sdk_same = model_choices.Choice(harness="sdk", model="claude-opus-5", label="Claude Opus 5")
+    other = model_choices.Choice(harness="omp", model="anthropic/claude-sonnet-5",
+                                 label="Claude Sonnet 5")
+    assert model_choices.not_a_reviewer(same, generator=generator) == "self"
+    assert model_choices.not_a_reviewer(sdk_same, generator=generator) == "self"
+    assert model_choices.not_a_reviewer(other, generator=generator) == ""
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "omp:anthropic/claude-opus-5")
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "omp:anthropic/claude-opus-5")
+    ran = []
+    monkeypatch.setattr(critic, "run", lambda *a, **kw: ran.append(True))
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    out = json.dumps(asyncio.run(mcp.call_tool("call_critic", {"package": "hello"})),
+                     ensure_ascii=False, default=str)
+    assert ran == [] and "generator" in out

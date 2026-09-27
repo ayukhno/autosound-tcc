@@ -2738,6 +2738,8 @@ lost the same way. Not looked into.
 
 **Task.** None yet — a tail of tcc#74.
 
+**Found and built (2026-09-27):** omp aborts an MCP request after `OMP_MCP_TIMEOUT_MS`, 30 000 ms by default (omp 17.2.9's own `mcp/timeout.ts`) — the cut came ~30 s in. TCC spawns omp with `OMP_MCP_TIMEOUT_MS` a minute over the review's own limit (`critic.DEFAULT_TIMEOUT_S`, 600 s). tcc#85.
+
 ### 98. After an OMP reviewer refused, TCC's own hint sent the session to the API key
 
 **What.** Seen on the Arbiter's screenshot, recorded by the session. `call_critic`'s refusal carries
@@ -2750,6 +2752,8 @@ openai нема»). `call_critic` also takes `via` other than omp for an OMP pic
 **Where.** Mac, `b2ed5d6` (screenshot 20; TCC's log 13:48:03).
 
 **Task.** None yet — a tail of tcc#74.
+
+**Built:** tcc#85 — no `via="api"` hint for an OMP pick, and `call_critic` refuses a `via` other than omp for it before anything runs.
 
 ### 99. An OMP reviewer on the generator's own model hangs: two `omp -p` calls with no output
 
@@ -2765,6 +2769,8 @@ session, then filed as refusals. The session named the method's own warning (`se
 
 **Task.** None yet — a tail of tcc#74.
 
+**Built:** tcc#85 — the generator's own model (by name, whatever the route) is greyed in the reviewer list («та сама модель, що й генератор»), follows the generator's pick, and `call_critic` and `get_tcc_state` refuse it.
+
 ### 100. The same-vendor «!» beside the reviewer is red; it is a warning — yellow
 
 **What.** The Arbiter: «зроби жовтим не червоним». «OMP · Claude Sonnet 5» green, beside it a red «!»
@@ -2775,6 +2781,8 @@ does not run (his rule the same day: red an error, orange/yellow a warning).
 
 **Task.** None yet.
 
+**Built:** tcc#86 — the «!» is yellow when all it says is a warning (same vendor, Flash, substituted, another model answered), red when the pick cannot review.
+
 ### 101. The reviewer list: the models that answered could be green
 
 **What.** The Arbiter: «може покрасити зеленим ті моделі що запрацювали». The list colours the
@@ -2784,3 +2792,5 @@ answered («OMP · Claude Sonnet 5») looks like one never tried.
 **Where.** Mac, `b2ed5d6`, the AI CRITIC list (screenshot 26).
 
 **Task.** None yet.
+
+**Built:** tcc#86 — a reviewer that answered this launch is green in the list.

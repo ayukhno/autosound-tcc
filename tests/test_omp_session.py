@@ -877,3 +877,25 @@ def test_a_frame_the_reader_cannot_read_ends_the_turn_out_loud(tmp_path):
     events = aio.run(run())
     assert any(isinstance(e, Notice) and "could not read" in e.text for e in events)
     assert events[-1] is None, "the drain is told nothing more is coming"
+
+
+def test_omp_waits_for_a_tool_as_long_as_a_review_may_take(tmp_path, monkeypatch):
+    """Finding 97 (tcc#85): the session's `call_critic` was cut ~30 s in and the session read it
+    as «збій транспорту MCP» while the reviewer still worked — omp aborts an MCP request after
+    `OMP_MCP_TIMEOUT_MS`, 30 000 ms by default. A review is allowed `critic.DEFAULT_TIMEOUT_S`."""
+    import asyncio as aio
+
+    from autosound_tcc.core import critic
+
+    seen = {}
+
+    async def fake_spawn(*argv, **kwargs):
+        seen.update(kwargs)
+        raise OSError("not starting omp in a test")
+
+    monkeypatch.setattr(omp_session_module.asyncio, "create_subprocess_exec", fake_spawn)
+    try:
+        aio.run(OmpSession(project_dir=tmp_path)._spawn())
+    except OSError:
+        pass
+    assert int(seen["env"]["OMP_MCP_TIMEOUT_MS"]) > critic.DEFAULT_TIMEOUT_S * 1000
