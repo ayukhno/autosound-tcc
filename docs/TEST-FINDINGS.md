@@ -2520,3 +2520,13 @@ project stays on 3.0.61 or moves to 3.0.62. TCC `de20037` carries the method at 
 2026-09-25. Two checkouts reachable → exit 3; telling a deliberate pin from a split is the skill's
 S-001. TCC runs the personal copy (its title: «skill 3.0.62»). What is left is the Arbiter's choice
 for the project — stay pinned to 3.0.61 or move the link to 3.0.62 — answered in the car session.
+
+### 87. A hover tip stays on screen: over another app after switching, or over TCC with the mouse elsewhere
+
+**What.** The Arbiter: «хінт не ховається а залишається навіть поверх іншої аплікації на яку
+перемкнувся. або висить над ТСС хоч миша вже в іншому місці».
+
+**Where.** Mac, TCC's hover tips (`RoundedTooltip`, a stays-on-top window hidden only on the owner's
+leave event).
+
+**Task.** tcc#78, on W-3 by the Arbiter's word 2026-09-27 («додай до робіт»).
