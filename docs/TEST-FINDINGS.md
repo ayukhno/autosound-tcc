@@ -3001,3 +3001,11 @@ SWEEP (SW) column holds one row, `L m+tw_55 (rta) inv`, green; the MMM RTA (RTA)
 **Related.** Finding 30, item 3 — a sweep labelled `(rta)`, the other way round.
 
 **Task.** tcc#101 (W-4).
+
+**Cause (found 2026-09-27 on the project's copy, `research/raw/prj_to_compare/1_EPY-Sep2026`, read only).** Round
+`cap_016` in `process/process-state.json` carries no `groups`, so the panel sorts its six `expected` titles itself
+(`measurement_view.groups_from_titles`) — by the title's END: `(sw)` or `(rta)`, else sweep. `L m+tw_55 (rta) inv`
+ends with `inv`. The method's parser reads that title right — `method: 'rta'`, `params: 'inv'` — and TCC already
+calls it for the spelling (`_canonical`), then sorts by the suffix anyway. TCC's own code on the copy gives exactly
+the screen: `sw ['L m+tw_55 (rta) inv']`, `rta [the other five]`. Fix: sort by the parsed `method`, the suffix only
+for a title the grammar does not read.
