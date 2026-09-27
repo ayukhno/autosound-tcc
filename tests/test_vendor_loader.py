@@ -141,3 +141,35 @@ def test_the_rew_row_names_the_endpoint_it_actually_reaches(monkeypatch):
     monkeypatch.setattr(api, "BASE_URL", "http://studio-pc:4740")
     assert main_window._rew_endpoint_label() == "http://studio-pc:4740", \
         "and anything else is named in full rather than mislabelled as the default"
+
+
+def test_on_windows_a_refused_symlink_becomes_a_junction(tmp_path, monkeypatch):
+    """Finding 103 (tcc#88): on the Windows VM the project had no `.claude/skills/autosound-tuning`
+    and the session ran without the method. A symlink needs Developer Mode or an admin there
+    (WinError 1314) and the refusal was swallowed; a junction needs neither — the skill's own
+    installer links the same way (`install.ps1`)."""
+    import sys
+    import types
+    from pathlib import Path
+
+    from autosound_tcc.core import vendor_loader
+
+    made = []
+    fake = types.ModuleType("_winapi")
+    fake.CreateJunction = lambda target, link: (made.append((target, link)), Path(link).mkdir())
+    monkeypatch.setitem(sys.modules, "_winapi", fake)
+    monkeypatch.setattr(vendor_loader.sys, "platform", "win32")
+    monkeypatch.setattr(vendor_loader, "is_available", lambda: True)
+    skill = tmp_path / "skill" / "autosound-tuning"
+    skill.mkdir(parents=True)
+    monkeypatch.setattr(vendor_loader, "skill_dir", lambda: skill)
+
+    def refuse(self, target, target_is_directory=False):
+        raise OSError(1314, "A required privilege is not held by the client")
+
+    monkeypatch.setattr(Path, "symlink_to", refuse)
+
+    link = vendor_loader.link_skill_into(tmp_path / "project")
+
+    assert link is not None and link.exists()
+    assert made and made[0][0] == str(skill.resolve())

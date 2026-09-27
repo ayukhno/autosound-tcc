@@ -2827,6 +2827,10 @@ the generator was «OMP · Gemini 3.1 Flash Image» — an image model offered a
 
 **Task.** None yet.
 
+**Built (a hypothesis, to check on the VM):** tcc#88 — a symlink on Windows needs Developer Mode or an
+admin (WinError 1314), and `link_skill_into` swallowed the refusal; it falls back to a junction, as the
+skill's `install.ps1` links.
+
 ### 104. Windows at `3ef4787`: #62 still there, #66 gone
 
 **What.** The Arbiter on the VM, 2026-09-27:

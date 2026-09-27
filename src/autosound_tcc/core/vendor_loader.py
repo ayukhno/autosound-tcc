@@ -229,7 +229,18 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
         if not is_available():
             return None
         link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(skill_dir().resolve(), target_is_directory=True)
+        target = skill_dir().resolve()
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            if not sys.platform.startswith("win"):
+                raise
+            # A symlink on Windows needs Developer Mode or an admin (WinError 1314), and the
+            # refusal left the project with no method at all (finding 103, tcc#88). A junction
+            # needs neither, and it is how the skill's own installer links (`install.ps1`).
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))
         return link
     except OSError:
         return None
