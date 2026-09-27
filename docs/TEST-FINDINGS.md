@@ -2972,3 +2972,15 @@ refusal is read and retried, and a failure shows omp's reason. Live, omp 18.3.5 
 Arbiter's exact five frames; after — the retry, `ready`, and omp's own answer in the first turn («No API key found
 for anthropic», that HOME has no login) with a turn end, in 2 s. Tests: `test_omp_18s_refusal_behind_a_stack_is_still_read_and_retried`,
 `test_a_failure_names_omps_reason_not_its_stack_frames`.
+
+### 110. The dialog's messages carry no time
+
+**What.** The Arbiter, 2026-09-27, after a slow first omp turn («досить довго чекав»): «може додати тайм-маркери
+для повідомлень?» The bubbles (ARBITER · YOU, SYSTEM · TCC, GENERATOR · …) show who spoke, not when; how long a
+turn took cannot be read off the screen.
+
+**Where.** The second Mac, the in-app dialog (screenshot 6).
+
+**Weight.** Low: a want, not a defect — but it is what would have measured the slow first turn.
+
+**Task.** tcc#100 (W-4).
