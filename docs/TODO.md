@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-089 — W-4: the collection
 
-**Статус**: open 2026-09-27 · collection, nothing built (`WAVES.md` §1 step 2) · the milestone `W-4 · v0.1.45` (#4) opened on the Arbiter's word, its number read from the skill's `W-4 · v3.0.64` · ten issues, all assessed, none `ok` (#96: TEST-FINDINGS 105, the control header in a small window; #97: TEST-FINDINGS 106, an omp session hangs after the tools retry — cause found; #98: TEST-FINDINGS 107, the update row updates TCC alone) · resume: `hub/bin/role tcc --resume 548b3dd8-46a7-4ed0-97d4-dca187a7538a`
+**Статус**: open 2026-09-27 · collection, nothing built (`WAVES.md` §1 step 2) · the milestone `W-4 · v0.1.45` (#4) opened on the Arbiter's word, its number read from the skill's `W-4 · v3.0.64` · nine issues, all assessed, none `ok` (#96: TEST-FINDINGS 105, the control header in a small window; #97: TEST-FINDINGS 106, an omp session hangs after the tools retry — cause found) · finding 107 went to the skill as hub #219 TCC-035, tcc#98 deferred off the milestone until it answers · resume: `hub/bin/role tcc --resume 548b3dd8-46a7-4ed0-97d4-dca187a7538a`
 
 On the milestone: #91 SKL-056 (hub #217, the skill clone with local changes — waits for the skill's
 S-064 command), #92 F-087 (the desktop-shortcut pin), #93 F-068 (the drivers' Fs checkbox — the method

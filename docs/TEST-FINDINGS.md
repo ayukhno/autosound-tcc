@@ -2916,4 +2916,4 @@ nothing in the window offers them.
 
 **Weight.** Low to medium: an old omp is what TCC then runs against, and nobody is told.
 
-**Task.** tcc#98 (W-4).
+**Task.** Moved to the skill (the Arbiter: the installer is the skill's): hub #219 TCC-035. TCC's half, tcc#98, is deferred off W-4 until the skill names its command.
