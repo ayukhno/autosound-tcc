@@ -2381,6 +2381,8 @@ behind the models window, and a moment later it went behind TCC as well.
 
 **Built:** tcc#71 again. The models window was application-modal (`exec()`), which on macOS sits at the modal-panel level above every app's windows; the terminal came up behind it. It is modal to TCC's window only now (`WindowModal`, shown with `show()`), and its answer is taken when it closes. Not checked live.
 
+**Checked live 2026-09-27 (Mac, `de20037`):** the terminal still opens behind TCC, «як і було».
+
 ### 80. An omp session hangs inside TCC's own `get_tcc_state`
 
 **What.** «Запускаю Claude Opus 5 …», then «120s with no output. Still inside
@@ -2408,6 +2410,9 @@ longer than limit')`. asyncio reads a subprocess's lines up to 64 KiB, omp's fra
 without a word. omp is spawned with a 64 MiB line limit now, and a reader that fails says so in the
 dialog and ends the turn. Checked live: `read README.md` and `read skill://autosound-tuning`
 through `rpc-ui` both end, and the turn goes on.
+
+**Checked live 2026-09-27 (Mac, `de20037`, omp with Claude Opus 5):** «запрацював» — the turn read
+TCC's state and answered.
 
 ### 81. Quitting TCC while the omp session hung: Python aborts
 
@@ -2448,4 +2453,53 @@ notice about project settings, labelled as a ledger record, with shell text nobo
 
 **Where.** Mac, the in-app AI dialog, omp route (screenshots 14 and 16).
 
-**Task.** None — for the Arbiter to decide whether it is noise to hide.
+**The Arbiter, 2026-09-27:** not hidden — the bubble's header should say it comes from OMP
+(«було б добре щоб писало в заголовку що це OMP»), not LEDGER. The project panel's half is 84.
+
+**Task.** None yet.
+
+### 84. The project panel does not say that the generator and the advisor run through OMP
+
+**What.** «ПАРАМЕТРИ ПРОЄКТУ» shows «ШІ генератор anthropic/claude-opus-5» and «ШІ радник
+google-antigravity/gemini…» with no route; the Arbiter wants OMP named there too («і в конфігурації
+теж глянь»), as in 83's header.
+
+**Where.** Mac, the project panel (screenshot 2, 2026-09-27).
+
+**Task.** None yet.
+
+### 85. A reviewer model is found dead only when the first review fails
+
+**What.** The Arbiter: «було б добре з'ясовувати це до запуску». The car session, asked why the
+reviewer did not work, tried the picks one by one (its own report, 2026-09-27):
+
+- `gemini-2.5-flash` (the pick before): API 404 «no longer available to new users»; `agy`
+  «invalid model selection». TCC's state still said `reachable: true, ready: true`.
+- «OMP · Gemini 3.1 Pro» → `gemini-3.1-pro`: HTTP 404 from Google's API — no such id there.
+- `gemini-3.1-pro-high` through `agy`: «not supported in the selected location» on this account.
+- Working: `gemini-3.1-pro-preview` and `gemini-pro-latest` (API), `gemini-3.8-flash-low` (agy),
+  `gpt-5.6-terra` (codex).
+
+Three things in it, as the Arbiter met them:
+
+1. «не розумію чи OMP взагалі працює»: an OMP reviewer pick is not called through omp. TCC has no
+   omp reviewer CLI (`critic._HARNESS_CLIS`), so the method's script picks the transport by the
+   model's name, and omp's model names are not the API's — hence 404.
+2. Readiness is the channel being there, not a live call on the picked model.
+3. Flash picks are offered for the reviewer, a class the method forbids there.
+
+**Where.** Mac, the footer's AI CRITIC, the car project's omp session.
+
+**Task.** None yet — with 82 (GPT-OSS offered as reachable), the same class.
+
+### 86. The method's version check fails at the start of an omp session
+
+**What.** Seen on the Arbiter's screenshot, not reported by him — recorded by the session. The
+generator's first turn: «Не пройшла — версія методу. `deployment.py` відмовив (код 3). Досяжні дві
+збірки: v3.0.61 (ця і та, на яку вказує проєкт …» (cut off), and the car session asks whether the
+project stays on 3.0.61 or moves to 3.0.62. TCC `de20037` carries the method at v3.0.62 (tcc#68).
+
+**Where.** Mac, the in-app AI dialog, omp route, the Arbiter's own omp profile (screenshot 1,
+2026-09-27).
+
+**Task.** None — not looked into.
