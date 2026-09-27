@@ -2823,3 +2823,17 @@ the generator was «OMP · Gemini 3.1 Flash Image» — an image model offered a
 **Where.** Windows VM, `3ef4787` (screenshot 27, 2026-09-27).
 
 **Task.** None yet.
+
+### 104. Windows at `3ef4787`: #62 still there, #66 gone
+
+**What.** The Arbiter on the VM, 2026-09-27:
+- a start still shows an extra terminal window before the splash (finding 43; the log has `agy models`
+  and `claude.EXE auth` spawned before the splash, 14:46:53–55);
+- switching into «Режим контролю» still flashes many small Windows windows (finding 45);
+- a pin made from the desktop icon still gives a second taskbar icon («Autosound TCC» beside the running
+  «Tuning Command Center», screenshot 30; finding 44);
+- «порівняти з» lists the versions («—», `v_012`, `v_011`, screenshot 29) — #66 holds.
+
+**Where.** Windows VM, `3ef4787`, project `testAgy-auto`.
+
+**Task.** tcc#62 (open), tcc#66 (checked live).
