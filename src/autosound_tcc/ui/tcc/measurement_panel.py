@@ -299,12 +299,23 @@ class _LedgerWriteWorker(QThread):
 
     def run(self) -> None:
         result: dict = {"round_id": self._round_id, "opened": "", "recorded": [],
-                        "refused": [], "prot_done": [], "prot_refused": [], "prot_lost": []}
+                        "refused": [], "prot_done": [], "prot_refused": [], "prot_lost": [],
+                        "unplanned": ""}
         if not self._round_id:
             try:
-                process_writer.start_capture(
-                    self._project_dir, str(self._version), self._expected,
-                    origin=self._origin)
+                # The METHOD's list, not this window's (the Arbiter's round rule, SKL-054, tcc#77):
+                # `--plan` derives what the phase measures at this series. Where it cannot — no
+                # glossary, no phase, a phase that measures nothing — the pass still gets a round,
+                # with no list: Protection needs one (2026-09-06), and what came in is recorded
+                # as unplanned rather than against a list TCC made up.
+                try:
+                    process_writer.start_capture(
+                        self._project_dir, str(self._version), [], origin=self._origin,
+                        plan=True)
+                except process_writer.ProcessWriterError as exc:
+                    result["unplanned"] = self._why(exc)
+                    process_writer.start_capture(
+                        self._project_dir, str(self._version), [], origin=self._origin)
                 round_ = process_view.capture_round(self._project_dir) or {}
                 result["round_id"] = str(round_.get("id") or "")
                 result["opened"] = result["round_id"]
@@ -1361,6 +1372,8 @@ class MeasurementPanel(QWidget):
         self._round_id = str(result.get("round_id") or self._round_id)
         if result.get("opened"):
             self._add_status("capRoundOpened", round=result["opened"])
+        if result.get("unplanned"):
+            self._add_status("capRoundUnplanned", why=result["unplanned"])
         if result.get("recorded"):
             self._add_status("capRoundRecorded", n=len(result["recorded"]))
         for why in result.get("refused") or []:

@@ -678,9 +678,10 @@ def _ledger_calls(monkeypatch):
     calls: list = []
     # `origin` too (S-048): where the measurements came from is part of what a round records,
     # and a double that drops it cannot tell this project's series from another project's.
+    # And `plan` (SKL-054, tcc#77): whether the method gave the list or TCC did.
     monkeypatch.setattr(mp.process_writer, "start_capture",
-                        lambda d, v, e, step="", origin="":
-                        calls.append(("start", v, tuple(e), origin)))
+                        lambda d, v, e, step="", origin="", plan=False, **_kw:
+                        calls.append(("start", v, tuple(e), origin, plan)))
     monkeypatch.setattr(mp.process_writer, "record_capture",
                         lambda d, t: calls.append(("taken", t)))
     # `source` is recorded too (method `v3.0.59`, S-036): who answered is part of what was
@@ -710,7 +711,9 @@ def test_taking_measurements_in_opens_the_pass_when_no_session_did(tmp_path, mon
 
     worker.run()
 
-    assert calls[0] == ("start", "6", ("w-L_6 (sw)", "w-R_6 (sw)"), "")
+    # The METHOD's list, not the window's (SKL-054, tcc#77): the round opens from the plan and
+    # what came in is recorded against it.
+    assert calls[0] == ("start", "6", (), "", True)
     assert ("taken", "w-L_6 (sw)") in calls
     assert ("protective", "w-L", "OFF", "user") in calls
     assert seen["opened"] == "cap_003" and seen["round_id"] == "cap_003"
@@ -1089,7 +1092,8 @@ def test_the_series_question_can_also_say_the_measurements_came_from_another_pro
     )
     worker.run()
 
-    assert ("start", "49", ("m-L p1_49 (sw)",), "passat-b8-2026:49") in calls
+    # From the method's plan since SKL-054 (tcc#77); the origin rides along as before.
+    assert ("start", "49", (), "passat-b8-2026:49", True) in calls
 
 
 def test_the_origin_is_assembled_only_when_it_was_actually_asked_for():
@@ -1226,3 +1230,36 @@ def test_a_tall_panel_keeps_the_rows_compact_at_the_top():
         assert row.height() <= row.sizeHint().height() + 4
     finally:
         panel.hide()
+
+
+def test_a_pass_the_method_cannot_plan_still_opens_and_says_why(tmp_path, monkeypatch):
+    """`--plan` refuses with no glossary, no phase, or a phase that measures nothing. The pass is
+    still written — without a round Protection has nowhere to go (2026-09-06) — as a round with no
+    list, what came in recorded as unplanned, and the method's reason on the status line."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+
+    def _start(d, v, e, step="", origin="", plan=False, **_kw):
+        calls.append(("start", v, tuple(e), origin, plan))
+        if plan:
+            raise process_writer.ProcessWriterError("refused:\n--plan needs the phase the round measures for")
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="", version=6,
+        expected=["w-L_6 (sw)", "w-R_6 (sw)"], titles=["w-L_6 (sw)"], protective={},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert [c for c in calls if c[0] == "start"] == [("start", "6", (), "", True),
+                                                      ("start", "6", (), "", False)]
+    assert ("taken", "w-L_6 (sw)") in calls
+    assert seen["opened"] == "cap_003"
+    assert "--plan needs the phase" in seen["unplanned"]

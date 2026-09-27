@@ -1805,3 +1805,29 @@ def test_an_omp_reviewer_pick_is_refused_before_anything_runs(tmp_path, monkeypa
     state = json.dumps(asyncio.run(mcp.call_tool("get_tcc_state", {})), ensure_ascii=False,
                        default=str)
     assert "TCC-034" in state
+
+
+def test_start_capture_takes_the_methods_plan_when_no_list_is_given(tmp_path, monkeypatch):
+    """SKL-054 (hub #214, tcc#77): a request to measure is a round whose list the METHOD gives
+    (`--plan`), and the session is handed the list the method printed rather than composing one."""
+    from autosound_tcc.core import process_writer
+
+    seen = {}
+
+    def _start(project_dir, version, expected, step="", origin="", plan=False, optional=(),
+               start_method=""):
+        seen.update(version=version, expected=list(expected), plan=plan,
+                    optional=list(optional), start=start_method)
+        return "cap_001 — the method's list"
+
+    monkeypatch.setattr(process_writer, "start_capture", _start)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    out = asyncio.run(mcp.call_tool("start_capture", {"version": "61", "optional": ["Ws_61 (sw)"],
+                                                      "start": "rta"}))
+    assert seen == {"version": "61", "expected": [], "plan": True, "optional": ["Ws_61 (sw)"],
+                    "start": "rta"}
+    assert "the method's list" in json.dumps(out, ensure_ascii=False, default=str)
+
+    asyncio.run(mcp.call_tool("start_capture", {"version": "61", "expected": ["sw_61 (sw)"]}))
+    assert seen["plan"] is False and seen["expected"] == ["sw_61 (sw)"]

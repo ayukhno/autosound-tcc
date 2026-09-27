@@ -971,9 +971,17 @@ def build_server(
         return await asyncio.to_thread(_record, process_writer.check)
 
     @tool()
-    async def start_capture(version: str, expected: list[str], step: str = "") -> str:
-        """Open a capture round before measuring: the ledger version being captured at, and the
-        titles the phase asks for (SCR-034).
+    async def start_capture(version: str, expected: list[str] | None = None, step: str = "",
+                            plan: bool | None = None, optional: list[str] | None = None,
+                            start: str = "") -> str:
+        """Open a capture round before measuring: the series being captured, and the list the
+        METHOD gives for it (SCR-034; the Arbiter's round rule, SKL-054).
+
+        With no `expected`, the round opens from the plan (`--plan`): what this phase measures at
+        series `version`, `optional` captures on the list, ordered by setup from `start` (`sw` /
+        `rta`). `said` is the list the method printed — show THAT to the Arbiter; do not compose a
+        list of your own, and do not ask for captures in prose only. `expected` is for a round the
+        plan cannot give (the method says why when `--plan` refuses).
 
         A round, not a version. The version names the config the measurements were taken under and
         cannot tell two passes at the same config apart -- and the round is what makes a finished
@@ -982,8 +990,11 @@ def build_server(
 
         `step` binds the round to the plan step it satisfies, which is what lets that step's gate
         refuse to close while a capture it asked for is unusable (SCR-040)."""
+        listed = [str(title) for title in expected or [] if str(title).strip()]
         return await asyncio.to_thread(
-            _record, process_writer.start_capture, version, expected, step
+            _record, process_writer.start_capture, version, listed, step,
+            plan=(not listed) if plan is None else bool(plan), optional=list(optional or []),
+            start_method=start,
         )
 
     @tool()

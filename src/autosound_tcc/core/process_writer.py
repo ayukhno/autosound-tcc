@@ -498,7 +498,8 @@ def _refuse_if_too_old(command: str, out: str, err: str) -> None:
 
 
 def start_capture(
-    project_dir: Path, version: str, expected: list[str], step: str = "", origin: str = ""
+    project_dir: Path, version: str, expected: list[str], step: str = "", origin: str = "",
+    plan: bool = False, optional=(), start_method: str = "",
 ) -> str:
     """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
 
@@ -516,8 +517,19 @@ def start_capture(
     measurements, which the Arbiter called the base case rather than a rarity (2026-09-20).
     Whether a number IS foreign is the method's judgement, not ours — TCC carries the answer, it
     does not re-derive the gate.
+
+    `plan` asks the METHOD for the list (`--plan`, the Arbiter's round rule, skill #77 / SKL-054):
+    what this phase measures at series `version`, for the project's channels, `optional` captures
+    on it and ordered by setup from `start_method` (`sw` / `rta`). What it prints is the list the
+    person reads — returned here as it is.
     """
     args = ["capture-start", str(version), *[str(t) for t in expected or []]]
+    if plan:
+        args.append("--plan")
+    for title in optional or ():
+        args += ["--optional", str(title)]
+    if start_method:
+        args += ["--start", str(start_method)]
     if step:
         args += ["--step", step]
     if origin:

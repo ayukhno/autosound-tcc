@@ -287,3 +287,19 @@ def test_a_closed_rounds_protective_record_can_be_corrected_with_a_reason(tmp_pa
     # round id is what the amendment carries, the version is how a reader finds the round.
     record = proc.protective_record_for("1")
     assert record["channels"]["m-L"] == {"hp": {"f": 100, "type": "LR", "slope": 24}}
+
+
+def test_a_round_can_be_opened_from_the_methods_plan(tmp_path, monkeypatch):
+    """SKL-054 (hub #214, tcc#77): every request to measure is a round whose list the METHOD gives
+    — `capture-start <N> --plan` — with its optional captures and the method it starts with."""
+    from autosound_tcc.core import process_writer
+
+    seen = {}
+    monkeypatch.setattr(process_writer, "_run", lambda d, args, **kw: seen.setdefault("args", args))
+    process_writer.start_capture(tmp_path, "61", [], plan=True, optional=["Ws_61 (sw)"],
+                                 start_method="rta")
+
+    assert seen["args"][:2] == ["capture-start", "61"]
+    assert "--plan" in seen["args"]
+    assert seen["args"][seen["args"].index("--optional") + 1] == "Ws_61 (sw)"
+    assert seen["args"][seen["args"].index("--start") + 1] == "rta"
