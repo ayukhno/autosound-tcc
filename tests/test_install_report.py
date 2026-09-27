@@ -380,3 +380,25 @@ def test_the_installation_block_names_the_candidate(monkeypatch):
 
     assert install_report._app().items[0].value == "0.1.38 (beta-v0.2.0-rc1)"
 
+
+
+def test_the_projects_own_method_is_named_by_its_version_when_it_is_another(tmp_path):
+    """Finding 94 (tcc#83): «чому він питає про версію якщо скіл вже оновлений?» — everything said
+    3.0.62 while the project's link held a 3.0.61 checkout, which is what the session asked about."""
+    import json
+
+    from autosound_tcc.core import install_report
+
+    elsewhere = tmp_path / "autosound-skill-v3.0.61"
+    (elsewhere / "skills" / "autosound-tuning").mkdir(parents=True)
+    (elsewhere / ".claude-plugin").mkdir()
+    (elsewhere / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": "3.0.61"}))
+    link = tmp_path / "project" / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(elsewhere / "skills" / "autosound-tuning", target_is_directory=True)
+
+    rows = {item.label: item for item in install_report._skill(tmp_path / "project").items}
+
+    assert "3.0.61" in rows["project link"].value
+    assert install_report.project_method_version(tmp_path / "project") == "3.0.61"
+    assert install_report.project_method_version(tmp_path / "nowhere") == ""

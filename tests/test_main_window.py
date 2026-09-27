@@ -5122,3 +5122,19 @@ def test_a_bold_row_is_measured_in_bold_so_its_note_is_not_cut():
     combo.hidePopup()
 
     assert combo.view().minimumWidth() >= QFontMetrics(bold).horizontalAdvance(text)
+
+
+def test_the_title_names_the_projects_own_method_when_it_is_another(monkeypatch):
+    """Finding 94 (tcc#83): the title said «skill 3.0.62» while the project ran its own 3.0.61."""
+    from autosound_tcc.core import install_report
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(install_report, "skill_version", lambda: "3.0.62")
+    monkeypatch.setattr(install_report, "project_method_version", lambda _p: "3.0.61")
+    window._set_title()
+    assert "skill 3.0.62" in window.windowTitle() and "project 3.0.61" in window.windowTitle()
+
+    monkeypatch.setattr(install_report, "project_method_version", lambda _p: "3.0.62")
+    window._set_title()
+    assert "project 3.0" not in window.windowTitle(), "the same method is said once"

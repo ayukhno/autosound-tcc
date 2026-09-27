@@ -4070,10 +4070,19 @@ class MainWindow(QMainWindow):
         # A checkout without a manifest has no version, and then this says nothing about the
         # method at all — what it IS is a question for the report, which can answer it in full.
         skill_part = f"skill {skill_version}" if skill_version else ""
+        # And the project's own method when it is another: the session runs THAT one, and the
+        # title said «skill 3.0.62» over a project pinned to 3.0.61 (finding 94, tcc#83).
+        try:
+            project_method = install_report.project_method_version(config.project_dir())
+        except Exception:  # noqa: BLE001 — no project yet is the ordinary case
+            project_method = ""
+        project_part = (f"project {project_method}"
+                        if project_method and project_method != skill_version else "")
         versions = " · ".join(
             part for part in (
                 f"TCC {install_report.app_version()}" if install_report.app_version() else "",
                 skill_part,
+                project_part,
                 self._title_note,
             ) if part
         )

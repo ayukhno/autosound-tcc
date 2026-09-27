@@ -277,6 +277,24 @@ def _skill(project_dir: Optional[Path] = None) -> Section:
     return Section("The method", items)
 
 
+def project_method_version(project_dir: Path) -> str:
+    """The version of the method the project's OWN link holds, or "" when it has none or none can
+    be read. The session runs this one, and a project pins it on purpose (finding 94, tcc#83):
+    everything said «3.0.62» while the project held 3.0.61, and the session asked which."""
+    link = Path(project_dir) / ".claude" / "skills" / vendor_loader.SKILL_NAME
+    try:
+        if not link.exists():
+            return ""
+        target = link.resolve()
+        for parent in target.parents:
+            manifest = parent / ".claude-plugin" / "plugin.json"
+            if manifest.is_file():
+                return str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or "")
+    except Exception:  # noqa: BLE001 — an unreadable pin is "unknown", never a crash
+        return ""
+    return ""
+
+
 def _project_link(project_dir: Path) -> Item:
     """Which method the SESSION gets, which is not always the one every row above names.
 
@@ -300,7 +318,9 @@ def _project_link(project_dir: Path) -> Item:
         return Item("project link", "could not be read", f"{type(exc).__name__}: {exc}")
     if target == shipped:
         return Item("project link", "this one", str(target))
-    return Item("project link", "ANOTHER method", f"{target} — not {shipped}")
+    version = project_method_version(project_dir)
+    return Item("project link", f"ANOTHER method: {version}" if version else "ANOTHER method",
+                f"{target} — not {shipped}")
 
 
 def _tools() -> Section:

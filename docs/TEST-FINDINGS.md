@@ -2605,6 +2605,8 @@ CLAUDE OPUS 5», on the omp route.
 
 **Task.** None yet — with tcc#75's panel half (84).
 
+**Built:** tcc#80 `a216b49` — the generator's bubbles and «Запускаю …» carry the route («OMP · Claude Opus 5»).
+
 ### 91. «⚙ Налаштування» in the menu: bold, so it reads as a submenu
 
 **What.** The Arbiter: «зроби назву жирним (що це має субменю)». Its place at the end of TOOLS is
@@ -2613,6 +2615,8 @@ right (tcc#79).
 **Where.** Mac, `a71dc24`, the main menu.
 
 **Task.** None yet.
+
+**Built:** tcc#81 — the submenu title is bold.
 
 ### 92. After a new reviewer is picked, the footer keeps the previous one's last call in red
 
@@ -2627,6 +2631,8 @@ real review (then through codex), not the check that had just answered (screensh
 
 **Task.** None yet.
 
+**Built:** tcc#82 `0bae511` — once the pick answered its check, the status names it («… · відповів на перевірку»), not another reviewer's review.
+
 ### 93. TCC's own lines in the dialog still come as «SYSTEM · LEDGER»
 
 **What.** Seen on the Arbiter's screenshots, not reported by him — recorded by the session.
@@ -2637,6 +2643,8 @@ class, which moved only the project-folder notice to «SYSTEM · TCC».
 **Where.** Mac, `a71dc24`, the in-app AI dialog (screenshots 9 and 10).
 
 **Task.** None yet.
+
+**Built:** tcc#80 `a216b49` — SYSTEM · TCC is the default; only a banked change and the journal's closing report say ledger.
 
 ### 94. «дивно про версії»: what the diagnostics say about the versions
 
@@ -2655,6 +2663,8 @@ to the session (3.0.61 or 3.0.62) is the project's, given in the car session.
 **Where.** Mac, `a71dc24` (screenshot 10, 2026-09-27).
 
 **Task.** None yet.
+
+**Built:** tcc#83 — the title reads «skill 3.0.62 · project 3.0.61» when the project's link holds another method, and the report's «project link» row names its version.
 
 ### 95. The reviewer picker: OMP rows cannot be picked (by design until TCC-034); a bold row's note is cut in the middle
 
@@ -2680,6 +2690,8 @@ a 404 any more.
 
 «OMP · GPT-5.6-Terra» went green the same minute: answered through omp.
 
+**Built:** tcc#84 `0bae511` — each popup row is measured in its own font, so the bold row is not cut.
+
 ### 96. The reviewer picker turns red-brown under the mouse, over its green «answered»
 
 **What.** The Arbiter: «а мишку навів — червона». «OMP · GPT-5.6-Terra» is framed green (answered
@@ -2690,3 +2702,5 @@ not looked into.
 **Where.** Mac, `bf5d8a1`, the footer's AI CRITIC (screenshots 13 and 14, 2026-09-27).
 
 **Task.** None yet.
+
+**Built:** tcc#82 `0bae511` — the green and red frames hold under the mouse.
