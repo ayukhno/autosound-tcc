@@ -2750,3 +2750,37 @@ openai нема»). `call_critic` also takes `via` other than omp for an OMP pic
 **Where.** Mac, `b2ed5d6` (screenshot 20; TCC's log 13:48:03).
 
 **Task.** None yet — a tail of tcc#74.
+
+### 99. An OMP reviewer on the generator's own model hangs: two `omp -p` calls with no output
+
+**What.** The Arbiter picked «OMP · Claude Opus 5» as the reviewer while the generator runs Claude
+Opus 5 through omp: «а ось це дивно, бо ця ж модель працює як основна». Both `call_critic` calls hung
+— `omp -p --no-session --model anthropic/claude-opus-5` 2:52 and 1:07 with no output, killed by the
+session, then filed as refusals. The session named the method's own warning (`setup-critic-channel.md`
+§7: a reviewer CLI spawned inside an agent session on the same model deadlocks). «OMP · Claude Sonnet
+5» answered the same package a minute later — a real review, «[Iteration 1/3] Critic: Claude
+(anthropic/claude-sonnet-5)».
+
+**Where.** Mac, `b2ed5d6`, the footer's AI CRITIC and the in-app dialog (screenshots 21 and 22).
+
+**Task.** None yet — a tail of tcc#74.
+
+### 100. The same-vendor «!» beside the reviewer is red; it is a warning — yellow
+
+**What.** The Arbiter: «зроби жовтим не червоним». «OMP · Claude Sonnet 5» green, beside it a red «!»
+whose click says «той самий вендор, що й Генератор … Рецензія відбувається, але …». Red is for what
+does not run (his rule the same day: red an error, orange/yellow a warning).
+
+**Where.** Mac, `b2ed5d6`, the footer (screenshots 24 and 25).
+
+**Task.** None yet.
+
+### 101. The reviewer list: the models that answered could be green
+
+**What.** The Arbiter: «може покрасити зеленим ті моделі що запрацювали». The list colours the
+refused ones red («OMP · Claude Opus 5 · відмова», «OMP · GPT-5.6-Terra · відмова»); the one that
+answered («OMP · Claude Sonnet 5») looks like one never tried.
+
+**Where.** Mac, `b2ed5d6`, the AI CRITIC list (screenshot 26).
+
+**Task.** None yet.
