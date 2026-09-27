@@ -2644,3 +2644,14 @@ to the session (3.0.61 or 3.0.62) is the project's, given in the car session.
 **Where.** Mac, `a71dc24` (screenshot 10, 2026-09-27).
 
 **Task.** None yet.
+
+### 95. The reviewer picker: OMP rows cannot be picked (by design until TCC-034); a bold row's note is cut in the middle
+
+**What.** The Arbiter: «я не можу вибрати рецензента з OMP» — tcc#74 as built: OMP rows are greyed
+until the method calls through omp (hub #216 TCC-034); «API · …» is the key's route meanwhile. And on
+the same list the bold row reads «OMP · Gemini 3.1 Pro · через …— з наступним оновленням методу»: its
+note elided in the middle, where the plain rows show it whole.
+
+**Where.** Mac, `a71dc24`, the footer's AI CRITIC list (screenshot 11, 2026-09-27).
+
+**Task.** The OMP rows: tcc#74 against the skill's tag. The cut note: none yet.
