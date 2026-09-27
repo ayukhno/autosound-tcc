@@ -6,7 +6,13 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
-Between tags, what has landed is written under `## [v0.1.44] — 2026-09-27 · omp as a full route, the reviewer checked before a session, control mode's DSP tables, the method at v3.0.63
+Between tags, what has landed is written under `## [Unreleased]` at the top. In the commit a release
+is cut from, that heading is renamed to `## [vX.Y.Z] — date · title`, with its `Paired with method`
+line. The heading is written by hand; `make ship` only checks it. A `### Breaking` section marks a
+change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
+tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
+
+## [v0.1.44] — 2026-09-27 · omp as a full route, the reviewer checked before a session, control mode's DSP tables, the method at v3.0.63
 
 Paired with method `680c078ab6016492d1719242a0480d058a1dbb0a` — the tag on that commit is
 **`v3.0.63`**.

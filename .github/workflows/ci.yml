@@ -279,7 +279,10 @@ jobs:
     name: windows (run ${{ matrix.run }})
     needs: windows-plan
     runs-on: windows-latest
-    timeout-minutes: 30
+    # 45, not 30: the whole suite in one Windows job took 27m48s at v0.1.43 and was cancelled at 85%
+    # at v0.1.44 — slow, not hung; the PR's four shards took 4-6 minutes each (the wave's release,
+    # 2026-09-27).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
