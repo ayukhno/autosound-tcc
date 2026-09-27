@@ -130,13 +130,17 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
     if result.ok:
         succeeded(key)
         return
-    if result.mode not in (critic.MODE_CLIPBOARD, critic.MODE_REFUSED):
+    # `choose_model` for a model that WAS named: its route does not serve it — `gemini-2.5-flash`
+    # came back 404 that way and TCC went on calling the reviewer ready (finding 85, tcc#74).
+    if result.mode not in (critic.MODE_CLIPBOARD, critic.MODE_REFUSED, critic.MODE_CHOOSE_MODEL):
         return
     harness, _, model = key.partition(":")
     choice = model_choices.Choice(harness=harness or "omp", model=model or key, label=key)
     if not (reaches or model_choices.critic_reaches)(choice):
         return
     reason = critic.refusal_reason(result.detail)
+    if result.mode == critic.MODE_CHOOSE_MODEL:
+        reason = reason or REFUSED
     if reason:
         # The detail is what a tooltip shows: the one thing to do when it can be named, the CLI's
         # own words when it cannot.

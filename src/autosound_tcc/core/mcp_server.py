@@ -153,8 +153,13 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     resolved, choice = model_choices.resolve_critic(key)
     state = availability.status(choice)
     because = list(missing) + ([availability.PHRASES[state.reason]] if not state.ready else [])
+    why_not = model_choices.not_a_reviewer(choice)
+    if why_not == model_choices.NOT_A_REVIEWER_OMP:
+        because.append(OMP_REVIEWER_REFUSAL)
     return {
         "configured": True,
+        **({"warning": FLASH_REVIEWER_WARNING}
+           if why_not == model_choices.NOT_A_REVIEWER_FLASH else {}),
         # The name the reviewer is called with, as `call_critic` sends it (tcc#57).
         "model": model_choices.reviewer_model(choice),
         # What the Arbiter picked, versus what this machine will actually run. Empty unless the
@@ -168,6 +173,7 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         # never enters a shell profile or the project folder, which is one `git push` from
         # leaking it (HUB-025, hub #197).
         "how": "call the `call_critic` tool" if model_choices.critic_reaches(choice)
+               else OMP_REVIEWER_REFUSAL if why_not == model_choices.NOT_A_REVIEWER_OMP
                else ("call `call_critic`; with no key it hands you a clipboard package for this "
                      "model. To make the channel answer directly, the Arbiter enters the key in "
                      "TCC: Menu → Reviewer key, which stores it in this computer's keystore — "
@@ -194,6 +200,21 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         "ready": not because,
         "not_ready_because": because,
     }
+
+
+#: Said instead of a review when the reviewer is picked through omp (tcc#74). The Arbiter,
+#: 2026-09-27: «якщо вибрана ОМР, то і йти треба тільки через цей виклик» — and the reviewer script
+#: has no omp route until the method's TCC-034 (hub #216). English, like the rest of the payload.
+OMP_REVIEWER_REFUSAL = (
+    "The reviewer is picked through omp, and an OMP pick goes through omp only (the Arbiter's "
+    "rule, tcc#74). The method's reviewer script has no omp route yet (hub #216 TCC-034), so "
+    "nothing was called. Ask the Arbiter to pick an API, AGY or CODEX reviewer in TCC's footer."
+)
+#: Beside a Flash-class reviewer in `get_tcc_state`: it runs, and the method does not review with it.
+FLASH_REVIEWER_WARNING = (
+    "a Flash-class reviewer: the method does not review with Flash (it praises and misses); "
+    "the Arbiter picks a Pro-class one in TCC's footer"
+)
 
 
 def configured_critic_model(project_dir: Path) -> str:
@@ -1125,6 +1146,12 @@ def build_server(
         Never run the reviewer script yourself for it: a direct run's reply never reaches the
         Arbiter's window, only the journal.
         """
+        # An OMP pick goes through omp or not at all (tcc#74): with no omp route in the script it
+        # went to the vendor's API under a name cut from omp's selector, and came back 404.
+        if configured_critic_harness(project_dir) == "omp":
+            return json.dumps({"mode": critic.MODE_ERROR, "critique": "", "model": None,
+                               "detail": OMP_REVIEWER_REFUSAL, "package": None, "seconds": 0},
+                              ensure_ascii=False)
         # The Arbiter's pick is the default. Without this the call went out with NO model, the
         # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
         # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"

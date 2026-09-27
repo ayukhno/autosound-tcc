@@ -3702,6 +3702,11 @@ class MainWindow(QMainWindow):
         that sends somebody to the metered one — the whole reason the routes are labelled at all.
         """
         self._reload_model_choices()
+        if not getattr(self, "_reviewer_probed_at_launch", False):
+            # The saved pick is asked once per launch, before any session (tcc#74): the picker was
+            # grey until a session started, and a dead model looked like a live one till then.
+            self._reviewer_probed_at_launch = True
+            self._probe_reviewer()
         quiet = model_choices.cli_routes_without_models()
         if quiet:
             self._status_strip.notify(
@@ -4162,6 +4167,10 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
         if before != choice.key:
             self._tell_session_reviewer(choice)
+            # Asked now, not at the next session start (the Arbiter: «було б добре з'ясовувати це
+            # до запуску», tcc#74); a check still running for the previous pick asks again after.
+            self._reprobe_reviewer = True
+            self._probe_reviewer()
 
     def _tell_session_reviewer(self, choice) -> None:
         """A running session learns the new reviewer through the signal queue (finding 59).
@@ -4245,11 +4254,19 @@ class MainWindow(QMainWindow):
             harness=key.partition(":")[0] or "omp",
             model=key.partition(":")[2] or key, label=key, provider="",
         )
-        if key and not model_choices.critic_reaches(for_reach):
+        why_not = model_choices.not_a_reviewer(for_reach) if key else ""
+        if why_not == model_choices.NOT_A_REVIEWER_OMP:
+            # Not "clipboard only": nothing is called at all until the method goes through omp.
+            notes.append(i18n.t("criticRowViaOmp"))
+            tips.append(i18n.t("criticViaOmpTip"))
+        elif key and not model_choices.critic_reaches(for_reach):
             notes.append(i18n.t("criticClipboardOnly"))
             vendor = model_choices.vendor_of(for_reach)
             tips.append(i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
                         .format(model=for_reach.model, vendor=vendor))
+        if why_not == model_choices.NOT_A_REVIEWER_FLASH:
+            notes.append(i18n.t("criticRowNotFlash"))
+            tips.append(i18n.t("criticNotFlashTip"))
         if chosen is not None and generator is not None:
             # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
             # does not recognise, which would make any two unknown models look like a matched pair.
@@ -4665,6 +4682,7 @@ class MainWindow(QMainWindow):
             return
         if self._reviewer_probe is not None and self._reviewer_probe.isRunning():
             return  # one probe at a time; replacing a running QThread is the probe30 crash
+        self._reprobe_reviewer = False
         # Only a reviewer something can reach — the RESOLVED one, as the probe sends it. Without a
         # key or a CLI for its vendor the script can only compile a clipboard package: nothing to
         # record, and a prompt on the clipboard at session start that nobody asked for.
@@ -4694,6 +4712,9 @@ class MainWindow(QMainWindow):
                 clipboard.clear()
         self._reload_model_choices()
         self._refresh_critic_status()
+        if getattr(self, "_reprobe_reviewer", False):
+            # Picked while the previous check ran (tcc#74): this one's answer is still unknown.
+            QTimer.singleShot(0, self._probe_reviewer)
 
     def _say_what_the_project_applies(self) -> None:
         """Name this project folder's own hooks and permissions before the first turn (HUB-050).
@@ -4849,7 +4870,13 @@ class MainWindow(QMainWindow):
             # One word for why it cannot run, or nothing (spec 2026-09-13). "Not installed" and
             # "remembered from last launch" are two of the reasons now, not two separate badges.
             state = availability.status(choice)
-            if not state.ready:
+            # No reviewer, whatever the machine has (tcc#74): an OMP pick goes through omp only
+            # and the script has no omp route yet; Flash is no reviewer for the method.
+            why_not = model_choices.not_a_reviewer(choice) if critic else ""
+            if why_not:
+                notes.append(i18n.t("criticRowViaOmp" if why_not == model_choices.NOT_A_REVIEWER_OMP
+                                    else "criticRowNotFlash"))
+            elif not state.ready:
                 notes.append(availability_view.word(state))
             elif critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
@@ -4877,7 +4904,7 @@ class MainWindow(QMainWindow):
                 colour = (current_theme().faint if state.reason == availability.NOT_CHECKED
                           else current_theme().warn)
                 combo.setItemData(row, QColor(colour), Qt.ItemDataRole.ForegroundRole)
-            if not choice.available:
+            if not choice.available or why_not:
                 # Not selectable, and greyed by the style rather than by a colour written here:
                 # a row nobody can pick has to look like one before it is clicked.
                 item = combo.model().item(row)

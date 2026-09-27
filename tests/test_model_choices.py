@@ -138,7 +138,8 @@ def test_the_reviewer_list_is_the_generator_list_plus_the_local_clis(catalogue, 
 
     assert reviewer[: len(generator)] == generator
     routes = {c.harness for c in reviewer[len(generator):]}
-    assert routes == {"agy", "codex"}
+    # And the key's own route (tcc#74): a one-shot call too, and the reviewer's alone.
+    assert routes == {"api", "agy", "codex"}
     assert all(c.harness in ("sdk", "omp") for c in generator)
 
 
@@ -934,3 +935,64 @@ def test_an_omp_catalogue_that_failed_is_not_asked_again_every_refresh(monkeypat
         mc.refresh_cli_catalogue(active_omp=active)
 
     assert asked == [1], "asked once; the silence is remembered"
+
+
+# --- The reviewer's routes (tcc#74, findings 82 and 85) -------------------------------------------
+
+
+def test_the_reviewer_list_has_an_api_route_for_gemini_pro_through_the_key():
+    """Gemini Pro answered only through the key on 2026-09-27, and the picker offered it only as an
+    OMP pick whose prefix was cut off on the way to the API. The Arbiter: an OMP pick goes through
+    omp, and the key's own route is its own line, «API · …»."""
+    from autosound_tcc.core import model_choices
+
+    api = [c for c in model_choices.critic_choices([]) if c.harness == "api"]
+
+    assert api and {c.route for c in api} == {"API"}
+    assert {"gemini-pro-latest", "gemini-3.1-pro-preview"} <= {c.model for c in api}
+    assert all(model_choices.reviewer_model(c) == c.model for c in api)
+
+
+def test_an_api_pick_reaches_through_the_key_only(monkeypatch, real_critic_reaches):
+    from autosound_tcc.core import model_choices, reviewer_key
+
+    api = model_choices.Choice(harness="api", model="gemini-pro-latest",
+                               label="gemini-pro-latest", provider="google")
+    monkeypatch.setattr(model_choices.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(reviewer_key, "has_key", lambda name: False)
+    assert model_choices.critic_reaches(api) is False, "agy on PATH is not the key's route"
+
+    monkeypatch.setattr(reviewer_key, "has_key", lambda name: name == "GEMINI_API_KEY")
+    assert model_choices.critic_reaches(api) is True
+
+
+def test_an_omp_pick_is_no_reviewer_until_the_method_calls_through_omp(monkeypatch,
+                                                                         real_critic_reaches):
+    """The Arbiter, 2026-09-27: «якщо вибрана ОМР, то і йти треба тільки через цей виклик». The
+    reviewer script has no omp route yet (hub #216 TCC-034), so an OMP pick reaches nothing —
+    rather than the vendor's API under a name cut from omp's selector."""
+    from autosound_tcc.core import model_choices, reviewer_key
+
+    omp = model_choices.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
+                               label="Gemini 3.1 Pro (High)", provider="google-antigravity")
+    monkeypatch.setattr(model_choices.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(reviewer_key, "has_key", lambda name: True)
+
+    assert model_choices.not_a_reviewer(omp) == "omp"
+    assert model_choices.critic_reaches(omp) is False
+
+
+def test_a_flash_model_is_marked_not_a_reviewer_and_a_pro_one_is_not():
+    """The method does not review with Flash; the picker says so on the row (tcc#74)."""
+    from autosound_tcc.core import model_choices
+
+    flash = model_choices.Choice(harness="agy", model="gemini-3.8-flash-low",
+                                 label="Gemini 3.8 Flash (Low)", provider="google")
+    lite = model_choices.Choice(harness="api", model="gemini-3.1-flash-lite",
+                                label="gemini-3.1-flash-lite", provider="google")
+    pro = model_choices.Choice(harness="api", model="gemini-pro-latest",
+                               label="gemini-pro-latest", provider="google")
+
+    assert model_choices.not_a_reviewer(flash) == "flash"
+    assert model_choices.not_a_reviewer(lite) == "flash"
+    assert model_choices.not_a_reviewer(pro) == ""

@@ -5001,3 +5001,54 @@ def test_the_models_window_is_modal_to_tcc_not_to_every_app(monkeypatch):
         assert reloaded == [True]
     finally:
         window._settings.remove(mw._ACTIVE_OMP_KEY)
+
+
+def test_an_omp_or_flash_row_is_greyed_in_the_reviewer_picker_with_why_and_stays_if_picked():
+    """tcc#74: an OMP pick goes through omp only, and the reviewer script has no omp route yet; a
+    Flash model is no reviewer for the method. Both rows say so and cannot be picked — and one that
+    IS the current pick stays selected, as every other row that cannot run does."""
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc import i18n
+    from PySide6.QtWidgets import QComboBox
+
+    _app()
+    combo = QComboBox()
+    omp = mc.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
+                    label="Gemini 3.1 Pro (High)", provider="google-antigravity")
+    flash = mc.Choice(harness="agy", model="gemini-3.8-flash-low",
+                      label="Gemini 3.8 Flash (Low)", provider="google")
+    pro = mc.Choice(harness="api", model="gemini-pro-latest", label="gemini-pro-latest",
+                    provider="google")
+
+    MainWindow._fill_combo(combo, [omp, flash, pro], flash.key, critic=True)
+
+    rows = {combo.itemData(i): i for i in range(combo.count())}
+    model = combo.model()
+    assert i18n.t("criticRowViaOmp") in combo.itemText(rows[omp.key])
+    assert i18n.t("criticRowNotFlash") in combo.itemText(rows[flash.key])
+    assert not model.item(rows[omp.key]).isEnabled()
+    assert not model.item(rows[flash.key]).isEnabled()
+    assert model.item(rows[pro.key]).isEnabled()
+    assert combo.currentData() == flash.key, "the current pick is not moved"
+
+    # In the generator's picker the same OMP row is an ordinary one.
+    MainWindow._fill_combo(combo, [omp], omp.key)
+    assert combo.model().item(0).isEnabled()
+
+
+def test_picking_another_reviewer_checks_it_at_once(monkeypatch):
+    """The Arbiter: «було б добре з'ясовувати це до запуску» (tcc#74). A new pick is asked at once,
+    and one picked while a check is running is asked when that one ends."""
+    _app()
+    window = MainWindow()
+    asked = []
+    monkeypatch.setattr(window, "_probe_reviewer", lambda: asked.append(True))
+    combo = window._ai_critic_combo
+    keys = [combo.itemData(i) for i in range(combo.count())
+            if combo.model().item(i).isEnabled() and combo.itemData(i)]
+    assert len(keys) >= 2
+    current = combo.currentData()
+    other = next(k for k in keys if k != current)
+    combo.setCurrentIndex(combo.findData(other))
+
+    assert asked, "a changed pick is checked before any session"

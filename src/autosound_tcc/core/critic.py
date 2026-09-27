@@ -257,7 +257,9 @@ def session_env(project_dir: Path) -> dict:
     reviewer reads `AUTOSOUND_CRITIC_MODEL` first, and the binary TCC would use goes with it.
     """
     model, route = configured(project_dir)
-    if not model:
+    if not model or route == "omp":
+        # An OMP pick goes through omp or not at all (tcc#74), and the script has no omp route
+        # yet: a model handed over here would reach the vendor's API under a cut-down name.
         return {}
     env = {"AUTOSOUND_CRITIC_MODEL": model}
     env.update(critic_bin_override(harness=route))
@@ -317,6 +319,8 @@ def run(
     if trace_path:
         argv.append(str(trace_path))
     via = (via or "").strip().lower()
+    if not via and (harness or "").strip().lower() == "api":
+        via = "api"  # «API · …» is the key's route and nothing else (tcc#74)
     if via in VIA_ROUTES:
         argv += ["--via", via]
 

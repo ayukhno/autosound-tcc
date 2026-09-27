@@ -258,3 +258,16 @@ def test_a_refused_reviewer_goes_red_like_a_refused_clipboard_fallback():
 
     assert _status(_choice()).reason == availability.LOCATION
 
+
+
+def test_a_model_the_route_does_not_serve_goes_red():
+    """Finding 85 (tcc#74): `gemini-2.5-flash` answered 404 «no longer available», the script
+    came back asking which model (`choose_model`), and TCC went on reporting the reviewer ready.
+    A named model that its route does not serve is a refusal."""
+    from autosound_tcc.core import critic
+
+    availability.record_reviewer_outcome(
+        "agy:gemini-3.1-pro-high",
+        _result(critic.MODE_CHOOSE_MODEL, "Модель `gemini-3.1-pro-high` не знайдена (HTTP 404)"),
+        reaches=lambda _c: True)
+    assert _status(_choice()).reason == availability.REFUSED

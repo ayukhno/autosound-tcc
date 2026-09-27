@@ -38,7 +38,7 @@ from autosound_tcc.core import reviewer_key
 # omp's broker are the same words and two different accounts, and the one that quietly spends API
 # credit is the one nobody notices until the balance goes negative (reported 2026-08-07, on a
 # Google AI Studio account, by a user who also had a subscription and free OAuth access).
-Harness = Literal["sdk", "omp", "agy", "codex"]
+Harness = Literal["sdk", "omp", "agy", "codex", "api"]
 
 #: Prefix shown in front of every picker entry, and what it means for billing. Every route is
 #: labelled, not just the SDK: an unlabelled entry reads as "the normal one", which is exactly the
@@ -48,6 +48,7 @@ ROUTES: dict[str, tuple[str, str]] = {
     "agy": ("AGY", "the Antigravity CLI on this machine — its own subscription"),
     "codex": ("CODEX", "the Codex CLI on this machine — its own ChatGPT login"),
     "omp": ("OMP", "omp's broker — whichever API credentials omp holds, metered"),
+    "api": ("API", "your own API key, called by the method's reviewer script — metered"),
 }
 
 # What TCC drives through the Agent SDK. Claude only, and deliberately not read from a catalogue:
@@ -158,6 +159,12 @@ CLI_TIMEOUT_S = 15.0
 #: What Codex offers. Hardcoded because `codex models` needs a terminal (it answers "stdin is not
 #: a terminal" when driven), unlike `agy models` which prints a plain list.
 CODEX_MODELS: tuple[str, ...] = ("gpt-5.2-codex", "gpt-5.2")
+
+#: The reviewer through the key and nothing else — «API · …» (tcc#74). Both answered live through
+#: the key on 2026-09-27, when agy's Pro was refused by location and every OMP pick went to the API
+#: under a name cut from omp's selector. `gemini-pro-latest` is Google's own pointer to the current
+#: Pro; the dated id stays put until Google retires it.
+API_MODELS: tuple[str, ...] = ("gemini-pro-latest", "gemini-3.1-pro-preview")
 
 
 @dataclass(frozen=True)
@@ -726,6 +733,35 @@ def resolve_critic(key: str) -> tuple[Resolved, Optional[Choice]]:
                             label=resolved.key, provider="")
 
 
+def api_choices() -> list[Choice]:
+    """The reviewer through the API key (tcc#74). Google's only: the key the method keeps is
+    `GEMINI_API_KEY` for this route, and whether it is there is `critic_reaches`'s question."""
+    return [Choice(harness="api", model=model, label=model, provider="google")
+            for model in API_MODELS]
+
+
+#: Why a row is not offered as a reviewer, for the picker and `get_tcc_state` (tcc#74).
+NOT_A_REVIEWER_OMP = "omp"
+NOT_A_REVIEWER_FLASH = "flash"
+
+
+def not_a_reviewer(choice: Choice) -> str:
+    """Why this is no reviewer, or "" (tcc#74).
+
+    `omp`: the Arbiter, 2026-09-27 — «якщо вибрана ОМР, то і йти треба тільки через цей виклик»,
+    and the reviewer script has no omp route until the method's TCC-034 (hub #216). Cut to a bare
+    name, an OMP pick went to the vendor's API instead — `gemini-3.1-pro` came back 404.
+
+    `flash`: the method does not review with Flash — it praises and misses, and once backed both
+    sides of the question it was called for. Marked, not hidden: an option that is absent reads as
+    one that does not exist."""
+    if choice.harness == "omp":
+        return NOT_A_REVIEWER_OMP
+    if tier_of(choice) in ("flash", "lite"):
+        return NOT_A_REVIEWER_FLASH
+    return ""
+
+
 def reviewer_model(choice: Choice) -> str:
     """The name the skill's reviewer script takes for this pick (tcc#57, finding 58).
 
@@ -795,10 +831,14 @@ def critic_reaches(choice: Choice) -> bool:
     A vendor we cannot NAME is a vendor we cannot promise a transport for. False is the honest
     answer, and it makes the clipboard a choice made in advance rather than a surprise.
     """
+    if choice.harness == "omp":
+        return False  # no omp route in the reviewer script yet (tcc#74, hub #216 TCC-034)
     vendor = vendor_of(choice)
     if not vendor:
         return False
     keys, binaries = _CRITIC_TRANSPORTS.get(vendor, ((), ()))
+    if choice.harness == "api":
+        binaries = ()  # «API · …» is the key's route and nothing else (tcc#74)
     # `reviewer_key.has_key`, not `os.environ` — the method keeps the key in the OS keystore, or
     # in `critic-env`, and OUT of the shell profile, so the environment is the one place a
     # correctly-stored key is guaranteed NOT to be (SKL-024, HUB-025). The method's own
@@ -821,7 +861,7 @@ def critic_choices(active_omp: list[str]) -> list[Choice]:
     Generator has to hold a session and talk to TCC's MCP server — which `agy` and `codex` may
     well be able to do, but not by anything TCC has wired yet.
     """
-    return _apply_overrides(choices(active_omp) + agy_choices() + codex_choices())
+    return _apply_overrides(choices(active_omp) + api_choices() + agy_choices() + codex_choices())
 
 
 def recommended(choice: Choice, critic: bool = False) -> bool:

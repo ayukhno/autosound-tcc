@@ -915,7 +915,8 @@ def test_the_state_carries_the_reviewer_the_arbiter_picked(
     from autosound_tcc.core import config, project_settings
     from autosound_tcc.core.mcp_server import _reviewer_state
 
-    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "omp:google/gemini-3.1-pro")
+    # The key's own route: an OMP pick reaches nothing until the method calls through omp (tcc#74).
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "api:gemini-pro-latest")
     monkeypatch.setenv("GEMINI_API_KEY", "key")  # reachability is now about this machine
 
     state = _reviewer_state(tmp_path)
@@ -1782,3 +1783,25 @@ def test_call_critic_takes_the_route_for_one_run_and_a_refusal_names_it(tmp_path
     out = asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
     text = json.dumps(out, ensure_ascii=False, default=str)
     assert "via" in text and "call_critic" in text
+
+
+def test_an_omp_reviewer_pick_is_refused_before_anything_runs(tmp_path, monkeypatch):
+    """The Arbiter, 2026-09-27: an OMP pick goes through omp or not at all. The reviewer script has
+    no omp route yet (hub #216 TCC-034), so `call_critic` says so and calls nothing — it went to
+    Google's API as `gemini-3.1-pro` and came back 404 (finding 85). `get_tcc_state` says the same."""
+    from autosound_tcc.core import config, critic, project_settings
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:google-antigravity/gemini-3.1-pro-high")
+    ran = []
+    monkeypatch.setattr(critic, "run", lambda *a, **kw: ran.append(True))
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    out = asyncio.run(mcp.call_tool("call_critic", {"package": "hello"}))
+    text = json.dumps(out, ensure_ascii=False, default=str)
+    assert ran == []
+    assert "omp" in text and "TCC-034" in text
+
+    state = json.dumps(asyncio.run(mcp.call_tool("get_tcc_state", {})), ensure_ascii=False,
+                       default=str)
+    assert "TCC-034" in state

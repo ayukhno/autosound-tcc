@@ -688,3 +688,28 @@ def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, m
 
     critic.run("a package", project_dir=tmp_path, harness="agy", model="gemini-3.8-flash-high")
     assert "--via" not in seen["argv"] and "GEMINI_API_KEY" not in seen["env"]
+
+
+def test_an_api_pick_runs_through_the_key_and_an_omp_pick_hands_a_session_nothing(tmp_path,
+                                                                                   monkeypatch):
+    """tcc#74: «API · …» is the key's route and nothing else, so the run asks the script for
+    `--via api`; an OMP pick has no route in the script yet, and a session's own shell must not be
+    handed a model it would take to the API under a cut-down name."""
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    seen = {}
+
+    def _fake(argv, **kw):
+        seen["argv"] = argv
+        raise OSError("stop here")
+
+    monkeypatch.setattr(critic.subprocess, "run", _fake)
+    critic.run("# hi", project_dir=tmp_path, model="gemini-pro-latest", harness="api")
+    assert "--via" in seen["argv"] and seen["argv"][seen["argv"].index("--via") + 1] == "api"
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:google-antigravity/gemini-3.1-pro-high")
+    assert critic.session_env(tmp_path) == {}

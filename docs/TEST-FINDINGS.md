@@ -2454,6 +2454,8 @@ OpenAI and finds `codex` installed, while no transport of the reviewer script ru
 
 **Task.** tcc#74 (with 85), on W-3 by the Arbiter's word 2026-09-27.
 
+**Built:** with 85, tcc#74.
+
 ### 83. Every omp session opens with «SYSTEM · LEDGER: this project's settings.json applies: hook SessionStart …»
 
 **What.** Seen on the Arbiter's screenshots, not reported by him — recorded by the session. At each
@@ -2514,6 +2516,19 @@ Three things in it, as the Arbiter met them:
 **Where.** Mac, the footer's AI CRITIC, the car project's omp session.
 
 **Task.** tcc#74 (with 82), on W-3 by the Arbiter's word 2026-09-27.
+
+**The Arbiter, 2026-09-27:** «OMP потрібен … дати доступ до різних моделей … якщо вибрана ОМР, то і йти
+треба тільки через цей виклик». The reviewer script has no omp route: hub #216 TCC-034 to `skill`. W-3
+takes the check and honest OMP rows; the omp route lands with the skill's tag. And «API · …» for Gemini
+Pro through the key (his word, the same day).
+
+**Built:** «API · gemini-pro-latest» and «API · gemini-3.1-pro-preview» run with `--via api` and reach
+only with the key. OMP and Flash rows in the reviewer picker are greyed with why («через omp — з
+наступним оновленням методу», «не для рецензента»); a current pick stays selected. An OMP pick is
+called for nothing: `call_critic` says so, `get_tcc_state` is not ready with the same words, a
+session's shell is handed no model. A Flash pick carries a warning in the state. The reviewer is
+asked once at launch and at once when picked. `choose_model` for a named model (the 404 of
+`gemini-2.5-flash`) is a refusal now: red, where it read as ready. Not checked live.
 
 ### 86. The method's version check fails at the start of an omp session
 
