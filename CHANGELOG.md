@@ -12,6 +12,19 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+### Fixed
+
+- **An omp session starts again when omp refuses a tool of TCC's list** (tcc#97, findings 106 and 109).
+  With a model that reads images itself, and with every model on omp 18, omp refuses `inspect_image`,
+  and TCC starts it once more without it (tcc#87). Two things broke that path. The first omp's
+  end-of-process mark stayed in the event queue, so the opening turn ended with nothing and the dialog
+  sat on «Запускаю OMP · …» while omp worked. And omp 18 prints a stack after its refusal, so the last
+  lines TCC read were all stack frames: no retry, and «omp exited before reporting ready» followed by
+  five `at …` lines. The retry now starts with an empty queue, and stack frames and source excerpts are
+  kept out of what TCC reads and shows of omp's errors. Checked with omp 18.3.5.
+
 ## [v0.1.44] — 2026-09-27 · omp as a full route, the reviewer checked before a session, control mode's DSP tables, the method at v3.0.63
 
 Paired with method `680c078ab6016492d1719242a0480d058a1dbb0a` — the tag on that commit is

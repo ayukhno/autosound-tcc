@@ -2903,6 +2903,9 @@ queue holds one item, `None`. The test of tcc#87 checks `_start_process` only, n
 
 **Task.** tcc#97 (W-4).
 
+**Fixed on `wave-0.1.45` (2026-09-27, the Arbiter: «лагоди зараз»):** the retry starts the second omp with an
+empty event queue. Tests: `test_the_first_turn_after_the_tools_retry_shows_what_omp_says`.
+
 **omp 18 (2026-09-27).** The Arbiter's fresh Windows install brought omp **18.3.5**. omp 18 has no
 `inspect_image` at all (no file names it in the v18.2.4 or v18.3.5 trees), so there every session is refused on
 `--tools`, takes the retry and hangs, whatever the model. tcc#97's fix is checked against omp 18 too — TCC has
@@ -2960,3 +2963,9 @@ whole stderr it returns the seven tools. With those seven, omp 18.3.5 reports `r
 **Weight.** High: no omp session on omp 18.
 
 **Task.** tcc#97 (W-4), with 106.
+
+**Fixed on `wave-0.1.45` (2026-09-27):** stack frames and source excerpts are kept out of the stderr tail, so the
+refusal is read and retried, and a failure shows omp's reason. Live, omp 18.3.5 in a scratch HOME: before — the
+Arbiter's exact five frames; after — the retry, `ready`, and omp's own answer in the first turn («No API key found
+for anthropic», that HOME has no login) with a turn end, in 2 s. Tests: `test_omp_18s_refusal_behind_a_stack_is_still_read_and_retried`,
+`test_a_failure_names_omps_reason_not_its_stack_frames`.

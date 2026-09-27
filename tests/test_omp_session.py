@@ -932,8 +932,126 @@ def test_a_newer_omp_that_dropped_a_tool_is_started_again_with_the_tools_it_name
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
     session = OmpSession(project_dir=tmp_path)
 
-    aio.run(session._start_process())
+    async def start_and_close():
+        try:
+            await session._start_process()
+        finally:
+            await session.close()
+
+    aio.run(start_and_close())
 
     assert session._saw_ready
     assert "inspect_image" not in session._tools
     assert set(session._tools) == {"read", "write", "edit", "glob", "grep", "bash", "ask"}
+
+
+def _fake_omp(tmp_path, monkeypatch, refusal: str) -> None:
+    """A POSIX stand-in for omp on PATH: it refuses `inspect_image` with `refusal` on stderr, and
+    with any other list reports `ready` and answers one `prompt` with a line of text."""
+    import textwrap
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    omp = bindir / "omp"
+    omp.write_text(textwrap.dedent(f'''\
+        #!/usr/bin/env python3
+        import json, sys
+        tools = sys.argv[sys.argv.index("--tools") + 1].split(",")
+        if "inspect_image" in tools:
+            sys.stderr.write({refusal!r})
+            sys.exit(1)
+        print('{{"type": "ready"}}', flush=True)
+        for line in sys.stdin:
+            if json.loads(line).get("type") == "prompt":
+                print(json.dumps({{"type": "message_update", "assistantMessageEvent":
+                                  {{"type": "text_delta", "delta": "hello from omp"}}}}), flush=True)
+                print('{{"type": "agent_end"}}', flush=True)
+        '''), encoding="utf-8")
+    omp.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ.get('PATH', '')}")
+
+
+_OMP_17_REFUSAL = ("CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: read, write, "
+                   "edit, glob, grep, bash, ask, ast_edit, goal.\n")
+
+#: omp 18.3.5's refusal, as it prints it: a source excerpt, the reason, then five stack frames.
+_OMP_18_REFUSAL = (
+    "14766 |   if (o.length === 0)\n"
+    "14767 |   throw new Yp(`Unknown tool${o.length === 1 ? \"\" : \"s\"} in --tools: ...`);\n"
+    "                ^\n"
+    "CliUsageError: Unknown tool in --tools: inspect_image. Valid tools: read, write, edit, glob, "
+    "grep, bash, ask, ast_edit, goal, init_experiment, run_experiment, log_experiment, update_notes.\n"
+    "      at dot (/$bunfs/root/omp-darwin-arm64:14767:9)\n"
+    "      at U9 (/$bunfs/root/omp-darwin-arm64:640398:12)\n"
+    "      at async run (/$bunfs/root/omp-darwin-arm64:640622:14)\n"
+    "      at async iJr (/$bunfs/root/omp-darwin-arm64:1849:16)\n"
+    "      at async Ipo (/$bunfs/root/omp-darwin-arm64:643770:12)\n"
+)
+
+
+async def _first_turn(session: OmpSession) -> list:
+    events = []
+    try:
+        async for event in session.start():
+            events.append(event)
+    finally:
+        await session.close()
+    return events
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a POSIX script stands in for omp")
+def test_the_first_turn_after_the_tools_retry_shows_what_omp_says(tmp_path, monkeypatch):
+    """Finding 106 (tcc#97): after the retry of tcc#87 the dialog sat on «Запускаю OMP · …» while
+    the second omp worked. The refused omp's reader put its end-marker in the event queue, the
+    retry kept the queue, and the opening turn read that marker first and ended with nothing."""
+    import asyncio as aio
+
+    _fake_omp(tmp_path, monkeypatch, _OMP_17_REFUSAL)
+    project = tmp_path / "car"
+    project.mkdir()
+
+    events = aio.run(_first_turn(OmpSession(project_dir=project)))
+
+    said = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert "hello from omp" in said
+    assert any(isinstance(e, TurnEnd) for e in events)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a POSIX script stands in for omp")
+def test_omp_18s_refusal_behind_a_stack_is_still_read_and_retried(tmp_path, monkeypatch):
+    """Finding 109: omp 18 prints a stack after «Unknown tool in --tools: …», and TCC read only the
+    last five stderr lines — five frames. The refusal was never seen, no retry, and the Arbiter got
+    «omp exited before reporting ready» and the frames."""
+    import asyncio as aio
+
+    _fake_omp(tmp_path, monkeypatch, _OMP_18_REFUSAL)
+    session = OmpSession(project_dir=tmp_path)
+
+    async def start_and_close():
+        try:
+            await session._start_process()
+        finally:
+            await session.close()
+
+    aio.run(start_and_close())
+
+    assert session._saw_ready
+    assert "inspect_image" not in session._tools
+
+
+def test_a_failure_names_omps_reason_not_its_stack_frames(tmp_path):
+    """Finding 109: the message was TCC's line plus five `at …` frames; omp's own reason, the one
+    line worth reading, was above them."""
+    session = OmpSession(project_dir=tmp_path)
+
+    async def feed():
+        reader = asyncio.StreamReader()
+        reader.feed_data(("SomeError: the reason\n" + "      at frame (x:1:1)\n" * 6).encode())
+        reader.feed_eof()
+        from types import SimpleNamespace
+        session._proc = SimpleNamespace(stderr=reader)
+        await session._drain_stderr()
+
+    asyncio.run(feed())
+
+    assert "SomeError: the reason" in session._why("omp exited before reporting ready")

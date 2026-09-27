@@ -97,14 +97,20 @@ _ENABLED_TOOLS = (
 
 _UNKNOWN_TOOL = re.compile(r"Unknown tool in --tools: (\S+?)\.\s*Valid tools: ([^\n]+)")
 
+#: What omp's runtime prints around an error: `at fn (file:line:col)` frames, and the source excerpt
+#: (`14767 |   throw …` and its `^`). omp 18 puts five frames after the reason, and the stderr tail
+#: was all frames — no retry, and nothing to read on screen (finding 109). Kept out of the tail.
+_STACK_NOISE = re.compile(r"^\s*at\s.*:\d+:\d+\)?\s*$|^\s*\d+\s\|\s|^\s*\^\s*$")
+
 
 def tools_omp_takes(said: str, wanted) -> Optional[list[str]]:
     """The tools of `wanted` that omp says it has, when it refused one of them; else None.
 
-    omp 17.4.0 dropped `inspect_image` and refused the whole `--tools` list over it — «Unknown tool
-    in --tools: inspect_image. Valid tools: read, write, …» — so no omp session started on that
-    machine (finding 102, tcc#87). omp names what it takes; this keeps the allowlist's meaning (only
-    those tools) and drops what this omp does not have."""
+    omp refuses the whole `--tools` list over one tool it does not offer — «Unknown tool in --tools:
+    inspect_image. Valid tools: read, write, …» — and no omp session started (finding 102, tcc#87).
+    17.x offers `inspect_image` only to a model that cannot read images itself; omp 18 has none. omp
+    names what it takes; this keeps the allowlist's meaning (only those tools) and drops what this
+    omp does not offer."""
     found = _UNKNOWN_TOOL.search(said or "")
     if not found:
         return None
@@ -917,6 +923,9 @@ class OmpSession:
                     "omp refused --tools %s; starting again with %s",
                     ",".join(self._tools), ",".join(kept))
                 self._tools = kept
+                # A fresh queue too: the refused omp's reader left its end-marker in the old one,
+                # and the opening turn read it first and ended with nothing (finding 106, tcc#97).
+                self._events = asyncio.Queue()
                 self._ready = asyncio.Event()
                 self._ended = asyncio.Event()
                 self._saw_ready = False
@@ -947,7 +956,7 @@ class OmpSession:
             return
         async for raw in proc.stderr:
             line = raw.decode(errors="replace").rstrip()
-            if line:
+            if line and not _STACK_NOISE.match(line):
                 self._stderr_tail = (self._stderr_tail + [line])[-20:]
 
     def _why(self, fallback: str) -> str:
