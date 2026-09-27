@@ -2053,6 +2053,13 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-088 — v0.1.44: the installer path walked by hand
+
+**Статус**: open 2026-09-27 · waiting on the Arbiter (`WAVES.md` §3.1, TCC only)
+
+The one exit criterion of W-3 no script makes: a fresh install of v0.1.44 by the README's installer, on a
+machine (the Windows VM is the likeliest), started from its shortcut. Whatever it finds is W-4's.
+
 ### F-087 — W-4: a taskbar pin made from the desktop shortcut is a second button on Windows
 
 **Статус**: open 2026-09-27 · for W-4's collection (the Arbiter: «Підказка зараз, дослідження в W-4»)
