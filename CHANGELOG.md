@@ -6,13 +6,18 @@ button follows the tags below, so a version here is what somebody actually recei
 it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
 differ, and the newer of them is the fresh install.
 
-Between tags, what has landed is written under `## [Unreleased]` at the top. In the commit a release
-is cut from, that heading is renamed to `## [vX.Y.Z] — date · title`, with its `Paired with method`
-line. The heading is written by hand; `make ship` only checks it. A `### Breaking` section marks a
-change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
-tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
+Between tags, what has landed is written under `## [v0.1.44] — 2026-09-27 · omp as a full route, the reviewer checked before a session, control mode's DSP tables, the method at v3.0.63
 
-## [Unreleased]
+Paired with method `680c078ab6016492d1719242a0480d058a1dbb0a` — the tag on that commit is
+**`v3.0.63`**.
+
+The wave W-3, collected with the Arbiter on the Mac and on Windows, and built item by item on his OK
+(`docs/W-3-LESSONS.md` has what it taught). What he meets first: omp is a full route — a session
+through omp starts, reads its tools and survives a long review, and a reviewer picked through omp is
+called through omp and nothing else; the reviewer is asked the moment it is picked, so a dead or
+exhausted model is red before any session, not in the middle of one; control mode's DSP tables are
+one navigation with the EQ, status dots and «порівняти з» across configurations; and every model on
+screen says which way it runs.
 
 ### Added
 
@@ -23,8 +28,69 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
   guide is not part of the installed package and its screens change between versions.
 - **A guide to the house curve in TCC.** [The house curve in TCC](docs/guide/HOUSE-CURVE.md): where
   the window shows the target curve, how it opens the method's target-curve tool, and the tool's
-  buttons (loading curves and measurements, Compare, Analyze), with screenshots. What a target curve
-  is and how to choose, build and voice one stays in the method's own guides, linked from the page.
+  buttons, with screenshots.
+- **The reviewer through the key: «API · gemini-pro-latest», «API · gemini-3.1-pro-preview».**
+  Gemini Pro through your own API key is its own row and goes only that way (tcc#74).
+- **The reviewer is checked when it is picked.** Once at launch and at once after a new pick, a short
+  live call colours the picker: grey not known yet, green answered, red refused with the route's own
+  words. A model its route does not serve is red now, where it read as ready. The status beside the
+  picker names the check that just answered (tcc#74, #82).
+- **«⚙ Налаштування»** — TCC's technical settings in one submenu, the EQ card's field order first; it
+  sits at the end of the Tools section, in bold (tcc#67, #79, #81).
+- **Control mode's DSP tables** — one navigation between the tables and the EQ and back, a status dot
+  on each tree group and tab, «порівняти з» across configurations; the EQ band card numbers its DSP
+  band, colours its type and shows bypass; tier pickers in the EQ header and band counts in the
+  pickers, table and tree; the compared version's EQ row under the current one, with new / changed /
+  removed marks, and the compared bands as coloured dots in the tree (tcc#51–#55).
+- **Capture rounds from the method's plan.** Taking measurements in without a session opens the
+  round with the list the method gives (`capture-start <N> --plan`), and the session's
+  `start_capture` does the same when it is given no list (tcc#77, hub #214).
+
+### Changed
+
+- **The method moves to v3.0.63**: a capture round carries its own columns and is read against REW
+  when it closes, a step's name leads with its id, and the reviewer script calls through omp
+  (tcc#68, hub #216).
+- **Every model says its route** — the picker, «Параметри проєкту» («OMP · Claude Opus 5») and the
+  dialog's bubbles («GENERATOR · OMP · CLAUDE OPUS 5») (tcc#75, #80).
+- **An OMP reviewer goes through omp only.** omp's full selector is sent, never cut to a bare name
+  for another route; a refusal is omp's own, and nothing suggests retrying through a key. The
+  generator's own model is greyed as a reviewer — it reviews nothing and hung through omp. Flash
+  models are marked «не для рецензента» (tcc#74, #85).
+- **Colours mean one thing each**: the reviewer's «!» is yellow for a warning (same vendor, Flash),
+  red when the pick cannot review; a reviewer that answered is green in the list; the picker keeps
+  its state colour under the mouse (tcc#82, #86).
+- **TCC's own lines in the dialog are «SYSTEM · TCC»**; «ledger» is kept for a banked change and the
+  journal's closing report. The project folder's own hooks are not announced any more; a folder that
+  grants tools without asking, or a settings file nobody can read, is an orange warning (tcc#75, #80).
+- **The title and the diagnostics name the project's own method** when its link holds another
+  version than yours: «skill 3.0.63 · project 3.0.61» (tcc#83).
+- **The SDK model list** is Anthropic's current one (Opus 5.5, Fable 5.1) and says how old it is
+  (tcc#64).
+
+### Fixed
+
+- **omp sessions**: a session that did not start (a TypeError on `language`); a turn that hung inside
+  TCC's own tools (the frame reader died on omp's long frames); a newer omp (17.4) that refused
+  TCC's tool list over a tool it dropped — started again with the tools it names; a long review cut
+  after omp's 30 s tool timeout — omp now waits as long as a review may take (tcc#56, #72, #85, #87).
+- **Quitting** with a hung omp session or while REW is being pinged no longer aborts (tcc#63, #73).
+- **The terminal «Налаштувати omp…» opens** in front of TCC — a hover tip had pulled TCC back over it,
+  and with a Parallels VM running «Terminal» named the VM's Windows Terminal; it is addressed by its
+  bundle id now, and a refusal carries osascript's own words (tcc#71).
+- **Hover tips hide** when you switch to another app, and when the mouse has left their control
+  (tcc#78).
+- **Windows**: a project gets its skill link as a junction when a symlink is refused (no Developer
+  Mode), so a session runs with the method; entering control mode no longer flashes small windows;
+  «порівняти з» lists the versions (tcc#88, #62, #66). To pin TCC to the taskbar, pin it from its
+  running window — a pin made from the desktop shortcut is a second button (TODO F-087).
+- **«In focus now»** reads the open round, not the phase plan, and a next round is not shown done
+  (tcc#60); the curve window says REW is offline instead of waiting for the timeout (tcc#61); the
+  omp models window draws its check boxes in both themes and is wide enough (tcc#70); a state file
+  whose `version` field names another version is said in the DSP header (tcc#50); the key screen,
+  the theme button and the faint grey read right in both languages and themes (tcc#65); the
+  reviewer's reply has its own bubble (tcc#59); the reviewer picker's colours and the project params
+  follow the pick at once (tcc#57, #58).
 
 ## [v0.1.43] — 2026-09-23 · the intake form, control mode, the reviewer key in the Keychain, the method at v3.0.60
 
