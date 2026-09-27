@@ -2902,3 +2902,18 @@ queue holds one item, `None`. The test of tcc#87 checks `_start_process` only, n
 **Weight.** High: no omp session is usable on that machine.
 
 **Task.** tcc#97 (W-4).
+
+### 107. «Оновити TCC» updates TCC alone: omp and the other tools stay where they were
+
+**What.** The Arbiter, 2026-09-27, after «Оновити TCC» on the second Mac (0.1.43 → 0.1.44): «я оновлювався
+ось буквально, чому не було оновлення всіх пакетів?» The button ran `uv tool install --upgrade
+"autosound-tcc[gui,claude] @ git+…@v0.1.44"`: TCC and four of its Python packages moved
+(`claude-agent-sdk`, `pyjwt`, `uvicorn`), 33 were already current. omp stayed at 17.3.8 (brew offers 18.2.4).
+TCC's updater has two rows, TCC and the skill; omp, `agy`, `gh` and Claude Code are the installer's, and
+nothing in the window offers them.
+
+**Where.** The second Mac (MacBook Air), TCC's update row.
+
+**Weight.** Low to medium: an old omp is what TCC then runs against, and nobody is told.
+
+**Task.** tcc#98 (W-4).
