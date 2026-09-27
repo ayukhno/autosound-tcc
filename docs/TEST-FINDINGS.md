@@ -2860,3 +2860,5 @@ fresh pin from the desktop again none — Windows drops the id when it pins a sh
 the id on the pinned copy and Explorer was restarted: still two buttons (Windows keeps what the pin was at
 pin time). A pin from the running window stays one button (F-037). The Arbiter: the hint now, the research
 in W-4 — the reference and the installer say «pin it from its running window»; W-4's item is TODO F-087.
+
+**Checked live 2026-09-27 (VM, `17dd4fc`):** the switch into control mode flashes nothing.
