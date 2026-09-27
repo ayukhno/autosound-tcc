@@ -2671,3 +2671,14 @@ Assist 429 `RESOURCE_EXHAUSTED`, the Antigravity account's quota — with the me
 a 404 any more.
 
 «OMP · GPT-5.6-Terra» went green the same minute: answered through omp.
+
+### 96. The reviewer picker turns red-brown under the mouse, over its green «answered»
+
+**What.** The Arbiter: «а мишку навів — червона». «OMP · GPT-5.6-Terra» is framed green (answered
+this launch); with the cursor on it the frame turns red-brown, which reads as a refusal. Likely the
+pickers' common hover border (`mini-select:hover`, the accent colour) drawn over the state colour —
+not looked into.
+
+**Where.** Mac, `bf5d8a1`, the footer's AI CRITIC (screenshots 13 and 14, 2026-09-27).
+
+**Task.** None yet.
