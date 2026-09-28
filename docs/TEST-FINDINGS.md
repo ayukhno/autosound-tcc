@@ -3031,3 +3031,21 @@ missing. Way out: a heading over the first group too («4.C-cut — цей пр�
 greyed as «v_002 — зараз».
 
 **Task.** tcc#103 (W-4), no `ok` yet.
+
+### 113. The DSP tree at the bottom left marks EQ changes only: a changed HP, delay or polarity has no mark there
+
+**What.** The Arbiter, 2026-09-28: «ось тут не відображається признак змін в нижній лівій зоні, а треба. і те саме
+ось тут по затримці і полярності … звісно це все має працювати і для всіх інших відхилень/змін.»
+- Screenshot 4: the output table has sw's HPF `20 BW4` in blue, changed. In the tree, sw's line reads
+  `HP 20 BW4 · LP 80 LR4 · -6.0dB` with no mark on the HP; only the EQ marks beside it (`● (1)` new, `● (2)` changed).
+- Screenshot 5: `6.R-right` against `v_006`. The table has m-R's and tw-R's delay `4.19` and polarity `NORM` in blue,
+  changed. In the tree, m-R and tw-R carry no mark at all. The output line does not show the delay either.
+
+Wanted: every field that differs from the compared version marked in the tree too, on every tier, not EQ alone.
+
+**Where.** This Mac, TCC at `wave-0.1.45`, project `car/passat-b8-2026-aya`, the DSP tree («ВИХІДНІ»), with
+«порівняти з» set.
+
+**Weight.** Medium: the tree is where a change is seen at a glance, and it shows only part of them.
+
+**Task.** tcc#104 (W-4), no `ok` yet.
