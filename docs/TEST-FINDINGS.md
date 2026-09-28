@@ -3009,3 +3009,25 @@ ends with `inv`. The method's parser reads that title right — `method: 'rta'`,
 calls it for the spelling (`_canonical`), then sorts by the suffix anyway. TCC's own code on the copy gives exactly
 the screen: `sw ['L m+tw_55 (rta) inv']`, `rta [the other five]`. Fix: sort by the parsed `method`, the suffix only
 for a title the grammar does not read.
+
+### 112. «Порівняти з»: the open configuration's versions sit at the top without a name, and its current one is not there
+
+**What.** The Arbiter, 2026-09-28: «вибрана конфігурація 4. … в конфігурації 3. є два варіанта. Тепер вибираємо
+конфігурацію 3. і не бачимо її варіантів налаштувань, але бачимо що в 4. теж два варіанти, а ми до цього їх теж не
+бачили. це бага в ТСС чи в файлах проекту?» With `4.C-cut` open the list reads «—», `v_001`, then `1.B-base — інший
+пресет` with `v_006…v_001`, `3.S-shelf` with `v_002 v_001`, and so on; `4.C-cut` is not among the named groups.
+With `3.S-shelf` open it is the same the other way round (screenshots 1 and 2).
+
+**Where.** This Mac, TCC at `wave-0.1.45`, project `car/passat-b8-2026-aya`, the EQ tab's «порівняти з».
+
+**Weight.** Low: nothing is lost, the list reads as if it were.
+
+**Cause (found 2026-09-28).** Not the project's files: `state/3.S-shelf` … `state/7.E-epy` each hold `v_001` and
+`v_002` with `HEAD` = `v_002`. TCC shows the open configuration's versions first, with no heading
+(`detail_pane.fill_compare_combo`), and leaves the current one out, since a version is not compared with itself
+(`ledger_line.compare_groups`, `v != current`). So the lone `v_001` at the top is the open configuration's other
+version, and its `v_002` is the one on screen. Every other configuration gets a heading, so the open one looks
+missing. Way out: a heading over the first group too («4.C-cut — цей пресет»), and the current version shown
+greyed as «v_002 — зараз».
+
+**Task.** tcc#103 (W-4), no `ok` yet.
