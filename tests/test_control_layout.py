@@ -448,23 +448,24 @@ def test_the_corner_labels_ask_for_their_own_width_not_zero(tmp_path, monkeypatc
     defaults to `QSizePolicy.Ignored`, which asks the layout for ZERO width of its own and grows
     only into whatever the row's OTHER items leave over -- this row has its own explicit stretch
     (`head_layout.addStretch(1)`, `main_window.py`) competing for exactly that leftover space, so
-    the label got none of it. Measured (real app, English): «порівняти з» («compare with») read
-    «c…» at 1600, 1000 and 756 px alike -- not reproducible offscreen by resizing this window (it
-    cannot go below its own 697 px minimum here either, same as finding IMPORTANT 3), so the
-    policy itself is asserted directly rather than the rendered symptom: `Maximum` --
-    `ElidedLabel`'s own documented "value" mode -- asks for the label's natural width instead."""
-    from PySide6.QtWidgets import QSizePolicy
+    the label got none of it. Measured (English): «compare with» read «c…» and «another
+    configuration» «a…» at 1600, 1000 and 756 px alike. `Maximum` -- `ElidedLabel`'s own
+    documented "value" mode -- asks for the label's natural width instead.
 
+    The window is SHOWN and laid out at a roomy 1600 px: on a window never shown, no layout hands
+    the labels a width, `text()` stays whole under either policy, and a test reading it passes
+    for nothing (the previous version of this test did exactly that)."""
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
+    window.show()
     layout = window._control_layout
     layout.enter()
-    assert layout._compare_label.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum
-    assert layout._compare_other.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum
-    # Kept as a secondary, coarser guard: true today regardless of the policy (this window is not
-    # narrow enough offscreen to tell the two apart by rendered text), but still a real invariant.
-    assert layout._compare_label.text() == i18n.t("cmpWith"), layout._compare_label.text()
     layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("SQ/v_004"))
+    window.resize(1600, 900)
+    for _ in range(4):
+        QApplication.processEvents()
+    assert layout._compare_other.isVisibleTo(window), "another preset picked: its tag is up"
+    assert layout._compare_label.text() == i18n.t("cmpWith"), layout._compare_label.text()
     assert layout._compare_other.text() == i18n.t("cmpOtherTag"), layout._compare_other.text()
     layout.leave()
 

@@ -941,9 +941,22 @@ def test_the_compare_row_tooltip_survives_a_paint():
     `_DTab.paintEvent` used to call `setToolTip` on every single paint -- `""` when the text fit,
     the full text when it did not -- silently erasing `_sync_tabs`'s tcc#54 hint on `_cmp_btn`
     («Pick a version in «compare with» first», measured after `open_eq`, gone after the first
-    paint). A resize (which schedules a repaint) must not touch a tooltip the owner set, elided
-    or not."""
+    paint). A paint, elided or not, must not touch a tooltip the owner set.
+
+    The pane is SHOWN and the tab repainted before each check, and the paints are counted: a
+    widget never shown is never painted, so the previous version of this test passed against the
+    very paint-time `setToolTip` it was written to catch."""
+    from PySide6.QtCore import QEvent, QObject
+
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    class _Paints(QObject):
+        count = 0
+
+        def eventFilter(self, _watched, event):  # noqa: N802 (Qt override)
+            if event.type() == QEvent.Type.Paint:
+                self.count += 1
+            return False
 
     _app()
     view = _rig_with_eq(inputs=True)
@@ -952,14 +965,26 @@ def test_the_compare_row_tooltip_survives_a_paint():
     pane.set_embedded(True)
     pane.set_view(view)
     pane.open_eq(outputs, _row(outputs, "m-L"))
-    owner_tip = pane._cmp_btn.toolTip()
+    pane.show()
+    QApplication.processEvents()
+    button = pane._cmp_btn
+    owner_tip = button.toolTip()
     assert owner_tip == i18n.t("cmpRowOff"), owner_tip
+    paints = _Paints()
+    button.installEventFilter(paints)
 
-    pane._cmp_btn.resize(20, 22)  # narrow enough to elide -- and a resize schedules a paint
-    assert pane._cmp_btn.toolTip() == owner_tip, "the owner's hint survives being elided"
+    button.resize(20, 22)  # narrow enough to elide
+    QApplication.processEvents()
+    button.repaint()
+    assert paints.count > 0 and button.fit_text() != button.text(), "painted, and elided"
+    assert button.toolTip() == owner_tip, "the owner's hint survives being elided"
 
-    pane._cmp_btn.resize(400, 22)  # roomy again
-    assert pane._cmp_btn.toolTip() == owner_tip, "and survives not being elided either"
+    painted = paints.count
+    button.resize(400, 22)  # roomy again
+    QApplication.processEvents()
+    button.repaint()
+    assert paints.count > painted and button.fit_text() == button.text(), "painted, whole"
+    assert button.toolTip() == owner_tip, "and survives not being elided either"
 
 
 def test_a_tab_with_no_owner_tooltip_falls_back_to_its_full_text_when_elided():

@@ -207,7 +207,10 @@ def test_current_is_dropped_from_every_group_it_does_not_head(tmp_path):
     `current` stays IN its own group now (tcc#103), but must stay OUT of every OTHER one --
     before this change it was dropped from every group; a version's own file can name a preset
     different from the one it is CURRENT for (SQ is applying v_006, but v_006 itself says it was
-    proposed for FULL), and nothing marks it there as the version already open."""
+    proposed for FULL), and nothing marks it there as the version already open.
+
+    It still stands in the OPEN preset's group, whatever its file names: #103 wants the current
+    version shown there, greyed -- not a heading over an empty list."""
     versions = tmp_path / "versions"
     versions.mkdir(parents=True)
     (versions / "v_004.json").write_text(
@@ -221,16 +224,39 @@ def test_current_is_dropped_from_every_group_it_does_not_head(tmp_path):
     groups = ledger_line.compare_groups(tmp_path, "SQ", "v_006")
     assert dict(groups).get("FULL", []) == ["v_004"], \
         "current does not reappear, selectable, under the preset its own file names"
+    assert groups == [("SQ", ["v_006"]), ("FULL", ["v_004"])], \
+        "the open preset's heading stands over its current version, not over nothing"
+
+    (versions / "v_004.json").unlink()
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == [("SQ", ["v_006"])], \
+        "nor does FULL's heading, once the version open now was its only one"
 
 
-def test_compare_groups_still_drops_current_from_another_preset_s_own_numbering(tmp_path):
-    """The old layout numbers each preset separately -- a version literally called the same as
-    `current` can exist, unrelated, in another preset's own numbering, and must not be offered as
-    a pick there either (the same GAP, on the old layout)."""
+def test_another_preset_keeps_its_own_v_002_on_the_old_layout(tmp_path):
+    """The old layout numbers each preset on its own: FULL's `v_002` is a different state from
+    SQ's `v_002` -- keyed `FULL/v_002` and read from FULL's own folder -- never the version open
+    now, so nothing of FULL's is dropped because SQ's current is also called `v_002`."""
     _old_layout(tmp_path)
     groups = ledger_line.compare_groups(tmp_path, "SQ", "v_002")
-    assert dict(groups)["FULL"] == ["v_001"], \
-        "FULL's own v_002 -- a different file, the same number -- is not offered as a pick"
+    assert dict(groups)["FULL"] == ["v_002", "v_001"], \
+        "FULL's own current version stays on offer beside its older one"
+
+
+def test_the_arbiter_s_project_offers_every_other_preset_s_both_versions(tmp_path):
+    """The shape of `passat-b8-2026-aya` (tcc#103, finding 112): `3.S-shelf`…`7.E-epy` each hold
+    `v_001` and `v_002`, `HEAD` = `v_002`; `4.C-cut` is open at its `v_002`. Its own group keeps
+    that version (greyed by the combo), and every other configuration offers both of its own --
+    its current one included (finding 66)."""
+    names = ("3.S-shelf", "4.C-cut", "5.B-bass", "6.W-wide", "7.E-epy")
+    for name in names:
+        folder = tmp_path / name
+        folder.mkdir()
+        for n in (1, 2):
+            (folder / f"v_{n:03d}.json").write_text("{}", encoding="utf-8")
+        (folder / "HEAD").write_text("v_002\n", encoding="utf-8")
+    groups = ledger_line.compare_groups(tmp_path, "4.C-cut", "v_002")
+    assert groups[0] == ("4.C-cut", ["v_002", "v_001"])
+    assert groups[1:] == [(n, ["v_002", "v_001"]) for n in names if n != "4.C-cut"]
 
 
 def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkeypatch):

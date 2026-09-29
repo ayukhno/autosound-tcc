@@ -110,28 +110,33 @@ def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str,
     it into a disabled, greyed «v_002 — зараз» row is `detail_pane.fill_compare_combo`'s job, not
     this one's — it still needs `current` to know which row that is.
 
-    Every OTHER group keeps dropping it (a gap the controller caught in review, opus reviewer's
-    pass): `current`'s own file can name a DIFFERENT preset than the one it is CURRENT for — a
-    configuration may continue another preset's (`previous_of`'s own docstring) — and
-    `fill_compare_combo` only greys `current` out of the group it is passed as `own`; anywhere
-    else, it is a plain, selectable row with nothing marking it as the version already on screen.
+    On the project line `current`'s own file can name a DIFFERENT preset than the one it is
+    current for — a configuration may continue another preset's (`previous_of`'s own docstring).
+    It still goes in THIS preset's group, the only one `fill_compare_combo` greys, and in no
+    other: under another preset's heading it would be a plain, selectable row with nothing
+    marking it as the version already on screen, and without it this preset's heading could
+    stand over an empty list.
 
     The old layout numbers each preset on its own, so another preset's `v_002` is a different
-    state from this one's — the caller keys it with its preset. The project line numbers once, and
-    each version's file names the preset it was made for; one never made for any stays with this
-    preset, where it was offered before.
+    state from this one's — the caller keys it with its preset — and is never `current`, so
+    nothing is dropped there. The project line numbers once, and each version's file names the
+    preset it was made for; one never made for any stays with this preset, where it was offered
+    before.
     """
     root = Path(root)
     if is_project_line(root):
         every = list(reversed(versions(root, preset)))
         made_for = {v: _made_for(root, v) for v in every}
-        groups = [(preset, [v for v in every if made_for[v] in (None, preset)])]
-        for other in sorted({p for p in made_for.values() if p and p != preset}):
+        groups = [(preset, [v for v in every if v == current or made_for[v] in (None, preset)])]
+        # Named from the versions other than `current`, so a preset whose only version is the
+        # one open now gets no heading over nothing.
+        for other in sorted({made_for[v] for v in every
+                             if v != current and made_for[v] not in (None, preset)}):
             groups.append((other, [v for v in every if made_for[v] == other and v != current]))
         return groups
     groups = [(preset, list(reversed(versions(root, preset))))]
     for other in presets(root):
-        theirs = [v for v in reversed(versions(root, other)) if v != current] if other != preset else []
+        theirs = list(reversed(versions(root, other))) if other != preset else []
         if theirs:
             groups.append((other, theirs))
     return groups
