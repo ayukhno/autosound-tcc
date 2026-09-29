@@ -3101,7 +3101,14 @@ His note: «але може це там на рівні даних — тому 
 on `wave-0.1.45`, so either the round carries its own groups (the task, not the title, decides), or a title the
 grammar does not read falls back to sweep.
 
-**Task.** None yet; not diagnosed (collection).
+**Cause (2026-09-29, from the project's `process-state.json`).** Not the round's data: `cap_013` carries no groups;
+the `… (rta) inv` titles were taken beyond the plan. The method's grammar reads a note after the method tag, but
+refuses these titles for their `D_` prefix (rule S-042), and TCC then sorted a refused title by its last word
+(`inv`, `PK=-2`) and defaulted to sweep. The Arbiter the same evening: «наші префікси були помилкою — треба було
+робити різні конфігурації і додавати літеру перед номером заміру як ми робимо зараз в проекті рісьоча» — so the
+grammar is right to refuse `D_`; TCC now reads a refused title's tag where the grammar places it.
+
+**Task.** tcc#109 (W-4, built `50419d6`).
 
 ### 118. Control mode opens shifted to the left on the Windows VM
 
