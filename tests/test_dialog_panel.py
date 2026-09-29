@@ -331,3 +331,94 @@ def test_tccs_own_lines_are_signed_tcc_and_only_a_record_says_ledger():
     assert panel._bubbles[-1]._who_label.text() == "SYSTEM · TCC"
     panel._add_system_message("v_007 banked", role=dialog_panel.SYS_ROLE_LEDGER)
     assert panel._bubbles[-1]._who_label.text() == "SYSTEM · ledger"
+
+
+def _hms(at: float) -> str:
+    import time
+
+    return time.strftime("%H:%M:%S", time.localtime(at))
+
+
+def test_a_new_bubble_says_when_beside_who_said_it(monkeypatch):
+    """tcc#100, finding 110: the Arbiter waited on a slow first turn and could not read how long it
+    took — the bubbles said who spoke, not when («може додати тайм-маркери для повідомлень?»)."""
+    import time
+
+    app = _app()
+    panel = DialogPanel()
+    monkeypatch.setattr(time, "time", lambda: 1_790_000_000.0)
+    panel._add_system_message("the reviewer is now X")
+    bubble = panel._bubbles[-1]
+
+    assert bubble._time_label.text() == _hms(1_790_000_000.0)
+    assert bubble._who_label.text() == "SYSTEM · TCC", "the role keeps its own words"
+
+    panel.resize(700, 500)
+    panel.show()
+    app.processEvents()
+    who, when = bubble._who_label.geometry(), bubble._time_label.geometry()
+    assert not bubble._time_label.isHidden()
+    assert abs(who.center().y() - when.center().y()) <= 2, "on the role line, not under it"
+    assert when.left() >= who.right(), "beside who spoke"
+
+
+def test_the_role_line_is_measured_with_its_time():
+    """The width `natural_width` gives a bubble has to hold the whole role line — a stamp left out
+    of it is the lost U of "ARBITER · YOU" again, this time with the seconds cut off."""
+    app = _app()
+    role = "ARBITER · YOU"
+    bubble = MessageBubble("user", role, "Hi", at=1_790_000_000.0)
+    stamp = bubble._time_label.text()
+
+    bare = (bubble._who_label.fontMetrics().horizontalAdvance(role) + len(role)
+            + bubble._time_label.fontMetrics().horizontalAdvance(stamp) + 28)
+    assert bubble.natural_width >= bare
+    assert bubble.natural_width > MessageBubble("user", role, "Hi").natural_width
+
+    bubble.setFixedWidth(bubble.natural_width)
+    bubble.show()
+    app.processEvents()
+    assert bubble._time_label.width() >= bubble._time_label.sizeHint().width(), "not squeezed"
+    assert bubble._time_label.geometry().right() <= bubble.contentsRect().right()
+
+
+def test_the_opening_line_keeps_its_own_time_when_the_session_puts_it_back(monkeypatch, tmp_path):
+    """The one bubble the panel rebuilds: the Arbiter's first line, held across `attach_agent`'s
+    clear. It comes back with the moment it was said, not the moment it was put back (tcc#100)."""
+    import time
+
+    from PySide6.QtCore import QObject, Signal
+
+    from autosound_tcc.core.signal_bus import SignalBus
+
+    class _Worker(QObject):
+        chunk = Signal(object)
+        turn_done = Signal()
+        failed = Signal(str)
+
+    _app()
+    panel = DialogPanel()
+    said = 1_790_000_000.0
+    monkeypatch.setattr(time, "time", lambda: said)
+    panel._input.setText("Привіт")
+    panel._on_send()
+
+    monkeypatch.setattr(time, "time", lambda: said + 3_725)  # an hour, two minutes, five seconds on
+    panel.attach_agent(_Worker(), SignalBus(tmp_path))
+
+    first = panel._bubbles[0]
+    assert "Привіт" in first.plain_text()
+    assert first._time_label.text() == _hms(said)
+
+
+def test_a_message_with_no_time_of_its_own_shows_none():
+    """The dialog keeps no history with times in it, and the demo transcript was never said by
+    anyone. Neither gets the moment it was drawn — a wrong time reads as a right one (tcc#100)."""
+    _app()
+    panel = DialogPanel()
+    assert panel._bubbles, "the demo transcript is up"
+    for bubble in panel._bubbles:
+        assert bubble._time_label.isHidden() and not bubble._time_label.text()
+
+    bare = MessageBubble("gen", "GENERATOR · X", "Hi")
+    assert bare._time_label.isHidden() and not bare._time_label.text()

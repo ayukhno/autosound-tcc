@@ -65,6 +65,17 @@ SYS_ROLE_LEDGER = "SYSTEM · ledger"
 _MSG_BODY_BASE_PX = 13.0
 _DIALOG_FONT_KEY = "ui/dialog_font_scale"
 _DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
+#: The gap between who spoke and when, on a bubble's role line (tcc#100). `natural_width` counts
+#: it, so it lives in one place.
+_TIME_GAP_PX = 8
+#: `_add_bubble`'s default for `at`: the message is being said this moment. None is a real value
+#: there — a message with no time of its own shows none rather than the moment it was drawn.
+_SAID_NOW: Any = object()
+
+
+def _time_of_day(at: float) -> str:
+    """`HH:MM:SS` — when a message was said, beside who said it (tcc#100, finding 110)."""
+    return time.strftime("%H:%M:%S", time.localtime(at))
 
 
 #: Rendering and input moved to `chat_text` when the onboarding window stopped re-implementing
@@ -73,7 +84,8 @@ _markdown = chat_text.markdown
 
 
 class MessageBubble(QFrame):
-    def __init__(self, who: str, role: str, html: str, source: str = "", level: str = "") -> None:
+    def __init__(self, who: str, role: str, html: str, source: str = "", level: str = "",
+                 at: Optional[float] = None) -> None:
         super().__init__()
         # `level` — `warn` (orange) or `error` (red) on a system line that reports a problem: the
         # Arbiter, 2026-09-27 (finding 83), «червоним … як помилку чи помаранчевим якщо попередження».
@@ -81,9 +93,22 @@ class MessageBubble(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 7, 12, 8)
         layout.setSpacing(3)
+        # The role line says who spoke and when: a slow turn could not be measured off the screen
+        # (tcc#100, finding 110 — «може додати тайм-маркери для повідомлень?»). The time is its own
+        # label, not more of `who_label`'s text: it is faint where the role is coloured.
+        role_line = QHBoxLayout()
+        role_line.setContentsMargins(0, 0, 0, 0)
+        role_line.setSpacing(_TIME_GAP_PX)
         who_label = QLabel(role)
         who_label.setProperty("class", f"msg-who msg-who-{who}")
-        layout.addWidget(who_label)
+        role_line.addWidget(who_label)
+        # `at` None — no time of its own (the demo transcript): no stamp, never the time it was drawn.
+        self._time_label = QLabel(_time_of_day(at) if at is not None else "")
+        self._time_label.setProperty("class", "msg-time")
+        self._time_label.setHidden(at is None)
+        role_line.addWidget(self._time_label)
+        role_line.addStretch(1)
+        layout.addLayout(role_line)
         self._body = QLabel(html)
         self._body.setTextFormat(Qt.TextFormat.RichText)
         self._body.setWordWrap(True)
@@ -153,12 +178,17 @@ class MessageBubble(QFrame):
         is polished, and on A-/A+), and freezing a pre-stylesheet measurement is the very bug the
         on-demand measurement was introduced to fix.
         """
-        stamp = (self._body.font().toString(), self._who_label.font().toString())
+        stamp = (self._body.font().toString(), self._who_label.font().toString(),
+                 self._time_label.font().toString())
         if stamp != self._width_stamp:
             # The role line is measured with an allowance for `.msg-who`'s `letter-spacing: 1px`,
             # which Qt renders but does not report through `fontMetrics()` -- so the measurement
             # came out about a pixel per character short and "ARBITER · YOU" lost its U.
             role = self._who_label.fontMetrics().horizontalAdvance(self._role) + len(self._role)
+            said_at = self._time_label.text()
+            if said_at:
+                # The time shares the line (tcc#100); left out, it is what would lose its seconds.
+                role += _TIME_GAP_PX + self._time_label.fontMetrics().horizontalAdvance(said_at)
             body = self._body.fontMetrics().horizontalAdvance(self._plain)
             self._width_cache = max(body, role) + 28
             self._width_stamp = stamp
@@ -260,8 +290,10 @@ class DialogPanel(QWidget):
         # never switched off, so a thought that arrives while the model is working is not lost to
         # a disabled widget -- see `_on_send`.
         self._queued: list[str] = []
-        # The first thing typed into a fresh panel, held across `attach_agent`'s clear.
+        # The first thing typed into a fresh panel, held across `attach_agent`'s clear -- with the
+        # moment it was said, which is the time it shows when it is put back (tcc#100).
         self._opening_said: Optional[str] = None
+        self._opening_at: Optional[float] = None
         # Set once the Arbiter has answered "save" to the quit question: the session gets its
         # last turn and nothing may start another one. See `hold_queue_for_quit`.
         self._quitting = False
@@ -387,7 +419,8 @@ class DialogPanel(QWidget):
         # the front and scrambles their order (the dialog rendered crit→user→gen→gen otherwise).
         self._chat_layout.addStretch(1)
         for message in DIALOG:
-            self._add_bubble(message.who, message.role, i18n.tx(message.text))
+            # Never said by anyone, so no time to show (tcc#100).
+            self._add_bubble(message.who, message.role, i18n.tx(message.text), at=None)
         self._scroll.setWidget(self._chat)
         # Stick to the bottom, the way a chat window does, instead of scrolling once and hoping.
         # A bubble's height settles over several layout passes -- the label wraps, the font scale
@@ -610,9 +643,11 @@ class DialogPanel(QWidget):
         for bubble in self._bubbles:
             self._fit(bubble)
 
-    def _add_bubble(self, who: str, role: str, html: str, source: str = "", level: str = "") -> None:
+    def _add_bubble(self, who: str, role: str, html: str, source: str = "", level: str = "",
+                    at: Any = _SAID_NOW) -> None:
         bubble_row = QHBoxLayout()
-        bubble = MessageBubble(who, role, html, source, level)
+        bubble = MessageBubble(who, role, html, source, level,
+                               at=time.time() if at is _SAID_NOW else at)
         bubble.apply_font_scale(self._font_scale)
         self._bubbles.append(bubble)
         self._fit(bubble)
@@ -852,9 +887,11 @@ class DialogPanel(QWidget):
         self._model_label = model or i18n.t("generator")
         self._clear_bubbles()
         said, self._opening_said = getattr(self, "_opening_said", None), None
+        said_at, self._opening_at = getattr(self, "_opening_at", None), None
         if said:
-            # Put it back: the mock is what had to go, not the Arbiter's own first line.
-            self._add_bubble("user", "Arbiter · you", _markdown(said), said)
+            # Put it back: the mock is what had to go, not the Arbiter's own first line. At its own
+            # time, not the time it was put back (tcc#100).
+            self._add_bubble("user", "Arbiter · you", _markdown(said), said, at=said_at)
         self._not_visible_btn.setHidden(False)
         self._refresh_placeholder()
         self.set_session_label(resumed=resumed, phase=phase)
@@ -983,13 +1020,15 @@ class DialogPanel(QWidget):
             # A live composer that swallows what you type is worse than a disabled one. Sending
             # the first message IS the explicit start, and the text becomes the opening prompt
             # rather than being thrown away in favour of a canned one.
-            self._add_bubble("user", "Arbiter · you", _markdown(text), text)
+            said_at = time.time()
+            self._add_bubble("user", "Arbiter · you", _markdown(text), text, at=said_at)
             # Held because `attach_agent` clears the transcript a moment from now -- it drops the
             # mock so demo numbers cannot be read as measurements, and it was taking this bubble
             # with it. The first thing the Arbiter said vanished from the record while being the
             # very thing that started the session (user, 2026-08-21: "після Привіт робота пішла
             # (але сам Привіт пропав)").
             self._opening_said = text
+            self._opening_at = said_at
             self._input.clear()
             self._set_busy(True)
             self.startRequested.emit(text)

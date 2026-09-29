@@ -1290,6 +1290,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="msg-who-crit"] {{ color: {t.info}; }}
     QLabel[class~="msg-who-user"] {{ color: {t.arbiter}; }}
     QLabel[class~="msg-who-sys"] {{ color: {t.info}; }}
+    /* .msg-time — when a message was said, beside who said it (tcc#100, finding 110). Faint and
+    without the role's letter-spacing: it is looked up when wanted, the role is what the eye finds. */
+    QLabel[class~="msg-time"] {{
+        font-size: 10px;
+        color: {t.faint};
+    }}
     QLabel[class~="msg-body"] {{
         font-size: 13px;
     }}
