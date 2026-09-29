@@ -1,0 +1,6 @@
+# Who signs release tags of Autosound TCC (tcc#102, hub #83 HUB-032). For people and for `git verify-tag`:
+#   git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag v0.1.45
+# TCC's updater does NOT read this file -- it carries the same key as a constant
+# (src/autosound_tcc/core/signed_tags.py), because a tag's own copy of this file would vouch for itself.
+# tests/test_signed_tags.py checks that the two agree; scripts/ship.py verifies every tag it cuts against this file.
+ayukhno namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHLm4x1yz9JbFfBlxdQA8vR8yYMupVktswes3CL7QE1y

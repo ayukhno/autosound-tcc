@@ -74,6 +74,16 @@ it and still one file too many to keep a single fact in.
 
 Everything up to and including the local tag is reversible. The single irreversible act is the
 last line of the script, on its own, by name.
+
+## The tag is signed, and checked before it leaves (tcc#102, hub #83 HUB-032)
+
+From `v0.1.45` TCC's updater installs a release tag only when it verifies against the author's key,
+so a tag cut unsigned would stop every update. Two halves, and neither is a copy of the other.
+BEFORE the tag, whether git will sign with the key in `allowed_signers` is the carrier's question
+(`tag-will-be-signed`, hub #84 HUB-033 — put there so this repository asks it without a second
+copy); its refusal names the `git config` lines that fix it, and ship prints it like any other.
+AFTER the tag, ship verifies the tag it actually made against that file, before either push: a tag
+that does not verify is deleted again and nothing leaves the machine.
 """
 from __future__ import annotations
 
@@ -448,10 +458,47 @@ def method_sha(root: Path) -> str:
     return install_report.skill_sha()
 
 
+#: Who signs this repository's tags, for people and for `git verify-tag` (tcc#102). The updater
+#: does not read it — it carries the key as a constant, `core/signed_tags.py`.
+SIGNERS = "allowed_signers"
+
+
+def tag_command(tag: str) -> list[str]:
+    """The one tag line, signed, in the skill's form (`tag-check.sh`: `git tag -s X -m X`). The plan
+    shows it and `publish` runs it, from here both, so the line shown is the line run."""
+    return ["git", "tag", "-s", tag, "-m", tag]
+
+
+def verify_signed_tag(root: Path, tag: str) -> str:
+    """The tag just made, verified against `allowed_signers`: git's own `Good` line, or a Stop.
+
+    The SSH form of that line (`Good "git" signature for …`) and nothing looser: a tag signed with
+    GPG by a machine left on `gpg.format=openpgp` says `Good signature from …`, and the updater
+    would refuse it all the same. A tag that does not verify is deleted before the Stop — it must
+    not leave this machine, and a run after the fix needs the name free.
+    """
+    signers = Path(root).resolve() / SIGNERS
+    done = subprocess.run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}", "verify-tag", tag],
+                          cwd=str(root), capture_output=True, text=True, encoding="utf-8",
+                          errors="replace")
+    said = [line.strip() for line in f"{done.stderr}\n{done.stdout}".splitlines() if line.strip()]
+    good = next((line for line in said if line.startswith('Good "git" signature')), "")
+    if done.returncode == 0 and good:
+        return good
+    run(["git", "tag", "-d", tag], root, check=False)
+    reason = said[-1].rstrip(".") if said else f"git verify-tag exit {done.returncode}"
+    raise Stop(f"{tag} was signed, but it does not verify against {SIGNERS} — {reason}. The tag "
+               "was deleted again and nothing was pushed: TCC's updater refuses a release tag "
+               f"that does not verify (tcc#102). `git config user.signingkey` must name the key in "
+               f"{SIGNERS}")
+
+
 def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
-    """Tag HEAD and publish that one tag by name — the last act of every mode."""
-    run(["git", "tag", tag], root)
-    say(f"  tagged {tag} (still local — `git tag -d {tag}` undoes it)")
+    """Tag HEAD, signed, check the signature, and publish that one tag by name — the last act of
+    every mode."""
+    run(tag_command(tag), root)
+    good = verify_signed_tag(root, tag)
+    say(f"  tagged {tag}, {good} (still local — `git tag -d {tag}` undoes it)")
     run(["git", "push", "origin", "main"], root)
     # The one irreversible line in this file. By NAME, never `--tags`: a bulk push has no target
     # in the command, and a published tag cannot be moved or removed by anybody afterwards.
@@ -511,9 +558,11 @@ def ship(root: Path, release: bool, test_command=None,
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
     # oracle vouching for lines nobody runs. Pinned on this side by
-    # `test_ship_never_pushes_in_BULK_and_never_releases`; the other side is the hub's.
+    # `test_ship_never_pushes_in_BULK_and_never_releases`; the other side is the hub's. The tag
+    # line is signed since tcc#102; the carrier's literal still reads `git tag <tag>`, and the
+    # hook judges both the same (`-s` and `-m` are among its `TAG_WRITE` flags; asked 2026-09-29).
     plan.commands = [
-        f"git tag {plan.tag}",
+        " ".join(tag_command(plan.tag)),
         "git push origin main",
         f"git push origin {plan.tag}",
     ]

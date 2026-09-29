@@ -109,20 +109,60 @@ def git(cwd: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+def public_key(path: Path) -> str:
+    """`type key` of a `.pub` file — the two words `allowed_signers` and git compare."""
+    return " ".join(path.read_text(encoding="utf-8").split()[:2])
+
+
+@pytest.fixture(scope="session")
+def signing_keys(tmp_path_factory):
+    """Two throwaway SSH keys, `author` and `stranger`, made here — never the real key, never
+    `~/.ssh` (tcc#102). Once per session: every release in this file signs its tag now.
+
+    No `ssh-keygen`, no signed tag: ship cannot release on such a machine, so the release cases
+    skip there, loudly, rather than pass on a tag nobody signed."""
+    if shutil.which("ssh-keygen") is None:
+        pytest.skip("no ssh-keygen on this machine: ship cannot sign a tag here")
+    where = tmp_path_factory.mktemp("signing-keys")
+    for who in ("author", "stranger"):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who,
+                        "-f", str(where / who)], check=True, capture_output=True)
+    return {who: where / f"{who}.pub" for who in ("author", "stranger")}
+
+
+def no_machine_git(monkeypatch) -> None:
+    """Git with nothing of the machine's: global and system config shut out, so the developer's
+    own `user.signingkey` cannot reach a fixture, and no ssh-agent to talk to."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+
+
+def sign_with(work: Path, key: Path) -> None:
+    """Git in `work` signs tags with `key`, the way `~/.gitconfig` does it on the release machine."""
+    git(work, "config", "gpg.format", "ssh")
+    git(work, "config", "user.signingkey", str(key))
+
+
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
+def repo(tmp_path, monkeypatch, signing_keys):
     """A working tree with a bare repository beside it as `origin`, tagged `v0.1.24`.
 
     Shaped like TCC's own: a `main` branch, a version in `pyproject.toml`, a changelog whose top
-    entry names the NEXT tag, and the method's sha stubbed.
+    entry names the NEXT tag, and the method's sha stubbed. It signs like TCC's too (tcc#102):
+    `allowed_signers` at the root, and git set to sign with the key in it — a throwaway one.
     """
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
+    no_machine_git(monkeypatch)
     subprocess.run(["git", "init", "--quiet", "--bare", str(origin)], check=True)
     subprocess.run(["git", "init", "--quiet", "-b", "main", str(work)], check=True)
     git(work, "config", "user.email", "t@t")
     git(work, "config", "user.name", "t")
     git(work, "remote", "add", "origin", str(origin))
+    sign_with(work, signing_keys["author"])
+    (work / "allowed_signers").write_text(
+        f'author namespaces="git" {public_key(signing_keys["author"])}\n', encoding="utf-8")
 
     (work / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.24"), encoding="utf-8")
     (work / "CHANGELOG.md").write_text(
@@ -461,8 +501,8 @@ def test_a_candidate_dry_run_names_the_beta_tag_and_writes_nothing(repo):
     plan = _run(repo, release=False, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0")
 
     assert (plan.mode, plan.tag) == ("candidate", "beta-v0.2.0-rc1")
-    assert plan.commands == ["git tag beta-v0.2.0-rc1", "git push origin main",
-                             "git push origin beta-v0.2.0-rc1"]
+    assert plan.commands == ["git tag -s beta-v0.2.0-rc1 -m beta-v0.2.0-rc1",
+                             "git push origin main", "git push origin beta-v0.2.0-rc1"]
     assert git(repo, "rev-parse", "HEAD") == before
     assert git(repo, "tag", "--list", "beta-v0.2.0-rc1") == ""
 
@@ -681,7 +721,7 @@ def test_ship_never_pushes_in_BULK_and_never_releases(repo):
     """
     plan = _run(repo, release=False)
 
-    assert plan.commands == ["git tag v0.1.25", "git push origin main",
+    assert plan.commands == ["git tag -s v0.1.25 -m v0.1.25", "git push origin main",
                              "git push origin v0.1.25"]
     for command in plan.commands:
         assert "--tags" not in command and "--follow-tags" not in command
@@ -1039,3 +1079,89 @@ def test_a_candidate_does_not_ask_the_remote_at_all(repo):
          published=lambda _root, sha: asked.append(sha) or [])
 
     assert asked == [], "a candidate is the diagnostic build, and it answers to nobody's tag"
+
+
+# --- signed tags (tcc#102, hub #83 HUB-032) ------------------------------------------------
+#
+# From v0.1.45 TCC's updater installs a release tag only when it verifies against the author's key,
+# so an unsigned tag cut here would stop every update. Two halves, and neither is a copy of the
+# other: BEFORE the tag the carrier asks whether git would sign with the key in `allowed_signers`
+# (`tag-will-be-signed`, hub #84 HUB-033); AFTER it ship verifies the tag it actually made.
+
+
+def verify_tag(repo: Path, tag: str) -> tuple[int, str]:
+    """`git verify-tag` against the tree's own `allowed_signers`, the way a person checks one."""
+    done = subprocess.run(
+        ["git", "-c", f"gpg.ssh.allowedSignersFile={repo / 'allowed_signers'}", "verify-tag", tag],
+        cwd=str(repo), capture_output=True, text=True)
+    return done.returncode, done.stderr + done.stdout
+
+
+def test_the_release_tag_is_signed_and_verifies_against_allowed_signers(repo):
+    lines = []
+    _run(repo, say=lines.append)
+
+    assert git(repo, "cat-file", "-t", "v0.1.25") == "tag", "a signed tag is an annotated one"
+    rc, said = verify_tag(repo, "v0.1.25")
+    assert rc == 0 and 'Good "git" signature for author' in said, said
+    assert "refs/tags/v0.1.25^{}" in git(repo, "ls-remote", "--tags", "origin"), \
+        "the tag object itself was pushed, not a lightweight name"
+    assert any('Good "git" signature' in line for line in lines), \
+        f"ship's own check of the tag went unsaid: {lines}"
+
+
+def test_a_tag_that_does_not_verify_is_deleted_and_nothing_is_pushed(repo, signing_keys):
+    """Git signed, but with a key `allowed_signers` does not list — the carrier's check before the
+    tag would refuse this, so what is under test is the belt after it: ship verifies the tag it
+    made, and a tag no updater would install never leaves the machine."""
+    sign_with(repo, signing_keys["stranger"])
+    main_before = git(repo, "rev-parse", "origin/main")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    said = str(stop.value)
+    assert "does not verify" in said and "allowed_signers" in said, said
+    assert "nothing was pushed" in said, said
+    assert git(repo, "tag", "--list", "v0.1.25") == "", "the tag that does not verify is gone"
+    assert "v0.1.25" not in git(repo, "ls-remote", "origin")
+    assert git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == main_before
+
+
+def test_ship_shows_the_tag_line_it_runs():
+    """The line in the plan is built from the same argv `publish` runs, so the two cannot drift."""
+    assert " ".join(ship_mod.tag_command("v0.1.25")) == "git tag -s v0.1.25 -m v0.1.25"
+
+
+def test_the_carrier_refuses_a_tag_git_would_not_sign_and_names_the_fix(tmp_path, monkeypatch,
+                                                                        signing_keys):
+    """The refusal BEFORE the tag is the carrier's `tag-will-be-signed` (hub #84 HUB-033), which
+    ship prints and stops on like every other channel check — not a second copy of it here, the
+    rule this file's header keeps since HUB-003. So it is asked of the real carrier, on a
+    throwaway tree carrying an `allowed_signers` like this repository's.
+
+    Skipped, loudly, when the hub is not here — and then ship refuses anyway: no carrier, no
+    release."""
+    if not ship_mod.CARRIER.is_file():
+        pytest.skip(f"the hub's carrier is not on this machine ({ship_mod.CARRIER})")
+    carrier = ship_mod.load_carrier()
+    assert "check_signing(" in inspect.getsource(carrier.preflight), \
+        "the preflight no longer asks whether the tag will be signed"
+
+    no_machine_git(monkeypatch)
+    tree = tmp_path / "tree"
+    subprocess.run(["git", "init", "--quiet", str(tree)], check=True)
+    (tree / "allowed_signers").write_text(
+        f'author namespaces="git" {public_key(signing_keys["author"])}\n', encoding="utf-8")
+    tcc = carrier.ROLE_REPO["tcc"]
+
+    unset = carrier.check_signing(tree, tcc)
+    assert unset.gates, unset
+    assert "git config --global gpg.format ssh" in unset.line, unset.line
+    assert "git config --global user.signingkey ~/.ssh/id_ed25519.pub" in unset.line, unset.line
+
+    sign_with(tree, signing_keys["stranger"])
+    assert carrier.check_signing(tree, tcc).gates, "another key is refused too"
+
+    sign_with(tree, signing_keys["author"])
+    assert not carrier.check_signing(tree, tcc).gates, "the key in allowed_signers passes"
