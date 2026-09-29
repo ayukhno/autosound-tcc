@@ -3064,9 +3064,11 @@ Wanted: the full mode is usable at its minimum — either the window's minimum g
 hands over to control mode; tabs keep at least their first letters or a letter code rather than nothing.
 Fine as is: the compare list itself («список для вибору конфігурації для порівняння — все ок»).
 
-**Weight.** Medium: at that width the mode shows nothing the Arbiter can use.
+**Weight.** Low — the Arbiter's verdict the same evening: «це не проблема — бо при зовсім мінімальній ширині не
+очікуємо що все буде придатно. може збільшити мінімальну ширину трохи?» So: raise the full mode's minimum width a
+little. His widths for the header: full screen — a huge margin; half the screen — problems; 2/3 — all fine.
 
-**Task.** None yet — found while W-4's PR #105 waits for CI.
+**Task.** None yet — for the next wave's collection.
 
 ### 115. Control mode at its minimum width: the 3500 crossover is cut
 
@@ -3100,3 +3102,25 @@ on `wave-0.1.45`, so either the round carries its own groups (the task, not the 
 grammar does not read falls back to sweep.
 
 **Task.** None yet; not diagnosed (collection).
+
+### 118. Control mode opens shifted to the left on the Windows VM
+
+**What.** The Arbiter, 2026-09-29, the Windows VM, `wave-0.1.45`: «в Режимі контроль на пів екрана все ок — тільки
+відкривається якось дивно — зʼїзджає ліворуч» (screenshot: the control-mode window's header begins at the screen's
+edge, «інша ко…» cut at the right).
+
+**Weight.** Low: it works; the placement is off.
+
+**Task.** None yet — for the next wave's collection.
+
+### 119. The full mode's detail pane elides its tabs at full screen width on Windows
+
+**What.** The Arbiter's screenshot, 2026-09-29, the Windows VM, full mode at full screen: the detail pane's tabs read
+«Табл…», «Рі…», «Затри…», «Ф…» with wide empty gaps between them, and «закрит…», while the pane has room; at 2/3 of the
+screen the same tabs read whole. Before W-4 these tabs drew their whole text: tcc#96's eliding (the head's chips and
+tabs) elides where it should not on Windows metrics — the same family as the CI failure of PR #105's Windows shard
+4/4 (five header tests written against Mac pixels).
+
+**Weight.** Medium: a regression of W-4's own work, seen at full screen.
+
+**Task.** tcc#96, fix round 5 on `wave-0.1.45`, before the release.
