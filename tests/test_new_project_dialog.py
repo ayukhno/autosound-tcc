@@ -4,6 +4,7 @@ served form, which the new window opens (hub #194) -- this dialog starts no inte
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -419,6 +420,96 @@ def test_the_source_s_own_seat_is_named_beside_the_choice(tmp_path, monkeypatch)
     dlg = _dialog_on(_passat(tmp_path, seat="driver"), seeder, monkeypatch)
     driver = dlg._seat_combo.itemText(dlg._seat_combo.findData("driver"))
     assert driver in dlg._seat_source.text()
+
+
+#: The Passat package's seven measured Fs (`car/passat-b8-2026`, impedance of 2026-08-21) -- the
+#: numbers the Arbiter would have to measure a second time if they stayed behind (tcc#93).
+_PASSAT_FS = (("sw", "K", "sub", 43.9), ("w-L", "C", "woofer", 52.4), ("w-R", "D", "woofer", 52.4),
+              ("m-L", "E", "midrange", 194.8), ("m-R", "F", "midrange", 196.7),
+              ("tw-L", "G", "tweeter", 939.7), ("tw-R", "H", "tweeter", 948.9))
+
+
+def _passat_with_fs(tmp_path):
+    """The Passat as the seeder meets it: seven channels with a measured Fs, and the centre, which
+    was never measured and must not be counted as one."""
+    source = tmp_path / "source"
+    source.mkdir()
+    channels = [{"code": code, "slot": slot, "role": role, "tier": "channels",
+                 "fs_hz": {"value": fs, "source": "measured", "at": "2026-08-21T15:18:52+00:00"}}
+                for code, slot, role, fs in _PASSAT_FS]
+    channels.append({"code": "c", "slot": "B", "role": "center", "tier": "channels"})
+    (source / "project.json").write_text(json.dumps({
+        "schema_version": 3, "car": {"make": "VW", "model": "Passat B8"},
+        "dsp": {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
+        "channels": channels}), encoding="utf-8")
+    (source / "dsp_profile.json").write_text(
+        '{"dsp_profile": {"vendor": "Audiotec-Fischer", "name": "Helix DSP Ultra S"}}',
+        encoding="utf-8")
+    return source
+
+
+def _created_fs(tmp_path, monkeypatch, *, ticked):
+    """Copy the Passat through the REAL seeder with the Fs box as given; the new project's Fs."""
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._folder_edit.setText(str(tmp_path / "new"))
+    dlg._seed_edit.setText(str(_passat_with_fs(tmp_path)))
+    dlg._seed_fs.setChecked(ticked)
+    dlg._on_create()
+    assert dlg.seeded is not None and dlg.seeded.ok, dlg.seeded and dlg.seeded.problem
+    data = json.loads((tmp_path / "new" / "project.json").read_text(encoding="utf-8"))
+    return {row["code"]: row.get("fs_hz") for row in data["channels"]}
+
+
+def test_the_drivers_fs_box_is_ticked_by_default(tmp_path):
+    """«імпеданс складна штука і міряти його другий раз це подвиг» (hub #185): the Fs travel
+    unless somebody decides otherwise. And the box belongs to copying, like the findings box."""
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    assert dlg._seed_fs.isChecked()
+    assert dlg._seed_fs.text() == npd.i18n.t("npSeedFs")
+    assert not dlg._seed_fs.isHidden()
+    dlg._seed_combo.setCurrentIndex(dlg._seed_combo.findData(None))
+    assert dlg._seed_fs.isHidden(), "from scratch there is nothing to carry"
+
+
+def test_ticked_the_seven_passat_fs_arrive(tmp_path, monkeypatch):
+    fs = _created_fs(tmp_path, monkeypatch, ticked=True)
+    arrived = {code: row["value"] for code, row in fs.items() if row is not None}
+    assert arrived == {code: value for code, _slot, _role, value in _PASSAT_FS}
+    assert fs["c"] is None, "the centre had none to give"
+
+
+def test_unticked_no_channel_has_an_fs(tmp_path, monkeypatch):
+    fs = _created_fs(tmp_path, monkeypatch, ticked=False)
+    assert len(fs) == 8, "the channels still travel -- only their Fs stay behind"
+    assert all(value is None for value in fs.values()), fs
+
+
+def test_the_note_counts_the_fs_the_box_carries(tmp_path, monkeypatch):
+    """Counted off the preview seed, as the findings are (#48): what lands, not what the source
+    holds -- a different processor leaves the channels, and their Fs with them, behind."""
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._seed_edit.setText(str(_passat_with_fs(tmp_path)))
+    counted = npd.i18n.t("npSeedTravelsFs").format(fs=7)
+    assert counted in dlg._seed_summary.text()
+
+    dlg._seed_fs.setChecked(False)
+    assert counted not in dlg._seed_summary.text(), "unticked, nothing of it is promised"
+
+
+def test_the_fs_tick_reaches_both_seed_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
+    seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))
+    dlg = _dialog_on(_passat(tmp_path), seeder, monkeypatch)
+    dlg._folder_edit.setText(str(tmp_path / "new"))
+    seeder.seeded_into.clear()
+    dlg._seed_fs.setChecked(False)          # redraws the note: the preview call
+    dlg._on_create()
+    flags = [kwargs.get("include_fs") for _src, _dst, kwargs in seeder.seeded_into]
+    assert len(flags) >= 2 and set(flags) == {False}, flags
 
 
 def test_the_seat_offers_exactly_the_method_s_seats_in_its_words():

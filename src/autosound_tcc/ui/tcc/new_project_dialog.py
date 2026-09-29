@@ -102,6 +102,28 @@ def _source_seat(source: Path) -> Optional[str]:
         return data.get("project_type")
 
 
+def _fs_carried(target: Path) -> Optional[int]:
+    """How many channels of a freshly seeded project carry a driver's Fs, or None when its
+    `project.json` cannot be read. A carried Fs arrives wrapped as a fact (`{"value": …}`), an
+    older one may still be a bare number; either counts while it holds a value."""
+    import json
+
+    try:
+        data = json.loads((target / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    count = 0
+    for row in data.get("channels") or []:
+        fs = row.get("fs_hz") if isinstance(row, dict) else None
+        if isinstance(fs, dict):
+            fs = fs.get("value")
+        if fs is not None:
+            count += 1
+    return count
+
+
 def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
     """(vendor, name) pairs from the packaged `dsp_profiles/*.json` -- read directly rather than through
     the vendored `rew_tool` so this dialog still works if that submodule isn't checked out.
@@ -236,6 +258,14 @@ class NewProjectDialog(QDialog):
         self._seed_findings.toggled.connect(self._refresh_seed_note_now)
         layout.addWidget(self._seed_findings)
 
+        # ON by default, the other way round from the findings: the drivers' Fs are the same
+        # drivers in the same doors, and «імпеданс складна штука і міряти його другий раз це
+        # подвиг» (the Arbiter, hub #185; tcc#93). Unticked, this build measures its own.
+        self._seed_fs = QCheckBox(i18n.t("npSeedFs"))
+        self._seed_fs.setChecked(True)
+        self._seed_fs.toggled.connect(self._refresh_seed_note_now)
+        layout.addWidget(self._seed_fs)
+
         # The seat never travels: another seat is why a copy exists (hub #193, SKL-048). So it
         # is chosen HERE, with no default, and the source's own seat is said beside the choice.
         self._seat_label = _field_label(i18n.t("npSeat"))
@@ -346,7 +376,7 @@ class NewProjectDialog(QDialog):
         copying = self._seed_combo.currentData() == "copy"
         self._sync_create_enabled()  # the button names the act this mode performs
         for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
-                       self._seed_findings, self._seat_label, self._seat_combo,
+                       self._seed_findings, self._seed_fs, self._seat_label, self._seat_combo,
                        self._seat_source):
             widget.setVisible(copying)
         if copying:
@@ -399,25 +429,30 @@ class NewProjectDialog(QDialog):
         the flags Create will use, and its report is what gets drawn — which follows the method's
         behaviour without this file having to know it, including the change that has not reached
         our vendored copy yet. `seed()` never writes into the source; that is its own promise.
+
+        Returns `(report, fs)`: `fs` is how many drivers' Fs landed, read off the preview's own
+        `project.json` before the folder goes, because the report has no count for them (tcc#93).
         """
         seeder = _seeder()
         if seeder is None:
-            return None
+            return None, None
         with tempfile.TemporaryDirectory(prefix="tcc-seed-preview-") as tmp:
             target = Path(tmp) / "preview"
             target.mkdir()
             try:
-                return seeder.seed(
+                report = seeder.seed(
                     source,
                     target,
                     include_findings=self._seed_findings.isChecked(),
+                    include_fs=self._seed_fs.isChecked(),
                     copy_profile=seeder.dsp_of(source) == (
                         self._vendor_edit.text().strip(), self._model_edit.text().strip()),
                     note=i18n.t("npSeedNote"),
                     seat=self._seat_combo.currentData(),
                 )
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
-                return None
+                return None, None
+            return report, _fs_carried(target)
 
     def _refresh_seed_note(self, *_args) -> None:
         """Ask for a redraw — on a short delay, because drawing this note runs a whole seed.
@@ -448,7 +483,7 @@ class NewProjectDialog(QDialog):
         summary = self._seed_describes
         lines = [i18n.t("npSeedSummary").format(
             car=summary.car, dsp=summary.dsp or "—", channels=summary.channels)]
-        report = self._would_travel(source)
+        report, fs = self._would_travel(source)
         if report is not None and report.ok:
             key = "npSeedTravelsFindings" if self._seed_findings.isChecked() else "npSeedTravels"
             lines.append(i18n.t(key).format(
@@ -460,6 +495,10 @@ class NewProjectDialog(QDialog):
                 # — they are the same car — but a row whose proof lives elsewhere is a different
                 # thing from one measured here, and the person ticking the box is who has to know.
                 lines.append(i18n.t("npSeedFindingsEvidence"))
+            if self._seed_fs.isChecked() and fs is not None:
+                # Zero is said too, as a real answer: the source measured none, or a different
+                # processor leaves the channels behind and their Fs with them (the line below).
+                lines.append(i18n.t("npSeedTravelsFs").format(fs=fs))
             if summary.channels and not report.channels:
                 # The one a person has to read BEFORE pressing Create: wanting the findings and
                 # not the channels was impossible, so the working answer was to go around the
@@ -596,6 +635,7 @@ class NewProjectDialog(QDialog):
                 source,
                 project_dir,
                 include_findings=self._seed_findings.isChecked(),
+                include_fs=self._seed_fs.isChecked(),
                 # The profile travels only when it is the same DSP. Pick a different one and its
                 # capabilities are a question for the form's /new-dsp page, not a file to inherit.
                 copy_profile=seeder.dsp_of(source) == (vendor, model),
