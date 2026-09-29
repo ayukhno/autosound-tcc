@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -300,6 +301,42 @@ class _UpdateProbe:
         return self._thread.is_alive()
 
 
+class _SkillStep:
+    """One step of «Update the method» on a plain thread, and its answer when it lands.
+
+    The step is the skill's own `upkeep.py` now (hub #221): `status` can take a minute — it asks
+    Homebrew and GitHub about the tools too — and `libs` longer, pip on a phone's network. The
+    press used to block the window for a second-long git fetch; this cannot. Same shape as
+    `_UpdateProbe`: nothing of Qt's, so it may outlive the dialog that started it.
+    """
+
+    def __init__(self, work) -> None:
+        self.result = None
+        self.error = ""
+        self._thread = threading.Thread(target=self._run, args=(work,),
+                                        name="tcc-skill-update", daemon=True)
+        self._thread.start()
+
+    def _run(self, work) -> None:
+        try:
+            self.result = work()
+        except Exception as exc:  # noqa: BLE001 — an answer on the row, not a dead thread
+            self.error = f"{type(exc).__name__}: {exc}"
+
+    @property
+    def running(self) -> bool:
+        return self._thread.is_alive()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        self._thread.join(timeout)
+
+
+#: How many changed files the keep-local question lists before "…and N more". A session's patch
+#: is a file or two; a clone somebody worked in by hand can be hundreds, and a dialog taller than
+#: the screen hides its own buttons.
+_KEEP_LOCAL_SHOWN = 12
+
+
 def _human_size(size: int) -> str:
     """A transcript's size in units a person compares at a glance. No locale, no decimals below a
     megabyte: the number is there to tell a long conversation from a short one, not to be added up.
@@ -487,6 +524,16 @@ class DiagnosticsDialog(QDialog):
         self._update_timer = QTimer(self)
         self._update_timer.setInterval(_TOOLS_POLL_MS)
         self._update_timer.timeout.connect(self._poll_updates)
+        # «Update the method» runs in steps off the GUI thread (`_SkillStep`), with a question in
+        # the middle when the clone carries local changes. No cap on the tries, unlike the probe:
+        # each step is a subprocess with its own timeout, so it always ends.
+        self._skill_job: Optional[_SkillStep] = None
+        self._skill_then = None
+        self._skill_latest = ""
+        self._skill_before = ""
+        self._skill_timer = QTimer(self)
+        self._skill_timer.setInterval(_TOOLS_POLL_MS)
+        self._skill_timer.timeout.connect(self._poll_skill_job)
         return box
 
     def _poll_updates(self) -> None:
@@ -505,9 +552,17 @@ class DiagnosticsDialog(QDialog):
 
     def _show_update(self, status) -> None:
         """One row's worth of the answer, in the words that tell a person what to do next."""
+        if status.name == "skill" and self._skill_job is not None:
+            # A Re-check landing while the skill is being updated: the steps' own receipt is on
+            # its way, and "up to date" or a live button in its place would be both wrong and a
+            # second press.
+            return
         label, button = self._update_rows[status.name]
         title = i18n.t("updTccName") if status.name == "tcc" else i18n.t("updSkillName")
         here = status.installed or "?"
+        if status.name == "skill":
+            # The release the row offers is the one the button installs (F-024's rule for TCC).
+            self._skill_latest = status.latest if status.newer else ""
         # Version numbers only, since F-036: the commit used to be appended to both of these, and
         # the brackets read as noise on the row the same way they did in the title bar. The sha is
         # still what the COMPARISON is made on (`updates.py`), and it is still printed whole in the
@@ -551,37 +606,141 @@ class DiagnosticsDialog(QDialog):
         self._start_update_check()
 
     def _update_skill(self) -> None:
-        """Done here, in the app: it is another folder's git checkout and takes about a second."""
+        """The skill's own updater, in steps: what was changed here, a question if anything was,
+        then keep it, move the clone, bring the libraries (hub #221, tcc#91).
+
+        Off the GUI thread since the skill's `upkeep.py` does it (`_SkillStep`): the first step,
+        `status`, can take a minute. The row says which step it is on.
+        """
+        if self._skill_job is not None:
+            return
         label, button = self._update_rows["skill"]
+        self._skill_before = label.text()
         button.setEnabled(False)
+        label.setText(i18n.t("updSkillLooking"))
+        self._run_skill_step(updates.local_changes, self._after_local_changes)
+
+    def _run_skill_step(self, work, then) -> None:
+        self._skill_job = _SkillStep(work)
+        self._skill_then = then
+        self._skill_timer.start()
+
+    def _poll_skill_job(self) -> None:
+        job = self._skill_job
+        if job is None or job.running:
+            return
+        self._skill_timer.stop()
+        then, self._skill_job, self._skill_then = self._skill_then, None, None
+        if job.error or job.result is None:
+            label, button = self._update_rows["skill"]
+            label.setText(i18n.t("updFailed").format(why=job.error or "?"))
+            button.setEnabled(True)
+            return
+        then(job.result)
+
+    def _after_local_changes(self, found) -> None:
+        """Clean: straight on. Changed: the files named, and the one question — send them too?"""
+        label, button = self._update_rows["skill"]
+        if not found.ok:
+            label.setText(i18n.t("updFailed").format(why=_reason(found.reason, found.detail)))
+            button.setEnabled(True)
+            return
+        send = False
+        if found.changed:
+            answer = self._ask_keep_local(found.changed)
+            if answer is None:
+                # Cancelled: nothing kept, nothing reset, the row back to its offer.
+                label.setText(self._skill_before)
+                button.setEnabled(True)
+                return
+            send = answer
         label.setText(i18n.t("updWorking"))
-        # Blocking on purpose, and it is allowed to be: a shallow fetch of one tag is a second at
-        # most, and the alternative -- a thread for a call this short -- is a window that can be
-        # clicked twice before the first one lands.
-        ok, what, detail = updates.apply_skill()
-        if ok:
-            label.setText(i18n.t("updSkillDone").format(version=what.lstrip("v")))
+        tag = f"v{self._skill_latest}" if self._skill_latest else ""
+        keep = bool(found.changed)
+        self._run_skill_step(lambda: updates.apply_skill(tag, keep_local=keep, send=send),
+                             self._after_skill_update)
+
+    def _keep_local_box(self, changed) -> tuple[QMessageBox, QPushButton, QPushButton, QPushButton]:
+        """The question, built and not shown: the files named, because a yes takes them off the
+        machine (tcc#91 — «можливість це виправити і відправити issue для інфо скілу»).
+
+        The default is to update WITHOUT sending: Enter is not a yes to something that leaves the
+        machine. Escape cancels, and cancelling touches nothing.
+        """
+        shown = list(changed[:_KEEP_LOCAL_SHOWN])
+        files = "\n".join(f"• {name}" for name in shown)
+        if len(changed) > len(shown):
+            files += "\n" + i18n.t("updKeepMore").format(count=len(changed) - len(shown))
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("updKeepTitle"))
+        box.setText(i18n.t("updKeepText").format(files=files))
+        send = box.addButton(i18n.t("updKeepSend"), QMessageBox.ButtonRole.AcceptRole)
+        keep = box.addButton(i18n.t("updKeepOnly"), QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton(i18n.t("updKeepCancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep)
+        box.setEscapeButton(cancel)
+        return box, send, keep, cancel
+
+    def _ask_keep_local(self, changed) -> Optional[bool]:
+        """True: keep, send, update. False: keep and update. None: do nothing."""
+        box, send, keep, _cancel = self._keep_local_box(changed)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is send:
+            return True
+        if clicked is keep:
+            return False
+        return None
+
+    def _after_skill_update(self, done) -> None:
+        """The receipt: where the skill landed, and each thing that happened on the way — the
+        kept patch and the send's answer above all, since a reset clone no longer shows them."""
+        label, button = self._update_rows["skill"]
+        if done.ok:
+            lines = [i18n.t("updSkillDone").format(version=done.version.lstrip("v"))]
+            if done.signature:
+                lines.append(i18n.t("updSkillSigned").format(line=done.signature))
+        else:
+            lines = [i18n.t("updFailed").format(why=_reason(done.reason, done.detail))]
+        if done.patch:
+            lines.append(i18n.t("updKeepSaved").format(path=done.patch))
+        if done.sent:
+            lines.append(i18n.t("updKeepSent").format(url=done.sent.get("url", ""))
+                         if done.sent.get("sent")
+                         else i18n.t("updKeepNotSent").format(why=done.sent.get("why", "")))
+        if done.libs_ok is True:
+            lines.append(i18n.t("updLibsDone").format(what=done.libs) if done.libs
+                         else i18n.t("updLibsCurrent"))
+        elif done.libs_ok is False:
+            lines.append(i18n.t("updLibsFailed").format(why=done.libs))
+        label.setText("\n".join(lines))
+        if done.ok:
             # The report underneath must show the new version — but the row keeps what it just
             # said until the next Re-check, because that sentence is the receipt for the press.
             self._install_read = False
             self.refresh_install(check_updates=False)
         else:
-            label.setText(i18n.t("updFailed").format(why=_reason(what, detail)))
             button.setEnabled(True)
 
     def _update_tcc(self) -> None:
         """Handed to a terminal, with the reason said out loud.
 
         TCC cannot replace its own files while it is running -- on Windows it cannot at all, and
-        the failure would land halfway through -- so the command goes to a window the person can
-        watch, and the app says the one thing that matters: close TCC first.
+        the failure would land halfway through -- so the update goes to a window the person can
+        watch, and the app says the one thing that matters: close TCC first. The window runs a
+        script file TCC writes, in the reader's language, and shows only those lines and uv's
+        answer (hub #221 ask 3).
         """
         label, _button = self._update_rows["tcc"]
         try:
             # Pinned to the release the row is offering, not to whatever `main` holds by
             # the time the terminal opens (F-024).
-            terminal_launcher.run_line(updates.tcc_install_line(
-                tag=updates.newest_tcc_tag(updates.current_channel())))
+            script = updates.write_tcc_install_script(
+                tag=updates.newest_tcc_tag(updates.current_channel()),
+                words={"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
+                       "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed")})
+            terminal_launcher.run_script(script)
         except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
             label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
             return
@@ -860,7 +1019,9 @@ class DiagnosticsDialog(QDialog):
             return
         # Back to "checking", buttons off: a row still saying "a newer one is out" with a live
         # button while the question is being asked again is an offer we cannot honour yet.
-        for label, button in self._update_rows.values():
+        for name, (label, button) in self._update_rows.items():
+            if name == "skill" and self._skill_job is not None:
+                continue  # mid-update: its row says which step it is on
             label.setText(i18n.t("updChecking"))
             button.setEnabled(False)
         self._update_probe = _UpdateProbe(updates.current_channel())

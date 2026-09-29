@@ -15,6 +15,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
@@ -430,54 +431,185 @@ def test_could_not_ask_is_not_the_same_as_up_to_date():
     assert dialog._update_rows["tcc"][0].text() == i18n.t("updUnknown")
 
 
-def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
+def _finish_skill_update(dialog) -> None:
+    """Run the skill button's steps to the end, here and now: each one is a thread the dialog's
+    timer would otherwise poll."""
+    for _ in range(5):
+        job = dialog._skill_job
+        if job is None:
+            return
+        job.join(timeout=10)
+        dialog._poll_skill_job()
+    raise AssertionError("the skill update never settled")
+
+
+def _skill_offered(monkeypatch, changed=(), done=None):
+    """A dialog whose skill row offers 3.0.7, a clone with `changed`, and `apply_skill` recorded."""
     from autosound_tcc.core import updates
 
     _app()
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
-    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (True, "v3.0.7", ""))
+    monkeypatch.setattr(updates, "local_changes",
+                        lambda: updates.LocalChanges(True, tuple(changed)))
+    asked = []
+    done = done or updates.SkillUpdate(True, version="v3.0.7",
+                                       signature="v3.0.7: signature good (ayukhno)",
+                                       libs_ok=True, libs="numpy 2.0.2 → 2.1.0")
+    monkeypatch.setattr(updates, "apply_skill",
+                        lambda tag="", keep_local=False, send=False:
+                        asked.append((tag, keep_local, send)) or done)
+    return dialog, asked
+
+
+def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
+    dialog, asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
 
     dialog._update_skill()
+    _finish_skill_update(dialog)
 
-    assert "3.0.7" in dialog._update_rows["skill"][0].text()
+    assert asked == [("v3.0.7", False, False)], "the release the row offered; nothing to keep"
+    text = dialog._update_rows["skill"][0].text()
+    assert "3.0.7" in text
+    assert "v3.0.7: signature good (ayukhno)" in text, "the skill's signature line, as it said it"
+    assert "numpy 2.0.2 → 2.1.0" in text, "and the libraries that moved with it"
 
 
 def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
     from autosound_tcc.core import updates
 
-    _app()
-    dialog = DiagnosticsDialog()
-    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
-    monkeypatch.setattr(updates, "apply_skill", lambda tag="": (False, "git_failed", "no network"))
+    said = "v3.0.7: the signature does not check out -- no principal matched; nothing was changed"
+    dialog, _asked = _skill_offered(monkeypatch, done=updates.SkillUpdate(False, "refused", said))
 
     dialog._update_skill()
+    _finish_skill_update(dialog)
 
     label, button = dialog._update_rows["skill"]
-    assert "no network" in label.text(), "git's own words survive; the framing is translated"
-    assert i18n.t("updWhy_git_failed") in label.text()
+    assert said in label.text(), "the skill's own sentence survives; the framing is translated"
+    assert i18n.t("updWhy_refused") in label.text()
     assert button.isEnabled(), "a failure the person can retry must leave them the button"
 
 
-def test_updating_tcc_is_handed_to_a_terminal(monkeypatch):
-    """TCC cannot replace its own running files -- on Windows not at all -- so it does not try."""
+def test_a_clone_with_local_changes_names_them_and_asks_about_sending(monkeypatch):
+    """tcc#91: in place of the grey button, the changed files named and one action. The question
+    names the files, because the send takes them off the machine; the patch is kept either way."""
+    changed = ("skills/autosound-tuning/rew_tool/contract.py", "skills/autosound-tuning/new.py")
+    dialog, asked = _skill_offered(monkeypatch, changed=changed)
+    shown = []
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda files: shown.append(files) or False)
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    assert shown == [changed]
+    assert asked == [("v3.0.7", True, False)], "declined: kept and updated, not sent"
+
+    box = dialog._keep_local_box(changed)[0]
+    for name in changed:
+        assert name in box.text()
+    labels = [button.text() for button in box.buttons()]
+    assert i18n.t("updKeepSend") in labels and i18n.t("updKeepOnly") in labels
+    assert box.defaultButton().text() == i18n.t("updKeepOnly"), "Enter never sends"
+
+
+def test_a_yes_to_sending_shows_where_it_went(monkeypatch):
+    from autosound_tcc.core import updates
+
+    url = "https://github.com/ayukhno/autosound-tuning-skill/issues/123"
+    dialog, asked = _skill_offered(monkeypatch, changed=("a.py",), done=updates.SkillUpdate(
+        True, version="v3.0.7", patch="/h/.claude/skills/autosound-local-changes/x.patch",
+        sent={"sent": True, "url": url}, libs_ok=True))
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda files: True)
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    assert asked == [("v3.0.7", True, True)]
+    text = dialog._update_rows["skill"][0].text()
+    assert url in text and "x.patch" in text
+
+
+def test_a_send_that_did_not_go_says_why_and_still_updated(monkeypatch):
+    from autosound_tcc.core import updates
+
+    why = "no GitHub here (`gh` missing or not signed in); the patch is kept"
+    dialog, _asked = _skill_offered(monkeypatch, changed=("a.py",), done=updates.SkillUpdate(
+        True, version="v3.0.7", patch="/p/x.patch", sent={"sent": False, "why": why}))
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda files: True)
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    text = dialog._update_rows["skill"][0].text()
+    assert why in text and "3.0.7" in text
+
+
+def test_cancelling_the_question_changes_nothing(monkeypatch):
+    dialog, asked = _skill_offered(monkeypatch, changed=("a.py",))
+    before = dialog._update_rows["skill"][0].text()
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda files: None)
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    label, button = dialog._update_rows["skill"]
+    assert asked == [], "no keep-local, no reset, no update"
+    assert label.text() == before and button.isEnabled()
+
+
+def test_a_re_check_during_the_skill_update_leaves_its_row_alone(monkeypatch):
+    """A minute of `status`, minutes of pip: a Re-check pressed meanwhile must not write "up to
+    date" over "updating…", nor hand back a button for a second run."""
+    import threading
+
+    from autosound_tcc.core import updates
+
+    dialog, _asked = _skill_offered(monkeypatch)
+    release = threading.Event()
+    monkeypatch.setattr(updates, "local_changes",
+                        lambda: release.wait(5) and updates.LocalChanges(True, ()))
+    monkeypatch.setattr(updates, "check_all", lambda channel="stable": (
+        updates.Status("tcc", "0.1.3", "0.1.3", False),
+        updates.Status("skill", "3.0.7", "3.0.7", False)))
+
+    dialog._update_skill()
+    label, button = dialog._update_rows["skill"]
+    dialog._start_update_check()
+    dialog._show_update(updates.Status("skill", "3.0.7", "3.0.7", False))
+
+    assert label.text() == i18n.t("updSkillLooking") and not button.isEnabled()
+    release.set()
+    _finish_skill_update(dialog)
+    dialog._update_probe._thread.join(timeout=5)
+
+
+def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
+    """TCC cannot replace its own running files -- on Windows not at all -- so it does not try.
+    The window runs a script file TCC wrote, so what it shows is the person's lines (hub #221)."""
+    import tempfile
+
     from autosound_tcc.core import terminal_launcher, updates
 
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))  # the script lands here, not in /tmp
     _app()
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("tcc", "0.1.1", "0.9.9", True))
     seen = []
-    monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
+    monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.9.9")
 
     dialog._update_tcc()
 
     assert len(seen) == 1
+    script = seen[0].read_text(encoding="utf-8")
     # Pinned to the release the row offered, not to whatever `main` holds by then (F-024).
-    assert "autosound-tcc[gui,claude] @ git+" in seen[0]
-    assert "@v0.9.9" in seen[0]
-    assert "--python 3.12" in seen[0]
-    assert str(os.getpid()) in seen[0], "the window waits for THIS process before it replaces it"
+    assert "autosound-tcc[gui,claude] @ git+" in script
+    assert "@v0.9.9" in script
+    assert "--python 3.12" in script
+    assert str(os.getpid()) in script, "the window waits for THIS process before it replaces it"
+    assert i18n.t("updTermWait") in script, "in the reader's language"
+    assert seen[0].parent.parent == tmp_path
     assert dialog._update_rows["tcc"][0].text() == i18n.t("updTccHanded")
 
 
@@ -709,21 +841,24 @@ def test_an_app_installed_from_a_candidate_opens_with_the_box_ticked(monkeypatch
     assert DiagnosticsDialog()._beta_box.isChecked() is True
 
 
-def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch):
+def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch, tmp_path):
+    import tempfile
+
     from autosound_tcc.core import config, terminal_launcher, updates
 
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))  # the script lands here, not in /tmp
     _app()
     config.set_update_channel("beta")
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("tcc", "0.1.38", "0.2.0-rc2", True))
     seen = []
-    monkeypatch.setattr(terminal_launcher, "run_line", lambda line: seen.append(line))
+    monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
     monkeypatch.setattr(updates, "newest_tcc_tag",
                         lambda channel="stable": "beta-v0.2.0-rc2" if channel == "beta" else "v0.1.39")
 
     dialog._update_tcc()
 
-    assert "@beta-v0.2.0-rc2" in seen[0]
+    assert "@beta-v0.2.0-rc2" in seen[0].read_text(encoding="utf-8")
 
 
 def test_the_rew_line_names_skipped_captures_with_their_reasons_and_no_doubled_v():

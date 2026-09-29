@@ -156,6 +156,34 @@ def run_line(line: str) -> None:
     raise TerminalLaunchError("no supported terminal emulator found on PATH")
 
 
+def run_script(path: Path) -> None:
+    """Open a terminal that runs the script file at `path` by name, and leave it open.
+
+    For the update window (hub #221, skill #94): a script shows the person's lines and nothing
+    of the commands, where a typed line was echoed whole by zsh. On macOS and Linux the line
+    typed is `sh '<file>'`, which the script's first act clears. On Windows cmd is handed the
+    file's NAME with the window starting in its folder — cmd does not echo a `/k` command, the
+    script turns its own echo off, and the folder travels as `wt -d` / `cwd` rather than inside
+    the line: a temp path carries the user's name, spaces and `&` included (the HUB-053 rule).
+
+    `path` is a file this app wrote, never user text.
+    """
+    path = Path(path)
+    if sys.platform.startswith("win"):
+        log = app_log.logger()
+        folder, name = str(path.parent), path.name
+        if shutil.which("wt"):
+            log.info("terminal: windows terminal (wt -d … cmd /k), script=%s", path)
+            subprocess.Popen(["wt", "-d", folder, "cmd", "/k", name], close_fds=True,
+                             **child.wants_a_console())
+            return
+        log.info("terminal: cmd /k in a new console, script=%s", path)
+        subprocess.Popen(["cmd", "/k", name], close_fds=True, cwd=folder,
+                         **child.wants_a_console())
+        return
+    run_line(f"sh {shlex.quote(str(path))}")
+
+
 #: The bundle each macOS terminal app answers to, for yielding the focus to it.
 _MAC_BUNDLES = {"Terminal": "com.apple.Terminal", "iTerm": "com.googlecode.iterm2"}
 

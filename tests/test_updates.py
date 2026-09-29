@@ -135,41 +135,259 @@ def test_a_developer_s_own_checkout_is_never_touched(monkeypatch, tmp_path):
         "ls-remote": (True, f"{_THERE}\trefs/tags/v9.9.9"),
     })
     _skill_at(monkeypatch, _HERE, "3.0.0")
+    upkeep = _fake_upkeep(monkeypatch, tmp_path, {})
 
     status = updates.check_skill()
 
     assert status.updatable is False
     assert (status.reason, status.detail) == ("on_branch", "main"), "a key, not a sentence"
-    ok, why, detail = updates.apply_skill()
-    assert ok is False and why == "on_branch" and detail == "main"
+    done = updates.apply_skill()
+    assert done.ok is False and done.reason == "on_branch" and done.detail == "main"
+    found = updates.local_changes()
+    assert found.ok is False and found.reason == "on_branch"
+    assert upkeep == [], "upkeep's keep-local resets a clone: a working tree never reaches it"
 
 
-def test_uncommitted_changes_also_stop_it(monkeypatch, tmp_path):
+def test_local_changes_no_longer_grey_the_button(monkeypatch, tmp_path):
+    """tcc#91 (SKL-056). A session had patched `rew_tool/contract.py` in the installed clone, and
+    the row said «має незакомічені зміни, тому не чіпаю» over a grey button — no next step without
+    git by hand. The clone's changes are the skill's `upkeep.py keep-local` business now, so they
+    no longer make the clone "not ours", and TCC stopped asking git about them at all."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    _git_answers(monkeypatch, {
+    calls = _git_answers(monkeypatch, {
         "--git-dir": (True, ".git"),
         "--show-superproject-working-tree": (True, ""),
         "symbolic-ref": (False, ""),
-        "status": (True, " M skills/autosound-tuning/SKILL.md"),
+        "status": (True, " M skills/autosound-tuning/rew_tool/contract.py"),
+        "ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.64"),
+    })
+    _skill_at(monkeypatch, _HERE, "3.0.61")
+
+    status = updates.check_skill()
+
+    assert status.newer is True and status.updatable is True
+    assert not any("status" in call for call in calls), "no porcelain check from TCC any more"
+
+
+# ---- the skill moved by its own upkeep.py (hub #221 SKL-059, tcc#91) -------------------------
+
+_CLONE_JSON = {"clone": "/c", "from": "v3.0.61", "to": "v3.0.64",
+               "signature": "v3.0.64: signature good (ayukhno)"}
+_LIBS_JSON = {"python": "/usr/bin/python3", "command": "pip …", "ok": True,
+              "before": {"numpy": "2.0.2", "scipy": "1.13.1", "matplotlib": "3.9.4"},
+              "after": {"numpy": "2.1.0", "scipy": "1.13.1", "matplotlib": "3.9.4"}, "why": ""}
+_KEPT_JSON = {"clone": "/c", "changed": ["skills/autosound-tuning/rew_tool/contract.py"],
+              "version": "v3.0.61", "patch": "/h/.claude/skills/autosound-local-changes/x.patch",
+              "sent": None, "reset": True}
+
+
+def _fake_upkeep(monkeypatch, tmp_path, answers: dict):
+    """Fake the skill's `upkeep.py` by subcommand -> `(exit code, JSON object or raw stdout)`.
+
+    Returns the list of subcommands it was asked for, each with its own arguments — the ORDER is
+    what most of these tests are about. The real script never runs: it would act on a clone."""
+    import json
+
+    script = tmp_path / "upkeep.py"
+    script.write_text("raise SystemExit('the fake is patched in; this never runs')\n")
+    monkeypatch.setattr(updates, "upkeep_script", lambda: script)
+    calls = []
+
+    def fake(argv, timeout):
+        assert argv[1] == str(script) and argv[2:4] == ["--json", "--clone"], argv
+        calls.append(argv[5:])
+        code, out = answers.get(argv[5], (0, {}))
+        return code, out if isinstance(out, str) else json.dumps(out), ""
+
+    monkeypatch.setattr(updates, "_run_upkeep", fake)
+    return calls
+
+
+def _an_installed_clone(monkeypatch, tmp_path):
+    repo = tmp_path / "clone"
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: repo)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    return repo
+
+
+def test_a_clean_clone_is_moved_by_upkeep_clone_then_libs(monkeypatch, tmp_path):
+    """Ask 1 and 2 of hub #221: the tag the row offered, through the skill's own `clone` (the tag
+    lands in refs/tags — skill #92 — and its signature is checked — skill #99), and then `libs`
+    in the same action, so numpy, scipy and matplotlib follow the skill that uses them (skill #98)."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    git = _git_answers(monkeypatch, {})
+    calls = _fake_upkeep(monkeypatch, tmp_path, {"clone": (0, _CLONE_JSON), "libs": (0, _LIBS_JSON)})
+
+    done = updates.apply_skill("v3.0.64")
+
+    assert calls == [["clone", "--tag", "v3.0.64"], ["libs"]]
+    assert done.ok is True and done.version == "v3.0.64"
+    assert done.signature == "v3.0.64: signature good (ayukhno)", "the skill's line, as it said it"
+    assert done.libs_ok is True and done.libs == "numpy 2.0.2 → 2.1.0", "only what moved"
+    assert done.patch == "" and done.sent is None, "nothing was kept: nothing was changed here"
+    assert git == [], "TCC runs no git against the clone to move it"
+
+
+def test_upkeep_runs_on_tcc_s_python_with_json_and_the_clone_before_the_command(monkeypatch,
+                                                                                 tmp_path):
+    """The contract (hub #217, #219): `--json` and `--clone` go BEFORE the subcommand, and the
+    interpreter is the one TCC runs on — its console twin on Windows (`child.script_interpreter`)."""
+    from autosound_tcc.core import child
+
+    repo = _an_installed_clone(monkeypatch, tmp_path)
+    seen = []
+    _fake_upkeep(monkeypatch, tmp_path, {"clone": (0, _CLONE_JSON), "libs": (0, _LIBS_JSON)})
+    fake = updates._run_upkeep
+    monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: seen.append(argv) or fake(
+        argv, timeout))
+
+    updates.apply_skill("v3.0.64")
+
+    assert seen[0] == [child.script_interpreter(), str(tmp_path / "upkeep.py"), "--json",
+                       "--clone", str(repo), "clone", "--tag", "v3.0.64"]
+
+
+def test_a_dirty_clone_is_named_then_kept_as_a_patch_before_the_clone_moves(monkeypatch,
+                                                                              tmp_path):
+    """tcc#91: the changed files named (read from `upkeep.py status`, not from git), then
+    `keep-local` — the patch on disk before its own reset — and only then `clone` and `libs`.
+    No `--send` without the person's yes, and a declined send still updates."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    calls = _fake_upkeep(monkeypatch, tmp_path, {
+        "status": (0, {"clone": {"path": "/c", "exists": True, "version": "v3.0.61",
+                                 "changed": ["skills/autosound-tuning/rew_tool/contract.py"]},
+                       "tools": [], "libs": {}}),
+        "keep-local": (0, _KEPT_JSON),
+        "clone": (0, _CLONE_JSON),
+        "libs": (0, _LIBS_JSON),
     })
 
-    ok, why, _detail = updates.apply_skill()
+    found = updates.local_changes()
+    done = updates.apply_skill("v3.0.64", keep_local=True, send=False)
 
-    assert ok is False and why == "dirty"
+    assert found.ok is True
+    assert found.changed == ("skills/autosound-tuning/rew_tool/contract.py",)
+    assert calls == [["status"], ["keep-local"], ["clone", "--tag", "v3.0.64"], ["libs"]]
+    assert done.ok is True and done.patch.endswith("x.patch"), "where the changes went, said"
+    assert done.sent is None
 
 
-def test_the_method_is_updated_the_way_the_installer_does_it(monkeypatch, tmp_path):
-    """Fetch the tag BY NAME into a --depth 1 clone, then check out FETCH_HEAD."""
-    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
-    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
-    calls = _git_answers(monkeypatch, {"ls-remote": (True, "sha\trefs/tags/v3.0.7")})
+def test_a_yes_to_sending_passes_send_and_the_answer_comes_back(monkeypatch, tmp_path):
+    _an_installed_clone(monkeypatch, tmp_path)
+    url = "https://github.com/ayukhno/autosound-tuning-skill/issues/123"
+    calls = _fake_upkeep(monkeypatch, tmp_path, {
+        "keep-local": (0, {**_KEPT_JSON, "sent": {"sent": True, "url": url}}),
+        "clone": (0, _CLONE_JSON), "libs": (0, _LIBS_JSON)})
 
-    ok, what, _detail = updates.apply_skill()
+    done = updates.apply_skill("v3.0.64", keep_local=True, send=True)
 
-    assert ok is True and what == "v3.0.7"
-    fetch = [c for c in calls if "fetch" in c][0]
-    assert "--depth" in fetch and "v3.0.7" in fetch
-    assert any("FETCH_HEAD" in c for c in calls)
+    assert calls[0] == ["keep-local", "--send"]
+    assert done.sent == {"sent": True, "url": url}
+
+    why = "no GitHub here (`gh` missing or not signed in); the patch is kept"
+    _fake_upkeep(monkeypatch, tmp_path, {
+        "keep-local": (0, {**_KEPT_JSON, "sent": {"sent": False, "why": why}}),
+        "clone": (0, _CLONE_JSON), "libs": (0, _LIBS_JSON)})
+    done = updates.apply_skill("v3.0.64", keep_local=True, send=True)
+    assert done.ok is True and done.sent == {"sent": False, "why": why}, "not sent still updates"
+
+
+def test_a_refused_clone_is_its_own_sentence_and_nothing_else_runs(monkeypatch, tmp_path):
+    """Exit 3 and `{"ok": false, "refused": …}` — a bad signature, a dirty clone, no network. The
+    sentence is the skill's and goes on screen as it is; `libs` does not run after a clone that
+    did not move."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    said = "v3.0.64: the signature does not check out -- no principal matched; nothing was changed"
+    calls = _fake_upkeep(monkeypatch, tmp_path, {
+        "clone": (3, {"ok": False, "refused": said}), "libs": (0, _LIBS_JSON)})
+
+    done = updates.apply_skill("v3.0.64")
+
+    assert calls == [["clone", "--tag", "v3.0.64"]]
+    assert done.ok is False and (done.reason, done.detail) == ("refused", said)
+
+
+def test_a_refused_keep_local_stops_before_the_clone(monkeypatch, tmp_path):
+    _an_installed_clone(monkeypatch, tmp_path)
+    said = "/p.patch does not hold the clone's changes exactly; nothing was reset"
+    calls = _fake_upkeep(monkeypatch, tmp_path, {"keep-local": (3, {"ok": False, "refused": said})})
+
+    done = updates.apply_skill("v3.0.64", keep_local=True)
+
+    assert calls == [["keep-local"]]
+    assert done.ok is False and done.detail == said
+
+
+def test_the_patch_is_still_named_when_the_clone_then_refuses(monkeypatch, tmp_path):
+    """keep-local has already reset the clone by then: where the changes went must not be lost
+    with the refusal."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    _fake_upkeep(monkeypatch, tmp_path, {
+        "keep-local": (0, _KEPT_JSON),
+        "clone": (3, {"ok": False, "refused": "could not fetch v3.0.64: timeout; nothing was changed"})})
+
+    done = updates.apply_skill("v3.0.64", keep_local=True)
+
+    assert done.ok is False and done.patch.endswith("x.patch")
+
+
+def test_libraries_that_did_not_upgrade_do_not_undo_the_update(monkeypatch, tmp_path):
+    """`libs` exits 3 with its own object — not a refusal — when pip fails. The clone HAS moved."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    _fake_upkeep(monkeypatch, tmp_path, {
+        "clone": (0, _CLONE_JSON),
+        "libs": (3, {**_LIBS_JSON, "ok": False, "why": "ERROR: No matching distribution"})})
+
+    done = updates.apply_skill("v3.0.64")
+
+    assert done.ok is True and done.version == "v3.0.64"
+    assert done.libs_ok is False and done.libs == "ERROR: No matching distribution"
+
+
+def test_an_answer_that_is_not_json_is_said_in_its_own_words(monkeypatch, tmp_path):
+    _an_installed_clone(monkeypatch, tmp_path)
+    _fake_upkeep(monkeypatch, tmp_path, {"clone": (1, "Traceback …\nOSError: disk full")})
+
+    done = updates.apply_skill("v3.0.64")
+
+    assert done.ok is False and done.reason == "upkeep_failed"
+    assert "disk full" in done.detail
+
+
+def test_a_skill_older_than_its_own_updater_is_told_so(monkeypatch, tmp_path):
+    """`upkeep.py` arrived with the skill's v3.0.64. TCC's wheel carries no copy of the skill (it
+    finds the installed one — `vendor_loader`), so an installed clone older than that has no
+    updater TCC could run, and TCC no longer moves it with git itself (hub #221)."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    monkeypatch.setattr(updates, "upkeep_script", lambda: None)
+    ran = []
+    monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
+
+    assert updates.apply_skill("v3.0.64").reason == "no_upkeep"
+    assert updates.local_changes().reason == "no_upkeep"
+    assert ran == []
+
+
+def test_the_real_subprocess_path_reads_a_stub_upkeep(monkeypatch, tmp_path):
+    """One run through `subprocess` with a stub in place of `upkeep.py`: the argv arrives in the
+    contract's order, the JSON comes back parsed, and the child cannot stop to ask for a password
+    or leave `__pycache__` in the clone (which `git status` would then name as a change)."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    stub = tmp_path / "upkeep.py"
+    stub.write_text(
+        "import json, os, sys\n"
+        "print(json.dumps({'clone': {'path': '/c', 'exists': True, 'version': 'v3.0.61',\n"
+        "  'changed': [' '.join(sys.argv[1:]), os.environ.get('GIT_TERMINAL_PROMPT'),\n"
+        "              os.environ.get('PYTHONDONTWRITEBYTECODE')]}}))\n",
+        encoding="utf-8")
+    monkeypatch.setattr(updates, "upkeep_script", lambda: stub)
+
+    found = updates.local_changes()
+
+    assert found.ok is True, found
+    argv, prompt, bytecode = found.changed
+    assert argv == f"--json --clone {tmp_path / 'clone'} status"
+    assert prompt == "0" and bytecode == "1"
 
 
 def test_tcc_is_compared_against_the_newest_release(monkeypatch):
@@ -217,7 +435,8 @@ def test_the_update_command_pins_the_release_it_is_offering(monkeypatch):
     assert updates.tcc_install_command("") == updates.TCC_INSTALL_COMMAND
     assert "@v" not in updates.TCC_INSTALL_COMMAND
 
-    assert "@v0.1.11" in updates.tcc_install_line(pid=4242, tag="v0.1.11")
+    for platform in ("darwin", "win32"):
+        assert "@v0.1.11" in updates.tcc_install_script(pid=4242, tag="v0.1.11", platform=platform)
 
 
 def test_a_source_checkout_is_told_to_use_git(monkeypatch):
@@ -268,26 +487,98 @@ def test_version_keys(text, expected):
     assert updates._version_key(text) == expected
 
 
-def test_the_update_waits_for_this_process_before_it_replaces_it(monkeypatch):
+def test_the_update_waits_for_this_process_before_it_replaces_it():
     """Telling somebody to close the app first was tried and was not enough: `uv` replaced the
     package while TCC was open, then failed clearing the old `Scripts` -- Windows will not delete a
     running executable -- and the install was left half-swapped and would not start (user, Windows
     11, 2026-08-19). The window waits for our pid instead of asking."""
-    monkeypatch.setattr(updates.sys, "platform", "win32")
-    line = updates.tcc_install_line(pid=4242)
-    assert "Wait-Process -Id 4242" in line
-    assert line.index("Wait-Process") < line.index("uv tool install"), "wait first, then install"
+    script = updates.tcc_install_script(pid=4242, platform="win32")
+    assert "Wait-Process -Id 4242" in script
+    assert script.index("Wait-Process") < script.index("uv tool install"), "wait first, then install"
 
-    monkeypatch.setattr(updates.sys, "platform", "darwin")
-    line = updates.tcc_install_line(pid=4242)
-    assert "kill -0 4242" in line
-    assert line.index("kill -0") < line.index("uv tool install")
+    script = updates.tcc_install_script(pid=4242, platform="darwin")
+    assert "kill -0 4242" in script
+    assert script.index("kill -0") < script.index("uv tool install")
 
 
 def test_the_wait_defaults_to_our_own_process():
     import os
 
-    assert str(os.getpid()) in updates.tcc_install_line()
+    assert f"kill -0 {os.getpid()} " in updates.tcc_install_script(platform="darwin")
+
+
+_WORDS = {"wait": "Закрий ТСС — це вікно чекає на нього, тоді оновить.",
+          "updating": "ТСС закрито — оновлюю.",
+          "done": "Готово — запусти ТСС знову.",
+          "failed": "Оновлення не завершилось — чому, сказано вище."}
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_the_mac_update_window_shows_only_the_person_s_lines(tmp_path):
+    """hub #221 ask 3 (skill #94). zsh echoed the whole typed line — `echo …; while kill -0 …;
+    uv tool install … @v0.1.44 …` — and the one sentence the Arbiter needed came last and was lost
+    («можемо заховати зайве?»). So the window runs a script file whose first act is to clear the
+    screen, the typed `sh '<file>'` included, and what is left is his lines and uv's own answer.
+
+    Run for real here, with a fake `uv` and a process that has already gone."""
+    import os
+    import subprocess as sp
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "uv").write_text("#!/bin/sh\necho 'Installed 1 executable: autosound-tcc'\n")
+    (bindir / "uv").chmod(0o755)
+    gone = sp.Popen(["true"])
+    gone.wait()
+    path = updates.write_tcc_install_script(pid=gone.pid, tag="v0.1.45", words=_WORDS,
+                                            folder=tmp_path, platform="darwin")
+
+    out = sp.run(["/bin/sh", str(path)], capture_output=True, text=True, encoding="utf-8",
+                 env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"}, timeout=30).stdout
+
+    first, _sep, rest = out.partition(_WORDS["wait"])
+    assert first == "\033[H\033[2J\033[3J", "the screen and its scrollback go first"
+    assert rest.splitlines() == ["", _WORDS["updating"], "Installed 1 executable: autosound-tcc",
+                                 "", _WORDS["done"]]
+    for command in ("uv tool install", "kill -0", "echo", "printf"):
+        assert command not in out, f"{command!r} reached the window"
+
+
+def test_a_failed_install_says_so_instead_of_done(tmp_path):
+    for platform in ("darwin", "win32"):
+        script = updates.tcc_install_script(pid=1, words=_WORDS, platform=platform)
+        assert script.index(_WORDS["failed"]) > script.index("uv tool install")
+        assert script.count(_WORDS["done"]) == 1
+
+
+def test_the_windows_update_window_shows_only_the_person_s_lines(tmp_path):
+    """The same on Windows: a `.cmd` file whose first line turns the echo of every line off and
+    whose next clears the window, run by name (`terminal_launcher.run_script`). UTF-8 with
+    `chcp 65001` so the Arbiter's words arrive whole, CRLF because cmd reads batch files by line,
+    and `call` in front of uv so a `.cmd` shim of it would not end this script early."""
+    path = updates.write_tcc_install_script(pid=4242, tag="v0.1.45", words=_WORDS,
+                                            folder=tmp_path, platform="win32")
+
+    raw = path.read_bytes()
+    assert path.suffix == ".cmd"
+    assert b"\r\n" in raw and b"\n" not in raw.replace(b"\r\n", b""), "CRLF throughout"
+    lines = raw.decode("utf-8").split("\r\n")
+    assert lines[:3] == ["@echo off", "chcp 65001 >nul", "cls"], lines[:3]
+    shown = [line[len("echo "):] for line in lines if line.startswith("echo ")]
+    assert shown == [_WORDS["wait"], _WORDS["updating"], _WORDS["done"], _WORDS["failed"]]
+    install = next(line for line in lines if "uv tool install" in line)
+    assert install.startswith("call uv tool install ") and "@v0.1.45" in install
+
+
+def test_a_sentence_cannot_turn_into_a_command(tmp_path):
+    """The words are translations, and `&` or `|` in one would be a second command in cmd; a
+    quote would end the string in sh."""
+    words = {**_WORDS, "wait": "Close TCC & wait | it's 100% fine <ok>"}
+    win = updates.tcc_install_script(pid=1, words=words, platform="win32")
+    assert "echo Close TCC ^& wait ^| it's 100%% fine ^<ok^>" in win
+    mac = updates.tcc_install_script(pid=1, words=words, platform="darwin")
+    assert """printf '%s\\n' 'Close TCC & wait | it'"'"'s 100% fine <ok>'""" in mac
+
 
 def test_a_repository_that_cannot_be_asked_for_tags_says_so(monkeypatch):
     """Offline mid-check. The row must not invent a number, and must not claim to be current
@@ -317,8 +608,8 @@ def test_a_submodule_is_not_an_installed_release(monkeypatch, tmp_path):
     assert status.updatable is False
     assert status.reason == "submodule"
     assert status.detail.endswith("autosound-tcc")
-    ok, why, _detail = updates.apply_skill()
-    assert ok is False and why == "submodule", "and the button cannot do it either"
+    done = updates.apply_skill()
+    assert done.ok is False and done.reason == "submodule", "and the button cannot do it either"
 
 
 def test_our_installer_constants_agree_with_the_installers_own(monkeypatch):

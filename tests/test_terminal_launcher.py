@@ -414,3 +414,45 @@ def test_a_refused_applescript_is_reported_in_osascripts_own_words(monkeypatch, 
     with pytest.raises(TerminalLaunchError) as refused:
         launch(tmp_path, "claude")
     assert "-2740" in str(refused.value)
+
+
+# ---- the update window: a script run by name, never typed out (hub #221, skill #94) -----------
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+def test_macos_runs_the_update_script_by_its_path_and_types_nothing_else(recorded, monkeypatch,
+                                                                         tmp_path):
+    """The line zsh echoes is `sh '<file>'` and nothing more — and the file's first act clears it.
+    A folder with a space and a quote in it stays one argument."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher.Path, "exists", lambda self: False)  # no iTerm
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+    script = tmp_path / "it's here" / "tcc-update.sh"
+
+    terminal_launcher.run_script(script)
+
+    applescript = recorded[0][2]
+    typed = applescript.split("do script ", 1)[1].split("\n", 1)[0]
+    assert typed == terminal_launcher._applescript_literal(
+        "sh " + "'" + str(script).replace("'", "'\"'\"'") + "'")
+    assert "uv" not in typed
+
+
+@pytest.mark.parametrize("wt", [True, False])
+def test_windows_runs_the_update_script_by_name_from_its_own_folder(recorded, monkeypatch,
+                                                                    tmp_path, wt):
+    """cmd does not echo a `/k` command, and the script turns its own echo off first. The folder
+    travels as the window's starting folder (`wt -d`, or `cwd`), never inside the line — a user
+    name with a space or `&` in it is in every temp path (the HUB-053 rule)."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which",
+                        lambda name: f"C:/{name}" if (wt or name != "wt") else None)
+    script = tmp_path / "A & B" / "tcc-update.cmd"
+
+    terminal_launcher.run_script(script)
+
+    if wt:
+        assert recorded[0] == ["wt", "-d", str(script.parent), "cmd", "/k", "tcc-update.cmd"]
+    else:
+        assert recorded[0] == ["cmd", "/k", "tcc-update.cmd"]
+        assert recorded.kwargs["cwd"] == str(script.parent)
+    assert recorded.kwargs.get("shell") is not True
