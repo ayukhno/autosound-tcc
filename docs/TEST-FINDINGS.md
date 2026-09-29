@@ -3049,3 +3049,54 @@ Wanted: every field that differs from the compared version marked in the tree to
 **Weight.** Medium: the tree is where a change is seen at a glance, and it shows only part of them.
 
 **Task.** tcc#104 (W-4), no `ok` yet.
+
+### 114. The full mode at its minimum width: the DSP table cannot be read, and the tabs lose their names
+
+**What.** The Arbiter, 2026-09-29, the Windows VM, TCC at `wave-0.1.45` (`1ee915b`), project `testAgy-auto`, the
+window at its minimum size: «добре було б залишити хоч перші літери чи замінити назви на літери-коди. хінт спасає,
+але не зразу розумієш що там є закладки … в цілому таблицю не розбереш — тому такий режим НЕ РОБОЧІЙ і треба або
+вікно збільшити або перейти в режим контроль».
+- Screenshot 1: the detail pane's head at the minimum — the tabs show no words (only the hover says «Таблиця»), the
+  header reads «Virtual channels · порівняти з [v_002] [інша конфігур…] [закрити]».
+- Screenshot 3: the output table at the minimum — every cell elided: «300 …», «70 …», «350…», «NO…», «GAIN DE»,
+  «ELAY M».
+Wanted: the full mode is usable at its minimum — either the window's minimum grows until the table reads, or it
+hands over to control mode; tabs keep at least their first letters or a letter code rather than nothing.
+Fine as is: the compare list itself («список для вибору конфігурації для порівняння — все ок»).
+
+**Weight.** Medium: at that width the mode shows nothing the Arbiter can use.
+
+**Task.** None yet — found while W-4's PR #105 waits for CI.
+
+### 115. Control mode at its minimum width: the 3500 crossover is cut
+
+**What.** The Arbiter, 2026-09-29, same session: control mode at the minimum width is «почти ок»; the LPF of m-L and
+m-R and the HPF of tw-L and tw-R read «3500 …» (screenshot 4) — «не критично, розмір зробити трохи більше і ок».
+
+**Weight.** Low.
+
+**Task.** None yet.
+
+### 116. The DSP tree's changed crossover: blue is not enough to see it
+
+**What.** The Arbiter, 2026-09-29: the tree line of w-R reads «HP 70 LR4 · LP 400 LR4 · +0.0d…» with «HP 70 LR4» in
+blue, changed against «порівняти з» (tcc#104, screenshot 2) — «було б добре зробити жирним підсвічений кросовер —
+щоб було видно».
+
+**Weight.** Low: the mark is there, it does not stand out.
+
+**Task.** None yet (a follow-up of tcc#104, whose tree marks are colour only, no bold).
+
+### 117. «У фокусі зараз»: captures named `(rta)` listed under SWEEP (SW) in testAgy-auto
+
+**What.** The Arbiter, 2026-09-29, `testAgy-auto`: round `cap_010` lists «D_L_7 (rta) m-L: lev=-4.5, PK=-2» and
+«D_L_7 (rta) m-L: lev=-4.5, PK=-4.5» under SWEEP (SW) (screenshot 5); round `cap_013` lists «D_L w+m_9 (rta) inv» and
+«D_R w+m_9 (rta) inv» under SWEEP (SW), and «D_L w+m_9 (rta)» / «D_R w+m_9 (rta)» under MMM RTA (screenshot 6).
+His note: «але може це там на рівні даних — тому що мені ніхто не завадить привʼязати любу назву до sweep задачі,
+навіть з rta в назві».
+
+**Weight.** Low until the cause is known — finding 111 / tcc#101 fixed the sorting of titles by their parsed method
+on `wave-0.1.45`, so either the round carries its own groups (the task, not the title, decides), or a title the
+grammar does not read falls back to sweep.
+
+**Task.** None yet; not diagnosed (collection).
