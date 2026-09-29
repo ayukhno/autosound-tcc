@@ -113,15 +113,27 @@ def groups_from_titles(titles) -> list[dict]:
     past round read back from the journal. Grouped by capture method and nothing else — the scopes
     the derived path knows about (pairs, sides, joints) are a property of the phase plan, and a
     round that exists outside one has no such structure to recover.
+
+    Sorted by the method `parse_name` reads off the title, not by how the title ends (tcc#101,
+    finding 111): `L m+tw_55 (rta) inv` ends with `inv`, the clarification after the method, and
+    landed under SW when the last word decided it. The suffix is only a fallback, for a title the
+    grammar does not read at all.
     """
+    try:
+        naming = vendor_loader.load_naming()
+    except Exception:  # noqa: BLE001 — no method on the machine: every title falls to the suffix
+        naming = None
     by_method: dict[str, list[str]] = {}
     for title in titles:
         text = str(title).strip()
         if not text:
             continue
-        method = next(
-            (m for suffix, m in _METHOD_BY_SUFFIX if text.rstrip().endswith(suffix)), "sw"
-        )
+        entry = naming.parse_name(text) if naming else None
+        method = entry.get("method") if entry else None
+        if not method:
+            method = next(
+                (m for suffix, m in _METHOD_BY_SUFFIX if text.rstrip().endswith(suffix)), "sw"
+            )
         by_method.setdefault(method, []).append(text)
     return [
         {"label": _METHOD_LABELS.get(method, method), "method": method, "names": names}

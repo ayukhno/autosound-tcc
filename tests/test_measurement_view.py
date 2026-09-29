@@ -468,6 +468,21 @@ def test_a_past_round_becomes_a_read_only_session_with_its_own_verdicts(tmp_path
     assert [g.method for g in session.groups] == ["sw", "rta"]
 
 
+def test_a_title_ending_in_something_other_than_the_method_still_sorts_by_it(tmp_path):
+    """tcc#101 (finding 111), round `cap_016`: `L m+tw_55 (rta) inv` ends with `inv`, not `(rta)`,
+    so sorting by the title's last word put it under SW. The grammar's own `parse_name` already
+    reads `method: rta` for it; sort by that instead, and fall back to the suffix only for a title
+    the grammar does not read at all."""
+    groups = measurement_view.groups_from_titles(
+        ["L m+tw_55 (rta) inv", "off-convention title (sw)"]
+    )
+
+    by_method = {g["method"]: g["names"] for g in groups}
+    assert by_method["rta"] == ["L m+tw_55 (rta) inv"]
+    # Not in the grammar (no `_N`) -- still sorts by its own suffix.
+    assert by_method["sw"] == ["off-convention title (sw)"]
+
+
 def test_a_round_is_linked_to_the_steps_whose_evidence_names_its_captures(tmp_path):
     """No field records that link — but SCR-035 makes every closed step cite something real, and a
     capture is cited by its REW title."""
