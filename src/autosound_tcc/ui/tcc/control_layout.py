@@ -257,6 +257,14 @@ def place_terminal_left(screen) -> None:
 #: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
 _REFIT_SLACK_PX = 12
 
+#: The most the compare box holds as its floor (tcc#96, the controller's finding on the third
+#: pass). The window's floor grows one for one with it: the rest of the Arbiter's header measured
+#: 518 px (offscreen, English and Ukrainian alike) and the window adds 16, so past 222 px the
+#: window can no longer sit in 756 -- half his 1512-px screen, where control mode puts it -- and
+#: sticks out past the screen's edge. 190 keeps the floor at 724, leaving 32 px for fonts wider
+#: than the offscreen ones; it still holds «<preset> · v_NNN» whole for a preset of ~17 characters.
+_COMPARE_BOX_FLOOR_PX = 190
+
 
 class _CompareBox(QComboBox):
     """«Порівняти з» in the header. Another configuration's version is shown with its preset's
@@ -264,9 +272,11 @@ class _CompareBox(QComboBox):
     meaning going with it (tcc#96, the controller's ruling after finding 105's second pass). The
     open list's rows stay as they are: #103's headings name the preset there.
 
-    For that name it asks for the width it needs and holds it as its floor -- the project name and
-    the mode button give ground instead. Whatever it shows is drawn elided, never cut mid-glyph
-    («v_0(», the Arbiter's first screenshot)."""
+    It asks for the whole of that, but holds as its floor only «<preset> · v_NNN» -- the names a
+    project-line version was saved under («v_002 · P3, SQ-2, SQ-3», `ledger_line.label`) give way
+    first -- and never more than `_COMPARE_BOX_FLOOR_PX`: a preset name too long for that gives
+    way next, the version still whole. The hover has the whole text. Whatever it shows is drawn
+    elided, never cut mid-glyph («v_0(», the Arbiter's first screenshot)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -277,6 +287,21 @@ class _CompareBox(QComboBox):
         if is_other_preset(key):
             return f"{key.split('/', 1)[0]} · {self.currentText()}"
         return self.currentText()
+
+    def _parts(self) -> Optional[tuple[str, str, str]]:
+        """Another configuration's pick as `(preset, v_NNN, the saved names after it)`."""
+        key = self.currentData()
+        if not is_other_preset(key):
+            return None
+        preset, version = key.split("/", 1)
+        row = self.currentText()
+        if not row.startswith(version):
+            return preset, row, ""
+        return preset, version, row[len(version):]
+
+    def _text_width(self, text: str) -> int:
+        # Rounded up: `elidedText` measures in fractions of a pixel (TODO F-045).
+        return math.ceil(QFontMetricsF(self.font()).horizontalAdvance(text))
 
     def _room(self, size=None) -> int:
         """The width the text has: the style's edit field, less the pixel each side of it that
@@ -290,22 +315,38 @@ class _CompareBox(QComboBox):
         return max(0, field.width() - 2)
 
     def fit_text(self) -> str:
-        """What the closed box draws: `shown_text`, elided to the room it has now."""
-        return self.fontMetrics().elidedText(self.shown_text(), Qt.TextElideMode.ElideRight,
-                                             self._room())
+        """What the closed box draws: `shown_text`, elided to the room it has now -- the saved
+        names first, then the preset's name; «v_NNN» goes only when nothing else is left."""
+        metrics, room, full = self.fontMetrics(), self._room(), self.shown_text()
+        cut = metrics.elidedText(full, Qt.TextElideMode.ElideRight, room)
+        parts = self._parts()
+        if cut == full or parts is None:
+            return cut
+        preset, version, _names = parts
+        if cut.startswith(f"{preset} · {version}"):
+            return cut
+        rest = f" · {version}"
+        short = metrics.elidedText(preset, Qt.TextElideMode.ElideRight,
+                                   room - self._text_width(rest))
+        return short + rest if short else cut
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
         if is_other_preset(self.currentData()):
             chrome = hint.width() - self._room(hint)
-            # Rounded up: `elidedText` measures in fractions of a pixel (TODO F-045).
-            text = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self.shown_text()))
-            hint.setWidth(max(hint.width(), text + chrome))
+            hint.setWidth(max(hint.width(), self._text_width(self.shown_text()) + chrome))
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
-        # A QComboBox's floor is its size hint; the wider hint keeps it so.
-        return self.sizeHint()
+        # A QComboBox's own floor is its size hint.
+        hint = super().minimumSizeHint()
+        parts = self._parts()
+        if parts is not None:
+            preset, version, names = parts
+            chrome = hint.width() - self._room(hint)
+            held = self._text_width(f"{preset} · {version}" + ("…" if names else "")) + chrome
+            hint.setWidth(max(hint.width(), min(held, _COMPARE_BOX_FLOOR_PX)))
+        return hint
 
     def sync_width(self) -> None:
         """Tells the layout the width changed -- only when the name shown did: it re-lays the
@@ -670,6 +711,8 @@ class ControlLayout:
         said = [] if show_label else [i18n.t("cmpWith")]
         if other:
             said.append(i18n.t("cmpOtherTip").format(version=combo.shown_text()))
+        elif combo.fit_text() != combo.shown_text():
+            said.append(combo.shown_text())  # this preset's own version, its saved names cut
         self._compare_tip.set_text("<br>".join(html.escape(line) for line in said))
 
     def _on_tab_changed(self, index: int) -> None:

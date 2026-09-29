@@ -593,6 +593,44 @@ def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path
     layout.leave()
 
 
+_LONG_PRESET = "5.W-wide-stage-for-rear-seat-A"  # 30 characters
+_LONG_NAMES = "v_002 · P3, SQ-2, SQ-3, SQ-Comp-4"  # every name v_002 was saved under
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, monkeypatch, lang):
+    """tcc#96, the controller's finding on the third pass: the box asked for the whole «<preset> ·
+    <row>», and the window's floor grew with it one for one -- past 756 px (half the Arbiter's
+    1512-px screen, where control mode puts the window) at about 28 characters, so the window
+    stuck out past the screen's right edge. On the project line a row carries every name its
+    version was saved under («v_002 · P3, SQ-2, SQ-3»). The box's floor is now «<preset> · v_NNN»
+    and no more than a cap: the saved names give way first, then a preset name too long for the
+    cap; the version stays, and the hover has the whole text."""
+    try:
+        window = _control_window(tmp_path, monkeypatch, lang)
+        assert len(_LONG_PRESET) == 30
+        others = [("3.S-shelf", [("3.S-shelf/v_002", _LONG_NAMES), ("3.S-shelf/v_001", "v_001")]),
+                  (_LONG_PRESET, [(f"{_LONG_PRESET}/v_002", "v_002")])]
+        window._compare_args = window._compare_args[:4] + (others,) + window._compare_args[5:]
+        layout = window._control_layout
+        layout._fill_compare()
+        combo = layout.compare_combo
+        for key in ("3.S-shelf/v_002", f"{_LONG_PRESET}/v_002"):
+            combo.setCurrentIndex(combo.findData(key))
+            _settle(window, 756)
+            floor = window.minimumSizeHint().width()
+            assert floor <= 756 and window.width() == 756, (key, floor, window.width())
+            shown, full = combo.fit_text(), combo.shown_text()
+            if key.startswith("3.S"):
+                assert shown.startswith("3.S-shelf · v_002"), f"the saved names give way: {shown}"
+            else:
+                assert shown.endswith(" · v_002") and shown.startswith("5.W-"), shown
+            assert full in combo.hover_tip.text(), "the whole text is in the hover"
+        layout.leave()
+    finally:
+        i18n.set_language("en")
+
+
 def test_a_squeezed_compare_box_settles_at_its_floor_not_below(tmp_path, monkeypatch):
     """The same box, built the same way `_build_corner` builds it, sharing a row with a widget
     that demands far more room than the row can give -- a real, if artificial, squeeze (a whole
