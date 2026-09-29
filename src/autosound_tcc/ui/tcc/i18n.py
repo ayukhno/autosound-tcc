@@ -211,6 +211,8 @@ T: dict[Lang, dict[str, str]] = {
         "updTermUpdating": "TCC is closed — updating it now. This can take a few minutes.",
         "updTermDone": "Done — start TCC again. This window can be closed.",
         "updTermFailed": "The update did not finish — the lines above say why.",
+        "updTermMoved": "The new version changed after it was checked, or the server did not "
+                        "answer — nothing was installed. Start TCC and press «Update TCC» again.",
         "diagLogNone": "no log file — this run writes to the terminal only",
         "diagInstallBlurb": "What is installed on this machine — versions, where each piece came \
 from, which command-line tools answer. Copy it into a message when you report something: it \
@@ -1401,6 +1403,8 @@ Choose sweeps (sw) above to read this.",
         "updTermUpdating": "ТСС закрито — оновлюю. Це може тривати кілька хвилин.",
         "updTermDone": "Готово — запусти ТСС знову. Це вікно можна закрити.",
         "updTermFailed": "Оновлення не завершилось — чому, написано вище.",
+        "updTermMoved": "Нова версія змінилась після перевірки, або сервер не відповів — нічого "
+                        "не встановлено. Запусти ТСС і натисни «Оновити ТСС» ще раз.",
         "diagLogNone": "лог-файла немає — цей запуск пише лише в термінал",
         "diagInstallBlurb": "Що встановлено на цій машині — версії, звідки взялася кожна частина, \
 які CLI відповідають. Скопіюй у повідомлення, коли про щось звітуєш: це відповідає на перші пʼять \
@@ -2525,6 +2529,8 @@ Choose sweeps (sw) above to read this.",
         "updTermUpdating": "TCC zamknięty — aktualizuję. To może potrwać kilka minut.",
         "updTermDone": "Gotowe — uruchom TCC ponownie. To okno można zamknąć.",
         "updTermFailed": "Aktualizacja się nie zakończyła — powód jest wyżej.",
+        "updTermMoved": "Nowa wersja zmieniła się po sprawdzeniu albo serwer nie odpowiedział — "
+                        "nic nie zainstalowano. Uruchom TCC i naciśnij «Zaktualizuj TCC» jeszcze raz.",
         "diagLogNone": 'nie ma pliku logu — ten przebieg pisze tylko do terminala',
         "diagInstallBlurb": 'Co jest zainstalowane na tej maszynie — wersje, skąd wzięła się każda część, które CLI '
                             'odpowiadają. Skopiuj do wiadomości, gdy coś zgłaszasz: to odpowiada na pierwsze pięć pytań, '
@@ -3711,6 +3717,9 @@ Choose sweeps (sw) above to read this.",
         "updTermUpdating": "TCC ist geschlossen — aktualisiere jetzt. Das kann ein paar Minuten dauern.",
         "updTermDone": "Fertig — starte TCC wieder. Dieses Fenster kann geschlossen werden.",
         "updTermFailed": "Das Update ist nicht fertig geworden — warum, steht oben.",
+        "updTermMoved": "Die neue Version hat sich nach der Prüfung geändert, oder der Server hat "
+                        "nicht geantwortet — es wurde nichts installiert. Starte TCC und drücke "
+                        "«TCC aktualisieren» noch einmal.",
         "diagLogNone": 'keine Protokolldatei — dieser Lauf schreibt nur ins Terminal',
         "diagInstallBlurb": 'Was auf dieser Maschine installiert ist — Versionen, woher jedes Teil kam, welche CLIs '
                             'antworten. Kopiere es in eine Nachricht, wenn du etwas meldest: es beantwortet die ersten '

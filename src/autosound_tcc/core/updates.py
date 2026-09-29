@@ -113,6 +113,8 @@ TCC_WINDOW_WORDS = {
     "updating": "TCC is closed — updating it now. This can take a few minutes.",
     "done": "Done — start TCC again. This window can be closed.",
     "failed": "The update did not finish — the lines above say why.",
+    "moved": "The new version changed after it was checked, or the server did not answer — "
+             "nothing was installed. Start TCC and press «Update TCC» again.",
 }
 
 #: Cursor home, clear the screen, clear the scrollback. The last one matters: `clear` alone leaves
@@ -133,7 +135,8 @@ def _cmd_echo(text: str) -> str:
 
 
 def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
-                       words: Optional[dict] = None, platform: Optional[str] = None) -> str:
+                       words: Optional[dict] = None, platform: Optional[str] = None,
+                       sha: str = "") -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -157,8 +160,18 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     one thing to explain.
 
     The install is one step between the wait and the result, `tcc_install_command(tag)`. TCC's own
-    tag is checked before this script is written at all (`prepare_tcc_update`, tcc#102), so the
-    script carries no check of its own: a tag that does not verify gets no script.
+    tag is checked before this script is written at all (`prepare_tcc_update`, tcc#102): a tag
+    that does not verify gets no script.
+
+    **`sha` is the commit that check verified, and the script holds uv to it** (review of
+    tcc#102). The check runs when the button is pressed; uv resolves the tag NAME only after the
+    person has quit TCC, which may be much later. So, right before uv, the script asks the remote
+    what the tag's peeled `^{}` line names now, and installs nothing unless it is that commit — a
+    tag moved since, a lightweight tag put in its place (no `^{}` line), or no answer all end in
+    the `moved` line. uv itself is not pinned to the sha: the tag name is what
+    `install_report.requested_revision` reads back — the shown version, the channel, the guide
+    link. No `sha` (a release from before signing, the developer's switch): nothing was verified,
+    so there is nothing to hold uv to.
     """
     if pid is None:
         pid = os.getpid()
@@ -170,30 +183,51 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         # `call`, so a `uv.cmd` shim would return here instead of ending the script. `goto`
         # rather than an `if (…) else (…)` block, where a `)` in a translation would close it.
         # Wait-Process returns at once if the id is already gone — TCC closed first.
+        # The check before uv: `for /f` reads the first field of git's one line, and an empty
+        # answer compares unequal, so it fails closed. `2^>nul` is the redirect escaped into the
+        # child command; `^{}` sits inside double quotes, where cmd leaves a caret alone.
+        guard = [
+            "set GIT_TERMINAL_PROMPT=0",
+            'set "tcc_now="',
+            f"for /f \"tokens=1\" %%a in ('git ls-remote \"{TCC_REPO}\" "
+            f"\"refs/tags/{tag}^{{}}\" 2^>nul') do set \"tcc_now=%%a\"",
+            f'if not "%tcc_now%"=="{sha}" goto moved',
+        ] if sha else []
         lines = [
             "@echo off",
             "chcp 65001 >nul",
             "cls",
             _cmd_echo(said["wait"]),
             f'powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue"',
+            *guard,
             _cmd_echo(said["updating"]),
             f"call {command}",
             "if errorlevel 1 goto failed",
             "echo.",
             _cmd_echo(said["done"]),
             "goto :eof",
+            *([":moved", "echo.", _cmd_echo(said["moved"]), "goto :eof"] if sha else []),
             ":failed",
             "echo.",
             _cmd_echo(said["failed"]),
         ]
     else:
         say = "printf '%s\\n' {}".format
+        guard = [
+            f"now=$(GIT_TERMINAL_PROMPT=0 git ls-remote {shlex.quote(TCC_REPO)} "
+            f"{shlex.quote(f'refs/tags/{tag}^{{}}')} 2>/dev/null | cut -f1)",
+            f'if [ "$now" != {shlex.quote(sha)} ]; then',
+            "  " + say(shlex.quote(said["moved"])),
+            "  exit 1",
+            "fi",
+        ] if sha else []
         lines = [
             "#!/bin/sh",
             "# TCC's update, written by TCC for the terminal it opened (core/updates.py).",
             f"printf '{_CLEAR_SCREEN}'",
             say(shlex.quote(said["wait"])),
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done",
+            *guard,
             say(shlex.quote(said["updating"])),
             f"if {command}; then",
             "  echo; " + say(shlex.quote(said["done"])),
@@ -206,7 +240,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
 
 def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                              words: Optional[dict] = None, folder: Optional[Path] = None,
-                             platform: Optional[str] = None) -> Path:
+                             platform: Optional[str] = None, sha: str = "") -> Path:
     """`tcc_install_script` in a file, for `terminal_launcher.run_script` to run by name.
 
     A fresh folder of this user's each time (`mkdtemp`, mode 0700): nobody else's file can be
@@ -216,7 +250,7 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     windows = _is_windows(platform)
     folder = Path(folder) if folder else Path(tempfile.mkdtemp(prefix="autosound-tcc-update-"))
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
-    path.write_text(tcc_install_script(pid, tag, words=words, platform=platform),
+    path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -628,7 +662,10 @@ def _verdict_by_name(tag: str, signed_from: str, order) -> Optional[tuple[bool, 
     if here is None or first is None:
         return (False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check",
                 "bad_signature")
-    if here < first:
+    # The version triple, not the whole key: on TCC's channel a candidate sorts below its own
+    # release, and `beta-v0.1.45-rc1` — signed by the same `make ship` — would read as older than
+    # v0.1.45 and pass unchecked (review of tcc#102).
+    if here[:3] < first[:3]:
         return True, (f"{tag} predates signed tags (they start at {signed_from}): installed "
                       f"without a signature check"), ""
     return None
@@ -950,8 +987,9 @@ def _apply_with(got: Extracted, repo: Path, target: str, *, keep_local: bool,
 # ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) -------------
 
 
-def check_tcc_tag(tag: str) -> tuple[bool, str, str]:
-    """`_verify_tag`'s answer for one of TCC's own tags: `(ok, the line to show, reason key)`.
+def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
+    """`_verify_tag`'s answer for one of TCC's own tags — `(ok, the line to show, reason key,
+    the commit the verified tag names)`, that commit "" when nothing was verified.
 
     `uv tool install … @<tag>` checks no signature, so the tag object is fetched first into a
     temporary BARE repository — TCC has no clone of itself to fetch into — and verified there
@@ -962,10 +1000,14 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str]:
     them (`channel_key`): a beta candidate is signed by the same `make ship` and checked like a
     release. A name the check can decide on alone — the developer's switch, a release from before
     signing — is decided without fetching anything.
+
+    The commit comes back so the install script can hold uv to it (`tcc_install_script`): uv
+    resolves the tag's NAME only after the person quits TCC. A verified tag whose commit git then
+    cannot name is refused — fail closed, never "verified, but unpinned".
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None:
-        return early
+        return (*early, "")
     with tempfile.TemporaryDirectory(prefix="autosound-tcc-tag-", ignore_cleanup_errors=True) as tmp:
         repo = Path(tmp)
         ok, said = _git("init", "--quiet", "--bare", str(repo))
@@ -973,9 +1015,16 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str]:
             ok, said = _git("fetch", "--quiet", "--no-tags", "--depth", "1", TCC_REPO,
                             f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
         if not ok:
-            return False, said, "fetch_failed"
-        return _verify_tag(repo, tag, signed_from=TCC_SIGNED_FROM, principal=TCC_SIGNING_PRINCIPAL,
-                           signing_key=TCC_SIGNING_KEY, order=channel_key)
+            return False, said, "fetch_failed", ""
+        ok, line, why = _verify_tag(repo, tag, signed_from=TCC_SIGNED_FROM,
+                                    principal=TCC_SIGNING_PRINCIPAL, signing_key=TCC_SIGNING_KEY,
+                                    order=channel_key)
+        if not ok:
+            return False, line, why, ""
+        named, sha = _git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}", cwd=repo)
+    if not named or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha):
+        return False, f"{tag}: git names no commit for the verified tag ({sha})", "bad_signature", ""
+    return True, line, "", sha
 
 
 @dataclass(frozen=True)
@@ -1005,10 +1054,10 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
     tag = newest_tcc_tag(channel)
     if not tag:
         return TccUpdate(None, "probe_failed", last_probe_error() or "no tag matched")
-    ok, line, why = check_tcc_tag(tag)
+    ok, line, why, sha = check_tcc_tag(tag)
     # The update log's line with the check's result — the evidence HUB-032 closes on.
     (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)
     if not ok:
         return TccUpdate(None, why, line, tag=tag)
-    script = write_tcc_install_script(pid, tag, words=words, platform=platform)
+    script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha)
     return TccUpdate(script, signature=line, tag=tag)

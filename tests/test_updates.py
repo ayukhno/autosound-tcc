@@ -1172,7 +1172,10 @@ def test_tcc_s_tag_signed_by_the_constant_s_key_passes_and_the_install_is_writte
 
     assert ready.script is not None and ready.reason == "", ready
     assert ready.signature == "v0.1.45: signature good (author)"
-    assert "@v0.1.45" in ready.script.read_text(encoding="utf-8"), "the tag that was checked"
+    script = ready.script.read_text(encoding="utf-8")
+    assert "@v0.1.45" in script, "the tag that was checked"
+    verified = _git_in("rev-parse", "v0.1.45^{commit}", cwd=tmp_path / "tcc-origin")
+    assert verified in script, "and the commit it named, for the check right before uv"
     assert _left_in(temp) == ["autosound-tcc"], "the bare repository and the signers file are gone"
 
 
@@ -1300,11 +1303,12 @@ def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_rel
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     fetched = []
     monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
-        fetched.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
+        fetched.append(args) or ((True, "c" * 40) if "rev-parse" in args else
+                                 (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 
-    ok, line, why = updates.check_tcc_tag("beta-v0.2.0-rc1")
+    ok, line, why, sha = updates.check_tcc_tag("beta-v0.2.0-rc1")
 
-    assert (ok, why) == (True, ""), line
+    assert (ok, why, sha) == (True, "", "c" * 40), line
     assert any("fetch" in args for args in fetched), "checked, not passed by its name"
 
 
@@ -1315,3 +1319,101 @@ def test_tcc_s_anchor_is_the_one_in_signed_tags():
     assert updates.TCC_SIGNING_KEY == signed_tags.TCC_SIGNING_KEY
     assert updates.TCC_SIGNED_FROM == signed_tags.TCC_SIGNED_FROM == "v0.1.45"
     assert updates.SKIP_VERIFY_VAR is signed_tags.SKIP_VERIFY_VAR
+
+
+# ---- fix round 1: the tag checked again right before uv; a candidate of v0.1.45 is checked -----
+#
+# `check_tcc_tag` verifies the tag object when the button is pressed, and `uv` resolves the NAME
+# only after the person has quit TCC — an unbounded wait. So the script asks, right before uv,
+# whether the tag still names the commit that was verified, and installs nothing if it does not
+# (review of tcc#102). Pinning uv to the sha instead was ruled out: the tag name is what
+# `requested_revision` reads back (the shown version, the channel, the guide link).
+
+_VERIFIED = "c" * 40
+_MOVED_WORDS = {**_WORDS, "moved": "Тег змінився після перевірки — нічого не встановлено. "
+                                   "Натисни «Оновити» ще раз."}
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_the_script_checks_the_tag_still_names_the_verified_commit_before_uv(platform):
+    script = updates.tcc_install_script(pid=1, tag="v0.1.46", words=_MOVED_WORDS,
+                                        platform=platform, sha=_VERIFIED)
+
+    guard = script.index("ls-remote")
+    assert _VERIFIED in script and "refs/tags/v0.1.46^{}" in script
+    assert script.index(_WORDS["wait"]) < guard < script.index(_WORDS["updating"]), \
+        "after TCC has closed, before the line that says it is updating"
+    assert guard < script.index("uv tool install")
+    assert _MOVED_WORDS["moved"] in script, "the person's line, in the person's language"
+    unchecked = updates.tcc_install_script(pid=1, tag="v0.1.44", words=_MOVED_WORDS,
+                                           platform=platform)
+    assert "ls-remote" not in unchecked, "nothing was verified, so there is nothing to hold it to"
+
+
+def _moving_remote(tmp_path):
+    """A bare "remote" with `v0.1.46` annotated on one commit; returns `(remote, work, commit)`."""
+    work, remote = tmp_path / "work", tmp_path / "remote.git"
+    _git_in("init", "-q", "-b", "main", str(work))
+    (work / "a.txt").write_text("one\n")
+    _git_in("add", "-A", cwd=work)
+    _git_in("commit", "-q", "-m", "checked", cwd=work)
+    _git_in("tag", "-a", "v0.1.46", "-m", "checked", cwd=work)
+    _git_in("init", "-q", "--bare", str(remote))
+    _git_in("push", "-q", str(remote), "main", "v0.1.46", cwd=work)
+    return remote, work, _git_in("rev-parse", "v0.1.46^{commit}", cwd=work)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+@pytest.mark.parametrize("moved", [False, True], ids=["unmoved", "moved"])
+def test_a_tag_moved_after_the_check_is_not_installed(monkeypatch, tmp_path, moved):
+    """Run for real with `/bin/sh`: a fake `uv` that leaves a mark, a process already gone, and a
+    remote whose tag is force-moved AFTER the script was written from the verified commit."""
+    import os
+    import shutil
+    import subprocess as sp
+
+    remote, work, verified = _moving_remote(tmp_path)
+    monkeypatch.setattr(updates, "TCC_REPO", f"file://{remote}")
+    mark = tmp_path / "uv-ran"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "uv").write_text(f"#!/bin/sh\necho ran > '{mark}'\n"
+                               "echo 'Installed 1 executable: autosound-tcc'\n")
+    (bindir / "uv").chmod(0o755)
+    gone = sp.Popen(["true"])
+    gone.wait()
+    folder = tmp_path / "script"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=gone.pid, tag="v0.1.46", words=_MOVED_WORDS,
+                                            folder=folder, platform="darwin", sha=verified)
+    if moved:
+        (work / "a.txt").write_text("two\n")
+        _git_in("commit", "-q", "-am", "not what was checked", cwd=work)
+        _git_in("tag", "-f", "-a", "v0.1.46", "-m", "moved", cwd=work)
+        _git_in("push", "-q", "--force", str(remote), "refs/tags/v0.1.46", cwd=work)
+
+    git_dir = os.path.dirname(shutil.which("git"))
+    out = sp.run(["/bin/sh", str(path)], capture_output=True, text=True, encoding="utf-8",
+                 env={**os.environ, "PATH": f"{bindir}:{git_dir}:/usr/bin:/bin"},
+                 timeout=30).stdout
+
+    if moved:
+        assert not mark.exists(), "uv never ran"
+        assert _MOVED_WORDS["moved"] in out and _WORDS["updating"] not in out, out
+    else:
+        assert mark.exists(), "the tag the check verified is installed"
+        assert out.rstrip().endswith(_WORDS["done"]), out
+    for command in ("ls-remote", "git ", "printf", verified):
+        assert command not in out, f"{command!r} reached the window"
+
+
+def test_a_candidate_of_the_first_signed_version_is_checked_one_before_it_predates(monkeypatch):
+    """Candidates sort below their release on the channel, so `beta-v0.1.45-rc1` read as older
+    than v0.1.45 and passed unverified — while `make ship CANDIDATE=` signs it. The version
+    triple decides "predates", not the channel order."""
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+
+    assert updates._verdict_by_name("beta-v0.1.45-rc1", "v0.1.45", updates.channel_key) is None
+    ok, line, why = updates._verdict_by_name("beta-v0.1.44-rc1", "v0.1.45", updates.channel_key)
+    assert ok and why == "" and "predates signed tags" in line
+    assert updates._verdict_by_name("v0.1.45", "v0.1.45", updates.channel_key) is None

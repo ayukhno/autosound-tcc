@@ -615,7 +615,7 @@ def _finish_tcc_update(dialog) -> None:
     assert dialog._tcc_job is None, "the TCC update never settled"
 
 
-def _tag_checked(monkeypatch, answer=(True, "v0.9.9: signature good (ayukhno)", "")):
+def _tag_checked(monkeypatch, answer=(True, "v0.9.9: signature good (ayukhno)", "", "c" * 40)):
     """TCC's own tag check (tcc#102) answered without the network; the tags it was asked about."""
     from autosound_tcc.core import updates
 
@@ -654,6 +654,8 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     assert "--python 3.12" in script
     assert str(os.getpid()) in script, "the window waits for THIS process before it replaces it"
     assert i18n.t("updTermWait") in script, "in the reader's language"
+    assert "c" * 40 in script and i18n.t("updTermMoved") in script, (
+        "held to the verified commit right before uv, the refusal in the reader's language")
     assert seen[0].parent.parent == tmp_path
     text = dialog._update_rows["tcc"][0].text()
     assert text.startswith(i18n.t("updTccHanded"))
@@ -677,7 +679,7 @@ def test_a_tcc_tag_that_does_not_verify_opens_no_terminal_and_says_why(monkeypat
     monkeypatch.setattr(terminal_launcher, "run_script",
                         lambda path: pytest.fail("no terminal for a tag that does not verify"))
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
-    _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature"))
+    _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature", ""))
 
     dialog._update_tcc()
     _finish_tcc_update(dialog)

@@ -754,7 +754,8 @@ class DiagnosticsDialog(QDialog):
         # The tag is the newest on that channel, not whatever `main` holds by then (F-024).
         channel = updates.current_channel()
         words = {"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
-                 "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed")}
+                 "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed"),
+                 "moved": i18n.t("updTermMoved")}
         self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
         self._tcc_timer.start()
 
