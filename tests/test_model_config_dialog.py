@@ -93,12 +93,19 @@ def test_the_filter_hides_non_matching_rows(catalogue):
 
 
 def test_an_unreadable_catalogue_keeps_the_existing_marks(monkeypatch):
-    """A failed subprocess must not be a way to silently unmark everything the user chose."""
+    """A failed subprocess must not be a way to silently unmark everything the user chose.
+
+    omp itself missing is not the "installed but could not list its models" case (tcc#99): its
+    own message already names the fix (install it), and «Налаштувати omp…» is not a next step
+    here -- there is nothing on PATH for it to launch. So this stays the plain line, as before,
+    with no toggle behind it to hide anything from."""
     monkeypatch.setattr(model_choices, "omp_available", lambda: False)
     dialog = ModelConfigDialog(["google/gemini-3.1-pro-preview"])
 
     assert dialog._list.count() == 0
-    assert "brew install" in dialog._error_detail.text()
+    assert "brew install" in dialog._status.text()
+    assert dialog._error_toggle.isHidden(), "nothing to hide behind it in this branch"
+    assert dialog._error_line.isHidden()
 
     dialog._accept()
 

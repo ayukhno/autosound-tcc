@@ -158,6 +158,15 @@ class ModelConfigDialog(QDialog):
             # user's choices because a subprocess failed would be a worse answer than an empty
             # list with the reason under it.
             self._error = str(exc)
+            if not model_choices.omp_available():
+                # omp itself is missing. Its own message already names the fix (install it), and
+                # «Configure omp…» is not a next step here -- there is nothing on PATH for it to
+                # launch. This stays the one plain line it always was, with no toggle behind it.
+                self._status.setText(self._error)
+                return
+            # omp is on PATH but could not list its models -- not set up yet, or broken (finding
+            # 108, tcc#99). The raw subprocess text alone left no next step; this line leads, and
+            # the raw text -- still needed for a report -- is one click away behind the toggle.
             self._error_line.setText(
                 i18n.t("configureModelsError").format(btn=i18n.t("configureModelsSetup"))
             )
