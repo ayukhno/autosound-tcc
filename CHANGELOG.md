@@ -14,8 +14,63 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
+## [v0.1.45] — 2026-09-29 · signed tags and a verified updater, the skill updated through its own upkeep, control mode in a small window, the method at v3.0.64
+
+Paired with method `6d6a9877672092c62808e665c178f28f947eb7a4` — the tag on that commit is
+**`v3.0.64`**, the method's first signed tag.
+
+The wave W-4, collected with the Arbiter on the Mac and on Windows and built on his OK, issue by issue.
+What he meets first: TCC's release tags are signed, and the update button checks a release's signature
+before it installs anything — TCC's own and the method's; «Оновити Скіл» works on a clone with local
+changes (the changes are kept as a patch and, only on his word, sent to the skill) and moves the method's
+libraries with it; control mode's header keeps its words in half a screen; and the DSP tree marks every
+value that differs from «порівняти з», not only EQ.
+
+### Added
+
+- **TCC's release tags are signed, and the updater verifies them** (tcc#102, hub #83 HUB-032). `make ship`
+  tags with `git tag -s` and checks its own tag against `allowed_signers` before anything is pushed; a tag
+  that does not verify is deleted and nothing leaves the machine. Before «Оновити ТСС» installs a release,
+  TCC fetches that tag, verifies it against the author's key (a constant in TCC, never a file from the
+  tag), and only then writes the install step; the install step checks once more, right before `uv`,
+  that the tag still points at the commit that was verified. Tags before v0.1.45 predate signing and
+  update with a line that says so. A git too old to check a signature says so instead of calling the
+  signature bad.
+- **The method is updated through its own `upkeep.py`** (tcc#91 SKL-056, hub #221 SKL-059). «Оновити
+  Скіл» fetches the new release, verifies its signature, and runs that release's `upkeep.py`: a clone with
+  local changes names the changed files and keeps them as a patch before the update (sent to the skill as
+  an issue only if you say so), the clone moves to the new tag (so `describe` works), and numpy, scipy and
+  matplotlib move with it. Clones older than the script update too.
+- **Time on the dialog's messages** (tcc#100, finding 110): each message shows when it was said, faintly,
+  beside who said it. A card redrawn from disk shows no time rather than a wrong one.
+- **The drivers' Fs travel with a new project copied from another** (tcc#93, F-068, hub #185), behind
+  their own box, ticked by default — impedance is hard to measure twice.
+
+### Changed
+
+- **The update window shows only your lines** (hub #221): what to do now, then the result — no typed
+  command above them, on the Mac and on Windows.
+- **The method at v3.0.64** (tcc#95): the first signed method tag. A state file whose name and content
+  disagree is now refused by the method; TCC says so in your language, with the method's own sentence
+  and repair command under it (tcc#50's warning, kept).
+
 ### Fixed
 
+- **Control mode's header in a small window** (tcc#96, finding 105): tab labels and buttons shorten with
+  «…» instead of being cut mid-word; «порівняти з» and «інша конфігурація» are shown whole or not at all,
+  and when they hide, the compare box itself names the configuration («3.S-shelf · v_002») and its hover
+  says the rest; a long configuration name no longer pushes the window past half the screen.
+- **«Порівняти з» lists the open configuration's own versions under their own heading** (tcc#103,
+  finding 112), with the current version shown greyed as «— зараз»; another configuration keeps its own
+  current version in the list.
+- **The DSP tree marks every changed value** (tcc#104, finding 113): HP, LP, gain, delay and polarity are
+  marked against «порівняти з» on every tier, from the same rule the tables use, and a changed delay shows
+  on the output line.
+- **«У фокусі зараз» lists an RTA capture as RTA** (tcc#101, finding 111): a capture is sorted by the
+  method its name parses to, not by its name's last word, so `L m+tw_55 (rta) inv` is no longer a sweep.
+- **The omp models dialog before omp is set up** (tcc#99, finding 108) says what to do — omp is not set
+  up yet, press «Налаштувати omp…» — with omp's own words behind «деталі»; an omp that is not installed
+  keeps its install line.
 - **An omp session starts again when omp refuses a tool of TCC's list** (tcc#97, findings 106 and 109).
   With a model that reads images itself, and with every model on omp 18, omp refuses `inspect_image`,
   and TCC starts it once more without it (tcc#87). Two things broke that path. The first omp's
