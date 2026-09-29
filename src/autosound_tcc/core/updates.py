@@ -656,12 +656,15 @@ def _verdict_by_name(tag: str, signed_from: str, order) -> Optional[tuple[bool, 
     """What can be said of `tag` without git, as `_verify_tag` says it — or None when the
     signature itself has to be checked. So a caller that must first FETCH the tag (TCC's own,
     `check_tcc_tag`) fetches nothing for a release that predates signing."""
-    if os.environ.get(SKIP_VERIFY_VAR) == "1":
-        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)", ""
+    # The name first, then the switch: the switch skips the SIGNATURE, not everything -- before
+    # it, an oddly named remote tag reached the install script's text unvalidated (final W-4
+    # review of tcc#102).
     here, first = order(tag), order(signed_from)
     if here is None or first is None:
         return (False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check",
                 "bad_signature")
+    if os.environ.get(SKIP_VERIFY_VAR) == "1":
+        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)", ""
     # The version triple, not the whole key: on TCC's channel a candidate sorts below its own
     # release, and `beta-v0.1.45-rc1` — signed by the same `make ship` — would read as older than
     # v0.1.45 and pass unchecked (review of tcc#102).

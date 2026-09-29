@@ -1221,6 +1221,31 @@ def test_the_developer_switch_skips_tcc_s_check_and_says_so(monkeypatch, tmp_pat
         f"signature NOT checked: {updates.SKIP_VERIFY_VAR}=1 is set (a developer's switch)")
 
 
+def test_the_developer_switch_skips_the_signature_not_the_name_check(monkeypatch, tmp_path):
+    """Final W-4 review (tcc#102): the switch returned before the name-shape check, so a remote tag
+    of any name reached the install script's text unvalidated. The switch means "skip the
+    signature"; a name `channel_key` rejects is still refused, and nothing is fetched or written."""
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    monkeypatch.setenv(updates.SKIP_VERIFY_VAR, "1")
+    odd = "v0.1.46-x"
+    assert updates.channel_key(odd) is None
+    _offering(monkeypatch, odd)
+    ran = []
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        ran.append(args) or (True, "")))
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is None and ready.reason == "bad_signature", ready
+    assert "is not a release tag" in ready.detail, ready.detail
+    assert ran == [], "decided by its name: nothing fetched"
+    assert list(temp.iterdir()) == [], "no script written"
+    ok, _line, why = updates._verify_tag(tmp_path, "v3.0.64-x")
+    assert (ok, why) == (False, "bad_signature"), "the method's tags too"
+
+
 def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path):
     temp = tmp_path / "temp"
     temp.mkdir()

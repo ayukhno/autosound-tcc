@@ -2322,6 +2322,9 @@ class MainWindow(QMainWindow):
 
         self._has_project = True
         self._left_status.setVisible(False)
+        # A message no longer shown is no longer re-said: a refusal's `again` kept past a repaired
+        # load put its line back over the good version's hover on the next language switch.
+        self._left_status_again = None
         self._create_project_btn.setVisible(False)
         self._bank_first_btn.setVisible(False)
         self._tree.setVisible(True)
@@ -2423,8 +2426,10 @@ class MainWindow(QMainWindow):
             return f"{line}\n\n{r.said}"
 
         self._version_shown = None
-        self._show_left_status(_said(), again=_said)
+        # The sub before the hover, as `_show_version` does: the elided sub resets a native tip it
+        # does not need, which emptied the hover `_said` had just set.
         self._dsp_section.set_sub(f"{refused.file_version} ≠ {refused.claimed}")
+        self._show_left_status(_said(), again=_said)
         self._dsp_section.set_dot(None)
 
     def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:

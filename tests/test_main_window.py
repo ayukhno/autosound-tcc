@@ -4913,6 +4913,73 @@ def test_a_state_file_the_method_refuses_by_its_version_is_said_in_the_arbiter_s
         window._on_language_selected("en")
 
 
+def _a_refused_state(tmp_path, monkeypatch):
+    """A seeded project whose HEAD snapshot's `version` field names another (`v_012`), which the
+    method refuses; returns the HEAD's name, the file, and its original content for a repair."""
+    from pathlib import Path
+
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    history = vendor_loader.load_dsp_state().PresetHistory(
+        str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
+    head = history.head()
+    path = Path(history._path(head))
+    original = path.read_text(encoding="utf-8")
+    data = json.loads(original)
+    data["version"] = "v_012"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return head, path, original
+
+
+def test_the_refused_version_s_hover_is_there_on_first_show_not_after_a_switch(
+        tmp_path, monkeypatch):
+    """Final W-4 review (tcc#95): the refusal set the header's hover and then its sub, and the
+    elided sub resets a native tip it does not need -- so the hover was empty until a language
+    switch put it back."""
+    head, _path, _original = _a_refused_state(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    line = i18n.t("stateVersionRefused").format(file=head, inner="v_012")
+    assert window._dsp_section.sub_text() == f"{head} ≠ v_012"
+    assert window._dsp_section._sub_label.toolTip() == line
+    assert window._dsp_section._dot.toolTip() == line
+
+
+def test_a_repaired_file_s_version_keeps_its_hover_through_a_language_switch(
+        tmp_path, monkeypatch):
+    """Final W-4 review (tcc#95): the refusal's `again` stayed kept after a repaired file loaded,
+    and the next language switch re-said the refusal over the good version's hover."""
+    head, path, original = _a_refused_state(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    header_tip = window._dsp_section._sub_label.toolTip
+    assert window._dsp_section.sub_text() == f"{head} ≠ v_012", "refused first"
+
+    path.write_text(original, encoding="utf-8")
+    window._load_project()
+    good = header_tip()
+    assert head in good, good
+    assert good != i18n.t("stateVersionRefused").format(file=head, inner="v_012")
+
+    try:
+        window._on_language_selected("uk")
+        tip = header_tip()
+        assert tip != i18n.t("stateVersionRefused").format(file=head, inner="v_012"), tip
+        assert head in tip, tip
+        window._on_language_selected("en")
+        assert header_tip() == good, "the switch put back the good version's hover"
+    finally:
+        window._on_language_selected("en")
+
 
 def test_the_eq_card_order_is_a_setting_the_processor_s_by_default(monkeypatch):
     """Finding 70 (tcc#67): the field order as a TCC setting, not only the vendor's rule (68)."""

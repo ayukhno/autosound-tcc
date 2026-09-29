@@ -709,3 +709,33 @@ def test_any_other_refusal_of_a_state_file_stays_the_method_s_own(tmp_path, monk
     with pytest.raises(vstate.SnapshotError) as refused:
         load_project_view(str(root), "FULL", PROFILE)
     assert not isinstance(refused.value, VersionRefused)
+
+
+def test_an_older_method_without_snapshot_error_still_says_its_own_load_failure(
+        tmp_path, monkeypatch):
+    """Final W-4 review (tcc#50): an installed method older than v3.0.52 has no `SnapshotError`,
+    and naming it in the `except` raised AttributeError -- which masked every `history.load`
+    failure behind a missing-attribute complaint. The method's own error comes through."""
+    import types
+
+    import pytest
+
+    from autosound_tcc.core import config, vendor_loader
+    from autosound_tcc.state.dsp_state import load_project_view
+
+    class _History:
+        def __init__(self, root, preset, project_dir=None):
+            pass
+
+        def head(self):
+            return "v_001"
+
+        def load(self, version=None):
+            raise ValueError("the ledger is torn")
+
+    older = types.SimpleNamespace(PresetHistory=_History)  # no SnapshotError, no identity_error
+    monkeypatch.setattr(vendor_loader, "load_dsp_state", lambda: older)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+
+    with pytest.raises(ValueError, match="the ledger is torn"):
+        load_project_view(str(tmp_path / "state"), "FULL", PROFILE)

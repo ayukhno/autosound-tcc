@@ -629,7 +629,9 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     read_as = version or history.head()
     try:
         raw = history.load(version)
-    except vstate.SnapshotError as exc:
+    # `getattr`: a method older than v3.0.52 has no `SnapshotError`, and naming it bare turned
+    # every load failure there into an AttributeError about the name.
+    except getattr(vstate, "SnapshotError", ()) as exc:
         refused = _version_refused(vstate, history, read_as, str(exc))
         if refused is None:
             raise
