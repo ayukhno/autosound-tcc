@@ -98,11 +98,46 @@ def test_an_unreadable_catalogue_keeps_the_existing_marks(monkeypatch):
     dialog = ModelConfigDialog(["google/gemini-3.1-pro-preview"])
 
     assert dialog._list.count() == 0
-    assert "brew install" in dialog._status.text()
+    assert "brew install" in dialog._error_detail.text()
 
     dialog._accept()
 
     assert dialog.active == ["google/gemini-3.1-pro-preview"]
+
+
+# ---- the models dialog before omp is set up (finding 108, tcc#99) ------------------------------
+
+
+def test_omp_error_shows_a_plain_line_first_with_the_raw_text_behind_a_toggle(monkeypatch):
+    """The Arbiter, on a fresh install (2026-09-27): «повідомлення під зоною скрола ... не
+    зрозуміле». omp's raw subprocess text is not a next step; the plain line is, and the raw text
+    -- still needed for a report -- moves behind a collapsed toggle rather than disappearing."""
+    monkeypatch.setattr(model_choices, "omp_available", lambda: True)
+    raw = (
+        "omp: `omp models` ended before completing: the event loop drained while it was still "
+        "pending (rerun with PI_DEBUG_STARTUP=1 to see the last phase reached)"
+    )
+    monkeypatch.setattr(
+        model_choices.subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", raw),
+    )
+
+    dialog = ModelConfigDialog([])
+
+    assert dialog._list.count() == 0
+    assert dialog._error_line.text() == i18n.t("configureModelsError").format(
+        btn=i18n.t("configureModelsSetup")
+    )
+    # `isVisible()` is False for any child of a dialog never shown -- `isHidden()` is what
+    # actually reflects this widget's own setVisible state (see test_main_window.py).
+    assert not dialog._error_line.isHidden()
+    assert "event loop drained" not in dialog._error_line.text(), "the plain line, not omp's text"
+    assert dialog._error_detail.isHidden(), "collapsed by default"
+    assert dialog._error_detail.text() == raw
+
+    dialog._error_toggle.click()
+
+    assert not dialog._error_detail.isHidden(), "the toggle reveals it"
 
 
 def test_choosing_a_model_does_not_mutate_the_combo_while_the_signal_runs(tmp_path, monkeypatch):

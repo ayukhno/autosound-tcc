@@ -84,6 +84,32 @@ class ModelConfigDialog(QDialog):
         enable_copy(self._status, value=self._status.text)
         layout.addWidget(self._status)
 
+        # Finding 108 (tcc#99): before this, an empty list under a failed catalogue read showed
+        # only omp's own subprocess text -- true, but not a thing the Arbiter could act on. This
+        # line leads instead; `_error_detail` still carries omp's text, verbatim, for a report --
+        # it is one click away behind `_error_toggle` rather than gone.
+        self._error_line = QLabel("")
+        self._error_line.setWordWrap(True)
+        self._error_line.setVisible(False)
+        layout.addWidget(self._error_line)
+
+        self._error_toggle = QPushButton()
+        self._error_toggle.setCheckable(True)
+        self._error_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._error_toggle.setAutoDefault(False)
+        self._error_toggle.setVisible(False)
+        self._error_toggle.toggled.connect(self._set_error_expanded)
+        layout.addWidget(self._error_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self._error_detail = QLabel("")
+        self._error_detail.setWordWrap(True)
+        self._error_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._error_detail.setCursor(Qt.CursorShape.IBeamCursor)
+        enable_copy(self._error_detail, value=self._error_detail.text)
+        self._error_detail.setVisible(False)
+        layout.addWidget(self._error_detail)
+        self._set_error_expanded(False)
+
         # omp's own configurator, opened in the user's terminal (user, 2026-08-19). It is where
         # accounts and API keys are set up, and what is set up there is exactly what decides
         # whether the list above has three models in it or three hundred — so the way to it
@@ -119,6 +145,12 @@ class ModelConfigDialog(QDialog):
     # ---- contents ----------------------------------------------------------
 
     def _populate(self) -> None:
+        # Collapsed and hidden until the `except` below says otherwise -- a `_reload()` after a
+        # setup run has to be able to go from an error state back to a clean one.
+        self._error_toggle.setChecked(False)
+        self._error_line.setVisible(False)
+        self._error_toggle.setVisible(False)
+        self._status.setVisible(True)
         try:
             catalogue = model_choices.omp_catalogue()
         except model_choices.OmpCatalogueError as exc:
@@ -126,7 +158,13 @@ class ModelConfigDialog(QDialog):
             # user's choices because a subprocess failed would be a worse answer than an empty
             # list with the reason under it.
             self._error = str(exc)
-            self._status.setText(str(exc))
+            self._error_line.setText(
+                i18n.t("configureModelsError").format(btn=i18n.t("configureModelsSetup"))
+            )
+            self._error_detail.setText(self._error)
+            self._error_line.setVisible(True)
+            self._error_toggle.setVisible(True)
+            self._status.setVisible(False)
             return
         known = {choice.model for choice in catalogue}
         # A model marked earlier that omp no longer reports still belongs on screen -- otherwise
@@ -149,13 +187,22 @@ class ModelConfigDialog(QDialog):
             self._list.addItem(item)
         self._status.setText(i18n.t("configureModelsCount").format(n=self._list.count()))
 
+    def _set_error_expanded(self, expanded: bool) -> None:
+        """Show or hide omp's own text, and keep `_error_toggle`'s own label saying which."""
+        self._error_detail.setVisible(expanded)
+        arrow = "▾" if expanded else "▸"  # ▾ / ▸
+        self._error_toggle.setText(f"{arrow} {i18n.t('configureModelsErrorDetails')}")
+
     def _open_setup(self) -> None:
         """Open `omp setup` in a terminal — omp's onboarding: providers, keys, sign-ins.
 
         Errors land on the status line, which is the line that already carries "omp is not on
         PATH" and can be copied. A button that does nothing visible is the one outcome a launcher
-        must not have (`terminal_launcher.launch` says the same in its own docstring).
+        must not have (`terminal_launcher.launch` says the same in its own docstring). Made
+        visible again here: `_populate` hides it while the catalogue error line leads instead, and
+        this button is reachable from that state too (finding 108, tcc#99).
         """
+        self._status.setVisible(True)
         try:
             terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",))
         except terminal_launcher.TerminalLaunchError as exc:

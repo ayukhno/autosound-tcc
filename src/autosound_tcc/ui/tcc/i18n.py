@@ -734,6 +734,12 @@ it is done and you come back here, the list is read again. TCC holds none of tho
 the terminal and the session in it are yours.",
         "configureModelsSetupOpened": "omp's setup is open in a terminal. When it is done, come \
 back to this window — the list is read again.",
+        # Finding 108 (tcc#99): the Arbiter read omp's raw subprocess text under an empty list and
+        # had no next step. This line leads instead; the raw text is what a report needs, so it
+        # stays one click away behind `configureModelsErrorDetails` rather than gone.
+        "configureModelsError": "omp is not set up yet, or it could not list its models. Press \
+«{btn}» below.",
+        "configureModelsErrorDetails": "details",
         # The MCP server is what a session reaches TCC through. When it did not start, the reason
         # was known minutes earlier and had nowhere to go — now it travels with the message.
         "mcpDown": "The MCP server is not running, so a session has nothing to reach TCC through. \
@@ -1870,6 +1876,9 @@ Choose sweeps (sw) above to read this.",
 даних не тримає: термінал і сесія в ньому — твої.",
         "configureModelsSetupOpened": "Налаштування omp відкрито в терміналі. Коли закінчиш — \
 повернись у це вікно, список перечитається.",
+        "configureModelsError": "omp ще не налаштований, або не вдалося прочитати список його \
+моделей. Натисни «{btn}» нижче.",
+        "configureModelsErrorDetails": "деталі",
         "mcpDown": "MCP-сервер не працює, тож сесії нема через що дістатися до TCC. Запусти TCC \
 ще раз; якщо повторюється — причина тут і в лозі:",
         "mcpDownLog": "лог:",
@@ -3003,6 +3012,9 @@ Choose sweeps (sw) above to read this.",
                                    'sesja w nim są twoje.',
         "configureModelsSetupOpened": 'Konfiguracja omp jest otwarta w terminalu. Gdy skończysz, wróć do tego okna — lista zostanie '
                                       'odczytana ponownie.',
+        "configureModelsError": 'omp nie jest jeszcze skonfigurowany, albo nie udało się odczytać listy jego modeli. Naciśnij '
+                                '«{btn}» poniżej.',
+        "configureModelsErrorDetails": 'szczegóły',
         "mcpDown": 'Serwer MCP nie działa, więc sesja nie ma przez co sięgnąć do TCC. Uruchom TCC ponownie; '
                    'jeśli się powtarza — przyczyna jest tutaj i w logu:',
         "mcpDownLog": 'log:',
@@ -4173,6 +4185,9 @@ Choose sweeps (sw) above to read this.",
                                    'Zugangsdaten: das Terminal und die Sitzung darin gehören dir.',
         "configureModelsSetupOpened": 'omps Einrichtung ist in einem Terminal offen. Wenn sie fertig ist, komm in dieses Fenster '
                                       'zurück — die Liste wird neu gelesen.',
+        "configureModelsError": 'omp ist noch nicht eingerichtet, oder seine Modellliste konnte nicht gelesen werden. Klicke '
+                                'unten auf «{btn}».',
+        "configureModelsErrorDetails": 'Details',
         "mcpDown": 'Der MCP-Server läuft nicht, also hat eine Sitzung nichts, worüber sie TCC erreichen könnte. '
                    'Starte TCC neu; wenn es weiter passiert, steht der Grund hier und im Protokoll:',
         "mcpDownLog": 'Protokoll:',
