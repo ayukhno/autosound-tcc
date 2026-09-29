@@ -4861,6 +4861,58 @@ def test_a_state_whose_file_and_version_disagree_is_said_in_the_header_and_the_s
     assert window._status_strip.text() == said
 
 
+def test_a_state_file_the_method_refuses_by_its_version_is_said_in_the_arbiter_s_language(
+        tmp_path, monkeypatch):
+    """tcc#50 under method v3.0.64 (skill #89, tcc#95): the method now refuses a file whose
+    `version` field names another, and the window showed that refusal bare -- English, absolute
+    paths, a shell command, and nothing a language switch would re-say. The Arbiter's line comes
+    first, in his language, with the method's sentence under it for a report; the header names
+    both versions as the tcc#50 warning did."""
+    from pathlib import Path
+
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    history = vendor_loader.load_dsp_state().PresetHistory(
+        str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
+    head = history.head()
+    path = Path(history._path(head))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = "v_012"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    def shown() -> tuple[str, str]:
+        text = window._left_status.text().replace("​", "")
+        head_line, _, under = text.partition("\n\n")
+        return head_line, under
+
+    try:
+        window._on_language_selected("uk")
+        line, under = shown()
+        assert line == i18n.t("stateVersionRefused").format(file=head, inner="v_012")
+        assert "назва і вміст розходяться" in line
+        assert f"repair-version {head}" in under and "'v_012'" in under, under
+        assert window._dsp_section.sub_text() == f"{head} ≠ v_012"
+
+        window._on_language_selected("en")
+        line, under = shown()
+        assert line == i18n.t("stateVersionRefused").format(file=head, inner="v_012")
+        assert "its name and its content disagree" in line
+        assert f"repair-version {head}" in under
+        assert window._dsp_section.sub_text() == f"{head} ≠ v_012", "a switch keeps both names"
+    finally:
+        window._on_language_selected("en")
+
+
 
 def test_the_eq_card_order_is_a_setting_the_processor_s_by_default(monkeypatch):
     """Finding 70 (tcc#67): the field order as a TCC setting, not only the vendor's rule (68)."""

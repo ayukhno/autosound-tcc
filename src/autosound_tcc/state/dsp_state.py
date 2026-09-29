@@ -432,8 +432,8 @@ class ProjectView:
         The header read the field, the diff the file, and an empty diff read as "no changes".
 
         From method v3.0.64 `PresetHistory.load()` refuses such a file itself, naming both and
-        `repair-version` (skill #89, hub #213 TCC-033), so this fires only with an installed
-        method older than that."""
+        `repair-version` (skill #89, hub #213 TCC-033) -- `VersionRefused` below -- so this fires
+        only with an installed method older than that."""
         return bool(self.file_version and self.version and self.file_version != self.version)
 
     @property
@@ -567,10 +567,54 @@ def rig_view(profile: dict) -> ProjectView:
     )
 
 
+class VersionRefused(Exception):
+    """The method refused a snapshot whose `version` field names another version (skill #89).
+
+    Its own refusal is one English sentence with absolute paths and a shell command -- right for a
+    report, not for the Arbiter, who was told this in his language before the method took it over
+    (tcc#50). So the two names travel apart from the sentence: `file_version` is the file's name,
+    `claimed` what its field says, and `said` the method's words, which `str()` still gives to
+    anything that shows it bare. A plain `Exception`, not the method's `SnapshotError`: that class
+    exists only once the vendored module is loaded, and every catcher in TCC takes `Exception`.
+    """
+
+    def __init__(self, file_version: str, claimed: str, said: str):
+        super().__init__(said)
+        self.file_version = file_version
+        self.claimed = claimed
+        self.said = said
+
+
+def _version_refused(vstate, history, read_as: Optional[str], said: str) -> Optional[VersionRefused]:
+    """`VersionRefused` when the method's refusal was about identity, else None.
+
+    Asked of the method's own `identity_error` on the file as it is, never parsed out of its
+    sentence: the wording is the method's to change. A method without the check (older than
+    v3.0.64) never refuses for this, and a file that cannot be read again leaves the refusal as the
+    method said it."""
+    import json
+
+    identity_error = getattr(vstate, "identity_error", None)
+    if identity_error is None or not read_as:
+        return None
+    # `_path` is the method's own resolution of a version to its file -- the per-project line or
+    # the per-preset folder -- and the same call its own `load()` made a moment ago.
+    path = history._path(read_as)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            snap = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(snap, dict) or identity_error(path, snap) is None:
+        return None
+    return VersionRefused(read_as, str(snap.get("version")), said)
+
+
 def load_project_view(root: str, preset: str, profile: dict, version: Optional[str] = None) -> ProjectView:
     """Read a ledger snapshot from disk via the vendored `PresetHistory` and shape it per `profile`.
 
-    `version=None` loads the current HEAD. Requires the `rew_tool` submodule.
+    `version=None` loads the current HEAD. Requires the `rew_tool` submodule. Raises
+    `VersionRefused` for a file the method refuses because its `version` names another.
     """
     from autosound_tcc.core import vendor_loader
 
@@ -583,7 +627,13 @@ def load_project_view(root: str, preset: str, profile: dict, version: Optional[s
     # ledger uses. It reads `project.json` from there for `project_rev` and the settings sheet.
     history = vstate.PresetHistory(root, preset, project_dir=str(config.project_dir()))
     read_as = version or history.head()
-    raw = history.load(version)
+    try:
+        raw = history.load(version)
+    except vstate.SnapshotError as exc:
+        refused = _version_refused(vstate, history, read_as, str(exc))
+        if refused is None:
+            raise
+        raise refused from exc
     hardware_controls = load_hardware_controls()
     # The SCR-001 join resolves against `project.json` as it is NOW, which is right for the current
     # HEAD and approximate for an old snapshot: replace a driver and every historical version reads

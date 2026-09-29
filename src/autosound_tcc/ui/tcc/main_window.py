@@ -98,7 +98,7 @@ from autosound_tcc.state import (
     proposal_view,
 )
 from autosound_tcc.core import signal_bus
-from autosound_tcc.state.dsp_state import ProjectView, load_project_view, rig_view
+from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
@@ -2313,6 +2313,9 @@ class MainWindow(QMainWindow):
             return
         try:
             view = load_project_view(str(root), preset, profile)
+        except VersionRefused as refused:
+            self._say_version_refused(refused)
+            return
         except Exception as exc:  # noqa: BLE001
             self._show_left_status(f"Could not load ledger {preset!r}:\n{type(exc).__name__}: {exc}")
             return
@@ -2402,6 +2405,27 @@ class MainWindow(QMainWindow):
         self._dsp_section.set_sub(f"{view.file_version} ≠ {view.version}")
         self._dsp_section.set_sub_tip(said)
         self._status_strip.notify(said, level="warn", dismissible=True)
+
+    def _say_version_refused(self, refused: VersionRefused) -> None:
+        """The method refused the HEAD snapshot because its `version` names another (skill #89,
+        method v3.0.64) -- the tcc#50 case, which the method now stops instead of TCC warning.
+
+        Said as tcc#50 said it: the Arbiter's line first, in his language, and the header naming
+        both versions. `stateVersionMismatch` cannot be reused -- «Показано вміст» is no longer
+        true, nothing is shown. The method's sentence goes under the line, unchanged: it carries
+        the file and the repair command, which is what a report needs. `again` re-says both the
+        line and the header's hover on a language switch; `_version_shown` is dropped so the switch
+        does not put back the version loaded before this one."""
+
+        def _said(r: VersionRefused = refused) -> str:
+            line = i18n.t("stateVersionRefused").format(file=r.file_version, inner=r.claimed)
+            self._dsp_section.set_sub_tip(line)
+            return f"{line}\n\n{r.said}"
+
+        self._version_shown = None
+        self._show_left_status(_said(), again=_said)
+        self._dsp_section.set_sub(f"{refused.file_version} ≠ {refused.claimed}")
+        self._dsp_section.set_dot(None)
 
     def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:
         """«Порівняти з» for the channel tables: the other versions, newest first, each with the
@@ -5726,7 +5750,8 @@ class MainWindow(QMainWindow):
         # language the window was built in until F-033.
         self._refresh_critic_status()
         if self._left_status_again is not None:
-            self._left_status.setText(self._left_status_again())
+            # `_breakable` as `_show_left_status` does: a re-said message may carry a path too.
+            self._left_status.setText(_breakable(self._left_status_again()))
         for i in range(self._preset_combo.count()):
             self._preset_combo.setItemText(i, _preset_label(self._preset_combo.itemData(i)))
         self._plan_panel.retranslate()

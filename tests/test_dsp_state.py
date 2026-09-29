@@ -643,19 +643,21 @@ def test_a_channel_with_no_status_counts_as_proposed_as_the_method_reads_it():
     assert view.state == "proposed"
 
 
-def test_a_state_file_whose_version_field_names_another_is_refused_in_the_method_s_words(
+def test_a_state_file_the_method_refuses_by_its_version_comes_back_with_both_names(
         tmp_path, monkeypatch):
     """tcc#50: `v_011.json` carried `"version": "v_012"` after a variant was copied over it. TCC
     loaded it without a word: the header read the field, the diff resolved by the file name, and
     the empty diff read as "no changes". TCC then said the mismatch itself (8d4c590) and asked the
     method for the invariant (hub #213 TCC-033). From v3.0.64 the method's `load()` refuses such a
-    file (skill #89), naming both versions and the repair, and the window shows that refusal where
-    it shows every other one ("Could not load ledger"). The view's own `version_mismatch` stays for
-    an installed method older than that."""
+    file (skill #89) in English, with absolute paths and a shell command -- so the refusal comes
+    back as `VersionRefused`, carrying the two names the window says in the Arbiter's language and
+    the method's sentence unchanged under it. The names are read from the file through the
+    method's own `identity_error`, never parsed out of its sentence. The view's `version_mismatch`
+    stays for an installed method older than v3.0.64, which still hands the file over."""
     import pytest
 
     from autosound_tcc.core import config, vendor_loader
-    from autosound_tcc.state.dsp_state import load_project_view
+    from autosound_tcc.state.dsp_state import VersionRefused, load_project_view
     from tests import _intake
 
     _intake.seed(tmp_path)
@@ -673,15 +675,37 @@ def test_a_state_file_whose_version_field_names_another_is_refused_in_the_method
     data["version"] = "v_099"
     path.write_text(json.dumps(data), encoding="utf-8")
 
-    vstate = vendor_loader.load_dsp_state()
-    with pytest.raises(vstate.SnapshotError) as refused:
+    with pytest.raises(VersionRefused) as refused:
         load_project_view(str(root), "FULL", PROFILE)
 
-    said = str(refused.value)
-    assert second in said and "'v_099'" in said and f"repair-version {second}" in said, said
+    got = refused.value
+    assert (got.file_version, got.claimed) == (second, "v_099")
+    assert second in got.said and "'v_099'" in got.said and f"repair-version {second}" in got.said
+    assert str(got) == got.said, "anything that shows it bare still shows the method's words"
 
     clean = load_project_view(str(root), "FULL", PROFILE, version=history.versions()[0])
     assert clean.file_version == history.versions()[0] and not clean.version_mismatch
     # What an older method still hands over: the view names both and says they disagree.
     assert ProjectView(preset="FULL", sample_rate=None, groups=(), version="v_099",
                        file_version=second).version_mismatch
+
+
+def test_any_other_refusal_of_a_state_file_stays_the_method_s_own(tmp_path, monkeypatch):
+    """Only the identity refusal is taken apart; a file that is not UTF-8 (v3.0.46) still arrives
+    as the method's `SnapshotError`, with its own repair, exactly as before."""
+    import pytest
+
+    from autosound_tcc.core import config, vendor_loader
+    from autosound_tcc.state.dsp_state import VersionRefused, load_project_view
+    from tests import _intake
+
+    _intake.seed(tmp_path)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    root = tmp_path / "state"
+    vstate = vendor_loader.load_dsp_state()
+    history = vstate.PresetHistory(str(root), "FULL", project_dir=str(tmp_path))
+    Path(history._path(history.head())).write_bytes(b'{"version": "\xa7"}')  # 0xa7: not UTF-8
+
+    with pytest.raises(vstate.SnapshotError) as refused:
+        load_project_view(str(root), "FULL", PROFILE)
+    assert not isinstance(refused.value, VersionRefused)
