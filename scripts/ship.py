@@ -469,6 +469,18 @@ def tag_command(tag: str) -> list[str]:
     return ["git", "tag", "-s", tag, "-m", tag]
 
 
+def drop_tag(root: Path, tag: str) -> str:
+    """Delete the local `tag` that must not leave this machine; the sentence that says what
+    happened — including when git would not delete it, and then the command to do it by hand."""
+    try:
+        run(["git", "tag", "-d", tag], root)
+    except Stop as failed:
+        why = str(failed).strip().splitlines()[-1]
+        return (f"The tag could NOT be deleted ({why}) — delete it by hand before anything else, "
+                f"`git tag -d {tag}`; nothing was pushed")
+    return "The tag was deleted again and nothing was pushed"
+
+
 def verify_signed_tag(root: Path, tag: str) -> str:
     """The tag just made, verified against `allowed_signers`: git's own `Good` line, or a Stop.
 
@@ -476,8 +488,16 @@ def verify_signed_tag(root: Path, tag: str) -> str:
     GPG by a machine left on `gpg.format=openpgp` says `Good signature from …`, and the updater
     would refuse it all the same. A tag that does not verify is deleted before the Stop — it must
     not leave this machine, and a run after the fix needs the name free.
+
+    A tree with no `allowed_signers` is its own sentence: git answers it with the same
+    "No principal matched" as a stranger's key, and the key hint would send the reader to a
+    `user.signingkey` that was right all along (review of tcc#102).
     """
     signers = Path(root).resolve() / SIGNERS
+    if not signers.is_file():
+        raise Stop(f"{tag} was signed, but there is no {SIGNERS} in this tree to verify it "
+                   f"against. {drop_tag(root, tag)}: TCC's updater refuses a release tag that "
+                   f"does not verify (tcc#102). Put {SIGNERS} back at the repository root")
     done = subprocess.run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}", "verify-tag", tag],
                           cwd=str(root), capture_output=True, text=True, encoding="utf-8",
                           errors="replace")
@@ -485,12 +505,29 @@ def verify_signed_tag(root: Path, tag: str) -> str:
     good = next((line for line in said if line.startswith('Good "git" signature')), "")
     if done.returncode == 0 and good:
         return good
-    run(["git", "tag", "-d", tag], root, check=False)
     reason = said[-1].rstrip(".") if said else f"git verify-tag exit {done.returncode}"
-    raise Stop(f"{tag} was signed, but it does not verify against {SIGNERS} — {reason}. The tag "
-               "was deleted again and nothing was pushed: TCC's updater refuses a release tag "
-               f"that does not verify (tcc#102). `git config user.signingkey` must name the key in "
-               f"{SIGNERS}")
+    raise Stop(f"{tag} was signed, but it does not verify against {SIGNERS} — {reason}. "
+               f"{drop_tag(root, tag)}: TCC's updater refuses a release tag that does not verify "
+               f"(tcc#102). `git config user.signingkey` must name the key in {SIGNERS}")
+
+
+def left_behind(root: Path, version: str) -> str:
+    """What a failure after the release commit leaves, and the two ways on; "" when HEAD is
+    already published — a failure past `git push origin main` leaves nothing of that kind.
+
+    Bought in review (tcc#102): `git tag -s` failing (a key with a passphrase and no agent) or a
+    tag that does not verify left the bumped commit on local `main`, unpushed, and the Stop said
+    only why the tag failed — while the next run is refused by the carrier's `head-published`.
+    """
+    head = run(["git", "rev-parse", "HEAD"], root, check=False)
+    published = run(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"], root,
+                    check=False)
+    if not head or head == published:
+        return ""
+    return (f"The release commit {head[:12]} (version {version}) stays on local main, not pushed, "
+            "and the next `make ship REAL=1` is refused (`head-published`) until one of two: "
+            "`git push origin main` — ship then tags that commit and writes nothing — or "
+            "`git reset --hard origin/main` — ship then does the bump again.")
 
 
 def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
@@ -614,7 +651,12 @@ def ship(root: Path, release: bool, test_command=None,
     run(["git", "add", *files], root)
     run(["git", "commit", "-m", f"{plan.tag}: paired with method {plan.method_sha[:12]}"], root)
     say(f"  committed {plan.tag}")
-    publish(root, plan.tag, say)
+    try:
+        publish(root, plan.tag, say)
+    except Stop as stop:
+        # Past the release commit now, so whatever stopped the tag also left that commit behind.
+        state = left_behind(root, plan.version)
+        raise Stop(f"{stop}\n  {state}" if state else str(stop)) from stop
     return plan
 
 

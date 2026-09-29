@@ -1128,6 +1128,110 @@ def test_a_tag_that_does_not_verify_is_deleted_and_nothing_is_pushed(repo, signi
     assert git(repo, "ls-remote", "origin", "refs/heads/main").split()[0] == main_before
 
 
+def assert_names_the_local_release_commit(repo: Path, said: str) -> None:
+    """A failure past the release commit (the bump path) leaves that commit on local `main`,
+    unpushed, and the carrier's `head-published` refuses the next run — so the Stop names the
+    commit and both ways on (review of tcc#102, round 1)."""
+    head = git(repo, "rev-parse", "HEAD")
+    assert head != git(repo, "rev-parse", "origin/main"), "the state the sentence describes"
+    assert head[:12] in said and "0.1.25" in said, said
+    assert "git push origin main" in said and "git reset --hard origin/main" in said, said
+
+
+def test_a_tag_git_cannot_sign_names_the_release_commit_left_behind(repo, signing_keys):
+    """`git tag -s` itself fails — here no signing key at all, on the release machine a key with
+    a passphrase and no agent (git: "unable to sign the tag"). The commit is already made. Then
+    the first way on, taken: push it, and ship tags that commit without bumping again."""
+    git(repo, "config", "--unset", "user.signingkey")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    assert_names_the_local_release_commit(repo, str(stop.value))
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+    head = git(repo, "rev-parse", "HEAD")
+
+    sign_with(repo, signing_keys["author"])
+    git(repo, "push", "--quiet", "origin", "main")
+    _run(repo)
+
+    assert git(repo, "rev-parse", "HEAD") == head, "no second release commit"
+    assert git(repo, "rev-parse", "v0.1.25^{commit}") == head
+
+
+def test_a_tag_that_does_not_verify_names_the_release_commit_left_behind(repo, signing_keys):
+    """The other shape: signed, but by a key `allowed_signers` does not list. Then the second
+    way on, taken: reset to what is published, and ship does the bump again."""
+    sign_with(repo, signing_keys["stranger"])
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    assert_names_the_local_release_commit(repo, str(stop.value))
+
+    git(repo, "reset", "--quiet", "--hard", "origin/main")
+    sign_with(repo, signing_keys["author"])
+    _run(repo)
+
+    assert git(repo, "rev-parse", "v0.1.25^{commit}") == git(repo, "rev-parse", "origin/main")
+    assert git(repo, "log", "--format=%s", "-1", "v0.1.25").startswith("v0.1.25: paired")
+
+
+def test_a_tree_without_allowed_signers_is_named_not_blamed_on_the_signing_key(repo):
+    """With no `allowed_signers` git's answer is the same "No principal matched" as a stranger's
+    key, and the old hint sent the reader to `user.signingkey`, which was right."""
+    git(repo, "rm", "--quiet", "allowed_signers")
+    git(repo, "commit", "--quiet", "-m", "no signers")
+    git(repo, "push", "--quiet", "origin", "main")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    said = str(stop.value)
+    assert "no allowed_signers" in said, said
+    assert "signingkey" not in said, "the key was never the problem"
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+
+
+def test_a_tag_that_could_not_be_deleted_says_so_and_names_the_command(repo, signing_keys,
+                                                                       monkeypatch):
+    """The Stop used to say "the tag was deleted again" whatever `git tag -d` answered."""
+    sign_with(repo, signing_keys["stranger"])
+    real_run = ship_mod.run
+
+    def run(argv, cwd, check=True):
+        if argv[:3] == ["git", "tag", "-d"]:
+            if check:
+                raise ship_mod.Stop("git tag -d v0.1.25 -> 1\nerror: could not lock the ref")
+            return ""
+        return real_run(argv, cwd, check)
+
+    monkeypatch.setattr(ship_mod, "run", run)
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo)
+
+    said = str(stop.value)
+    assert "was deleted again" not in said, said
+    assert "could NOT be deleted" in said and "`git tag -d v0.1.25`" in said, said
+    assert "could not lock the ref" in said, "git's own reason"
+    assert "v0.1.25" not in git(repo, "ls-remote", "origin"), "and still nothing was pushed"
+
+
+def test_the_carriers_signing_refusal_stops_ship_before_anything_is_written(repo):
+    """`tag-will-be-signed` (hub #84 HUB-033) is the refusal before the tag; ship prints it by
+    that name and stops on it like any other channel check."""
+    lines = []
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, say=lines.append,
+             ask=channel(answers=(("clean-tree", OK), ("tag-will-be-signed", FAIL))))
+
+    assert "tag-will-be-signed" in str(stop.value)
+    assert any("tag-will-be-signed" in line and FAIL in line for line in lines), lines
+    assert 'version = "0.1.24"' in (repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+
+
 def test_ship_shows_the_tag_line_it_runs():
     """The line in the plan is built from the same argv `publish` runs, so the two cannot drift."""
     assert " ".join(ship_mod.tag_command("v0.1.25")) == "git tag -s v0.1.25 -m v0.1.25"
