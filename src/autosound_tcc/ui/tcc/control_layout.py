@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import subprocess
 import sys
 from typing import Optional
 
 import shiboken6
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QFontMetricsF, QPalette, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -42,6 +43,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStyle,
+    QStyleOptionComboBox,
+    QStylePainter,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -57,6 +61,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
     is_other_preset,
 )
 from autosound_tcc.ui.tcc.labels import ElidedLabel
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.setting_status import DotTabBar, field_status, group_status, tip_for
 
 #: How many journal events the feed shows, newest last.
@@ -247,6 +252,92 @@ def place_terminal_left(screen) -> None:
         pass
 
 
+#: How much room past its own width a hidden corner label waits for before it comes back, so a
+#: header a pixel either side of the line does not flicker (tcc#96). The header's own ask moves by
+#: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
+_REFIT_SLACK_PX = 12
+
+
+class _CompareBox(QComboBox):
+    """«Порівняти з» in the header. Another configuration's version is shown with its preset's
+    name, «3.S-shelf · v_002», so the «інша конфігурація» tag beside it can give way without the
+    meaning going with it (tcc#96, the controller's ruling after finding 105's second pass). The
+    open list's rows stay as they are: #103's headings name the preset there.
+
+    For that name it asks for the width it needs and holds it as its floor -- the project name and
+    the mode button give ground instead. Whatever it shows is drawn elided, never cut mid-glyph
+    («v_0(», the Arbiter's first screenshot)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._sized_for: Optional[str] = None
+
+    def shown_text(self) -> str:
+        key = self.currentData()
+        if is_other_preset(key):
+            return f"{key.split('/', 1)[0]} · {self.currentText()}"
+        return self.currentText()
+
+    def _room(self, size=None) -> int:
+        """The width the text has: the style's edit field, less the pixel each side of it that
+        the label is drawn inside."""
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        if size is not None:
+            option.rect = QRect(QPoint(0, 0), size)
+        field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                            QStyle.SubControl.SC_ComboBoxEditField, self)
+        return max(0, field.width() - 2)
+
+    def fit_text(self) -> str:
+        """What the closed box draws: `shown_text`, elided to the room it has now."""
+        return self.fontMetrics().elidedText(self.shown_text(), Qt.TextElideMode.ElideRight,
+                                             self._room())
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().sizeHint()
+        if is_other_preset(self.currentData()):
+            chrome = hint.width() - self._room(hint)
+            # Rounded up: `elidedText` measures in fractions of a pixel (TODO F-045).
+            text = math.ceil(QFontMetricsF(self.font()).horizontalAdvance(self.shown_text()))
+            hint.setWidth(max(hint.width(), text + chrome))
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        # A QComboBox's floor is its size hint; the wider hint keeps it so.
+        return self.sizeHint()
+
+    def sync_width(self) -> None:
+        """Tells the layout the width changed -- only when the name shown did: it re-lays the
+        header out, and the header's refit is what calls this."""
+        shown = self.shown_text()
+        if shown != self._sized_for:
+            self._sized_for = shown
+            self.updateGeometry()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+        painter = QStylePainter(self)
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        option.currentText = self.fit_text()
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+
+
+class _HeaderWatch(QObject):
+    """Refits the corner whenever the header is resized, laid out again or shown."""
+
+    def __init__(self, refit, parent: QObject) -> None:
+        super().__init__(parent)
+        self._refit = refit
+
+    def eventFilter(self, _watched, event) -> bool:  # noqa: N802 (Qt override)
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest, QEvent.Type.Show):
+            self._refit()
+        return False
+
+
 class ControlLayout:
     """Enter and leave the control layout on a live `MainWindow`, moving its real panels."""
 
@@ -262,9 +353,11 @@ class ControlLayout:
         #: Which tab holds what: a group id, "eq", a parameter field, or "monitor".
         self._index: dict[str, int] = {}
         self._corner: Optional[QWidget] = None
-        self.compare_combo: Optional[QComboBox] = None
+        self.compare_combo: Optional[_CompareBox] = None
         self._compare_label: Optional[QLabel] = None
         self._compare_other: Optional[QLabel] = None
+        self._compare_tip = None
+        self._header_watch: Optional[_HeaderWatch] = None
 
     # ---- the two borders ----------------------------------------------------------------------
 
@@ -355,10 +448,12 @@ class ControlLayout:
             self.vertical.setParent(None)
             self.vertical.deleteLater()
         if self._corner is not None:
+            self._corner.parentWidget().removeEventFilter(self._header_watch)
             self._corner.setParent(None)
             self._corner.deleteLater()
         self.vertical = self.horizontal = self.tabs = None
         self._corner = self.compare_combo = self._compare_label = self._compare_other = None
+        self._compare_tip = self._header_watch = None
         self._index = {}
         self._compact(False)
         if self._saved_geometry is not None:
@@ -455,21 +550,23 @@ class ControlLayout:
         layout = QHBoxLayout(self._corner)
         layout.setContentsMargins(0, 0, 6, 2)
         layout.setSpacing(6)
-        # `ElidedLabel`, not a plain one: at half a screen this row ran out of room before the box
-        # beside it did, and a plain QLabel does not give ground -- it just gets clipped mid-word
-        # («порівнят», tcc#96, finding 105). `_compact` also hides it outright when the header is
-        # tight, but the label still has to survive whatever width it is given in between.
+        # Shown whole or not at all (tcc#96, finding 105: «порівнят», then «пор…» at half a screen
+        # after the first two passes): `_fit_corner` hides it, and the «інша конфігурація» tag,
+        # whenever the header cannot give it its full width -- judged on every resize of the
+        # header. An `ElidedLabel` still, so the moment between a resize and that refit never
+        # cuts it mid-word; a floor of 0, so a label shown only where it fits whole adds nothing
+        # to the window's own minimum.
         # `Maximum`, not `ElidedLabel`'s own default `Ignored`: `Ignored` asks the LAYOUT for zero
         # width and takes only whatever is left over after everything else is placed, which in
         # this row left it 0 px and reading «c…» at every width, including full screen -- an
         # opus reviewer's own measurement of the first pass of this fix, caught before commit.
         # `Maximum` is `ElidedLabel`'s documented "value" mode: its natural width, ground given
         # only under real squeeze.
-        self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=16,
+        self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=0,
                                           policy=QSizePolicy.Policy.Maximum)
         self._compare_label.setProperty("class", "phead-sub")
         layout.addWidget(self._compare_label)
-        self.compare_combo = QComboBox()
+        self.compare_combo = _CompareBox()
         self.compare_combo.setProperty("class", "mini-select")
         self.compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -480,14 +577,15 @@ class ControlLayout:
         # constant (34 px, a Fusion-style guess; the app runs the platform style with QSS) pulled
         # the floor down from the combo's own natural ~121 px to ~98. `QComboBox.
         # minimumSizeHint()` already equals `sizeHint()` (verified: a plain `QComboBox` built the
-        # same way reports the same QSize for both) -- Qt does not let an ordinary layout shrink
-        # it below that on its own, so the box already has a real floor without anything set here.
-        # What actually produced the Arbiter's empty box is still not established: the window
-        # cannot be forced below its own real minimum (697 px) offscreen, so the squeeze that
-        # produced it could not be reproduced in this environment to find out.
+        # same way reports the same QSize for both; `_CompareBox` keeps it so) -- Qt does not let
+        # an ordinary layout shrink it below that on its own, so the box already has a real floor
+        # without anything set here. Measured with the Arbiter's header shown: 121 px, and never
+        # empty down to the window's own minimum (697 px, in English and in Ukrainian alike).
         self.compare_combo.currentIndexChanged.connect(self._on_compare_picked)
+        # What a hidden corner label said, and which configuration a picked version belongs to.
+        self._compare_tip = attach_tip(self.compare_combo)
         layout.addWidget(self.compare_combo)
-        self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=16,
+        self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=0,
                                           policy=QSizePolicy.Policy.Maximum)
         self._compare_other.setProperty("class", "cmp-other")
         self._compare_other.setVisible(False)
@@ -495,6 +593,8 @@ class ControlLayout:
         button = self.window._layout_btn
         header = button.parentWidget().layout()
         header.insertWidget(header.indexOf(button), self._corner)
+        self._header_watch = _HeaderWatch(self._fit_corner, self._corner)
+        button.parentWidget().installEventFilter(self._header_watch)
 
     def _fill_compare(self) -> None:
         args = getattr(self.window, "_compare_args", None) or ()
@@ -511,7 +611,7 @@ class ControlLayout:
         combo.blockSignals(blocked)
         selectable = [v for v in own if v != current]
         self._corner.setVisible(bool(selectable or others))
-        self._compare_other.setVisible(is_other_preset(key))
+        self._fit_corner()
 
     def _on_compare_picked(self, _index: int) -> None:
         chosen = getattr(self.window, "_on_compare_chosen", None)
@@ -529,8 +629,48 @@ class ControlLayout:
         blocked = self.compare_combo.blockSignals(True)
         self.compare_combo.setCurrentIndex(max(self.compare_combo.findData(key) if key else 0, 0))
         self.compare_combo.blockSignals(blocked)
-        self._compare_other.setVisible(is_other_preset(key))
+        self._fit_corner()
         self.sync_dots()
+
+    def _fit_corner(self) -> None:
+        """«порівняти з» and «інша конфігурація»: whole, or not shown at all (tcc#96, the
+        controller's ruling after finding 105's second pass) -- at control mode's own 756 px they
+        read «пор…», and «п…» beside «інша конфі…», which say nothing.
+
+        Each is judged by the header's width against what the header asks for WITH it, i.e. with
+        everything at its natural width; a hidden one comes back only with `_REFIT_SLACK_PX` to
+        spare. The project name and the mode button give ground by eliding once both have gone
+        (measured: letting «порівняти з» keep its width instead raised the window's floor to
+        735–757 px and cut the tag to «a…»). The tag gives way first: its meaning is in the box,
+        which names the configuration. What a hidden label said is in the box's hover."""
+        corner, combo = self._corner, self.compare_combo
+        if corner is None or not shiboken6.isValid(corner):
+            return
+        label, tag = self._compare_label, self._compare_other
+        combo.sync_width()
+        other = is_other_preset(combo.currentData())
+        header = corner.parentWidget()
+        if header is None or not header.isVisible():
+            # Nothing laid out yet to measure; the header's first resize judges.
+            show_label, show_tag = True, other
+        else:
+            spacing = corner.layout().spacing()
+            wants = {w: w.sizeHint().width() + spacing for w in (label, tag)}
+            bare = header.sizeHint().width() - sum(n for w, n in wants.items() if not w.isHidden())
+            room = header.width()
+
+            def fits(widget, need: int) -> bool:
+                return room >= need + (_REFIT_SLACK_PX if widget.isHidden() else 0)
+
+            show_label = fits(label, bare + wants[label])
+            show_tag = other and show_label and fits(tag, bare + wants[label] + wants[tag])
+        for widget, show in ((label, show_label), (tag, show_tag)):
+            if widget.isHidden() == show:
+                widget.setVisible(show)
+        said = [] if show_label else [i18n.t("cmpWith")]
+        if other:
+            said.append(i18n.t("cmpOtherTip").format(version=combo.shown_text()))
+        self._compare_tip.set_text("<br>".join(html.escape(line) for line in said))
 
     def _on_tab_changed(self, index: int) -> None:
         self._light_tree(self.tabs.widget(index) if self.tabs is not None else None)

@@ -10,6 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSplitter, QTabWidget  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
@@ -390,8 +391,9 @@ def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
 def test_a_narrow_tab_elides_its_label_instead_of_cutting_it_mid_word(tmp_path, monkeypatch):
     """tcc#96, finding 105. Corrected per an opus reviewer's pass on the first fix (IMPORTANT 3):
     the earlier version of this test resized the WHOLE WINDOW to 420 px, but a `MainWindow` here
-    cannot go below its own real minimum (697 px) offscreen -- the resize is silently clamped, so
-    the eliding branch never actually ran and the test passed for nothing.
+    cannot go below its own real minimum offscreen (697 px, in English and in Ukrainian alike) --
+    the resize is silently clamped, so the eliding branch never actually ran and the test passed
+    for nothing.
 
     A bare `DotTabBar` resized directly does not reliably reproduce genuine per-tab squeeze
     either: measured by hand (see the fix report), Qt's own tab layout on this platform/style
@@ -430,9 +432,8 @@ def test_the_compare_box_gets_no_floor_below_its_own_minimum(tmp_path, monkeypat
     already equals `sizeHint()` (asserted below, which is what makes it a real floor an ordinary
     layout will not shrink the box past on its own).
 
-    What actually produced the Arbiter's empty box is still not established -- the window cannot
-    be forced below its own real minimum (697 px) offscreen, so the squeeze that produced it
-    could not be reproduced here to find out."""
+    With the Arbiter's header shown, the box measures 121 px and is never empty down to the
+    window's own minimum (697 px, in English and in Ukrainian alike)."""
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
     layout = window._control_layout
@@ -467,6 +468,128 @@ def test_the_corner_labels_ask_for_their_own_width_not_zero(tmp_path, monkeypatc
     assert layout._compare_other.isVisibleTo(window), "another preset picked: its tag is up"
     assert layout._compare_label.text() == i18n.t("cmpWith"), layout._compare_label.text()
     assert layout._compare_other.text() == i18n.t("cmpOtherTag"), layout._compare_other.text()
+    layout.leave()
+
+
+_OTHERS = ("3.S-shelf", "5.M-mid", "6.W-wide", "7.E-epy")
+
+
+def _arbiter_header(window):
+    """The header the Arbiter works in (tcc#96, finding 105): the project, the open preset and its
+    slot, a target link, and «порівняти з» over the preset's own two versions and four other
+    configurations' (#103)."""
+    _with_rig(window)
+    window._project_label.setText("⌂ passat-b8-2026-aya")
+    window._preset_combo.addItem("4.C-cut")
+    window._show_slot_and_save("P4", "")
+    window._target_label.setText("SQ-Comp ↗")
+    window._compare_args = (
+        ["v_002", "v_001"], "v_001", lambda _key: _older(), {"v_002": "v_002", "v_001": "v_001"},
+        [(p, [(f"{p}/v_002", "v_002"), (f"{p}/v_001", "v_001")]) for p in _OTHERS],
+        "4.C-cut", "v_002")
+    window._compare_key = "v_001"
+
+
+def _control_window(tmp_path, monkeypatch, lang="en"):
+    """Shown, in control mode, speaking `lang` -- set AFTER the window is built, which applies its
+    own saved language as it starts."""
+    window = _window(tmp_path, monkeypatch)
+    i18n.set_language(lang)
+    _arbiter_header(window)
+    window.show()
+    window._control_layout.enter()
+    return window
+
+
+def _settle(window, width):
+    window.resize(width, 900)
+    for _ in range(4):
+        QApplication.processEvents()
+
+
+def _corner_words(window):
+    """What «порівняти з» and «інша конфігурація» show: the text, or None while hidden."""
+    layout = window._control_layout
+    return tuple(label.text() if label.isVisibleTo(window) else None
+                 for label in (layout._compare_label, layout._compare_other))
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_the_corner_labels_are_whole_or_hidden_never_cut(tmp_path, monkeypatch, lang):
+    """tcc#96, finding 105 -- the controller's ruling after measuring the second pass: at control
+    mode's own width (756 px, half the Arbiter's 1512-px screen) «порівняти з» still read «пор…» /
+    «compa…», and with another configuration picked «п…» beside «інша конфі…». Each label is now
+    shown whole or not at all. What a hidden one said moves into the box: its hover says
+    «порівняти з», and another configuration's version is shown with its preset's name,
+    «3.S-shelf · v_002» (the open list's rows stay as #103 left them)."""
+    try:
+        window = _control_window(tmp_path, monkeypatch, lang)
+        layout = window._control_layout
+        combo = layout.compare_combo
+        full = (i18n.t("cmpWith"), i18n.t("cmpOtherTag"))
+        for width in (1600, 756):
+            for picked in ("v_001", "3.S-shelf/v_002"):
+                combo.setCurrentIndex(combo.findData(picked))
+                _settle(window, width)
+                words = _corner_words(window)
+                if width == 1600:
+                    assert words == (full[0], full[1] if "/" in picked else None), words
+                assert all(w is None or w == f for w, f in zip(words, full)), (width, words)
+                if words[0] is None:
+                    assert i18n.t("cmpWith") in combo.hover_tip.text(), "the hidden word is kept"
+        # 756 px, another configuration picked:
+        assert _corner_words(window) == (None, None), "half a screen: both give way"
+        assert combo.shown_text() == "3.S-shelf · v_002", "the picked version names its preset"
+        assert combo.fit_text() == combo.shown_text(), "and shows it whole"
+        assert combo.itemText(combo.currentIndex()) == "v_002", "the list's own row is unchanged"
+        assert i18n.t("cmpOtherTip").format(version="3.S-shelf · v_002") in combo.hover_tip.text()
+        layout.leave()
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path, monkeypatch):
+    """Shown or hidden is decided from the header's width against what the header asks for WITH
+    the label, and a hidden label comes back only with room to spare: resized a few pixels at a
+    time across both thresholds and back, each label changes once each way, and every width
+    settles to one state."""
+    from PySide6.QtCore import QEvent, QObject
+
+    class _Toggles(QObject):
+        count = 0
+
+        def eventFilter(self, _watched, event):  # noqa: N802 (Qt override)
+            if event.type() in (QEvent.Type.Show, QEvent.Type.Hide):
+                self.count += 1
+            return False
+
+    window = _control_window(tmp_path, monkeypatch)
+    layout = window._control_layout
+    layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("3.S-shelf/v_002"))
+    toggles = _Toggles()
+    for label in (layout._compare_label, layout._compare_other):
+        label.installEventFilter(toggles)
+    widths = list(range(1160, 740, -5))
+    seen = []
+    for width in widths + widths[::-1]:
+        _settle(window, width)
+        toggles.count = 0
+        for _ in range(4):
+            QApplication.processEvents()
+        assert toggles.count == 0, f"still toggling at {width} px"
+        seen.append(tuple(w is not None for w in _corner_words(window)))
+    down, up = seen[:len(widths)], seen[len(widths):]
+    assert down[0] == up[-1] == (True, True), "roomy: both whole"
+    assert down[-1] == up[0] == (False, False), "half a screen and less: both give way"
+    for states in (down, up):
+        for which in (0, 1):
+            run = [s[which] for s in states]
+            assert sum(run[i] != run[i - 1] for i in range(1, len(run))) == 1, run
+    rising = widths[::-1]
+    for which in (0, 1):
+        went = next(widths[i] for i in range(1, len(down)) if down[i][which] != down[i - 1][which])
+        back = next(rising[i] for i in range(1, len(up)) if up[i][which] != up[i - 1][which])
+        assert back - went >= 10, f"label {which}: gone at {went} px, back at {back} px"
     layout.leave()
 
 
