@@ -5199,3 +5199,32 @@ def test_the_reviewer_marks_a_warning_yellow_and_an_answered_row_green(monkeypat
     monkeypatch.setattr(window, "_critic_notes", lambda: ([("clipboard only", "tip")], True))
     window._refresh_critic_warning()
     assert "warn-mark-soft" not in str(window._critic_warn.property("class"))
+
+
+def test_a_banked_change_read_from_disk_shows_no_time_and_one_banked_now_does(monkeypatch, tmp_path):
+    """tcc#100: the time on a message is when it was said. The banked-change card a project opens
+    on is a record read from `proposals/<v>.json` — banked yesterday, maybe — and it came up as
+    «SYSTEM · LEDGER 09:14:02», the moment TCC was opened. That card shows no time; a version
+    banked while the window watches is news, and says when it arrived."""
+    import time
+
+    from autosound_tcc.state import proposal_view
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(proposal_view, "load_delta",
+                        lambda version, preset, project_dir=None: {"version": version})
+    monkeypatch.setattr(proposal_view, "to_html", lambda delta: f"{delta['version']} banked")
+    now = 1_790_000_000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+    before = len(window._dialog._bubbles)
+
+    window._show_banked_delta("v_904", "tune", tmp_path)   # the project opens on v_904
+    window._show_banked_delta("v_905", "tune", tmp_path)   # v_905 is banked mid-session
+    window._show_banked_delta("v_302", "other", tmp_path)  # another preset opens on v_302
+
+    opened, banked, switched = window._dialog._bubbles[before:]
+    assert "v_904" in opened.plain_text() and "v_905" in banked.plain_text()
+    for from_disk in (opened, switched):
+        assert from_disk._time_label.isHidden() and not from_disk._time_label.text()
+    assert banked._time_label.text() == time.strftime("%H:%M:%S", time.localtime(now))

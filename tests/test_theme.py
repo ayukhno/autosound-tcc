@@ -99,3 +99,33 @@ def test_the_reviewer_pickers_state_colour_holds_under_the_mouse():
             at = sheet.index(rule)
             assert at > common, "later in the sheet, so it wins over the common hover"
             assert colour in sheet[at:].split("}", 1)[0], (name, state)
+
+
+def test_the_time_on_a_message_reads_on_every_bubble():
+    """tcc#100: the time beside who spoke is 10 px on a TINTED bubble. In `faint` it came to
+    3.4:1 on the Arbiter's own bubble — the one he reads to time a wait — against the 4.5:1 that
+    finding 51 (tcc#65) set after his eyes strained. Computed from the colours the sheet draws, for
+    every kind of bubble in both themes; and it stays quieter than the message itself."""
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    def drawn(sheet: str, selector: str, prop: str) -> str:
+        block = sheet.split(selector + " {", 1)[1].split("}", 1)[0]
+        value = re.search(prop + r":\s*([^;]+);", block).group(1).strip()
+        if value.startswith("#"):
+            return value
+        r, g, b = (int(float(part)) for part in value[value.index("(") + 1:-1].split(",")[:3])
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    kinds = ("msg-gen", "msg-crit", "msg-user", "msg-sys", "msg-sys-warn", "msg-sys-error")
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        sheet = theme.build_qss(palette)
+        stamp = drawn(sheet, 'QLabel[class~="msg-time"]', "color")
+        for kind in kinds:
+            ground = drawn(sheet, f'QFrame[class~="{kind}"]', "background")
+            assert _contrast(stamp, ground) >= 4.5, (
+                f"{name} {kind}: the time is {_contrast(stamp, ground):.2f}:1 on {ground}")
+            assert _contrast(stamp, ground) < _contrast(palette.text, ground), (
+                f"{name} {kind}: the time must stay quieter than the message")

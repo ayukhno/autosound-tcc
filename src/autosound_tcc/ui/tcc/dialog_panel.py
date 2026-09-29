@@ -685,15 +685,17 @@ class DialogPanel(QWidget):
     def _font_in(self) -> None:
         self._set_font_scale(self._font_scale + _DIALOG_FONT_STEP)
 
-    def _add_system_message(self, html: str, role: str = _SYS_ROLE_TCC, level: str = "") -> None:
+    def _add_system_message(self, html: str, role: str = _SYS_ROLE_TCC, level: str = "",
+                            at: Any = _SAID_NOW) -> None:
         """A line from TCC rather than from anyone in the conversation.
 
         `role` because not all of them are ledger events: "omp has said nothing" and "starting
         <model>" are TCC talking about the machinery, and filing those under the ledger makes a
         status line look like something that was recorded. `level` is `warn` or `error` for a
-        line that reports a problem.
+        line that reports a problem. `at` as in `_add_bubble`: None for a record read from disk,
+        which has no moment on screen to claim (tcc#100).
         """
-        self._add_bubble("sys", role, html, level=level)
+        self._add_bubble("sys", role, html, level=level, at=at)
         self._scroll_to_end()
 
     def _scroll_to_end(self) -> None:

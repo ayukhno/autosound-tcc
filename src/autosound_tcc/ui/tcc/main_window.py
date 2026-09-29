@@ -2347,7 +2347,7 @@ class MainWindow(QMainWindow):
         # "no changes" (tcc#50).
         read_as = getattr(view, "file_version", None) or view.version
         self._offer_compare(root, preset, profile, read_as)
-        self._show_banked_delta(read_as, preset)
+        self._show_banked_delta(read_as, preset, root)
 
     def _show_slot_and_save(self, slot: str, save: str) -> None:
         """An empty label takes no room: its spacing pushed the target link away from the preset
@@ -3655,23 +3655,31 @@ class MainWindow(QMainWindow):
             )
         self._missing_said = seen
 
-    def _show_banked_delta(self, version: Optional[str], preset: Optional[str]) -> None:
+    def _show_banked_delta(self, version: Optional[str], preset: Optional[str], root: Path) -> None:
         """When a version arrives with a banked delta, put THAT on screen as the settings card.
 
         The card the Arbiter keys from should carry the values the ledger banked, not the values a
         model re-rendered into chat — the same argument as `dsp-state-current` being generated
         rather than hand-written (SCR-026). Shown once per version: this runs on every project
         reload, and the watcher fires more than once for a single commit.
+
+        Timed only when it is news (tcc#100). The version a project or preset OPENS on was banked
+        before the window looked — a record read from disk, and the moment it was drawn is not its
+        time. A new version of the same preset, arriving while the window watches, is.
         """
         if not version or not preset or version == getattr(self, "_delta_shown", None):
             return
+        where = (str(root), preset)
+        banked_now = where == getattr(self, "_delta_where", None)
+        self._delta_where = where
         delta = proposal_view.load_delta(version, preset)
         # No delta file is the ordinary case — a seeded baseline, a hand-written ledger, a project
         # older than this. Remembered anyway, so a reload does not re-ask the disk for it.
         self._delta_shown = version
         if delta is None:
             return
-        self._dialog._add_system_message(proposal_view.to_html(delta), role=SYS_ROLE_LEDGER)
+        self._dialog._add_system_message(proposal_view.to_html(delta), role=SYS_ROLE_LEDGER,
+                                         at=time.time() if banked_now else None)
 
     #: How long after one probe the next activation is allowed to start another. `claude auth
     #: status` is a subprocess: somebody moving between two windows would otherwise spawn one per
