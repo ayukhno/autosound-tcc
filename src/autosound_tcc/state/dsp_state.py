@@ -429,7 +429,11 @@ class ProjectView:
     def version_mismatch(self) -> bool:
         """The file and its `version` field name different versions (tcc#50): `v_011.json` held
         `"version": "v_012"` after a variant was copied over it, and a revision was lost in place.
-        The header read the field, the diff the file, and an empty diff read as "no changes"."""
+        The header read the field, the diff the file, and an empty diff read as "no changes".
+
+        From method v3.0.64 `PresetHistory.load()` refuses such a file itself, naming both and
+        `repair-version` (skill #89, hub #213 TCC-033), so this fires only with an installed
+        method older than that."""
         return bool(self.file_version and self.version and self.file_version != self.version)
 
     @property

@@ -643,10 +643,17 @@ def test_a_channel_with_no_status_counts_as_proposed_as_the_method_reads_it():
     assert view.state == "proposed"
 
 
-def test_a_state_file_whose_version_field_names_another_is_said_not_drawn(tmp_path, monkeypatch):
+def test_a_state_file_whose_version_field_names_another_is_refused_in_the_method_s_words(
+        tmp_path, monkeypatch):
     """tcc#50: `v_011.json` carried `"version": "v_012"` after a variant was copied over it. TCC
     loaded it without a word: the header read the field, the diff resolved by the file name, and
-    the empty diff read as "no changes". The view now knows the name it was READ BY."""
+    the empty diff read as "no changes". TCC then said the mismatch itself (8d4c590) and asked the
+    method for the invariant (hub #213 TCC-033). From v3.0.64 the method's `load()` refuses such a
+    file (skill #89), naming both versions and the repair, and the window shows that refusal where
+    it shows every other one ("Could not load ledger"). The view's own `version_mismatch` stays for
+    an installed method older than that."""
+    import pytest
+
     from autosound_tcc.core import config, vendor_loader
     from autosound_tcc.state.dsp_state import load_project_view
     from tests import _intake
@@ -666,10 +673,15 @@ def test_a_state_file_whose_version_field_names_another_is_said_not_drawn(tmp_pa
     data["version"] = "v_099"
     path.write_text(json.dumps(data), encoding="utf-8")
 
-    view = load_project_view(str(root), "FULL", PROFILE)
+    vstate = vendor_loader.load_dsp_state()
+    with pytest.raises(vstate.SnapshotError) as refused:
+        load_project_view(str(root), "FULL", PROFILE)
 
-    assert view.version == "v_099" and view.file_version == second
-    assert view.version_mismatch
+    said = str(refused.value)
+    assert second in said and "'v_099'" in said and f"repair-version {second}" in said, said
 
     clean = load_project_view(str(root), "FULL", PROFILE, version=history.versions()[0])
-    assert not clean.version_mismatch
+    assert clean.file_version == history.versions()[0] and not clean.version_mismatch
+    # What an older method still hands over: the view names both and says they disagree.
+    assert ProjectView(preset="FULL", sample_rate=None, groups=(), version="v_099",
+                       file_version=second).version_mismatch
