@@ -451,7 +451,7 @@ def _skill_offered(monkeypatch, changed=(), done=None):
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
     monkeypatch.setattr(updates, "local_changes",
-                        lambda: updates.LocalChanges(True, tuple(changed)))
+                        lambda tag="": updates.LocalChanges(True, tuple(changed)))
     asked = []
     done = done or updates.SkillUpdate(True, version="v3.0.7",
                                        signature="v3.0.7: signature good (ayukhno)",
@@ -463,12 +463,19 @@ def _skill_offered(monkeypatch, changed=(), done=None):
 
 
 def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
+    from autosound_tcc.core import updates
+
     dialog, asked = _skill_offered(monkeypatch)
     monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
+    looked = []
+    monkeypatch.setattr(updates, "local_changes",
+                        lambda tag="": looked.append(tag) or updates.LocalChanges(True, ()))
 
     dialog._update_skill()
+    assert dialog._update_rows["skill"][0].text() == i18n.t("updSkillLooking"), "while it looks"
     _finish_skill_update(dialog)
 
+    assert looked == ["v3.0.7"], "the offered release's updater looks, not the clone's own"
     assert asked == [("v3.0.7", False, False)], "the release the row offered; nothing to keep"
     text = dialog._update_rows["skill"][0].text()
     assert "3.0.7" in text
@@ -568,7 +575,7 @@ def test_a_re_check_during_the_skill_update_leaves_its_row_alone(monkeypatch):
     dialog, _asked = _skill_offered(monkeypatch)
     release = threading.Event()
     monkeypatch.setattr(updates, "local_changes",
-                        lambda: release.wait(5) and updates.LocalChanges(True, ()))
+                        lambda tag="": release.wait(5) and updates.LocalChanges(True, ()))
     monkeypatch.setattr(updates, "check_all", lambda channel="stable": (
         updates.Status("tcc", "0.1.3", "0.1.3", False),
         updates.Status("skill", "3.0.7", "3.0.7", False)))

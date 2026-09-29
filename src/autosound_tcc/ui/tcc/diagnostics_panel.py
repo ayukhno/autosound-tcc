@@ -609,8 +609,8 @@ class DiagnosticsDialog(QDialog):
         """The skill's own updater, in steps: what was changed here, a question if anything was,
         then keep it, move the clone, bring the libraries (hub #221, tcc#91).
 
-        Off the GUI thread since the skill's `upkeep.py` does it (`_SkillStep`): the first step,
-        `status`, can take a minute. The row says which step it is on.
+        Off the GUI thread since the skill's `upkeep.py` does it (`_SkillStep`): the first step —
+        fetch the release, check its signature, `status` — can take a minute, and the row says so.
         """
         if self._skill_job is not None:
             return
@@ -618,7 +618,10 @@ class DiagnosticsDialog(QDialog):
         self._skill_before = label.text()
         button.setEnabled(False)
         label.setText(i18n.t("updSkillLooking"))
-        self._run_skill_step(updates.local_changes, self._after_local_changes)
+        # Both steps run the `upkeep.py` of the release the row offers — the clone's own may
+        # predate the script (`updates._upkeep_from_tag`).
+        tag = f"v{self._skill_latest}" if self._skill_latest else ""
+        self._run_skill_step(lambda: updates.local_changes(tag), self._after_local_changes)
 
     def _run_skill_step(self, work, then) -> None:
         self._skill_job = _SkillStep(work)

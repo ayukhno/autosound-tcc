@@ -6,13 +6,14 @@ that closes the gap.
 
 **The two halves are installed differently, so they update differently.**
 
-*The method* is a shallow git checkout parked on a release tag (`v3.*`). Since the skill's
-v3.0.64 it moves through the skill's OWN `scripts/upkeep.py` (hub #221, SKL-059; hub #217,
-SKL-056): `clone` fetches the tag into `refs/tags` and checks its signature, `libs` brings numpy,
-scipy and matplotlib along, and `keep-local` keeps a local change as a patch before anything is
-reset. TCC runs no git that changes the clone any more; it runs the skill's command, off the GUI
-thread, and shows what it answers. One path with the skill's installers, which call the same
-script.
+*The method* is a shallow git checkout parked on a release tag (`v3.*`). It moves through the
+skill's OWN `scripts/upkeep.py` (hub #221, SKL-059; hub #217, SKL-056) — the copy inside the tag
+being installed, the way the skill's installers run it: the tag is fetched into the clone (objects
+and refs; the working tree is not touched), its signature checked, its `upkeep.py` taken into a
+temporary folder and run there. `keep-local` keeps a local change as a patch before anything is
+reset, `clone` checks the tag out, `libs` brings numpy, scipy and matplotlib along. TCC checks
+nothing out and resets nothing itself; it runs the skill's commands off the GUI thread and shows
+what they answer.
 
 *TCC* is a `uv` tool, and updating it means replacing the files of the process doing the asking.
 On macOS that quietly works and takes effect at the next start; on Windows it cannot — the running
@@ -36,9 +37,11 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -256,11 +259,12 @@ _NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_AS
 _log = logging.getLogger("autosound_tcc")
 
 
-def _git(*args: str, cwd: Optional[Path] = None) -> tuple[bool, str]:
+def _git(*args: str, cwd: Optional[Path] = None,
+         timeout: float = _ASK_TIMEOUT) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash."""
     try:
         done = subprocess.run(
-            ["git", *args], capture_output=True, text=True, timeout=_ASK_TIMEOUT,
+            ["git", *args], capture_output=True, text=True, timeout=timeout,
             encoding="utf-8",
             errors="replace",
             env={**os.environ, **_NO_PROMPTING},
@@ -571,21 +575,117 @@ def current_channel() -> str:
 _UPKEEP_TIMEOUT = {"status": 150.0, "keep-local": 180.0, "clone": 360.0, "libs": 960.0}
 
 
-def upkeep_script() -> Optional[Path]:
-    """The skill's `scripts/upkeep.py`, from the skill TCC uses, or None when it has none.
+#: The skill's trust anchor, as its own `upkeep.py` and both installers hold it (skill #99, hub
+#: #82 HUB-031): a CONSTANT, never a file read from the tag being verified — a tag's own
+#: `allowed_signers` would vouch for itself. Tags before `SKILL_SIGNED_FROM` predate signing and
+#: pass with a line saying so. `tests/test_updates.py` compares these with the vendored script's.
+SKILL_SIGNING_PRINCIPAL = "ayukhno"
+SKILL_SIGNING_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHLm4x1yz9JbFfBlxdQA8vR8yYMupVktswes3CL7QE1y"
+SKILL_SIGNED_FROM = "v3.0.64"
+SKIP_VERIFY_VAR = "AUTOSOUND_SKIP_TAG_VERIFY"
 
-    Found the way every other script of the skill is (`contract_check.script_path()`): through
-    `vendor_loader.skill_dir()`, which is the vendored submodule in a checkout and the INSTALLED
-    skill everywhere else — TCC's wheel carries no copy of the skill on purpose (`vendor_loader`).
-    So an installed skill older than v3.0.64, where the script arrived, has none: that is
-    `no_upkeep`, said on the row, and never a git fallback — TCC does not move the clone with git
-    any more (hub #221).
+#: Where the method lives inside its repository, and what of the NEW tag is taken out to run its
+#: updater: `upkeep.py` and the two files it imports — the installers' own list (install.sh
+#: `keep_local`, install.ps1 `Save-LocalChanges`, v3.0.64) — plus `requirements.txt`, which `libs`
+#: reads beside it. The installers run `libs` from the clone; TCC runs it from here.
+_SKILL_IN_REPO = "skills/autosound-tuning"
+_UPKEEP_FILES = ("scripts/upkeep.py", "rew_tool/gates/side_effect.py", "rew_tool/console.py",
+                 "requirements.txt")
+
+#: A fetch of one release over a network that may be a phone: `upkeep.py`'s own fetch allows 300 s.
+_FETCH_TIMEOUT = 300.0
+
+
+def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM) -> tuple[bool, str]:
+    """`(ok, the line to show)` for `tag` in `repo`, by the skill's `verify_tag` rules.
+
+    Good signature by the constant's key: ok. A release before `signed_from`: ok, and the line
+    says it predates signing. Anything else at or after it — unsigned, a stranger's key, not a
+    release name — refused, in git's own words. The developer's switch skips it, visibly.
     """
+    if os.environ.get(SKIP_VERIFY_VAR) == "1":
+        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)"
+    here, first = _RELEASE_RE.fullmatch(tag), _RELEASE_RE.fullmatch(signed_from)
+    if here is None or first is None:
+        return False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check"
+    if tuple(map(int, here.groups())) < tuple(map(int, first.groups())):
+        return True, (f"{tag} predates signed tags (they start at {signed_from}): installed "
+                      f"without a signature check")
+    with tempfile.TemporaryDirectory(prefix="autosound_signers_") as tmp:
+        signers = Path(tmp) / "allowed_signers"
+        signers.write_text(f'{SKILL_SIGNING_PRINCIPAL} namespaces="git" {SKILL_SIGNING_KEY}\n',
+                           encoding="utf-8")
+        ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
+                        "verify-tag", tag, cwd=repo)
+    if ok and "Good" in said:
+        return True, f"{tag}: signature good ({SKILL_SIGNING_PRINCIPAL})"
+    return False, f"{tag}: {(said.splitlines() or ['git verify-tag failed'])[-1]}"
+
+
+def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
+    """`git show <tag>:<path>` as BYTES, or None when the tag has no such file.
+
+    Bytes, not text: a file is copied out of the tag as it is, the way install.ps1 takes a zip
+    rather than let PowerShell decode it through the console's code page."""
     try:
-        path = vendor_loader.skill_dir() / "scripts" / "upkeep.py"
-    except Exception:  # noqa: BLE001 — no skill at all is the same answer
+        done = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True,
+                              timeout=_ASK_TIMEOUT, check=False,
+                              env={**os.environ, **_NO_PROMPTING}, **child.quiet())
+    except Exception:  # noqa: BLE001 — no git: the same as no file
         return None
-    return path if path.is_file() else None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _extract_upkeep(repo: Path, tag: str, root: Path) -> tuple[Optional[Path], str, str]:
+    """Fetch `tag` into the clone, check it, take its `upkeep.py` out into `root`.
+
+    `(script, "", "")`, or `(None, reason key, detail)`. Exactly the installers' order (install.sh
+    `checkout_method` → `verify_tag` → `keep_local`): what was fetched is checked BEFORE anything of
+    it runs — the script about to run comes from this tag, and a script that checks its own
+    signature has checked nothing. `upkeep.py clone` checks it again; that one is the skill's.
+
+    The fetch writes objects and `refs/tags/<tag>` into the clone and nothing else: the working
+    tree, the index and HEAD are as they were, local changes included (skill #92's refspec, so
+    `describe` can name the tag later).
+    """
+    ok, said = _git("fetch", "--quiet", "--depth", "1", "origin",
+                    f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
+    if not ok:
+        return None, "fetch_failed", said
+    signed, line = _verify_tag(repo, tag)
+    _log.info("skill tag %s: %s", tag, line)
+    if not signed:
+        return None, "bad_signature", line
+    for name in _UPKEEP_FILES:
+        blob = _git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}")
+        if blob is None:
+            continue  # the installers' `|| true`: only upkeep.py itself is required
+        target = root / _SKILL_IN_REPO / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(blob)
+    script = root / _SKILL_IN_REPO / "scripts" / "upkeep.py"
+    if not script.is_file():
+        # A release from before the script (v3.0.64): nothing to run, and no git fallback — the
+        # skill's installer is the one way across, once.
+        return None, "no_upkeep", ""
+    return script, "", ""
+
+
+@contextmanager
+def _upkeep_from_tag(repo: Path, tag: str):
+    """Yields `(script, reason, detail)` for the `upkeep.py` of `tag`; the copy is removed after.
+
+    The NEW tag's script, not the clone's own: the clones on the Arbiter's machines (3.0.61 on the
+    VM, 3.0.63 on the Mac) predate the script altogether, and install.sh says the same of itself —
+    "the clone's own version may predate the script". So the script is always as new as the skill
+    being installed. TCC's wheel carries no copy of the skill (`vendor_loader`), so there is no
+    third place it could come from.
+    """
+    root = Path(tempfile.mkdtemp(prefix="autosound-upkeep-"))
+    try:
+        yield _extract_upkeep(repo, tag, root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _run_upkeep(argv: list[str], timeout: float) -> tuple[int, str, str]:
@@ -618,7 +718,7 @@ class Upkeep:
     detail: str = ""
 
 
-def _upkeep(command: str, *args: str, clone: Path) -> Upkeep:
+def _upkeep(command: str, *args: str, clone: Path, script: Path) -> Upkeep:
     """Run `upkeep.py --json --clone <clone> <command> [args]` and read its answer.
 
     `--json` and `--clone` BEFORE the command (the contract on hub #217 and #219), on the
@@ -627,9 +727,6 @@ def _upkeep(command: str, *args: str, clone: Path) -> Upkeep:
     sentence goes on screen as the skill wrote it; exit 3 with any other object is a step that
     failed and says why in its own fields.
     """
-    script = upkeep_script()
-    if script is None:
-        return Upkeep(False, {}, "no_upkeep")
     argv = [child.script_interpreter(), str(script), "--json", "--clone", str(clone), command, *args]
     code, out, err = _run_upkeep(argv, _UPKEEP_TIMEOUT.get(command, 300.0))
     try:
@@ -655,8 +752,6 @@ def _ours_to_run(repo: Optional[Path]) -> tuple[str, str]:
     ours, (why, detail) = _is_ours(repo)
     if not ours:
         return why, detail
-    if upkeep_script() is None:
-        return "no_upkeep", ""
     return "", ""
 
 
@@ -670,14 +765,29 @@ class LocalChanges:
     detail: str = ""
 
 
-def local_changes() -> LocalChanges:
-    """The clone's changed files, asked of the skill (`upkeep.py status`) — slow, run it off the
-    GUI thread. It replaces the `status --porcelain` TCC used to run itself (tcc#91)."""
+def _target(tag: str) -> tuple[str, str]:
+    """`(tag, "")`, or `("", git's words)` when no tag was given and the newest cannot be asked."""
+    if tag:
+        return tag, ""
+    newest = newest_tag()
+    return newest, "" if newest else (last_probe_error() or "no tag matched")
+
+
+def local_changes(tag: str = "") -> LocalChanges:
+    """The clone's changed files, as the `upkeep.py` of `tag` (default: the newest release) names
+    them — `status`. Slow (a fetch, and `status` asks about the tools too): off the GUI thread. It
+    replaces the `status --porcelain` TCC used to run itself (tcc#91)."""
     repo = _skill_repo_dir()
     why, detail = _ours_to_run(repo)
     if why:
         return LocalChanges(False, reason=why, detail=detail)
-    answer = _upkeep("status", clone=repo)
+    target, said = _target(tag)
+    if not target:
+        return LocalChanges(False, reason="probe_failed", detail=said)
+    with _upkeep_from_tag(repo, target) as (script, why, detail):
+        if script is None:
+            return LocalChanges(False, reason=why, detail=detail)
+        answer = _upkeep("status", clone=repo, script=script)
     if not answer.ok:
         return LocalChanges(False, reason=answer.reason, detail=answer.detail)
     clone = answer.data.get("clone") or {}
@@ -718,8 +828,9 @@ def _libs_moved(data: dict) -> str:
 
 
 def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) -> SkillUpdate:
-    """Move the method's clone onto `tag` (default: the newest release) with the skill's own
-    `upkeep.py`: `keep-local` first when asked, then `clone`, then `libs` (hub #221, tcc#91).
+    """Move the method's clone onto `tag` (default: the newest release) with the `upkeep.py` of
+    that tag (`_upkeep_from_tag`): `keep-local` first when asked, then `clone`, then `libs`, all
+    with the one copy, removed afterwards (hub #221, tcc#91).
 
     `clone` fetches the tag into `refs/tags`, so `git describe` names it afterwards (skill #92 —
     the bare-name fetch this function used to run moved HEAD and stored no tag), and checks its
@@ -736,19 +847,28 @@ def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) 
     why, detail = _ours_to_run(repo)
     if why:
         return SkillUpdate(False, why, detail)
+    target, said = _target(tag)
+    if not target:
+        return SkillUpdate(False, "probe_failed", said)
+    with _upkeep_from_tag(repo, target) as (script, why, detail):
+        if script is None:
+            return SkillUpdate(False, why, detail)
+        return _apply_with(script, repo, target, keep_local=keep_local, send=send)
+
+
+def _apply_with(script: Path, repo: Path, target: str, *, keep_local: bool,
+                send: bool) -> SkillUpdate:
+    """`apply_skill`'s steps, with the new tag's `upkeep.py` already in hand."""
     patch, sent = "", None
     if keep_local:
-        kept = _upkeep("keep-local", *(["--send"] if send else []), clone=repo)
+        kept = _upkeep("keep-local", *(["--send"] if send else []), clone=repo, script=script)
         if not kept.ok:
             return SkillUpdate(False, kept.reason, kept.detail)
         patch, sent = str(kept.data.get("patch") or ""), kept.data.get("sent")
-    target = tag or newest_tag()
-    # No tag known (offline) is left to the skill, which asks for the newest itself and refuses
-    # in its own sentence when it cannot.
-    moved = _upkeep("clone", *(["--tag", target] if target else []), clone=repo)
+    moved = _upkeep("clone", "--tag", target, clone=repo, script=script)
     if not moved.ok:
         return SkillUpdate(False, moved.reason, moved.detail, patch=patch, sent=sent)
-    libs = _upkeep("libs", clone=repo)
+    libs = _upkeep("libs", clone=repo, script=script)
     libs_ok = libs.ok and bool(libs.data.get("ok", True))
     return SkillUpdate(
         True,

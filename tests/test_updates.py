@@ -19,7 +19,7 @@ def _git_answers(monkeypatch, answers: dict):
     """Fake `git` by first argument (`ls-remote`, `symbolic-ref`, …) -> (ok, output)."""
     calls = []
 
-    def fake(*args, cwd=None):
+    def fake(*args, cwd=None, timeout=None):
         calls.append(args)
         # Longest key first: "--show-superproject-working-tree" and "--git-dir" are both rev-parse.
         for key in sorted(answers, key=len, reverse=True):
@@ -186,11 +186,17 @@ def _fake_upkeep(monkeypatch, tmp_path, answers: dict):
 
     Returns the list of subcommands it was asked for, each with its own arguments — the ORDER is
     what most of these tests are about. The real script never runs: it would act on a clone."""
+    import contextlib
     import json
 
     script = tmp_path / "upkeep.py"
     script.write_text("raise SystemExit('the fake is patched in; this never runs')\n")
-    monkeypatch.setattr(updates, "upkeep_script", lambda: script)
+
+    @contextlib.contextmanager
+    def extracted(repo, tag):
+        yield script, "", ""
+
+    monkeypatch.setattr(updates, "_upkeep_from_tag", extracted)
     calls = []
 
     def fake(argv, timeout):
@@ -354,40 +360,217 @@ def test_an_answer_that_is_not_json_is_said_in_its_own_words(monkeypatch, tmp_pa
     assert "disk full" in done.detail
 
 
-def test_a_skill_older_than_its_own_updater_is_told_so(monkeypatch, tmp_path):
-    """`upkeep.py` arrived with the skill's v3.0.64. TCC's wheel carries no copy of the skill (it
-    finds the installed one — `vendor_loader`), so an installed clone older than that has no
-    updater TCC could run, and TCC no longer moves it with git itself (hub #221)."""
-    _an_installed_clone(monkeypatch, tmp_path)
-    monkeypatch.setattr(updates, "upkeep_script", lambda: None)
-    ran = []
-    monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
+# ---- the NEW tag's upkeep.py, as the skill's installers run it (coordinator's ruling on #91) ----
+#
+# Real git, in throwaway repositories under `tmp_path` (HOME is there too, `conftest.py`): an
+# "origin" with release tags, and an installed clone made the installer's way. The `upkeep.py` in
+# the tags is a STUB that writes down how it was run and answers the contract's JSON — the real
+# one would act on the clone, and what is under test is how TCC finds and runs it.
 
-    assert updates.apply_skill("v3.0.64").reason == "no_upkeep"
-    assert updates.local_changes().reason == "no_upkeep"
-    assert ran == []
+_STUB_UPKEEP = """\
+import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+skill = os.path.dirname(here)
+beside = [p for p in ("rew_tool/gates/side_effect.py", "rew_tool/console.py", "requirements.txt")
+          if os.path.isfile(os.path.join(skill, p))]
+with open(os.environ["UPKEEP_STUB_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"argv": sys.argv[1:], "file": os.path.abspath(__file__), "beside": beside,
+                         "prompt": os.environ.get("GIT_TERMINAL_PROMPT"),
+                         "bytecode": os.environ.get("PYTHONDONTWRITEBYTECODE")}) + "\\n")
+command = sys.argv[sys.argv.index("--clone") + 2]
+print(json.dumps({
+    "status": {"clone": {"path": "c", "exists": True, "version": "v3.0.9", "changed": ["a.txt"]},
+               "tools": [], "libs": {}},
+    "keep-local": {"clone": "c", "changed": ["a.txt"], "version": "v3.0.9", "patch": "/kept/x.patch",
+                   "sent": None, "reset": True},
+    "clone": {"clone": "c", "from": "v3.0.9", "to": sys.argv[-1], "signature": "stub: checked"},
+    "libs": {"python": "p", "command": "c", "ok": True, "before": {}, "after": {}, "why": ""},
+}[command]))
+"""
 
 
-def test_the_real_subprocess_path_reads_a_stub_upkeep(monkeypatch, tmp_path):
-    """One run through `subprocess` with a stub in place of `upkeep.py`: the argv arrives in the
-    contract's order, the JSON comes back parsed, and the child cannot stop to ask for a password
-    or leave `__pycache__` in the clone (which `git status` would then name as a change)."""
-    _an_installed_clone(monkeypatch, tmp_path)
-    stub = tmp_path / "upkeep.py"
-    stub.write_text(
-        "import json, os, sys\n"
-        "print(json.dumps({'clone': {'path': '/c', 'exists': True, 'version': 'v3.0.61',\n"
-        "  'changed': [' '.join(sys.argv[1:]), os.environ.get('GIT_TERMINAL_PROMPT'),\n"
-        "              os.environ.get('PYTHONDONTWRITEBYTECODE')]}}))\n",
-        encoding="utf-8")
-    monkeypatch.setattr(updates, "upkeep_script", lambda: stub)
+def _git_in(*args, cwd=None):
+    import os
+    import subprocess as sp
 
-    found = updates.local_changes()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    done = sp.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True)
+    assert done.returncode == 0, (args, done.stdout, done.stderr)
+    return done.stdout.strip()
 
-    assert found.ok is True, found
-    argv, prompt, bytecode = found.changed
-    assert argv == f"--json --clone {tmp_path / 'clone'} status"
-    assert prompt == "0" and bytecode == "1"
+
+def _skill_repos(monkeypatch, tmp_path):
+    """origin: v3.0.9 (the installed clone's), v3.0.10 (no upkeep.py yet), v3.0.11 (with it).
+    The clone: shallow at v3.0.9, a session's edit in it. Returns `(clone, log, temp root)`."""
+    import os
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)  # the developer's own git config stays out
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    log = tmp_path / "upkeep-runs.jsonl"
+    monkeypatch.setenv("UPKEEP_STUB_LOG", str(log))
+    origin = tmp_path / "origin"
+    skill = origin / "skills" / "autosound-tuning"
+    skill.mkdir(parents=True)
+    _git_in("init", "-q", "-b", "main", str(origin))
+    (origin / "a.txt").write_text("one\n")
+    (skill / "SKILL.md").write_text("the method\n")
+    _git_in("add", "-A", cwd=origin)
+    _git_in("commit", "-q", "-m", "v3.0.9", cwd=origin)
+    _git_in("tag", "-a", "v3.0.9", "-m", "v3.0.9", cwd=origin)
+    (skill / "SKILL.md").write_text("the method, later\n")
+    _git_in("commit", "-q", "-am", "v3.0.10", cwd=origin)
+    _git_in("tag", "-a", "v3.0.10", "-m", "no upkeep.py yet", cwd=origin)
+    _add_upkeep(origin)
+    _git_in("tag", "-a", "v3.0.11", "-m", "upkeep.py arrives", cwd=origin)
+    clone = tmp_path / "home" / ".claude" / "skills" / ".autosound-tuning-src"
+    _git_in("-c", "advice.detachedHead=false", "clone", "-q", "--branch", "v3.0.9", "--depth", "1",
+            f"file://{origin}", str(clone))
+    (clone / "a.txt").write_text("one\na session's patch\n")
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: clone)
+    return clone, log, temp
+
+
+def _add_upkeep(origin):
+    skill = origin / "skills" / "autosound-tuning"
+    (skill / "scripts").mkdir(exist_ok=True)
+    (skill / "rew_tool" / "gates").mkdir(parents=True, exist_ok=True)
+    (skill / "scripts" / "upkeep.py").write_text(_STUB_UPKEEP)
+    (skill / "rew_tool" / "gates" / "side_effect.py").write_text("# the feedback gate\n")
+    (skill / "rew_tool" / "console.py").write_text("def install():\n    return False\n")
+    (skill / "requirements.txt").write_text("numpy\nscipy\nmatplotlib\n")
+    _git_in("add", "-A", cwd=origin)
+    _git_in("commit", "-q", "-m", "upkeep.py", cwd=origin)
+
+
+def _runs(log):
+    import json
+
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_an_old_clone_is_moved_by_the_new_tag_s_own_upkeep(monkeypatch, tmp_path):
+    """The Arbiter's two machines: the VM's clone is 3.0.61 and the Mac's 3.0.63, and neither has
+    `upkeep.py` — it arrived in 3.0.64. So TCC does what the skill's installers do (install.sh
+    `keep_local`, install.ps1 `Save-LocalChanges`): fetch the target tag into the clone — objects
+    and refs, the working tree untouched — take the NEW tag's `upkeep.py` and the files it imports
+    into a temporary folder, and run THAT, with `--clone` naming the installed clone. The script is
+    always as new as the skill being installed, and the folder is gone afterwards."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    head = _git_in("rev-parse", "HEAD", cwd=clone)
+
+    found = updates.local_changes("v3.0.11")
+    done = updates.apply_skill("v3.0.11", keep_local=True)
+
+    assert found.ok and found.changed == ("a.txt",), found
+    assert done.ok and done.version == "v3.0.11" and done.patch == "/kept/x.patch", done
+    runs = _runs(log)
+    assert [run["argv"][3:] for run in runs] == [
+        ["status"], ["keep-local"], ["clone", "--tag", "v3.0.11"], ["libs"]]
+    for run in runs:
+        assert run["argv"][:3] == ["--json", "--clone", str(clone)]
+        assert run["file"].startswith(str(temp)), "the new tag's copy, not the clone's (it has none)"
+        assert run["file"].replace("\\", "/").endswith("skills/autosound-tuning/scripts/upkeep.py")
+        assert run["beside"] == ["rew_tool/gates/side_effect.py", "rew_tool/console.py",
+                                 "requirements.txt"], "what it imports, and what `libs` reads"
+        assert run["prompt"] == "0" and run["bytecode"] == "1"
+    assert list(temp.iterdir()) == [], "the temporary copy is removed after each use"
+    assert _git_in("rev-parse", "refs/tags/v3.0.11^{commit}", cwd=clone), "the tag was fetched"
+    assert _git_in("rev-parse", "HEAD", cwd=clone) == head, "TCC itself moved nothing"
+    assert "a session's patch" in (clone / "a.txt").read_text(), "nor reset anything"
+
+
+def test_a_target_tag_without_upkeep_is_the_installer_s_job(monkeypatch, tmp_path):
+    """A release from before `upkeep.py` has nothing TCC could run: one line on the row — update
+    once with the skill's installer — and nothing touched. Never the old fetch-and-checkout."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    head = _git_in("rev-parse", "HEAD", cwd=clone)
+
+    found = updates.local_changes("v3.0.10")
+    done = updates.apply_skill("v3.0.10", keep_local=True)
+
+    assert found.reason == "no_upkeep" and done.reason == "no_upkeep" and not done.ok
+    assert _runs(log) == []
+    assert list(temp.iterdir()) == []
+    assert _git_in("rev-parse", "HEAD", cwd=clone) == head
+    assert "a session's patch" in (clone / "a.txt").read_text()
+
+
+def test_a_release_whose_signature_does_not_check_out_runs_nothing(monkeypatch, tmp_path):
+    """The installers verify the fetched tag BEFORE they run anything from it (install.sh:
+    `verify_tag` before `keep_local`), and so does TCC: the script about to run comes from that
+    tag, and a script that checks its own signature has checked nothing. v3.0.64 onwards are signed
+    by the skill's author; an unsigned one is refused with git's own words."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    origin = tmp_path / "origin"
+    _git_in("tag", "-a", "v3.0.64", "-m", "unsigned", cwd=origin)
+
+    done = updates.apply_skill("v3.0.64", keep_local=True)
+    found = updates.local_changes("v3.0.64")
+
+    assert done.reason == "bad_signature" and found.reason == "bad_signature", (done, found)
+    assert "v3.0.64" in done.detail
+    assert _runs(log) == [] and list(temp.iterdir()) == []
+    assert "a session's patch" in (clone / "a.txt").read_text()
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_release_signed_by_the_author_s_key_runs_and_a_stranger_s_does_not(monkeypatch,
+                                                                              tmp_path):
+    """The trust anchor is a constant in TCC, the skill's own (`upkeep.py` SIGNING_KEY), never a
+    file read from the tag being checked. Throwaway keys here, the constant pointed at one."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    origin = tmp_path / "origin"
+    keys = {}
+    for who in ("author", "stranger"):
+        path = tmp_path / who
+        _git_in_keygen(path, who)
+        keys[who] = " ".join((tmp_path / f"{who}.pub").read_text().split()[:2])
+    for tag, who in (("v3.0.64", "author"), ("v3.0.65", "stranger")):
+        _git_in("-c", "gpg.format=ssh", "-c", f"user.signingkey={tmp_path / who}.pub",
+                "tag", "-s", tag, "-m", tag, cwd=origin)
+    monkeypatch.setattr(updates, "SKILL_SIGNING_PRINCIPAL", "author")
+    monkeypatch.setattr(updates, "SKILL_SIGNING_KEY", keys["author"])
+
+    good = updates.apply_skill("v3.0.64")
+    assert good.ok, good
+    assert [run["argv"][3:] for run in _runs(log)] == [["clone", "--tag", "v3.0.64"], ["libs"]]
+
+    log.unlink()
+    foreign = updates.apply_skill("v3.0.65")
+    assert foreign.reason == "bad_signature" and _runs(log) == []
+    assert list(temp.iterdir()) == []
+
+
+def _git_in_keygen(path, comment):
+    import subprocess as sp
+
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(path)],
+           check=True, capture_output=True)
+
+
+def test_the_trust_anchor_is_the_skill_s_own():
+    """Kept identical on purpose, like the installer constants above: read from the vendored
+    `upkeep.py` by `ast`, so nothing of it is imported and no bytecode lands in the submodule."""
+    import ast
+
+    from autosound_tcc.core import vendor_loader
+
+    script = vendor_loader.skill_dir() / "scripts" / "upkeep.py"
+    if not script.is_file():
+        pytest.skip("the method at this pin has no upkeep.py")
+    theirs = {node.targets[0].id: node.value.value
+              for node in ast.parse(script.read_text(encoding="utf-8")).body
+              if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+              and isinstance(node.targets[0], ast.Name)}
+    assert theirs["SIGNING_PRINCIPAL"] == updates.SKILL_SIGNING_PRINCIPAL
+    assert theirs["SIGNING_KEY"] == updates.SKILL_SIGNING_KEY
+    assert theirs["SIGNED_FROM"] == updates.SKILL_SIGNED_FROM
+    assert theirs["SKIP_VERIFY_VAR"] == updates.SKIP_VERIFY_VAR
 
 
 def test_tcc_is_compared_against_the_newest_release(monkeypatch):
