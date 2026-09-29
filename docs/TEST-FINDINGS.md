@@ -3109,6 +3109,9 @@ grammar does not read falls back to sweep.
 відкривається якось дивно — зʼїзджає ліворуч» (screenshot: the control-mode window's header begins at the screen's
 edge, «інша ко…» cut at the right).
 
+Wanted, the Arbiter 22:32: «треба щоб він відкривався ось так при переході в режим Контроль» — his screenshot shows
+the control-mode window on the RIGHT half of the screen, its full height, the left half free (a terminal there).
+
 **Weight.** Low: it works; the placement is off.
 
 **Task.** None yet — for the next wave's collection.
