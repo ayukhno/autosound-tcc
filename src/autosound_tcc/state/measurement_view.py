@@ -15,6 +15,7 @@ an empty task that looks like a completed one.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -55,9 +56,23 @@ def has_glossary(project_dir: Optional[Path] = None) -> bool:
         return False
 
 
-# REW title -> capture method, by the suffix the grammar writes (`naming-and-structure.md`).
-_METHOD_BY_SUFFIX = (("(sw)", "sw"), ("(rta)", "rta"))
+# A title the grammar refuses, read for its method tag where the grammar places one (tcc#109): glued
+# to the series number, `_7 (rta)`, with free text after it (`naming.py` `_NAME_RE`/`_TAGGED_RE`) --
+# the last such, as the grammar's greedy body takes it; else the first tag, as `(imp)` with no `_N`
+# is placed (`_UNVERSIONED_RE`: its body holds no bracket). Case-blind, as the grammar is.
+_SERIES_TAG_RE = re.compile(r"_(?:\d+|final)(?:ctl|rep)?\s*\(([A-Za-z]+)\)")
+_TAG_RE = re.compile(r"\(([A-Za-z]+)\)")
+# `naming.METHODS`, for a machine with no method to ask.
+_METHODS = ("sw", "rta", "imp")
 _METHOD_LABELS = {"sw": "sweep (sw)", "rta": "MMM RTA (rta)"}
+
+
+def _method_by_tag(text: str, methods) -> Optional[str]:
+    glued = [m.lower() for m in _SERIES_TAG_RE.findall(text) if m.lower() in methods]
+    if glued:
+        return glued[-1]
+    loose = [m.lower() for m in _TAG_RE.findall(text) if m.lower() in methods]
+    return loose[0] if loose else None
 
 
 def _series_reader(project_dir: Optional[Path] = None):
@@ -116,24 +131,25 @@ def groups_from_titles(titles) -> list[dict]:
 
     Sorted by the method `parse_name` reads off the title, not by how the title ends (tcc#101,
     finding 111): `L m+tw_55 (rta) inv` ends with `inv`, the clarification after the method, and
-    landed under SW when the last word decided it. The suffix is only a fallback, for a title the
-    grammar does not read at all.
+    landed under SW when the last word decided it.
+
+    A title the grammar refuses is read for its method tag where the grammar would find it, not by
+    its last word (tcc#109, finding 117): `D_L w+m_9 (rta) inv` and `D_L_7 (rta) m-L: lev=-4.5,
+    PK=-2` carry the note the grammar welcomes and are refused only for the `D_` before the code
+    (S-042) -- by the suffix they went under SW. A title with no tag at all stays under SW.
     """
     try:
         naming = vendor_loader.load_naming()
-    except Exception:  # noqa: BLE001 — no method on the machine: every title falls to the suffix
+    except Exception:  # noqa: BLE001 — no method on the machine: every title falls to its tag
         naming = None
+    methods = naming.METHODS if naming else _METHODS
     by_method: dict[str, list[str]] = {}
     for title in titles:
         text = str(title).strip()
         if not text:
             continue
         entry = naming.parse_name(text) if naming else None
-        method = entry.get("method") if entry else None
-        if not method:
-            method = next(
-                (m for suffix, m in _METHOD_BY_SUFFIX if text.rstrip().endswith(suffix)), "sw"
-            )
+        method = (entry.get("method") if entry else None) or _method_by_tag(text, methods) or "sw"
         by_method.setdefault(method, []).append(text)
     return [
         {"label": _METHOD_LABELS.get(method, method), "method": method, "names": names}

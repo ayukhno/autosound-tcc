@@ -483,6 +483,83 @@ def test_a_title_ending_in_something_other_than_the_method_still_sorts_by_it(tmp
     assert by_method["sw"] == ["off-convention title (sw)"]
 
 
+# ---- a title the grammar refuses still sorts by its method tag (tcc#109, finding 117) -----------
+# `testAgy-auto`, rounds `cap_010` and `cap_013`: the notes after the tag are the grammar's own
+# clarification (naming.py `_TAGGED_RE`, `params`) -- what it refuses is the `D_` before the code
+# (S-042: `_` only begins the series). Refused, the title fell to its last word and to SW.
+_CAP_013_TAKEN = {
+    "D_SW+Ws_9 (rta)": {"at": "2026-09-24T14:41:01+00:00", "planned": True},
+    "D_ALL_9 (rta)": {"at": "2026-09-24T14:41:02+00:00", "planned": True},
+    "D_L w+m_9 (rta)": {"at": "2026-09-24T14:41:02+00:00", "planned": False},
+    "D_L w+m_9 (rta) inv": {"at": "2026-09-24T14:41:02+00:00", "planned": False},
+    "D_R w+m_9 (rta)": {"at": "2026-09-24T14:41:03+00:00", "planned": False},
+    "D_R w+m_9 (rta) inv": {"at": "2026-09-24T14:41:03+00:00", "planned": False},
+}
+_CAP_010_TITLE = "D_L_7 (rta) m-L: lev=-4.5, PK=-2"
+
+
+def test_a_title_the_grammar_refuses_sorts_by_its_method_tag_not_its_last_word():
+    groups = measurement_view.groups_from_titles([*_CAP_013_TAKEN, _CAP_010_TITLE])
+
+    assert [g["method"] for g in groups] == ["rta"]
+    assert groups[0]["names"] == [*_CAP_013_TAKEN, _CAP_010_TITLE]
+
+
+def test_a_past_round_puts_its_unplanned_rta_captures_under_rta():
+    """`cap_013` as the project holds it: two asked for, four captured though nobody asked
+    (`planned: false`). The two `… (rta) inv` were the ones under SWEEP."""
+    round_ = {"id": "cap_013", "n": 13, "phase": "2", "version": "12", "version_kind": "series",
+              "expected": ["D_SW+Ws_9 (rta)", "D_ALL_9 (rta)"], "taken": _CAP_013_TAKEN,
+              "skipped": {}, "closed": "2026-09-24T14:41:03+00:00"}
+
+    session = measurement_view._session_for_round(round_, None)
+
+    assert [g.method for g in session.groups] == ["rta"]
+    assert [i.name for i in session.groups[0].items] == list(_CAP_013_TAKEN)
+
+
+def test_an_open_round_puts_an_rta_with_a_note_under_rta(project):
+    """`cap_010` while open: the round's own list, grouped by `groups_from_titles`."""
+    process_view.process_dir(project).mkdir(parents=True, exist_ok=True)
+    (process_view.process_dir(project) / "process-state.json").write_text(
+        json.dumps({"schema_version": 1, "active_phase": "2", "plan": [],
+                    "capture": {"id": "cap_010", "phase": "2", "version": "7",
+                                "expected": [_CAP_010_TITLE, "D_L w+m_7 (rta) inv"],
+                                "taken": {}}}),
+        encoding="utf-8",
+    )
+
+    session = mv.build_session("2", 7, [], project)
+
+    assert [g.method for g in session.groups] == ["rta"]
+    assert _names(session) == [_CAP_010_TITLE, "D_L w+m_7 (rta) inv"]
+
+
+@pytest.mark.parametrize("title", [
+    *_CAP_013_TAKEN, _CAP_010_TITLE,
+    "D_R_7 (sw) m-R: lev=-4.5, PK=-2",  # a sweep with a note stays a sweep
+    "D_R_7 (sw) vs (rta)",  # the tag glued to `_N` is the method; a bracket in the note is not
+    "D_ALL_9 (RTA)",  # the grammar lowercases the tag
+    "D_w-L (imp) case35l",  # the one method with no `_N`
+])
+def test_the_fallback_reads_the_tag_where_the_grammar_would(title):
+    """Mirrors the method rather than guessing: the same title without its `D_` is one the grammar
+    reads, and both land in the same column."""
+    naming = vendor_loader.load_naming()
+    method = naming.parse_name(title.removeprefix("D_"))["method"]
+
+    groups = measurement_view.groups_from_titles([title])
+
+    assert [(g["method"], g["names"]) for g in groups] == [(method, [title])]
+
+
+@pytest.mark.parametrize("title", ["Baseline solo", "D_L_7 m-L: lev=-4.5", "D_L_7 (x0) note"])
+def test_a_title_with_no_method_tag_keeps_the_sweep_default(title):
+    groups = measurement_view.groups_from_titles([title])
+
+    assert [g["method"] for g in groups] == ["sw"]
+
+
 def test_a_round_is_linked_to_the_steps_whose_evidence_names_its_captures(tmp_path):
     """No field records that link — but SCR-035 makes every closed step cite something real, and a
     capture is cited by its REW title."""
