@@ -257,13 +257,19 @@ def place_terminal_left(screen) -> None:
 #: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
 _REFIT_SLACK_PX = 12
 
-#: The most the compare box holds as its floor (tcc#96, the controller's finding on the third
-#: pass). The window's floor grows one for one with it: the rest of the Arbiter's header measured
-#: 518 px (offscreen, English and Ukrainian alike) and the window adds 16, so past 222 px the
-#: window can no longer sit in 756 -- half his 1512-px screen, where control mode puts it -- and
-#: sticks out past the screen's edge. 190 keeps the floor at 724, leaving 32 px for fonts wider
-#: than the offscreen ones; it still holds «<preset> · v_NNN» whole for a preset of ~17 characters.
-_COMPARE_BOX_FLOOR_PX = 190
+#: The preset name the compare box always holds whole as its floor, «<this name> · v_NNN»
+#: (tcc#96, the controller's finding on the third pass): 13 letters of ordinary width, longer
+#: than any of the Arbiter's («3.S-shelf», «4.C-cut»). The window's floor grows one for one with
+#: the box, so the box's floor is capped -- in the box's own font, not in pixels. A 190-px cap
+#: (the fourth pass, measured offscreen on the Mac) held these 13 letters there and about six on
+#: the Windows runner, where the offscreen text is twice as wide (Qt's FreeType font database
+#: finds no fonts and draws every glyph as wide as the pixel size; CI run 36623891341), and it
+#: would have held fewer at the app's zoom. In the Mac's font the cap comes to the same 190 px:
+#: the rest of the Arbiter's header measured 518 (English and Ukrainian alike), the window adds
+#: 16, so the floor is 724 -- inside 756, half his 1512-px screen, where control mode puts the
+#: window. A font that widens the rest of the header past that widens the floor too; the cap
+#: cannot buy that back, and that is the zoom finding, not this box's.
+_COMPARE_BOX_FLOOR_NAME = "a" * 13
 
 
 class _CompareBox(QComboBox):
@@ -274,9 +280,10 @@ class _CompareBox(QComboBox):
 
     It asks for the whole of that, but holds as its floor only «<preset> · v_NNN» -- the names a
     project-line version was saved under («v_002 · P3, SQ-2, SQ-3», `ledger_line.label`) give way
-    first -- and never more than `_COMPARE_BOX_FLOOR_PX`: a preset name too long for that gives
-    way next, the version still whole. The hover has the whole text. Whatever it shows is drawn
-    elided, never cut mid-glyph («v_0(», the Arbiter's first screenshot)."""
+    first -- and never more than `floor_cap()`, the room «<_COMPARE_BOX_FLOOR_NAME> · v_NNN»
+    takes in its font: a preset name too long for that gives way next, the version still whole.
+    The hover has the whole text. Whatever it shows is drawn elided, never cut mid-glyph
+    («v_0(», the Arbiter's first screenshot)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -337,6 +344,14 @@ class _CompareBox(QComboBox):
             hint.setWidth(max(hint.width(), self._text_width(self.shown_text()) + chrome))
         return hint
 
+    def floor_cap(self) -> int:
+        """The most this box holds as its floor: «<_COMPARE_BOX_FLOOR_NAME> · v_NNN» in its own
+        font, plus its chrome -- 190 px in the Mac's offscreen font, and as many letters in any
+        other."""
+        hint = super().minimumSizeHint()
+        chrome = hint.width() - self._room(hint)
+        return self._text_width(f"{_COMPARE_BOX_FLOOR_NAME} · v_000") + chrome
+
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
         # A QComboBox's own floor is its size hint.
         hint = super().minimumSizeHint()
@@ -345,7 +360,7 @@ class _CompareBox(QComboBox):
             preset, version, names = parts
             chrome = hint.width() - self._room(hint)
             held = self._text_width(f"{preset} · {version}" + ("…" if names else "")) + chrome
-            hint.setWidth(max(hint.width(), min(held, _COMPARE_BOX_FLOOR_PX)))
+            hint.setWidth(max(hint.width(), min(held, self.floor_cap())))
         return hint
 
     def sync_width(self) -> None:

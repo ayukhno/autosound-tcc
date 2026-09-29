@@ -12,11 +12,12 @@ Two views share one pane:
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -113,10 +114,9 @@ def _is_left(name: str) -> bool:
     return bool(re.search(r"(\bL\b|L$)", name))
 
 
-class _DTab(QLabel):
-    """A head tab/chip («EQ», «⇅ Порівняти», «Копіювати EQ …»): shortens itself to «…» instead of
-    running past its row and getting clipped mid-word (tcc#96, finding 105: «⇅ П», «Копі», the
-    Arbiter's screenshot).
+class _FitLabel(QLabel):
+    """A head label that shortens itself to «…» instead of running past its row and getting
+    clipped mid-word (tcc#96, finding 105: «⇅ П», «Копі», the Arbiter's screenshot).
 
     Drawn elided, never `setText`-ed (the same reasoning as `labels.ElidedButton`): `.text()`
     always stays the real, full string, and only `paintEvent` substitutes a shorter one, measured
@@ -125,13 +125,29 @@ class _DTab(QLabel):
     of this file's own tests build a bare, unshown `DetailPane` (no `show()`/resize at all) and
     read a tab's `.text()` straight back; on such a pane `showEvent`/layout activation can still
     fire once, handing every child SOME provisional width that has nothing to do with an actual
-    window's — eliding against it cut tabs that never had a real narrow row at all."""
+    window's — eliding against it cut tabs that never had a real narrow row at all.
 
-    clicked = Signal()
+    Its floor decides WHEN it gives way (fix round 5 -- the Arbiter on the Windows VM: the full
+    window's head read «Табл…», an empty «EQ», «Рів…», «Затри…», «Ф…» and «закрит…» with the
+    pane 840 px wide, «порівняти з», the box and «інша конфігурація» whole beside them; measured
+    here with the Mac's font and a 1400-px window, the pane 821 px for a head asking 891). A box
+    layout splits what it is short of EQUALLY among the items that can shrink, and the first
+    pass's 24-px floor made the tabs the only ones: the whole deficit went to them, down to a
+    4-px content rect and nothing to draw. One that `holds` asks for its text as its floor, as a
+    plain `QLabel` did before the wave: the layout takes the room from whatever else can give
+    (the table's title), and only a row below its own minimum -- where Qt trims the widest items
+    to one width -- cuts into it, elided instead of clipped. One that does not hold (a chip in a
+    control-mode tab, the title) goes down to its first glyph and «…», never to nothing.
 
-    def __init__(self, text: str) -> None:
+    Whole pixels are not enough to judge a fit: `elidedText` measures in fractions, and a text
+    79.11 px wide given the 79 it asked for lost its last letters (`labels.ElidedLabel`, F-045;
+    the final review saw «Control mo…» at 1600 px on Windows fonts). The hint is rounded up, and
+    the fit is judged in fractions."""
+
+    def __init__(self, text: str = "", holds: bool = True) -> None:
         super().__init__(text)
         self._full = text
+        self._holds = holds
         # The OWNER's hint (`_sync_tabs`'s tcc#54 tooltips, e.g. `_cmp_btn`'s "pick a version
         # first" / "compare with {version}"), separate from the fallback this widget sets for
         # ITSELF when elided with nothing else to say. `None` -- never set -- is not the same as
@@ -139,13 +155,17 @@ class _DTab(QLabel):
         # the reviewer's pass: painting used to call `setToolTip` on every paint, unconditionally,
         # overwriting whichever of the two came first).
         self._owner_tip: Optional[str] = None
-        self.setProperty("class", "d-tab")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         # So `paintEvent` can draw this label's own QSS box (`.d-tab`'s border-radius and padding,
-        # `.d-tab.on`'s fill) through the style -- needed only once it stops calling the native
-        # `QLabel.paintEvent`, which paints that box on its own.
+        # `.d-tab.on`'s fill, `.cmp-other`'s border) through the style -- needed only once it
+        # stops calling the native `QLabel.paintEvent`, which paints that box on its own.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+
+    def set_holds(self, holds: bool) -> None:
+        """Whether the floor is the whole text, or its first glyph and «…»."""
+        if holds != self._holds:
+            self._holds = holds
+            self.updateGeometry()
 
     def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
         self._full = text
@@ -157,23 +177,33 @@ class _DTab(QLabel):
         self._owner_tip = text
         super().setToolTip(text)
 
+    def _width(self, text: str) -> float:
+        return QFontMetricsF(self.font()).horizontalAdvance(text)
+
+    def _chrome(self) -> int:
+        """Padding, border and frame: the label's own hint beyond its text."""
+        return max(0, super().sizeHint().width()
+                   - self.fontMetrics().horizontalAdvance(self._full))
+
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
-        metrics = self.fontMetrics()
-        chrome = max(0, hint.width() - metrics.horizontalAdvance(super().text()))
-        hint.setWidth(metrics.horizontalAdvance(self._full) + chrome)
+        hint.setWidth(math.ceil(self._width(self._full)) + self._chrome())
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
         hint = super().minimumSizeHint()
-        hint.setWidth(min(hint.width(), 24))
+        floor = (self.sizeHint().width() if self._holds
+                 else math.ceil(self._width(self._full[:1] + "…")) + self._chrome())
+        hint.setWidth(min(self.sizeHint().width(), floor))
         return hint
 
     def fit_text(self) -> str:
-        """This tab's text right now: the full string, or elided with «…» to what its row
+        """This label's text right now: the full string, or elided with «…» to what its row
         actually has (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint to
         find out."""
         room = max(0, self.contentsRect().width())
+        if self._width(self._full) <= room:
+            return self._full
         return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
 
     def _sync_tip(self) -> None:
@@ -201,6 +231,19 @@ class _DTab(QLabel):
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
         painter.drawText(self.contentsRect(), int(self.alignment()), shown)
+
+
+class _DTab(_FitLabel):
+    """A head tab/chip («EQ», «⇅ Порівняти», «Копіювати EQ …»): a `_FitLabel` that is clicked.
+    In the full window it holds its text -- the tabs ARE the navigation -- and inside a
+    control-mode tab it gives way (`set_embedded`), as the chips there must (finding 105)."""
+
+    clicked = Signal()
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self.setProperty("class", "d-tab")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         event.accept()
@@ -284,6 +327,10 @@ class _TierPickButton(QToolButton):
         actually given (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint
         to find out."""
         room = max(0, self.width() - self._chrome())
+        # Judged in fractions, as `_FitLabel` does: a whole-pixel room one fraction short of the
+        # text would elide it with its own width to spare (F-045).
+        if QFontMetricsF(self.font()).horizontalAdvance(self._full) <= room:
+            return self._full
         return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -805,14 +852,17 @@ class DetailPane(QFrame):
             tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
             head_layout.addWidget(tab)
             self._param_tabs[field] = tab
-        self._title = QLabel("")
+        # The one thing in this row that gives way while the others still have their width (fix
+        # round 5): what it says, the table below says too. The tabs, the labels and the buttons
+        # hold their text, and a row below its own minimum elides them instead of clipping.
+        self._title = _FitLabel("", holds=False)
         self._title.setProperty("class", "phead-sub")
         head_layout.addWidget(self._title)
         head_layout.addStretch(1)
 
         # «Порівняти з» (the Arbiter, 2026-09-23): what changed since another version of this preset
         # — the previous one by default — is marked in the tables, with what it was on hover.
-        self._compare_label = QLabel(i18n.t("cmpWith"))
+        self._compare_label = _FitLabel(i18n.t("cmpWith"))
         self._compare_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._compare_label)
         self._compare_combo = QComboBox()
@@ -824,7 +874,7 @@ class DetailPane(QFrame):
         self._compare_combo.currentIndexChanged.connect(self._on_compare_changed)
         head_layout.addWidget(self._compare_combo)
         # Said beside the list when the version picked is another preset's (finding 66).
-        self._compare_other = QLabel(i18n.t("cmpOtherTag"))
+        self._compare_other = _FitLabel(i18n.t("cmpOtherTag"))
         self._compare_other.setProperty("class", "cmp-other")
         head_layout.addWidget(self._compare_other)
         self._compare_label.setVisible(False)
@@ -832,8 +882,10 @@ class DetailPane(QFrame):
         self._compare_other.setVisible(False)
 
         # Shortened from its end when the row is short, not cut on both sides («(риті», the
-        # Arbiter, 2026-09-25).
-        self._close_btn = ElidedButton(i18n.t("close"))
+        # Arbiter, 2026-09-25). It holds its text (fix round 5): the layout takes a small
+        # shortfall equally from every item that can shrink, and this one shrank beside a title
+        # with room to give -- «закрит…» on the Windows VM with the pane 840 px wide.
+        self._close_btn = ElidedButton(i18n.t("close"), holds=True)
         self._close_btn.setProperty("class", "d-close")
         self._close_btn.clicked.connect(self.close_pane)
         head_layout.addWidget(self._close_btn)
@@ -889,6 +941,10 @@ class DetailPane(QFrame):
         self._embedded = on
         self._compare_label.setVisible(False)
         self._compare_combo.setVisible(False)
+        # The full window's tabs hold their text; a control-mode tab's chips give way, down to a
+        # glyph and «…» (finding 105; fix round 5).
+        for tab in self._head.findChildren(_DTab):
+            tab.set_holds(not on)
         if on:
             # The row reads: the way back, the channels, then the actions at its end (the
             # Arbiter, 2026-09-25: «ось це в кінець строчки»).

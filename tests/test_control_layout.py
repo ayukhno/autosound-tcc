@@ -453,18 +453,19 @@ def test_the_corner_labels_ask_for_their_own_width_not_zero(tmp_path, monkeypatc
     configuration» «a…» at 1600, 1000 and 756 px alike. `Maximum` -- `ElidedLabel`'s own
     documented "value" mode -- asks for the label's natural width instead.
 
-    The window is SHOWN and laid out at a roomy 1600 px: on a window never shown, no layout hands
-    the labels a width, `text()` stays whole under either policy, and a test reading it passes
-    for nothing (the previous version of this test did exactly that)."""
+    The window is SHOWN and laid out at a width MEASURED to be roomy for this font (`_roomy`):
+    on a window never shown, no layout hands the labels a width, `text()` stays whole under
+    either policy, and a test reading it passes for nothing (the previous version of this test
+    did exactly that). Measured, not 1600 px: that was roomy on the Mac and not on the Windows
+    runner, whose offscreen text is twice as wide (fix round 5, CI run 36623891341)."""
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
     window.show()
     layout = window._control_layout
     layout.enter()
     layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("SQ/v_004"))
-    window.resize(1600, 900)
-    for _ in range(4):
-        QApplication.processEvents()
+    _settle(window, 1600)
+    _settle(window, _roomy(window))
     assert layout._compare_other.isVisibleTo(window), "another preset picked: its tag is up"
     assert layout._compare_label.text() == i18n.t("cmpWith"), layout._compare_label.text()
     assert layout._compare_other.text() == i18n.t("cmpOtherTag"), layout._compare_other.text()
@@ -514,6 +515,31 @@ def _corner_words(window):
                  for label in (layout._compare_label, layout._compare_other))
 
 
+def _header_asks(window):
+    """The window widths at which the header can show «порівняти з» whole, and both labels
+    whole: the header's ask with everything at its natural width -- what `_fit_corner` judges
+    against -- plus what the window adds around the header. Read off the shown, laid-out window.
+
+    Measured rather than assumed (fix round 5): 1600 px was roomy on the Mac and not on the
+    Windows runner, whose offscreen text is twice as wide (Qt's FreeType font database finds no
+    fonts there and draws every glyph as wide as the pixel size), so the tag stayed hidden at
+    1600 and the flicker sweep started below both thresholds (CI run 36623891341)."""
+    layout = window._control_layout
+    corner = layout._corner
+    header = corner.parentWidget()
+    spacing = corner.layout().spacing()
+    label, tag = layout._compare_label, layout._compare_other
+    wants = {w: w.sizeHint().width() + spacing for w in (label, tag)}
+    bare = header.sizeHint().width() - sum(n for w, n in wants.items() if not w.isHidden())
+    around = window.width() - header.width()
+    return bare + wants[label] + around, bare + wants[label] + wants[tag] + around
+
+
+def _roomy(window):
+    """A width with both labels' ask met and room to spare past the refit slack."""
+    return _header_asks(window)[1] + 60
+
+
 @pytest.mark.parametrize("lang", ["en", "uk"])
 def test_the_corner_labels_are_whole_or_hidden_never_cut(tmp_path, monkeypatch, lang):
     """tcc#96, finding 105 -- the controller's ruling after measuring the second pass: at control
@@ -521,24 +547,32 @@ def test_the_corner_labels_are_whole_or_hidden_never_cut(tmp_path, monkeypatch, 
     «compa…», and with another configuration picked «п…» beside «інша конфі…». Each label is now
     shown whole or not at all. What a hidden one said moves into the box: its hover says
     «порівняти з», and another configuration's version is shown with its preset's name,
-    «3.S-shelf · v_002» (the open list's rows stay as #103 left them)."""
+    «3.S-shelf · v_002» (the open list's rows stay as #103 left them).
+
+    "Roomy" is measured for the font at hand (`_roomy`), and "half a screen" is 756 px or the
+    window's own floor where this font's header is wider than that (fix round 5: on the Windows
+    runner's twice-as-wide offscreen text, 1600 px was not roomy and 756 not reachable)."""
     try:
         window = _control_window(tmp_path, monkeypatch, lang)
         layout = window._control_layout
         combo = layout.compare_combo
         full = (i18n.t("cmpWith"), i18n.t("cmpOtherTag"))
-        for width in (1600, 756):
+        _settle(window, 1600)
+        for roomy in (True, False):
             for picked in ("v_001", "3.S-shelf/v_002"):
                 combo.setCurrentIndex(combo.findData(picked))
-                _settle(window, width)
+                _settle(window, _roomy(window) if roomy else 756)
                 words = _corner_words(window)
-                if width == 1600:
+                if roomy:
                     assert words == (full[0], full[1] if "/" in picked else None), words
-                assert all(w is None or w == f for w, f in zip(words, full)), (width, words)
+                assert all(w is None or w == f for w, f in zip(words, full)), (roomy, words)
                 if words[0] is None:
                     assert i18n.t("cmpWith") in combo.hover_tip.text(), "the hidden word is kept"
-        # 756 px, another configuration picked:
-        assert _corner_words(window) == (None, None), "half a screen: both give way"
+        # Half a screen, another configuration picked. Both labels give way there unless the
+        # font is narrow enough for «порівняти з» to fit whole, which the rule allows.
+        with_label, _with_both = _header_asks(window)
+        if window.width() + control_layout._REFIT_SLACK_PX < with_label:
+            assert _corner_words(window) == (None, None), "half a screen: both give way"
         assert combo.shown_text() == "3.S-shelf · v_002", "the picked version names its preset"
         assert combo.fit_text() == combo.shown_text(), "and shows it whole"
         assert combo.itemText(combo.currentIndex()) == "v_002", "the list's own row is unchanged"
@@ -552,7 +586,9 @@ def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path
     """Shown or hidden is decided from the header's width against what the header asks for WITH
     the label, and a hidden label comes back only with room to spare: resized a few pixels at a
     time across both thresholds and back, each label changes once each way, and every width
-    settles to one state."""
+    settles to one state. The sweep runs from 60 px above both labels' ask to 60 px below
+    «порівняти з»'s, both measured for the font at hand (`_header_asks`; fix round 5 -- a sweep
+    fixed at 1160–745 px started below both thresholds on the Windows runner)."""
     from PySide6.QtCore import QEvent, QObject
 
     class _Toggles(QObject):
@@ -566,10 +602,16 @@ def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path
     window = _control_window(tmp_path, monkeypatch)
     layout = window._control_layout
     layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("3.S-shelf/v_002"))
+    _settle(window, 1600)
+    with_label, with_both = _header_asks(window)
+    floor = window.minimumSizeHint().width()
+    if with_label - 60 <= floor:
+        pytest.skip(f"the window's floor ({floor} px) is above where «порівняти з» goes "
+                    f"({with_label} px): no threshold to cross in this font")
     toggles = _Toggles()
     for label in (layout._compare_label, layout._compare_other):
         label.installEventFilter(toggles)
-    widths = list(range(1160, 740, -5))
+    widths = list(range(with_both + 60, with_label - 60, -5))
     seen = []
     for width in widths + widths[::-1]:
         _settle(window, width)
@@ -605,7 +647,14 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, m
     stuck out past the screen's right edge. On the project line a row carries every name its
     version was saved under («v_002 · P3, SQ-2, SQ-3»). The box's floor is now «<preset> · v_NNN»
     and no more than a cap: the saved names give way first, then a preset name too long for the
-    cap; the version stays, and the hover has the whole text."""
+    cap; the version stays, and the hover has the whole text.
+
+    The cap is the box's `floor_cap()`, measured in its font (fix round 5). Half a screen is
+    checked where the header can sit in it at all: on a font whose header is wider than 756 px
+    even with the smallest box -- the Windows runner's offscreen text, or the app's zoom -- the
+    floor is the header's doing, not the box's, and the check is skipped and says so."""
+    from PySide6.QtWidgets import QComboBox
+
     try:
         window = _control_window(tmp_path, monkeypatch, lang)
         assert len(_LONG_PRESET) == 30
@@ -615,20 +664,63 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, m
         layout = window._control_layout
         layout._fill_compare()
         combo = layout.compare_combo
+        cap, smallest = combo.floor_cap(), QComboBox.minimumSizeHint(combo).width()
+        too_wide = []
         for key in ("3.S-shelf/v_002", f"{_LONG_PRESET}/v_002"):
             combo.setCurrentIndex(combo.findData(key))
             _settle(window, 756)
-            floor = window.minimumSizeHint().width()
-            assert floor <= 756 and window.width() == 756, (key, floor, window.width())
+            floor, box = window.minimumSizeHint().width(), combo.minimumSizeHint().width()
+            assert box <= cap, (key, box, cap)
             shown, full = combo.fit_text(), combo.shown_text()
             if key.startswith("3.S"):
                 assert shown.startswith("3.S-shelf · v_002"), f"the saved names give way: {shown}"
             else:
                 assert shown.endswith(" · v_002") and shown.startswith("5.W-"), shown
             assert full in combo.hover_tip.text(), "the whole text is in the hover"
+            if floor > 756 and floor - box + smallest > 756:
+                too_wide.append((key, floor - box, smallest))
+                continue
+            assert floor <= 756 and window.width() == 756, (key, floor, window.width(), cap)
         layout.leave()
+        if too_wide:
+            pytest.skip("this font's header does not sit in half a screen with the smallest box "
+                        f"(the zoom finding, not the box's cap): {too_wide}")
     finally:
         i18n.set_language("en")
+
+
+def test_the_compare_box_s_floor_holds_a_typical_name_in_any_font():
+    """tcc#96, fix round 5: the fourth pass capped the box's floor at 190 px, measured offscreen
+    on the Mac. The Windows runner's offscreen text is twice as wide (Qt's FreeType font
+    database finds no fonts there and draws every glyph as wide as the pixel size), and under
+    that cap «3.S-shelf · v_002» came out «3.… · v_002» (CI run 36623891341). The cap is the
+    width of «<13 letters> · v_NNN» in the box's own font now, so the same names fit whole at
+    any font: the box's font is widened to about twice and four times here, and the picked name
+    still shows whole with the box at its own floor."""
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.control_layout import _CompareBox
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    caps = []
+    for stretch in (100, 141, 200):
+        combo = _CompareBox()
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(6)
+        font = QFont(combo.font())
+        font.setStretch(stretch)
+        combo.setFont(font)
+        fill_compare_combo(combo, ["v_001"], {"v_001": "v_001"},
+                           [("3.S-shelf", [("3.S-shelf/v_002", "v_002")])], "4.C-cut", None)
+        combo.setCurrentIndex(combo.findData("3.S-shelf/v_002"))
+        combo.resize(combo.minimumSizeHint())
+        assert combo.minimumSizeHint().width() <= combo.floor_cap(), stretch
+        assert combo.fit_text() == combo.shown_text() == "3.S-shelf · v_002", \
+            (stretch, combo.fit_text())
+        caps.append(combo.floor_cap())
+    assert caps[0] < caps[1] < caps[2], f"the cap follows the font: {caps}"
 
 
 def test_a_squeezed_compare_box_settles_at_its_floor_not_below(tmp_path, monkeypatch):

@@ -132,9 +132,15 @@ class ElidedButton(QPushButton):
     are also in the main menu's help section in full, so nothing becomes unreachable.
     """
 
-    def __init__(self, text: str = "", parent=None) -> None:
+    def __init__(self, text: str = "", parent=None, holds: bool = False) -> None:
         super().__init__(text, parent)
         self._full = text
+        # `holds`: the floor is the whole label, as a plain button's is. The detail pane's
+        # «закрити ✕» holds (tcc#96, fix round 5): a box layout takes a small shortfall equally
+        # from every item that can shrink, and the button shrank beside a title with room to
+        # give -- «закрит…» on the Windows VM with the pane 840 px wide. A row below its own
+        # minimum still elides it, instead of clipping it («(риті», the Arbiter, 2026-09-25).
+        self._holds = holds
         # `Preferred`, not the QPushButton default `Minimum`: only a policy carrying the shrink
         # flag lets a layout read `minimumSizeHint` at all (`qSmartMinSize`). The vertical half
         # stays `Fixed` -- this row's height is not in question.
@@ -154,30 +160,51 @@ class ElidedButton(QPushButton):
     def _chrome(self) -> int:
         """What the button spends on something other than its text: padding, border, the style's
         own margins. Measured off the real hint rather than assumed, the way `ElidedLabel` does
-        it, so a stylesheet change carries into this number instead of going unnoticed."""
-        return max(0, super().minimumSizeHint().width()
+        it, so a stylesheet change carries into this number instead of going unnoticed.
+
+        Off the base class's `sizeHint`, not its `minimumSizeHint`: the latter asks `sizeHint()`
+        for its answer, and PySide's virtual dispatch would hand that call to the override below,
+        which asks this method again."""
+        return max(0, super().sizeHint().width()
                    - self.fontMetrics().horizontalAdvance(self._full))
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        """Rounded UP from the fractional width (the same F-045 as `ElidedLabel`): `elidedText`
+        measures in fractions, and a whole-pixel hint one fraction short read «Control mo…» with
+        the whole window to spare (the final review of W-4, Windows fonts)."""
+        hint = super().sizeHint()
+        hint.setWidth(max(hint.width(), self._chrome() + math.ceil(
+            QFontMetricsF(self.font()).horizontalAdvance(self._full))))
+        return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
         hint = super().minimumSizeHint()
-        hint.setWidth(self._chrome() + math.ceil(
+        hint.setWidth(self.sizeHint().width() if self._holds else self._chrome() + math.ceil(
             QFontMetricsF(self.font()).horizontalAdvance(self._short())))
         return hint
 
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        """Drawn elided, never re-`setText`-ed: changing the text would change the hint, the
-        layout would hand out a different width, and the two would chase each other."""
+    def fit_text(self) -> str:
+        """What the button draws: the whole label, the label elided to its room, or its leading
+        glyph -- without having to paint to find out."""
         metrics = self.fontMetrics()
         room = max(0, self.width() - self._chrome())
+        if QFontMetricsF(self.font()).horizontalAdvance(self._full) <= room:
+            return self._full
         shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
-        if shown == self._full:
-            super().paintEvent(event)
-            self._tell_the_full_text(cut=False)
-            return
         # `elidedText` walks down to "…" and then to nothing; the glyph is more use than either,
         # and `minimumSizeHint` above guarantees there is room for it.
         if metrics.horizontalAdvance(shown) < metrics.horizontalAdvance(self._short()):
             shown = self._short()
+        return shown
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Drawn elided, never re-`setText`-ed: changing the text would change the hint, the
+        layout would hand out a different width, and the two would chase each other."""
+        shown = self.fit_text()
+        if shown == self._full:
+            super().paintEvent(event)
+            self._tell_the_full_text(cut=False)
+            return
         option = QStyleOptionButton()
         self.initStyleOption(option)
         option.text = shown
