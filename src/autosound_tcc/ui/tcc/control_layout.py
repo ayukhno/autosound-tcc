@@ -66,9 +66,6 @@ _SIZES_KEY_V = "ui/control_layout/vertical"
 _SIZES_KEY_H = "ui/control_layout/horizontal"
 _DEFAULT_V = [420, 480]
 _DEFAULT_H = [1, 1]
-#: What the compare box spends on the drop arrow and its own padding, beyond the text (tcc#96,
-#: finding 105) -- roughly what a Fusion-derived style reserves for a QComboBox.
-_COMPARE_BOX_CHROME_PX = 34
 
 
 def _event_line(event: dict) -> str:
@@ -462,7 +459,14 @@ class ControlLayout:
         # beside it did, and a plain QLabel does not give ground -- it just gets clipped mid-word
         # («порівнят», tcc#96, finding 105). `_compact` also hides it outright when the header is
         # tight, but the label still has to survive whatever width it is given in between.
-        self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=16)
+        # `Maximum`, not `ElidedLabel`'s own default `Ignored`: `Ignored` asks the LAYOUT for zero
+        # width and takes only whatever is left over after everything else is placed, which in
+        # this row left it 0 px and reading «c…» at every width, including full screen -- an
+        # opus reviewer's own measurement of the first pass of this fix, caught before commit.
+        # `Maximum` is `ElidedLabel`'s documented "value" mode: its natural width, ground given
+        # only under real squeeze.
+        self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=16,
+                                          policy=QSizePolicy.Policy.Maximum)
         self._compare_label.setProperty("class", "phead-sub")
         layout.addWidget(self._compare_label)
         self.compare_combo = QComboBox()
@@ -470,15 +474,21 @@ class ControlLayout:
         self.compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.compare_combo.setMinimumContentsLength(6)
-        # `minimumContentsLength` only sizes the box's PREFERRED width -- its own `minimumSizeHint`
-        # is a hint a header squeezed past its total minimum can still shrink below, which is how
-        # the box came back «v_0(», or nothing at all (tcc#96, finding 105). `setMinimumWidth` is
-        # the hard floor Qt actually honours: enough for an ordinary version on its own, «v_006».
-        self.compare_combo.setMinimumWidth(
-            self.compare_combo.fontMetrics().horizontalAdvance("v_000") + _COMPARE_BOX_CHROME_PX)
+        # NO explicit `setMinimumWidth` here (tcc#96, finding 105) -- a first attempt set one,
+        # and an opus reviewer's pass caught that it made things WORSE: an explicit minimum
+        # REPLACES `minimumSizeHint` as the layout's floor even when it is smaller, so a guessed
+        # constant (34 px, a Fusion-style guess; the app runs the platform style with QSS) pulled
+        # the floor down from the combo's own natural ~121 px to ~98. `QComboBox.
+        # minimumSizeHint()` already equals `sizeHint()` (verified: a plain `QComboBox` built the
+        # same way reports the same QSize for both) -- Qt does not let an ordinary layout shrink
+        # it below that on its own, so the box already has a real floor without anything set here.
+        # What actually produced the Arbiter's empty box is still not established: the window
+        # cannot be forced below its own real minimum (697 px) offscreen, so the squeeze that
+        # produced it could not be reproduced in this environment to find out.
         self.compare_combo.currentIndexChanged.connect(self._on_compare_picked)
         layout.addWidget(self.compare_combo)
-        self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=16)
+        self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=16,
+                                          policy=QSizePolicy.Policy.Maximum)
         self._compare_other.setProperty("class", "cmp-other")
         self._compare_other.setVisible(False)
         layout.addWidget(self._compare_other)

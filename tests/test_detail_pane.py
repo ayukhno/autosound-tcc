@@ -936,6 +936,54 @@ def test_a_real_pane_s_chips_elide_the_same_way_when_squeezed():
         assert widget.text() == full, "resizing alone never rewrites the real text"
 
 
+def test_the_compare_row_tooltip_survives_a_paint():
+    """tcc#96, finding 105 -- IMPORTANT 2, an opus reviewer's pass on the first fix:
+    `_DTab.paintEvent` used to call `setToolTip` on every single paint -- `""` when the text fit,
+    the full text when it did not -- silently erasing `_sync_tabs`'s tcc#54 hint on `_cmp_btn`
+    («Pick a version in «compare with» first», measured after `open_eq`, gone after the first
+    paint). A resize (which schedules a repaint) must not touch a tooltip the owner set, elided
+    or not."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq(inputs=True)
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_embedded(True)
+    pane.set_view(view)
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+    owner_tip = pane._cmp_btn.toolTip()
+    assert owner_tip == i18n.t("cmpRowOff"), owner_tip
+
+    pane._cmp_btn.resize(20, 22)  # narrow enough to elide -- and a resize schedules a paint
+    assert pane._cmp_btn.toolTip() == owner_tip, "the owner's hint survives being elided"
+
+    pane._cmp_btn.resize(400, 22)  # roomy again
+    assert pane._cmp_btn.toolTip() == owner_tip, "and survives not being elided either"
+
+
+def test_a_tab_with_no_owner_tooltip_falls_back_to_its_full_text_when_elided():
+    """The fallback `_DTab` gives itself when NOBODY else named a hint -- so an elided tab is
+    never silently unexplained, the other half of IMPORTANT 2's fix. `show()`d: `resizeEvent`
+    (where the fallback is synced) does not fire on a bare, never-shown top-level widget at all."""
+    from autosound_tcc.ui.tcc.detail_pane import _DTab
+
+    _app()
+    long = "Копіювати EQ m-Left-Tweeter-Front"
+    tab = _DTab(long)
+    tab.show()
+    assert tab.toolTip() == "", "roomy: nothing to explain"
+    tab.resize(40, 22)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert tab.toolTip() == long, "elided, and nobody else said anything: the full text stands in"
+    tab.resize(2000, 22)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert tab.toolTip() == "", "roomy again: the fallback clears itself"
+    tab.close()
+
+
 def test_the_own_group_is_headed_too_and_its_current_version_is_greyed_out():
     """tcc#103, finding 112: with «4.C-cut» open, «порівняти з» showed «—», a lone `v_001`, then
     every OTHER preset under its own heading — the open configuration's own versions had none, and

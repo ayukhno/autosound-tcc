@@ -387,49 +387,113 @@ def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
 
 
 
-def test_a_small_window_elides_tab_labels_instead_of_cutting_them_mid_word(tmp_path, monkeypatch):
-    """tcc#96, finding 105: at a narrow width every tab label came back cut mid-word («Табл»,
-    «Ріве», «Затр», «Фаз», no «…» anywhere) instead of shrinking cleanly -- `DotTabBar` drew each
-    tab's FULL text centred on its actual (already squeezed) rect, which could ask for less than
-    zero room and run the text into the neighbouring tab."""
+def test_a_narrow_tab_elides_its_label_instead_of_cutting_it_mid_word(tmp_path, monkeypatch):
+    """tcc#96, finding 105. Corrected per an opus reviewer's pass on the first fix (IMPORTANT 3):
+    the earlier version of this test resized the WHOLE WINDOW to 420 px, but a `MainWindow` here
+    cannot go below its own real minimum (697 px) offscreen -- the resize is silently clamped, so
+    the eliding branch never actually ran and the test passed for nothing.
+
+    A bare `DotTabBar` resized directly does not reliably reproduce genuine per-tab squeeze
+    either: measured by hand (see the fix report), Qt's own tab layout on this platform/style
+    settles each tab at a floor that still comfortably fits ordinary tab text, however much
+    narrower the bar itself is made beyond that -- there may be a REAL narrow-window path to
+    genuine squeeze on the Arbiter's own Mac, but it was not reproducible here. `tabRect` is
+    forced directly instead, which is what the reviewer's suggested alternative ("set the tab
+    bar... to a fixed width smaller than its text") comes down to when the bar's own layout will
+    not cooperate -- and tests `fit_text`'s own eliding computation deterministically."""
+    from PySide6.QtCore import QRect
+
+    from autosound_tcc.ui.tcc.setting_status import DotTabBar
+
+    _app()
+    bar = DotTabBar()
+    long = f'{i18n.t("copyEqBank")} m-Left-Tweeter-Front-Channel'
+    bar.addTab(long)
+    monkeypatch.setattr(bar, "tabRect", lambda _index: QRect(0, 0, 60, 24))
+    shown, width = bar.fit_text(0)
+    assert shown != long, "genuinely shortened, not left whole"
+    assert shown.endswith("…") and len(shown) > 1, "a whole glyph prefix, not a bare cut"
+    assert width <= 60, "never wider than the room it was given"
+
+    # With real room, nothing is touched at all.
+    monkeypatch.setattr(bar, "tabRect", lambda _index: QRect(0, 0, 2000, 24))
+    shown2, _width2 = bar.fit_text(0)
+    assert shown2 == long
+
+
+def test_the_compare_box_gets_no_floor_below_its_own_minimum(tmp_path, monkeypatch):
+    """tcc#96, finding 105 -- IMPORTANT 1, an opus reviewer's pass on the first fix: that pass set
+    an explicit `setMinimumWidth`, which turned out to REPLACE `minimumSizeHint` as the layout's
+    floor even when it is SMALLER (measured: a 34 px guessed chrome constant pulled the effective
+    floor down from the combo's own ~121 px to ~98 -- lower than before the fix, not higher).
+    Nothing is set explicitly now, so nothing can undercut it; `QComboBox.minimumSizeHint()`
+    already equals `sizeHint()` (asserted below, which is what makes it a real floor an ordinary
+    layout will not shrink the box past on its own).
+
+    What actually produced the Arbiter's empty box is still not established -- the window cannot
+    be forced below its own real minimum (697 px) offscreen, so the squeeze that produced it
+    could not be reproduced here to find out."""
     window = _window(tmp_path, monkeypatch)
     _with_rig(window)
-    window.show()
     layout = window._control_layout
     layout.enter()
-    window.resize(420, 500)
-    for _ in range(5):
-        QApplication.processEvents()
-
-    bar = layout.tabs.tabBar()
-    for index in range(bar.count()):
-        full = bar.tabText(index)
-        shown, width = bar.fit_text(index)
-        assert shown == full or shown.endswith("…"), (full, shown)
-        assert width <= bar.tabRect(index).width(), "never wider than the tab actually has"
-    layout.leave()
-    window.close()
-
-
-def test_a_small_window_keeps_the_compare_box_readable_not_empty(tmp_path, monkeypatch):
-    """tcc#96, finding 105: «поле "порівняти з" обрізано, а в такому варіанті зовсім пусто (хоч
-    там є вибір)» -- the box had no floor of its own, so a header squeezed past its total minimum
-    could still shrink it to a sliver («v_0(») or nothing. `setMinimumWidth` is the hard floor Qt
-    actually keeps, even when the rest of the row has to give more ground instead."""
-    window = _window(tmp_path, monkeypatch)
-    _with_rig(window)
-    window.show()
-    layout = window._control_layout
-    layout.enter()
-    window.resize(360, 500)
-    for _ in range(5):
-        QApplication.processEvents()
-
     combo = layout.compare_combo
-    assert combo.minimumWidth() > 0, "a floor was actually set"
-    assert combo.width() >= combo.minimumWidth(), "the header never shrinks it past its floor"
+    assert combo.minimumWidth() == 0, "no explicit override to undercut the natural floor"
+    assert combo.minimumSizeHint() == combo.sizeHint(), "QComboBox's own floor IS its sizeHint"
     layout.leave()
-    window.close()
+
+
+def test_the_corner_labels_ask_for_their_own_width_not_zero(tmp_path, monkeypatch):
+    """tcc#96, finding 105 -- CRITICAL 1, an opus reviewer's pass on the first fix: `ElidedLabel`
+    defaults to `QSizePolicy.Ignored`, which asks the layout for ZERO width of its own and grows
+    only into whatever the row's OTHER items leave over -- this row has its own explicit stretch
+    (`head_layout.addStretch(1)`, `main_window.py`) competing for exactly that leftover space, so
+    the label got none of it. Measured (real app, English): «порівняти з» («compare with») read
+    «c…» at 1600, 1000 and 756 px alike -- not reproducible offscreen by resizing this window (it
+    cannot go below its own 697 px minimum here either, same as finding IMPORTANT 3), so the
+    policy itself is asserted directly rather than the rendered symptom: `Maximum` --
+    `ElidedLabel`'s own documented "value" mode -- asks for the label's natural width instead."""
+    from PySide6.QtWidgets import QSizePolicy
+
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    layout = window._control_layout
+    layout.enter()
+    assert layout._compare_label.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum
+    assert layout._compare_other.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum
+    # Kept as a secondary, coarser guard: true today regardless of the policy (this window is not
+    # narrow enough offscreen to tell the two apart by rendered text), but still a real invariant.
+    assert layout._compare_label.text() == i18n.t("cmpWith"), layout._compare_label.text()
+    layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("SQ/v_004"))
+    assert layout._compare_other.text() == i18n.t("cmpOtherTag"), layout._compare_other.text()
+    layout.leave()
+
+
+def test_a_squeezed_compare_box_settles_at_its_floor_not_below(tmp_path, monkeypatch):
+    """The same box, built the same way `_build_corner` builds it, sharing a row with a widget
+    that demands far more room than the row can give -- a real, if artificial, squeeze (a whole
+    `MainWindow` cannot be forced this narrow offscreen, per the test above)."""
+    from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
+
+    _app()
+    container = QWidget()
+    row = QHBoxLayout(container)
+    hungry = QLabel("x" * 400)
+    combo = QComboBox()
+    combo.setProperty("class", "mini-select")
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(6)
+    combo.addItem("v_006 · SQ-Comp")
+    row.addWidget(hungry)
+    row.addWidget(combo)
+    container.resize(120, 30)
+    container.show()
+    for _ in range(5):
+        QApplication.processEvents()
+
+    assert combo.width() >= combo.minimumSizeHint().width(), \
+        "never squeezed past its own floor even when a sibling wants everything"
+    assert combo.width() > 0 and combo.currentText(), "the box still has something to show"
 
 
 def test_the_tab_dots_sit_close_to_the_text(tmp_path, monkeypatch):

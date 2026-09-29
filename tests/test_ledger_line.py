@@ -202,6 +202,37 @@ def test_compare_groups_keeps_the_current_version_even_with_nothing_else_to_offe
     assert ledger_line.compare_groups(tmp_path, "SQ", "v_001") == [("SQ", ["v_001"])]
 
 
+def test_current_is_dropped_from_every_group_it_does_not_head(tmp_path):
+    """The GAP the controller caught in review (an opus reviewer's pass on the first fix):
+    `current` stays IN its own group now (tcc#103), but must stay OUT of every OTHER one --
+    before this change it was dropped from every group; a version's own file can name a preset
+    different from the one it is CURRENT for (SQ is applying v_006, but v_006 itself says it was
+    proposed for FULL), and nothing marks it there as the version already open."""
+    versions = tmp_path / "versions"
+    versions.mkdir(parents=True)
+    (versions / "v_004.json").write_text(
+        '{"version": "v_004", "preset": "FULL", "parent": null}', encoding="utf-8")
+    (versions / "v_006.json").write_text(
+        '{"version": "v_006", "preset": "FULL", "parent": null}', encoding="utf-8")
+    (tmp_path / "slots.json").write_text(
+        '{"active": "SQ", "layout": "project-numbered", '
+        '"slots": {"SQ": {"version": "v_006", "dsp_preset": 1}, '
+        '"FULL": {"version": "v_004", "dsp_preset": 2}}, "configs": {}}', encoding="utf-8")
+    groups = ledger_line.compare_groups(tmp_path, "SQ", "v_006")
+    assert dict(groups).get("FULL", []) == ["v_004"], \
+        "current does not reappear, selectable, under the preset its own file names"
+
+
+def test_compare_groups_still_drops_current_from_another_preset_s_own_numbering(tmp_path):
+    """The old layout numbers each preset separately -- a version literally called the same as
+    `current` can exist, unrelated, in another preset's own numbering, and must not be offered as
+    a pick there either (the same GAP, on the old layout)."""
+    _old_layout(tmp_path)
+    groups = ledger_line.compare_groups(tmp_path, "SQ", "v_002")
+    assert dict(groups)["FULL"] == ["v_001"], \
+        "FULL's own v_002 -- a different file, the same number -- is not offered as a pick"
+
+
 def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkeypatch):
     from autosound_tcc.core import config
     from autosound_tcc.ui.tcc import main_window

@@ -132,6 +132,13 @@ class _DTab(QLabel):
     def __init__(self, text: str) -> None:
         super().__init__(text)
         self._full = text
+        # The OWNER's hint (`_sync_tabs`'s tcc#54 tooltips, e.g. `_cmp_btn`'s "pick a version
+        # first" / "compare with {version}"), separate from the fallback this widget sets for
+        # ITSELF when elided with nothing else to say. `None` -- never set -- is not the same as
+        # `""` -- set, deliberately, to nothing: only the former falls back (finding IMPORTANT 2,
+        # the reviewer's pass: painting used to call `setToolTip` on every paint, unconditionally,
+        # overwriting whichever of the two came first).
+        self._owner_tip: Optional[str] = None
         self.setProperty("class", "d-tab")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # So `paintEvent` can draw this label's own QSS box (`.d-tab`'s border-radius and padding,
@@ -144,6 +151,11 @@ class _DTab(QLabel):
         self._full = text
         super().setText(text)
         self.updateGeometry()
+        self._sync_tip()
+
+    def setToolTip(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._owner_tip = text
+        super().setToolTip(text)
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
@@ -164,11 +176,23 @@ class _DTab(QLabel):
         room = max(0, self.contentsRect().width())
         return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
 
+    def _sync_tip(self) -> None:
+        """The owner's tooltip if it ever set one -- even an empty one, deliberately; otherwise
+        the text elision took away, so nothing is silently lost. Called from `resizeEvent` and
+        `setText`, never from `paintEvent`: painting must stay free of side effects (finding
+        IMPORTANT 2)."""
+        if self._owner_tip is not None:
+            return
+        super().setToolTip(self._full if self.fit_text() != self._full else "")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._sync_tip()
+
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
         shown = self.fit_text()
         if shown == self._full:
             super().paintEvent(event)
-            self.setToolTip("")
             return
         option = QStyleOption()
         option.initFrom(self)
@@ -177,7 +201,6 @@ class _DTab(QLabel):
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
         painter.drawText(self.contentsRect(), int(self.alignment()), shown)
-        self.setToolTip(self._full)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         event.accept()
