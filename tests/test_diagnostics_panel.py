@@ -498,6 +498,20 @@ def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
     assert button.isEnabled(), "a failure the person can retry must leave them the button"
 
 
+def test_a_git_too_old_to_check_is_said_as_such_on_the_row(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog, _asked = _skill_offered(monkeypatch, done=updates.SkillUpdate(
+        False, "git_too_old", "git version 2.30.1: unknown option -- Y"))
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    text = dialog._update_rows["skill"][0].text()
+    assert i18n.t("updWhy_git_too_old") in text and "git version 2.30.1" in text
+    assert i18n.t("updWhy_bad_signature") not in text
+
+
 def test_a_clone_with_local_changes_names_them_and_asks_about_sending(monkeypatch):
     """tcc#91: in place of the grey button, the changed files named and one action. The question
     names the files, because the send takes them off the machine; the patch is kept either way."""

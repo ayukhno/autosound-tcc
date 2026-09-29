@@ -596,21 +596,34 @@ _UPKEEP_FILES = ("scripts/upkeep.py", "rew_tool/gates/side_effect.py", "rew_tool
 _FETCH_TIMEOUT = 300.0
 
 
-def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM) -> tuple[bool, str]:
-    """`(ok, the line to show)` for `tag` in `repo`, by the skill's `verify_tag` rules.
+#: What a git that CANNOT check an SSH signature says, as install.sh v3.0.64 `verify_tag` matches
+#: it (`*gpg.format*|*"unknown option"*|*"-Y"*`, "this git may be too old"): a git before 2.34 does
+#: not know `gpg.format=ssh`, an ssh-keygen without `-Y` answers "unknown option", and git itself
+#: names `ssh-keygen -Y` when it is missing. Plus no ssh-keygen at all. Not a bad signature — a
+#: machine that cannot look — and on the VM, with an older git, it read as a forged release.
+_CANNOT_CHECK = ("gpg.format", "unknown option", "-Y", "cannot run ssh-keygen")
+
+
+def _verify_tag(repo: Path, tag: str, *,
+                signed_from: str = SKILL_SIGNED_FROM) -> tuple[bool, str, str]:
+    """`(ok, the line to show, reason key when not ok)` for `tag` in `repo`, by the skill's
+    `verify_tag` rules.
 
     Good signature by the constant's key: ok. A release before `signed_from`: ok, and the line
-    says it predates signing. Anything else at or after it — unsigned, a stranger's key, not a
-    release name — refused, in git's own words. The developer's switch skips it, visibly.
+    says it predates signing. The developer's switch skips it, and the line says so. Anything else
+    at or after it is refused: `git_too_old` when git could not check at all (`_CANNOT_CHECK`),
+    `bad_signature` for an unsigned tag, a stranger's key, a name that is not a release — in git's
+    own words either way.
     """
     if os.environ.get(SKIP_VERIFY_VAR) == "1":
-        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)"
+        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)", ""
     here, first = _RELEASE_RE.fullmatch(tag), _RELEASE_RE.fullmatch(signed_from)
     if here is None or first is None:
-        return False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check"
+        return (False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check",
+                "bad_signature")
     if tuple(map(int, here.groups())) < tuple(map(int, first.groups())):
         return True, (f"{tag} predates signed tags (they start at {signed_from}): installed "
-                      f"without a signature check")
+                      f"without a signature check"), ""
     with tempfile.TemporaryDirectory(prefix="autosound_signers_") as tmp:
         signers = Path(tmp) / "allowed_signers"
         signers.write_text(f'{SKILL_SIGNING_PRINCIPAL} namespaces="git" {SKILL_SIGNING_KEY}\n',
@@ -618,8 +631,12 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM) -
         ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
                         "verify-tag", tag, cwd=repo)
     if ok and "Good" in said:
-        return True, f"{tag}: signature good ({SKILL_SIGNING_PRINCIPAL})"
-    return False, f"{tag}: {(said.splitlines() or ['git verify-tag failed'])[-1]}"
+        return True, f"{tag}: signature good ({SKILL_SIGNING_PRINCIPAL})", ""
+    last = (said.splitlines() or ["git verify-tag failed"])[-1]
+    if any(mark in said for mark in _CANNOT_CHECK):
+        _known, version = _git("--version")
+        return False, f"{version or 'git'}: {last}", "git_too_old"
+    return False, f"{tag}: {last}", "bad_signature"
 
 
 def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
@@ -636,10 +653,23 @@ def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
     return done.stdout if done.returncode == 0 else None
 
 
-def _extract_upkeep(repo: Path, tag: str, root: Path) -> tuple[Optional[Path], str, str]:
+@dataclass(frozen=True)
+class Extracted:
+    """The new tag's `upkeep.py`, taken out to run — or why there is none to run."""
+
+    script: Optional[Path]
+    #: A key when `script` is None, as `Status.reason`; `detail` is git's words or the line.
+    reason: str = ""
+    detail: str = ""
+    #: TCC's own line about the tag's signature — shown on the row when `upkeep.py clone` gives
+    #: none, so the developer's switch and a release from before signing are never silent (HUB-032).
+    signature: str = ""
+
+
+def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     """Fetch `tag` into the clone, check it, take its `upkeep.py` out into `root`.
 
-    `(script, "", "")`, or `(None, reason key, detail)`. Exactly the installers' order (install.sh
+    Exactly the installers' order (install.sh
     `checkout_method` → `verify_tag` → `keep_local`): what was fetched is checked BEFORE anything of
     it runs — the script about to run comes from this tag, and a script that checks its own
     signature has checked nothing. `upkeep.py clone` checks it again; that one is the skill's.
@@ -651,11 +681,11 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> tuple[Optional[Path], s
     ok, said = _git("fetch", "--quiet", "--depth", "1", "origin",
                     f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
     if not ok:
-        return None, "fetch_failed", said
-    signed, line = _verify_tag(repo, tag)
+        return Extracted(None, "fetch_failed", said)
+    signed, line, why = _verify_tag(repo, tag)
     _log.info("skill tag %s: %s", tag, line)
     if not signed:
-        return None, "bad_signature", line
+        return Extracted(None, why, line)
     for name in _UPKEEP_FILES:
         blob = _git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}")
         if blob is None:
@@ -667,13 +697,13 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> tuple[Optional[Path], s
     if not script.is_file():
         # A release from before the script (v3.0.64): nothing to run, and no git fallback — the
         # skill's installer is the one way across, once.
-        return None, "no_upkeep", ""
-    return script, "", ""
+        return Extracted(None, "no_upkeep", signature=line)
+    return Extracted(script, signature=line)
 
 
 @contextmanager
 def _upkeep_from_tag(repo: Path, tag: str):
-    """Yields `(script, reason, detail)` for the `upkeep.py` of `tag`; the copy is removed after.
+    """Yields the `Extracted` `upkeep.py` of `tag`; the copy is removed after.
 
     The NEW tag's script, not the clone's own: the clones on the Arbiter's machines (3.0.61 on the
     VM, 3.0.63 on the Mac) predate the script altogether, and install.sh says the same of itself —
@@ -784,10 +814,10 @@ def local_changes(tag: str = "") -> LocalChanges:
     target, said = _target(tag)
     if not target:
         return LocalChanges(False, reason="probe_failed", detail=said)
-    with _upkeep_from_tag(repo, target) as (script, why, detail):
-        if script is None:
-            return LocalChanges(False, reason=why, detail=detail)
-        answer = _upkeep("status", clone=repo, script=script)
+    with _upkeep_from_tag(repo, target) as got:
+        if got.script is None:
+            return LocalChanges(False, reason=got.reason, detail=got.detail)
+        answer = _upkeep("status", clone=repo, script=got.script)
     if not answer.ok:
         return LocalChanges(False, reason=answer.reason, detail=answer.detail)
     clone = answer.data.get("clone") or {}
@@ -850,30 +880,35 @@ def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) 
     target, said = _target(tag)
     if not target:
         return SkillUpdate(False, "probe_failed", said)
-    with _upkeep_from_tag(repo, target) as (script, why, detail):
-        if script is None:
-            return SkillUpdate(False, why, detail)
-        return _apply_with(script, repo, target, keep_local=keep_local, send=send)
+    with _upkeep_from_tag(repo, target) as got:
+        if got.script is None:
+            return SkillUpdate(False, got.reason, got.detail)
+        return _apply_with(got, repo, target, keep_local=keep_local, send=send)
 
 
-def _apply_with(script: Path, repo: Path, target: str, *, keep_local: bool,
+def _apply_with(got: Extracted, repo: Path, target: str, *, keep_local: bool,
                 send: bool) -> SkillUpdate:
     """`apply_skill`'s steps, with the new tag's `upkeep.py` already in hand."""
+    script = got.script
     patch, sent = "", None
     if keep_local:
         kept = _upkeep("keep-local", *(["--send"] if send else []), clone=repo, script=script)
         if not kept.ok:
             return SkillUpdate(False, kept.reason, kept.detail)
         patch, sent = str(kept.data.get("patch") or ""), kept.data.get("sent")
+        # The receipt, where it survives the dialog being closed mid-update.
+        _log.info("skill: local changes kept in %s; sent: %s", patch or "(none)", sent)
     moved = _upkeep("clone", "--tag", target, clone=repo, script=script)
     if not moved.ok:
         return SkillUpdate(False, moved.reason, moved.detail, patch=patch, sent=sent)
+    _log.info("skill: %s -> %s (%s)", moved.data.get("from"), moved.data.get("to"),
+              moved.data.get("signature") or got.signature)
     libs = _upkeep("libs", clone=repo, script=script)
     libs_ok = libs.ok and bool(libs.data.get("ok", True))
     return SkillUpdate(
         True,
         version=str(moved.data.get("to") or target),
-        signature=str(moved.data.get("signature") or ""),
+        signature=str(moved.data.get("signature") or got.signature),
         patch=patch, sent=sent,
         libs_ok=libs_ok,
         libs=_libs_moved(libs.data) if libs_ok

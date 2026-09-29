@@ -194,7 +194,7 @@ def _fake_upkeep(monkeypatch, tmp_path, answers: dict):
 
     @contextlib.contextmanager
     def extracted(repo, tag):
-        yield script, "", ""
+        yield updates.Extracted(script, signature=f"{tag}: checked by TCC")
 
     monkeypatch.setattr(updates, "_upkeep_from_tag", extracted)
     calls = []
@@ -383,7 +383,8 @@ print(json.dumps({
                "tools": [], "libs": {}},
     "keep-local": {"clone": "c", "changed": ["a.txt"], "version": "v3.0.9", "patch": "/kept/x.patch",
                    "sent": None, "reset": True},
-    "clone": {"clone": "c", "from": "v3.0.9", "to": sys.argv[-1], "signature": "stub: checked"},
+    "clone": {"clone": "c", "from": "v3.0.9", "to": sys.argv[-1],
+              "signature": os.environ.get("UPKEEP_STUB_SIGNATURE", "stub: checked")},
     "libs": {"python": "p", "command": "c", "ok": True, "before": {}, "after": {}, "why": ""},
 }[command]))
 """
@@ -544,6 +545,78 @@ def test_a_release_signed_by_the_author_s_key_runs_and_a_stranger_s_does_not(mon
     foreign = updates.apply_skill("v3.0.65")
     assert foreign.reason == "bad_signature" and _runs(log) == []
     assert list(temp.iterdir()) == []
+
+
+# ---- fix round 1: a git too old to check, and TCC's own signature line on the row ------------
+
+@pytest.mark.parametrize("said", [
+    # git before 2.34: `gpg.format=ssh` is not a value it knows
+    "error: unsupported value for gpg.format: ssh\nfatal: bad config variable 'gpg.format'",
+    # an ssh-keygen without `-Y`
+    "unknown option -- Y\nusage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile]",
+    # git saying so itself
+    "error: ssh-keygen -Y find-principals/verify is needed for ssh signature verification "
+    "(available in openssh version 8.2p1+)",
+    # no ssh-keygen at all
+    "error: cannot run ssh-keygen: No such file or directory",
+])
+def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_path, said):
+    """install.sh v3.0.64 `verify_tag` matches `*gpg.format*|*"unknown option"*|*"-Y"*` and says
+    "this git may be too old": a machine that cannot CHECK a signature is not a release whose
+    signature is wrong. The VM, where git is older, is exactly where it would read as a forged
+    release. Nothing is installed either way."""
+    _an_installed_clone(monkeypatch, tmp_path)
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    ran = []
+    monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
+    monkeypatch.setattr(updates, "_git_blob", lambda repo, spec: pytest.fail("nothing extracted"))
+
+    def fake_git(*args, cwd=None, timeout=None):
+        if "verify-tag" in args:
+            return False, said
+        if args == ("--version",):
+            return True, "git version 2.30.1"
+        return True, ""
+
+    monkeypatch.setattr(updates, "_git", fake_git)
+
+    done = updates.apply_skill("v3.0.64", keep_local=True)
+
+    assert done.ok is False and done.reason == "git_too_old", done
+    assert "git version 2.30.1" in done.detail
+    assert ran == []
+
+
+def test_a_signature_that_is_simply_wrong_stays_a_bad_signature(monkeypatch, tmp_path):
+    _an_installed_clone(monkeypatch, tmp_path)
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        (False, 'Could not verify signature.\nerror: no principal matched') if "verify-tag" in args
+        else (True, "")))
+
+    ok, line, reason = updates._verify_tag(tmp_path, "v3.0.64")
+
+    assert (ok, reason) == (False, "bad_signature") and "no principal matched" in line
+
+
+def test_tcc_s_own_signature_line_reaches_the_row_when_upkeep_gives_none(monkeypatch, tmp_path):
+    """HUB-032 asks for a VISIBLE line. The developer's switch and a release from before signing
+    were said only in the log; the row showed upkeep's line or nothing."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    monkeypatch.setenv("UPKEEP_STUB_SIGNATURE", "")
+
+    before = updates.apply_skill("v3.0.11")
+    assert before.ok and before.signature.startswith("v3.0.11 predates signed tags"), before
+
+    _git_in("tag", "-a", "v3.0.64", "-m", "unsigned", cwd=tmp_path / "origin")
+    monkeypatch.setenv(updates.SKIP_VERIFY_VAR, "1")
+    skipped = updates.apply_skill("v3.0.64")
+    assert skipped.ok and skipped.signature == (
+        f"signature NOT checked: {updates.SKIP_VERIFY_VAR}=1 is set (a developer's switch)")
+
+    monkeypatch.setenv("UPKEEP_STUB_SIGNATURE", "v3.0.64: upkeep's own line")
+    assert updates.apply_skill("v3.0.64").signature == "v3.0.64: upkeep's own line", (
+        "upkeep's line first when it gives one")
 
 
 def _git_in_keygen(path, comment):
