@@ -22,6 +22,7 @@ from html import escape
 from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -107,9 +108,9 @@ class _SubLine(ElidedLabel):
     rows of it made 196px of scroll running past the end of the content (user, 2026-08-22, with
     the screenshot; measured offscreen: 814px of content inside a 1010px claim).
 
-    A value that differs from «порівняти з» is drawn in the window's colour for a change, the one
-    the table's changed cells use (tcc#104, finding 113). So the line is rich text, cut on its
-    plain words: the same prefix, with the colour kept on what is left of each value.
+    A value that differs from «порівняти з» is drawn in the window's colour for a change, and
+    bold, as the table's changed cells are (tcc#104, finding 113; tcc#108, finding 116). So the
+    line is rich text, cut on its words: the colour and the weight kept on what is left of each.
     """
 
     def __init__(self) -> None:
@@ -127,20 +128,44 @@ class _SubLine(ElidedLabel):
         return list(self._parts)
 
     def _elide(self) -> None:
-        shown = self.fontMetrics().elidedText(
-            self._full, Qt.TextElideMode.ElideRight, max(self.width(), self._min_width)
-        )
-        cut = shown != self._full and shown.endswith("…")
-        room = len(shown) - 1 if cut else len(shown)
-        colour = mark_colour("chg")
-        out = []
+        """Cut where the line runs out of room, each run measured in the weight it is drawn in.
+
+        Measuring the line as plain text, as `ElidedLabel` does, is wrong here twice: bold is wider
+        than plain in most faces (Menlo is an exception; in the offscreen default face m-R's line
+        ran 5.4 px past its edge), and whole-pixel metrics round (0.5 px past). Fractional metrics
+        are what the rich text is laid out with, and neighbours of one weight are measured
+        together, as they are drawn.
+        """
+        plain = QFontMetricsF(self.font())
+        heavy = QFont(self.font())
+        heavy.setBold(True)
+        bold = QFontMetricsF(heavy)
+        runs: list = []  # [text, lit]
         for i, (text, changed) in enumerate(self._parts):
             for piece, lit in ((" · " if i else "", False), (text, changed)):
-                piece = piece[:room]
-                room -= len(piece)
-                if piece:
-                    piece = escape(piece)
-                    out.append(f'<span style="color:{colour}">{piece}</span>' if lit else piece)
+                if runs and runs[-1][1] == lit:
+                    runs[-1][0] += piece
+                elif piece:
+                    runs.append([piece, lit])
+        room = max(self.width(), self._min_width)
+        cut = sum((bold if lit else plain).horizontalAdvance(text) for text, lit in runs) > room
+        if cut:
+            room -= plain.horizontalAdvance("…")
+        colour = mark_colour("chg")
+        out = []
+        for text, lit in runs:
+            metrics = bold if lit else plain
+            wide = metrics.horizontalAdvance(text)
+            n = len(text)
+            while n and metrics.horizontalAdvance(text[:n]) > room:
+                n -= 1
+            if n:
+                piece = escape(text[:n])
+                out.append(f'<span style="color:{colour};font-weight:700">{piece}</span>'
+                           if lit else piece)
+            if n < len(text):
+                break
+            room -= wide
         said = "".join(out) + ("…" if cut else "")
         if said != QLabel.text(self):
             QLabel.setText(self, said)

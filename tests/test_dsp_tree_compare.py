@@ -3,10 +3,12 @@ channel's EQ chip (the Arbiter, 2026-09-26, finding 74, tcc#55)."""
 
 from __future__ import annotations
 
+import math
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup  # noqa: E402
@@ -144,7 +146,8 @@ def test_sw_s_changed_high_pass_is_marked_on_its_line_not_only_its_eq():
     # event only when shown, so the line is asked to re-cut itself here.
     sw._line2.resize(2000, 20)
     sw._line2._elide()
-    assert sw._line2.text().startswith(f'<span style="color:{mark_colour("chg")}">HP 20 BW4</span>')
+    assert sw._line2.text().startswith(
+        f'<span style="color:{mark_colour("chg")};font-weight:700">HP 20 BW4</span>')
     assert sw._line2.text().count("<span") == 1
 
 
@@ -198,6 +201,96 @@ def test_nothing_compared_clears_every_field_mark():
     assert chan.changed_fields() == frozenset() and _marked(chan) == []
     assert "Delay" not in " ".join(text for text, _ in chan._line2.parts())
     assert not chan._pill.isVisibleTo(chan)
+
+
+# ---- bold as well as blue, as the table's changed cells (the Arbiter, 2026-09-29, finding 116, tcc#108)
+
+
+def _drawn(line):
+    """`([(text, bold)], width)`: the line's rich text as Qt lays it out, in the line's own font."""
+    from PySide6.QtGui import QTextDocument
+
+    doc = QTextDocument()
+    doc.setDefaultFont(line.font())
+    doc.setDocumentMargin(0)
+    doc.setHtml(line.text())
+    runs = []
+    it = doc.begin().begin()
+    while not it.atEnd():
+        fragment = it.fragment()
+        runs.append((fragment.text(), fragment.charFormat().fontWeight() >= 700))
+        it += 1
+    return runs, doc.idealWidth()
+
+
+def _themed(tree):
+    """The window's own stylesheet on the tree, so the line wears the font the app gives it."""
+    from autosound_tcc.ui.tcc.theme import build_qss, current_theme
+
+    tree.setStyleSheet(build_qss(current_theme()))
+    return tree
+
+
+def test_a_changed_value_reads_bold_as_well_as_blue_and_nothing_else_does():
+    _app()
+    tree = _compared_tree()
+    for name, bold in (("sw", "HP 20 BW4"), ("m-R", "Delay 4.19ms"), ("w-L", "")):
+        line = _row_of(tree, "physical_outputs", name)._line2
+        line.resize(2000, 20)
+        line._elide()
+        runs, _width = _drawn(line)
+        assert "".join(text for text, heavy in runs if heavy) == bold, (name, runs)
+        assert "".join(text for text, _ in runs) == " · ".join(t for t, _ in line.parts()), name
+
+
+@pytest.mark.parametrize("themed", [False, True], ids=["app-face", "theme-face"])
+def test_a_cut_line_with_a_bold_part_still_fits_its_width(themed):
+    """The cut measured the line as plain text, and bold is wider than plain in most faces: the
+    line would run past its edge by what the bold part gained (the #104 review). The theme's
+    monospace keeps bold as wide as plain where it is installed; the app's own face does not, and
+    a machine without the theme's faces draws the line in another. Every width, both faces."""
+    from PySide6.QtGui import QFont, QFontMetricsF
+
+    _app()
+    tree = _compared_tree()
+    if themed:
+        _themed(tree)
+    line = _row_of(tree, "physical_outputs", "m-R")._line2
+    line.ensurePolished()
+    line.resize(2000, 20)
+    line._elide()
+    full = math.ceil(_drawn(line)[1])
+    heavy = QFont(line.font())
+    heavy.setBold(True)
+    said = " · ".join(text for text, _ in line.parts()) + "…"
+    widest = max(QFontMetricsF(heavy).horizontalAdvance(c) for c in said)
+    for width in range(40, full + 1):
+        line.resize(width, 20)
+        line._elide()
+        runs, drawn = _drawn(line)
+        assert drawn <= width, (width, drawn, line.text())
+        cut = line.text().endswith("…")
+        assert cut == (width < full), (width, line.text())
+        if cut:
+            # Cut where the next letter would not fit, not sooner.
+            assert width - drawn < widest, (width, drawn, line.text())
+    line.resize(full - 1, 20)
+    line._elide()
+    assert any(heavy for _text, heavy in _drawn(line)[0]), "the cut kept the bold on what is left"
+
+
+def test_a_changed_pill_is_bold_as_well_as_blue():
+    """Every pill is drawn bold (`QLabel[class~="pill"]`), so a changed NORM is bold already; this
+    holds it there beside the line's bold (tcc#108)."""
+    from autosound_tcc.ui.tcc.theme import current_theme
+
+    _app()
+    tree = _themed(_compared_tree())
+    pill = _row_of(tree, "physical_outputs", "m-R")._pill
+    pill.ensurePolished()
+    assert "chg" in pill.property("class").split()
+    assert pill.font().bold()
+    assert pill.palette().windowText().color().name() == current_theme().info
 
 
 def test_the_tree_marks_exactly_the_cells_the_table_marks():
