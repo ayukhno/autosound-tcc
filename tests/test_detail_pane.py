@@ -702,12 +702,16 @@ def test_the_tiers_are_pickers_in_the_eq_header():
         head.indexOf(pane._pair_btn) < head.indexOf(pane._eq_help), \
         "the actions close the row; copy before the pair, so the pair does not move when copy goes"
     assert not pane._title.isVisibleTo(pane), "the lit field already says which EQ"
-    width = picker.width()
+    # The row's ASKED width, not the assigned `.width()` (tcc#96, finding 105): the picker can
+    # now genuinely shrink when the header has no room to spare, which changes what it is GIVEN
+    # -- «nothing jumps» means it does not ask for more or less depending on which channel is
+    # picked, and `sizeHint` is where that is decided (`_TierPickButton.set_preferred_width`).
+    width = picker.sizeHint().width()
 
     pane._on_pair_toggle()
     picker = pane._tier_pickers["physical_outputs"]
     assert picker.text() == "Output: m-L/m-R"
-    assert picker.width() == width, "the field keeps its width: nothing jumps"
+    assert picker.sizeHint().width() == width, "the field asks for its width: nothing jumps"
     assert pane._tier_pickers["inputs"].text() == "Input: -/-"
 
     menu = pane._tier_pickers["virtual_channels"].menu()
@@ -866,6 +870,70 @@ def test_the_compare_list_is_wide_enough_for_whole_lines():
                        [("2.S-shelf", [("2.S-shelf/v_001", "v_001 · 2.S-shelf")])])
     view = combo.view()
     assert view.minimumWidth() >= view.sizeHintForColumn(0)
+
+
+# ---- narrow-window head chips (tcc#96, finding 105) ----------------------------------------------
+
+def test_a_dtab_elides_instead_of_relying_on_a_width_it_never_had():
+    """tcc#96, finding 105: in a small control-mode window the head's own tabs and chips -- «⇅
+    Порівняти», «Копіювати EQ …» (both `_DTab`s) -- came back cut mid-word, no «…» anywhere
+    («⇅ П», «Копі», the Arbiter's screenshot). Given real room, nothing is touched at all; given
+    none, it ends in «…», never a bare cut. `.text()` stays the real string either way -- only
+    `fit_text()` (what `paintEvent` actually draws) shortens."""
+    from autosound_tcc.ui.tcc.detail_pane import _DTab
+
+    _app()
+    long = "Копіювати EQ m-Left-Tweeter-Front"
+    tab = _DTab(long)
+    tab.resize(40, 22)
+    shown = tab.fit_text()
+    assert shown != long and shown.endswith("…"), shown
+    assert not long.startswith(shown[:-1]) or len(shown) < len(long), "genuinely shortened"
+    assert tab.text() == long, "the real text never changes -- only what is painted"
+
+    tab.resize(2000, 22)
+    assert tab.fit_text() == long, "with room to spare nothing is cut at all"
+
+
+def test_the_tier_chip_elides_instead_of_getting_clipped_past_its_row():
+    """tcc#96, finding 105: «Output: c» -- the tier picker's chip (`_fill_pickers`) used to be a
+    FIXED-width `QToolButton` the layout could never shrink; a header with no room for it just
+    ran it past its own edge and clipped it there, which read as the text itself failing to fit.
+    Given a width narrower than its own preferred one, its text elides instead."""
+    from autosound_tcc.ui.tcc.detail_pane import _TierPickButton
+
+    _app()
+    button = _TierPickButton()
+    button.setText("Output: m-Left-Tweeter-Front")
+    button.set_preferred_width(300)
+    button.resize(40, 22)
+    shown = button.fit_text()
+    assert shown != button.text() and shown.endswith("…"), shown
+
+    button.resize(300, 22)
+    assert button.fit_text() == button.text(), "at its own preferred width, nothing is cut"
+
+
+def test_a_real_pane_s_chips_elide_the_same_way_when_squeezed():
+    """The mechanism above, wired up in `DetailPane` itself: `_cmp_btn`, `_eq_copy` and the tier
+    picker (`_fill_pickers`) all reachable through the pane the Arbiter actually saw, not just the
+    classes in isolation."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_with_eq(inputs=True)
+    outputs = _grp(view, "physical_outputs")
+    pane = DetailPane()
+    pane.set_embedded(True)
+    pane.set_view(view)
+    pane.open_eq(outputs, _row(outputs, "m-L"))
+
+    for widget in (pane._cmp_btn, pane._eq_copy, pane._tier_pickers["physical_outputs"]):
+        full = widget.text()
+        widget.resize(60, widget.height() or 22)
+        shown = widget.fit_text()
+        assert shown == full or shown.endswith("…"), (widget, full, shown)
+        assert widget.text() == full, "resizing alone never rewrites the real text"
 
 
 def test_the_own_group_is_headed_too_and_its_current_version_is_greyed_out():

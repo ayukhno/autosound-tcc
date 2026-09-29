@@ -25,6 +25,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QScrollArea,
+    QSizePolicy,
+    QStyle,
+    QStyleOption,
+    QStyleOptionToolButton,
+    QStylePainter,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -109,12 +114,70 @@ def _is_left(name: str) -> bool:
 
 
 class _DTab(QLabel):
+    """A head tab/chip («EQ», «⇅ Порівняти», «Копіювати EQ …»): shortens itself to «…» instead of
+    running past its row and getting clipped mid-word (tcc#96, finding 105: «⇅ П», «Копі», the
+    Arbiter's screenshot).
+
+    Drawn elided, never `setText`-ed (the same reasoning as `labels.ElidedButton`): `.text()`
+    always stays the real, full string, and only `paintEvent` substitutes a shorter one, measured
+    against whatever room THIS paint actually has. `labels.ElidedLabel` was tried first and
+    reverted -- it elides eagerly, inside `setText` and on every `resizeEvent`, and a great many
+    of this file's own tests build a bare, unshown `DetailPane` (no `show()`/resize at all) and
+    read a tab's `.text()` straight back; on such a pane `showEvent`/layout activation can still
+    fire once, handing every child SOME provisional width that has nothing to do with an actual
+    window's — eliding against it cut tabs that never had a real narrow row at all."""
+
     clicked = Signal()
 
     def __init__(self, text: str) -> None:
         super().__init__(text)
+        self._full = text
         self.setProperty("class", "d-tab")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # So `paintEvent` can draw this label's own QSS box (`.d-tab`'s border-radius and padding,
+        # `.d-tab.on`'s fill) through the style -- needed only once it stops calling the native
+        # `QLabel.paintEvent`, which paints that box on its own.
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._full = text
+        super().setText(text)
+        self.updateGeometry()
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().sizeHint()
+        metrics = self.fontMetrics()
+        chrome = max(0, hint.width() - metrics.horizontalAdvance(super().text()))
+        hint.setWidth(metrics.horizontalAdvance(self._full) + chrome)
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        hint.setWidth(min(hint.width(), 24))
+        return hint
+
+    def fit_text(self) -> str:
+        """This tab's text right now: the full string, or elided with «…» to what its row
+        actually has (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint to
+        find out."""
+        room = max(0, self.contentsRect().width())
+        return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        shown = self.fit_text()
+        if shown == self._full:
+            super().paintEvent(event)
+            self.setToolTip("")
+            return
+        option = QStyleOption()
+        option.initFrom(self)
+        painter = QStylePainter(self)
+        painter.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.setFont(self.font())
+        painter.drawText(self.contentsRect(), int(self.alignment()), shown)
+        self.setToolTip(self._full)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         event.accept()
@@ -125,6 +188,93 @@ class _DTab(QLabel):
         self.setProperty("class", cls)
         self.style().unpolish(self)
         self.style().polish(self)
+
+
+class _TierPickButton(QToolButton):
+    """A tier picker's chip («Output: c», `_fill_pickers`): as wide as the longest thing it could
+    say, so switching between channels never moves the row (finding 71, 6) — but able to give
+    ground when the ROW itself has no room, eliding instead of running past the head's edge and
+    getting clipped there, which is what «Output: c» cut to («tcc#96, finding 105) actually was: a
+    fixed-width button the layout could not shrink at all, not its own text failing to fit itself.
+
+    A `QToolButton` on purpose, not `labels.ElidedButton` (`QPushButton`): the theme's QSS keys
+    `.tier-pick`'s colours, hover and hidden menu-indicator off the `QToolButton` type itself
+    (`theme.py`), and a `QPushButton` would silently stop matching it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._full = ""
+        self._preferred_width = 0
+        # `Maximum`, not `Preferred`: `Preferred` also carries the GROW flag, and with the row's
+        # old hard `setFixedWidth` gone this widget would happily take any leftover space in the
+        # row instead of stopping at its own preferred width (caught by
+        # `test_the_tiers_are_pickers_in_the_eq_header`'s "nothing jumps" -- it jumped to 640 px).
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._full = text
+        super().setText(text)
+        self.updateGeometry()
+
+    def set_preferred_width(self, width: int) -> None:
+        """The row's STABLE width, off the tier's longest possible label — not whatever text
+        happens to be picked right now, which `sizeHint` would otherwise track on its own and
+        move the row every time the pick changed (the property `setFixedWidth` used to give it,
+        before it also had to be able to shrink)."""
+        self._preferred_width = width
+        self.updateGeometry()
+
+    def _chrome(self) -> int:
+        """What the button spends on its icon and its own padding, beyond the text — measured off
+        the real `minimumSizeHint`, the way `labels.ElidedButton` does it, so the theme's QSS
+        (padding, the hidden menu-indicator) carries into this number instead of being guessed.
+
+        `QToolButton.minimumSizeHint()` asks `sizeHint()` for its own answer, and PySide's virtual
+        dispatch hands that back to THIS class's override below — so with `_preferred_width` set,
+        it would measure OUR OWN preferred width against the text instead of the button's actual
+        icon/padding overhead. Cleared here and restored after, so the measurement is the widget's
+        real chrome, not whatever we last told `sizeHint()` to say."""
+        saved, self._preferred_width = self._preferred_width, 0
+        try:
+            chrome = max(0, super().minimumSizeHint().width()
+                         - self.fontMetrics().horizontalAdvance(self._full))
+        finally:
+            self._preferred_width = saved
+        return chrome
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().sizeHint()
+        if self._preferred_width:
+            hint.setWidth(self._preferred_width)
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        # Room for the chrome and a single elided character -- the floor that lets a squeezed row
+        # actually shrink this button instead of leaving it fixed and clipped past its own edge.
+        hint.setWidth(self._chrome() + self.fontMetrics().horizontalAdvance("…"))
+        return hint
+
+    def fit_text(self) -> str:
+        """This chip's text right now: the full string, or elided with «…» to what it was
+        actually given (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint
+        to find out."""
+        room = max(0, self.width() - self._chrome())
+        return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        shown = self.fit_text()
+        if shown == self._full:
+            super().paintEvent(event)
+            return
+        # Drawn elided, never `setText`-ed: changing the real text would change `minimumSizeHint`
+        # too (it reads `self._full`), and the two would chase each other (`labels.ElidedButton`'s
+        # same reasoning).
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.text = shown
+        QStylePainter(self).drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
 
 
 #: Freq first, then Q and Gain in the order the processor's own software shows them (finding 68,
@@ -1280,7 +1430,7 @@ class DetailPane(QFrame):
                         or next((r for r in rows if r.eq_count() > 0), None))
                 partner = by_name.get(_sibling_name(pick.name) or "") if pick is not None else None
             name = _TIER_NAME.get(tier.id, tier.label or "?")
-            button = QToolButton()
+            button = _TierPickButton()
             button.setText(f"{name}: {self._pair_text(pick, partner, paired)}")
             button.setProperty("class", "tier-pick on" if tier.id == group.id else "tier-pick")
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -1292,11 +1442,14 @@ class DetailPane(QFrame):
             # With an icon a tool button shows ONLY the icon unless told otherwise.
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setToolTip(tip_for(status, self._compare_text))
-            # As wide as the longest thing it can say, so switching never moves the row.
+            # As wide as the longest thing it can say, so switching never moves the row -- the
+            # PREFERRED width, not a fixed one: a squeezed head still has to be able to shrink it
+            # (tcc#96, finding 105), which is what elides its text instead of clipping the whole
+            # button past the row's edge.
             button.ensurePolished()
             longest = max((f"{name}: {self._pair_text(r, by_name.get(_sibling_name(r.name) or ''), p)}"
                            for r in rows for p in (False, True)), key=len, default=f"{name}: -/-")
-            button.setFixedWidth(button.fontMetrics().horizontalAdvance(longest) + 40)
+            button.set_preferred_width(button.fontMetrics().horizontalAdvance(longest) + 40)
             menu = QMenu(button)
             for r in rows:
                 count = band_count(r.eq_bands())
