@@ -20,7 +20,9 @@ On macOS that quietly works and takes effect at the next start; on Windows it ca
 `.exe` and its loaded DLLs are locked, and `uv` would fail in the middle with a permission error
 that reads like a bug. So TCC's update is handed to a terminal the person can watch and told to
 run after the app is closed. Which is also the honest shape: it downloads several hundred
-megabytes, and that belongs in a window with output, not behind a spinner.
+megabytes, and that belongs in a window with output, not behind a spinner. `uv` cannot check a
+signature, so before the window gets anything TCC checks its own tag the way the method's is
+checked (`prepare_tcc_update`, tcc#102): a tag that does not verify gets no script at all.
 
 Nothing here raises and nothing here writes without being asked: `check_*` only reads and asks the
 network, `apply_skill()` is the one function that changes anything, and it refuses on any checkout
@@ -47,6 +49,8 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.core import child, config, install_report, vendor_loader
+from autosound_tcc.core.signed_tags import (SKIP_VERIFY_VAR, TCC_SIGNED_FROM, TCC_SIGNING_KEY,
+                                            TCC_SIGNING_PRINCIPAL, allowed_signers_line)
 
 #: Where each half comes from. The installer's own constants, kept identical on purpose: an update
 #: that pulled from a different place than the install did would be a second source of truth.
@@ -152,8 +156,9 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     directory that is no longer the one it started with. One behaviour on both platforms is also
     one thing to explain.
 
-    The install is one step between the wait and the result, `tcc_install_command(tag)`: a check
-    of TCC's own tag (tcc#102) goes in front of it with its own line, and nothing else moves.
+    The install is one step between the wait and the result, `tcc_install_command(tag)`. TCC's own
+    tag is checked before this script is written at all (`prepare_tcc_update`, tcc#102), so the
+    script carries no check of its own: a tag that does not verify gets no script.
     """
     if pid is None:
         pid = os.getpid()
@@ -579,10 +584,11 @@ _UPKEEP_TIMEOUT = {"status": 150.0, "keep-local": 180.0, "clone": 360.0, "libs":
 #: #82 HUB-031): a CONSTANT, never a file read from the tag being verified — a tag's own
 #: `allowed_signers` would vouch for itself. Tags before `SKILL_SIGNED_FROM` predate signing and
 #: pass with a line saying so. `tests/test_updates.py` compares these with the vendored script's.
+#: TCC's own anchor and the developer's switch `SKIP_VERIFY_VAR`, one name for both checks, are
+#: `core/signed_tags.py`'s (tcc#102), imported above.
 SKILL_SIGNING_PRINCIPAL = "ayukhno"
 SKILL_SIGNING_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHLm4x1yz9JbFfBlxdQA8vR8yYMupVktswes3CL7QE1y"
 SKILL_SIGNED_FROM = "v3.0.64"
-SKIP_VERIFY_VAR = "AUTOSOUND_SKIP_TAG_VERIFY"
 
 #: Where the method lives inside its repository, and what of the NEW tag is taken out to run its
 #: updater: `upkeep.py` and the two files it imports — the installers' own list (install.sh
@@ -599,39 +605,64 @@ _FETCH_TIMEOUT = 300.0
 #: What a git that CANNOT check an SSH signature says, as install.sh v3.0.64 `verify_tag` matches
 #: it (`*gpg.format*|*"unknown option"*|*"-Y"*`, "this git may be too old"): a git before 2.34 does
 #: not know `gpg.format=ssh`, an ssh-keygen without `-Y` answers "unknown option", and git itself
-#: names `ssh-keygen -Y` when it is missing. Plus no ssh-keygen at all. Not a bad signature — a
-#: machine that cannot look — and on the VM, with an older git, it read as a forged release.
-_CANNOT_CHECK = ("gpg.format", "unknown option", "-Y", "cannot run ssh-keygen")
+#: names `ssh-keygen -Y` when it is missing. Plus no ssh-keygen at all — "cannot run" on macOS and
+#: Linux, "cannot spawn" in Git for Windows. Not a bad signature — a machine that cannot look —
+#: and on the VM, with an older git, it read as a forged release.
+_CANNOT_CHECK = ("gpg.format", "unknown option", "-Y", "cannot run ssh-keygen",
+                 "cannot spawn ssh-keygen")
 
 
-def _verify_tag(repo: Path, tag: str, *,
-                signed_from: str = SKILL_SIGNED_FROM) -> tuple[bool, str, str]:
+def _release_key(name: str) -> Optional[tuple[int, ...]]:
+    """`v3.0.64` -> (3, 0, 64); None for any other name — the skill's `tag_key`."""
+    match = _RELEASE_RE.fullmatch(name)
+    return tuple(map(int, match.groups())) if match else None
+
+
+def _verdict_by_name(tag: str, signed_from: str, order) -> Optional[tuple[bool, str, str]]:
+    """What can be said of `tag` without git, as `_verify_tag` says it — or None when the
+    signature itself has to be checked. So a caller that must first FETCH the tag (TCC's own,
+    `check_tcc_tag`) fetches nothing for a release that predates signing."""
+    if os.environ.get(SKIP_VERIFY_VAR) == "1":
+        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)", ""
+    here, first = order(tag), order(signed_from)
+    if here is None or first is None:
+        return (False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check",
+                "bad_signature")
+    if here < first:
+        return True, (f"{tag} predates signed tags (they start at {signed_from}): installed "
+                      f"without a signature check"), ""
+    return None
+
+
+def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
+                principal: str = "", signing_key: str = "",
+                order=_release_key) -> tuple[bool, str, str]:
     """`(ok, the line to show, reason key when not ok)` for `tag` in `repo`, by the skill's
-    `verify_tag` rules.
+    `verify_tag` rules — for the method's tags by default, for TCC's with its own anchor, first
+    signed tag and channel order (`check_tcc_tag`).
 
     Good signature by the constant's key: ok. A release before `signed_from`: ok, and the line
     says it predates signing. The developer's switch skips it, and the line says so. Anything else
     at or after it is refused: `git_too_old` when git could not check at all (`_CANNOT_CHECK`),
     `bad_signature` for an unsigned tag, a stranger's key, a name that is not a release — in git's
     own words either way.
+
+    Only the SSH form of git's answer counts as good (`Good "git" signature …`): the check forces
+    `gpg.format=ssh`, and a GPG signature that some key on this machine happens to vouch for
+    (`Good signature from …`) is not the author's key.
     """
-    if os.environ.get(SKIP_VERIFY_VAR) == "1":
-        return True, f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)", ""
-    here, first = _RELEASE_RE.fullmatch(tag), _RELEASE_RE.fullmatch(signed_from)
-    if here is None or first is None:
-        return (False, f"{tag!r} is not a release tag (vX.Y.Z), so there is no signature to check",
-                "bad_signature")
-    if tuple(map(int, here.groups())) < tuple(map(int, first.groups())):
-        return True, (f"{tag} predates signed tags (they start at {signed_from}): installed "
-                      f"without a signature check"), ""
+    principal = principal or SKILL_SIGNING_PRINCIPAL
+    signing_key = signing_key or SKILL_SIGNING_KEY
+    early = _verdict_by_name(tag, signed_from, order)
+    if early is not None:
+        return early
     with tempfile.TemporaryDirectory(prefix="autosound_signers_") as tmp:
         signers = Path(tmp) / "allowed_signers"
-        signers.write_text(f'{SKILL_SIGNING_PRINCIPAL} namespaces="git" {SKILL_SIGNING_KEY}\n',
-                           encoding="utf-8")
+        signers.write_text(allowed_signers_line(principal, signing_key) + "\n", encoding="utf-8")
         ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
                         "verify-tag", tag, cwd=repo)
-    if ok and "Good" in said:
-        return True, f"{tag}: signature good ({SKILL_SIGNING_PRINCIPAL})", ""
+    if ok and 'Good "git" signature' in said:
+        return True, f"{tag}: signature good ({principal})", ""
     last = (said.splitlines() or ["git verify-tag failed"])[-1]
     if any(mark in said for mark in _CANNOT_CHECK):
         _known, version = _git("--version")
@@ -914,3 +945,70 @@ def _apply_with(got: Extracted, repo: Path, target: str, *, keep_local: bool,
         libs=_libs_moved(libs.data) if libs_ok
         else str(libs.data.get("why") or libs.detail or libs.reason),
     )
+
+
+# ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) -------------
+
+
+def check_tcc_tag(tag: str) -> tuple[bool, str, str]:
+    """`_verify_tag`'s answer for one of TCC's own tags: `(ok, the line to show, reason key)`.
+
+    `uv tool install … @<tag>` checks no signature, so the tag object is fetched first into a
+    temporary BARE repository — TCC has no clone of itself to fetch into — and verified there
+    against a temporary signers file written from the constant (`core/signed_tags.py`), never
+    from a file in the tag. Both are removed on every path, a failed fetch included.
+
+    TCC's first signed tag is `TCC_SIGNED_FROM`, and tags are ordered the way TCC's channel orders
+    them (`channel_key`): a beta candidate is signed by the same `make ship` and checked like a
+    release. A name the check can decide on alone — the developer's switch, a release from before
+    signing — is decided without fetching anything.
+    """
+    early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
+    if early is not None:
+        return early
+    with tempfile.TemporaryDirectory(prefix="autosound-tcc-tag-", ignore_cleanup_errors=True) as tmp:
+        repo = Path(tmp)
+        ok, said = _git("init", "--quiet", "--bare", str(repo))
+        if ok:
+            ok, said = _git("fetch", "--quiet", "--no-tags", "--depth", "1", TCC_REPO,
+                            f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
+        if not ok:
+            return False, said, "fetch_failed"
+        return _verify_tag(repo, tag, signed_from=TCC_SIGNED_FROM, principal=TCC_SIGNING_PRINCIPAL,
+                           signing_key=TCC_SIGNING_KEY, order=channel_key)
+
+
+@dataclass(frozen=True)
+class TccUpdate:
+    """TCC's update made ready for the terminal — or why it was not. `Extracted`'s shape: the thing
+    to run, or a reason key and git's words; and the signature line either way it passed."""
+
+    script: Optional[Path]
+    reason: str = ""
+    detail: str = ""
+    #: TCC's line about the tag's signature: good, predates signing, or NOT checked under the
+    #: developer's switch — shown on the row, never only in the log (HUB-032).
+    signature: str = ""
+    tag: str = ""
+
+
+def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
+                       words: Optional[dict] = None,
+                       platform: Optional[str] = None) -> TccUpdate:
+    """The newest tag on `channel`, checked (`check_tcc_tag`), and only then its install script
+    (`write_tcc_install_script`). A fetch and a check: off the GUI thread.
+
+    A tag that does not verify gets NO script, so no terminal opens and `uv` never runs: nothing
+    is installed, and the reason is the row's to say. No tag at all is refused too — the ref-less
+    command would install `main` as it stands, which no signature covers.
+    """
+    tag = newest_tcc_tag(channel)
+    if not tag:
+        return TccUpdate(None, "probe_failed", last_probe_error() or "no tag matched")
+    ok, line, why = check_tcc_tag(tag)
+    # The update log's line with the check's result — the evidence HUB-032 closes on.
+    (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)
+    if not ok:
+        return TccUpdate(None, why, line, tag=tag)
+    script = write_tcc_install_script(pid, tag, words=words, platform=platform)
+    return TccUpdate(script, signature=line, tag=tag)

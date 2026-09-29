@@ -301,13 +301,15 @@ class _UpdateProbe:
         return self._thread.is_alive()
 
 
-class _SkillStep:
-    """One step of «Update the method» on a plain thread, and its answer when it lands.
+class _UpdateStep:
+    """One step of an update on a plain thread, and its answer when it lands.
 
-    The step is the skill's own `upkeep.py` now (hub #221): `status` can take a minute — it asks
-    Homebrew and GitHub about the tools too — and `libs` longer, pip on a phone's network. The
-    press used to block the window for a second-long git fetch; this cannot. Same shape as
-    `_UpdateProbe`: nothing of Qt's, so it may outlive the dialog that started it.
+    For the method the step is the skill's own `upkeep.py` (hub #221): `status` can take a minute
+    — it asks Homebrew and GitHub about the tools too — and `libs` longer, pip on a phone's
+    network. For TCC it is the check of its own tag before the terminal gets it (tcc#102): a fetch
+    and a `git verify-tag`. The press used to block the window for a second-long git fetch; this
+    cannot. Same shape as `_UpdateProbe`: nothing of Qt's, so it may outlive the dialog that
+    started it.
     """
 
     def __init__(self, work) -> None:
@@ -524,16 +526,21 @@ class DiagnosticsDialog(QDialog):
         self._update_timer = QTimer(self)
         self._update_timer.setInterval(_TOOLS_POLL_MS)
         self._update_timer.timeout.connect(self._poll_updates)
-        # «Update the method» runs in steps off the GUI thread (`_SkillStep`), with a question in
+        # «Update the method» runs in steps off the GUI thread (`_UpdateStep`), with a question in
         # the middle when the clone carries local changes. No cap on the tries, unlike the probe:
         # each step is a subprocess with its own timeout, so it always ends.
-        self._skill_job: Optional[_SkillStep] = None
+        self._skill_job: Optional[_UpdateStep] = None
         self._skill_then = None
         self._skill_latest = ""
         self._skill_before = ""
         self._skill_timer = QTimer(self)
         self._skill_timer.setInterval(_TOOLS_POLL_MS)
         self._skill_timer.timeout.connect(self._poll_skill_job)
+        # «Update TCC» checks TCC's own tag first, off the GUI thread too (tcc#102).
+        self._tcc_job: Optional[_UpdateStep] = None
+        self._tcc_timer = QTimer(self)
+        self._tcc_timer.setInterval(_TOOLS_POLL_MS)
+        self._tcc_timer.timeout.connect(self._poll_tcc_job)
         return box
 
     def _poll_updates(self) -> None:
@@ -552,8 +559,8 @@ class DiagnosticsDialog(QDialog):
 
     def _show_update(self, status) -> None:
         """One row's worth of the answer, in the words that tell a person what to do next."""
-        if status.name == "skill" and self._skill_job is not None:
-            # A Re-check landing while the skill is being updated: the steps' own receipt is on
+        if (self._skill_job if status.name == "skill" else self._tcc_job) is not None:
+            # A Re-check landing while that half is being updated: the steps' own receipt is on
             # its way, and "up to date" or a live button in its place would be both wrong and a
             # second press.
             return
@@ -609,7 +616,7 @@ class DiagnosticsDialog(QDialog):
         """The skill's own updater, in steps: what was changed here, a question if anything was,
         then keep it, move the clone, bring the libraries (hub #221, tcc#91).
 
-        Off the GUI thread since the skill's `upkeep.py` does it (`_SkillStep`): the first step —
+        Off the GUI thread since the skill's `upkeep.py` does it (`_UpdateStep`): the first step —
         fetch the release, check its signature, `status` — can take a minute, and the row says so.
         """
         if self._skill_job is not None:
@@ -624,7 +631,7 @@ class DiagnosticsDialog(QDialog):
         self._run_skill_step(lambda: updates.local_changes(tag), self._after_local_changes)
 
     def _run_skill_step(self, work, then) -> None:
-        self._skill_job = _SkillStep(work)
+        self._skill_job = _UpdateStep(work)
         self._skill_then = then
         self._skill_timer.start()
 
@@ -727,27 +734,55 @@ class DiagnosticsDialog(QDialog):
             button.setEnabled(True)
 
     def _update_tcc(self) -> None:
-        """Handed to a terminal, with the reason said out loud.
+        """Handed to a terminal, with the reason said out loud — once TCC's own tag checks out.
 
         TCC cannot replace its own files while it is running -- on Windows it cannot at all, and
         the failure would land halfway through -- so the update goes to a window the person can
         watch, and the app says the one thing that matters: close TCC first. The window runs a
         script file TCC writes, in the reader's language, and shows only those lines and uv's
         answer (hub #221 ask 3).
+
+        Before any of that, the tag is checked (tcc#102): fetched and verified off the GUI thread,
+        and a tag that does not verify opens no window at all — the row says why instead.
         """
-        label, _button = self._update_rows["tcc"]
+        if self._tcc_job is not None:
+            return
+        label, button = self._update_rows["tcc"]
+        button.setEnabled(False)
+        label.setText(i18n.t("updTccChecking"))
+        # Read here, on the GUI thread: the channel is a QSettings value, the words the reader's.
+        # The tag is the newest on that channel, not whatever `main` holds by then (F-024).
+        channel = updates.current_channel()
+        words = {"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
+                 "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed")}
+        self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
+        self._tcc_timer.start()
+
+    def _poll_tcc_job(self) -> None:
+        job = self._tcc_job
+        if job is None or job.running:
+            return
+        self._tcc_timer.stop()
+        self._tcc_job = None
+        label, button = self._update_rows["tcc"]
+        ready = job.result
+        if job.error or ready is None:
+            label.setText(i18n.t("updFailed").format(why=job.error or "?"))
+            button.setEnabled(True)
+            return
+        if ready.script is None:
+            # Nothing was written, so nothing runs: the reason where the window would have been.
+            label.setText(i18n.t("updFailed").format(why=_reason(ready.reason, ready.detail)))
+            button.setEnabled(True)
+            return
         try:
-            # Pinned to the release the row is offering, not to whatever `main` holds by
-            # the time the terminal opens (F-024).
-            script = updates.write_tcc_install_script(
-                tag=updates.newest_tcc_tag(updates.current_channel()),
-                words={"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
-                       "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed")})
-            terminal_launcher.run_script(script)
+            terminal_launcher.run_script(ready.script)
         except Exception as exc:  # noqa: BLE001 — no terminal we know how to drive
             label.setText(i18n.t("updFailed").format(why=f"{type(exc).__name__}: {exc}"))
+            button.setEnabled(True)
             return
-        label.setText(i18n.t("updTccHanded"))
+        label.setText("\n".join([i18n.t("updTccHanded"),
+                                  i18n.t("updSkillSigned").format(line=ready.signature)]))
 
     def _poll_tools(self) -> None:
         """Put the tools section in as soon as it lands, and stop asking either way."""

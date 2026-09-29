@@ -605,6 +605,25 @@ def test_a_re_check_during_the_skill_update_leaves_its_row_alone(monkeypatch):
     dialog._update_probe._thread.join(timeout=5)
 
 
+def _finish_tcc_update(dialog) -> None:
+    """Run the TCC button's check to the end, here and now: a thread the dialog's timer would
+    otherwise poll."""
+    job = dialog._tcc_job
+    assert job is not None, "the check runs off the GUI thread"
+    job.join(timeout=10)
+    dialog._poll_tcc_job()
+    assert dialog._tcc_job is None, "the TCC update never settled"
+
+
+def _tag_checked(monkeypatch, answer=(True, "v0.9.9: signature good (ayukhno)", "")):
+    """TCC's own tag check (tcc#102) answered without the network; the tags it was asked about."""
+    from autosound_tcc.core import updates
+
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag: asked.append(tag) or answer)
+    return asked
+
+
 def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     """TCC cannot replace its own running files -- on Windows not at all -- so it does not try.
     The window runs a script file TCC wrote, so what it shows is the person's lines (hub #221)."""
@@ -619,9 +638,14 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     seen = []
     monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.9.9")
+    asked = _tag_checked(monkeypatch)
 
     dialog._update_tcc()
+    label, button = dialog._update_rows["tcc"]
+    assert label.text() == i18n.t("updTccChecking") and not button.isEnabled(), "while it checks"
+    _finish_tcc_update(dialog)
 
+    assert asked == ["v0.9.9"], "the tag the script installs is the tag that was checked"
     assert len(seen) == 1
     script = seen[0].read_text(encoding="utf-8")
     # Pinned to the release the row offered, not to whatever `main` holds by then (F-024).
@@ -631,7 +655,60 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     assert str(os.getpid()) in script, "the window waits for THIS process before it replaces it"
     assert i18n.t("updTermWait") in script, "in the reader's language"
     assert seen[0].parent.parent == tmp_path
-    assert dialog._update_rows["tcc"][0].text() == i18n.t("updTccHanded")
+    text = dialog._update_rows["tcc"][0].text()
+    assert text.startswith(i18n.t("updTccHanded"))
+    assert i18n.t("updSkillSigned").format(line="v0.9.9: signature good (ayukhno)") in text, (
+        "the check's line is on the row, not only in the log (HUB-032)")
+
+
+def test_a_tcc_tag_that_does_not_verify_opens_no_terminal_and_says_why(monkeypatch, tmp_path):
+    """tcc#102: the update is refused where it would have been handed over — the row — and no
+    window opens, so uv never runs."""
+    import tempfile
+
+    from autosound_tcc.core import terminal_launcher, updates
+
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.44", "0.1.46", True))
+    monkeypatch.setattr(terminal_launcher, "run_script",
+                        lambda path: pytest.fail("no terminal for a tag that does not verify"))
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
+    _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature"))
+
+    dialog._update_tcc()
+    _finish_tcc_update(dialog)
+
+    label, button = dialog._update_rows["tcc"]
+    assert i18n.t("updWhy_bad_signature") in label.text()
+    assert "No principal matched" in label.text(), "git's own words stay"
+    assert button.isEnabled(), "the person can try again"
+    assert list(temp.iterdir()) == [], "no script was written"
+
+
+def test_a_re_check_landing_while_tcc_s_tag_is_checked_does_not_overwrite_the_row(monkeypatch):
+    import threading
+
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.44", "0.1.45", True))
+    release = threading.Event()
+    monkeypatch.setattr(updates, "prepare_tcc_update",
+                        lambda channel="stable", **_kw: release.wait(5) and updates.TccUpdate(
+                            None, "bad_signature", "v0.1.45: x"))
+
+    dialog._update_tcc()
+    dialog._show_update(updates.Status("tcc", "0.1.44", "0.1.45", True))
+
+    label, button = dialog._update_rows["tcc"]
+    assert label.text() == i18n.t("updTccChecking") and not button.isEnabled()
+    release.set()
+    _finish_tcc_update(dialog)
 
 
 def test_re_check_asks_about_updates_again(monkeypatch):
@@ -876,10 +953,13 @@ def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
     monkeypatch.setattr(updates, "newest_tcc_tag",
                         lambda channel="stable": "beta-v0.2.0-rc2" if channel == "beta" else "v0.1.39")
+    asked = _tag_checked(monkeypatch)
 
     dialog._update_tcc()
+    _finish_tcc_update(dialog)
 
     assert "@beta-v0.2.0-rc2" in seen[0].read_text(encoding="utf-8")
+    assert asked == ["beta-v0.2.0-rc2"], "the candidate is checked too"
 
 
 def test_the_rew_line_names_skipped_captures_with_their_reasons_and_no_doubled_v():

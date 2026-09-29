@@ -559,6 +559,8 @@ def test_a_release_signed_by_the_author_s_key_runs_and_a_stranger_s_does_not(mon
     "(available in openssh version 8.2p1+)",
     # no ssh-keygen at all
     "error: cannot run ssh-keygen: No such file or directory",
+    # no ssh-keygen at all, in Git for Windows' words
+    "error: cannot spawn ssh-keygen: No such file or directory",
 ])
 def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_path, said):
     """install.sh v3.0.64 `verify_tag` matches `*gpg.format*|*"unknown option"*|*"-Y"*` and says
@@ -1105,3 +1107,211 @@ def test_the_channel_setting_round_trips(monkeypatch):
     assert config.update_channel() == "beta"
     assert updates.current_channel() == "beta"
 
+
+
+# ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) ------------
+#
+# `uv tool install … @<tag>` cannot check a signature, so TCC checks the tag first: the tag object
+# fetched into a temporary bare repository, `git verify-tag` against a temporary signers file
+# written from the constant (`core/signed_tags.py`), both gone afterwards. The skill's rules and
+# the skill's function (`_verify_tag`), with TCC's anchor and TCC's first signed tag, v0.1.45.
+
+
+def _tcc_origin(monkeypatch, tmp_path):
+    """TCC's origin with a tag of every kind around v0.1.45, TCC's constant pointed at a throwaway
+    `author` key (never the real one, never `~/.ssh`), and the temporary root watched.
+
+    v0.1.44 lightweight, as every TCC tag before signing; v0.1.45 signed by the author; v0.1.46 by
+    a stranger; v0.1.47 annotated, unsigned; v0.1.48 lightweight after signing began."""
+    import os
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    keys = {}
+    for who in ("author", "stranger"):
+        _git_in_keygen(tmp_path / who, who)
+        keys[who] = " ".join((tmp_path / f"{who}.pub").read_text().split()[:2])
+    origin = tmp_path / "tcc-origin"
+    _git_in("init", "-q", "-b", "main", str(origin))
+    (origin / "pyproject.toml").write_text('[project]\nname = "autosound-tcc"\n')
+    _git_in("add", "-A", cwd=origin)
+    _git_in("commit", "-q", "-m", "a release", cwd=origin)
+    _git_in("tag", "v0.1.44", cwd=origin)
+    for tag, who in (("v0.1.45", "author"), ("v0.1.46", "stranger")):
+        _git_in("-c", "gpg.format=ssh", "-c", f"user.signingkey={tmp_path / who}.pub",
+                "tag", "-s", tag, "-m", tag, cwd=origin)
+    _git_in("tag", "-a", "v0.1.47", "-m", "unsigned", cwd=origin)
+    _git_in("tag", "v0.1.48", cwd=origin)
+    monkeypatch.setattr(updates, "TCC_REPO", f"file://{origin}")
+    monkeypatch.setattr(updates, "TCC_SIGNING_PRINCIPAL", "author")
+    monkeypatch.setattr(updates, "TCC_SIGNING_KEY", keys["author"])
+    return temp
+
+
+def _offering(monkeypatch, tag):
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": tag)
+
+
+def _left_in(temp):
+    """What the update left in the temporary root: only the terminal's script folder, if any."""
+    return sorted(path.name.split("-update-")[0] for path in temp.iterdir())
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_tcc_s_tag_signed_by_the_constant_s_key_passes_and_the_install_is_written(monkeypatch,
+                                                                                  tmp_path):
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, "v0.1.45")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    assert ready.signature == "v0.1.45: signature good (author)"
+    assert "@v0.1.45" in ready.script.read_text(encoding="utf-8"), "the tag that was checked"
+    assert _left_in(temp) == ["autosound-tcc"], "the bare repository and the signers file are gone"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+@pytest.mark.parametrize("tag", ["v0.1.46", "v0.1.47", "v0.1.48"])
+def test_tcc_s_tag_unsigned_or_by_a_stranger_installs_nothing(monkeypatch, tmp_path, tag):
+    """A stranger's key, an annotated tag with no signature, a lightweight one after signing began:
+    refused with a reason KEY, and no script is written, so no terminal opens and uv never runs."""
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, tag)
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is None and ready.reason == "bad_signature", ready
+    assert ready.detail.startswith(f"{tag}: "), "git's own words, naming the tag"
+    assert list(temp.iterdir()) == [], "nothing written, and the temporaries removed"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_tcc_tag_before_signing_passes_with_a_line_saying_so(monkeypatch, tmp_path):
+    """Every TCC tag before v0.1.45 is lightweight and unsigned: it keeps updating, and says so."""
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, "v0.1.44")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, ready
+    assert ready.signature == ("v0.1.44 predates signed tags (they start at v0.1.45): installed "
+                               "without a signature check")
+    assert _left_in(temp) == ["autosound-tcc"]
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_the_developer_switch_skips_tcc_s_check_and_says_so(monkeypatch, tmp_path):
+    _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, "v0.1.46")
+    monkeypatch.setenv(updates.SKIP_VERIFY_VAR, "1")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, ready
+    assert ready.signature == (
+        f"signature NOT checked: {updates.SKIP_VERIFY_VAR}=1 is set (a developer's switch)")
+
+
+def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    _offering(monkeypatch, "v0.1.45")
+
+    def fake_git(*args, cwd=None, timeout=None):
+        if "verify-tag" in args:
+            return False, "error: cannot spawn ssh-keygen: No such file or directory"
+        if args == ("--version",):
+            return True, "git version 2.30.1.windows.1"
+        return True, ""
+
+    monkeypatch.setattr(updates, "_git", fake_git)
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="win32")
+
+    assert ready.script is None and ready.reason == "git_too_old", ready
+    assert "git version 2.30.1" in ready.detail
+    assert list(temp.iterdir()) == []
+
+
+def test_a_tcc_tag_that_cannot_be_fetched_installs_nothing(monkeypatch, tmp_path):
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    _offering(monkeypatch, "v0.1.45")
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        (False, "fatal: unable to access 'https://github.com/…': Could not resolve host")
+        if "fetch" in args else (True, "")))
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is None and ready.reason == "fetch_failed", ready
+    assert "Could not resolve host" in ready.detail
+    assert list(temp.iterdir()) == []
+
+
+def test_no_tag_to_check_installs_nothing_rather_than_the_default_branch(monkeypatch, tmp_path):
+    """Without a tag the old command installs `main` as it stands — which no signature covers."""
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    _offering(monkeypatch, "")
+    monkeypatch.setattr(updates, "last_probe_error", lambda: "Could not resolve host")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is None and ready.reason == "probe_failed"
+    assert ready.detail == "Could not resolve host"
+    assert list(temp.iterdir()) == []
+
+
+def test_the_update_log_gets_the_check_s_result(monkeypatch, tmp_path):
+    """HUB-032's closing evidence: a line of the update log with the result of the check."""
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(tmp_path))
+    _offering(monkeypatch, "v0.1.44")
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    said = []
+
+    class Log:
+        def info(self, text, *args):
+            said.append(text % args)
+
+        warning = info
+
+    monkeypatch.setattr(updates, "_log", Log())
+
+    updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert said == ["tcc tag v0.1.44: v0.1.44 predates signed tags (they start at v0.1.45): "
+                    "installed without a signature check"]
+
+
+def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_release(monkeypatch):
+    """`make ship CANDIDATE=` signs its tag too (one `publish`), so a candidate after v0.1.45 is
+    checked like a release — not refused for not being named vX.Y.Z."""
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    fetched = []
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        fetched.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
+
+    ok, line, why = updates.check_tcc_tag("beta-v0.2.0-rc1")
+
+    assert (ok, why) == (True, ""), line
+    assert any("fetch" in args for args in fetched), "checked, not passed by its name"
+
+
+def test_tcc_s_anchor_is_the_one_in_signed_tags():
+    """One definition each: the skip switch too, which task 9 had defined here as well."""
+    from autosound_tcc.core import signed_tags
+
+    assert updates.TCC_SIGNING_KEY == signed_tags.TCC_SIGNING_KEY
+    assert updates.TCC_SIGNED_FROM == signed_tags.TCC_SIGNED_FROM == "v0.1.45"
+    assert updates.SKIP_VERIFY_VAR is signed_tags.SKIP_VERIFY_VAR
