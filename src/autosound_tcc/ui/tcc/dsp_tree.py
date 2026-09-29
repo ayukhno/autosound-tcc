@@ -18,6 +18,7 @@ without them still renders.
 from __future__ import annotations
 
 import re
+from html import escape
 from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, Signal
@@ -35,7 +36,15 @@ from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
-from autosound_tcc.ui.tcc.detail_pane import band_changes, band_count, mark_colour
+from autosound_tcc.ui.tcc.detail_pane import (
+    band_changes,
+    band_count,
+    cell_text,
+    changed_fields,
+    column_title,
+    mark_colour,
+    table_fields,
+)
 from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
@@ -82,7 +91,7 @@ def _default_collapsed(group_id: str) -> bool:
     return group_id != "physical_outputs"
 
 
-def _sub_line(text: str) -> ElidedLabel:
+class _SubLine(ElidedLabel):
     """A channel row's second line -- one line, elided, never wrapped.
 
     A row is one channel; making it two lines tall as soon as the panel narrows turns a list you
@@ -97,10 +106,44 @@ def _sub_line(text: str) -> ElidedLabel:
     with the hint, and this tree used to be exactly that (a QScrollArea, F-002/F-021). Fourteen
     rows of it made 196px of scroll running past the end of the content (user, 2026-08-22, with
     the screenshot; measured offscreen: 814px of content inside a 1010px claim).
+
+    A value that differs from «порівняти з» is drawn in the window's colour for a change, the one
+    the table's changed cells use (tcc#104, finding 113). So the line is rich text, cut on its
+    plain words: the same prefix, with the colour kept on what is left of each value.
     """
-    label = ElidedLabel(text, native_tooltip=False)
-    label.setProperty("class", "cline2")
-    return label
+
+    def __init__(self) -> None:
+        super().__init__("", native_tooltip=False)
+        self.setProperty("class", "cline2")
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self._parts: list = []
+
+    def set_parts(self, parts: list) -> None:
+        """`[(text, changed)]`, said one after another with « · » between."""
+        self._parts = list(parts)
+        self.setText(" · ".join(text for text, _ in self._parts))
+
+    def parts(self) -> list:
+        return list(self._parts)
+
+    def _elide(self) -> None:
+        shown = self.fontMetrics().elidedText(
+            self._full, Qt.TextElideMode.ElideRight, max(self.width(), self._min_width)
+        )
+        cut = shown != self._full and shown.endswith("…")
+        room = len(shown) - 1 if cut else len(shown)
+        colour = mark_colour("chg")
+        out = []
+        for i, (text, changed) in enumerate(self._parts):
+            for piece, lit in ((" · " if i else "", False), (text, changed)):
+                piece = piece[:room]
+                room -= len(piece)
+                if piece:
+                    piece = escape(piece)
+                    out.append(f'<span style="color:{colour}">{piece}</span>' if lit else piece)
+        said = "".join(out) + ("…" if cut else "")
+        if said != QLabel.text(self):
+            QLabel.setText(self, said)
 
 
 class _Pill(QLabel):
@@ -146,6 +189,24 @@ def _eq_bank_text(row, group_id: str) -> str:
     return bank.text if bank else ""
 
 
+#: How the second line names a value it shows only when it changed; the rest go by the table's
+#: column heads («Pol NORM», «EQ Byp Y»).
+_VALUE_WORD = {"ta_ms": ("Delay", "ms"), "phase_deg": ("Phase", "")}
+
+
+def _value_said(field: str, row: GroupRow) -> str:
+    value = cell_text(field, row)
+    word, unit = _VALUE_WORD.get(field, (column_title(field), ""))
+    return f"{word} {value}{unit if value != '—' else ''}"
+
+
+def _restyle(widget: QWidget, classes: str) -> None:
+    if widget.property("class") != classes:
+        widget.setProperty("class", classes)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+
 def _light(widget: QWidget, on: bool) -> None:
     """Add or drop `act` in a row's class — the row the window is showing (the Arbiter, on the
     prototype, 2026-09-25: «поточна група активна!»)."""
@@ -157,7 +218,8 @@ def _light(widget: QWidget, on: bool) -> None:
 
 class ChannelRow(QWidget):
     """Two-line row: ID badge + name + polarity/mute pill + EQ chip, then (for rows with a
-    crossover) a compact HP/LP/gain summary line — mirrors `.cline1`/`.cline2`."""
+    crossover) a compact HP/LP/gain summary line — mirrors `.cline1`/`.cline2`. Against
+    «порівняти з», what differs is drawn changed (`set_compared`)."""
 
     clicked = Signal()
     eqRequested = Signal()
@@ -168,13 +230,17 @@ class ChannelRow(QWidget):
         super().__init__()
         self.setProperty("class", "chan")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._group = group
         self._row = row
         self._changes: Optional[dict] = None
+        #: The table's columns that differ from «порівняти з» for this channel (tcc#104).
+        self._changed: frozenset = frozenset()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 4, 8, 5)
         layout.setSpacing(1)
 
         is_output = "hp" in group.known_fields or "lp" in group.known_fields
+        self._is_output = is_output
         line1 = QHBoxLayout()
         line1.setSpacing(6)
         if row.slot:
@@ -195,17 +261,10 @@ class ChannelRow(QWidget):
             ctype.setProperty("class", "ctype")
             line1.addWidget(ctype)
         if row.muted:
-            # MUTE-only in the working interface (user request 2026-07-27) -- OFF (hardware
-            # physically disabled at the DSP level, GroupRow.off) is real data but stays out of
-            # the main tree/table for now, deferred to a future settings view to avoid confusing
-            # the two states side by side. See pill-off/`_FIELD_COLUMNS["off"]` (detail_pane.py) --
-            # left in place, just not wired into any profile's `fields` list right now.
-            line1.addWidget(_Pill(i18n.t("pillMute"), "mute"))
             self.setProperty("class", "chan chan-dim")
-        elif raw.get("polarity") == "INV":
-            # Only flag inversion -- NORM is the default and showing it on every row is noise
-            # (user request 2026-07-27).
-            line1.addWidget(_Pill("INV", "inv"))
+        # MUTE or the polarity -- which one, and whether it is a change, `_sync_marks` says.
+        self._pill = _Pill("", "mute")
+        line1.addWidget(self._pill)
 
         # Feature tag (RearRC/SubRC/RC) is a virtual-tier convention -- the prototype shows it only
         # on virtual channels, not on the physical outputs that carry the same tag. Include the
@@ -230,23 +289,9 @@ class ChannelRow(QWidget):
         line1.addWidget(self._eq_chip)
         layout.addLayout(line1)
 
-        if is_output:
-            hp = CrossoverLeg.from_raw(raw.get("hp")).label
-            lp = CrossoverLeg.from_raw(raw.get("lp")).label
-            gain = raw.get("gain_db")
-            gain_s = f"{gain:+.1f}dB" if isinstance(gain, (int, float)) else "—"
-            line2 = _sub_line(f"HP {hp} · LP {lp} · {gain_s}")
-            layout.addWidget(line2)
-        else:
-            # Virtual channels have no crossover, but their gain (and delay) matter in the main
-            # list -- surface them the same way (user request 2026-07-27).
-            gain = raw.get("gain_db")
-            delay = raw.get("ta_ms")
-            parts = [f"Gain {gain:+.1f}dB" if isinstance(gain, (int, float)) else "Gain —"]
-            if isinstance(delay, (int, float)):
-                parts.append(f"Delay {delay:g}ms")
-            line2 = _sub_line(" · ".join(parts))
-            layout.addWidget(line2)
+        self._line2 = _SubLine()
+        layout.addWidget(self._line2)
+        self._sync_marks()
 
         # rounded_tooltip.attach(), not setToolTip() -- native QToolTip's window frame stays
         # square on macOS regardless of its own QSS border-radius (user request 2026-07-28).
@@ -263,15 +308,74 @@ class ChannelRow(QWidget):
         )
 
     def set_compared(self, old_row: Optional[GroupRow], compared: bool) -> None:
-        """This channel against the same one in the compared version; `compared` False clears."""
+        """This channel against the same one in the compared version; `compared` False clears.
+
+        The bands as dots with counts beside the chip (finding 74), and every other value the
+        table marks drawn changed where the row says it: the tree read the bands alone, so sw's
+        HPF and m-R's delay and polarity were marked in the table and nowhere here (tcc#104,
+        finding 113). Both by the table's own rule (`changed_fields`)."""
         self._changes = band_changes(self._row, old_row) if compared else None
+        self._changed = (changed_fields(self._group, self._row, old_row) if compared
+                         else frozenset())
         parts = [f'<span style="color:{mark_colour(status)}">●&nbsp;({n})</span>'
                  for status, n in (self._changes or {}).items() if n]
+        if not parts and "eq" in self._changed:
+            # The table marks the EQ cell and no band counts as moved (an empty slot's values, a
+            # channel new with no bands): a bare dot, so the tree still says what the table says.
+            parts = [f'<span style="color:{mark_colour("chg")}">●</span>']
         self._cmp.setText("&nbsp;&nbsp;".join(parts))
         self._cmp.setVisible(bool(parts))
+        self._sync_marks()
 
     def band_changes(self) -> Optional[dict]:
         return dict(self._changes) if self._changes is not None else None
+
+    def changed_fields(self) -> frozenset:
+        return self._changed
+
+    def _sync_marks(self) -> None:
+        """The pill and the second line, with what differs from «порівняти з» drawn changed."""
+        row, raw, changed = self._row, self._row.raw, self._changed
+        pill = None
+        if row.muted:
+            # MUTE-only in the working interface (user request 2026-07-27) -- OFF (hardware
+            # physically disabled at the DSP level, GroupRow.off) is real data but stays out of
+            # the main tree/table for now, deferred to a future settings view to avoid confusing
+            # the two states side by side. See pill-off/`_FIELD_COLUMNS["off"]` (detail_pane.py) --
+            # left in place, just not wired into any profile's `fields` list right now.
+            pill = ("mute", i18n.t("pillMute"), "mute")
+        elif raw.get("polarity") == "INV" or "polarity" in changed:
+            # Only flag inversion -- NORM is the default and showing it on every row is noise
+            # (user request 2026-07-27). A NORM the compared version did not have is not noise:
+            # it is the change (finding 113).
+            said = cell_text("polarity", row)
+            pill = ("polarity", said, "inv" if said == "INV" else "norm")
+        self._pill.setVisible(pill is not None)
+        if pill is not None:
+            field, said, kind = pill
+            self._pill.setText(said)
+            _restyle(self._pill, f"pill pill-{kind}" + (" chg" if field in changed else ""))
+
+        if self._is_output:
+            gain = raw.get("gain_db")
+            parts = [("hp", f"HP {CrossoverLeg.from_raw(raw.get('hp')).label}"),
+                     ("lp", f"LP {CrossoverLeg.from_raw(raw.get('lp')).label}"),
+                     ("gain_db", f"{gain:+.1f}dB" if isinstance(gain, (int, float)) else "—")]
+        else:
+            # Virtual channels have no crossover, but their gain (and delay) matter in the main
+            # list -- surface them the same way (user request 2026-07-27).
+            gain = raw.get("gain_db")
+            delay = raw.get("ta_ms")
+            parts = [("gain_db", f"Gain {gain:+.1f}dB" if isinstance(gain, (int, float))
+                      else "Gain —")]
+            if isinstance(delay, (int, float)):
+                parts.append(("ta_ms", f"Delay {delay:g}ms"))
+        # Any other value that differs joins the line: an output's delay was not on it at all
+        # (finding 113). The EQ has its dots, the pill its field.
+        placed = {f for f, _ in parts} | {"eq"} | ({pill[0]} if pill else set())
+        parts += [(f, _value_said(f, row)) for f in table_fields(self._group)
+                  if f in changed and f not in placed]
+        self._line2.set_parts([(text, f in changed) for f, text in parts])
 
     @staticmethod
     def _tooltip_html(row: GroupRow, raw: dict, is_output: bool) -> str:

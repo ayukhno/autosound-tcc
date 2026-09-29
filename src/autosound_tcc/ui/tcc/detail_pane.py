@@ -386,6 +386,62 @@ def band_changes(row: GroupRow, old_row: Optional[GroupRow]) -> dict:
             "removed": sum(d.status == "removed" for d in was_side)}
 
 
+def table_fields(group: ProfileGroup) -> list:
+    """The controls a tier's table draws as columns, in the tier's own order."""
+    return [f for f in group.known_fields if f in _FIELD_COLUMNS]
+
+
+def column_title(field: str) -> str:
+    """A control's name as the table's column heads it («Pol», «EQ Byp»)."""
+    return _FIELD_COLUMNS.get(field, field)
+
+
+def cell_text(field: str, row: GroupRow) -> str:
+    """A value as the table reads it — and as it is compared (`field_changed`)."""
+    raw = row.raw
+    if field in ("hp", "lp"):
+        return CrossoverLeg.from_raw(raw.get(field)).label
+    if field == "gain_db":
+        v = raw.get("gain_db")
+        return f"{v:+.1f}" if isinstance(v, (int, float)) else "—"
+    if field == "ta_ms":
+        v = raw.get("ta_ms")
+        return f"{v:g}" if isinstance(v, (int, float)) else "—"
+    if field == "phase_deg":
+        v = raw.get("phase_deg")
+        return f"{v:g}°" if isinstance(v, (int, float)) else "—"
+    if field == "polarity":
+        return raw.get("polarity") or "—"
+    if field == "mute":
+        return "MUTE" if raw.get("mute") else "—"
+    if field == "off":
+        return "OFF" if raw.get("off") else "—"
+    if field == "eq_bypass":
+        return "Y" if raw.get("eq_bypass") else "—"
+    if field == "eq":
+        # «(active/configured)», as the pickers say it: «15 bands» counted the empty slots.
+        count = band_count(row.eq_bands())
+        return f"{count} ▸" if count else "—"
+    return "—"
+
+
+def field_changed(field: str, row: GroupRow, old_row: Optional[GroupRow]) -> bool:
+    """Whether this value differs from the same channel in the compared version: the ONE rule for
+    the table's changed cells and the DSP tree's marks, so the two never disagree (tcc#104,
+    finding 113 — the table marked sw's HPF, the tree only its EQ). `old_row` None: that version
+    lacks the channel, and every value is new."""
+    if old_row is None:
+        return True
+    # «7 bands ▸» reads the same with a band moved; the bands are what changed.
+    bands_moved = field == "eq" and old_row.raw.get("eq") != row.raw.get("eq")
+    return cell_text(field, old_row) != cell_text(field, row) or bands_moved
+
+
+def changed_fields(group: ProfileGroup, row: GroupRow, old_row: Optional[GroupRow]) -> frozenset:
+    """Every column of `group`'s table that `field_changed` marks for this channel."""
+    return frozenset(f for f in table_fields(group) if field_changed(f, row, old_row))
+
+
 def _pair_colours(now_side: list) -> dict:
     """Each changed band and its compared self in one colour of the pair palette, keyed by the
     band object: «кольорово однаковими "змінені", як у нас правий-лівий» (the Arbiter,
@@ -1162,7 +1218,7 @@ class DetailPane(QFrame):
     # ---- table view -------------------------------------------------------
 
     def _build_table(self, group: ProfileGroup) -> QTableWidget:
-        columns = [f for f in group.known_fields if f in _FIELD_COLUMNS]
+        columns = table_fields(group)
         headers = ["ID", i18n.t("colChan")] + [_FIELD_COLUMNS[f] for f in columns]
         rows = group.rows_visible()
         table = QTableWidget(len(rows), len(headers))
@@ -1354,26 +1410,22 @@ class DetailPane(QFrame):
         if color:
             item.setForeground(QColor(color))
         compared, old = self._compared_row(group_id, row)
-        if compared:
+        if compared and field_changed(field, row, old):
             before = self._cell_text(field, old) if old is not None else None
-            # «7 bands ▸» reads the same with a band moved; the bands are what changed.
-            bands_moved = (field == "eq" and old is not None
-                           and old.raw.get("eq") != row.raw.get("eq"))
-            if before != self._cell_text(field, row) or bands_moved:
-                item.setData(CHANGED_ROLE, True)
-                # Blue and bold: the table's stylesheet paints over an item's background, and the
-                # change has to read at a glance — blue is the window's "new" (in REW, import it).
-                item.setForeground(QColor(t.info))
-                item.setBackground(QColor(t.mix("info", 14, "panel")))
-                font = item.font()
-                font.setBold(True)
-                item.setFont(font)
-                if before is None:
-                    item.setToolTip(i18n.t("cmpNew"))
-                elif before == self._cell_text(field, row):
-                    item.setToolTip(i18n.t("cmpEqChanged"))
-                else:
-                    item.setToolTip(i18n.t("cmpWas").format(value=before))
+            item.setData(CHANGED_ROLE, True)
+            # Blue and bold: the table's stylesheet paints over an item's background, and the
+            # change has to read at a glance — blue is the window's "new" (in REW, import it).
+            item.setForeground(QColor(t.info))
+            item.setBackground(QColor(t.mix("info", 14, "panel")))
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            if before is None:
+                item.setToolTip(i18n.t("cmpNew"))
+            elif before == self._cell_text(field, row):
+                item.setToolTip(i18n.t("cmpEqChanged"))
+            else:
+                item.setToolTip(i18n.t("cmpWas").format(value=before))
         return item
 
     @staticmethod
@@ -1394,33 +1446,7 @@ class DetailPane(QFrame):
             return f"{v:g}" if isinstance(v, (int, float)) and not isinstance(v, bool) else ""
         return ""
 
-    @staticmethod
-    def _cell_text(field: str, row: GroupRow) -> str:
-        raw = row.raw
-        if field in ("hp", "lp"):
-            return CrossoverLeg.from_raw(raw.get(field)).label
-        if field == "gain_db":
-            v = raw.get("gain_db")
-            return f"{v:+.1f}" if isinstance(v, (int, float)) else "—"
-        if field == "ta_ms":
-            v = raw.get("ta_ms")
-            return f"{v:g}" if isinstance(v, (int, float)) else "—"
-        if field == "phase_deg":
-            v = raw.get("phase_deg")
-            return f"{v:g}°" if isinstance(v, (int, float)) else "—"
-        if field == "polarity":
-            return raw.get("polarity") or "—"
-        if field == "mute":
-            return "MUTE" if raw.get("mute") else "—"
-        if field == "off":
-            return "OFF" if raw.get("off") else "—"
-        if field == "eq_bypass":
-            return "Y" if raw.get("eq_bypass") else "—"
-        if field == "eq":
-            # «(active/configured)», as the pickers say it: «15 bands» counted the empty slots.
-            count = band_count(row.eq_bands())
-            return f"{count} ▸" if count else "—"
-        return "—"
+    _cell_text = staticmethod(cell_text)
 
     # ---- EQ view ----------------------------------------------------------
 

@@ -929,6 +929,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.off};
         background: {t.mix('off', 16)};
     }}
+    /* A pill whose value differs from «порівняти з» — the colours of the table's changed cells
+    (tcc#104, finding 113). Two attributes, so it wins over the pill's own kind. */
+    QLabel[class~="pill"][class~="chg"] {{
+        color: {t.info};
+        background: {t.mix('info', 14, 'panel')};
+    }}
     QLabel[class~="eq-chip"] {{
         font-family: "SF Mono", Menlo, monospace;
         font-size: 10px;
