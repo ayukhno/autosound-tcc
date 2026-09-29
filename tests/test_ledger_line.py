@@ -173,16 +173,33 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
 def test_compare_offers_this_preset_first_then_the_others_on_the_old_layout(tmp_path):
     """«Треба мати можливість порівнювати не тільки v_xxx в поточній конфігурації, але і з іншими
     конфігураціями» (the Arbiter, 2026-09-25, finding 66). The old layout numbers each preset on
-    its own, so the other presets' versions are a second list, not more of the same one."""
+    its own, so the other presets' versions are a second list, not more of the same one.
+
+    `current` (v_003) stays in its own group, first (tcc#103, finding 112) -- greying it out and
+    marking it «зараз» is `fill_compare_combo`'s job, not this function's."""
     _old_layout(tmp_path)
     assert ledger_line.compare_groups(tmp_path, "SQ", "v_003") == [
-        ("SQ", ["v_002", "v_001"]), ("FULL", ["v_002", "v_001"])]
+        ("SQ", ["v_003", "v_002", "v_001"]), ("FULL", ["v_002", "v_001"])]
 
 
 def test_compare_groups_the_project_line_by_the_preset_each_version_was_made_for(tmp_path):
     _arbiter_example(tmp_path)
     assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == [
-        ("SQ", ["v_003", "v_002", "v_001"]), ("FULL", ["v_005", "v_004"])]
+        ("SQ", ["v_006", "v_003", "v_002", "v_001"]), ("FULL", ["v_005", "v_004"])]
+
+
+def test_compare_groups_keeps_the_current_version_even_with_nothing_else_to_offer(tmp_path):
+    """A preset with a single version used to come back empty (silently dropped, tcc#103, finding
+    112); now its own version -- the one open now -- is still there for the heading and the greyed
+    row to stand on."""
+    versions = tmp_path / "versions"
+    versions.mkdir(parents=True)
+    (versions / "v_001.json").write_text('{"version": "v_001", "preset": "SQ", "parent": null}',
+                                         encoding="utf-8")
+    (tmp_path / "slots.json").write_text(
+        '{"active": "SQ", "layout": "project-numbered", '
+        '"slots": {"SQ": {"version": "v_001", "dsp_preset": 1}}, "configs": {}}', encoding="utf-8")
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_001") == [("SQ", ["v_001"])]
 
 
 def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkeypatch):
@@ -202,7 +219,10 @@ def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkey
     window._offer_compare(root, "SQ", {}, "v_003")
     combo = window._detail._compare_combo
     keys = [combo.itemData(i) for i in range(combo.count())]
-    assert keys[:3] == [None, "v_002", "v_001"], "this preset's versions come first, as before"
+    # "—", the own-preset heading, v_003 (the current one) greyed out (tcc#103), then its
+    # selectable versions -- still first, as before.
+    assert keys[:5] == [None, None, None, "v_002", "v_001"], \
+        "this preset's own group comes first, headed and with its current version greyed"
     assert keys.index("FULL/v_002") > keys.index("v_001")
     header = next(i for i in range(combo.count())
                   if combo.itemData(i) is None and "FULL" in combo.itemText(i))

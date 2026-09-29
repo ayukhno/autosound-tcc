@@ -184,10 +184,25 @@ class DotTabBar(QTabBar):
             size.setWidth(size.width() + _TAB_GAP + DOT_DIAMETER)
         return size
 
+    def fit_text(self, index: int) -> tuple[str, int]:
+        """This tab's text, elided («…», tcc#96, finding 105) to what the tab and its dot actually
+        have room for, and the width it takes once elided.
+
+        `tabRect(index)` is Qt's own layout decision, not `tabSizeHint`'s wish for one: when the
+        bar has less room than every tab's hint adds up to, Qt shrinks the rects it actually hands
+        out below that wish — and drawing the FULL text centred in a narrower rect (the bug this
+        replaces) let it run into the tab beside it, cut wherever the neighbour's shape started
+        covering it, mid-word and with no «…» in sight."""
+        metrics = QFontMetrics(self._font(index))
+        has_dot = bool(self._dots.get(index))
+        available = max(0, self.tabRect(index).width() - (_TAB_GAP + DOT_DIAMETER if has_dot else 0))
+        shown = metrics.elidedText(self.tabText(index), Qt.TextElideMode.ElideRight, available)
+        return shown, metrics.horizontalAdvance(shown)
+
     def label_geometry(self, index: int) -> tuple[QRect, QRect]:
         """`(text rect, dot rect)` for a tab: the two centred together in the tab."""
         rect = self.tabRect(index)
-        width = QFontMetrics(self._font(index)).horizontalAdvance(self.tabText(index))
+        _shown, width = self.fit_text(index)
         has_dot = bool(self._dots.get(index))
         group = width + (_TAB_GAP + DOT_DIAMETER if has_dot else 0)
         left = rect.left() + (rect.width() - group) // 2
@@ -204,12 +219,13 @@ class DotTabBar(QTabBar):
             self.initStyleOption(option, index)
             painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
             text_rect, dot_rect = self.label_geometry(index)
+            shown, _width = self.fit_text(index)
             selected = index == self.currentIndex()
             painter.setFont(self._font(index))
             painter.setPen(QColor(t.text if selected or option.state & QStyle.StateFlag.State_MouseOver
                                   else t.muted))
             painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
-                             self.tabText(index))
+                             shown)
             status = self._dots.get(index)
             if status:
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing)

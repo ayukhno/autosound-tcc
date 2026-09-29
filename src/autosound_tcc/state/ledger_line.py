@@ -104,6 +104,12 @@ def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str,
     (the Arbiter, 2026-09-25, finding 66: «порівнювати не тільки v_xxx в поточній конфігурації,
     але і з іншими конфігураціями»).
 
+    `current` stays IN the own group now (tcc#103, finding 112) — it used to be filtered out here
+    on the reasoning that a version is not compared with itself, which silently dropped the row
+    «4.C-cut»'s versions were supposed to open on and read as "where did my versions go". Turning
+    it into a disabled, greyed «v_002 — зараз» row is `detail_pane.fill_compare_combo`'s job, not
+    this one's — it still needs `current` to know which row that is.
+
     The old layout numbers each preset on its own, so another preset's `v_002` is a different
     state from this one's — the caller keys it with its preset. The project line numbers once, and
     each version's file names the preset it was made for; one never made for any stays with this
@@ -111,13 +117,13 @@ def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str,
     """
     root = Path(root)
     if is_project_line(root):
-        every = [v for v in reversed(versions(root, preset)) if v != current]
+        every = list(reversed(versions(root, preset)))
         made_for = {v: _made_for(root, v) for v in every}
         groups = [(preset, [v for v in every if made_for[v] in (None, preset)])]
         for other in sorted({p for p in made_for.values() if p and p != preset}):
             groups.append((other, [v for v in every if made_for[v] == other]))
         return groups
-    groups = [(preset, [v for v in reversed(versions(root, preset)) if v != current])]
+    groups = [(preset, list(reversed(versions(root, preset))))]
     for other in presets(root):
         theirs = list(reversed(versions(root, other))) if other != preset else []
         if theirs:

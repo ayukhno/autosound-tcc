@@ -387,6 +387,51 @@ def test_the_target_link_stays_clear_of_the_compare_list(tmp_path, monkeypatch):
 
 
 
+def test_a_small_window_elides_tab_labels_instead_of_cutting_them_mid_word(tmp_path, monkeypatch):
+    """tcc#96, finding 105: at a narrow width every tab label came back cut mid-word («Табл»,
+    «Ріве», «Затр», «Фаз», no «…» anywhere) instead of shrinking cleanly -- `DotTabBar` drew each
+    tab's FULL text centred on its actual (already squeezed) rect, which could ask for less than
+    zero room and run the text into the neighbouring tab."""
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    window.resize(420, 500)
+    for _ in range(5):
+        QApplication.processEvents()
+
+    bar = layout.tabs.tabBar()
+    for index in range(bar.count()):
+        full = bar.tabText(index)
+        shown, width = bar.fit_text(index)
+        assert shown == full or shown.endswith("…"), (full, shown)
+        assert width <= bar.tabRect(index).width(), "never wider than the tab actually has"
+    layout.leave()
+    window.close()
+
+
+def test_a_small_window_keeps_the_compare_box_readable_not_empty(tmp_path, monkeypatch):
+    """tcc#96, finding 105: «поле "порівняти з" обрізано, а в такому варіанті зовсім пусто (хоч
+    там є вибір)» -- the box had no floor of its own, so a header squeezed past its total minimum
+    could still shrink it to a sliver («v_0(») or nothing. `setMinimumWidth` is the hard floor Qt
+    actually keeps, even when the rest of the row has to give more ground instead."""
+    window = _window(tmp_path, monkeypatch)
+    _with_rig(window)
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    window.resize(360, 500)
+    for _ in range(5):
+        QApplication.processEvents()
+
+    combo = layout.compare_combo
+    assert combo.minimumWidth() > 0, "a floor was actually set"
+    assert combo.width() >= combo.minimumWidth(), "the header never shrinks it past its floor"
+    layout.leave()
+    window.close()
+
+
 def test_the_tab_dots_sit_close_to_the_text(tmp_path, monkeypatch):
     """Finding 71, 1: on macOS a tab button sits at the tab's very edge whatever the stylesheet
     says (the Arbiter's screenshot after 8fbbab6), so the bar draws the dot itself, just after the

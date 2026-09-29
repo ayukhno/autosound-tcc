@@ -56,6 +56,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
     fill_compare_combo,
     is_other_preset,
 )
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.setting_status import DotTabBar, field_status, group_status, tip_for
 
 #: How many journal events the feed shows, newest last.
@@ -65,6 +66,9 @@ _SIZES_KEY_V = "ui/control_layout/vertical"
 _SIZES_KEY_H = "ui/control_layout/horizontal"
 _DEFAULT_V = [420, 480]
 _DEFAULT_H = [1, 1]
+#: What the compare box spends on the drop arrow and its own padding, beyond the text (tcc#96,
+#: finding 105) -- roughly what a Fusion-derived style reserves for a QComboBox.
+_COMPARE_BOX_CHROME_PX = 34
 
 
 def _event_line(event: dict) -> str:
@@ -262,6 +266,7 @@ class ControlLayout:
         self._index: dict[str, int] = {}
         self._corner: Optional[QWidget] = None
         self.compare_combo: Optional[QComboBox] = None
+        self._compare_label: Optional[QLabel] = None
         self._compare_other: Optional[QLabel] = None
 
     # ---- the two borders ----------------------------------------------------------------------
@@ -356,7 +361,7 @@ class ControlLayout:
             self._corner.setParent(None)
             self._corner.deleteLater()
         self.vertical = self.horizontal = self.tabs = None
-        self._corner = self.compare_combo = self._compare_other = None
+        self._corner = self.compare_combo = self._compare_label = self._compare_other = None
         self._index = {}
         self._compact(False)
         if self._saved_geometry is not None:
@@ -453,17 +458,27 @@ class ControlLayout:
         layout = QHBoxLayout(self._corner)
         layout.setContentsMargins(0, 0, 6, 2)
         layout.setSpacing(6)
-        label = QLabel(i18n.t("cmpWith"))
-        label.setProperty("class", "phead-sub")
-        layout.addWidget(label)
+        # `ElidedLabel`, not a plain one: at half a screen this row ran out of room before the box
+        # beside it did, and a plain QLabel does not give ground -- it just gets clipped mid-word
+        # («порівнят», tcc#96, finding 105). `_compact` also hides it outright when the header is
+        # tight, but the label still has to survive whatever width it is given in between.
+        self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=16)
+        self._compare_label.setProperty("class", "phead-sub")
+        layout.addWidget(self._compare_label)
         self.compare_combo = QComboBox()
         self.compare_combo.setProperty("class", "mini-select")
         self.compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.compare_combo.setMinimumContentsLength(6)
+        # `minimumContentsLength` only sizes the box's PREFERRED width -- its own `minimumSizeHint`
+        # is a hint a header squeezed past its total minimum can still shrink below, which is how
+        # the box came back «v_0(», or nothing at all (tcc#96, finding 105). `setMinimumWidth` is
+        # the hard floor Qt actually honours: enough for an ordinary version on its own, «v_006».
+        self.compare_combo.setMinimumWidth(
+            self.compare_combo.fontMetrics().horizontalAdvance("v_000") + _COMPARE_BOX_CHROME_PX)
         self.compare_combo.currentIndexChanged.connect(self._on_compare_picked)
         layout.addWidget(self.compare_combo)
-        self._compare_other = QLabel(i18n.t("cmpOtherTag"))
+        self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=16)
         self._compare_other.setProperty("class", "cmp-other")
         self._compare_other.setVisible(False)
         layout.addWidget(self._compare_other)
@@ -476,13 +491,16 @@ class ControlLayout:
         own = args[0] if len(args) > 0 else []
         labels = args[3] if len(args) > 3 else None
         others = args[4] if len(args) > 4 else None
+        preset = args[5] if len(args) > 5 else None
+        current = args[6] if len(args) > 6 else None
         key = getattr(self.window, "_compare_key", None)
         combo = self.compare_combo
         blocked = combo.blockSignals(True)
-        fill_compare_combo(combo, own, labels, others)
+        fill_compare_combo(combo, own, labels, others, preset, current)
         combo.setCurrentIndex(max(combo.findData(key) if key else 0, 0))
         combo.blockSignals(blocked)
-        self._corner.setVisible(bool(own or others))
+        selectable = [v for v in own if v != current]
+        self._corner.setVisible(bool(selectable or others))
         self._compare_other.setVisible(is_other_preset(key))
 
     def _on_compare_picked(self, _index: int) -> None:

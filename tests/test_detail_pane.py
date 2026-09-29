@@ -868,6 +868,43 @@ def test_the_compare_list_is_wide_enough_for_whole_lines():
     assert view.minimumWidth() >= view.sizeHintForColumn(0)
 
 
+def test_the_own_group_is_headed_too_and_its_current_version_is_greyed_out():
+    """tcc#103, finding 112: with «4.C-cut» open, «порівняти з» showed «—», a lone `v_001`, then
+    every OTHER preset under its own heading — the open configuration's own versions had none, and
+    its current one (v_002, HEAD) had simply vanished. Wanted: the same heading form the other
+    groups use, for this one too, and the current version shown but greyed, not selectable."""
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    combo = QComboBox()
+    fill_compare_combo(combo, ["v_002", "v_001"], None, None, preset="4.C-cut", current="v_002")
+    texts = [combo.itemText(i) for i in range(combo.count())]
+    keys = [combo.itemData(i) for i in range(combo.count())]
+    assert texts == ["—", i18n.t("cmpOwnPreset").format(preset="4.C-cut"),
+                     i18n.t("cmpCurrentVersion").format(version="v_002"), "v_001"]
+    assert keys == [None, None, None, "v_001"], "the heading and the current row carry no key"
+    assert not combo.model().item(1).isEnabled(), "the heading is not a version to pick"
+    assert not combo.model().item(2).isEnabled(), "the current version is not selectable (#103)"
+    assert combo.model().item(3).isEnabled()
+
+
+def test_nothing_that_reads_the_combo_can_land_on_the_current_version():
+    """The current row carries no key (`None`, like «—» and every other heading) -- nothing that
+    reads `combo.currentData()` after picking it can end up "comparing" a version with itself."""
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    combo = QComboBox()
+    fill_compare_combo(combo, ["v_002", "v_001"], None, None, preset="SQ", current="v_002")
+    current_row = next(i for i in range(combo.count())
+                       if "v_002" in combo.itemText(i) and i != 0)
+    combo.setCurrentIndex(current_row)
+    assert combo.currentData() is None
+
 
 # ---- third pass (finding 71; tcc#53) ------------------------------------------------------------
 

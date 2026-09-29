@@ -412,19 +412,35 @@ CHANGED_ROLE = Qt.ItemDataRole.UserRole + 7
 
 
 def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] = None,
-                       others: Optional[list] = None) -> None:
-    """«Порівняти з»: «—», this preset's versions, then each other preset's under its name.
+                       others: Optional[list] = None, preset: Optional[str] = None,
+                       current: Optional[str] = None) -> None:
+    """«Порівняти з»: «—», this preset's versions under its own heading, then each other preset's
+    under its.
+
+    `preset` heads the first group the same way `others` heads the rest (tcc#103, finding 112):
+    the open configuration's own versions used to be drawn bare, right under «—», with no way to
+    tell them apart from a flat list. `current`, if it is among `versions`, gets a disabled,
+    greyed row of its own — «v_002 — зараз» — instead of being silently absent: a version is never
+    something to compare with itself, but dropping it read as "where did my versions go".
 
     `others` is `[(preset, [(key, label), …]), …]` (finding 66). The key of another preset's
     version carries that preset (`SQ/v_004`) because on the old layout each preset numbers its
     own, and the loader has to know where to read it from."""
     combo.clear()
     combo.addItem("—", None)
+    if preset is not None:
+        combo.addItem(i18n.t("cmpOwnPreset").format(preset=preset), None)
+        combo.model().item(combo.count() - 1).setEnabled(False)
     for version in versions:
-        combo.addItem(str((labels or {}).get(version, version)), str(version))
-    for preset, items in others or ():
+        label = str((labels or {}).get(version, version))
+        if version == current:
+            combo.addItem(i18n.t("cmpCurrentVersion").format(version=label), None)
+            combo.model().item(combo.count() - 1).setEnabled(False)
+        else:
+            combo.addItem(label, str(version))
+    for other, items in others or ():
         combo.insertSeparator(combo.count())
-        combo.addItem(i18n.t("cmpOtherPreset").format(preset=preset), None)
+        combo.addItem(i18n.t("cmpOtherPreset").format(preset=other), None)
         combo.model().item(combo.count() - 1).setEnabled(False)
         for key, label in items:
             combo.addItem(str(label), str(key))
@@ -719,21 +735,25 @@ class DetailPane(QFrame):
             self.open_param(self._param)
 
     def set_compare_choices(self, versions: list, default: Optional[str], loader,
-                            labels: Optional[dict] = None, others: Optional[list] = None) -> None:
+                            labels: Optional[dict] = None, others: Optional[list] = None,
+                            preset: Optional[str] = None, current: Optional[str] = None) -> None:
         """Offer these versions to compare with; `loader(key)` returns that version's view.
 
         `default` is the one selected (the previous configuration, by the window's choice); None,
-        or no versions at all, compares with nothing and hides the control. `labels` names a
+        or nothing to actually pick, compares with nothing and hides the control. `labels` names a
         version the way the list shows it — `v_003 · SQ-1`, with the names it was saved under in
         the device (hub #198). `others` are the other presets' versions, after this one's
-        (`fill_compare_combo`, finding 66)."""
+        (`fill_compare_combo`, finding 66); `preset` and `current` head and grey out this preset's
+        own group the same way (tcc#103) — `current` may be IN `versions` now, so it is not what
+        decides whether the control has anything to offer."""
         self._compare_loader = loader
         blocked = self._compare_combo.blockSignals(True)
-        fill_compare_combo(self._compare_combo, versions, labels, others)
+        fill_compare_combo(self._compare_combo, versions, labels, others, preset, current)
         index = self._compare_combo.findData(default) if default else 0
         self._compare_combo.setCurrentIndex(max(index, 0))
         self._compare_combo.blockSignals(blocked)
-        shown = bool(versions or others) and not self._embedded
+        selectable = [v for v in versions if v != current]
+        shown = bool(selectable or others) and not self._embedded
         self._compare_label.setVisible(shown)
         self._compare_combo.setVisible(shown)
         self._load_compare()

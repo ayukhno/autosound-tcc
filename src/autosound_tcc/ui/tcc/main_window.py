@@ -2434,9 +2434,13 @@ class MainWindow(QMainWindow):
 
         # One read per version: the pane, the control layout's tabs and the dots all ask for it.
         loader = functools.lru_cache(maxsize=16)(load)
-        self._compare_args = (own, default, loader, labels, others)
+        # `preset` and `current` ride along after `others` (index 5, 6) so `control_layout.
+        # _fill_compare` can head and grey the own group the same way (tcc#103) -- appended, not
+        # inserted, so the existing `len(args) > 3`/`> 4` reads of `labels`/`others` stay right.
+        self._compare_args = (own, default, loader, labels, others, preset, current)
         self._compare_key = default
-        self._detail.set_compare_choices(own, default, loader, labels=labels, others=others)
+        self._detail.set_compare_choices(own, default, loader, labels=labels, others=others,
+                                         preset=preset, current=current)
         self._sync_status_dots()
 
     def _compare_view_now(self):
