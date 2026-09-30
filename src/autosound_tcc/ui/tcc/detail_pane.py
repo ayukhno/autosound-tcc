@@ -284,35 +284,37 @@ class _TierPickButton(QToolButton):
         self.updateGeometry()
 
     def set_preferred_width(self, width: int) -> None:
-        """The row's STABLE width, off the tier's longest possible label — not whatever text
-        happens to be picked right now, which `sizeHint` would otherwise track on its own and
-        move the row every time the pick changed (the property `setFixedWidth` used to give it,
-        before it also had to be able to shrink)."""
+        """The row's STABLE width, off the tier's longest possible label (`width_for`) — not
+        whatever text happens to be picked right now, which `sizeHint` would otherwise track on
+        its own and move the row every time the pick changed (the property `setFixedWidth` used to
+        give it, before it also had to be able to shrink)."""
         self._preferred_width = width
         self.updateGeometry()
 
-    def _chrome(self) -> int:
-        """What the button spends on its icon and its own padding, beyond the text — measured off
-        the real `minimumSizeHint`, the way `labels.ElidedButton` does it, so the theme's QSS
-        (padding, the hidden menu-indicator) carries into this number instead of being guessed.
+    def width_for(self, text: str) -> int:
+        """The width at which this chip shows `text` whole: its chrome, measured, and the text's
+        width rounded UP from its fractions -- `fit_text` judges the fit in fractions, and a
+        whole-pixel width one fraction short elides the last letters (F-045)."""
+        return self._chrome() + math.ceil(QFontMetricsF(self.font()).horizontalAdvance(text))
 
-        `QToolButton.minimumSizeHint()` asks `sizeHint()` for its own answer, and PySide's virtual
-        dispatch hands that back to THIS class's override below — so with `_preferred_width` set,
-        it would measure OUR OWN preferred width against the text instead of the button's actual
-        icon/padding overhead. Cleared here and restored after, so the measurement is the widget's
-        real chrome, not whatever we last told `sizeHint()` to say."""
-        saved, self._preferred_width = self._preferred_width, 0
-        try:
-            chrome = max(0, super().minimumSizeHint().width()
-                         - self.fontMetrics().horizontalAdvance(self._full))
-        finally:
-            self._preferred_width = saved
-        return chrome
+    def _chrome(self) -> int:
+        """What the button spends beyond its text: the dot, the gap after it, the two spaces Qt
+        pads a tool button's text with, and the theme's padding -- Qt's own size of the button
+        (the base `sizeHint`, not this class's) less Qt's own measure of the text in it, so the
+        QSS carries into this number instead of being guessed.
+
+        Against Qt's measure of the text, not `horizontalAdvance`: the two round differently, and
+        the difference made the chrome, and the row, a pixel wider for «m-L» than for «m-L/m-R»
+        on a wide font -- the row jumped on the pair toggle."""
+        text = self.fontMetrics().size(Qt.TextFlag.TextShowMnemonic, self._full).width()
+        return max(0, super().sizeHint().width() - text)
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
-        if self._preferred_width:
-            hint.setWidth(self._preferred_width)
+        # Never narrower than its own text whole, whatever it was told (CI at f9d3a9e: on the
+        # Windows runner's fontless text the chip's chrome outgrew a guessed allowance, and at its
+        # own preferred width it read «Output: m-Left-Tweeter-Fro…»).
+        hint.setWidth(max(self._preferred_width, self.width_for(self._full)))
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
@@ -1552,9 +1554,11 @@ class DetailPane(QFrame):
             # (tcc#96, finding 105), which is what elides its text instead of clipping the whole
             # button past the row's edge.
             button.ensurePolished()
-            longest = max((f"{name}: {self._pair_text(r, by_name.get(_sibling_name(r.name) or ''), p)}"
-                           for r in rows for p in (False, True)), key=len, default=f"{name}: -/-")
-            button.set_preferred_width(button.fontMetrics().horizontalAdvance(longest) + 40)
+            labels = [f"{name}: {self._pair_text(r, by_name.get(_sibling_name(r.name) or ''), p)}"
+                      for r in rows for p in (False, True)] or [f"{name}: -/-"]
+            # Measured, chrome and all: a guessed 40 px of chrome held the longest label on the
+            # Mac and not on the Windows runner's fontless text (CI at f9d3a9e).
+            button.set_preferred_width(max(button.width_for(label) for label in labels))
             menu = QMenu(button)
             for r in rows:
                 count = band_count(r.eq_bands())

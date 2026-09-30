@@ -8,6 +8,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 
 from autosound_tcc.state.dsp_state import EqBand  # noqa: E402
@@ -920,14 +921,31 @@ def test_the_tier_chip_elides_instead_of_getting_clipped_past_its_row():
     _app()
     button = _TierPickButton()
     button.setText("Output: m-Left-Tweeter-Front")
-    preferred = button.fontMetrics().horizontalAdvance(button.text()) + 60
-    button.set_preferred_width(preferred)
+    button.set_preferred_width(button.width_for(button.text()))
     button.resize(_squeezed(button), 22)
     shown = button.fit_text()
     assert shown != button.text() and shown.endswith("…"), shown
 
-    button.resize(preferred, 22)
+    button.resize(button.sizeHint().width(), 22)
     assert button.fit_text() == button.text(), "at its own preferred width, nothing is cut"
+
+
+def test_the_tier_chip_s_preferred_width_holds_its_text_whatever_it_was_given():
+    """CI at f9d3a9e, windows-latest: at its own preferred width the chip read
+    «Output: m-Left-Tweeter-Fro…». The width it was given was the text's width plus a guessed 60
+    px of chrome (40 in `_fill_pickers`), and on the runner's fontless offscreen text the chrome
+    is more than that. Its preferred width now holds its own text whole -- the chrome measured,
+    the text's width rounded up from its fractions -- however little it was told, so it never
+    elides at its own size on any font engine. Given too little on purpose here: the text's width
+    alone, no chrome at all."""
+    from autosound_tcc.ui.tcc.detail_pane import _TierPickButton
+
+    _app()
+    button = _TierPickButton()
+    button.setText("Output: m-Left-Tweeter-Front")
+    button.set_preferred_width(button.fontMetrics().horizontalAdvance(button.text()))
+    button.resize(button.sizeHint().width(), 22)
+    assert button.fit_text() == button.text(), (button.sizeHint().width(), button.fit_text())
 
 
 def test_a_real_pane_s_chips_elide_the_same_way_when_squeezed():

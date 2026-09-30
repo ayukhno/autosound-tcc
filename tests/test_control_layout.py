@@ -697,15 +697,22 @@ def test_the_compare_box_s_floor_holds_a_typical_name_in_any_font():
     that cap «3.S-shelf · v_002» came out «3.… · v_002» (CI run 36623891341). The cap is the
     width of «<13 letters> · v_NNN» in the box's own font now, so the same names fit whole at
     any font: the box's font is widened to about twice and four times here, and the picked name
-    still shows whole with the box at its own floor."""
-    from PySide6.QtGui import QFont
+    still shows whole with the box at its own floor.
+
+    Whether the font widens at all is measured first (CI at f9d3a9e): the Windows runner's
+    fontless offscreen text ignores the stretch, every cap came out 279 px, and "the cap follows
+    the font" had nothing to follow there. The cap holding «<13 letters> · v_NNN» and the picked
+    name whole are checked in every font; the growth only where the font grows."""
+    import math
+
+    from PySide6.QtGui import QFont, QFontMetricsF
     from PySide6.QtWidgets import QComboBox
 
-    from autosound_tcc.ui.tcc.control_layout import _CompareBox
+    from autosound_tcc.ui.tcc.control_layout import _COMPARE_BOX_FLOOR_NAME, _CompareBox
     from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
 
     _app()
-    caps = []
+    caps, widths = [], []
     for stretch in (100, 141, 200):
         combo = _CompareBox()
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -717,10 +724,16 @@ def test_the_compare_box_s_floor_holds_a_typical_name_in_any_font():
                            [("3.S-shelf", [("3.S-shelf/v_002", "v_002")])], "4.C-cut", None)
         combo.setCurrentIndex(combo.findData("3.S-shelf/v_002"))
         combo.resize(combo.minimumSizeHint())
+        held = QFontMetricsF(combo.font()).horizontalAdvance(f"{_COMPARE_BOX_FLOOR_NAME} · v_000")
+        assert combo.floor_cap() >= math.ceil(held), (stretch, combo.floor_cap(), held)
         assert combo.minimumSizeHint().width() <= combo.floor_cap(), stretch
         assert combo.fit_text() == combo.shown_text() == "3.S-shelf · v_002", \
             (stretch, combo.fit_text())
         caps.append(combo.floor_cap())
+        widths.append(held)
+    if not widths[0] < widths[1] < widths[2]:
+        pytest.skip(f"this font engine ignores the stretch (the floor name measures {widths}): "
+                    f"no growth for the cap to follow, caps {caps}")
     assert caps[0] < caps[1] < caps[2], f"the cap follows the font: {caps}"
 
 
