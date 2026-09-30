@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import config
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.discard import drop
 from autosound_tcc.ui.tcc.detail_pane import (
     cell_width,
     DetailPane,
@@ -622,13 +623,17 @@ class ControlLayout:
         layout, index = self._confirm_home
         layout.insertWidget(index, w._dialog.confirm_bar)
         w._main_splitter.setVisible(True)
+        # Each out of its layout before it is unparented (`discard.drop`, tcc#19). The header's
+        # items are fetched to measure the corner's room (`_min_width_without`), and PySide keeps
+        # a wrapper for each fetched item as long as the header lives; unparented in place, the
+        # corner's item was deleted by Qt behind that wrapper, and the next Qt object built on
+        # its address came back to Python as a `QWidgetItem` -- a new table's `viewport()` on
+        # ubuntu's CI at 0750776. The splitter goes the same way: its layout is the window's.
         if self.vertical is not None:
-            self.vertical.setParent(None)
-            self.vertical.deleteLater()
+            drop(self.vertical)
         if self._corner is not None:
             self._corner.parentWidget().removeEventFilter(self._header_watch)
-            self._corner.setParent(None)
-            self._corner.deleteLater()
+            drop(self._corner)
         self.vertical = self.horizontal = self.tabs = None
         self._corner = self.compare_combo = self._compare_label = self._compare_other = None
         self._compare_tip = self._header_watch = None

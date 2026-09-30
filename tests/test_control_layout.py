@@ -11,8 +11,16 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+import shiboken6  # noqa: E402
 from PySide6.QtCore import QRect  # noqa: E402
-from PySide6.QtWidgets import QApplication, QSplitter, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QLayout,
+    QLayoutItem,
+    QSplitter,
+    QTabWidget,
+    QWidget,
+)
 
 from autosound_tcc.core import config  # noqa: E402
 from autosound_tcc.ui.tcc import control_layout, i18n, main_window  # noqa: E402
@@ -50,6 +58,59 @@ def test_entering_and_leaving_puts_every_panel_back(tmp_path, monkeypatch):
     assert left.parentWidget() is window._main_splitter
     assert right.parentWidget() is window._main_splitter
     assert bar.parentWidget() is home
+
+
+def _dead_item_wrappers() -> list:
+    """Python wrappers of layout items that no live layout holds any more.
+
+    PySide wraps an item fetched by `QLayout.itemAt` and keeps the wrapper for as long as the
+    layout lives (`addLayoutOwnership`). A widget that leaves the layout by `setParent` or by its
+    own deletion has Qt delete its item without a word to PySide, and the wrapper stays in
+    shiboken's address table under the freed address. The live items are read off every
+    widget's layout; the wrappers this walk makes to read them are let go again, so it leaves
+    nothing behind of its own."""
+    def wrapped():
+        return [w for w in shiboken6.getAllValidWrappers()
+                if isinstance(w, QLayoutItem) and not isinstance(w, (QLayout, QWidget))]
+
+    before = {id(w) for w in wrapped()}
+    live = set()
+    for widget in QApplication.allWidgets():
+        if not isinstance(widget, QWidget):
+            continue
+        layouts = [widget.layout()] if isinstance(widget.layout(), QLayout) else []
+        while layouts:
+            layout = layouts.pop()
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                live.add(shiboken6.getCppPointer(item)[0])
+                if isinstance(item.layout(), QLayout):
+                    layouts.append(item.layout())
+    dead = []
+    for wrapper in wrapped():
+        if id(wrapper) not in before:
+            shiboken6.invalidate(wrapper)
+        elif shiboken6.getCppPointer(wrapper)[0] not in live:
+            dead.append(type(wrapper).__name__)
+    return dead
+
+
+def test_leaving_leaves_no_layout_item_behind_its_python_wrapper(tmp_path, monkeypatch):
+    """CI at 0750776 (run 36710327675, ubuntu): right after control mode was left, a new table's
+    `viewport()` came back to Python as a `QWidgetItem` («has no attribute 'installEventFilter'»),
+    and in the next case the table's event filter was handed one. The address had been the
+    compare corner's layout item. The corner sits in the window's header, whose items
+    `_fit_corner` fetches to sum the rest of the header (`_min_width_without`), and `leave`
+    unparented it while its item was still in that layout: Qt deleted the item behind the wrapper
+    PySide keeps for it, and the next Qt object built on the address was looked up as that item.
+    The tcc#19 crash on Windows had the same shape (`discard.py`). Only glibc's allocator has put
+    a widget there so far, so what is checked is the leftover wrapper, on every platform, twice
+    round."""
+    window = _window(tmp_path, monkeypatch)
+    for _ in range(2):
+        window._control_layout.enter()
+        window._control_layout.leave()
+        assert _dead_item_wrappers() == []
 
 
 def test_the_top_window_carries_the_tabs_the_arbiter_named(tmp_path, monkeypatch):
