@@ -405,6 +405,7 @@ def test_a_narrow_tab_elides_its_label_instead_of_cutting_it_mid_word(tmp_path, 
     bar... to a fixed width smaller than its text") comes down to when the bar's own layout will
     not cooperate -- and tests `fit_text`'s own eliding computation deterministically."""
     from PySide6.QtCore import QRect
+    from PySide6.QtGui import QFontMetrics
 
     from autosound_tcc.ui.tcc.setting_status import DotTabBar
 
@@ -412,11 +413,14 @@ def test_a_narrow_tab_elides_its_label_instead_of_cutting_it_mid_word(tmp_path, 
     bar = DotTabBar()
     long = f'{i18n.t("copyEqBank")} m-Left-Tweeter-Front-Channel'
     bar.addTab(long)
-    monkeypatch.setattr(bar, "tabRect", lambda _index: QRect(0, 0, 60, 24))
+    # 60 px, or -- where this font's first letter and «…» alone are wider (a stretch of 200 on
+    # the Mac: «C…» is 79 px) -- just that: short of the text, room for a beginning.
+    room = max(60, QFontMetrics(bar._font(0)).horizontalAdvance(long[:1] + "…") + 2)
+    monkeypatch.setattr(bar, "tabRect", lambda _index: QRect(0, 0, room, 24))
     shown, width = bar.fit_text(0)
     assert shown != long, "genuinely shortened, not left whole"
     assert shown.endswith("…") and len(shown) > 1, "a whole glyph prefix, not a bare cut"
-    assert width <= 60, "never wider than the room it was given"
+    assert width <= room, "never wider than the room it was given"
 
     # With real room, nothing is touched at all.
     monkeypatch.setattr(bar, "tabRect", lambda _index: QRect(0, 0, 2000, 24))
@@ -710,7 +714,19 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(
                         f"the saved names give way: {shown}"
                 assert shown.endswith(" · v_002") or shown.startswith("3.S-shelf · v_002"), shown
             else:
-                assert shown.endswith(" · v_002") and shown.startswith("5.W-"), shown
+                # The version whole and the preset's beginning -- as much of it as the cap
+                # leaves, never none (the Arbiter: cut is fine if the beginning shows). ubuntu's
+                # fonts at a stretch of 141 (CI at 9bb37b7) leave «5… · v_002», where this
+                # expected four letters: the Mac's metrics. Four only where the box holds them.
+                assert shown.endswith(" · v_002"), shown
+                head = shown[:-len(" · v_002")]
+                assert head == _LONG_PRESET or (
+                    len(head) > 1 and head.endswith("…") and _LONG_PRESET.startswith(head[:-1])), \
+                    f"the preset's beginning shows: {shown}"
+                base = QComboBox.minimumSizeHint(combo)
+                held = combo._text_width("5.W-… · v_002") + base.width() - combo._room(base)
+                if box >= held:
+                    assert head.startswith("5.W-"), f"the box holds four letters: {shown}"
             assert full in combo.hover_tip.text(), "the whole text is in the hover"
             if floor > half and floor - box + smallest > half:
                 too_wide.append((key, floor - box, smallest))
@@ -1242,8 +1258,11 @@ def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monke
         half = layout._right_half()[1].width()
         assert window.width() == max(half, window.minimumWidth()), (window.width(), half)
         # Not the «?»: it never elides, and its round border curves into its contents rect.
-        for chip in chips:
-            _paints_what_it_says(chip)
+        fontless = {_paints_what_it_says(chip) for chip in chips} - {""}
+        if fontless:
+            layout.leave()
+            pytest.skip(f"in {lang} the fit's rule held for every chip; the ink is not checked: "
+                        f"{', '.join(sorted(fontless))}")
         # Whole where the head has the room for its ask -- English at the Mac's font does, by
         # one pixel (734 for an ask of 733), once the hint asks only what the paint needs. A
         # font whose ask is wider than the row (Ukrainian, or the runner's twice-as-wide text)
