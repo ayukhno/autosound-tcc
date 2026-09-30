@@ -234,8 +234,9 @@ class _FitLabel(QLabel):
                    - self.fontMetrics().horizontalAdvance(self._full))
 
     def whole_width(self) -> int:
-        """The width that shows the text whole, whatever way the label is set to now."""
-        return math.ceil(self._width(self._full)) + self._chrome()
+        """The width that shows the text whole, whatever way the label is set to now -- and no
+        more than the style caps it at («?» asks 17 px of a 16-px cap)."""
+        return min(self.maximumWidth(), math.ceil(self._width(self._full)) + self._chrome())
 
     def _text_rect(self) -> QRect:
         """Where QLabel itself puts the text -- `QLabelPrivate::documentRect`: the contents rect
@@ -481,9 +482,16 @@ class _HeadBox(QComboBox):
         return super().sizeHint().width()
 
     def floor_width(self) -> int:
+        """«v_NNN» whole with the «…» that says a saved name follows: measured on «v_000» alone,
+        «v_001 · P3» read «v_0…» at the floor (the re-review of fix round 1)."""
         hint = super().sizeHint()
         chrome = hint.width() - self._room(hint)
-        return min(hint.width(), chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000")))
+        return min(hint.width(), chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000…")))
+
+    @staticmethod
+    def _version_head(text: str) -> str:
+        """«v_NNN» at the start of a row's text, or nothing."""
+        return text[:5] if text[:2] == "v_" and text[2:5].isdigit() else ""
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
@@ -496,11 +504,16 @@ class _HeadBox(QComboBox):
         return hint
 
     def fit_text(self) -> str:
-        """What the closed box draws: the current text, elided to the room it has now."""
+        """What the closed box draws: the current text, elided to the room it has now -- the
+        version whole and «…» after it where the saved names do not fit."""
         metrics, room, text = QFontMetricsF(self.font()), self._room(), self.currentText()
         if metrics.horizontalAdvance(text) <= room:
             return text
-        return metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
+        shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
+        head = self._version_head(text)
+        if head and not shown.startswith(head) and metrics.horizontalAdvance(head + "…") <= room:
+            shown = head + "…"
+        return shown
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
         painter = QStylePainter(self)
@@ -1073,7 +1086,9 @@ class DetailPane(QFrame):
         # channel, because in the single-channel view that is what "copy EQ" means. Hidden unless
         # the method can produce one for this DSP: a copy button that yields nothing, or
         # something nobody can identify, is worse than no button (user, 2026-08-23).
-        self._eq_copy = _DTab(i18n.t("copyEqBank"), floor="glyph")
+        # Its floor is «К…», not «К»: the copy has no glyph of its own, and a lone letter reads
+        # as a word cut with nothing to say so (the re-review of fix round 1).
+        self._eq_copy = _DTab(i18n.t("copyEqBank"))
         self._eq_copy.setProperty("class", "d-tab d-copy")
         self._eq_copy.clicked.connect(self._on_copy_eq_bank)
         self._eq_copy.setVisible(False)
@@ -1568,6 +1583,22 @@ class DetailPane(QFrame):
         spacing = _HEAD_SPACING_TIGHT if giving == len(stages) else _HEAD_SPACING
         if self._head.layout().spacing() != spacing:
             self._head.layout().setSpacing(spacing)
+        self._sync_box_tip()
+
+    def _sync_box_tip(self) -> None:
+        """What a hidden label said goes into the list's hover, as control mode's corner does
+        (the re-review of fix round 1: at two thirds of the screen the tag hid over the table
+        too, and another configuration's «v_002» read as this configuration's own)."""
+        said = []
+        if self._compare_label.way() == "hidden":
+            said.append(i18n.t("cmpWith"))
+        if self._compare_other.way() == "hidden" and is_other_preset(self._compare_version):
+            preset = self._compare_version.split("/", 1)[0]
+            said.append(i18n.t("cmpOtherTip").format(
+                version=f"{preset} · {self._compare_combo.currentText()}"))
+        tip = "\n".join(said)
+        if self._compare_combo.toolTip() != tip:
+            self._compare_combo.setToolTip(tip)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
         if watched is self._head and event.type() in (

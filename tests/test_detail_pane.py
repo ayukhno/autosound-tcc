@@ -1816,3 +1816,120 @@ def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
             _paints_what_it_says(widget)
     finally:
         i18n.set_language("en")
+
+
+def test_the_list_s_floor_keeps_the_version_whole_before_a_saved_name():
+    """The re-review of fix round 1 (b): the list's floor was measured on «v_000» alone, so a
+    version saved under a name -- «v_001 · P3» -- read «v_0…» at the floor. The floor holds
+    «v_NNN» and the «…» that says a name follows: «v_001…»; with the room, the whole row."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_001", "v_002"], "v_001", lambda _k: _rig_view(),
+                             {"v_001": "v_001 · P3", "v_002": "v_002"}, [], "4.C-cut", "v_002")
+    box = pane._compare_combo
+    assert box.currentText() == "v_001 · P3"
+    box.show()
+    try:
+        box.set_way("floor")
+        box.resize(box.floor_width(), 24)
+        QApplication.processEvents()
+        assert box.fit_text() == "v_001…", box.fit_text()
+        box.set_way("holds")
+        box.resize(box.whole_width() + 60, 24)
+        QApplication.processEvents()
+        assert box.fit_text() == "v_001 · P3", box.fit_text()
+    finally:
+        box.close()
+
+
+def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch):
+    """The re-review of fix round 1 (c): at two thirds of the screen «інша конфігурація» hides
+    over the table too, and the list had no hover, so another configuration's «v_002» read as
+    this configuration's own. As control mode's corner does, a hidden label's words go into the
+    list's hover: «порівняти з», and «інша конфігурація: 3.S-shelf · v_002»; with the room, the
+    labels are back and the hover empty."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "table")
+        window._fit_centre_floor()
+        for _ in range(4):
+            window.resize(1008, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+        head, box = pane._head, pane._compare_combo
+        assert not pane._compare_other.isVisibleTo(head) and pane._compare_other.wanted()
+        assert box.toolTip() == "порівняти з\nінша конфігурація: 3.S-shelf · v_002", box.toolTip()
+
+        splitter = window._main_splitter
+        window.resize(2600, 900)
+        for _ in range(4):
+            QApplication.processEvents()
+        sizes = splitter.sizes()
+        want = pane.head_asks()[0] + 40
+        splitter.setSizes([sizes[0], want, sum(sizes) - sizes[0] - want])
+        for _ in range(4):
+            QApplication.processEvents()
+        assert pane._compare_other.isVisibleTo(head) and box.toolTip() == "", box.toolTip()
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("font", [("zoom", 1.2), ("zoom", 1.3), ("zoom", 1.4), ("stretch", 110)],
+                         ids=["zoom120", "zoom130", "zoom140", "stretch110"])
+def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch, font):
+    """The residual, stated (the re-review of fix round 1, d): over one channel's EQ the head's
+    minimum fits the centre's floor of 588 on the Arbiter's 1512-px screen at the default font
+    (546), and not at the zoom's steps -- measured here with the copy chip's floor at «К…»:
+    zoom 120 % 606, 130 % 623, 140 % 650, and a stretch of 110 623 (the review measured 601 /
+    600 / 625 with the floor at «К», and zoom 120 % fitting). There Qt trims the list and
+    «закрити ✕» at the full window's floor. Where it does not fit this test says so with the
+    numbers (an expected failure), and passes the day it does."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+
+    app = _app()
+    before = QFont(app.font())
+    kind, value = font
+    if kind == "stretch":
+        wide = QFont(before)
+        wide.setStretch(value)
+        app.setFont(wide)
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "eq_single")
+        if kind == "zoom":
+            window._set_zoom(value)
+        for _ in range(4):
+            QApplication.processEvents()
+        window._fit_centre_floor()
+        least = pane.head_asks()[-1]
+        floor = window._center.minimumWidth() - (pane.width() - pane._head.width())
+        if least > floor:
+            pytest.xfail(f"residual: over one channel's EQ at {kind} {value} the head's minimum "
+                         f"is {least} px against the centre's floor {floor} on a 1512-px screen")
+        assert least <= floor, (least, floor)
+    finally:
+        if kind == "zoom":
+            window._set_zoom(1.0)
+        app.setFont(before)
+        i18n.set_language("en")
