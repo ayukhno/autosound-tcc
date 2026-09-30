@@ -330,6 +330,33 @@ def _min_chrome(widget: QWidget, top: QWidget) -> Optional[int]:
     return chrome
 
 
+def _min_width_without(widget: QWidget, skip: QWidget) -> int:
+    """`widget`'s minimum width less `skip`'s, summed from its own margins, its box layout's
+    margins and spacing, and the other items' own minimums -- the same number whatever `skip`
+    asks for now. A layout's own `minimumSize` is a cached sum refreshed only by a posted event,
+    so "the layout's minimum less the widget's fresh one" is two moments mixed. A nested widget
+    on the way to `skip` is summed the same way."""
+    margins, layout = widget.contentsMargins(), widget.layout()
+    width, shown = margins.left() + margins.right(), 0
+    if layout is None:
+        return width
+    margins = layout.contentsMargins()
+    width += margins.left() + margins.right()
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item.isEmpty():
+            continue
+        shown += 1
+        inner = item.widget()
+        if inner is skip:
+            continue
+        if inner is not None and inner.isAncestorOf(skip):
+            width += _min_width_without(inner, skip)
+        else:
+            width += item.minimumSize().width()
+    return width + max(0, shown - 1) * layout.spacing()
+
+
 #: How much room past its own width a hidden corner label waits for before it comes back, so a
 #: header a pixel either side of the line does not flicker (tcc#96). The header's own ask moves by
 #: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
@@ -831,12 +858,16 @@ class ControlLayout:
         label, tag = self._compare_label, self._compare_other
         header = corner.parentWidget()
         if header is not None:
-            # What half the screen leaves the box: the half, less the header's minimum without
-            # the box (its own minimum less the box's -- the same number whatever the box holds
-            # now) and what the window adds around the header (tcc#96, the re-review of fix
+            # What half the screen leaves the box: the half, less the rest of the header at its
+            # minimum and what the window adds around the header (tcc#96, the re-review of fix
             # round 5: a font a little wider than the Mac's put a 30-character preset past 756).
+            # The rest is summed from the other items themselves (`_min_width_without`), never
+            # read as "the header's minimum less the box's": the header's is a layout's CACHED
+            # number and the box's a fresh one, and their difference ratcheted on a pick -- the
+            # room traced 247, 190, 162, 190, 218, the window's minimum spiked to 780 and Qt
+            # grew the window past the half for good (the review of the follow-up).
             around = _min_chrome(header, self.window) or 0
-            rest = header.minimumSizeHint().width() - combo.minimumSizeHint().width()
+            rest = _min_width_without(header, combo)
             combo.set_half_room(self._right_half()[1].width() - around - rest)
         combo.sync_width()
         other = is_other_preset(combo.currentData())

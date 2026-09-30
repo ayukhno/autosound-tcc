@@ -1154,3 +1154,51 @@ def test_a_reload_that_raises_the_table_s_floor_keeps_a_flush_right_window_on_it
     frame = window.frameGeometry()
     assert frame.right() <= free.right() and frame.left() >= free.left(), (frame, free, narrow, wide)
     layout.leave()
+
+
+@pytest.mark.parametrize("stretch", [100, 106, 110, 141])
+def test_a_pick_at_the_half_never_pushes_the_window_past_it(tmp_path, monkeypatch, stretch):
+    """The review of the follow-up: a long other-configuration pick at the half, at a font a
+    little wider than the Mac's (stretch 106 -> 760 px, 110 -> 755 and then 780 on a second long
+    pick, zoom 120% -> 763), left the window past the half for good, and the tests' `_settle`
+    resized it back and hid it. The room the half left the box was read as "the header's
+    minimum less the box's" -- a layout's cached number against a fresh one -- and ratcheted
+    (247, 190, 162, 190, 218) through the layouts' posted events, so the window's minimum spiked,
+    Qt grew the window, and nothing shrank it back. The rest of the header is summed from the
+    other items themselves now. Picked at the half with NO resize after: the window stays at
+    the half and its frame inside the screen, through a long pick, back, and a long pick again.
+    Where the header does not sit in the half even with the smallest box (stretch 141) there is
+    no half to keep, and the test says so."""
+    from PySide6.QtGui import QFont
+
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    try:
+        window = _control_window(tmp_path, monkeypatch)
+        others = [("3.S-shelf", [("3.S-shelf/v_002", _LONG_NAMES), ("3.S-shelf/v_001", "v_001")]),
+                  (_LONG_PRESET, [(f"{_LONG_PRESET}/v_002", "v_002")])]
+        window._compare_args = window._compare_args[:4] + (others,) + window._compare_args[5:]
+        layout = window._control_layout
+        layout._fill_compare()
+        _settled(window)
+        combo, half = layout.compare_combo, layout._right_half()[1].width()
+        free = window.screen().availableGeometry()
+        if window.width() > half:
+            pytest.skip(f"this font's header does not sit in half a 1512-px screen: the window "
+                        f"is {window.width()} px wide at the half's {half} before any pick")
+        assert window.width() == half and window.frameGeometry().right() <= free.right()
+        for key in ("3.S-shelf/v_002", f"{_LONG_PRESET}/v_002", "v_001", f"{_LONG_PRESET}/v_002"):
+            combo.setCurrentIndex(combo.findData(key))
+            _settled(window)
+            frame = window.frameGeometry()
+            assert window.width() == half and frame.right() <= free.right(), (
+                key, window.width(), half, frame, window.minimumWidth())
+            assert combo.fit_text().endswith(combo.currentText()[:5]) or "v_00" in combo.fit_text()
+        layout.leave()
+    finally:
+        app.setFont(before)
+        i18n.set_language("en")
