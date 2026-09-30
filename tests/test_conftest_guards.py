@@ -171,3 +171,58 @@ def test_app_ground_drops_a_record_that_lies_and_keeps_one_that_is_true(_sheet_r
         assert theme._APPLIED is not None and theme._APPLIED[2] == app_ground.styleSheet()
     else:
         assert theme._APPLIED is None
+
+
+def test_a_finished_test_s_panes_leave_the_language_switch():
+    """F-065: every `MainWindow` switches to its saved language as it is built, and a switch
+    called every pane the run had made so far -- in one process the cost of a window grew with
+    its place in the run. What a test registered is dropped when it ends; what was there before
+    it stays, and the language still reaches it."""
+    import weakref
+
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from tests import _windows
+
+    QApplication.instance() or QApplication([])
+    earlier = DetailPane()  # stands for what a module fixture, or an import, registered
+    before = _windows.language_listeners()
+    finished = DetailPane()  # stands for what the test itself made
+
+    def owners():
+        return [entry().__self__ for entry in i18n._listeners
+                if isinstance(entry, weakref.WeakMethod) and entry() is not None]
+
+    assert earlier in owners() and finished in owners()
+    _windows.drop_language_listeners_since(before)
+    assert earlier in owners() and finished not in owners()
+    english = finished._tab_table.text()
+    i18n.set_language("uk")
+    try:
+        assert earlier._tab_table.text() == i18n.t("tabTable") != english, "it still follows"
+        assert finished._tab_table.text() == english, "a finished test's pane keeps its words"
+    finally:
+        i18n.set_language("en")
+
+
+def test_a_test_starts_on_a_frozen_heap_and_its_own_cycles_are_still_collected():
+    """F-065: a full collection between tests walked every Python object the run's earlier
+    windows still hold -- 437 s of a 2730-s serial run. `_collect_qt_leftovers` freezes what is
+    alive when a test starts, so a collection walks only what the test made since; a cycle the
+    test drops is collected all the same."""
+    import gc
+    import weakref
+
+    assert gc.get_freeze_count() > 0, "what was alive before this test is out of the collection"
+
+    class _Cycle:
+        pass
+
+    dropped = _Cycle()
+    dropped.itself = dropped
+    gone = weakref.ref(dropped)
+    del dropped
+    gc.collect()
+    assert gone() is None, "a cycle made and dropped in the test is collected"

@@ -82,9 +82,13 @@ def test_main_window_builds_five_regions():
     assert window._right is not None
 
 
-def test_theme_toggle_switches_and_persists_in_memory():
+def test_theme_toggle_switches_and_persists_in_memory(monkeypatch):
+    from tests import _windows
+
     _app()
     window = MainWindow()
+    # The switch styles this window, not every window the run has left alive (F-065).
+    _windows.theme_on_the_window(monkeypatch, window)
     start = window._mode
     window._toggle_theme()
     assert window._mode != start

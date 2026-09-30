@@ -2060,6 +2060,7 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.ui.tcc import main_window
+    from tests import _windows
     from tests import test_control_layout as tcl
 
     kind, value, pinned = _EQ_HEAD_LEAST_AT[case]
@@ -2069,6 +2070,8 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
     # never by the minimum they pin.
     not_mac = _not_the_mac_font()
     window = tcl._window(tmp_path, monkeypatch)
+    # The zoom styles this window, not every window the run has left alive (F-065).
+    _windows.theme_on_the_window(monkeypatch, window)
     i18n.set_language("uk")
     try:
         monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))

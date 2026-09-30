@@ -22,6 +22,7 @@ from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.curve_dialog import CurveDialog, _CurveWorker  # noqa: E402
 from autosound_tcc.ui.tcc.curve_view import CurveView, Trace  # noqa: E402
 from autosound_tcc.ui.tcc.theme import current_theme  # noqa: E402
+from tests import _windows  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -675,27 +676,24 @@ def test_the_unit_sits_with_the_numbers_not_under_the_axis():
     assert view._unit_label.text() == "dB"
 
 
-def test_the_plot_repaints_when_the_theme_changes():
+def test_the_plot_repaints_when_the_theme_changes(monkeypatch):
     """Everything else in the app repaints from the stylesheet; a plot draws with explicit pens
     and keeps the colours it was built with — a light plot sitting in a dark window (user,
-    2026-08-11)."""
-    from autosound_tcc.ui.tcc.theme import apply_theme
-
-    app = _app()
-    apply_theme(app, "light")
+    2026-08-11). The themes go on the view alone (`_windows.theme_on`, F-065)."""
     view = _view()
+    _windows.theme_on(monkeypatch, view, "light")
+    view.apply_theme()
     view.set_markers([4.52, 4.78], tokens=["accent", "info"])
     light_bg = view._plot.backgroundBrush().color().name()
     light_pen = view._markers[0].pen.color().name()
 
-    apply_theme(app, "dark")
+    _windows.theme_on(monkeypatch, view, "dark")
     view.apply_theme()
 
     assert view._plot.backgroundBrush().color().name() != light_bg
     assert view._markers[0].pen.color().name() != light_pen
     # ...and the reading survives the repaint: a theme switch must not move a marker.
     assert view.positions() == pytest.approx([4.52, 4.78])
-    apply_theme(app, "light")
 
 
 def test_pyqtgraphs_own_context_menu_is_not_offered():
@@ -2009,21 +2007,17 @@ def test_the_toggle_survives_the_kind_the_window_switches_to():
         assert dialog._view._sum_btn.isVisibleTo(dialog._view) is True, kind
 
 
-def test_the_predicted_sum_is_drawn_to_be_followed_across_the_plot():
+def test_the_predicted_sum_is_drawn_to_be_followed_across_the_plot(monkeypatch):
     """It came out as a thin grey dash nobody could read (user, 2026-08-18). Bolder than a trace,
     near-full alpha, still dashed — and in a colour that is neither of the two trace colours, so
     the eye does not have to work out which of three orange-ish lines is the prediction."""
     view = _fr_view(_fr_trace("w-L_01 (sw)"), _fr_trace("w-R_01 (sw)"))
-
-    from autosound_tcc.ui.tcc.theme import apply_theme
-
-    app = _app()
     view.set_sum_shown(True)
 
     # Both themes, because the palette swaps under it and a colour that reads in one can vanish
-    # in the other — which is how the first one ended up grey on grey.
+    # in the other — which is how the first one ended up grey on grey. On the view alone (F-065).
     for mode in ("dark", "light"):
-        apply_theme(app, mode)
+        _windows.theme_on(monkeypatch, view, mode)
         view.apply_theme()
         pen = view._sum_curve.opts["pen"]
         theme = current_theme()
@@ -2033,30 +2027,29 @@ def test_the_predicted_sum_is_drawn_to_be_followed_across_the_plot():
         drawn = pen.color().name()
         assert drawn not in (theme.accent, theme.info), f"{mode}: not either driver's colour"
         assert drawn not in (theme.border2, theme.muted, theme.faint), f"{mode}: nor the grid's"
-    apply_theme(app, "light")
 
 
-def test_the_delay_box_follows_the_theme_like_the_combos_beside_it():
+def test_the_delay_box_follows_the_theme_like_the_combos_beside_it(monkeypatch):
     """It stayed white with light text on it in the dark theme (user, 2026-08-18): every
     `.mini-select` rule was written `QComboBox[...]`, so not one of them reached the spin box, and
     the palette does not cover for it — the native style paints the field itself.
 
     Asserted on the EFFECTIVE palette after a live switch, not on the sheet alone: the fault was
-    never that the sheet was wrong, it was that nothing in it applied here."""
+    never that the sheet was wrong, it was that nothing in it applied here. The sheets go on the
+    view alone (F-065)."""
     from PySide6.QtGui import QPalette
 
-    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT, apply_theme
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
 
-    app = _app()
     view = _view()
     box = view._shift_box
     assert box.property("class") == "mini-select", "it wears the class the combos wear"
 
-    apply_theme(app, "dark")
+    _windows.theme_on(monkeypatch, view, "dark")
     box.ensurePolished()
     dark = box.palette().color(QPalette.ColorRole.Window).name()
 
-    apply_theme(app, "light")
+    _windows.theme_on(monkeypatch, view, "light")
     box.ensurePolished()
     light = box.palette().color(QPalette.ColorRole.Window).name()
 
@@ -2065,15 +2058,19 @@ def test_the_delay_box_follows_the_theme_like_the_combos_beside_it():
     assert dark != light, "and a live switch moves it, not only construction"
 
 
-def test_the_three_paragraphs_under_the_plot_are_buttons_with_the_text_in_the_tip():
+def test_the_three_paragraphs_under_the_plot_are_buttons_with_the_text_in_the_tip(monkeypatch):
     """User, 2026-08-18: "займають місце і не читаються". Each one names what stands behind it —
-    and what leaves the window is unchanged, which is the half of this that must not break."""
+    and what leaves the window is unchanged, which is the half of this that must not break.
+
+    The row's height is the stylesheet's, so the dialog wears the sheet itself: it rode on the
+    whole application's, which the theme test before it used to leave on (F-065)."""
     _app()
     from autosound_tcc.core import delay_bank
 
     delay_bank.put("w-L_01 (sw)", 0.198)
     every = ["w-L_01 (sw)", "w-R_01 (sw)"]
     dialog = _dialog(every, bridge=_FrBridge(), kind="phase", available=every)
+    _windows.theme_on(monkeypatch, dialog, current_theme().mode)
     dialog._worker.wait(4000)
     dialog._worker.run()
     view = dialog._view
@@ -2814,7 +2811,7 @@ def test_a_measurement_rew_could_not_draw_is_faint_and_does_not_shift_the_others
     assert i18n.t("curveChipMissingTip").format(title="w-R_01 (sw)") in _tip(chips[1]._x)
 
 
-def test_the_chips_are_repainted_when_the_theme_changes():
+def test_the_chips_are_repainted_when_the_theme_changes(monkeypatch):
     """A chip's colour is a PEN's colour, written per widget — nothing about a stylesheet switch
     reaches it, which is the same reason the plot itself has to be told."""
     _app()
@@ -2823,18 +2820,15 @@ def test_the_chips_are_repainted_when_the_theme_changes():
     dialog._worker.wait(4000)
     before = [_chip_colour(chip) for chip in _chips(dialog)]
 
-    from autosound_tcc.ui.tcc.theme import apply_theme
-
     # To the OTHER palette, whichever this run happens to be standing on: tests before this one
     # switch the theme and leave it switched, and "to light" is not a change when it is light.
+    # On the dialog alone (F-065).
     was = current_theme().mode
-    try:
-        apply_theme(_app(), "light" if was == "dark" else "dark")
-        dialog.apply_theme()
-        after = [_chip_colour(chip) for chip in _chips(dialog)]
-    finally:
-        apply_theme(_app(), was)
-        dialog.apply_theme()
+    _windows.theme_on(monkeypatch, dialog, "light" if was == "dark" else "dark")
+    dialog.apply_theme()
+    after = [_chip_colour(chip) for chip in _chips(dialog)]
+    _windows.theme_on(monkeypatch, dialog, was)
+    dialog.apply_theme()
 
     assert after != before, "the two palettes do not paint a trace the same"
     assert all(colour for colour in after), "and every chip still carries one"
@@ -3056,27 +3050,20 @@ def test_a_number_box_has_room_for_its_value_and_the_steppers_under_every_style(
         view._fit_number_boxes()
 
 
-def test_the_boxes_follow_the_zoom_instead_of_clipping_at_it():
+def test_the_boxes_follow_the_zoom_instead_of_clipping_at_it(monkeypatch):
     """A width settled at one font size is the same defect one zoom step later, and the zoom is
     exactly what moves it: `A+` re-applies the sheet with a bigger `font-size`, which beats any
-    font set in code. This is what a constant could not do."""
-    from autosound_tcc.ui.tcc import theme as theme_mod
-
-    app = _app()
+    font set in code. This is what a constant could not do. The zoomed sheet goes on the view
+    alone (F-065)."""
     view = _view()
     before = view._shift_box.width()
-    was = theme_mod._APPLIED  # this sheet is the whole application's; put it back after
 
-    try:
-        theme_mod.apply_theme(app, "dark", scale=1.5)
-        view.apply_theme()
+    _windows.theme_on(monkeypatch, view, "dark", scale=1.5)
+    view.apply_theme()
 
-        assert view._shift_box.width() > before
-        room = view._shift_box.width() - _stepper_width(view._shift_box)
-        assert room >= view._shift_box.fontMetrics().horizontalAdvance("-50.000 ms")
-    finally:
-        mode, scale, _qss = was or ("dark", 1.0, "")
-        theme_mod.apply_theme(app, mode, scale)
+    assert view._shift_box.width() > before
+    room = view._shift_box.width() - _stepper_width(view._shift_box)
+    assert room >= view._shift_box.fontMetrics().horizontalAdvance("-50.000 ms")
 
 
 def test_a_fourth_decimal_is_given_room_when_the_dsp_asks_for_one():

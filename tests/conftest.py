@@ -64,7 +64,7 @@ def _an_exception_in_a_qt_slot_fails_the_test():
 
 
 @pytest.fixture(autouse=True)
-def _collect_qt_leftovers():
+def _collect_qt_leftovers(request):
     """Free the test's discarded Qt objects HERE, between tests, not at a moment Python picks.
 
     A `QThread` with no parent lives until the garbage collector takes it, and the tests make
@@ -75,9 +75,29 @@ def _collect_qt_leftovers():
 
     Not a fix for the product: there every worker has a parent widget that owns it. This is the
     suite being tidy about what it throws away.
+
+    FROZEN between tests (F-065). The windows of every earlier test are still alive (F-053), and
+    a full collection walks every Python object they hold: late in one-process `pytest tests/`
+    a quarter of a second, paid by every test -- 437 s of a 2730-s serial run on the Mac at
+    956e8a8, where CI's whole-suite jobs ran out of time. So what is alive when a test starts is
+    frozen (`gc.freeze`), and each collection here walks only what was made since, which is all a
+    test can have discarded. The previous test's leftovers are collected first, once its
+    fixtures have let go of them. A file's first test collects everything, unfrozen, so what a
+    finished file's module fixtures held is not kept past it; the session ends unfrozen and
+    collected, as it did before, while Qt is still whole.
     """
+    global _GC_FILE
+    if request.node.path != _GC_FILE:
+        _GC_FILE = request.node.path
+        gc.unfreeze()
+    gc.collect()
+    gc.freeze()
     yield
     gc.collect()
+
+
+#: The file whose tests are running, for `_collect_qt_leftovers`: a new one unfreezes the heap.
+_GC_FILE = None
 
 
 @pytest.fixture(autouse=True)
@@ -163,28 +183,43 @@ def _no_live_rew():
 def _quiet_windows_left_behind():
     """TODO F-053: a window a test leaves alive stops acting once its test is over — its timers,
     its watchers, its writes — without being deleted (see `tests/_windows.py` for why not)."""
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance()
-    # The wrappers themselves are held, not just their ids. `topLevelWidgets()` makes a fresh
-    # wrapper for a widget Python holds no wrapper of; kept as an id only, it is freed at once,
-    # and the test's own window could be given that id -- then it counted as "there before" and
-    # was never quieted. Measured in a plain `-n 4` run: `test_a_marked_omp_model_joins_...`'s
-    # window stayed live, its deferred placeholder drop wrote its omp pick into the NEXT test's
-    # project, and that test's window opened the «model gone» box on it -- a real modal, which
-    # waits for nobody and held the worker until it was killed.
-    before = list(app.topLevelWidgets()) if app is not None else []
-    seen = {id(widget) for widget in before}
-    yield
-    app = QApplication.instance()
-    if app is None:
-        return
     from tests import _windows
 
-    for widget in app.topLevelWidgets():
-        if id(widget) not in seen and type(widget).__name__ == "MainWindow":
-            _windows.quiet(widget)
+    # The windows themselves are held, not just their ids. An id alone can be handed to the
+    # test's own window once what it named is freed -- then it counted as "there before" and was
+    # never quieted (with the wrappers `topLevelWidgets()` made just to be counted, it was at
+    # once). The registry, not that walk: see `main_windows`. Measured in a plain `-n 4` run:
+    # `test_a_marked_omp_model_joins_...`'s window stayed live, its deferred placeholder drop
+    # wrote its omp pick into the NEXT test's project, and that test's window opened the «model
+    # gone» box on it -- a real modal, which waits for nobody and held the worker until it was
+    # killed.
+    before = _windows.main_windows()
+    seen = {id(window) for window in before}
+    yield
+    for window in _windows.main_windows():
+        if id(window) not in seen:
+            _windows.quiet(window)
     del before
+
+
+@pytest.fixture(autouse=True)
+def _a_finished_test_s_widgets_are_not_retranslated():
+    """A language switch retranslates the widgets of the test that switches, not of every test
+    before it (F-065).
+
+    `i18n.set_language` calls every registered `retranslate`, and every `MainWindow` calls it as
+    it is built. The widgets of earlier tests are still alive (F-053), so in one process each
+    switch -- and each window built -- redid the words of every detail pane and diagnostics panel
+    the run had made so far: 415 switches, 827 s of a 2730-s serial run on the Mac at 956e8a8,
+    up to 4.3 s for one late in `test_main_window.py`. What a test registered is dropped from the
+    list when the test is over; what was registered before it (a module's fixture, an import)
+    stays. Nothing is deleted: a finished test's widgets simply keep the words they had, like its
+    quieted windows keep their last state."""
+    from tests import _windows
+
+    before = _windows.language_listeners()
+    yield
+    _windows.drop_language_listeners_since(before)
 
 
 @pytest.fixture(autouse=True)
@@ -236,6 +271,10 @@ def _end_qt_before_python_finalises():
     the frame it died in. Nothing here changes when a test's widgets die.
     """
     yield
+    # What `_collect_qt_leftovers` froze goes back to the collector, and is collected here while
+    # Python and Qt are both whole -- where the per-test collection would have taken it.
+    gc.unfreeze()
+    gc.collect()
     from autosound_tcc.ui.tcc import qt_shutdown
 
     qt_shutdown.destroy_application()
