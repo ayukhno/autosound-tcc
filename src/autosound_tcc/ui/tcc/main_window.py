@@ -2326,7 +2326,6 @@ class MainWindow(QMainWindow):
             self._tree.set_view(rig)
             # The panel's one-parameter tabs read the whole view, not one group.
             self._detail.set_view(rig)
-            self._fit_centre_floor()
             self._set_project_params(rig)
             self._refresh_open_detail()
             self._show_slot_and_save("", "")
@@ -2337,6 +2336,8 @@ class MainWindow(QMainWindow):
             self._compare_args = None
             self._compare_key = None
             self._detail.set_compare_choices([], None, None)
+            # After the pane's head has its compare row (none here): the floor measures the head.
+            self._fit_centre_floor()
             self._sync_status_dots()
             self._refresh_process()
             return
@@ -2371,7 +2372,6 @@ class MainWindow(QMainWindow):
         self._rebuild_acoustics()
         self._tree.set_view(view)
         self._detail.set_view(view)
-        self._fit_centre_floor()
         self._set_project_params(view)
         self._refresh_open_detail()
 
@@ -2383,6 +2383,9 @@ class MainWindow(QMainWindow):
         # "no changes" (tcc#50).
         read_as = getattr(view, "file_version", None) or view.version
         self._offer_compare(root, preset, profile, read_as)
+        # After «порівняти з» is in the pane's head: the floor measures the head too, and the
+        # second review found it measured before the row was there (tcc#106).
+        self._fit_centre_floor()
         self._show_banked_delta(read_as, preset, root)
 
     def _show_slot_and_save(self, slot: str, save: str) -> None:
@@ -2534,6 +2537,8 @@ class MainWindow(QMainWindow):
         if control is not None and control.active:
             control.use_compare(key, self._compare_view_now(), self._compare_said())
         self._sync_status_dots()
+        # Another configuration's version puts «інша конфігурація» in the pane's head (tcc#106).
+        self._fit_centre_floor()
 
     def _on_pane_focus(self, group_id, what) -> None:
         """The full window's pane lights what it shows in the tree; in «Режим контролю» the tabs
@@ -2558,16 +2563,25 @@ class MainWindow(QMainWindow):
 
     def _on_layout_toggle(self) -> None:
         """Switch between the in-app session's layout and the control layout, and remember it."""
-        self._control_layout.toggle()
         if not self._control_layout.active:
-            # The saved geometry comes back under a floor that may have risen meanwhile (a load,
-            # a zoom, a language) and grows to it to the right (the review of tcc#106).
-            self._keep_on_screen()
+            self._full_frame_width = self.frameGeometry().width()
+        self._control_layout.toggle()
         self._set_project_setting(_LAYOUT_KEY, "control" if self._control_layout.active else "gui")
         self._sync_layout_button()
+        if not self._control_layout.active:
+            # The saved geometry comes back under a window that may have grown meanwhile -- the
+            # floor by a load, the header by a zoom or a language -- and grows to it to the right
+            # (the reviews of tcc#106), inside `leave` already: the splitter shown again activates
+            # the layouts, and the geometry is expanded to the new minimum. So the growth is
+            # counted from the width the full window had when control mode took it. Last, after
+            # the button's new label has widened the header too, and once more on the event
+            # loop's next pass, for whatever lands after that.
+            width = self._keep_on_screen(since=getattr(self, "_full_frame_width", None))
+            QTimer.singleShot(0, self, lambda: self._keep_on_screen(since=width))
 
     def _enter_saved_layout(self) -> None:
         if not self._control_layout.active and getattr(self, "_agent_worker", None) is None:
+            self._full_frame_width = self.frameGeometry().width()  # see `_on_layout_toggle`
             self._control_layout.enter()
             self._sync_layout_button()
 
@@ -3157,28 +3171,37 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self._keep_on_screen()
 
-    def _keep_on_screen(self) -> None:
-        """A shown window its floor has just widened stays on its screen (the review of tcc#106).
+    def _keep_on_screen(self, since: Optional[int] = None) -> int:
+        """A shown window its floor has just widened stays on its screen (the review of tcc#106);
+        returns the width of its frame, to be asked again `since`.
 
         Qt grows a window to its new minimum to the RIGHT, where it stands: a window 960 px wide
         against a 1920 screen's right edge came out 1254 px wide when a project opened, 293 px
         past the edge, and control mode's `leave` restoring a narrower saved geometry did the
         same. The layouts are activated now, so the window grows now and not on the event loop's
         next pass (flushing the posted layout requests did not carry the splitter's new minimum up
-        to the window: measured), and a window past the right edge is moved left by that much --
-        never past the left one. A maximised window is the screen's already."""
+        to the window: measured), and a window that GREW past the right edge is moved left by
+        that much -- by no more than it grew, and never past the left edge.
+
+        Growth only (the second review): this runs on every reload, and the project is reloaded on
+        every file the skill writes. A window the Arbiter left straddling a second monitor stays
+        where he left it, and on Windows a right-snapped window, whose frame carries invisible
+        resize borders past the screen, is not nudged left on each refit. A maximised window is
+        the screen's already."""
+        before = self.frameGeometry().width() if since is None else since
         if self.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
-            return
+            return before
         self._main_splitter.updateGeometry()
         self.centralWidget().layout().activate()
         self.layout().activate()
-        room = _screen_room(self)
-        if room is None:
-            return
         frame = self.frameGeometry()
-        over = frame.right() - room.right()
-        if over > 0:
-            self.move(max(room.left(), frame.left() - over), frame.top())
+        room = _screen_room(self)
+        grew = frame.width() - before
+        if grew > 0 and room is not None:
+            shift = min(frame.right() - room.right(), grew, frame.left() - room.left())
+            if shift > 0:
+                self.move(frame.left() - shift, frame.top())
+        return frame.width()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """The floor's cap is a share of THIS window's screen (tcc#106): asked again when the

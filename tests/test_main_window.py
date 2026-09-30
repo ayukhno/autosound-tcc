@@ -3561,35 +3561,61 @@ def test_moving_to_another_screen_refits_the_floor(tmp_path, monkeypatch):
     assert _floor_part(window) <= 1512 * 2 // 3 < wide
 
 
-def _at_the_right_edge(window, width, screen=1920) -> int:
-    """The window `width` px wide (or its own minimum, if more) with its right edge on the
-    screen's; its width."""
+def _at_the_right_edge(window, width, screen=1920, past=0) -> int:
+    """The window `width` px wide (or its own minimum, if more) with its right edge `past` px
+    beyond the screen's (negative: inside it); its width."""
     window.resize(width, 900)
     _let_it_settle()
-    window.move(screen - window.frameGeometry().width(), 0)
+    window.move(screen - window.frameGeometry().width() + past, 0)
     _let_it_settle()
-    assert window.frameGeometry().right() == screen - 1
+    assert window.frameGeometry().right() == screen - 1 + past
     return window.width()
 
 
-def test_a_floor_that_rises_on_a_shown_window_keeps_it_on_its_screen(tmp_path, monkeypatch):
+@pytest.mark.parametrize("past", [-50, 0, 100])
+def test_a_floor_that_rises_on_a_shown_window_keeps_it_on_its_screen(
+        tmp_path, monkeypatch, past):
     """The review of tcc#106 (probe A): a 1920 screen, the window 960 px wide against its right
     edge, no project; a project opens and the floor rises to its tables -- Qt grew the window to
     the right where it stood, 293 px past the screen. It is moved back inside, never past the
-    left edge. The same path runs on a reload, a zoom, a language and a screen change."""
+    left edge. The same path runs on a reload, a zoom, a language and a screen change.
+
+    By its overflow, and never by more than it grew (the second review): a window that stood
+    50 px inside the edge moves by what the growth pushed past it, and one parked 100 px beyond
+    the edge -- onto a second monitor -- keeps its 100 px and moves by the growth alone."""
     window = _window_on_a_screen(tmp_path, monkeypatch, 1920)
     window.show()
-    before = _at_the_right_edge(window, 960)
+    before_width = _at_the_right_edge(window, 960, past=past)
+    before = window.frameGeometry()
     _write_the_arbiters_rig(tmp_path)
     window._load_project()
     _let_it_settle()
-    if _floor_part(window) <= before:
-        pytest.skip(f"in this font the window was {before} px before the project, no narrower "
-                    f"than the floor it gets ({_floor_part(window)}): nothing grew")
-    frame = window.frameGeometry()
-    assert window.width() >= _floor_part(window), "the floor rose and the window grew"
-    assert frame.left() >= 0 and frame.right() <= 1919, (
-        f"the window is at x {frame.left()}..{frame.right()} on a 1920-px screen")
+    if _floor_part(window) <= before_width:
+        pytest.skip(f"in this font the window was {before_width} px before the project, no "
+                    f"narrower than the floor it gets ({_floor_part(window)}): nothing grew")
+    after = window.frameGeometry()
+    grew = after.width() - before.width()
+    assert window.width() >= _floor_part(window) and grew > 0, "the floor rose, the window grew"
+    moved = min(max(0, before.right() + grew - 1919), grew)
+    assert after.left() == before.left() - moved and after.left() >= 0, (
+        f"x {before.left()}..{before.right()} grew by {grew} to {after.left()}..{after.right()}, "
+        f"not moved by {moved}")
+    assert after.right() == max(1919, before.right())
+
+
+def test_a_reload_that_does_not_raise_the_floor_leaves_the_window_where_it_is(
+        tmp_path, monkeypatch):
+    """The second review of tcc#106: the check moved a window whose floor had NOT risen. The
+    project is reloaded on every file the skill writes, and a window left 100 px past a 1920
+    screen's right edge -- on its way to a second monitor -- was pulled back inside on each."""
+    window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=1920)
+    _let_it_settle()
+    _at_the_right_edge(window, window.width(), past=100)
+    parked, floor = window.frameGeometry(), window._center.minimumWidth()
+    window._load_project()
+    _let_it_settle()
+    assert window._center.minimumWidth() == floor, "the same floor"
+    assert window.frameGeometry() == parked, "and the window where it was left"
 
 
 def test_leaving_control_mode_after_the_floor_rose_keeps_the_window_on_its_screen(
@@ -3619,6 +3645,87 @@ def test_leaving_control_mode_after_the_floor_rose_keeps_the_window_on_its_scree
     assert window.width() >= _floor_part(window), "back with the floor that rose meanwhile"
     assert frame.left() >= 0 and frame.right() <= 1919, (
         f"the window is at x {frame.left()}..{frame.right()} on a 1920-px screen")
+
+
+@pytest.mark.parametrize("lang", ["de", "pl"])
+def test_leaving_control_mode_after_a_language_switch_keeps_the_window_on_its_screen(
+        tmp_path, monkeypatch, lang):
+    """The second review of tcc#106: the header widened while control mode was on -- the
+    reviewer zoomed in -- and on leaving at a 1920 screen's right edge the window's right edge
+    came to 1927. The check ran before the layout button's label changed, and the label's growth
+    landed after it. It runs last now, and once more on the next pass of the event loop.
+
+    A language switch widens the header the same way (1935 in German and 1932 in Polish against
+    the first round's code), and costs no restyle of every live widget in the process, which
+    the zoom's does: forty seconds a run in this file."""
+    from autosound_tcc.ui.tcc import control_layout
+
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    window = _window_on_a_screen(tmp_path, monkeypatch, 1920)
+    window.show()
+    try:
+        _let_it_settle()
+        _at_the_right_edge(window, 200)  # at its minimum, which the new words will raise
+        before = window.frameGeometry()
+        window._on_layout_toggle()
+        window._on_language_selected(lang)
+        _let_it_settle()
+        window._on_layout_toggle()
+        _let_it_settle()
+        after = window.frameGeometry()
+        assert after.width() > before.width(), "the new words widened the full window"
+        assert after.left() >= 0 and after.right() <= 1919, (
+            f"the window is at x {after.left()}..{after.right()} on a 1920-px screen")
+    finally:
+        i18n.set_language("en")
+
+
+def _write_a_small_rig(folder) -> None:
+    """Three controls in the one tier -- a table narrower than its pane's head -- and a second
+    configuration, SQ, to compare with."""
+    profile = {"dsp_profile": {"name": "M6V4", "vendor": "Musway", "groups": [
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db"]}]}}
+    (folder / "dsp_profile.json").write_text(json.dumps(profile))
+    for name, versions in (("FULL", ("v_001", "v_002")), ("SQ", ("v_001",))):
+        preset = folder / name
+        preset.mkdir()
+        for gain, version in enumerate(versions):
+            channels = {code: {"slot": slot, "hp": {"f": 80 + gain}, "lp": {"f": 4000},
+                               "gain_db": -2.0 - gain}
+                        for slot, code in zip("AB", ("w-L", "w-R"))}
+            (preset / f"{version}.json").write_text(json.dumps(
+                {"preset": name, "sample_rate": 48000, "channels": channels}))
+        (preset / "HEAD").write_text(versions[-1])
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_picking_another_configuration_refits_the_floor_to_the_head(tmp_path, monkeypatch, lang):
+    """The second review of tcc#106: the floor was measured before «порівняти з» came into the
+    head, and picking another configuration's version showed «інша конфігурація» with no refit --
+    on a three-control rig, whose table is narrower than the head, a floor of 549 px under a head
+    that needs 697. The floor follows the head now, and at the minimum the head reads whole."""
+    monkeypatch.setenv("AUTOSOUND_TCC_PRESET", "FULL")
+    _write_a_small_rig(tmp_path)
+    window = _window_on_a_screen(tmp_path, monkeypatch, 10_000)
+    try:
+        window._on_language_selected(lang)
+        window._on_table_requested("physical_outputs")
+        window.show()
+        pane = window._detail
+        combo = pane._compare_combo
+        assert pane._compare_label.isVisibleTo(pane), "«порівняти з» is in the head"
+        combo.setCurrentIndex(combo.findData("SQ/v_001"))
+        assert pane._compare_other.isVisibleTo(pane), "another configuration is picked"
+        _settle_at(window, 200)
+        assert window._center.minimumWidth() == window._centre_need() > window._tables_need()
+        cut = [f"{word.text()!r} reads {word.fit_text()!r}"
+               for word in (pane._compare_label, pane._compare_other)
+               if word.fit_text() != word.text()] + _what_does_not_read(window)
+        assert not cut, f"at the minimum ({window.width()} px): {cut}"
+    finally:
+        i18n.set_language("en")
 
 
 def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):
