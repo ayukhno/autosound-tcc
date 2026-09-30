@@ -353,3 +353,41 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *_a, **_k: ("", "")))
     yield
+
+
+@pytest.fixture
+def app_ground():
+    """The whole application's state a window's measurements stand on, set by the test that
+    measures rather than inherited from whichever test ran before it in the same xdist worker.
+    The full `-n 4` run at 942dd61 failed four head tests that passed alone: a test before them
+    in the worker cleared the application's sheet and left `apply_theme`'s record saying the
+    sheet was on, so the next window skipped it and measured itself unstyled.
+
+    Here: the platform's own font -- at the stretch the run declares, `WIDE_STRETCH` (the
+    wide-font emulation's variable), or none; no record of an applied sheet, so the window's own
+    `apply_theme` applies its sheet at its own zoom (per test, from the isolated settings);
+    English. Everything goes back after."""
+    from PySide6.QtGui import QFont, QFontDatabase, QPalette
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import i18n, theme
+
+    app = QApplication.instance() or QApplication([])
+    was = (QFont(app.font()), app.styleSheet(), QPalette(app.palette()), theme._APPLIED,
+           theme._CURRENT, i18n.current_language())
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    stretch = int(os.environ.get("WIDE_STRETCH", "100"))
+    if stretch != 100:
+        font.setStretch(stretch)
+    app.setFont(font)
+    theme._APPLIED, theme._CURRENT = None, None
+    i18n.set_language("en")
+    try:
+        yield app
+    finally:
+        app.setFont(was[0])
+        if app.styleSheet() != was[1]:
+            app.setStyleSheet(was[1])
+        app.setPalette(was[2])
+        theme._APPLIED, theme._CURRENT = was[3], was[4]
+        i18n.set_language(was[5])

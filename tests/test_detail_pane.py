@@ -1796,23 +1796,40 @@ _MAC_FONT = (".AppleSystemUIFont", 127.61)
 
 def _not_the_mac_font() -> str:
     """"" where the app's font is the Mac's offscreen one the head's numbers were pinned in, or
-    why not: an engine without real fonts, another family, or a stretch (the reviewer's wide
-    emulation). Fingerprinted by what the font measures, never by a number the product works
-    out -- the re-review of the CI fix: gated on the head's ask, the guards skipped themselves
-    on the very regression they exist for (round 2's hint put back: ask 757 > room 734, and
-    the zoom pins' reference 513 -> 565)."""
+    why not. Fingerprinted by what the font measures, never by a number the product works out
+    -- the re-review of the CI fix: gated on the head's ask, the guards skipped themselves on
+    the very regression they exist for (round 2's hint put back: ask 757 > room 734, and the
+    zoom pins' reference 513 -> 565).
+
+    Skipped quietly only where the font is plainly another: an engine without real fonts,
+    another family, or a stretch (the wide-font emulation). The Mac's own family unstretched
+    that measures otherwise -- a new macOS image, another weight, a changed Cyrillic fallback --
+    still skips, but WARNS, and `pytest -q` prints the warning: CI runs without `-rs`, so a
+    quiet skip there would switch the five guards off with no trace but a skip count. Not a
+    failure: a font the runner changed is not a regression in this code, and the warning says
+    to re-measure and re-pin (the round-4 re-review's advisory)."""
+    import warnings
+
     from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF
 
     font = QFont(QApplication.font())
     fontless = _no_real_font(font)
     if fontless:
         return fontless
+    if font.stretch() not in (0, 100):
+        return f"a stretched font ({font.stretch()}), not the Mac's offscreen font"
     font.setPixelSize(11)
     family = QFontInfo(font).family()
+    if family != _MAC_FONT[0]:
+        return f"not the Mac's offscreen font: {family!r}, where the Mac's is {_MAC_FONT[0]!r}"
     advance = QFontMetricsF(font).horizontalAdvance(_MAC_FONT_TEXT)
-    if family != _MAC_FONT[0] or abs(advance - _MAC_FONT[1]) > 0.05:
-        return (f"not the Mac's offscreen font: {family!r}, «{_MAC_FONT_TEXT}» {advance:.2f} px "
-                f"at 11 px, where the Mac's is {_MAC_FONT[0]!r}, {_MAC_FONT[1]} px")
+    if abs(advance - _MAC_FONT[1]) > 0.05:
+        why = (f"the Mac's offscreen family {family!r} measures «{_MAC_FONT_TEXT}» {advance:.2f} "
+               f"px at 11 px, not the {_MAC_FONT[1]} the head's guards were pinned in")
+        warnings.warn(f"{why}: the pins and the whole-check skip -- re-measure and re-pin "
+                      f"_MAC_FONT, _EQ_HEAD_LEAST_MAC and _EQ_HEAD_LEAST_AT in "
+                      f"tests/test_detail_pane.py", stacklevel=2)
+        return why
     return ""
 
 
@@ -1849,7 +1866,7 @@ def _paints_what_it_says(widget) -> str:
     return ""
 
 
-def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
+def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch, app_ground):
     """The re-review of fix round 1 (N1, CRITICAL): the measurement was right and the paint was
     not. `_FitLabel.paintEvent` built its rect from `contentsRect()` less the chrome -- but the
     contents rect already excludes the style sheet's border and padding, so an elided tab drew
@@ -1967,7 +1984,7 @@ def test_the_list_s_floor_keeps_the_version_whole_before_a_saved_name():
         box.close()
 
 
-def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch):
+def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch, app_ground):
     """The re-review of fix round 1 (c): at two thirds of the screen «інша конфігурація» hides
     over the table too, and the list had no hover, so another configuration's «v_002» read as
     this configuration's own. As control mode's corner does, a hidden label's words go into the
@@ -2026,7 +2043,8 @@ _EQ_HEAD_LEAST_AT = {"zoom120": ("zoom", 1.2, 546), "zoom130": ("zoom", 1.3, 563
 
 
 @pytest.mark.parametrize("case", sorted(_EQ_HEAD_LEAST_AT))
-def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch, case):
+def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch, case,
+                                                           app_ground):
     """The residual, stated with its numbers pinned (the re-review of fix round 1, d, and of
     round 2): over one channel's EQ the head's minimum against the centre's floor of 586 on the
     Arbiter's 1512-px screen. Before round 3 the head's hint carried a full «x» of indent per

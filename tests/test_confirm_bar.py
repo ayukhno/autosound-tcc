@@ -236,7 +236,15 @@ def test_the_whole_question_sits_on_the_attention_background():
 
     Grabbed from the PARENT for that reason: grabbing the bar alone renders it as its own window
     and shows a background the app never draws."""
+    from PySide6.QtGui import QPalette
+
     app = QApplication.instance()
+    # The sheet, the palette and `apply_theme`'s record of what it applied are the whole
+    # application's: all three go back as they were. Clearing the sheet alone left the record
+    # saying the dark sheet was on, so the next window's `apply_theme` skipped it and built
+    # itself with no sheet at all -- four head tests failed after this one in the same xdist
+    # worker (the full `-n 4` run at 942dd61).
+    was = (app.styleSheet(), QPalette(app.palette()), theme._APPLIED, theme._CURRENT)
     active = theme.apply_theme(app, "dark")
     try:
         panel = QWidget()
@@ -266,4 +274,6 @@ def test_the_whole_question_sits_on_the_attention_background():
             f"pixels are {tint}"
         )
     finally:
-        app.setStyleSheet("")
+        app.setStyleSheet(was[0])
+        app.setPalette(was[1])
+        theme._APPLIED, theme._CURRENT = was[2], was[3]

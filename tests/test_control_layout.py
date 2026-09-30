@@ -1229,7 +1229,8 @@ def test_a_pick_at_the_half_never_pushes_the_window_past_it(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("lang", ["en", "uk"])
-def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monkeypatch, lang):
+def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monkeypatch, lang,
+                                                                app_ground):
     """The re-review of fix round 1 (N1, CRITICAL) in control mode at the half, the Mac's font,
     the default setup -- finding 105's screenshot again: «← Tab», «⇅ Com», «Copy EQ», «⇄ L»
     drawn cut with no «…» where the round before had them whole; in Ukrainian «← Табл», «⇅ Пор»,
