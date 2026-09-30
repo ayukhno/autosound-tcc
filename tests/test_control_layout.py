@@ -968,3 +968,82 @@ def _rest_floor(window):
     return (max(w.minimumSizeHint().width() for w in rows
                 if w is not None and w is not zones and w.isVisible())
             + window.width() - header.width())
+
+
+# ---- control mode's window on the right half of its screen, full height (tcc#110, finding 118) ---
+
+def _right_half_of(free):
+    half = free.width() // 2
+    return QRect(free.x() + half, free.y(), free.width() - half, free.height())
+
+
+def _settled(window):
+    for _ in range(8):
+        QApplication.processEvents()
+
+
+@pytest.mark.parametrize("free", [QRect(0, 0, 6000, 900), QRect(6000, 25, 6000, 875)],
+                         ids=["one-screen", "a-second-screen-under-a-menu-bar"])
+def test_control_mode_puts_its_frame_on_the_right_half_of_its_screen(tmp_path, monkeypatch, free):
+    """tcc#110, finding 118: on the Windows VM control mode opened shifted left. The WINDOW'S
+    FRAME takes the right half of the free area of the screen the window is on -- not past the
+    middle line, not past the top, the bottom or the right edge -- and the left half stays free for
+    the terminal. The screens are wide enough for this window in any font: placing it is what is
+    tested, not its width. Leaving puts the full window back where it was."""
+    window = _window(tmp_path, monkeypatch)
+    _on_screen(window, monkeypatch, free)
+    window.show()
+    window.setGeometry(QRect(free.x() + 40, free.y() + 60, 1400, 700))
+    _settled(window)
+    before = window.geometry()
+    window._control_layout.enter()
+    _settled(window)
+    frame, target = window.frameGeometry(), _right_half_of(free)
+    assert target.left() <= frame.left() <= target.left() + 2, (frame, target)
+    assert target.right() - 2 <= frame.right() <= target.right(), (frame, target)
+    assert target.top() <= frame.top() <= target.top() + 2, (frame, target)
+    assert target.bottom() - 2 <= frame.bottom() <= target.bottom(), (frame, target)
+    window._control_layout.leave()
+    _settled(window)
+    assert window.geometry() == before
+
+
+def test_a_windows_frame_is_kept_inside_the_right_half(tmp_path, monkeypatch):
+    """tcc#110: Windows draws a title bar above the window's area and invisible resize borders at
+    its sides and bottom (8 px there, 31 above, at 100 %), where the Mac draws a title bar only.
+    The client area is what `setGeometry` places, so the frame is taken off it: the window's area
+    is the right half less that frame. Offscreen Qt draws a 2-px frame, so the Windows one is
+    stood in for here."""
+    window = _window(tmp_path, monkeypatch)
+    free = QRect(0, 0, 6000, 1000)
+    _on_screen(window, monkeypatch, free)
+    window.show()
+    _settled(window)
+    monkeypatch.setattr(window, "frameGeometry",
+                        lambda: window.geometry().adjusted(-8, -31, 8, 8))
+    window._control_layout.enter()
+    _settled(window)
+    assert window.geometry() == _right_half_of(free).adjusted(8, 31, -8, -8)
+    window._control_layout.leave()
+
+
+def test_a_maximised_window_goes_to_the_right_half_and_comes_back_maximised(tmp_path, monkeypatch):
+    """tcc#110: a maximised window keeps its state through `setGeometry`, and Windows draws such a
+    window as maximised at whatever rect it is given. It becomes a normal window on the right half
+    first; leaving maximises it again, the full mode's own state as well as its geometry."""
+    window = _window(tmp_path, monkeypatch)
+    free = QRect(0, 0, 6000, 900)
+    window.show()
+    window.showMaximized()
+    _settled(window)
+    assert window.isMaximized()
+    _on_screen(window, monkeypatch, free)
+    window._control_layout.enter()
+    _settled(window)
+    assert not window.isMaximized()
+    frame, target = window.frameGeometry(), _right_half_of(free)
+    assert target.left() <= frame.left() <= target.left() + 2, (frame, target)
+    assert target.bottom() - 2 <= frame.bottom() <= target.bottom(), (frame, target)
+    window._control_layout.leave()
+    _settled(window)
+    assert window.isMaximized()

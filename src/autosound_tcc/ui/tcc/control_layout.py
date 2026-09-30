@@ -521,7 +521,9 @@ class ControlLayout:
         w = self.window
         if self.active:
             return
-        self._saved_geometry = w.geometry()
+        # The full window's own place, and its state: a maximised window goes back maximised.
+        full = w.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen)
+        self._saved_geometry = (w.normalGeometry() if full else w.geometry(), w.windowState())
 
         top = QWidget()
         top_layout = QVBoxLayout(top)
@@ -595,7 +597,10 @@ class ControlLayout:
         self._index = {}
         self._compact(False)
         if self._saved_geometry is not None:
-            w.setGeometry(self._saved_geometry)
+            geometry, state = self._saved_geometry
+            w.setGeometry(geometry)
+            if state & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
+                w.setWindowState(state)
         self.active = False
 
     def toggle(self) -> None:
@@ -881,8 +886,7 @@ class ControlLayout:
         key = (table, table.font().key())
         if self._table_whole is None or self._table_whole[:2] != key:
             self._table_whole = (*key, table_width_whole(table))
-        half = w.screen().availableGeometry().width() // 2
-        floor = min(self._table_whole[2] + inside, half - outside)
+        floor = min(self._table_whole[2] + inside, self._right_half()[1].width() - outside)
         # An explicit minimum replaces the page's own even when smaller (tcc#96): never below it.
         page.setMinimumWidth(max(floor, page.minimumSizeHint().width(), 0))
 
@@ -943,11 +947,38 @@ class ControlLayout:
             if getattr(self, "_header_spacing", None) is not None:
                 w._layout_btn.parentWidget().layout().setSpacing(self._header_spacing)
 
-    def _place_on_screen(self) -> None:
-        """TCC on the right half of its screen; the terminal on the left (A12)."""
+    def _right_half(self) -> tuple[QRect, QRect]:
+        """`(the free area of the window's screen, the window's own area that puts its FRAME on
+        the right half of it)`.
+
+        The frame, not the window's area (tcc#110, finding 118: on the Windows VM the window opened
+        shifted left). `setGeometry` places the area inside the frame, and the frame goes around
+        it: a title bar above, and on Windows invisible resize borders at the sides and the bottom
+        too. The right half given to the area put the frame over the middle line and past the top
+        and the bottom of the free area. The frame is read off the window as drawn now (the same
+        before `show` as the area, until the window system has drawn one). The free area is the
+        screen's the window is on, less the taskbar or the dock and the menu bar."""
         w = self.window
-        screen = w.screen().availableGeometry()
-        half = screen.width() // 2
+        free = w.screen().availableGeometry()
+        frame, inner = w.frameGeometry(), w.geometry()
+        half = free.width() // 2
+        right = QRect(free.x() + half, free.y(), free.width() - half, free.height())
+        return free, right.adjusted(max(0, inner.left() - frame.left()),
+                                    max(0, inner.top() - frame.top()),
+                                    -max(0, frame.right() - inner.right()),
+                                    -max(0, frame.bottom() - inner.bottom()))
+
+    def _place_on_screen(self) -> None:
+        """TCC on the right half of its screen, full height; the terminal on the left (A12,
+        tcc#110)."""
+        w = self.window
+        # A maximised window keeps its state through `setGeometry`, and Windows draws it maximised
+        # at a rect that is not its screen's: a normal window first (`leave` maximises it again).
+        if w.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
+            w.showNormal()
+        free, area = self._right_half()
+        # The full window's minimum, left behind until this mode's layout is laid out, would
+        # widen the window past the half; this mode's own comes with its layout.
         w.setMinimumWidth(0)
-        w.setGeometry(screen.x() + half, screen.y(), half, screen.height())
-        place_terminal_left(screen)
+        w.setGeometry(area)
+        place_terminal_left(free)
