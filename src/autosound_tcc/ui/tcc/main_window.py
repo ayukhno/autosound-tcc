@@ -3129,23 +3129,48 @@ class MainWindow(QMainWindow):
         grows with the font and the zoom, as it has to, where 320 was a number of pixels that held
         the table in no font at all. Re-measured on every load, theme, zoom and language.
 
-        Never below the old 320, and never so wide that the window leaves its screen -- at 150%
-        zoom the whole table is wider than a laptop, and a window past the screen's edge is worse
-        than a column that elides. The sides' floors are the full window's and control mode's
-        both (#107), so they stay; the centre is hidden in control mode, so this floor is the full
-        window's alone, and it is back the moment the full window is.
+        Never below the old 320, and never more than two thirds of the window's screen (the
+        coordinator's ruling on tcc#106). The Arbiter's widths for the full window: «full screen
+        -- a huge margin; half -- problems; 2/3 -- all fine», and at 2/3 of his 1512-pt screen his
+        screenshot has the output table whole. Measured in the offscreen fonts the need came out
+        1254 px there -- nine equal columns and two 200-px sides overestimate on real fonts -- and
+        a floor that high forbade the width he says works. Where the need is more than the cap,
+        the floor sits at the cap and the columns elide there, as they did everywhere before.
+
+        The sides' floors are the full window's and control mode's both (#107), so they stay; the
+        centre is hidden in control mode, so this floor is the full window's alone, and it is
+        back the moment the full window is. Asked again when the window changes screens.
         """
-        tables = self._tables_need()
-        need = 0
-        if tables:  # no table to show, no pane to show it in
-            need = max(tables, self._head_need()) + 2 * self._detail.frameWidth()
+        need = self._centre_need()
         margins = self.centralWidget().layout().contentsMargins()
         around = (self._left.minimumWidth() + self._right.minimumWidth()
                   + 2 * self._main_splitter.handleWidth() + margins.left() + margins.right())
         screen = _screen_width(self)
         if screen > 0:
-            need = min(need, screen - around)
+            need = min(need, screen * 2 // 3 - around)
         self._center.setMinimumWidth(max(_CENTRE_MIN_PX, need))
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """The floor's cap is a share of THIS window's screen (tcc#106): asked again when the
+        window is moved to another one, and on the first show, which may be on a screen other than
+        the one the window was measured against while it was being built."""
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and not getattr(self, "_watching_screen", False):
+            self._watching_screen = True
+            handle.screenChanged.connect(self._on_screen_changed)
+            self._fit_centre_floor()
+
+    def _on_screen_changed(self, _screen) -> None:
+        self._fit_centre_floor()
+
+    def _centre_need(self) -> int:
+        """What the centre column needs for its tables and the pane's head to read whole, measured
+        in the window's font; 0 with no table to show (and so no pane to show it in)."""
+        tables = self._tables_need()
+        if not tables:
+            return 0
+        return max(tables, self._head_need()) + 2 * self._detail.frameWidth()
 
     def _tables_need(self) -> int:
         """The width at which every tier's table holds `_FLOOR_CELLS` whole, cells and headings;

@@ -3389,6 +3389,23 @@ def _settle_at(window, width) -> None:
         QApplication.sendPostedEvents()
 
 
+def _floor_part(window) -> int:
+    """The window width the three columns ask for: the splitter's minimum, which carries the
+    centre's floor, and the margins round it."""
+    margins = window.centralWidget().layout().contentsMargins()
+    return window._main_splitter.minimumSizeHint().width() + margins.left() + margins.right()
+
+
+def _other_rows(window) -> int:
+    """The window width the rows above and below the columns ask for -- the header and the
+    footer have floors of their own, which are not the centre's."""
+    layout = window.centralWidget().layout()
+    margins = layout.contentsMargins()
+    return margins.left() + margins.right() + max(
+        layout.itemAt(i).minimumSize().width() for i in range(layout.count())
+        if layout.itemAt(i).widget() is not window._main_splitter)
+
+
 def _what_does_not_read(window) -> list[str]:
     """Everything tcc#106 wants whole that is not, at the window's width now: a named column
     narrower than its cells or its heading ask for, a tab word or «закрити» elided. Asked of the
@@ -3418,11 +3435,13 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
         tmp_path, monkeypatch, stretch, lang):
     """tcc#106 (TEST-FINDINGS 114): at the full window's minimum the Arbiter's output table read
     «300 …», «NO…», «GAIN DE», «ELAY M», and the pane's tabs had no words -- «може збільшити
-    мінімальну ширину трохи?». The minimum now holds the table's named columns and the tabs whole.
+    мінімальну ширину трохи?». The minimum now holds the table's named columns and the tabs whole,
+    wherever that fits under two thirds of the screen; where it does not, it sits at two thirds.
 
-    The minimum is measured off the table and the tabs in the window's own font, so it is not a
-    number of Mac pixels: a stretch of 141 stands in for the Windows runner's offscreen text,
-    about twice as wide (Qt finds no fonts there), and the same claim must hold in it."""
+    The need is measured off the table and the tabs in the window's own font, so no number here is
+    a number of Mac pixels: a stretch of 141 stands in for the Windows runner's offscreen text,
+    about twice as wide (Qt finds no fonts there). On a 1920-px screen the Mac's offscreen font
+    fits under the cap and is read; the stretched one does not, and the test says so."""
     app = _app()
     before = QFont(app.font())
     if stretch != 100:
@@ -3430,10 +3449,10 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
         wide.setStretch(stretch)
         app.setFont(wide)
     try:
-        window = _open_the_arbiters_rig(tmp_path, monkeypatch)
+        window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=1920)
         window._on_language_selected(lang)
         # Roomy is the window's own measure, not a screen size: three times its minimum.
-        roomy = 3 * window.minimumSizeHint().width()
+        roomy = 3 * max(window.minimumSizeHint().width(), window._centre_need())
         _settle_at(window, roomy)
         table = window._detail._scroll.widget()
         assert table.item(0, 2).text() == "3500 LR4" and table.item(0, 2).font().bold(), \
@@ -3442,6 +3461,14 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
 
         _settle_at(window, 200)
         assert window.width() == window.minimumSizeHint().width() < roomy, "at the minimum"
+        cap, need = 1920 * 2 // 3, window._centre_need()
+        around = _floor_part(window) - window._center.minimumWidth()
+        if need + around > cap:
+            assert _floor_part(window) == cap, "the floor sits at two thirds of the screen"
+            pytest.skip(f"in this font the table and the tabs need {need + around} px of window, "
+                        f"more than two thirds of a 1920-px screen ({cap}): the minimum sits at "
+                        f"the cap, and the columns elide there")
+        assert window._center.minimumWidth() == max(320, need), "the measured need, not capped"
         assert not _what_does_not_read(window), (
             f"at the full window's minimum ({window.width()} px, the centre "
             f"{window._center.width()} px): {_what_does_not_read(window)}")
@@ -3475,15 +3502,46 @@ def test_control_mode_leaves_the_full_window_its_own_minimum(tmp_path, monkeypat
     assert window.minimumSizeHint().width() == full
 
 
-def test_the_full_window_s_floor_never_pushes_it_past_its_screen(tmp_path, monkeypatch):
-    """A floor measured in the window's font grows with the font, and the zoom goes to 150%: on
-    a screen too narrow for the whole table, the floor stops where the window still fits, and
-    never comes below the centre's old 320 px."""
-    window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=1100)
-    margins = window.centralWidget().layout().contentsMargins()
-    splitter = window._main_splitter.minimumSizeHint().width()
-    assert splitter + margins.left() + margins.right() <= 1100
-    assert window._center.minimumWidth() >= 320
+@pytest.mark.parametrize("stretch", [100, 141])
+@pytest.mark.parametrize("screen", [1512, 1920])
+def test_the_full_window_s_floor_stays_under_two_thirds_of_its_screen(
+        tmp_path, monkeypatch, screen, stretch):
+    """tcc#106, the coordinator's ruling: the Arbiter's widths for the full window are «full
+    screen -- a huge margin; half -- problems; 2/3 -- all fine», and at 2/3 of his 1512-pt screen
+    his screenshot has the output table whole. Measured in the offscreen fonts the need came out
+    1254 px there, and a floor that high would forbid the width he says works. So the floor is
+    never more than two thirds of the window's screen, whatever the font, and never less than the
+    centre's old 320 px.
+
+    The header and the footer have floors of their own (#96, F-045); where one of them is wider
+    than two thirds -- the stretched font's header is -- that is theirs, not this floor's."""
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    try:
+        window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=screen)
+        _settle_at(window, 200)
+        cap = screen * 2 // 3
+        assert _floor_part(window) <= cap, (
+            f"the columns ask {_floor_part(window)} px of a {screen}-px screen (cap {cap})")
+        assert window.minimumSizeHint().width() <= max(cap, _other_rows(window))
+        assert window._center.minimumWidth() >= 320
+    finally:
+        app.setFont(before)
+
+
+def test_moving_to_another_screen_refits_the_floor(tmp_path, monkeypatch):
+    """The cap is two thirds of THE WINDOW'S screen: moved from a wide one to the Arbiter's
+    1512-pt one, the floor comes down with it."""
+    window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000)
+    _settle_at(window, 200)
+    wide = _floor_part(window)
+    monkeypatch.setattr(main_window, "_screen_width", lambda _widget: 1512)
+    window.windowHandle().screenChanged.emit(window.screen())
+    assert _floor_part(window) <= 1512 * 2 // 3 < wide
 
 
 def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):
