@@ -54,6 +54,20 @@ value that differs from «порівняти з», not only EQ.
 
 ### Fixed
 
+- **Control mode opens on the right half of its screen, full height** (tcc#110, finding 118): the window's
+  frame, not its client area, is placed there, on the screen the window is on; a maximised window is made normal
+  first and comes back maximised on leaving.
+- **Both windows' minimum widths hold their tables** (tcc#106, tcc#107, findings 114 and 115): the output table
+  sizes each column to its content (measured bold, so a «порівняти з» pick never moves them), and the full window's
+  and control mode's minimum widths are measured from what the table and the pane's head need — capped at two
+  thirds of the screen for the full window and at half for control mode — so «3500 LR4» reads whole at the
+  minimum where the screen allows. A window whose minimum grows is kept on its screen.
+- **The DSP tree's changed values are bold as well as blue** (tcc#108, finding 116).
+- **«У фокусі зараз» sorts a capture the method's grammar refuses by its method tag** (tcc#109, finding 117),
+  where the grammar would read it, not by its name's last word — a `(rta)` capture with a note after it is RTA.
+- **The detail pane's head keeps its words** (tcc#96, findings 105 and 119): the title gives way first, then the
+  compare labels (whole or hidden), then the tabs (down to their first letter, never nothing); the compare box and
+  «закрити» keep their floors; over an EQ the actions shorten to their glyph with the words in the hover.
 - **Control mode's header in a small window** (tcc#96, finding 105): tab labels and buttons shorten with
   «…» instead of being cut mid-word; «порівняти з» and «інша конфігурація» are shown whole or not at all,
   and when they hide, the compare box itself names the configuration («3.S-shelf · v_002») and its hover

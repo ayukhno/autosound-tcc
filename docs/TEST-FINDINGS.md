@@ -3068,7 +3068,7 @@ Fine as is: the compare list itself («список для вибору конф
 очікуємо що все буде придатно. може збільшити мінімальну ширину трохи?» So: raise the full mode's minimum width a
 little. His widths for the header: full screen — a huge margin; half the screen — problems; 2/3 — all fine.
 
-**Task.** None yet — for the next wave's collection.
+**Task.** tcc#106 (W-4, taken 2026-09-29 by the Arbiter's word «беремо зараз, треба довести ТСС до робочої версії»).
 
 ### 115. Control mode at its minimum width: the 3500 crossover is cut
 
@@ -3077,7 +3077,7 @@ m-R and the HPF of tw-L and tw-R read «3500 …» (screenshot 4) — «не к�
 
 **Weight.** Low.
 
-**Task.** None yet.
+**Task.** tcc#107 (W-4, taken 2026-09-29).
 
 ### 116. The DSP tree's changed crossover: blue is not enough to see it
 
@@ -3087,7 +3087,7 @@ blue, changed against «порівняти з» (tcc#104, screenshot 2) — «б
 
 **Weight.** Low: the mark is there, it does not stand out.
 
-**Task.** None yet (a follow-up of tcc#104, whose tree marks are colour only, no bold).
+**Task.** tcc#108 (W-4, taken 2026-09-29; built `d73e54d`).
 
 ### 117. «У фокусі зараз»: captures named `(rta)` listed under SWEEP (SW) in testAgy-auto
 
@@ -3121,7 +3121,7 @@ the control-mode window on the RIGHT half of the screen, its full height, the le
 
 **Weight.** Low: it works; the placement is off.
 
-**Task.** None yet — for the next wave's collection.
+**Task.** tcc#110 (W-4, taken 2026-09-29).
 
 ### 119. The full mode's detail pane elides its tabs at full screen width on Windows
 
