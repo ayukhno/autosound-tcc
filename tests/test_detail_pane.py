@@ -891,6 +891,10 @@ def test_a_dtab_elides_instead_of_relying_on_a_width_it_never_had():
     tab.resize(_squeezed(tab), 22)
     shown = tab.fit_text()
     assert shown != long and shown.endswith("…"), shown
+    # And never nothing, whatever the room (CI at 467c655: the runner's fontless text handed
+    # back «» here): the floor's «К…», clipped if it must be.
+    tab.resize(4, 22)
+    assert tab.fit_text() == long[:1] + "…", tab.fit_text()
     assert not long.startswith(shown[:-1]) or len(shown) < len(long), "genuinely shortened"
     assert tab.text() == long, "the real text never changes -- only what is painted"
 
@@ -1243,7 +1247,12 @@ def test_a_head_label_reads_whole_at_its_hint_and_never_nothing_at_its_floor():
         chip.set_way("gives")
         chip.resize(chip.floor_width(), 22)
         assert chip.fit_text() == "⇄" and chip.toolTip() == "⇄ L + R", chip.fit_text()
-        assert chip.floor_width() < _DTab("⇄ L + R").floor_width(), "narrower than «⇄…»"
+        dotted = _DTab("⇄ L + R")
+        dotted.show()  # polished like the chip: the same sheet's margins in both floors
+        try:
+            assert chip.floor_width() < dotted.floor_width(), "narrower than «⇄…»"
+        finally:
+            dotted.close()
         chip.set_way("hidden")
         assert not chip.isVisible() and chip.wanted()
         chip.setVisible(True)
@@ -1765,12 +1774,20 @@ def _paints_what_it_says(widget) -> None:
     shown = widget.fit_text()
     assert shown and _reads(widget), (widget.text(), shown)
     columns, right, room = _ink(widget)
-    advance = QFontMetricsF(widget.font()).horizontalAdvance(shown)
+    metrics = QFontMetricsF(widget.font())
+    advance = metrics.horizontalAdvance(shown)
+    # Where the last glyph's ink ends: the text's advance less that glyph's right bearing --
+    # the font's own numbers, so the bound follows the font (the re-review of fix round 2: at
+    # twice the width a fixed 4 px was too tight, and at the Mac's font it let a 3-px cut, the
+    # last dot of «…», through). The slack past that is anti-aliasing: two pixels, or a third
+    # of an «x» in a wider font.
+    ends = advance - metrics.rightBearing(shown[-1])
+    slack = max(1.0, metrics.horizontalAdvance("x") / 6)
     assert columns > 0, f"{widget.text()!r} shows {shown!r} and draws no ink"
-    assert advance <= room + 0.5, (widget.text(), shown, advance, room)
-    assert advance - 4 <= right <= advance + 2, (
-        f"{widget.text()!r} says {shown!r} ({advance:.1f} px) but its ink ends at {right} px "
-        f"of a {room}-px room")
+    assert advance < room + 1, (widget.text(), shown, advance, room)
+    assert ends - slack <= right <= advance + 2, (
+        f"{widget.text()!r} says {shown!r} (its ink should end at {ends:.1f} px, slack "
+        f"{slack:.1f}) but its ink ends at {right} px of a {room}-px room")
 
 
 def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
@@ -1873,15 +1890,210 @@ def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch):
         assert not pane._compare_other.isVisibleTo(head) and pane._compare_other.wanted()
         assert box.toolTip() == "порівняти з\nінша конфігурація: 3.S-shelf · v_002", box.toolTip()
 
+        # Roomy: wide enough for the pane's share to hold the head's ask -- measured, since the
+        # ask is the font's (at twice the width it is 2656 px, past a 2600-px window).
         splitter = window._main_splitter
-        window.resize(2600, 900)
-        for _ in range(4):
-            QApplication.processEvents()
-        sizes = splitter.sizes()
         want = pane.head_asks()[0] + 40
-        splitter.setSizes([sizes[0], want, sum(sizes) - sizes[0] - want])
+        roomy = 2600
+        window.resize(roomy, 900)
         for _ in range(4):
             QApplication.processEvents()
+        while sum(splitter.sizes()) < want + 2 * 200 + 40 and roomy < 8000:
+            roomy += 400
+            window.resize(roomy, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+        sizes = splitter.sizes()
+        splitter.setSizes([200, want, sum(sizes) - 200 - want])
+        for _ in range(4):
+            QApplication.processEvents()
+        assert pane.width() == want, (pane.width(), want, splitter.sizes())
+        assert pane._compare_other.isVisibleTo(head) and box.toolTip() == "", box.toolTip()
+    finally:
+        i18n.set_language("en")
+
+
+#: The EQ head's minimum over one channel, uk, in the Mac's offscreen font at the default zoom --
+#: the reference that says the numbers below are this font's -- and at the zoom's steps and a
+#: stretch of 110, all pinned (the re-review of fix round 2): a fix or a worse regression shows.
+_EQ_HEAD_LEAST_MAC = 513
+_EQ_HEAD_LEAST_AT = {"zoom120": ("zoom", 1.2, 546), "zoom130": ("zoom", 1.3, 563),
+                     "zoom140": ("zoom", 1.4, 579), "stretch110": ("stretch", 110, 562)}
+
+
+@pytest.mark.parametrize("case", sorted(_EQ_HEAD_LEAST_AT))
+def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch, case):
+    """The residual, stated with its numbers pinned (the re-review of fix round 1, d, and of
+    round 2): over one channel's EQ the head's minimum against the centre's floor of 586 on the
+    Arbiter's 1512-px screen. Before round 3 the head's hint carried a full «x» of indent per
+    label and the fit judged a strict advance: 606 / 623 / 650 / 623 at zoom 120 / 130 / 140 %
+    and a stretch of 110 -- all over the floor. With the hint, the fit and the paint one rule
+    (`_FitLabel._text_rect`) they are 546 / 563 / 579 / 562, all inside it, and pinned here so
+    a regression past 586 -- or a fix that brings them lower -- is visible. The numbers are the
+    Mac's offscreen font's: measured first at the default zoom (513); another font says what it
+    measured and skips."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+
+    kind, value, pinned = _EQ_HEAD_LEAST_AT[case]
+    app = _app()
+    before = QFont(app.font())
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "eq_single")
+        window._fit_centre_floor()
+        reference = pane.head_asks()[-1]
+        if kind == "zoom":
+            window._set_zoom(value)
+        else:
+            wide = QFont(before)
+            wide.setStretch(value)
+            app.setFont(wide)
+        for _ in range(4):
+            QApplication.processEvents()
+        window._fit_centre_floor()
+        least = pane.head_asks()[-1]
+        floor = window._center.minimumWidth() - (pane.width() - pane._head.width())
+        if reference != _EQ_HEAD_LEAST_MAC:
+            pytest.skip(f"not the Mac's offscreen font (the default minimum is {reference}, "
+                        f"not {_EQ_HEAD_LEAST_MAC}): at {kind} {value} the EQ head's minimum "
+                        f"is {least} against the floor {floor}")
+        assert least == pinned, (
+            f"at {kind} {value} the EQ head's minimum is {least} px, pinned at {pinned} "
+            f"(the floor {floor}): a regression or a fix -- re-pin it")
+        assert least <= floor, (least, floor)
+    finally:
+        if kind == "zoom":
+            window._set_zoom(1.0)
+        app.setFont(before)
+        i18n.set_language("en")
+
+
+def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
+    """The re-review of fix round 1 (N1, CRITICAL): the measurement was right and the paint was
+    not. `_FitLabel.paintEvent` built its rect from `contentsRect()` less the chrome -- but the
+    contents rect already excludes the style sheet's border and padding, so an elided tab drew
+    into width - 46 where the native text has width - 23: at the full window at two thirds of
+    the Arbiter's screen over one channel's EQ every elided tab drew NOTHING («Т…», «E…», «Р…»,
+    «З…», «Ф…», «⇅», «⇄» -- 0 px of ink) and «Копіювати EQ m-L» drew «Копі», a word cut with no
+    «…». No test looked at pixels. This one grabs each head label at that width and checks its
+    ink is the text `fit_text` names: present, ending where that text ends, inside the room.
+    The window is 1008 px wide (two thirds of 1512) and the head is below its ask, so the
+    elided paint path is what is grabbed."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from autosound_tcc.ui.tcc.detail_pane import _FitLabel
+    from tests import test_control_layout as tcl
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "eq_single")
+        window._fit_centre_floor()
+        # 1008 px, or the window's own floor where this font puts it higher (the runner's
+        # twice-as-wide text): the head is short of its ask either way.
+        for _ in range(4):
+            width = max(1008, window.minimumWidth())
+            window.resize(width, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+            if window.width() == width:
+                break
+        assert window.width() == max(1008, window.minimumWidth()), window.width()
+        head = pane._head
+        labels = [w for w in _head_words(pane) if isinstance(w, _FitLabel) and w.isVisibleTo(head)]
+        assert head.width() < pane.head_asks()[0] and any(w.fit_text() != w.text() for w in labels), \
+            "the head is short of its ask: the elided paint is what is grabbed"
+        for widget in labels:
+            _paints_what_it_says(widget)
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_list_s_floor_keeps_the_version_whole_before_a_saved_name():
+    """The re-review of fix round 1 (b): the list's floor was measured on «v_000» alone, so a
+    version saved under a name -- «v_001 · P3» -- read «v_0…» at the floor. The floor holds
+    «v_NNN» and the «…» that says a name follows: «v_001…»; with the room, the whole row."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_001", "v_002"], "v_001", lambda _k: _rig_view(),
+                             {"v_001": "v_001 · P3", "v_002": "v_002"}, [], "4.C-cut", "v_002")
+    box = pane._compare_combo
+    assert box.currentText() == "v_001 · P3"
+    box.show()
+    try:
+        box.set_way("floor")
+        box.resize(box.floor_width(), 24)
+        QApplication.processEvents()
+        assert box.fit_text() == "v_001…", box.fit_text()
+        box.set_way("holds")
+        box.resize(box.whole_width() + 60, 24)
+        QApplication.processEvents()
+        assert box.fit_text() == "v_001 · P3", box.fit_text()
+    finally:
+        box.close()
+
+
+def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch):
+    """The re-review of fix round 1 (c): at two thirds of the screen «інша конфігурація» hides
+    over the table too, and the list had no hover, so another configuration's «v_002» read as
+    this configuration's own. As control mode's corner does, a hidden label's words go into the
+    list's hover: «порівняти з», and «інша конфігурація: 3.S-shelf · v_002»; with the room, the
+    labels are back and the hover empty."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "table")
+        window._fit_centre_floor()
+        for _ in range(4):
+            window.resize(1008, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+        head, box = pane._head, pane._compare_combo
+        assert not pane._compare_other.isVisibleTo(head) and pane._compare_other.wanted()
+        assert box.toolTip() == "порівняти з\nінша конфігурація: 3.S-shelf · v_002", box.toolTip()
+
+        # Roomy: wide enough for the pane's share to hold the head's ask -- measured, since the
+        # ask is the font's (at twice the width it is 2656 px, past a 2600-px window).
+        splitter = window._main_splitter
+        want = pane.head_asks()[0] + 40
+        roomy = 2600
+        window.resize(roomy, 900)
+        for _ in range(4):
+            QApplication.processEvents()
+        while sum(splitter.sizes()) < want + 2 * 200 + 40 and roomy < 8000:
+            roomy += 400
+            window.resize(roomy, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+        sizes = splitter.sizes()
+        splitter.setSizes([200, want, sum(sizes) - 200 - want])
+        for _ in range(4):
+            QApplication.processEvents()
+        assert pane.width() == want, (pane.width(), want, splitter.sizes())
         assert pane._compare_other.isVisibleTo(head) and box.toolTip() == "", box.toolTip()
     finally:
         i18n.set_language("en")

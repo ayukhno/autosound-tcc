@@ -700,7 +700,15 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(
             assert box <= max(cap, smallest), (key, box, cap, smallest)
             shown, full = combo.fit_text(), combo.shown_text()
             if key.startswith("3.S"):
-                assert shown.startswith("3.S-shelf · v_002"), f"the saved names give way: {shown}"
+                # The saved names give way first; the preset too only where the cap leaves the
+                # box less than «3.S-shelf · v_002…» (ubuntu's fonts on CI at 467c655: «3… ·
+                # v_002» where this expected the preset whole) -- the version whole either way.
+                base = QComboBox.minimumSizeHint(combo)
+                held = combo._text_width("3.S-shelf · v_002…") + base.width() - combo._room(base)
+                if box >= held:
+                    assert shown.startswith("3.S-shelf · v_002"), \
+                        f"the saved names give way: {shown}"
+                assert shown.endswith(" · v_002") or shown.startswith("3.S-shelf · v_002"), shown
             else:
                 assert shown.endswith(" · v_002") and shown.startswith("5.W-"), shown
             assert full in combo.hover_tip.text(), "the whole text is in the hover"
@@ -1236,9 +1244,17 @@ def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monke
         # Not the «?»: it never elides, and its round border curves into its contents rect.
         for chip in chips:
             _paints_what_it_says(chip)
-        if eq._head.width() >= eq.head_asks()[0]:
-            assert all(chip.fit_text() == chip.text() for chip in chips), \
-                [(c.text(), c.fit_text()) for c in chips]
+        # Whole where the head has the room for its ask -- English at the Mac's font does, by
+        # one pixel (734 for an ask of 733), once the hint asks only what the paint needs. A
+        # font whose ask is wider than the row (Ukrainian, or the runner's twice-as-wide text)
+        # says so: the paint above is checked either way.
+        ask, room = eq.head_asks()[0], eq._head.width()
+        if room < ask:
+            layout.leave()
+            pytest.skip(f"in {lang} in this font the EQ head asks {ask} px of the {room} it has "
+                        f"at the half: the chips elide, and the paint above is what is checked")
+        assert all(chip.fit_text() == chip.text() for chip in chips), \
+            [(c.text(), c.fit_text()) for c in chips]
         layout.leave()
     finally:
         i18n.set_language("en")

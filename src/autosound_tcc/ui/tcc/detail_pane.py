@@ -229,42 +229,41 @@ class _FitLabel(QLabel):
         return QFontMetricsF(self.font()).horizontalAdvance(text)
 
     def _chrome(self) -> int:
-        """Padding, border and frame: the label's own hint beyond its text."""
-        return max(0, super().sizeHint().width()
-                   - self.fontMetrics().horizontalAdvance(self._full))
+        """What the label spends beyond its text: the contents margins the style sheet's border
+        and padding become for a label, and QLabel's own margin each side -- the same number
+        `_text_rect` takes off the width. Not QLabel's size hint less the text: that hint adds a
+        full «x» of indent where its paint takes half, and the chips asked 4-5 px more than the
+        paint needed (the re-review of fix round 2)."""
+        margins = self.contentsMargins()
+        return margins.left() + margins.right() + 2 * self.margin()
 
     def whole_width(self) -> int:
-        """The width that shows the text whole, whatever way the label is set to now -- and no
-        more than the style caps it at («?» asks 17 px of a 16-px cap)."""
-        return min(self.maximumWidth(), math.ceil(self._width(self._full)) + self._chrome())
+        """The width that shows the text whole, whatever way the label is set to now -- within
+        the widths the style sheet fixes («?» is 16 px, min and max, whatever its glyph asks),
+        which the layout holds to whatever the hint says."""
+        wide = math.ceil(self._width(self._full)) + self._chrome()
+        return max(self.minimumWidth(), min(self.maximumWidth(), wide))
 
     def _text_rect(self) -> QRect:
-        """Where QLabel itself puts the text -- `QLabelPrivate::documentRect`: the contents rect
-        (the style sheet's border and padding ARE contents margins for a label), less its margin,
-        and with a frame less half an «x» of indent on the aligned side. Both the room `fit_text`
-        judges by and where `paintEvent` draws: the re-review of fix round 1 found the paint rect
-        built from the contents rect less the chrome again (width - 46 for a d-tab, where the
-        native text has width - 23), so an elided tab drew nothing and a longer one a word cut
-        with no «…»."""
+        """Where the text is drawn, whole or elided: the contents rect (the style sheet's border
+        and padding ARE contents margins for a label), less QLabel's margin -- and not QLabel's
+        half-«x» indent for a framed label: the chips' padding is that already, and the indent
+        left the fit's room, the paint's and the hint's three different numbers. The re-review
+        of fix round 1 found the paint rect built from the contents rect less the chrome again
+        (width - 46 for a d-tab), so an elided tab drew nothing; the re-review of round 2 found
+        the English chips at the half elided for a sub-pixel while asking 4-5 px more than the
+        paint needed. One rule now: the room, the rect and the hint's chrome are this."""
         rect = self.contentsRect()
         margin = self.margin()
         rect.adjust(margin, margin, -margin, -margin)
-        indent = self.indent()
-        if indent < 0 and self.frameWidth():
-            indent = self.fontMetrics().horizontalAdvance("x") // 2 - margin
-        if indent > 0:
-            align = self.alignment()
-            if align & Qt.AlignmentFlag.AlignLeft:
-                rect.setLeft(rect.left() + indent)
-            if align & Qt.AlignmentFlag.AlignRight:
-                rect.setRight(rect.right() - indent)
         return rect
 
     def floor_width(self) -> int:
         """The least it can be drawn in: its first glyph and «…» -- or the glyph alone, for a chip
         whose glyph says it -- never nothing."""
         least = self._full[:1] if self._floor == "glyph" else self._full[:1] + "…"
-        return min(self.whole_width(), math.ceil(self._width(least)) + self._chrome())
+        return min(self.whole_width(),
+                   max(self.minimumWidth(), math.ceil(self._width(least)) + self._chrome()))
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
@@ -285,14 +284,19 @@ class _FitLabel(QLabel):
         # given 70 px read «Таблиця» whole for its 73 while the paint clipped it) nor the width
         # less the chrome (3 px stricter than the paint: chips whole took the elided path).
         room = max(0, self._text_rect().width())
-        if metrics.horizontalAdvance(self._full) <= room:
+        # A glyph clipped by less than a pixel is invisible: «⇄ L + R» at 41.75 px in a 41-px
+        # room is whole, where a strict fit elided it (the re-review of fix round 2).
+        if metrics.horizontalAdvance(self._full) < room + 1:
             return self._full
         shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
         # At its floor the label shows its floor text -- the glyph, or the glyph and «…» -- by
         # this label's own measure: Qt's elision is a few tenths of a pixel off either way, and
         # given the room «Р…» was measured for it drew «…» alone.
+        # -- and never nothing, whatever the room: the Windows runner's fontless text handed
+        # back «» for a chip given room for three of its glyphs (CI at 467c655), and a floor
+        # glyph clipped beats a chip with no ink.
         least = self._full[:1] if self._floor == "glyph" else self._full[:1] + "…"
-        if shown in ("", "…") and metrics.horizontalAdvance(least) <= room:
+        if shown in ("", "…"):
             shown = least
         return shown
 
@@ -309,18 +313,18 @@ class _FitLabel(QLabel):
         super().resizeEvent(event)
         self._sync_tip()
 
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        shown = self.fit_text()
-        if shown == self._full:
-            super().paintEvent(event)
-            return
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+        """Drawn by this label whole and elided alike, in `_text_rect`, the way QLabel draws its
+        own text: the style's box, then the text through `drawItemText` with the option's
+        palette, so a disabled chip's colour is the sheet's. One paint for both, so the fit and
+        the paint cannot disagree by an indent again."""
         option = QStyleOption()
         option.initFrom(self)
         painter = QStylePainter(self)
         painter.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option)
-        painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
-        painter.drawText(self._text_rect(), int(self.alignment()), shown)
+        painter.drawItemText(self._text_rect(), int(self.alignment()), option.palette,
+                             self.isEnabled(), self.fit_text(), self.foregroundRole())
 
 
 class _DTab(_FitLabel):
