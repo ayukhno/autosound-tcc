@@ -166,7 +166,15 @@ def _quiet_windows_left_behind():
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
-    before = {id(widget) for widget in app.topLevelWidgets()} if app is not None else set()
+    # The wrappers themselves are held, not just their ids. `topLevelWidgets()` makes a fresh
+    # wrapper for a widget Python holds no wrapper of; kept as an id only, it is freed at once,
+    # and the test's own window could be given that id -- then it counted as "there before" and
+    # was never quieted. Measured in a plain `-n 4` run: `test_a_marked_omp_model_joins_...`'s
+    # window stayed live, its deferred placeholder drop wrote its omp pick into the NEXT test's
+    # project, and that test's window opened the «model gone» box on it -- a real modal, which
+    # waits for nobody and held the worker until it was killed.
+    before = list(app.topLevelWidgets()) if app is not None else []
+    seen = {id(widget) for widget in before}
     yield
     app = QApplication.instance()
     if app is None:
@@ -174,8 +182,40 @@ def _quiet_windows_left_behind():
     from tests import _windows
 
     for widget in app.topLevelWidgets():
-        if id(widget) not in before and type(widget).__name__ == "MainWindow":
+        if id(widget) not in seen and type(widget).__name__ == "MainWindow":
             _windows.quiet(widget)
+    del before
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_waits_for_nobody(monkeypatch):
+    """A modal a test reaches fails that test, naming the modal, instead of holding the run.
+
+    Nobody answers a modal in a test, and a real one waits forever. A plain `-n 4` run of four
+    files here (2026-09-30) sat in `_offer_replacement`'s «model gone» box until the worker was
+    killed, 24 minutes on; CI's Windows shard 4 at 0750776 was cancelled at its 25-minute limit
+    in the same stretch of the suite. Now the modal raises, and the test fails with its title and
+    text -- from a slot too, which the slot guard above turns into the test's failure.
+
+    `QDialog.exec` is the one `exec` every dialog in PySide reaches, `QMessageBox`'s included;
+    the static `QMessageBox` questions are modals of their own. A test that is ABOUT a modal
+    patches its `exec` (or the call that opens it) itself; its patch runs later and wins."""
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    def refuse(what: str):
+        raise RuntimeError(f"a test opened a modal: {what} -- nobody answers it in a test; patch "
+                           f"its exec, or the call that opens it, in the test")
+
+    def exec_(self, *_args, **_kwargs):
+        text = self.text() if isinstance(self, QMessageBox) else ""
+        refuse(f"{type(self).__name__} «{self.windowTitle()}» {text[:200]!r}")
+
+    monkeypatch.setattr(QDialog, "exec", exec_)
+    for name in ("question", "warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(
+            lambda *args, _name=name, **_kwargs: refuse(
+                f"QMessageBox.{_name} {args[1:3] if len(args) > 2 else args!r}")))
+    yield
 
 
 @pytest.fixture(scope="session", autouse=True)

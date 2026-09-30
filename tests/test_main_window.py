@@ -1337,10 +1337,16 @@ def test_picking_the_folder_already_open_is_a_no_op(monkeypatch):
     window._choose_project_folder()
 
 
-def test_chip_buttons_actually_render_rounded():
+def test_chip_buttons_actually_render_rounded(monkeypatch):
     """QSS said `border-radius: 12px` and Qt drew square corners, because 12 is more than half of
     the 22px these render at — an out-of-range radius is silently ignored. Declaring it is not
-    the same as getting it, so this measures the pixels."""
+    the same as getting it, so this measures the pixels.
+
+    The catalogue is stubbed: this test processes events, and the window's catalogue worker
+    answers then. Unstubbed it ran this machine's `omp models`, and in a plain `-n 4` run its
+    answer reached a model pick an earlier test's window had written here -- the «model gone»
+    box, 24 minutes of a worker waiting (2026-09-30)."""
+    _catalogue(monkeypatch, [])
     _app()
     window = MainWindow()
     window.resize(1600, 900)

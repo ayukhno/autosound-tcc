@@ -119,3 +119,23 @@ def test_what_the_app_writes_for_the_machine_is_not_in_the_tests_own_folder(tmp_
     inside = {name: path for name, path in written_for_the_machine.items()
               if tmp_path.resolve() in Path(path).resolve().parents}
     assert not inside, f"written into the test's own folder: {inside}"
+
+
+def test_a_modal_a_test_reaches_fails_the_test_instead_of_waiting():
+    """A real modal in a test waits for a person who is not there: a plain `-n 4` run sat in
+    the «model gone» box for 24 minutes (2026-09-30), and CI's Windows shard hit its 25-minute
+    limit in the same stretch. The guard in conftest makes the modal fail the test by name."""
+    import pytest
+    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+
+    QApplication.instance() or QApplication([])
+    box = QMessageBox()
+    box.setWindowTitle("Model gone")
+    box.setText("This project is set to a model nothing here can run")
+    # By its text: the title is a no-op on macOS, where a message box has none.
+    with pytest.raises(RuntimeError, match="a test opened a modal: QMessageBox .*a model nothing"):
+        box.exec()
+    with pytest.raises(RuntimeError, match="a test opened a modal: QDialog"):
+        QDialog().exec()
+    with pytest.raises(RuntimeError, match="a test opened a modal: QMessageBox.question"):
+        QMessageBox.question(None, "Switch?", "Open the other folder?")
