@@ -12,7 +12,7 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [v0.1.45] — 2026-09-29 · signed tags and a verified updater, the skill updated through its own upkeep, control mode in a small window, the method at v3.0.64
+## [v0.1.45] — 2026-09-30 · signed tags and a verified updater, the skill updated through its own upkeep, control mode in a small window, the method at v3.0.64
 
 Paired with method `6d6a9877672092c62808e665c178f28f947eb7a4` — the tag on that commit is
 **`v3.0.64`**, the method's first signed tag.
