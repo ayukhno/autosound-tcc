@@ -16,7 +16,7 @@ import math
 import re
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -133,11 +133,19 @@ class _FitLabel(QLabel):
     here with the Mac's font and a 1400-px window, the pane 821 px for a head asking 891). A box
     layout splits what it is short of EQUALLY among the items that can shrink, and the first
     pass's 24-px floor made the tabs the only ones: the whole deficit went to them, down to a
-    4-px content rect and nothing to draw. One that `holds` asks for its text as its floor, as a
-    plain `QLabel` did before the wave: the layout takes the room from whatever else can give
-    (the table's title), and only a row below its own minimum -- where Qt trims the widest items
-    to one width -- cuts into it, elided instead of clipped. One that does not hold (a chip in a
-    control-mode tab, the title) goes down to its first glyph and «…», never to nothing.
+    4-px content rect and nothing to draw. The label meets a short row one of three ways, and
+    the head's own fit (`DetailPane._fit_head`) picks it by the room the row has:
+
+    - `"holds"`: its floor is its text, as a plain `QLabel`'s was before the wave. The layout
+      takes the room from whatever else can give, and only a row below its own minimum -- where
+      Qt trims the widest items to one width -- cuts into it, elided instead of clipped.
+    - `"gives"`: its floor is its first glyph and «…», never nothing. It shares the shortfall
+      with every other item that gives.
+    - `"floor"`: it asks for no more than that floor. It has given all it had, and the ones
+      still holding give next -- a box layout has no order of its own, only "equally from all
+      that can shrink", so an order is made by holding the rest and pinning the ones that went
+      first (the re-review of fix round 5: below the head's minimum the title bounced back to
+      «Output chan…» while the tabs went to «Табл…»).
 
     Whole pixels are not enough to judge a fit: `elidedText` measures in fractions, and a text
     79.11 px wide given the 79 it asked for lost its last letters (`labels.ElidedLabel`, F-045;
@@ -147,7 +155,7 @@ class _FitLabel(QLabel):
     def __init__(self, text: str = "", holds: bool = True) -> None:
         super().__init__(text)
         self._full = text
-        self._holds = holds
+        self._way = "holds" if holds else "gives"
         # The OWNER's hint (`_sync_tabs`'s tcc#54 tooltips, e.g. `_cmp_btn`'s "pick a version
         # first" / "compare with {version}"), separate from the fallback this widget sets for
         # ITSELF when elided with nothing else to say. `None` -- never set -- is not the same as
@@ -161,11 +169,14 @@ class _FitLabel(QLabel):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
-    def set_holds(self, holds: bool) -> None:
-        """Whether the floor is the whole text, or its first glyph and «…»."""
-        if holds != self._holds:
-            self._holds = holds
+    def set_way(self, way: str) -> None:
+        """How it meets a short row: `"holds"`, `"gives"` or `"floor"` (the class docstring)."""
+        if way != self._way:
+            self._way = way
             self.updateGeometry()
+
+    def way(self) -> str:
+        return self._way
 
     def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
         self._full = text
@@ -185,16 +196,22 @@ class _FitLabel(QLabel):
         return max(0, super().sizeHint().width()
                    - self.fontMetrics().horizontalAdvance(self._full))
 
+    def whole_width(self) -> int:
+        """The width that shows the text whole, whatever way the label is set to now."""
+        return math.ceil(self._width(self._full)) + self._chrome()
+
+    def floor_width(self) -> int:
+        """The least it can be drawn in: its first glyph and «…», never nothing."""
+        return min(self.whole_width(), math.ceil(self._width(self._full[:1] + "…")) + self._chrome())
+
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
-        hint.setWidth(math.ceil(self._width(self._full)) + self._chrome())
+        hint.setWidth(self.floor_width() if self._way == "floor" else self.whole_width())
         return hint
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
         hint = super().minimumSizeHint()
-        floor = (self.sizeHint().width() if self._holds
-                 else math.ceil(self._width(self._full[:1] + "…")) + self._chrome())
-        hint.setWidth(min(self.sizeHint().width(), floor))
+        hint.setWidth(self.whole_width() if self._way == "holds" else self.floor_width())
         return hint
 
     def fit_text(self) -> str:
@@ -235,8 +252,9 @@ class _FitLabel(QLabel):
 
 class _DTab(_FitLabel):
     """A head tab/chip («EQ», «⇅ Порівняти», «Копіювати EQ …»): a `_FitLabel` that is clicked.
-    In the full window it holds its text -- the tabs ARE the navigation -- and inside a
-    control-mode tab it gives way (`set_embedded`), as the chips there must (finding 105)."""
+    In the full window it holds its text while the row has the room -- the tabs ARE the
+    navigation -- and gives way last (`DetailPane._fit_head`); inside a control-mode tab it
+    always gives way, as the chips there must (finding 105)."""
 
     clicked = Signal()
 
@@ -854,9 +872,8 @@ class DetailPane(QFrame):
             tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
             head_layout.addWidget(tab)
             self._param_tabs[field] = tab
-        # The one thing in this row that gives way while the others still have their width (fix
-        # round 5): what it says, the table below says too. The tabs, the labels and the buttons
-        # hold their text, and a row below its own minimum elides them instead of clipping.
+        # The first thing in this row to give way (fix round 5): what it says, the table below
+        # says too. Who gives next, and who never does, is `_fit_head`'s.
         self._title = _FitLabel("", holds=False)
         self._title.setProperty("class", "phead-sub")
         head_layout.addWidget(self._title)
@@ -886,7 +903,8 @@ class DetailPane(QFrame):
         # Shortened from its end when the row is short, not cut on both sides («(риті», the
         # Arbiter, 2026-09-25). It holds its text (fix round 5): the layout takes a small
         # shortfall equally from every item that can shrink, and this one shrank beside a title
-        # with room to give -- «закрит…» on the Windows VM with the pane 840 px wide.
+        # with room to give -- «закрит…» on the Windows VM with the pane 840 px wide. The head's
+        # minimum keeps it whole (`_fit_head`); only a row below that trims it, elided.
         self._close_btn = ElidedButton(i18n.t("close"), holds=True)
         self._close_btn.setProperty("class", "d-close")
         self._close_btn.clicked.connect(self.close_pane)
@@ -901,6 +919,10 @@ class DetailPane(QFrame):
         at = head_layout.indexOf(self._compare_label)
         for offset, widget in enumerate(eq_actions):
             head_layout.insertWidget(at + offset, widget)
+        # Who gives way in a short row is decided from the room the row has (`_fit_head`), so it
+        # is decided again whenever the row is resized, shown, or laid out afresh -- a tab shown
+        # or hidden, a language, a zoom.
+        head.installEventFilter(self)
         outer.addWidget(head)
 
         self._scroll = QScrollArea()
@@ -943,10 +965,9 @@ class DetailPane(QFrame):
         self._embedded = on
         self._compare_label.setVisible(False)
         self._compare_combo.setVisible(False)
-        # The full window's tabs hold their text; a control-mode tab's chips give way, down to a
-        # glyph and «…» (finding 105; fix round 5).
-        for tab in self._head.findChildren(_DTab):
-            tab.set_holds(not on)
+        # The full window's tabs hold their text while the row has the room; a control-mode
+        # tab's chips give way, down to a glyph and «…» (finding 105; fix round 5) -- `_fit_head`
+        # reads `_embedded`, and `_sync_tabs` below runs it.
         if on:
             # The row reads: the way back, the channels, then the actions at its end (the
             # Arbiter, 2026-09-25: «ось це в кінець строчки»).
@@ -1224,6 +1245,71 @@ class DetailPane(QFrame):
         self._head.setVisible(menu or eq_on)
         self._title.setVisible(menu and not eq_on)
         self._pick_holder.setVisible(self._embedded and eq_on)
+        self._fit_head()
+
+    # ---- the head in a short row (tcc#96, finding 119) -------------------------------------
+
+    def _head_stages(self) -> list:
+        """The head's labels in the order they give way when the row is short (finding 119, the
+        re-review of fix round 5): the title first -- what it says, the table below says too;
+        then «порівняти з» and the «інша конфігурація» tag -- the list beside them names the
+        version, and each keeps its word in its hover; then the tabs, down to a glyph and «…»,
+        never to nothing. The list and «закрити ✕» keep their floors: a list trimmed below its
+        own showed «v_» at a 1100-px window and nothing at the window's floor."""
+        return [[self._title], [self._compare_label, self._compare_other],
+                self._head.findChildren(_DTab)]
+
+    def _head_shows(self, widget: QWidget) -> bool:
+        return widget.isVisibleTo(self._head)
+
+    def head_asks(self) -> list:
+        """The widths the head asks for: `[0]` with everything whole, then with each stage of
+        `_head_stages` at its floor in turn -- `[1]` the title at its floor and the rest whole,
+        `[2]` the labels too, `[3]` the tabs too, which is the head's own minimum. Counted from
+        the labels' whole and floor widths, not from what they ask for right now, so the numbers
+        do not move with the way `_fit_head` last set them."""
+        layout = self._head.layout()
+        shown = [w for w in (layout.itemAt(i).widget() for i in range(layout.count()))
+                 if w is not None and self._head_shows(w)]
+        margins = layout.contentsMargins()
+        width = margins.left() + margins.right() + layout.spacing() * (len(shown) - 1)
+        width += sum(w.whole_width() if isinstance(w, _FitLabel) else w.sizeHint().width()
+                     for w in shown)
+        asks = [width]
+        for stage in self._head_stages():
+            width -= sum(w.whole_width() - w.floor_width() for w in stage if self._head_shows(w))
+            asks.append(width)
+        return asks
+
+    def head_need(self) -> int:
+        """The width at which the head reads whole but for the title -- the tabs, «закрити ✕»,
+        the compare label, list and tag -- for those of them the head shows now. What the full
+        window's floor holds (tcc#106, `MainWindow._head_need`)."""
+        return self.head_asks()[1]
+
+    def _fit_head(self) -> None:
+        """Sets each stage's way by the room the head has now: the first stage that still fits
+        with everything after it whole gives; the stages before it sit at their floors; the ones
+        after it hold. In a control-mode tab every chip gives (finding 105). A head not shown
+        yet has no width to judge by: the defaults, until its first show or resize."""
+        stages = self._head_stages()
+        if self._embedded:
+            ways = ["gives"] * len(stages)
+        elif not self._head.isVisible():
+            ways = ["gives"] + ["holds"] * (len(stages) - 1)
+        else:
+            asks, width = self.head_asks(), self._head.width()
+            giving = next((i for i in range(1, len(asks)) if width >= asks[i]), len(stages))
+            ways = ["floor"] * (giving - 1) + ["gives"] + ["holds"] * (len(stages) - giving)
+        for stage, way in zip(stages, ways):
+            for widget in stage:
+                widget.set_way(way)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        if watched is self._head and event.type() in (
+                QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.LayoutRequest):
+            self._fit_head()
+        return super().eventFilter(watched, event)
 
     def _on_tab_table(self) -> None:
         if self._group is not None:

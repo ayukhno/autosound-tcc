@@ -3269,21 +3269,15 @@ class MainWindow(QMainWindow):
         return best
 
     def _head_need(self) -> int:
-        """The pane's head over a table: the tabs and «закрити» whole (they hold their words in
-        the full window, tcc#96), the title at its smallest, the compare label, list and tag at
-        their floors -- those of them the head shows now (a tab for a field no tier has, or the
-        compare row with nothing to compare, is hidden) -- so the row is never short and nothing
-        in it is trimmed."""
-        pane = self._detail
-        pane.ensurePolished()
-        head = pane._head.layout()
-        words = [word for word in (pane._tab_table, pane._tab_eq, *pane._param_tabs.values(),
-                                   pane._title, pane._compare_label, pane._compare_combo,
-                                   pane._compare_other, pane._close_btn)
-                 if word.isVisibleTo(pane)]
-        margins = head.contentsMargins()
-        return (margins.left() + margins.right() + head.spacing() * (len(words) - 1)
-                + sum(word.minimumSizeHint().width() for word in words))
+        """The pane's head over a table: the tabs, «закрити», the compare label, list and tag
+        whole, the title at its smallest -- those of them the head shows now (a tab for a field
+        no tier has, or the compare row with nothing to compare, is hidden) -- so the row is
+        never short and nothing in it is trimmed. The pane's own number (`DetailPane.head_need`,
+        tcc#96): what its words ask for right now depends on how much room the row last had,
+        since they give way in stages (finding 119), and a floor read off that would move with
+        the window."""
+        self._detail.ensurePolished()
+        return self._detail.head_need()
 
     def _build_center(self) -> QWidget:
         splitter = QSplitter(Qt.Orientation.Vertical)
