@@ -623,6 +623,11 @@ class ControlLayout:
         self._compact(False)
         if self._saved_geometry is not None:
             geometry, state = self._saved_geometry
+            # A window the Arbiter maximised IN this mode keeps that state through `setGeometry`
+            # (the defect tcc#110 fixed on the way in, mirrored on the way out): a normal window
+            # first, then the full window's own place, then its own state.
+            if w.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
+                w.showNormal()
             w.setGeometry(geometry)
             if state & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
                 w.setWindowState(state)
@@ -922,7 +927,25 @@ class ControlLayout:
             self._table_whole = (*key, table_width_whole(table))
         floor = min(self._table_whole[2] + inside, self._right_half()[1].width() - outside)
         # An explicit minimum replaces the page's own even when smaller (tcc#96): never below it.
+        before = page.minimumWidth()
         page.setMinimumWidth(max(floor, page.minimumSizeHint().width(), 0))
+        # A floor that rose on a shown window: the window grows to it where it stands, to the
+        # right (tcc#106, `_keep_on_screen`). A reload in this mode rebuilds the tabs on the event
+        # loop's next pass, after the window's own check has run, so a window at its minimum
+        # flush right went 9 px past a 1920-px screen when a crossover grew from 350 to 3500 Hz
+        # (the review of #107/#110). Asked here, when the floor is raised -- with every widget
+        # and layout between the page and the window told first: each keeps its minimum cached
+        # until a posted event reaches it (measured: the window's own read of its minimum stayed
+        # at the old number after the central layout was activated), and the check measures the
+        # growth, so the window has to grow NOW.
+        if page.minimumWidth() > before and w.isVisible():
+            node = page
+            while node is not None and node is not w:
+                node.updateGeometry()
+                if node.layout() is not None:
+                    node.layout().invalidate()
+                node = node.parentWidget()
+            w._keep_on_screen()
 
     def _compact(self, on: bool) -> None:
         """Make the header and the footer fit half a screen.

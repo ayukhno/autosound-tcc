@@ -978,8 +978,10 @@ def test_a_four_digit_crossover_reads_whole_at_control_mode_s_minimum(tmp_path, 
 
 def test_the_table_s_floor_gives_way_at_half_a_screen(tmp_path, monkeypatch):
     """tcc#107 under tcc#96's rule: control mode's window sits in half a screen. Where half the
-    screen cannot hold the output table whole, the table's floor stops there; the header's own
-    floor is the header's doing (the zoom finding), not the table's."""
+    screen cannot hold the output table whole, the table's floor stops there -- at the half as
+    the window measures it, its frame counted (the review of #107/#110: a `<=` against a half
+    that ignored the frame passed on the old code, and never said the cap was reached); the
+    header's own floor is the header's doing (the zoom finding), not the table's."""
     window = _window(tmp_path, monkeypatch)
     _with_arbiter_outputs(window)
     _on_screen(window, monkeypatch, QRect(0, 0, 20000, 1000))
@@ -994,7 +996,7 @@ def test_the_table_s_floor_gives_way_at_half_a_screen(tmp_path, monkeypatch):
     layout.enter()
     floor = _at_minimum(window)
     rest = _rest_floor(window)
-    assert floor <= max(half, rest), (floor, half, rest, held)
+    assert floor == max(layout._right_half()[1].width(), rest), (floor, half, rest, held)
     layout.leave()
 
 
@@ -1087,3 +1089,68 @@ def test_a_maximised_window_goes_to_the_right_half_and_comes_back_maximised(tmp_
     window._control_layout.leave()
     _settled(window)
     assert window.isMaximized()
+
+
+def test_a_window_maximised_in_control_mode_leaves_it_as_the_full_window_was(tmp_path, monkeypatch):
+    """The review of #107/#110: the defect tcc#110 fixed on the way in, mirrored on the way out.
+    A window the Arbiter maximised IN control mode is still maximised when `leave` restores the
+    full window's geometry, and Windows draws a maximised window at whatever rect it is given.
+    A normal window first; then the full window's own place and state -- normal, here."""
+    window = _window(tmp_path, monkeypatch)
+    free = QRect(0, 0, 6000, 900)
+    _on_screen(window, monkeypatch, free)
+    window.setGeometry(100, 50, 1300, 800)
+    window.show()
+    _settled(window)
+    full = window.geometry()
+    assert not window.isMaximized()
+    window._control_layout.enter()
+    _settled(window)
+    window.showMaximized()
+    _settled(window)
+    assert window.isMaximized()
+    window._control_layout.leave()
+    _settled(window)
+    assert not window.isMaximized(), "the full window was not maximised"
+    assert window.geometry() == full, (window.geometry(), full)
+
+
+def test_a_reload_that_raises_the_table_s_floor_keeps_a_flush_right_window_on_its_screen(
+        tmp_path, monkeypatch):
+    """The review of #107/#110: the output table's floor is held again when the tabs are rebuilt
+    on a reload, and that happens on the event loop's next pass -- after the window's own check
+    that a floor which rose keeps it on its screen (tcc#106). A control window at its minimum,
+    flush right on a 1920-px screen, grew 9 px past the edge when a crossover went from 350 to
+    3500 Hz. `_hold_table` asks the window to stay on its screen when it raises the floor."""
+    window = _window(tmp_path, monkeypatch)
+    free = QRect(0, 0, 1920, 1000)
+    _on_screen(window, monkeypatch, free)
+    monkeypatch.setattr(main_window, "_screen_room", lambda _widget: QRect(free))
+
+    def load(lpf_mid, hpf_tw):
+        view = _arbiter_outputs(lpf_mid=lpf_mid, hpf_tw=hpf_tw)
+        window._view = view
+        window._tree.set_view(view)
+        older = _arbiter_outputs(lpf_mid=300, hpf_tw=400)
+        window._compare_args = (["v_006"], "v_006", lambda _key: older, {"v_006": "v_006"}, [])
+        window._compare_key = "v_006"
+
+    load(350, 350)
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    narrow = _at_minimum(window)
+    window.move(free.right() + 1 - window.frameGeometry().width(), 0)
+    _settled(window)
+    assert window.frameGeometry().right() == free.right(), "flush right"
+
+    load(3500, 3500)
+    layout.refresh()
+    _settled(window)
+    wide = _at_minimum(window)
+    if wide <= narrow:
+        pytest.skip(f"in this font the table's floor did not rise with the wider crossover "
+                    f"({narrow} -> {wide} px): the rest of the window sets the minimum")
+    frame = window.frameGeometry()
+    assert frame.right() <= free.right() and frame.left() >= free.left(), (frame, free, narrow, wide)
+    layout.leave()
