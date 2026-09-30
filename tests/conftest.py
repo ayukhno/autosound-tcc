@@ -404,9 +404,22 @@ def app_ground():
     sheet was on, so the next window skipped it and measured itself unstyled.
 
     Here: the platform's own font -- at the stretch the run declares, `WIDE_STRETCH` (the
-    wide-font emulation's variable), or none; no record of an applied sheet, so the window's own
-    `apply_theme` applies its sheet at its own zoom (per test, from the isolated settings);
-    English. Everything goes back after."""
+    wide-font emulation's variable), or none; a record of the applied sheet that is TRUE, so the
+    window's own `apply_theme` applies its sheet at its own zoom (per test, from the isolated
+    settings) unless that very sheet is already on; English. Everything goes back after.
+
+    Each of these is written only where it differs, and the record is checked against the
+    application's sheet rather than cleared. Every write here is the whole application's --
+    `setStyleSheet` re-polishes every live widget in the process, `setFont` and `setPalette` send
+    each one an event, `set_language` retranslates every window -- and the windows of every test
+    before this one in the worker are all still alive (F-053). Cleared outright (d3f4cc1), the
+    record made each of these tests re-style all of them for a sheet that was already on: on the
+    Mac 1.8-3.1 s a test in `test_detail_pane.py` and 30 s in control mode's chip test, the two
+    files 121 s -> 211 s; CI's Windows shard 4 went from 806 s (942dd61) to 1232 s, then to its
+    25-minute limit (2026-09-30). A record that names the sheet on the application is kept --
+    the window's identical sheet then styles its own widgets as they are built, as in the
+    product; one that does not -- the lie that failed the four head tests -- is dropped, and the
+    window applies its sheet."""
     from PySide6.QtGui import QFont, QFontDatabase, QPalette
     from PySide6.QtWidgets import QApplication
 
@@ -419,15 +432,22 @@ def app_ground():
     stretch = int(os.environ.get("WIDE_STRETCH", "100"))
     if stretch != 100:
         font.setStretch(stretch)
-    app.setFont(font)
-    theme._APPLIED, theme._CURRENT = None, None
-    i18n.set_language("en")
+    if app.font() != font:
+        app.setFont(font)
+    if theme._APPLIED is not None and theme._APPLIED[2] != app.styleSheet():
+        theme._APPLIED = None
+    theme._CURRENT = None
+    if i18n.current_language() != "en":
+        i18n.set_language("en")
     try:
         yield app
     finally:
-        app.setFont(was[0])
+        if app.font() != was[0]:
+            app.setFont(was[0])
         if app.styleSheet() != was[1]:
             app.setStyleSheet(was[1])
-        app.setPalette(was[2])
+        if app.palette() != was[2]:
+            app.setPalette(was[2])
         theme._APPLIED, theme._CURRENT = was[3], was[4]
-        i18n.set_language(was[5])
+        if i18n.current_language() != was[5]:
+            i18n.set_language(was[5])

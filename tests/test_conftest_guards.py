@@ -8,6 +8,8 @@ second door nobody had noticed.
 import threading
 from pathlib import Path
 
+import pytest
+
 from autosound_tcc.core import model_choices
 
 
@@ -125,7 +127,6 @@ def test_a_modal_a_test_reaches_fails_the_test_instead_of_waiting():
     """A real modal in a test waits for a person who is not there: a plain `-n 4` run sat in
     the «model gone» box for 24 minutes (2026-09-30), and CI's Windows shard hit its 25-minute
     limit in the same stretch. The guard in conftest makes the modal fail the test by name."""
-    import pytest
     from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
     QApplication.instance() or QApplication([])
@@ -139,3 +140,34 @@ def test_a_modal_a_test_reaches_fails_the_test_instead_of_waiting():
         QDialog().exec()
     with pytest.raises(RuntimeError, match="a test opened a modal: QMessageBox.question"):
         QMessageBox.question(None, "Switch?", "Open the other folder?")
+
+
+@pytest.fixture(params=["true", "a lie"])
+def _sheet_record(request):
+    """`apply_theme`'s record of the sheet as `app_ground` finds it: naming the sheet on the
+    application, or one that is not on it. Set before `app_ground` and put back after it."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import theme
+
+    app = QApplication.instance() or QApplication([])
+    was = theme._APPLIED
+    on = app.styleSheet()
+    theme._APPLIED = ("dark", 1.0, on if request.param == "true" else on + "/* not on */")
+    yield request.param
+    theme._APPLIED = was
+
+
+def test_app_ground_drops_a_record_that_lies_and_keeps_one_that_is_true(_sheet_record,
+                                                                        app_ground):
+    """A lie -- the sheet cleared, the record saying it is on -- made the next window skip its
+    sheet and measure itself unstyled (four head tests, the full `-n 4` run at 942dd61): dropped,
+    the window applies its own. A true record is kept: cleared, it made every test on this
+    fixture re-style every window the worker still holds, for a sheet already on -- CI's Windows
+    shard 4 past its 25-minute limit."""
+    from autosound_tcc.ui.tcc import theme
+
+    if _sheet_record == "true":
+        assert theme._APPLIED is not None and theme._APPLIED[2] == app_ground.styleSheet()
+    else:
+        assert theme._APPLIED is None
