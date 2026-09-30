@@ -3227,8 +3227,10 @@ class MainWindow(QMainWindow):
 
     def _tables_need(self) -> int:
         """The width at which every tier's table holds `_FLOOR_CELLS` whole, cells and headings;
-        0 with no project. A table's columns are not sized to their text: every one but the ID
-        stretches to the same share, so each must be given what the widest named one asks.
+        0 with no project. Each column is sized to its content (`detail_pane._ContentTable`, the
+        lever tcc#106 and tcc#107 both named), so the need is the sum of what each asks: nine
+        equal shares of the widest one's ask came to 1254 px of the Arbiter's rig where its
+        content needs about 1115.
 
         Drawn by the pane's own `_build_table`, so the padding, the headings and the ID column are
         the ones on screen, over this rig's real rows with the sample values in the named columns
@@ -3254,14 +3256,8 @@ class MainWindow(QMainWindow):
                     font.setBold(True)
                     item.setFont(font)
                 table.ensurePolished()
-                header = table.horizontalHeader()
-
-                def asks(column: int) -> int:
-                    return max(table.sizeHintForColumn(column), header.sectionSizeHint(column))
-
-                widest = max(asks(column) for column in named)
-                best = max(best, asks(0) + (table.columnCount() - 1) * widest
-                           + 2 * table.frameWidth() + table.verticalScrollBar().sizeHint().width())
+                best = max(best, sum(table.column_needs()) + 2 * table.frameWidth()
+                           + table.verticalScrollBar().sizeHint().width())
             finally:
                 # Now, not `deleteLater`: its right-click hook holds it, and a test run has no
                 # event loop to flush a deferred delete.

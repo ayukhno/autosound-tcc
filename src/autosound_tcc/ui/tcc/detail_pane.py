@@ -367,6 +367,59 @@ class _TierPickButton(QToolButton):
         QStylePainter(self).drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
 
 
+class _ContentTable(QTableWidget):
+    """The pane's table, each column as wide as its heading and its widest value -- measured by
+    Qt in the table's own font, a changed cell's bold one included -- and the rest of a wide
+    pane shared out among the columns after the ID, so the table still fills it (the user's
+    «table on full width»).
+
+    Every column but the ID used to stretch to one equal share (tcc#106 and tcc#107 both named
+    it): the share had to be the widest column's, «3500 LR4» in bold, so the full window's floor
+    asked ~1254 px of the Arbiter's rig for a table whose content needs ~1115, and control
+    mode's ~854 for ~761. Short of its content -- under the half-screen and two-thirds caps --
+    every column gives in proportion, and the cells elide as they did everywhere before."""
+
+    def __init__(self, rows: int, columns: int) -> None:
+        super().__init__(rows, columns)
+        # `Fixed`: the widths are set here, on every resize of the viewport (a vertical scroll bar
+        # coming or going changes its width, not the table's), and the header leaves them be.
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.viewport().installEventFilter(self)
+
+    def column_needs(self) -> list:
+        """Each column's width whole: its heading's, or its widest cell's, by Qt's own measure."""
+        header = self.horizontalHeader()
+        return [max(self.sizeHintForColumn(column), header.sectionSizeHint(column))
+                for column in range(self.columnCount())]
+
+    def fit_columns(self) -> None:
+        needs = self.column_needs()
+        if not needs:
+            return
+        room, whole = self.viewport().width(), sum(needs)
+        if room >= whole:
+            # The ID column keeps to its content; the others share what is left, the odd pixels
+            # to the first of them.
+            sharing = max(1, len(needs) - 1)
+            share, odd = divmod(room - whole, sharing)
+            widths = [needs[0]] + [need + share + (1 if i < odd else 0)
+                                   for i, need in enumerate(needs[1:])]
+            if len(needs) == 1:
+                widths = [room]
+        else:
+            widths = [need * room // whole for need in needs]
+            for i in range(room - sum(widths)):
+                widths[i % len(widths)] += 1
+        for column, width in enumerate(widths):
+            if self.columnWidth(column) != width:
+                self.setColumnWidth(column, width)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
+        if watched is self.viewport() and event.type() == QEvent.Type.Resize:
+            self.fit_columns()
+        return super().eventFilter(watched, event)
+
+
 #: Freq first, then Q and Gain in the order the processor's own software shows them (finding 68,
 #: the Arbiter, 2026-09-25): PC-Tool (Helix, Audiotec-Fischer) reads Freq · Gain · Q; a MUSWAY
 #: reads Freq · Q · Gain. The profile does not state it, so the vendor decides.
@@ -1365,18 +1418,16 @@ class DetailPane(QFrame):
         columns = table_fields(group)
         headers = ["ID", i18n.t("colChan")] + [_FIELD_COLUMNS[f] for f in columns]
         rows = group.rows_visible()
-        table = QTableWidget(len(rows), len(headers))
+        # Each column to its content, the rest of the pane's width shared (`_ContentTable`): the
+        # user's "table on full width", without nine equal columns as wide as the widest.
+        table = _ContentTable(len(rows), len(headers))
         table.setProperty("class", "ptable")
         table.setHorizontalHeaderLabels(headers)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
         table.setShowGrid(False)
-        # Fill the pane width (user request: "table on full width"): every column shares the space
-        # equally, except the narrow ID column which sizes to its content.
         header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         apply_caps(header, spacing_px=0.7)  # QSS text-transform/letter-spacing don't apply to th
 
         t = current_theme()

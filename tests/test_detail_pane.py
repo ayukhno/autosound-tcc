@@ -1201,6 +1201,54 @@ def test_a_control_mode_tab_s_chips_give_way_where_the_full_window_s_tabs_hold()
         full.close()
 
 
+def test_the_table_s_columns_are_sized_to_their_content_and_share_the_rest():
+    """tcc#106 and tcc#107 both named the same lever: every column but the ID stretched to one
+    equal share, so a table's width whole was the widest column's need times the count -- ~1254
+    px of the full window and ~854 of control mode for the Arbiter's rig, where the content
+    needs ~1115 and ~761. Each column is as wide as its heading or its widest cell now (Qt's own
+    measure, a changed cell's bold included), the ID one keeps to that, and what a wide pane
+    has to spare the other columns share equally. Short of the content every column gives in
+    proportion, and the table still fills the pane -- no horizontal scroll bar."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane, _ContentTable
+
+    _app()
+    view = _rig_view()
+    pane = DetailPane()
+    pane.set_view(view)
+    pane.set_compare_choices(["v_001"], "v_001", lambda _k: _rig_view_changed())
+    outputs = _grp(view, "physical_outputs")
+    pane.open_table(outputs)
+    assert isinstance(pane._scroll.widget(), _ContentTable), "the pane's table is the one"
+    # On its own, so it can be made narrower than its content: the pane's head has a floor.
+    table = pane._build_table(outputs)
+    table.show()
+    try:
+        needs = table.column_needs()
+        table.resize(sum(needs) + 400, 200)
+        for _ in range(5):
+            QApplication.processEvents()
+        assert table.item(1, 4).font().bold(), "sw's gain changed: drawn bold, and measured so"
+        widths = [table.columnWidth(c) for c in range(table.columnCount())]
+        assert sum(widths) == table.viewport().width(), (widths, table.viewport().width())
+        assert widths[0] == needs[0], "the ID column keeps to its content"
+        spare = [width - need for width, need in zip(widths[1:], needs[1:])]
+        assert min(spare) >= 0 and max(spare) - min(spare) <= 1, (widths, needs)
+        assert not table.horizontalScrollBar().isVisible()
+
+        chrome = table.width() - table.viewport().width()
+        table.resize(sum(needs) - 40 + chrome, 200)
+        for _ in range(5):
+            QApplication.processEvents()
+        widths = [table.columnWidth(c) for c in range(table.columnCount())]
+        assert sum(widths) == table.viewport().width() < sum(needs), (widths, needs)
+        assert all(width <= need for width, need in zip(widths, needs)), (widths, needs)
+        assert not table.horizontalScrollBar().isVisible()
+    finally:
+        table.close()
+
+
 def test_the_compare_row_tooltip_survives_a_paint():
     """tcc#96, finding 105 -- IMPORTANT 2, an opus reviewer's pass on the first fix:
     `_DTab.paintEvent` used to call `setToolTip` on every single paint -- `""` when the text fit,

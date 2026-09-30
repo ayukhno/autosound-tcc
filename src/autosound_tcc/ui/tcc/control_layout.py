@@ -274,9 +274,10 @@ def table_width_whole(table: QTableWidget) -> int:
 
     Each value is measured regular and bold: a compared change is drawn bold (`DetailPane.
     _styled_cell`), and a floor that followed «порівняти з» would move the window's minimum with
-    every pick. The columns that stretch share the width equally (`DetailPane._build_table`), so
-    each needs the widest one's room; a column sized to its contents needs its own. A vertical
-    scroll bar that takes room is counted: the top zone is the Arbiter's to shorten."""
+    every pick. The pane's table sizes each column to its content (`detail_pane._ContentTable`),
+    so each needs its own room; a column that stretched would need the widest one's, and the
+    branch for it stays for a table that does. A vertical scroll bar that takes room is counted:
+    the top zone is the Arbiter's to shorten."""
     table.ensurePolished()
     header = table.horizontalHeader()
     fonts = (table.font(), QFont(table.font()))
@@ -870,9 +871,10 @@ class ControlLayout:
         The floor is the output table's page's: its table's width with every heading and value
         whole (`table_width_whole`), measured in the fonts it is drawn in -- a zoom or the Windows
         fonts widen it with them. It stops where the window would no longer sit in the half
-        screen this mode puts it in (tcc#96): measured in the Mac's offscreen font the table
-        needs about 830 px and the window around it about 20 more, past half of the Arbiter's
-        1512-px screen, so there the floor is the half and the widest columns still give way. The
+        screen this mode puts it in (tcc#96): with nine equal columns the Arbiter's table needed
+        about 830 px in the Mac's offscreen font, past half of his 1512-px screen; sized to its
+        content (`detail_pane._ContentTable`) it needs about 740, inside it. Where a font or a
+        rig still asks more, the floor is the half and the columns give way in proportion. The
         rest of the window keeps its own floor, whatever the table's."""
         w = self.window
         index = self._index.get("physical_outputs")
