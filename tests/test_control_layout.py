@@ -11,6 +11,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QRect  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSplitter, QTabWidget  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
@@ -811,3 +812,159 @@ def test_building_the_tabs_shows_no_window_of_its_own(tmp_path, monkeypatch):
         QApplication.instance().removeEventFilter(spy)
         window._control_layout.leave()
     assert "DetailPane" not in shown, shown
+
+
+# ---- control mode's minimum holds «Таблиця-О» whole (tcc#107, finding 115) -----------------------
+
+def _xo(freq, kind, slope):
+    return {"f": freq, "type": kind, "slope": slope}
+
+
+def _arbiter_outputs(lpf_mid=3500, hpf_tw=3500):
+    """The Arbiter's outputs as his Helix profile declares them, with his crossovers: m-L/m-R's LPF
+    and tw-L/tw-R's HPF at 3500 Hz, LR4 -- the cells that read «3500 …» at the minimum."""
+    from autosound_tcc.state.dsp_state import ProjectView
+
+    groups = [
+        {"id": "virtual_channels", "label": "Virtual channels",
+         "fields": ["gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq_bypass", "eq"]},
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq"]},
+    ]
+    band = {"type": "PK", "f": 482, "gain_db": -1.7, "q": 3.0}
+    channels = {
+        "c": {"hp": _xo(714, "LR", 24), "lp": _xo(1897, "LR", 24), "gain_db": -8.5,
+              "ta_ms": 1.95, "polarity": "NORM", "eq": [band] * 8},
+        "m-L": {"hp": _xo(460, "BW", 24), "lp": _xo(lpf_mid, "LR", 24), "gain_db": -3.5,
+                "ta_ms": 3.4, "polarity": "INV", "eq": [band] * 12},
+        "m-R": {"hp": _xo(460, "BW", 24), "lp": _xo(lpf_mid, "LR", 24), "gain_db": 0.9,
+                "ta_ms": 2.13, "polarity": "INV", "eq": [band] * 12},
+        "sw": {"hp": None, "lp": _xo(88, "LR", 24), "gain_db": 0.0, "ta_ms": 0.0,
+               "polarity": "NORM"},
+        "tw-L": {"hp": _xo(hpf_tw, "LR", 24), "lp": None, "gain_db": -5.8, "ta_ms": 2.49,
+                 "polarity": "INV", "eq": [band] * 10},
+        "tw-R": {"hp": _xo(hpf_tw, "LR", 24), "lp": None, "gain_db": -4.2, "ta_ms": 15.75,
+                 "polarity": "INV", "eq": [band] * 10},
+        "w-L": {"hp": _xo(92, "LR", 12), "lp": _xo(215, "LR", 12), "gain_db": -0.3,
+                "ta_ms": 4.33, "polarity": "NORM"},
+    }
+    identities = {name: {"code": name, "slot": slot, "tier": "channels"}
+                  for name, slot in zip(channels, "BEFKLMC")}
+    identities["VFL"] = {"code": "VFL", "slot": "A", "tier": "virtual_channels"}
+    ledger = {"preset": "FULL", "sample_rate": 96000, "channels": channels,
+              "virtual_channels": {"VFL": {"gain_db": 0.0}}}
+    profile = {"dsp_profile": {"name": "Helix", "vendor": "Audiotec Fischer", "groups": groups}}
+    return ProjectView.from_dict(ledger, profile, channels=identities)
+
+
+def _with_arbiter_outputs(window):
+    """His outputs, compared with the version before, where the crossovers stood elsewhere: the
+    3500s are changed cells, drawn bold."""
+    view = _arbiter_outputs()
+    window._view = view
+    window._tree.set_view(view)
+    older = _arbiter_outputs(lpf_mid=3000, hpf_tw=4000)
+    window._compare_args = (["v_006"], "v_006", lambda _key: older, {"v_006": "v_006"}, [])
+    window._compare_key = "v_006"
+    return view
+
+
+class _Screen:
+    """A screen with this free area: the offscreen one is 800 px wide, too narrow to say anything
+    about half a real screen."""
+
+    def __init__(self, free):
+        self._free = QRect(free)
+
+    def availableGeometry(self):  # noqa: N802 (Qt naming)
+        return QRect(self._free)
+
+    def geometry(self):
+        return QRect(self._free)
+
+
+def _on_screen(window, monkeypatch, free):
+    monkeypatch.setattr(window, "screen", lambda: _Screen(free))
+
+
+def _at_minimum(window):
+    """The window at its own minimum width, once every layout has had its say."""
+    for _ in range(4):
+        window.resize(1, 900)
+        for _ in range(4):
+            QApplication.processEvents()
+    return window.width()
+
+
+def _cut_columns(table):
+    """The output table's columns narrower than Qt's own ask for their heading and values."""
+    header = table.horizontalHeader()
+    return [(table.horizontalHeaderItem(c).text(), header.sectionSize(c),
+             max(table.sizeHintForColumn(c), header.sectionSizeHint(c)))
+            for c in range(table.columnCount())
+            if header.sectionSize(c) < max(table.sizeHintForColumn(c), header.sectionSizeHint(c))]
+
+
+def test_a_four_digit_crossover_reads_whole_at_control_mode_s_minimum(tmp_path, monkeypatch):
+    """tcc#107, finding 115: at control mode's minimum the Arbiter read «3500 …» in m-L/m-R's LPF
+    and tw-L/tw-R's HPF -- «розмір зробити трохи більше і ок». The minimum now holds the output
+    table whole: every heading and value at Qt's own measure of it, whatever is compared. The
+    screen is one whose half holds the table (the half-screen rule is the next test's); the
+    widths are Qt's measures in the font at hand, so this holds on the Windows runner's wide
+    offscreen text as well."""
+    from PySide6.QtWidgets import QTableWidget
+
+    window = _window(tmp_path, monkeypatch)
+    _with_arbiter_outputs(window)
+    _on_screen(window, monkeypatch, QRect(0, 0, 20000, 1000))
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    outputs = layout._index["physical_outputs"]
+    layout.tabs.setCurrentIndex(outputs)
+    combo = layout.compare_combo
+    floors = []
+    for picked in ("v_006", None):
+        combo.setCurrentIndex(combo.findData(picked))
+        floors.append(_at_minimum(window))
+        table = layout.tabs.widget(outputs).findChild(QTableWidget)
+        texts = {table.item(r, c).text() for r in range(table.rowCount())
+                 for c in range(table.columnCount())}
+        assert "3500 LR4" in texts
+        assert not _cut_columns(table), (picked, window.width(), _cut_columns(table))
+    assert floors[0] == floors[1], f"the minimum does not move with «порівняти з»: {floors}"
+    layout.leave()
+
+
+def test_the_table_s_floor_gives_way_at_half_a_screen(tmp_path, monkeypatch):
+    """tcc#107 under tcc#96's rule: control mode's window sits in half a screen. Where half the
+    screen cannot hold the output table whole, the table's floor stops there; the header's own
+    floor is the header's doing (the zoom finding), not the table's."""
+    window = _window(tmp_path, monkeypatch)
+    _with_arbiter_outputs(window)
+    _on_screen(window, monkeypatch, QRect(0, 0, 20000, 1000))
+    window.show()
+    layout = window._control_layout
+    layout.enter()
+    held = _at_minimum(window)
+    layout.leave()
+
+    half = held - 40
+    _on_screen(window, monkeypatch, QRect(0, 0, 2 * half, 1000))
+    layout.enter()
+    floor = _at_minimum(window)
+    rest = _rest_floor(window)
+    assert floor <= max(half, rest), (floor, half, rest, held)
+    layout.leave()
+
+
+def _rest_floor(window):
+    """The window's minimum from everything but control mode's zones: the header and the footer
+    (the footer sets it at the default font, 697 px)."""
+    root = window.centralWidget().layout()
+    zones = window._control_layout.vertical
+    rows = [root.itemAt(i).widget() for i in range(root.count())]
+    header = window._layout_btn.parentWidget()
+    return (max(w.minimumSizeHint().width() for w in rows
+                if w is not None and w is not zones and w.isVisible())
+            + window.width() - header.width())

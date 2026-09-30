@@ -34,18 +34,22 @@ import sys
 from typing import Optional
 
 import shiboken6
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QFontMetricsF, QPalette, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette, QTextCursor
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QSizePolicy,
     QSplitter,
     QStyle,
     QStyleOptionComboBox,
+    QStyleOptionViewItem,
     QStylePainter,
+    QTableWidget,
     QTabWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -252,6 +256,79 @@ def place_terminal_left(screen) -> None:
         pass
 
 
+def _cell_width(table: QTableWidget, text: str, font: QFont) -> int:
+    """The width a cell of `table` needs to show `text` whole in `font`, its padding included --
+    measured by the table's own style, which is what `sizeHintForColumn` asks for a cell."""
+    option = QStyleOptionViewItem()
+    option.initFrom(table)
+    option.font = font
+    option.fontMetrics = QFontMetrics(font)
+    option.text = text
+    option.features = QStyleOptionViewItem.ViewItemFeature.HasDisplay
+    return table.style().sizeFromContents(QStyle.ContentsType.CT_ItemViewItem, option, QSize(),
+                                          table).width()
+
+
+def table_width_whole(table: QTableWidget) -> int:
+    """The width at which every column of `table` shows its heading and its values whole (tcc#107).
+
+    Each value is measured regular and bold: a compared change is drawn bold (`DetailPane.
+    _styled_cell`), and a floor that followed «порівняти з» would move the window's minimum with
+    every pick. The columns that stretch share the width equally (`DetailPane._build_table`), so
+    each needs the widest one's room; a column sized to its contents needs its own. A vertical
+    scroll bar that takes room is counted: the top zone is the Arbiter's to shorten."""
+    table.ensurePolished()
+    header = table.horizontalHeader()
+    fonts = (table.font(), QFont(table.font()))
+    fonts[1].setBold(True)
+    own, stretched = 0, []
+    for column in range(table.columnCount()):
+        if header.isSectionHidden(column):
+            continue
+        need = header.sectionSizeHint(column)
+        for row in range(table.rowCount()):
+            item = table.item(row, column)
+            if item is not None and item.text():
+                need = max(need, *(_cell_width(table, item.text(), font) for font in fonts))
+        if header.sectionResizeMode(column) == QHeaderView.ResizeMode.Stretch:
+            stretched.append(need)
+        else:
+            own += need
+    width = own + len(stretched) * max(stretched, default=0) + 2 * table.frameWidth()
+    if not table.verticalHeader().isHidden():
+        width += table.verticalHeader().sizeHint().width()
+    bar = table.verticalScrollBar()
+    if not table.style().styleHint(QStyle.StyleHint.SH_ScrollBar_Transient, None, bar):
+        width += bar.sizeHint().width()
+    return width
+
+
+def _min_chrome(widget: QWidget, top: QWidget) -> Optional[int]:
+    """How much wider than `widget` Qt makes `top`'s minimum when `widget`'s own is the widest in
+    each row on the way up -- each box layout's margins, each frame, a tab widget's frame; a
+    stacked page or a main window's central widget adds none. None if `widget` is not inside
+    `top`."""
+    chrome, node = 0, widget
+    while node is not top:
+        parent = node.parentWidget()
+        if parent is None:
+            return None
+        if isinstance(parent, QTabWidget):
+            # Its minimum is its frame around the wider of its pages and its bar.
+            inside = max(node.minimumSizeHint().width(),
+                         parent.tabBar().minimumSizeHint().width())
+            chrome += parent.minimumSizeHint().width() - inside
+        else:
+            margins = parent.contentsMargins()
+            chrome += margins.left() + margins.right()
+            layout = parent.layout()
+            if isinstance(layout, QBoxLayout):
+                margins = layout.contentsMargins()
+                chrome += margins.left() + margins.right()
+        node = parent
+    return chrome
+
+
 #: How much room past its own width a hidden corner label waits for before it comes back, so a
 #: header a pixel either side of the line does not flicker (tcc#96). The header's own ask moves by
 #: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
@@ -382,7 +459,8 @@ class _CompareBox(QComboBox):
 
 
 class _HeaderWatch(QObject):
-    """Refits the corner whenever the header is resized, laid out again or shown."""
+    """Refits the corner, and holds the output table's floor, whenever the header is resized, laid
+    out again or shown."""
 
     def __init__(self, refit, parent: QObject) -> None:
         super().__init__(parent)
@@ -414,6 +492,8 @@ class ControlLayout:
         self._compare_other: Optional[QLabel] = None
         self._compare_tip = None
         self._header_watch: Optional[_HeaderWatch] = None
+        #: `(table, its font, its width whole)`: measured once per table and font (tcc#107).
+        self._table_whole: Optional[tuple] = None
 
     # ---- the two borders ----------------------------------------------------------------------
 
@@ -485,6 +565,7 @@ class ControlLayout:
         w._main_splitter.setVisible(False)
 
         self._compact(True)
+        self._hold_table()
         self._place_on_screen()
         self.active = True
 
@@ -510,6 +591,7 @@ class ControlLayout:
         self.vertical = self.horizontal = self.tabs = None
         self._corner = self.compare_combo = self._compare_label = self._compare_other = None
         self._compare_tip = self._header_watch = None
+        self._table_whole = None
         self._index = {}
         self._compact(False)
         if self._saved_geometry is not None:
@@ -560,6 +642,7 @@ class ControlLayout:
         if current >= 0:
             self.tabs.setCurrentIndex(min(current, self.tabs.count() - 1))
         self._on_tab_changed(self.tabs.currentIndex())
+        self._hold_table()
 
     def refresh(self) -> None:
         """Rebuild the tabs from the view the window holds now — after a reload, a preset switch
@@ -578,6 +661,7 @@ class ControlLayout:
         group = _group(getattr(self.window, "_view", None), group_id)
         if row_id is not None and isinstance(page, DetailPane) and group is not None:
             page.open_table(group, select_row_id=row_id)
+            self._hold_table()
         self.tabs.setCurrentIndex(index)
 
     def show_eq(self, group_id: str, row_id: str, back: Optional[str] = None) -> None:
@@ -649,8 +733,14 @@ class ControlLayout:
         button = self.window._layout_btn
         header = button.parentWidget().layout()
         header.insertWidget(header.indexOf(button), self._corner)
-        self._header_watch = _HeaderWatch(self._fit_corner, self._corner)
+        # The header re-lays itself out on a zoom or a language switch too, which is when the
+        # table's fonts and headings change: its floor is held again then (tcc#107).
+        self._header_watch = _HeaderWatch(self._refit, self._corner)
         button.parentWidget().installEventFilter(self._header_watch)
+
+    def _refit(self) -> None:
+        self._fit_corner()
+        self._hold_table()
 
     def _fill_compare(self) -> None:
         args = getattr(self.window, "_compare_args", None) or ()
@@ -686,6 +776,7 @@ class ControlLayout:
         self.compare_combo.setCurrentIndex(max(self.compare_combo.findData(key) if key else 0, 0))
         self.compare_combo.blockSignals(blocked)
         self._fit_corner()
+        self._hold_table()
         self.sync_dots()
 
     def _fit_corner(self) -> None:
@@ -766,6 +857,34 @@ class ControlLayout:
             bar.setTabToolTip(index, tip_for(status, said))
 
     # ---- fitting half a screen ----------------------------------------------------------------
+
+    def _hold_table(self) -> None:
+        """Control mode's minimum shows «Таблиця-О» whole, «3500 LR4» and not «3500 …» (tcc#107,
+        finding 115: the Arbiter at the minimum, «розмір зробити трохи більше і ок»).
+
+        The floor is the output table's page's: its table's width with every heading and value
+        whole (`table_width_whole`), measured in the fonts it is drawn in -- a zoom or the Windows
+        fonts widen it with them. It stops where the window would no longer sit in the half
+        screen this mode puts it in (tcc#96): measured in the Mac's offscreen font the table
+        needs about 830 px and the window around it about 20 more, past half of the Arbiter's
+        1512-px screen, so there the floor is the half and the widest columns still give way. The
+        rest of the window keeps its own floor, whatever the table's."""
+        w = self.window
+        index = self._index.get("physical_outputs")
+        page = self.tabs.widget(index) if self.tabs is not None and index is not None else None
+        table = page.findChild(QTableWidget) if isinstance(page, DetailPane) else None
+        if table is None or not w.isAncestorOf(page):
+            return
+        inside, outside = _min_chrome(table, page), _min_chrome(page, w)
+        if inside is None or outside is None:
+            return
+        key = (table, table.font().key())
+        if self._table_whole is None or self._table_whole[:2] != key:
+            self._table_whole = (*key, table_width_whole(table))
+        half = w.screen().availableGeometry().width() // 2
+        floor = min(self._table_whole[2] + inside, half - outside)
+        # An explicit minimum replaces the page's own even when smaller (tcc#96): never below it.
+        page.setMinimumWidth(max(floor, page.minimumSizeHint().width(), 0))
 
     def _compact(self, on: bool) -> None:
         """Make the header and the footer fit half a screen.
