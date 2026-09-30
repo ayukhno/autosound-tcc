@@ -492,21 +492,32 @@ def _arbiter_header(window):
     window._compare_key = "v_001"
 
 
-def _control_window(tmp_path, monkeypatch, lang="en"):
+def _control_window(tmp_path, monkeypatch, lang="en", screen=1512):
     """Shown, in control mode, speaking `lang` -- set AFTER the window is built, which applies its
-    own saved language as it starts."""
+    own saved language as it starts -- on the Arbiter's 1512-px screen unless another is named:
+    the offscreen platform's own is 800, too narrow to say anything about half a real screen,
+    and these tests put the window at 756, its half."""
     window = _window(tmp_path, monkeypatch)
     i18n.set_language(lang)
     _arbiter_header(window)
+    if screen is not None:
+        _on_screen(window, monkeypatch, QRect(0, 0, screen, 982))
     window.show()
     window._control_layout.enter()
     return window
 
 
 def _settle(window, width):
-    window.resize(width, 900)
+    """The window `width` px wide (or its floor, if more) once every layout has had its say. A
+    resize is clamped to the floor the window has AT THAT MOMENT, and a pick in the corner moves
+    the floor through every layout from the corner up to the window, one posted event each --
+    so the resize goes again until it lands, as `_at_minimum` does."""
     for _ in range(4):
-        QApplication.processEvents()
+        window.resize(width, 900)
+        for _ in range(4):
+            QApplication.processEvents()
+        if window.width() == width:
+            break
 
 
 def _corner_words(window):
@@ -641,7 +652,9 @@ _LONG_NAMES = "v_002 · P3, SQ-2, SQ-3, SQ-Comp-4"  # every name v_002 was saved
 
 
 @pytest.mark.parametrize("lang", ["en", "uk"])
-def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, monkeypatch, lang):
+@pytest.mark.parametrize("stretch", [100, 106, 110, 141])
+def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(
+        tmp_path, monkeypatch, lang, stretch):
     """tcc#96, the controller's finding on the third pass: the box asked for the whole «<preset> ·
     <row>», and the window's floor grew with it one for one -- past 756 px (half the Arbiter's
     1512-px screen, where control mode puts the window) at about 28 characters, so the window
@@ -650,12 +663,23 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, m
     and no more than a cap: the saved names give way first, then a preset name too long for the
     cap; the version stays, and the hover has the whole text.
 
-    The cap is the box's `floor_cap()`, measured in its font (fix round 5). Half a screen is
-    checked where the header can sit in it at all: on a font whose header is wider than 756 px
-    even with the smallest box -- the Windows runner's offscreen text, or the app's zoom -- the
-    floor is the header's doing, not the box's, and the check is skipped and says so."""
+    The cap is the box's `floor_cap()`: the letters «<13 letters> · v_NNN» take in its font (fix
+    round 5), or what half the screen leaves the box after the rest of the header, whichever is
+    less (the re-review: at a font stretched to 106, 108 and 110 -- the zoom's first steps --
+    the letters alone put the 30-character preset's floor at 760, 771 and 780). The window
+    stands on the Arbiter's 1512-px screen and the half is measured off it. It is checked where
+    the header can sit in the half at all: on a font whose header is wider than that even with
+    the smallest box -- the Windows runner's offscreen text, or a stretch of 141 -- the floor is
+    the header's doing, not the box's, and the check is skipped and says so."""
+    from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QComboBox
 
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
     try:
         window = _control_window(tmp_path, monkeypatch, lang)
         assert len(_LONG_PRESET) == 30
@@ -665,28 +689,31 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(tmp_path, m
         layout = window._control_layout
         layout._fill_compare()
         combo = layout.compare_combo
-        cap, smallest = combo.floor_cap(), QComboBox.minimumSizeHint(combo).width()
+        half = layout._right_half()[1].width()
+        smallest = QComboBox.minimumSizeHint(combo).width()
         too_wide = []
         for key in ("3.S-shelf/v_002", f"{_LONG_PRESET}/v_002"):
             combo.setCurrentIndex(combo.findData(key))
-            _settle(window, 756)
+            _settle(window, half)
+            cap = combo.floor_cap()
             floor, box = window.minimumSizeHint().width(), combo.minimumSizeHint().width()
-            assert box <= cap, (key, box, cap)
+            assert box <= max(cap, smallest), (key, box, cap, smallest)
             shown, full = combo.fit_text(), combo.shown_text()
             if key.startswith("3.S"):
                 assert shown.startswith("3.S-shelf · v_002"), f"the saved names give way: {shown}"
             else:
                 assert shown.endswith(" · v_002") and shown.startswith("5.W-"), shown
             assert full in combo.hover_tip.text(), "the whole text is in the hover"
-            if floor > 756 and floor - box + smallest > 756:
+            if floor > half and floor - box + smallest > half:
                 too_wide.append((key, floor - box, smallest))
                 continue
-            assert floor <= 756 and window.width() == 756, (key, floor, window.width(), cap)
+            assert floor <= half and window.width() == half, (key, floor, window.width(), cap)
         layout.leave()
         if too_wide:
-            pytest.skip("this font's header does not sit in half a screen with the smallest box "
-                        f"(the zoom finding, not the box's cap): {too_wide}")
+            pytest.skip(f"this font's header does not sit in half a {1512}-px screen ({half}) "
+                        f"with the smallest box (the zoom finding, not the box's cap): {too_wide}")
     finally:
+        app.setFont(before)
         i18n.set_language("en")
 
 

@@ -335,18 +335,23 @@ def _min_chrome(widget: QWidget, top: QWidget) -> Optional[int]:
 #: a few pixels as the names beside it elide (measured 1014–1020 px for one header).
 _REFIT_SLACK_PX = 12
 
-#: The preset name the compare box always holds whole as its floor, «<this name> · v_NNN»
-#: (tcc#96, the controller's finding on the third pass): 13 letters of ordinary width, longer
-#: than any of the Arbiter's («3.S-shelf», «4.C-cut»). The window's floor grows one for one with
-#: the box, so the box's floor is capped -- in the box's own font, not in pixels. A 190-px cap
-#: (the fourth pass, measured offscreen on the Mac) held these 13 letters there and about six on
-#: the Windows runner, where the offscreen text is twice as wide (Qt's FreeType font database
-#: finds no fonts and draws every glyph as wide as the pixel size; CI run 36623891341), and it
-#: would have held fewer at the app's zoom. In the Mac's font the cap comes to the same 190 px:
-#: the rest of the Arbiter's header measured 518 (English and Ukrainian alike), the window adds
-#: 16, so the floor is 724 -- inside 756, half his 1512-px screen, where control mode puts the
-#: window. A font that widens the rest of the header past that widens the floor too; the cap
-#: cannot buy that back, and that is the zoom finding, not this box's.
+#: The preset name the compare box holds whole as its floor where the header has the room,
+#: «<this name> · v_NNN» (tcc#96, the controller's finding on the third pass): 13 letters of
+#: ordinary width, longer than any of the Arbiter's («3.S-shelf», «4.C-cut»). The window's floor
+#: grows one for one with the box, so the box's floor is capped twice over -- in the box's own
+#: font, not in pixels, and by what half the screen leaves it after the rest of the header
+#: (`_CompareBox.floor_cap`). A 190-px cap (the fourth pass, measured offscreen on the Mac) held
+#: these 13 letters there and about six on the Windows runner, where the offscreen text is twice
+#: as wide (Qt's FreeType font database finds no fonts and draws every glyph as wide as the pixel
+#: size; CI run 36623891341). In the Mac's font the letters come to the same 190 px: the rest of
+#: the Arbiter's header measured 518 (English and Ukrainian alike), the window adds 16, so the
+#: floor is 724 -- inside 756, half his 1512-px screen, where control mode puts the window. The
+#: letters alone were not enough (the re-review of fix round 5): a font a little wider -- the
+#: stretch 106 to 110, the zoom's first steps -- widened the rest of the header AND the letters,
+#: and with a 30-character preset the floor went to 760-780 where the 190 px would have kept it
+#: in 756. So the half screen's leftover caps the letters: the box gives up letters before the
+#: window leaves the half. Only a font whose header does not fit the half even with the smallest
+#: box widens the floor past it -- the zoom finding, not this box's.
 _COMPARE_BOX_FLOOR_NAME = "a" * 13
 
 
@@ -358,14 +363,25 @@ class _CompareBox(QComboBox):
 
     It asks for the whole of that, but holds as its floor only «<preset> · v_NNN» -- the names a
     project-line version was saved under («v_002 · P3, SQ-2, SQ-3», `ledger_line.label`) give way
-    first -- and never more than `floor_cap()`, the room «<_COMPARE_BOX_FLOOR_NAME> · v_NNN»
-    takes in its font: a preset name too long for that gives way next, the version still whole.
-    The hover has the whole text. Whatever it shows is drawn elided, never cut mid-glyph
-    («v_0(», the Arbiter's first screenshot)."""
+    first -- and never more than `floor_cap()`: the room «<_COMPARE_BOX_FLOOR_NAME> · v_NNN»
+    takes in its font, or what half the screen leaves the box after the rest of the header
+    (`set_half_room`), whichever is less; a preset name too long for that gives way next, the
+    version still whole. The hover has the whole text. Whatever it shows is drawn elided, never
+    cut mid-glyph («v_0(», the Arbiter's first screenshot)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._sized_for: Optional[str] = None
+        #: What half the screen leaves this box (`ControlLayout._fit_corner`); None until measured.
+        self._half_room: Optional[int] = None
+
+    def set_half_room(self, room: Optional[int]) -> None:
+        """The most this box may hold as its floor for the window to stay in half its screen:
+        the half, less the rest of the header at its minimum and what the window adds around
+        it. Measured by the header's owner, since the box cannot see past its own edge."""
+        if room != self._half_room:
+            self._half_room = room
+            self.updateGeometry()
 
     def shown_text(self) -> str:
         key = self.currentData()
@@ -425,10 +441,18 @@ class _CompareBox(QComboBox):
     def floor_cap(self) -> int:
         """The most this box holds as its floor: «<_COMPARE_BOX_FLOOR_NAME> · v_NNN» in its own
         font, plus its chrome -- 190 px in the Mac's offscreen font, and as many letters in any
-        other."""
+        other -- or less where half the screen leaves it less (`set_half_room`), down to
+        «… · v_NNN»: the version whole, with the «…» that says a name was cut before it. Where
+        the half leaves not even that, the letters could not keep the window in it whatever they
+        gave (the zoom finding), and the font's own cap stands: the name whole is worth more than
+        a few pixels off a window that is past the half anyway."""
         hint = super().minimumSizeHint()
         chrome = hint.width() - self._room(hint)
-        return self._text_width(f"{_COMPARE_BOX_FLOOR_NAME} · v_000") + chrome
+        cap = self._text_width(f"{_COMPARE_BOX_FLOOR_NAME} · v_000") + chrome
+        least = self._text_width("… · v_000") + chrome
+        if self._half_room is not None and self._half_room >= least:
+            cap = min(cap, self._half_room)
+        return cap
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
         # A QComboBox's own floor is its size hint.
@@ -800,9 +824,17 @@ class ControlLayout:
         if corner is None or not shiboken6.isValid(corner):
             return
         label, tag = self._compare_label, self._compare_other
+        header = corner.parentWidget()
+        if header is not None:
+            # What half the screen leaves the box: the half, less the header's minimum without
+            # the box (its own minimum less the box's -- the same number whatever the box holds
+            # now) and what the window adds around the header (tcc#96, the re-review of fix
+            # round 5: a font a little wider than the Mac's put a 30-character preset past 756).
+            around = _min_chrome(header, self.window) or 0
+            rest = header.minimumSizeHint().width() - combo.minimumSizeHint().width()
+            combo.set_half_room(self._right_half()[1].width() - around - rest)
         combo.sync_width()
         other = is_other_preset(combo.currentData())
-        header = corner.parentWidget()
         if header is None or not header.isVisible():
             # Nothing laid out yet to measure; the header's first resize judges.
             show_label, show_tag = True, other
