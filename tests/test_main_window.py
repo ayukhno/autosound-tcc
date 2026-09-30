@@ -16,7 +16,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QRect, Qt  # noqa: E402
 from PySide6.QtGui import QCloseEvent, QFont  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -3345,21 +3345,18 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
 _WHOLE_AT_THE_MINIMUM = ("HPF", "LPF", "Gain dB", "Delay ms", "Pol")
 
 
-def _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000):
-    """A full window on the Arbiter's rig -- a Helix, ten columns in the output table -- with the
-    output table open, every crossover as wide as one gets («3500 LR4»), and «порівняти з» on the
-    version before, so every value in the table is a CHANGED one: drawn bold, its widest look.
-
-    Stood on a screen `screen` px wide: the offscreen platform's own is 800, narrower than any
-    window this test is about."""
+def _write_the_arbiters_rig(folder) -> None:
+    """The Arbiter's rig -- a Helix, ten columns in the output table -- every crossover as wide as
+    one gets («3500 LR4»), and a version before it with every value different, so that with
+    «порівняти з» on it every value in the table is a CHANGED one: drawn bold, its widest look."""
     profile = {"dsp_profile": {"name": "DSP Ultra S", "vendor": "Helix", "groups": [
         {"id": "virtual_channels", "label": "Virtual channels",
          "fields": ["gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq_bypass", "eq"]},
         {"id": "physical_outputs", "label": "Output channels",
          "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq"]}]}}
-    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    (folder / "dsp_profile.json").write_text(json.dumps(profile))
     codes = ("tw-L", "tw-R", "m-L", "m-R", "c", "w-L", "w-R", "r-L", "r-R", "sw")
-    preset = tmp_path / "FULL"
+    preset = folder / "FULL"
     preset.mkdir()
     for version, (freq, gain, delay, polarity) in (("v_001", (350, -3.5, 2.09, "INV")),
                                                    ("v_002", (3500, -12.5, 15.75, "NORM"))):
@@ -3370,13 +3367,24 @@ def _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000):
         (preset / f"{version}.json").write_text(json.dumps(
             {"preset": "FULL", "sample_rate": 96000, "channels": channels}))
     (preset / "HEAD").write_text("v_002")
+
+
+def _window_on_a_screen(tmp_path, monkeypatch, screen):
+    """A full window on the project in `tmp_path`, stood on a screen `screen` px wide: the
+    offscreen platform's own is 800, narrower than any window these tests are about."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
-    monkeypatch.setattr(main_window, "_screen_width", lambda _widget: screen, raising=False)
+    monkeypatch.setattr(main_window, "_screen_room", lambda _widget: QRect(0, 0, screen, 1080))
     _app()
-    window = MainWindow()
+    return MainWindow()
+
+
+def _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000):
+    """A full window on the Arbiter's rig, the output table open, on a screen `screen` px wide."""
+    _write_the_arbiters_rig(tmp_path)
+    window = _window_on_a_screen(tmp_path, monkeypatch, screen)
     window._on_table_requested("physical_outputs")
     window.show()
     return window
@@ -3384,6 +3392,12 @@ def _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000):
 
 def _settle_at(window, width) -> None:
     window.resize(width, 900)
+    for _ in range(4):
+        QApplication.processEvents()
+        QApplication.sendPostedEvents()
+
+
+def _let_it_settle() -> None:
     for _ in range(4):
         QApplication.processEvents()
         QApplication.sendPostedEvents()
@@ -3524,9 +3538,12 @@ def test_the_full_window_s_floor_stays_under_two_thirds_of_its_screen(
     try:
         window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=screen)
         _settle_at(window, 200)
-        cap = screen * 2 // 3
-        assert _floor_part(window) <= cap, (
-            f"the columns ask {_floor_part(window)} px of a {screen}-px screen (cap {cap})")
+        cap, need = screen * 2 // 3, window._centre_need()
+        around = _floor_part(window) - window._center.minimumWidth()
+        assert need > 0, "the rig's tables were measured"
+        assert _floor_part(window) == min(cap, need + around), (
+            f"the columns ask {_floor_part(window)} px of a {screen}-px screen: the need is "
+            f"{need + around}, the cap {cap}")
         assert window.minimumSizeHint().width() <= max(cap, _other_rows(window))
         assert window._center.minimumWidth() >= 320
     finally:
@@ -3539,9 +3556,69 @@ def test_moving_to_another_screen_refits_the_floor(tmp_path, monkeypatch):
     window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000)
     _settle_at(window, 200)
     wide = _floor_part(window)
-    monkeypatch.setattr(main_window, "_screen_width", lambda _widget: 1512)
+    monkeypatch.setattr(main_window, "_screen_room", lambda _widget: QRect(0, 0, 1512, 1080))
     window.windowHandle().screenChanged.emit(window.screen())
     assert _floor_part(window) <= 1512 * 2 // 3 < wide
+
+
+def _at_the_right_edge(window, width, screen=1920) -> int:
+    """The window `width` px wide (or its own minimum, if more) with its right edge on the
+    screen's; its width."""
+    window.resize(width, 900)
+    _let_it_settle()
+    window.move(screen - window.frameGeometry().width(), 0)
+    _let_it_settle()
+    assert window.frameGeometry().right() == screen - 1
+    return window.width()
+
+
+def test_a_floor_that_rises_on_a_shown_window_keeps_it_on_its_screen(tmp_path, monkeypatch):
+    """The review of tcc#106 (probe A): a 1920 screen, the window 960 px wide against its right
+    edge, no project; a project opens and the floor rises to its tables -- Qt grew the window to
+    the right where it stood, 293 px past the screen. It is moved back inside, never past the
+    left edge. The same path runs on a reload, a zoom, a language and a screen change."""
+    window = _window_on_a_screen(tmp_path, monkeypatch, 1920)
+    window.show()
+    before = _at_the_right_edge(window, 960)
+    _write_the_arbiters_rig(tmp_path)
+    window._load_project()
+    _let_it_settle()
+    if _floor_part(window) <= before:
+        pytest.skip(f"in this font the window was {before} px before the project, no narrower "
+                    f"than the floor it gets ({_floor_part(window)}): nothing grew")
+    frame = window.frameGeometry()
+    assert window.width() >= _floor_part(window), "the floor rose and the window grew"
+    assert frame.left() >= 0 and frame.right() <= 1919, (
+        f"the window is at x {frame.left()}..{frame.right()} on a 1920-px screen")
+
+
+def test_leaving_control_mode_after_the_floor_rose_keeps_the_window_on_its_screen(
+        tmp_path, monkeypatch):
+    """The review of tcc#106 (probe B): the floor rose while control mode was on (a project
+    opened), and leaving it restored the full window's saved geometry -- 1010 px -- which Qt then
+    grew to the new floor to the right, past the screen. It is moved back inside."""
+    from autosound_tcc.ui.tcc import control_layout
+
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    window = _window_on_a_screen(tmp_path, monkeypatch, 1920)
+    window.show()
+    before = _at_the_right_edge(window, 1010)
+    window._on_layout_toggle()
+    assert window._control_layout.active
+    _write_the_arbiters_rig(tmp_path)
+    window._load_project()
+    _let_it_settle()
+    window._on_layout_toggle()
+    assert not window._control_layout.active
+    _let_it_settle()
+    if _floor_part(window) <= before:
+        pytest.skip(f"in this font the window was {before} px before the project, no narrower "
+                    f"than the floor it gets ({_floor_part(window)}): nothing grew")
+    frame = window.frameGeometry()
+    assert window.width() >= _floor_part(window), "back with the floor that rose meanwhile"
+    assert frame.left() >= 0 and frame.right() <= 1919, (
+        f"the window is at x {frame.left()}..{frame.right()} on a 1920-px screen")
 
 
 def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):

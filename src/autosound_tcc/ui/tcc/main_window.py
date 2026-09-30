@@ -30,6 +30,7 @@ from PySide6.QtCore import (
     QFileSystemWatcher,
     QPoint,
     QProcess,
+    QRect,
     QThread,
     QTimer,
     QUrl,
@@ -667,12 +668,12 @@ def _clipboard_snapshot() -> _ClipboardSnapshot:
 
 
 
-def _screen_width(widget) -> int:
-    """The usable width of the screen `widget` is on, or 0 when there is none. A function of its
-    own so a test can stand the window on a screen of its choosing: the offscreen platform's is
-    800 px, narrower than the full window has ever been."""
+def _screen_room(widget) -> Optional[QRect]:
+    """The usable part of the screen `widget` is on -- the desk, less the taskbar -- or None when
+    there is no screen. A function of its own so a test can stand the window on a screen of its
+    choosing: the offscreen platform's is 800 px, narrower than the full window has ever been."""
     screen = widget.screen() or QGuiApplication.primaryScreen()
-    return screen.availableGeometry().width() if screen is not None else 0
+    return screen.availableGeometry() if screen is not None else None
 
 
 def _session_title(choice) -> str:
@@ -2558,6 +2559,10 @@ class MainWindow(QMainWindow):
     def _on_layout_toggle(self) -> None:
         """Switch between the in-app session's layout and the control layout, and remember it."""
         self._control_layout.toggle()
+        if not self._control_layout.active:
+            # The saved geometry comes back under a floor that may have risen meanwhile (a load,
+            # a zoom, a language) and grows to it to the right (the review of tcc#106).
+            self._keep_on_screen()
         self._set_project_setting(_LAYOUT_KEY, "control" if self._control_layout.active else "gui")
         self._sync_layout_button()
 
@@ -3145,10 +3150,35 @@ class MainWindow(QMainWindow):
         margins = self.centralWidget().layout().contentsMargins()
         around = (self._left.minimumWidth() + self._right.minimumWidth()
                   + 2 * self._main_splitter.handleWidth() + margins.left() + margins.right())
-        screen = _screen_width(self)
-        if screen > 0:
-            need = min(need, screen * 2 // 3 - around)
+        room = _screen_room(self)
+        if room is not None and room.width() > 0:
+            need = min(need, room.width() * 2 // 3 - around)
         self._center.setMinimumWidth(max(_CENTRE_MIN_PX, need))
+        if self.isVisible():
+            self._keep_on_screen()
+
+    def _keep_on_screen(self) -> None:
+        """A shown window its floor has just widened stays on its screen (the review of tcc#106).
+
+        Qt grows a window to its new minimum to the RIGHT, where it stands: a window 960 px wide
+        against a 1920 screen's right edge came out 1254 px wide when a project opened, 293 px
+        past the edge, and control mode's `leave` restoring a narrower saved geometry did the
+        same. The layouts are activated now, so the window grows now and not on the event loop's
+        next pass (flushing the posted layout requests did not carry the splitter's new minimum up
+        to the window: measured), and a window past the right edge is moved left by that much --
+        never past the left one. A maximised window is the screen's already."""
+        if self.windowState() & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
+            return
+        self._main_splitter.updateGeometry()
+        self.centralWidget().layout().activate()
+        self.layout().activate()
+        room = _screen_room(self)
+        if room is None:
+            return
+        frame = self.frameGeometry()
+        over = frame.right() - room.right()
+        if over > 0:
+            self.move(max(room.left(), frame.left() - over), frame.top())
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """The floor's cap is a share of THIS window's screen (tcc#106): asked again when the
@@ -3216,15 +3246,18 @@ class MainWindow(QMainWindow):
         return best
 
     def _head_need(self) -> int:
-        """The pane's head over a table, «порівняти з» out: the tabs and «закрити» whole (they
-        hold their words in the full window, tcc#96), the title at its smallest, the compare
-        label, list and tag at their floors -- so the row is never short and nothing in it is
-        trimmed."""
+        """The pane's head over a table: the tabs and «закрити» whole (they hold their words in
+        the full window, tcc#96), the title at its smallest, the compare label, list and tag at
+        their floors -- those of them the head shows now (a tab for a field no tier has, or the
+        compare row with nothing to compare, is hidden) -- so the row is never short and nothing
+        in it is trimmed."""
         pane = self._detail
         pane.ensurePolished()
         head = pane._head.layout()
-        words = [pane._tab_table, pane._tab_eq, *pane._param_tabs.values(), pane._title,
-                 pane._compare_label, pane._compare_combo, pane._compare_other, pane._close_btn]
+        words = [word for word in (pane._tab_table, pane._tab_eq, *pane._param_tabs.values(),
+                                   pane._title, pane._compare_label, pane._compare_combo,
+                                   pane._compare_other, pane._close_btn)
+                 if word.isVisibleTo(pane)]
         margins = head.contentsMargins()
         return (margins.left() + margins.right() + head.spacing() * (len(words) - 1)
                 + sum(word.minimumSizeHint().width() for word in words))
