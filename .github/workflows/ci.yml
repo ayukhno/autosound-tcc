@@ -221,7 +221,9 @@ jobs:
     name: linux (run ${{ matrix.run }})
     needs: linux-plan
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, not 30: the whole suite in one Linux job took 26m39s at v0.1.44 and was cancelled at 30m at v0.1.45
+    # (the wave W-4 added ~70 UI tests) — slow, not hung (2026-09-30, the Arbiter's word).
+    timeout-minutes: 45
     # Red here does not mean the build is broken -- it means the abort happened again. A check
     # that blinks is ignored within a week, and an ignored CI is worse than none, so this one
     # reports instead of blocking. The flag comes off when HUB-049 is closed.
@@ -281,8 +283,9 @@ jobs:
     runs-on: windows-latest
     # 45, not 30: the whole suite in one Windows job took 27m48s at v0.1.43 and was cancelled at 85%
     # at v0.1.44 — slow, not hung; the PR's four shards took 4-6 minutes each (the wave's release,
-    # 2026-09-27).
-    timeout-minutes: 45
+    # 2026-09-27). 60 from v0.1.45: 41m03s at v0.1.44 left no room for the wave W-4's ~70 UI tests
+    # (2026-09-30, the Arbiter's word).
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
