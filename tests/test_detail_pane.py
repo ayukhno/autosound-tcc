@@ -1699,3 +1699,40 @@ def test_a_new_or_removed_band_carries_its_colour_on_the_card_top_too():
     pane._cmp_btn.clicked.emit()
     top, lower = _card_rows(pane)
     assert top[2].match_color == t.ok and lower[2].match_color == t.warn
+
+
+def test_a_compare_pick_never_moves_the_table_s_columns():
+    """The review of the follow-up: a compared change is drawn bold, and a column's need
+    followed it -- «3500 LR4» bold or plain moved every column 1-3 px at panes of 760-1060 px on
+    a pick. Every cell is measured bold now, the widest it can be drawn, so two tables of the
+    same rows -- one compared with a version that changed them, one with nothing -- ask the same
+    and lay out the same."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    view = _rig_view()
+    outputs = _grp(view, "physical_outputs")
+    compared, plain = DetailPane(), DetailPane()
+    compared.set_view(view)
+    compared.set_compare_choices(["v_001"], "v_001", lambda _k: _rig_view_changed())
+    plain.set_view(view)
+    tables = (compared._build_table(outputs), plain._build_table(outputs))
+    assert tables[0].item(1, 4).font().bold() and not tables[1].item(1, 4).font().bold(), \
+        "sw's gain changed in the compared table only"
+    try:
+        for table in tables:
+            table.show()
+        assert tables[0].column_needs() == tables[1].column_needs()
+        for width in (720, 760, 900, 1060):
+            widths = []
+            for table in tables:
+                table.resize(width, 200)
+                for _ in range(5):
+                    QApplication.processEvents()
+                widths.append([table.columnWidth(c) for c in range(table.columnCount())])
+            assert widths[0] == widths[1], (width, widths)
+    finally:
+        for table in tables:
+            table.close()

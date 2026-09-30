@@ -17,7 +17,17 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QFontMetricsF,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPalette,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -31,6 +41,7 @@ from PySide6.QtWidgets import (
     QStyleOption,
     QStyleOptionComboBox,
     QStyleOptionToolButton,
+    QStyleOptionViewItem,
     QStylePainter,
     QTableWidget,
     QTableWidgetItem,
@@ -482,6 +493,19 @@ class _HeadBox(QComboBox):
         painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
 
 
+def cell_width(table: QTableWidget, text: str, font: QFont) -> int:
+    """The width a cell of `table` needs to show `text` whole in `font`, its padding included --
+    measured by the table's own style, which is what `sizeHintForColumn` asks for a cell."""
+    option = QStyleOptionViewItem()
+    option.initFrom(table)
+    option.font = font
+    option.fontMetrics = QFontMetrics(font)
+    option.text = text
+    option.features = QStyleOptionViewItem.ViewItemFeature.HasDisplay
+    return table.style().sizeFromContents(QStyle.ContentsType.CT_ItemViewItem, option, QSize(),
+                                          table).width()
+
+
 class _ContentTable(QTableWidget):
     """The pane's table, each column as wide as its heading and its widest value -- measured by
     Qt in the table's own font, a changed cell's bold one included -- and the rest of a wide
@@ -502,10 +526,23 @@ class _ContentTable(QTableWidget):
         self.viewport().installEventFilter(self)
 
     def column_needs(self) -> list:
-        """Each column's width whole: its heading's, or its widest cell's, by Qt's own measure."""
+        """Each column's width whole: its heading's, or its widest cell's, by Qt's own measure --
+        every cell measured BOLD, the widest it can be drawn (a compared change,
+        `DetailPane._styled_cell`), so a compare pick never moves the columns: measured by the
+        review of the follow-up, «3500 LR4» bold or plain shifted every column 1-3 px at panes of
+        760-1060 px."""
         header = self.horizontalHeader()
-        return [max(self.sizeHintForColumn(column), header.sectionSizeHint(column))
-                for column in range(self.columnCount())]
+        bold = QFont(self.font())
+        bold.setBold(True)
+        needs = []
+        for column in range(self.columnCount()):
+            need = header.sectionSizeHint(column)
+            for row in range(self.rowCount()):
+                item = self.item(row, column)
+                if item is not None and item.text():
+                    need = max(need, cell_width(self, item.text(), bold))
+            needs.append(need)
+        return needs
 
     def fit_columns(self) -> None:
         needs = self.column_needs()

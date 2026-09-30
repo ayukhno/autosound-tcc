@@ -34,8 +34,8 @@ import sys
 from typing import Optional
 
 import shiboken6
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QFont, QFontMetricsF, QPalette, QTextCursor
 from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
@@ -47,7 +47,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStyle,
     QStyleOptionComboBox,
-    QStyleOptionViewItem,
     QStylePainter,
     QTableWidget,
     QTabWidget,
@@ -59,6 +58,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.detail_pane import (
+    cell_width,
     DetailPane,
     eq_field_order,
     fill_compare_combo,
@@ -256,19 +256,6 @@ def place_terminal_left(screen) -> None:
         pass
 
 
-def _cell_width(table: QTableWidget, text: str, font: QFont) -> int:
-    """The width a cell of `table` needs to show `text` whole in `font`, its padding included --
-    measured by the table's own style, which is what `sizeHintForColumn` asks for a cell."""
-    option = QStyleOptionViewItem()
-    option.initFrom(table)
-    option.font = font
-    option.fontMetrics = QFontMetrics(font)
-    option.text = text
-    option.features = QStyleOptionViewItem.ViewItemFeature.HasDisplay
-    return table.style().sizeFromContents(QStyle.ContentsType.CT_ItemViewItem, option, QSize(),
-                                          table).width()
-
-
 def table_width_whole(table: QTableWidget) -> int:
     """The width at which every column of `table` shows its heading and its values whole (tcc#107).
 
@@ -290,7 +277,7 @@ def table_width_whole(table: QTableWidget) -> int:
         for row in range(table.rowCount()):
             item = table.item(row, column)
             if item is not None and item.text():
-                need = max(need, *(_cell_width(table, item.text(), font) for font in fonts))
+                need = max(need, *(cell_width(table, item.text(), font) for font in fonts))
         if header.sectionResizeMode(column) == QHeaderView.ResizeMode.Stretch:
             stretched.append(need)
         else:
