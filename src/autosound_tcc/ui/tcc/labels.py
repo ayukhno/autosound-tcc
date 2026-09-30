@@ -186,15 +186,22 @@ class ElidedButton(QPushButton):
     def fit_text(self) -> str:
         """What the button draws: the whole label, the label elided to its room, or its leading
         glyph -- without having to paint to find out."""
-        metrics = self.fontMetrics()
+        # Elided in fractions too: `QFontMetrics.elidedText` rounds, and handed «зак…» to a room
+        # a third of a pixel narrower than the glyphs.
+        metrics = QFontMetricsF(self.font())
         room = max(0, self.width() - self._chrome())
-        if QFontMetricsF(self.font()).horizontalAdvance(self._full) <= room:
+        if metrics.horizontalAdvance(self._full) <= room:
             return self._full
         shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
         # `elidedText` walks down to "…" and then to nothing; the glyph is more use than either,
-        # and `minimumSizeHint` above guarantees there is room for it.
-        if metrics.horizontalAdvance(shown) < metrics.horizontalAdvance(self._short()):
-            shown = self._short()
+        # and `minimumSizeHint` above guarantees there is room for it -- for a button that does
+        # not hold. One that holds is trimmed below its floor only by a row below its own minimum,
+        # and there the word is drawn only where it fits: put into less room than its own it was
+        # clipped mid-word, «закрит» (the re-review of fix round 5, finding 119).
+        short = self._short()
+        if (metrics.horizontalAdvance(short) <= room
+                and metrics.horizontalAdvance(shown) < metrics.horizontalAdvance(short)):
+            shown = short
         return shown
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
