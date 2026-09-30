@@ -16,8 +16,8 @@ import math
 import re
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetricsF, QGuiApplication, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QStyleOption,
+    QStyleOptionComboBox,
     QStyleOptionToolButton,
     QStylePainter,
     QTableWidget,
@@ -139,23 +140,36 @@ class _FitLabel(QLabel):
     - `"holds"`: its floor is its text, as a plain `QLabel`'s was before the wave. The layout
       takes the room from whatever else can give, and only a row below its own minimum -- where
       Qt trims the widest items to one width -- cuts into it, elided instead of clipped.
-    - `"gives"`: its floor is its first glyph and «…», never nothing. It shares the shortfall
-      with every other item that gives.
+    - `"gives"`: its floor is its first glyph and «…» (or the glyph alone, `floor="glyph"`),
+      never nothing. It shares the shortfall with every other item that gives.
     - `"floor"`: it asks for no more than that floor. It has given all it had, and the ones
       still holding give next -- a box layout has no order of its own, only "equally from all
       that can shrink", so an order is made by holding the rest and pinning the ones that went
       first (the re-review of fix round 5: below the head's minimum the title bounced back to
       «Output chan…» while the tabs went to «Табл…»).
+    - `"hidden"`: not shown at all, whole or nothing -- «порівняти з» and the tag at their glyph
+      («п…», «ін…») said nothing and still cost 64 px of a head short of 130 (the review of the
+      follow-up: the EQ view's head at the full window's floor emptied the box, finding 105's
+      second screenshot exactly). The owner's own `setVisible` is kept apart (`wanted`), so the
+      head's asks count what the owner shows and not what the fit hid: a threshold that moved
+      with its own outcome would flicker.
 
     Whole pixels are not enough to judge a fit: `elidedText` measures in fractions, and a text
     79.11 px wide given the 79 it asked for lost its last letters (`labels.ElidedLabel`, F-045;
-    the final review saw «Control mo…» at 1600 px on Windows fonts). The hint is rounded up, and
-    the fit is judged in fractions."""
+    the final review saw «Control mo…» at 1600 px on Windows fonts). The hint is rounded up, the
+    fit is judged in fractions, and the elision is done in fractions too."""
 
-    def __init__(self, text: str = "", holds: bool = True) -> None:
+    def __init__(self, text: str = "", holds: bool = True, floor: str = "…") -> None:
         super().__init__(text)
         self._full = text
         self._way = "holds" if holds else "gives"
+        #: What it comes down to: its first glyph and «…», or the glyph alone (`"glyph"`) for a
+        #: chip whose glyph says it -- «⇄ L + R», «⇅ Порівняти», «← Таблиця-О» -- and its hover
+        #: says the rest (the review of the follow-up, way (b): the EQ view's head has to fit
+        #: the centre's floor, and three chips at «⇄…» were 24 px of the shortfall).
+        self._floor = floor
+        #: Whether the owner wants it shown -- `setVisible` as the pane calls it.
+        self._wanted = True
         # The OWNER's hint (`_sync_tabs`'s tcc#54 tooltips, e.g. `_cmp_btn`'s "pick a version
         # first" / "compare with {version}"), separate from the fallback this widget sets for
         # ITSELF when elided with nothing else to say. `None` -- never set -- is not the same as
@@ -170,13 +184,25 @@ class _FitLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
     def set_way(self, way: str) -> None:
-        """How it meets a short row: `"holds"`, `"gives"` or `"floor"` (the class docstring)."""
+        """How it meets a short row: `"holds"`, `"gives"`, `"floor"` or `"hidden"` (the class
+        docstring)."""
         if way != self._way:
             self._way = way
+            super().setVisible(self._wanted and way != "hidden")
             self.updateGeometry()
 
     def way(self) -> str:
         return self._way
+
+    def setVisible(self, visible: bool) -> None:  # noqa: N802 (Qt override)
+        """The owner's wish; shown only while the fit has not hidden the label itself."""
+        self._wanted = visible
+        super().setVisible(visible and self._way != "hidden")
+
+    def wanted(self) -> bool:
+        """Whether the owner shows this label -- what the head's asks are counted from, whether
+        or not the fit has hidden it for now."""
+        return self._wanted
 
     def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
         self._full = text
@@ -201,8 +227,10 @@ class _FitLabel(QLabel):
         return math.ceil(self._width(self._full)) + self._chrome()
 
     def floor_width(self) -> int:
-        """The least it can be drawn in: its first glyph and «…», never nothing."""
-        return min(self.whole_width(), math.ceil(self._width(self._full[:1] + "…")) + self._chrome())
+        """The least it can be drawn in: its first glyph and «…» -- or the glyph alone, for a chip
+        whose glyph says it -- never nothing."""
+        least = self._full[:1] if self._floor == "glyph" else self._full[:1] + "…"
+        return min(self.whole_width(), math.ceil(self._width(least)) + self._chrome())
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
@@ -218,10 +246,21 @@ class _FitLabel(QLabel):
         """This label's text right now: the full string, or elided with «…» to what its row
         actually has (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint to
         find out."""
-        room = max(0, self.contentsRect().width())
-        if self._width(self._full) <= room:
+        metrics = QFontMetricsF(self.font())
+        # The width less the chrome, not `contentsRect`: the style sheet's padding and border are
+        # not contents margins, and a tab given 70 px read «Таблиця» whole for its 73 (the review
+        # of the follow-up), where the native paint clipped it.
+        room = max(0, self.width() - self._chrome())
+        if metrics.horizontalAdvance(self._full) <= room:
             return self._full
-        return self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, room)
+        shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
+        # At its floor the label shows its floor text -- the glyph, or the glyph and «…» -- by
+        # this label's own measure: Qt's elision is a few tenths of a pixel off either way, and
+        # given the room «Р…» was measured for it drew «…» alone.
+        least = self._full[:1] if self._floor == "glyph" else self._full[:1] + "…"
+        if shown in ("", "…") and metrics.horizontalAdvance(least) <= room:
+            shown = least
+        return shown
 
     def _sync_tip(self) -> None:
         """The owner's tooltip if it ever set one -- even an empty one, deliberately; otherwise
@@ -247,7 +286,10 @@ class _FitLabel(QLabel):
         painter.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option)
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
-        painter.drawText(self.contentsRect(), int(self.alignment()), shown)
+        # Inside the chrome, as the native paint puts the whole text: half of it each side.
+        inset = self._chrome() // 2
+        rect = self.contentsRect().adjusted(inset, 0, inset - self._chrome(), 0)
+        painter.drawText(rect, int(self.alignment()), shown)
 
 
 class _DTab(_FitLabel):
@@ -258,8 +300,8 @@ class _DTab(_FitLabel):
 
     clicked = Signal()
 
-    def __init__(self, text: str) -> None:
-        super().__init__(text)
+    def __init__(self, text: str, floor: str = "…") -> None:
+        super().__init__(text, floor=floor)
         self.setProperty("class", "d-tab")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -365,6 +407,79 @@ class _TierPickButton(QToolButton):
         self.initStyleOption(option)
         option.text = shown
         QStylePainter(self).drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+
+
+#: The head's gap between its items, and the gap once the tabs are giving way: with eight chips
+#: at their floors in the EQ view, nine gaps of 6 px were the 27 px that kept the head from the
+#: centre's floor on a 1512-px screen at the zoom's first steps (stretch 106: 605 against 589).
+_HEAD_SPACING = 6
+_HEAD_SPACING_TIGHT = 3
+
+
+class _HeadBox(QComboBox):
+    """The full head's «порівняти з» list. It asks for what it always did -- six letters' room,
+    `AdjustToMinimumContentsLengthWithIcon`, whatever is picked, so a pick never moves the
+    window's floor (tcc#107's rule for control mode's box) -- but its floor is «v_NNN», its real
+    shortest content, and not the six letters: 121 px of floor against a head 130 px short is
+    what emptied the box in the EQ view at the full window's floor (the review of the follow-up,
+    finding 105's second screenshot). Whatever it shows is drawn elided to its field, never
+    clipped mid-glyph. It meets a short row the way a `_FitLabel` does (`set_way`)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._way = "holds"
+
+    def set_way(self, way: str) -> None:
+        if way != self._way:
+            self._way = way
+            self.updateGeometry()
+
+    def way(self) -> str:
+        return self._way
+
+    def _room(self, size=None) -> int:
+        """The width the text has: the style's edit field, less the pixel each side of it."""
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        if size is not None:
+            option.rect = QRect(QPoint(0, 0), size)
+        field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                            QStyle.SubControl.SC_ComboBoxEditField, self)
+        return max(0, field.width() - 2)
+
+    def whole_width(self) -> int:
+        return super().sizeHint().width()
+
+    def floor_width(self) -> int:
+        hint = super().sizeHint()
+        chrome = hint.width() - self._room(hint)
+        return min(hint.width(), chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000")))
+
+    def sizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().sizeHint()
+        hint.setWidth(self.floor_width() if self._way == "floor" else self.whole_width())
+        return hint
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        hint.setWidth(self.whole_width() if self._way == "holds" else self.floor_width())
+        return hint
+
+    def fit_text(self) -> str:
+        """What the closed box draws: the current text, elided to the room it has now."""
+        metrics, room, text = QFontMetricsF(self.font()), self._room(), self.currentText()
+        if metrics.horizontalAdvance(text) <= room:
+            return text
+        return metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+        painter = QStylePainter(self)
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        option.currentText = self.fit_text()
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
 
 
 class _ContentTable(QTableWidget):
@@ -860,13 +975,13 @@ class DetailPane(QFrame):
         head.setProperty("class", "phead")
         head_layout = QHBoxLayout(head)
         head_layout.setContentsMargins(12, 6, 12, 6)
-        head_layout.setSpacing(6)
+        head_layout.setSpacing(_HEAD_SPACING)
         self._head = head
 
         # «← Таблиця-О» (the Arbiter, 2026-09-25: «ось це супер»): in a control-mode tab an EQ
         # opened from a table names the way back to it. The full window needs none: «Таблиця»
         # stands right beside it, and the head has no room for the same way twice.
-        self._back_btn = _DTab("←")
+        self._back_btn = _DTab("←", floor="glyph")
         self._back_btn.setProperty("class", "d-tab on")
         self._back_btn.clicked.connect(self._on_back)
         self._back_btn.setVisible(False)
@@ -878,11 +993,13 @@ class DetailPane(QFrame):
         self._tab_eq = _DTab("EQ")
         self._tab_eq.clicked.connect(self._on_tab_eq)
         head_layout.addWidget(self._tab_eq)
-        self._pair_btn = _DTab("⇄ L + R")
+        # The EQ's actions come down to their glyph in a tight row (`_FitLabel`, `floor="glyph"`).
+        self._pair_btn = _DTab("⇄ L + R", floor="glyph")
         self._pair_btn.clicked.connect(self._on_pair_toggle)
         self._pair_btn.setVisible(False)
         head_layout.addWidget(self._pair_btn)
-        self._eq_help = QLabel("?")
+        # A `_FitLabel` for its `set_way("hidden")` only: it never elides, it goes when tight.
+        self._eq_help = _FitLabel("?")
         self._eq_help.setProperty("class", "eq-help")
         self._eq_help.setCursor(Qt.CursorShape.WhatsThisCursor)
         self._eq_help.setVisible(False)
@@ -891,7 +1008,7 @@ class DetailPane(QFrame):
 
         # The compared version's EQ under this one (tcc#54, finding 73): left of the copy, passive
         # with no version chosen, gone in pair mode — two channels leave no room for a third row.
-        self._cmp_btn = _DTab(i18n.t("cmpRowBtn"))
+        self._cmp_btn = _DTab(i18n.t("cmpRowBtn"), floor="glyph")
         self._cmp_btn.clicked.connect(self._on_cmp_rows_toggle)
         self._cmp_btn.setVisible(False)
         head_layout.addWidget(self._cmp_btn)
@@ -900,7 +1017,7 @@ class DetailPane(QFrame):
         # channel, because in the single-channel view that is what "copy EQ" means. Hidden unless
         # the method can produce one for this DSP: a copy button that yields nothing, or
         # something nobody can identify, is worse than no button (user, 2026-08-23).
-        self._eq_copy = _DTab(i18n.t("copyEqBank"))
+        self._eq_copy = _DTab(i18n.t("copyEqBank"), floor="glyph")
         self._eq_copy.setProperty("class", "d-tab d-copy")
         self._eq_copy.clicked.connect(self._on_copy_eq_bank)
         self._eq_copy.setVisible(False)
@@ -937,7 +1054,7 @@ class DetailPane(QFrame):
         self._compare_label = _FitLabel(i18n.t("cmpWith"))
         self._compare_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._compare_label)
-        self._compare_combo = QComboBox()
+        self._compare_combo = _HeadBox()
         self._compare_combo.setProperty("class", "mini-select")
         # As wide as a version's name, not as the longest line in its list: the head is full.
         self._compare_combo.setSizeAdjustPolicy(
@@ -1303,35 +1420,60 @@ class DetailPane(QFrame):
     # ---- the head in a short row (tcc#96, finding 119) -------------------------------------
 
     def _head_stages(self) -> list:
-        """The head's labels in the order they give way when the row is short (finding 119, the
-        re-review of fix round 5): the title first -- what it says, the table below says too;
-        then «порівняти з» and the «інша конфігурація» tag -- the list beside them names the
-        version, and each keeps its word in its hover; then the tabs, down to a glyph and «…»,
-        never to nothing. The list and «закрити ✕» keep their floors: a list trimmed below its
-        own showed «v_» at a 1100-px window and nothing at the window's floor."""
-        return [[self._title], [self._compare_label, self._compare_other],
-                self._head.findChildren(_DTab)]
+        """The head's items in the order they give way when the row is short (finding 119, the
+        re-review of fix round 5), each stage with what its items come down to: the title first,
+        to its floor -- what it says, the table below says too; then «порівняти з», the «інша
+        конфігурація» tag and the EQ's «?», whole or hidden -- the list beside them names the
+        version, and «п…» said nothing for 64 px (the review of the follow-up); then the tabs
+        and the list, to their floors -- a tab to a glyph and «…», an EQ action to its glyph,
+        the list to «v_NNN», never to nothing. «закрити ✕» keeps its floor throughout. What is
+        left when all three have given is the head's own minimum, and it has to sit inside the
+        centre's floor (tcc#106's two thirds of the screen, less the sides), or Qt trims the
+        widest items below their floors: the list showed «v_», then nothing."""
+        return [([self._title], "floor"),
+                ([self._compare_label, self._compare_other, self._eq_help], "hidden"),
+                ([*self._head.findChildren(_DTab), self._compare_combo], "floor")]
 
     def _head_shows(self, widget: QWidget) -> bool:
-        return widget.isVisibleTo(self._head)
+        """Whether the owner shows this item -- the fit's own hiding does not count."""
+        return widget.wanted() if isinstance(widget, _FitLabel) else widget.isVisibleTo(self._head)
+
+    @staticmethod
+    def _whole_of(widget: QWidget) -> int:
+        return widget.whole_width() if hasattr(widget, "whole_width") else widget.sizeHint().width()
+
+    @staticmethod
+    def _floor_of(widget: QWidget) -> int:
+        return (widget.floor_width() if hasattr(widget, "floor_width")
+                else widget.minimumSizeHint().width())
 
     def head_asks(self) -> list:
         """The widths the head asks for: `[0]` with everything whole, then with each stage of
-        `_head_stages` at its floor in turn -- `[1]` the title at its floor and the rest whole,
-        `[2]` the labels too, `[3]` the tabs too, which is the head's own minimum. Counted from
-        the labels' whole and floor widths, not from what they ask for right now, so the numbers
-        do not move with the way `_fit_head` last set them."""
+        `_head_stages` given in turn -- `[1]` the title at its floor and the rest whole, `[2]`
+        the labels and the «?» hidden too, `[3]` the tabs and the list at their floors too, which
+        is the head's own minimum. Counted from the items' whole and floor widths (a hidden one
+        takes its spacing with it), not from what they ask for right now, so the numbers do not
+        move with the way `_fit_head` last set them."""
         layout = self._head.layout()
         shown = [w for w in (layout.itemAt(i).widget() for i in range(layout.count()))
                  if w is not None and self._head_shows(w)]
-        margins = layout.contentsMargins()
-        width = margins.left() + margins.right() + layout.spacing() * (len(shown) - 1)
-        width += sum(w.whole_width() if isinstance(w, _FitLabel) else w.sizeHint().width()
-                     for w in shown)
+        margins, spacing, gaps = layout.contentsMargins(), _HEAD_SPACING, len(shown) - 1
+        width = margins.left() + margins.right() + spacing * gaps
+        width += sum(self._whole_of(w) for w in shown)
         asks = [width]
-        for stage in self._head_stages():
-            width -= sum(w.whole_width() - w.floor_width() for w in stage if self._head_shows(w))
+        stages = self._head_stages()
+        for widgets, target in stages:
+            for widget in widgets:
+                if not self._head_shows(widget):
+                    continue
+                if target == "hidden":
+                    width -= self._whole_of(widget) + spacing
+                    gaps -= 1
+                else:
+                    width -= self._whole_of(widget) - self._floor_of(widget)
             asks.append(width)
+        # The last stage tightens the gaps too.
+        asks[-1] -= max(0, gaps) * (_HEAD_SPACING - _HEAD_SPACING_TIGHT)
         return asks
 
     def head_need(self) -> int:
@@ -1342,10 +1484,12 @@ class DetailPane(QFrame):
 
     def _fit_head(self) -> None:
         """Sets each stage's way by the room the head has now: the first stage that still fits
-        with everything after it whole gives; the stages before it sit at their floors; the ones
-        after it hold. In a control-mode tab every chip gives (finding 105). A head not shown
-        yet has no width to judge by: the defaults, until its first show or resize."""
+        with everything after it whole gives (a whole-or-hidden stage hides: it has no between);
+        the stages before it have given all -- at their floors, or hidden; the ones after it
+        hold. In a control-mode tab every chip gives (finding 105). A head not shown yet has no
+        width to judge by: the defaults, until its first show or resize."""
         stages = self._head_stages()
+        giving = 1
         if self._embedded:
             ways = ["gives"] * len(stages)
         elif not self._head.isVisible():
@@ -1353,10 +1497,21 @@ class DetailPane(QFrame):
         else:
             asks, width = self.head_asks(), self._head.width()
             giving = next((i for i in range(1, len(asks)) if width >= asks[i]), len(stages))
-            ways = ["floor"] * (giving - 1) + ["gives"] + ["holds"] * (len(stages) - giving)
-        for stage, way in zip(stages, ways):
-            for widget in stage:
+            ways = []
+            for i, (_widgets, target) in enumerate(stages, start=1):
+                if i < giving:
+                    ways.append(target)
+                elif i == giving:
+                    ways.append("gives" if target == "floor" else target)
+                else:
+                    ways.append("holds")
+        for (widgets, _target), way in zip(stages, ways):
+            for widget in widgets:
                 widget.set_way(way)
+        # The gaps tighten with the last stage, the tabs giving (`_HEAD_SPACING_TIGHT`).
+        spacing = _HEAD_SPACING_TIGHT if giving == len(stages) else _HEAD_SPACING
+        if self._head.layout().spacing() != spacing:
+            self._head.layout().setSpacing(spacing)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
         if watched is self._head and event.type() in (

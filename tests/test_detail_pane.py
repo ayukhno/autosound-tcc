@@ -886,7 +886,9 @@ def test_a_dtab_elides_instead_of_relying_on_a_width_it_never_had():
     _app()
     long = "Копіювати EQ m-Left-Tweeter-Front"
     tab = _DTab(long)
-    tab.resize(40, 22)
+    # Room for «…» and two letters past the tab's own padding (`_squeezed`), not 40 px: the room
+    # is judged inside the chrome now, and 40 px held less than «К…» in the runner's wide text.
+    tab.resize(_squeezed(tab), 22)
     shown = tab.fit_text()
     assert shown != long and shown.endswith("…"), shown
     assert not long.startswith(shown[:-1]) or len(shown) < len(long), "genuinely shortened"
@@ -966,7 +968,9 @@ def test_a_real_pane_s_chips_elide_the_same_way_when_squeezed():
         full = widget.text()
         widget.resize(_squeezed(widget), widget.height() or 22)
         shown = widget.fit_text()
-        assert shown == full or shown.endswith("…"), (widget, full, shown)
+        # The EQ's actions come down to their glyph (the review of the follow-up): «⇅» where
+        # Qt's elision would have drawn «…» alone.
+        assert shown == full or shown.endswith("…") or shown == full[:1], (widget, full, shown)
         assert widget.text() == full, "resizing alone never rewrites the real text"
 
 
@@ -992,49 +996,91 @@ def _at_its_floor(label) -> bool:
         shown == label.text() or (shown.endswith("…") and len(shown) <= 3))
 
 
-def test_the_full_window_s_head_keeps_its_tabs_whole_while_it_has_the_room(tmp_path, monkeypatch):
+def _arbiter_head(window, view: str):
+    """The Arbiter's head over `view` -- "table", "eq_single" or "eq_pair": «порівняти з», the
+    list and the «інша конфігурація» tag up (another configuration's version picked); the EQ
+    views over m-L, one channel with «⇅ Порівняти» and «Копіювати EQ m-L» shown, or the pair
+    with «⇄ L + R» on (finding 105's second screenshot was the EQ view). Returns the pane."""
+    from tests import test_control_layout as tcl
+
+    rig = tcl._with_rig(window)
+    pane = window._detail
+    pane.set_view(rig)
+    window._on_table_requested("physical_outputs")
+    pane.set_compare_choices(["v_002", "v_001"], "3.S-shelf/v_002", lambda _k: tcl._older(),
+                             {"v_002": "v_002", "v_001": "v_001"},
+                             [(p, [(f"{p}/v_002", "v_002")]) for p in tcl._OTHERS],
+                             "4.C-cut", "v_002")
+    if view != "table":
+        outputs = _grp(rig, "physical_outputs")
+        pane.open_eq(outputs, _row(outputs, "m-L"))
+        if view == "eq_pair":
+            pane._on_pair_toggle()
+    return pane
+
+
+def _head_words(pane) -> list:
+    """The head's words the owner shows: the tabs, the EQ's actions, the title, the «?», the
+    compare label and tag, «закрити ✕» -- what `fit_text` is asked of."""
+    from autosound_tcc.ui.tcc.detail_pane import _FitLabel
+
+    layout = pane._head.layout()
+    words = [layout.itemAt(i).widget() for i in range(layout.count())]
+    return [w for w in words if isinstance(w, _FitLabel) and w.wanted()
+            or w is pane._close_btn and w.isVisibleTo(pane._head)]
+
+
+def _reads(widget) -> bool:
+    """Whole, elided to «…», or -- a chip with a glyph floor -- its glyph: never nothing."""
+    shown = widget.fit_text()
+    return bool(shown) and (shown == widget.text() or shown.endswith("…")
+                            or (getattr(widget, "_floor", "") == "glyph"
+                                and shown == widget.text()[:1]))
+
+
+def _floors_hold(pane) -> None:
+    box, close = pane._compare_combo, pane._close_btn
+    assert box.width() >= box.minimumSizeHint().width() and _combo_shows_whole(box), \
+        (box.width(), box.minimumSizeHint().width(), box.currentText())
+    assert close.fit_text() == close.text(), close.fit_text()
+
+
+@pytest.mark.parametrize("view", ["table", "eq_single"])
+def test_the_full_window_s_head_gives_way_in_stages(tmp_path, monkeypatch, view):
     """tcc#96, fix round 5 -- the Arbiter on the Windows VM (wave-0.1.45 at 1ee915b): the full
     window's head at full screen width read «Табл…», an empty «EQ», «Рів…», «Затри…», «Ф…» and
     «закрит…» with the pane 840 px wide, and «порівняти з», the box and «інша конфігурація»
-    whole beside them; at two thirds of the screen every tab was empty. Reproduced here at the
-    Mac's font with a 1400-px window (the pane 821 px, the head asking 891): the first pass gave
+    whole beside them; at two thirds of the screen every tab was empty. The first pass gave
     each tab a 24-px floor, and a box layout takes what it is short of equally from the items
-    that can shrink -- the tabs were the only ones, down to a 4-px content rect and nothing to
-    draw.
+    that can shrink -- the tabs were the only ones, down to nothing to draw.
 
-    The re-review of that round (finding 119): holding the tabs and the labels raised the head's
-    minimum to 803 px, and a pane narrower than that -- the full window at its floor gets 563 --
-    had Qt trim the widest items to one width: the compare box came down to 63 of its 121 px
-    and read «v_», then nothing, and «закрити ✕» drew its leading word clipped, «закрит». The
-    head gives way in an order now (`DetailPane._fit_head`, `head_asks`): the title first, then
-    «порівняти з» and the tag, then the tabs -- each down to a glyph and «…», never to nothing --
-    while the box and «закрити ✕» keep their floors, and the head's own minimum is what is left
-    when all three have given. The pane is put at each width by the splitter's handle, as the
-    Arbiter would; the widths are the head's own asks, so no number here is a Mac pixel."""
-    from PySide6.QtCore import QRect
+    The re-review (finding 119): holding the tabs and the labels raised the head's minimum to
+    803 px, and a pane narrower than that had Qt trim the widest items to one width: the compare
+    box came down to 63 of its 121 px and read «v_», then nothing. The head gives way in an
+    order now (`DetailPane._fit_head`, `head_asks`): the title first; then «порівняти з», the
+    tag and the EQ's «?», whole or hidden (the review of the follow-up: «п…» said nothing and
+    cost 64 px); then the tabs and the list, each to its floor -- a tab to a glyph and «…», an
+    EQ action to its glyph, the list to «v_NNN» -- with the row's gaps tightened, never to
+    nothing; «закрити ✕» keeps its floor throughout. The pane is put at each width by the
+    splitter's handle, as the Arbiter would; the widths are the head's own asks, so no number
+    here is a Mac pixel. Over the table and over one channel's EQ."""
     from PySide6.QtWidgets import QApplication
 
-    from autosound_tcc.ui.tcc import main_window
+    from autosound_tcc.ui.tcc.detail_pane import _HEAD_SPACING, _HEAD_SPACING_TIGHT
     from tests import test_control_layout as tcl
 
     window = tcl._window(tmp_path, monkeypatch)
     i18n.set_language("uk")
     try:
-        view = tcl._with_rig(window)
         window.show()
-        pane = window._detail
-        pane.set_view(view)
-        window._on_table_requested("physical_outputs")
-        # The Arbiter's head: «порівняти з», the box and the «інша конфігурація» tag are up.
-        pane.set_compare_choices(["v_002", "v_001"], "3.S-shelf/v_002", lambda _k: tcl._older(),
-                                 {"v_002": "v_002", "v_001": "v_001"},
-                                 [(p, [(f"{p}/v_002", "v_002")]) for p in tcl._OTHERS],
-                                 "4.C-cut", "v_002")
+        pane = _arbiter_head(window, view)
         head, box, close = pane._head, pane._compare_combo, pane._close_btn
         tabs = [pane._tab_table, pane._tab_eq, *pane._param_tabs.values()]
         labels = [pane._compare_label, pane._compare_other]
-        assert all(t.isVisibleTo(window) for t in tabs) and pane._compare_other.isVisibleTo(window)
-        words = [*tabs, *labels, pane._title, close]
+        hidden_when_short = [*labels] + ([pane._eq_help] if view != "table" else [])
+        actions = [a for a in (pane._cmp_btn, pane._eq_copy, pane._pair_btn) if a.wanted()]
+        assert all(w.wanted() for w in (*tabs, *hidden_when_short))
+        assert (len(actions) == 3) == (view == "eq_single"), [a.text() for a in actions]
 
         def settle(width):
             window.resize(width, 900)
@@ -1051,15 +1097,12 @@ def test_the_full_window_s_head_keeps_its_tabs_whole_while_it_has_the_room(tmp_p
             assert pane.width() == width, (pane.width(), width, splitter.sizes())
 
         def cut():
-            return [(w.text(), w.fit_text()) for w in words if w.fit_text() != w.text()]
+            return [(w.text(), w.fit_text()) for w in _head_words(pane)
+                    if w.isVisibleTo(head) and w.fit_text() != w.text()]
 
-        def floors_hold():
-            assert box.width() >= box.minimumSizeHint().width() and _combo_shows_whole(box), \
-                (box.width(), box.minimumSizeHint().width(), box.currentText())
-            assert close.fit_text() == close.text(), close.fit_text()
+        def shown(widgets):
+            return [w.isVisibleTo(head) for w in widgets]
 
-        # Roomy: wide enough for the pane's share of the window (the splitter's, not all of it)
-        # to hold the head's ask -- measured, since the ask is the font's.
         whole, title_gone, labels_gone, least = pane.head_asks()
         frame = pane.width() - head.width()
         roomy = 2000
@@ -1068,56 +1111,88 @@ def test_the_full_window_s_head_keeps_its_tabs_whole_while_it_has_the_room(tmp_p
             roomy += 200
             settle(roomy)
         assert pane.width() >= whole + frame, (pane.width(), whole)
-        assert cut() == [], "roomy: everything whole"
-        # A pane a little short of the head's ask: the title gives way, nothing else does.
-        centre((whole + title_gone) // 2 + frame)
-        title = pane._title.fit_text()
-        assert title != pane._title.text() and title.endswith("…"), title
-        assert cut() == [(pane._title.text(), title)], cut()
-        floors_hold()
-        # Shorter: the title has given all it had, the labels give, the tabs still whole.
+        assert cut() == [] and all(shown(hidden_when_short)), "roomy: everything whole"
+        assert head.layout().spacing() == _HEAD_SPACING
+        if view == "table":
+            # A pane a little short of the head's ask: the title gives way, nothing else does.
+            centre((whole + title_gone) // 2 + frame)
+            title = pane._title.fit_text()
+            assert title != pane._title.text() and title.endswith("…"), title
+            assert cut() == [(pane._title.text(), title)], cut()
+            assert all(shown(hidden_when_short))
+            _floors_hold(pane)
+        # Shorter: the title has given all it had; the labels and the «?» go, whole or hidden.
         centre((title_gone + labels_gone) // 2 + frame)
-        assert _at_its_floor(pane._title), (pane._title.fit_text(), pane._title.width())
-        assert all(t.fit_text() == t.text() for t in tabs), cut()
-        assert any(w.fit_text() != w.text() for w in labels), cut()
-        assert all(w.fit_text().endswith("…") or w.fit_text() == w.text() for w in labels), cut()
-        floors_hold()
-        # Shorter still: the labels at their floors, the tabs give -- never to nothing.
+        assert not any(shown(hidden_when_short)) and all(w.wanted() for w in hidden_when_short)
+        if view == "table":
+            assert _at_its_floor(pane._title), (pane._title.fit_text(), pane._title.width())
+        assert all(w.fit_text() == w.text() for w in (*tabs, *actions)), cut()
+        _floors_hold(pane)
+        # Shorter still: the tabs, the actions and the list give, the gaps tighten -- never to
+        # nothing, and the list and «закрити ✕» whole.
         centre((labels_gone + least) // 2 + frame)
-        assert all(_at_its_floor(w) for w in labels), [(w.fit_text(), w.width()) for w in labels]
         assert any(t.fit_text() != t.text() for t in tabs), cut()
-        for t in tabs:
-            assert t.fit_text() and (t.fit_text() == t.text() or t.fit_text().endswith("…")), \
-                (t.text(), t.fit_text())
-        floors_hold()
+        assert all(_reads(w) for w in (*tabs, *actions)), cut()
+        assert head.layout().spacing() == _HEAD_SPACING_TIGHT
+        assert box.width() >= box.floor_width() and _combo_shows_whole(box), box.width()
+        assert close.fit_text() == close.text()
         assert head.minimumSizeHint().width() == least, "the head's minimum: all three giving"
-        # The window's own floor, on the Arbiter's 1512-px screen: the centre's floor there is
-        # two thirds of the screen less the sides (tcc#106), and the head's minimum -- all three
-        # stages given -- sits inside it, so nothing is trimmed: nothing empty, nothing clipped,
-        # the box and «закрити ✕» whole. (On the offscreen platform's own 800-px screen the
-        # centre's floor is the old 320, and what the pane gets at the window's floor is the
-        # splitter's whim.) A font too wide for that screen -- the Windows runner's -- has the
-        # head trimmed there whatever it holds, and the test says so in its numbers.
-        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
-        window._fit_centre_floor()
-        for _ in range(4):
-            settle(window.minimumWidth())
-            if window.width() == window.minimumWidth():
-                break
-        assert head.minimumSizeHint().width() == least
-        if head.width() < least:
-            pytest.skip(f"in this font the head's minimum ({least} px) is more than the centre's "
-                        f"floor on a 1512-px screen ({window._center.minimumWidth()}): Qt trims "
-                        "the head there, and nothing in it can hold")
-        for widget in words:
-            shown = widget.fit_text()
-            assert shown and (shown == widget.text() or shown.endswith("…")), (widget.text(), shown)
-        assert close.fontMetrics().horizontalAdvance(close.fit_text()) <= \
-            close.width() - close._chrome(), (close.fit_text(), close.width())
-        floors_hold()
         settle(roomy)
         centre(whole + frame + 40)
-        assert cut() == [], "roomy again: everything whole again"
+        assert cut() == [] and all(shown(hidden_when_short)), "roomy again: everything whole"
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("screen", [1512, 1920])
+@pytest.mark.parametrize("view", ["table", "eq_single", "eq_pair"])
+def test_the_head_reads_at_the_full_window_s_floor(tmp_path, monkeypatch, view, screen):
+    """The review of the follow-up (CRITICAL): the head's stages were sound over a table, and
+    the EQ view's head -- «EQ m-L», «⇄ L + R», «⇅ Порівняти», «Копіювати EQ m-L» -- had a
+    minimum of 717 px against the centre's floor of 588 on the Arbiter's 1512-px screen (two
+    thirds of it, less the sides, tcc#106), so at the full window's floor Qt trimmed the widest
+    items: the box got 42 of 121 px and drew empty, «закрити ✕» read «за…» -- finding 105's
+    second screenshot exactly; the pair view 611 against 588; at the Windows VM's twice-as-wide
+    text 1039 against 860 on 1920. The head's minimum is inside the centre's floor now: the
+    compare labels and the «?» whole or hidden, the EQ's actions down to their glyph and their
+    hover, the list's floor «v_NNN» (its real shortest content, not six letters), the gaps
+    tightened. At the window's floor on the Arbiter's screen and on the VM's: nothing empty,
+    nothing clipped, the list and «закрити ✕» whole. A font too wide for a screen -- the
+    runner's twice-as-wide text on 1512 -- says so in its numbers."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, screen, 982))
+        window.show()
+        pane = _arbiter_head(window, view)
+        head, box, close = pane._head, pane._compare_combo, pane._close_btn
+        window._fit_centre_floor()
+        for _ in range(4):
+            window.resize(window.minimumWidth(), 900)
+            for _ in range(4):
+                QApplication.processEvents()
+            if window.width() == window.minimumWidth():
+                break
+        least = pane.head_asks()[-1]
+        if head.width() < least:
+            pytest.skip(f"in this font the head's minimum over {view} ({least} px) is more than "
+                        f"the centre's floor on a {screen}-px screen "
+                        f"({window._center.minimumWidth()}): Qt trims the head there")
+        assert head.minimumSizeHint().width() <= head.width(), "nothing for Qt to trim"
+        words = [w for w in _head_words(pane) if w.isVisibleTo(head)]
+        assert words, "the head has words"
+        for widget in words:
+            assert _reads(widget), (widget.text(), widget.fit_text(), widget.width())
+        assert close.fontMetrics().horizontalAdvance(close.fit_text()) <= \
+            close.width() - close._chrome(), (close.fit_text(), close.width())
+        _floors_hold(pane)
+        assert box.currentText() == "v_002" and box.fit_text() == "v_002"
     finally:
         i18n.set_language("en")
 
@@ -1159,6 +1234,27 @@ def test_a_head_label_reads_whole_at_its_hint_and_never_nothing_at_its_floor():
         tab.close()
     assert not cut, f"{len(cut)} of {len(texts)} cut at their own hint, e.g. " + "; ".join(cut[:3])
     assert not nothing, f"{len(nothing)} read nothing at their floor, e.g. " + "; ".join(nothing[:3])
+
+    # A chip with a glyph floor («⇄ L + R», the EQ's actions): the glyph at its floor, with the
+    # whole text in its hover; and the hidden way keeps the owner's wish apart from the fit's.
+    chip = _DTab("⇄ L + R", floor="glyph")
+    chip.show()
+    try:
+        chip.set_way("gives")
+        chip.resize(chip.floor_width(), 22)
+        assert chip.fit_text() == "⇄" and chip.toolTip() == "⇄ L + R", chip.fit_text()
+        assert chip.floor_width() < _DTab("⇄ L + R").floor_width(), "narrower than «⇄…»"
+        chip.set_way("hidden")
+        assert not chip.isVisible() and chip.wanted()
+        chip.setVisible(True)
+        assert not chip.isVisible() and chip.wanted(), "the owner's wish waits for the fit"
+        chip.set_way("gives")
+        assert chip.isVisible()
+        chip.setVisible(False)
+        chip.set_way("holds")
+        assert not chip.isVisible() and not chip.wanted(), "the owner's own hiding stands"
+    finally:
+        chip.close()
 
 
 def test_a_control_mode_tab_s_chips_give_way_where_the_full_window_s_tabs_hold():
