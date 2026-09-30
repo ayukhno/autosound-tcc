@@ -661,11 +661,14 @@ def test_the_corner_labels_are_whole_or_hidden_never_cut(tmp_path, monkeypatch, 
 
 def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path, monkeypatch):
     """Shown or hidden is decided from the header's width against what the header asks for WITH
-    the label, and a hidden label comes back only with room to spare: resized a few pixels at a
-    time across both thresholds and back, each label changes once each way, and every width
-    settles to one state. The sweep runs from 60 px above both labels' ask to 60 px below
-    «порівняти з»'s, both measured for the font at hand (`_header_asks`; fix round 5 -- a sweep
-    fixed at 1160–745 px started below both thresholds on the Windows runner)."""
+    the label, and a hidden label comes back only with room to spare: resized across both
+    thresholds and back, each label changes once each way, and every width settles to one state.
+    The widths run from 60 px above both labels' ask to 60 px below «порівняти з»'s, both
+    measured for the font at hand (`_header_asks`; fix round 5 -- a sweep fixed at 1160–745 px
+    started below both thresholds on the Windows runner). Between those, 2 px either side of each
+    label's ask and of its ask plus the slack: where it goes, and where it may come back. A 5-px
+    sweep crossed the same edges in 54 whole-window settles each way on the Mac; these are 10
+    (F-065). Without the slack the label comes back 4 px after it went, and the last check fails."""
     from PySide6.QtCore import QEvent, QObject
 
     class _Toggles(QObject):
@@ -688,7 +691,10 @@ def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path
     toggles = _Toggles()
     for label in (layout._compare_label, layout._compare_other):
         label.installEventFilter(toggles)
-    widths = list(range(with_both + 60, with_label - 60, -5))
+    slack = control_layout._REFIT_SLACK_PX
+    widths = sorted({with_both + 60, with_label - 60}
+                    | {ask + side + edge for ask in (with_label, with_both)
+                       for side in (0, slack) for edge in (2, -2)}, reverse=True)
     seen = []
     for width in widths + widths[::-1]:
         _settle(window, width)
@@ -716,8 +722,11 @@ _LONG_PRESET = "5.W-wide-stage-for-rear-seat-A"  # 30 characters
 _LONG_NAMES = "v_002 · P3, SQ-2, SQ-3, SQ-Comp-4"  # every name v_002 was saved under
 
 
+# 110, the widest of the zoom's first steps, stands for 106 and 108: one cap decides all three.
+# 141 went (F-065): its header never sits in the half, so past the box's own checks it only
+# skipped -- and 110 makes those checks as well.
 @pytest.mark.parametrize("lang", ["en", "uk"])
-@pytest.mark.parametrize("stretch", [100, 106, 110, 141])
+@pytest.mark.parametrize("stretch", [100, 110])
 def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(
         tmp_path, monkeypatch, lang, stretch):
     """tcc#96, the controller's finding on the third pass: the box asked for the whole «<preset> ·
@@ -1241,7 +1250,9 @@ def test_a_reload_that_raises_the_table_s_floor_keeps_a_flush_right_window_on_it
     layout.leave()
 
 
-@pytest.mark.parametrize("stretch", [100, 106, 110, 141])
+# One wide font, 110 -- it both overshot and ratcheted (755, then 780); 106 went the same way.
+# 141 went (F-065): with no half to keep there it skipped before its first pick.
+@pytest.mark.parametrize("stretch", [100, 110])
 def test_a_pick_at_the_half_never_pushes_the_window_past_it(tmp_path, monkeypatch, stretch):
     """The review of the follow-up: a long other-configuration pick at the half, at a font a
     little wider than the Mac's (stretch 106 -> 760 px, 110 -> 755 and then 780 on a second long

@@ -1148,8 +1148,11 @@ def test_the_full_window_s_head_gives_way_in_stages(tmp_path, monkeypatch, view)
         i18n.set_language("en")
 
 
-@pytest.mark.parametrize("screen", [1512, 1920])
-@pytest.mark.parametrize("view", ["table", "eq_single", "eq_pair"])
+# Every view on the Arbiter's screen; on the VM's, the EQ views its finding was about -- the
+# table's head was sound there, and on 1920 it has more room still (F-065).
+@pytest.mark.parametrize(("view", "screen"), [("table", 1512), ("eq_single", 1512),
+                                              ("eq_pair", 1512), ("eq_single", 1920),
+                                              ("eq_pair", 1920)])
 def test_the_head_reads_at_the_full_window_s_floor(tmp_path, monkeypatch, view, screen):
     """The review of the follow-up (CRITICAL): the head's stages were sound over a table, and
     the EQ view's head -- «EQ m-L», «⇄ L + R», «⇅ Порівняти», «Копіювати EQ m-L» -- had a
@@ -2037,9 +2040,10 @@ def test_a_hidden_label_s_words_go_into_the_list_s_hover(tmp_path, monkeypatch, 
 #: The EQ head's minimum over one channel, uk, in the Mac's offscreen font at the default zoom --
 #: the reference that says the numbers below are this font's -- and at the zoom's steps and a
 #: stretch of 110, all pinned (the re-review of fix round 2): a fix or a worse regression shows.
+#: The zoom's first and last steps; 130 % (563) sat between them and went (F-065).
 _EQ_HEAD_LEAST_MAC = 513
-_EQ_HEAD_LEAST_AT = {"zoom120": ("zoom", 1.2, 546), "zoom130": ("zoom", 1.3, 563),
-                     "zoom140": ("zoom", 1.4, 579), "stretch110": ("stretch", 110, 562)}
+_EQ_HEAD_LEAST_AT = {"zoom120": ("zoom", 1.2, 546), "zoom140": ("zoom", 1.4, 579),
+                     "stretch110": ("stretch", 110, 562)}
 
 
 @pytest.mark.parametrize("case", sorted(_EQ_HEAD_LEAST_AT))

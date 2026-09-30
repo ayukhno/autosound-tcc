@@ -3453,8 +3453,9 @@ def _what_does_not_read(window) -> list[str]:
     return cut
 
 
-@pytest.mark.parametrize("lang", ["en", "uk"])
-@pytest.mark.parametrize("stretch", [100, 141])
+# The stretched font once, in the longer words: there it only checks that the floor sits at the
+# cap and says so, which the language does not change (F-065).
+@pytest.mark.parametrize(("stretch", "lang"), [(100, "en"), (100, "uk"), (141, "uk")])
 def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
         tmp_path, monkeypatch, stretch, lang):
     """tcc#106 (TEST-FINDINGS 114): at the full window's minimum the Arbiter's output table read
@@ -3526,7 +3527,9 @@ def test_control_mode_leaves_the_full_window_its_own_minimum(tmp_path, monkeypat
     assert window.minimumSizeHint().width() == full
 
 
-@pytest.mark.parametrize("stretch", [100, 141])
+# Both sides of `min(cap, need)` on the Mac's font: the cap on 1512 (1008 of the 1124 needed), the
+# need on 1920 (its cap 1280). The stretched font only landed on the cap again (F-065).
+@pytest.mark.parametrize("stretch", [100])
 @pytest.mark.parametrize("screen", [1512, 1920])
 def test_the_full_window_s_floor_stays_under_two_thirds_of_its_screen(
         tmp_path, monkeypatch, screen, stretch):
@@ -3657,7 +3660,8 @@ def test_leaving_control_mode_after_the_floor_rose_keeps_the_window_on_its_scree
         f"the window is at x {frame.left()}..{frame.right()} on a 1920-px screen")
 
 
-@pytest.mark.parametrize("lang", ["de", "pl"])
+# German alone: Polish widened the header the same way, by 3 px less (F-065).
+@pytest.mark.parametrize("lang", ["de"])
 def test_leaving_control_mode_after_a_language_switch_keeps_the_window_on_its_screen(
         tmp_path, monkeypatch, lang):
     """The second review of tcc#106: the header widened while control mode was on -- the
@@ -3710,7 +3714,8 @@ def _write_a_small_rig(folder) -> None:
         (preset / "HEAD").write_text(versions[-1])
 
 
-@pytest.mark.parametrize("lang", ["en", "uk"])
+# Ukrainian, the Arbiter's and the longer words: the refit does not depend on the language (F-065).
+@pytest.mark.parametrize("lang", ["uk"])
 def test_picking_another_configuration_refits_the_floor_to_the_head(tmp_path, monkeypatch, lang):
     """The second review of tcc#106: the floor was measured before «порівняти з» came into the
     head, and picking another configuration's version showed «інша конфігурація» with no refit --
