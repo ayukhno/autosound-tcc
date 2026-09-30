@@ -1202,3 +1202,43 @@ def test_a_pick_at_the_half_never_pushes_the_window_past_it(tmp_path, monkeypatc
     finally:
         app.setFont(before)
         i18n.set_language("en")
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monkeypatch, lang):
+    """The re-review of fix round 1 (N1, CRITICAL) in control mode at the half, the Mac's font,
+    the default setup -- finding 105's screenshot again: «← Tab», «⇅ Com», «Copy EQ», «⇄ L»
+    drawn cut with no «…» where the round before had them whole; in Ukrainian «← Табл», «⇅ Пор»,
+    «Копіювати Е». The paint rect was the contents rect less the chrome once more, 26 px short of
+    where the label draws its own text. Each chip is grabbed at the half: its ink is the text
+    `fit_text` names, present and ending where that text ends; and where the head has the room
+    for its whole ask -- English at the Mac's font -- every chip is whole."""
+    from tests.test_detail_pane import _paints_what_it_says
+
+    window = _control_window(tmp_path, monkeypatch, lang)
+    try:
+        view = window._view
+        layout = window._control_layout
+        table_o = _tab(layout, i18n.t("ctlTableO"))
+        layout.tabs.setCurrentIndex(table_o)
+        names = [r.name for r in next(g for g in view.groups
+                                      if g.id == "physical_outputs").rows_visible()]
+        layout.tabs.currentWidget()._scroll.widget().cellClicked.emit(names.index("m-L"), 1)
+        _settled(window)
+        eq = layout.tabs.currentWidget()
+        assert eq._row.name == "m-L" and eq._back_btn.isVisibleTo(window)
+        chips = [eq._back_btn, eq._cmp_btn, eq._eq_copy, eq._pair_btn]
+        assert all(chip.isVisibleTo(window) for chip in (*chips, eq._eq_help))
+        # At the half -- or at the window's own floor where this font's header is wider than
+        # the half (the runner's twice-as-wide text): the paint is checked either way.
+        half = layout._right_half()[1].width()
+        assert window.width() == max(half, window.minimumWidth()), (window.width(), half)
+        # Not the «?»: it never elides, and its round border curves into its contents rect.
+        for chip in chips:
+            _paints_what_it_says(chip)
+        if eq._head.width() >= eq.head_asks()[0]:
+            assert all(chip.fit_text() == chip.text() for chip in chips), \
+                [(c.text(), c.fit_text()) for c in chips]
+        layout.leave()
+    finally:
+        i18n.set_language("en")

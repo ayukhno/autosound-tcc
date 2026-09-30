@@ -237,6 +237,28 @@ class _FitLabel(QLabel):
         """The width that shows the text whole, whatever way the label is set to now."""
         return math.ceil(self._width(self._full)) + self._chrome()
 
+    def _text_rect(self) -> QRect:
+        """Where QLabel itself puts the text -- `QLabelPrivate::documentRect`: the contents rect
+        (the style sheet's border and padding ARE contents margins for a label), less its margin,
+        and with a frame less half an «x» of indent on the aligned side. Both the room `fit_text`
+        judges by and where `paintEvent` draws: the re-review of fix round 1 found the paint rect
+        built from the contents rect less the chrome again (width - 46 for a d-tab, where the
+        native text has width - 23), so an elided tab drew nothing and a longer one a word cut
+        with no «…»."""
+        rect = self.contentsRect()
+        margin = self.margin()
+        rect.adjust(margin, margin, -margin, -margin)
+        indent = self.indent()
+        if indent < 0 and self.frameWidth():
+            indent = self.fontMetrics().horizontalAdvance("x") // 2 - margin
+        if indent > 0:
+            align = self.alignment()
+            if align & Qt.AlignmentFlag.AlignLeft:
+                rect.setLeft(rect.left() + indent)
+            if align & Qt.AlignmentFlag.AlignRight:
+                rect.setRight(rect.right() - indent)
+        return rect
+
     def floor_width(self) -> int:
         """The least it can be drawn in: its first glyph and «…» -- or the glyph alone, for a chip
         whose glyph says it -- never nothing."""
@@ -258,10 +280,10 @@ class _FitLabel(QLabel):
         actually has (tcc#96, finding 105) -- what `paintEvent` draws, without having to paint to
         find out."""
         metrics = QFontMetricsF(self.font())
-        # The width less the chrome, not `contentsRect`: the style sheet's padding and border are
-        # not contents margins, and a tab given 70 px read «Таблиця» whole for its 73 (the review
-        # of the follow-up), where the native paint clipped it.
-        room = max(0, self.width() - self._chrome())
+        # The room the native paint has (`_text_rect`), neither the whole contents rect (a tab
+        # given 70 px read «Таблиця» whole for its 73 while the paint clipped it) nor the width
+        # less the chrome (3 px stricter than the paint: chips whole took the elided path).
+        room = max(0, self._text_rect().width())
         if metrics.horizontalAdvance(self._full) <= room:
             return self._full
         shown = metrics.elidedText(self._full, Qt.TextElideMode.ElideRight, room)
@@ -297,10 +319,7 @@ class _FitLabel(QLabel):
         painter.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option)
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.setFont(self.font())
-        # Inside the chrome, as the native paint puts the whole text: half of it each side.
-        inset = self._chrome() // 2
-        rect = self.contentsRect().adjusted(inset, 0, inset - self._chrome(), 0)
-        painter.drawText(rect, int(self.alignment()), shown)
+        painter.drawText(self._text_rect(), int(self.alignment()), shown)
 
 
 class _DTab(_FitLabel):

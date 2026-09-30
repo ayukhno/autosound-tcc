@@ -1736,3 +1736,83 @@ def test_a_compare_pick_never_moves_the_table_s_columns():
     finally:
         for table in tables:
             table.close()
+
+
+def _ink(widget) -> tuple:
+    """The painted text's ink inside the label's own text rect, from a grab of the widget:
+    `(inked columns, the rightmost inked column from the rect's left, the rect's width)`. The
+    background is the rect's most common colour (a lit tab's fill included), ink whatever
+    differs from it. No number here is a pixel of any one font: what is asserted is that the
+    ink reaches where the text `fit_text` names ends, and no further."""
+    from collections import Counter
+
+    image = widget.grab().toImage()
+    rect = widget._text_rect()
+    pixels = {(x, y): image.pixel(x, y)
+              for x in range(rect.left(), rect.right() + 1)
+              for y in range(rect.top(), rect.bottom() + 1)}
+    background = Counter(pixels.values()).most_common(1)[0][0]
+    columns = sorted({x for (x, _y), colour in pixels.items() if colour != background})
+    return len(columns), (columns[-1] - rect.left() + 1) if columns else 0, rect.width()
+
+
+def _paints_what_it_says(widget) -> None:
+    """The label's ink is the text `fit_text` names -- present, ending where that text's advance
+    ends (a glyph's side bearing of slack), inside the room -- so nothing is drawn cut and
+    nothing is left undrawn."""
+    from PySide6.QtGui import QFontMetricsF
+
+    shown = widget.fit_text()
+    assert shown and _reads(widget), (widget.text(), shown)
+    columns, right, room = _ink(widget)
+    advance = QFontMetricsF(widget.font()).horizontalAdvance(shown)
+    assert columns > 0, f"{widget.text()!r} shows {shown!r} and draws no ink"
+    assert advance <= room + 0.5, (widget.text(), shown, advance, room)
+    assert advance - 4 <= right <= advance + 2, (
+        f"{widget.text()!r} says {shown!r} ({advance:.1f} px) but its ink ends at {right} px "
+        f"of a {room}-px room")
+
+
+def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
+    """The re-review of fix round 1 (N1, CRITICAL): the measurement was right and the paint was
+    not. `_FitLabel.paintEvent` built its rect from `contentsRect()` less the chrome -- but the
+    contents rect already excludes the style sheet's border and padding, so an elided tab drew
+    into width - 46 where the native text has width - 23: at the full window at two thirds of
+    the Arbiter's screen over one channel's EQ every elided tab drew NOTHING («Т…», «E…», «Р…»,
+    «З…», «Ф…», «⇅», «⇄» -- 0 px of ink) and «Копіювати EQ m-L» drew «Копі», a word cut with no
+    «…». No test looked at pixels. This one grabs each head label at that width and checks its
+    ink is the text `fit_text` names: present, ending where that text ends, inside the room.
+    The window is 1008 px wide (two thirds of 1512) and the head is below its ask, so the
+    elided paint path is what is grabbed."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import main_window
+    from autosound_tcc.ui.tcc.detail_pane import _FitLabel
+    from tests import test_control_layout as tcl
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, 1512, 982))
+        window.show()
+        pane = _arbiter_head(window, "eq_single")
+        window._fit_centre_floor()
+        # 1008 px, or the window's own floor where this font puts it higher (the runner's
+        # twice-as-wide text): the head is short of its ask either way.
+        for _ in range(4):
+            width = max(1008, window.minimumWidth())
+            window.resize(width, 900)
+            for _ in range(4):
+                QApplication.processEvents()
+            if window.width() == width:
+                break
+        assert window.width() == max(1008, window.minimumWidth()), window.width()
+        head = pane._head
+        labels = [w for w in _head_words(pane) if isinstance(w, _FitLabel) and w.isVisibleTo(head)]
+        assert head.width() < pane.head_asks()[0] and any(w.fit_text() != w.text() for w in labels), \
+            "the head is short of its ask: the elided paint is what is grabbed"
+        for widget in labels:
+            _paints_what_it_says(widget)
+    finally:
+        i18n.set_language("en")
