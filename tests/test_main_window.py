@@ -17,7 +17,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtGui import QCloseEvent  # noqa: E402
+from PySide6.QtGui import QCloseEvent, QFont  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QFrame,
@@ -3337,6 +3337,153 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
             assert drawn.right() < next_from, (
                 f"at {width} px {name(left)} (x {drawn.left()}..{drawn.right()}) is drawn over "
                 f"{name(right)} (from x {next_from})")
+
+
+#: The output table's columns that read whole at the full window's minimum (tcc#106, finding 114:
+#: «300 …», «NO…», «GAIN DE», «ELAY M» on the Arbiter's screenshot): the crossovers, the gain, the
+#: delay and the polarity.
+_WHOLE_AT_THE_MINIMUM = ("HPF", "LPF", "Gain dB", "Delay ms", "Pol")
+
+
+def _open_the_arbiters_rig(tmp_path, monkeypatch, screen=10_000):
+    """A full window on the Arbiter's rig -- a Helix, ten columns in the output table -- with the
+    output table open, every crossover as wide as one gets («3500 LR4»), and «порівняти з» on the
+    version before, so every value in the table is a CHANGED one: drawn bold, its widest look.
+
+    Stood on a screen `screen` px wide: the offscreen platform's own is 800, narrower than any
+    window this test is about."""
+    profile = {"dsp_profile": {"name": "DSP Ultra S", "vendor": "Helix", "groups": [
+        {"id": "virtual_channels", "label": "Virtual channels",
+         "fields": ["gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq_bypass", "eq"]},
+        {"id": "physical_outputs", "label": "Output channels",
+         "fields": ["hp", "lp", "gain_db", "ta_ms", "polarity", "phase_deg", "mute", "eq"]}]}}
+    (tmp_path / "dsp_profile.json").write_text(json.dumps(profile))
+    codes = ("tw-L", "tw-R", "m-L", "m-R", "c", "w-L", "w-R", "r-L", "r-R", "sw")
+    preset = tmp_path / "FULL"
+    preset.mkdir()
+    for version, (freq, gain, delay, polarity) in (("v_001", (350, -3.5, 2.09, "INV")),
+                                                   ("v_002", (3500, -12.5, 15.75, "NORM"))):
+        leg = {"f": freq, "type": "LR", "slope": 24}
+        channels = {code: {"slot": slot, "hp": leg, "lp": leg, "gain_db": gain, "ta_ms": delay,
+                           "polarity": polarity, "phase_deg": 180}
+                    for slot, code in zip("ABCDEFGHIJ", codes)}
+        (preset / f"{version}.json").write_text(json.dumps(
+            {"preset": "FULL", "sample_rate": 96000, "channels": channels}))
+    (preset / "HEAD").write_text("v_002")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(main_window, "_screen_width", lambda _widget: screen, raising=False)
+    _app()
+    window = MainWindow()
+    window._on_table_requested("physical_outputs")
+    window.show()
+    return window
+
+
+def _settle_at(window, width) -> None:
+    window.resize(width, 900)
+    for _ in range(4):
+        QApplication.processEvents()
+        QApplication.sendPostedEvents()
+
+
+def _what_does_not_read(window) -> list[str]:
+    """Everything tcc#106 wants whole that is not, at the window's width now: a named column
+    narrower than its cells or its heading ask for, a tab word or «закрити» elided. Asked of the
+    widgets themselves -- the table's own size hints, the tab's own fit -- so no pixel count of
+    any one platform's font is written here."""
+    table = window._detail._scroll.widget()
+    header = table.horizontalHeader()
+    cut = []
+    for column in range(table.columnCount()):
+        title = table.horizontalHeaderItem(column).text()
+        if title not in _WHOLE_AT_THE_MINIMUM:
+            continue
+        need = max(table.sizeHintForColumn(column), header.sectionSizeHint(column))
+        if table.columnWidth(column) < need:
+            cut.append(f"{title}: {table.columnWidth(column)} px of the {need} it needs "
+                       f"({table.item(0, column).text()!r})")
+    pane = window._detail
+    for word in (pane._tab_table, pane._tab_eq, *pane._param_tabs.values(), pane._close_btn):
+        if word.fit_text() != word.text():
+            cut.append(f"{word.text()!r} reads {word.fit_text()!r}")
+    return cut
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+@pytest.mark.parametrize("stretch", [100, 141])
+def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
+        tmp_path, monkeypatch, stretch, lang):
+    """tcc#106 (TEST-FINDINGS 114): at the full window's minimum the Arbiter's output table read
+    «300 …», «NO…», «GAIN DE», «ELAY M», and the pane's tabs had no words -- «може збільшити
+    мінімальну ширину трохи?». The minimum now holds the table's named columns and the tabs whole.
+
+    The minimum is measured off the table and the tabs in the window's own font, so it is not a
+    number of Mac pixels: a stretch of 141 stands in for the Windows runner's offscreen text,
+    about twice as wide (Qt finds no fonts there), and the same claim must hold in it."""
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    try:
+        window = _open_the_arbiters_rig(tmp_path, monkeypatch)
+        window._on_language_selected(lang)
+        # Roomy is the window's own measure, not a screen size: three times its minimum.
+        roomy = 3 * window.minimumSizeHint().width()
+        _settle_at(window, roomy)
+        table = window._detail._scroll.widget()
+        assert table.item(0, 2).text() == "3500 LR4" and table.item(0, 2).font().bold(), \
+            "the widest crossover, drawn as a changed one"
+        assert not _what_does_not_read(window), "roomy, everything reads"
+
+        _settle_at(window, 200)
+        assert window.width() == window.minimumSizeHint().width() < roomy, "at the minimum"
+        assert not _what_does_not_read(window), (
+            f"at the full window's minimum ({window.width()} px, the centre "
+            f"{window._center.width()} px): {_what_does_not_read(window)}")
+    finally:
+        app.setFont(before)
+        i18n.set_language("en")
+
+
+def test_control_mode_leaves_the_full_window_its_own_minimum(tmp_path, monkeypatch):
+    """tcc#106: the full window's floor belongs to the full window. Control mode (a layout of its
+    own, #107) is not held to it, and coming back gives the full window its floor again."""
+    from autosound_tcc.ui.tcc import control_layout
+
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    window = _open_the_arbiters_rig(tmp_path, monkeypatch)
+    _settle_at(window, 200)
+    full = window.minimumSizeHint().width()
+    assert full == window.width()
+
+    window._control_layout.enter()
+    _settle_at(window, 200)
+    assert window.minimumSizeHint().width() < full, "control mode is not held to the full floor"
+
+    window._control_layout.leave()
+    _settle_at(window, 200)
+    assert window.minimumSizeHint().width() == window.width() == full
+    assert not _what_does_not_read(window)
+    window._control_layout.toggle()
+    window._control_layout.toggle()
+    assert window.minimumSizeHint().width() == full
+
+
+def test_the_full_window_s_floor_never_pushes_it_past_its_screen(tmp_path, monkeypatch):
+    """A floor measured in the window's font grows with the font, and the zoom goes to 150%: on
+    a screen too narrow for the whole table, the floor stops where the window still fits, and
+    never comes below the centre's old 320 px."""
+    window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=1100)
+    margins = window.centralWidget().layout().contentsMargins()
+    splitter = window._main_splitter.minimumSizeHint().width()
+    assert splitter + margins.left() + margins.right() <= 1100
+    assert window._center.minimumWidth() >= 320
 
 
 def test_a_copied_project_stores_a_model_key_the_registry_can_resolve(tmp_path, monkeypatch):

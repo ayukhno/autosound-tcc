@@ -20,10 +20,11 @@ import re
 import sys
 import time
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Optional
 
+import shiboken6
 from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
@@ -103,7 +104,12 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
-from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
+from autosound_tcc.ui.tcc.detail_pane import (
+    DetailPane,
+    eq_field_order,
+    is_other_preset,
+    table_fields,
+)
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import _SYS_ROLE_TCC, SYS_ROLE_LEDGER, DialogPanel
@@ -170,6 +176,17 @@ _LISTENING_PHASE = "4"
 #: read which phase is open and what the current step is, which is the whole reason it is on
 #: screen while a round is being captured.
 _PLAN_MIN_PX = 180
+#: The full window's centre column never came narrower than this before tcc#106, and still does
+#: not: it is the floor wherever the tables need less -- no project open, a tier of few columns.
+_CENTRE_MIN_PX = 320
+#: What the full window's minimum holds whole in a tier's table (tcc#106, TEST-FINDINGS 114: at the
+#: minimum the Arbiter's output table read «300 …», «NO…», «GAIN DE», «ELAY M»): the crossovers,
+#: the gain, the delay and the polarity, each with a value as wide as one comes -- a four-digit
+#: crossover («3500 LR4», the one finding 115 saw cut in control mode), a two-digit gain and delay
+#: with their decimals, the wider of the two polarities.
+_FLOOR_CELLS = {"hp": {"f": 3500, "type": "LR", "slope": 24},
+                "lp": {"f": 3500, "type": "LR", "slope": 24},
+                "gain_db": -12.5, "ta_ms": 15.75, "polarity": "NORM"}
 #: How an MCP client names itself in the handshake → the command a person knows it by.
 _CLIENT_NAMES = {"antigravity": "agy", "antigravity-cli": "agy", "gemini-cli": "gemini",
                  "gemini-cli-mcp-client": "gemini", "claude-code": "claude", "codex": "codex",
@@ -650,6 +667,14 @@ def _clipboard_snapshot() -> _ClipboardSnapshot:
 
 
 
+def _screen_width(widget) -> int:
+    """The usable width of the screen `widget` is on, or 0 when there is none. A function of its
+    own so a test can stand the window on a screen of its choosing: the offscreen platform's is
+    800 px, narrower than the full window has ever been."""
+    screen = widget.screen() or QGuiApplication.primaryScreen()
+    return screen.availableGeometry().width() if screen is not None else 0
+
+
 def _session_title(choice) -> str:
     """How the dialog names the generator: with its route, as the picker does — «OMP · Claude Opus
     5» (finding 90, tcc#80). The bare model said nothing of which way it runs, or whose bill it is."""
@@ -780,7 +805,9 @@ class MainWindow(QMainWindow):
         # (reported 2026-09-11). `Ignored` says: take what the stretch gives you, and never demand
         # width because of what is inside you.
         self._center.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self._center.setMinimumWidth(320)
+        # Its floor is what the tables and the pane's tabs need (`_fit_centre_floor`, tcc#106),
+        # measured once a project is open; until then the old 320.
+        self._center.setMinimumWidth(_CENTRE_MIN_PX)
         # A side panel is a fixed column with a handle, not something that resizes itself. Without
         # this a single long row grew the panel, the panel grew the window, and a maximised window
         # grew past the screen edge -- reported exactly that way. The handle still works.
@@ -2298,6 +2325,7 @@ class MainWindow(QMainWindow):
             self._tree.set_view(rig)
             # The panel's one-parameter tabs read the whole view, not one group.
             self._detail.set_view(rig)
+            self._fit_centre_floor()
             self._set_project_params(rig)
             self._refresh_open_detail()
             self._show_slot_and_save("", "")
@@ -2342,6 +2370,7 @@ class MainWindow(QMainWindow):
         self._rebuild_acoustics()
         self._tree.set_view(view)
         self._detail.set_view(view)
+        self._fit_centre_floor()
         self._set_project_params(view)
         self._refresh_open_detail()
 
@@ -3090,6 +3119,91 @@ class MainWindow(QMainWindow):
             self._detail.set_back(None)
             self._detail.open_eq(group, row)
 
+    def _fit_centre_floor(self) -> None:
+        """The full window's minimum: as wide as its tables and the pane's tabs need to read whole
+        (tcc#106, TEST-FINDINGS 114).
+
+        The centre column held a flat 320 px, and at the window's minimum the Arbiter's output
+        table read «300 …», «NO…», «GAIN DE», «ELAY M», the pane's tabs had no words -- «може
+        збільшити мінімальну ширину трохи?». The floor is now MEASURED, in the window's font: it
+        grows with the font and the zoom, as it has to, where 320 was a number of pixels that held
+        the table in no font at all. Re-measured on every load, theme, zoom and language.
+
+        Never below the old 320, and never so wide that the window leaves its screen -- at 150%
+        zoom the whole table is wider than a laptop, and a window past the screen's edge is worse
+        than a column that elides. The sides' floors are the full window's and control mode's
+        both (#107), so they stay; the centre is hidden in control mode, so this floor is the full
+        window's alone, and it is back the moment the full window is.
+        """
+        tables = self._tables_need()
+        need = 0
+        if tables:  # no table to show, no pane to show it in
+            need = max(tables, self._head_need()) + 2 * self._detail.frameWidth()
+        margins = self.centralWidget().layout().contentsMargins()
+        around = (self._left.minimumWidth() + self._right.minimumWidth()
+                  + 2 * self._main_splitter.handleWidth() + margins.left() + margins.right())
+        screen = _screen_width(self)
+        if screen > 0:
+            need = min(need, screen - around)
+        self._center.setMinimumWidth(max(_CENTRE_MIN_PX, need))
+
+    def _tables_need(self) -> int:
+        """The width at which every tier's table holds `_FLOOR_CELLS` whole, cells and headings;
+        0 with no project. A table's columns are not sized to their text: every one but the ID
+        stretches to the same share, so each must be given what the widest named one asks.
+
+        Drawn by the pane's own `_build_table`, so the padding, the headings and the ID column are
+        the ones on screen, over this rig's real rows with the sample values in the named columns
+        -- bold, as a changed value is drawn (`DetailPane._styled_cell`)."""
+        best = 0
+        for group in getattr(self._view, "groups", None) or ():
+            fields = table_fields(group)
+            if not group.rows_visible() or not set(fields) & set(_FLOOR_CELLS):
+                continue
+            sample = replace(group, rows=tuple(replace(row, raw={**row.raw, **_FLOOR_CELLS})
+                                               for row in group.rows))
+            table = self._detail._build_table(sample)
+            # Measured inside the pane, hidden, the way it is shown: a table outside the window
+            # polishes otherwise -- offscreen its headings kept capitals the pane's had lost, and
+            # asked 98 px for «Delay ms» where the pane's asked 86.
+            table.setParent(self._detail)
+            table.setVisible(False)
+            try:
+                named = [c for c, field in enumerate(fields, start=2) if field in _FLOOR_CELLS]
+                for column in named:
+                    item = table.item(0, column)
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                table.ensurePolished()
+                header = table.horizontalHeader()
+
+                def asks(column: int) -> int:
+                    return max(table.sizeHintForColumn(column), header.sectionSizeHint(column))
+
+                widest = max(asks(column) for column in named)
+                best = max(best, asks(0) + (table.columnCount() - 1) * widest
+                           + 2 * table.frameWidth() + table.verticalScrollBar().sizeHint().width())
+            finally:
+                # Now, not `deleteLater`: its right-click hook holds it, and a test run has no
+                # event loop to flush a deferred delete.
+                shiboken6.delete(table)
+        return best
+
+    def _head_need(self) -> int:
+        """The pane's head over a table, «порівняти з» out: the tabs and «закрити» whole (they
+        hold their words in the full window, tcc#96), the title at its smallest, the compare
+        label, list and tag at their floors -- so the row is never short and nothing in it is
+        trimmed."""
+        pane = self._detail
+        pane.ensurePolished()
+        head = pane._head.layout()
+        words = [pane._tab_table, pane._tab_eq, *pane._param_tabs.values(), pane._title,
+                 pane._compare_label, pane._compare_combo, pane._compare_other, pane._close_btn]
+        margins = head.contentsMargins()
+        return (margins.left() + margins.right() + head.spacing() * (len(words) - 1)
+                + sum(word.minimumSizeHint().width() for word in words))
+
     def _build_center(self) -> QWidget:
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
@@ -3244,6 +3358,7 @@ class MainWindow(QMainWindow):
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
         self._repolish_all()
+        self._fit_centre_floor()
         # The curve window is not in this window's widget tree and would not repaint from the
         # stylesheet even if it were: pyqtgraph draws with explicit pens.
         curves = getattr(self, "_curve_dialog", None)
@@ -3285,6 +3400,7 @@ class MainWindow(QMainWindow):
         self._settings.setValue(_ZOOM_KEY, self._zoom)
         apply_theme(QApplication.instance(), self._mode, scale=self._zoom)
         self._repolish_all()
+        self._fit_centre_floor()
         # Zoom scales every font in the sheet, so the box being copied has just changed size.
         QTimer.singleShot(0, self._match_icon_buttons)
         self._zoom_label.setText(f"{round(self._zoom * 100)}%")
@@ -5737,6 +5853,8 @@ class MainWindow(QMainWindow):
         self._target_tip.set_text(i18n.t("targetToolTip"))
         self._sync_layout_button()
         self._control_layout.refresh()
+        # The pane's words are in the new language now (its own listener ran first).
+        self._fit_centre_floor()
         shown = getattr(self, "_version_shown", None)
         if shown is not None:
             self._show_version(*shown)
