@@ -188,9 +188,9 @@ class _FitLabel(QLabel):
         # the reviewer's pass: painting used to call `setToolTip` on every paint, unconditionally,
         # overwriting whichever of the two came first).
         self._owner_tip: Optional[str] = None
-        # So `paintEvent` can draw this label's own QSS box (`.d-tab`'s border-radius and padding,
-        # `.d-tab.on`'s fill, `.cmp-other`'s border) through the style -- needed only once it
-        # stops calling the native `QLabel.paintEvent`, which paints that box on its own.
+        # Qt draws this label's own QSS box (`.d-tab`'s border-radius and padding, `.d-tab.on`'s
+        # fill, `.cmp-other`'s border) through the style before `paintEvent`, which draws only
+        # the text: `paintEvent` never calls the native `QLabel.paintEvent`.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
@@ -315,13 +315,14 @@ class _FitLabel(QLabel):
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
         """Drawn by this label whole and elided alike, in `_text_rect`, the way QLabel draws its
-        own text: the style's box, then the text through `drawItemText` with the option's
-        palette, so a disabled chip's colour is the sheet's. One paint for both, so the fit and
-        the paint cannot disagree by an indent again."""
+        own text: through `drawItemText` with the option's palette, so a disabled chip's colour
+        is the sheet's. One paint for both, so the fit and the paint cannot disagree by an indent
+        again. The style's box is not drawn here: `WA_StyledBackground` has Qt draw it before
+        this runs, and a second `PE_Widget` doubled every "on" chip's translucent accent («Таблиця»
+        0x28231c -> 0x3e3120, the re-review of the CI fix)."""
         option = QStyleOption()
         option.initFrom(self)
         painter = QStylePainter(self)
-        painter.drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option)
         painter.setFont(self.font())
         painter.drawItemText(self._text_rect(), int(self.alignment()), option.palette,
                              self.isEnabled(), self.fit_text(), self.foregroundRole())

@@ -1237,7 +1237,7 @@ def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monke
     where the label draws its own text. Each chip is grabbed at the half: its ink is the text
     `fit_text` names, present and ending where that text ends; and where the head has the room
     for its whole ask -- English at the Mac's font -- every chip is whole."""
-    from tests.test_detail_pane import _paints_what_it_says
+    from tests.test_detail_pane import _not_the_mac_font, _paints_what_it_says
 
     window = _control_window(tmp_path, monkeypatch, lang)
     try:
@@ -1263,15 +1263,19 @@ def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monke
             layout.leave()
             pytest.skip(f"in {lang} the fit's rule held for every chip; the ink is not checked: "
                         f"{', '.join(sorted(fontless))}")
-        # Whole where the head has the room for its ask -- English at the Mac's font does, by
-        # one pixel (734 for an ask of 733), once the hint asks only what the paint needs. A
-        # font whose ask is wider than the row (Ukrainian, or the runner's twice-as-wide text)
-        # says so: the paint above is checked either way.
+        # Whole in English at the Mac's font: the head has the room for its ask, by three
+        # pixels (734 for an ask of 731), once the hint asks only what the paint needs. Gated
+        # on the font and the language, never on the ask -- gated on the ask, round 2's hint put
+        # back (757) skipped this instead of failing it. Ukrainian asks more than the half has
+        # by design (787), and another font's widths are its own: the paint above is checked.
         ask, room = eq.head_asks()[0], eq._head.width()
-        if room < ask:
+        not_here = _not_the_mac_font() or (
+            "" if lang == "en" else f"in {lang} the head asks more than the half has, by design")
+        if not_here:
             layout.leave()
-            pytest.skip(f"in {lang} in this font the EQ head asks {ask} px of the {room} it has "
-                        f"at the half: the chips elide, and the paint above is what is checked")
+            pytest.skip(f"the chips' whole-check ({ask} px asked of {room}): {not_here}; the "
+                        f"paint above is what is checked")
+        assert ask <= room, f"at the Mac's font the EQ head asks {ask} px of the {room} it has"
         assert all(chip.fit_text() == chip.text() for chip in chips), \
             [(c.text(), c.fit_text()) for c in chips]
         layout.leave()

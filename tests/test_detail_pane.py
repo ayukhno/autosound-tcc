@@ -1788,6 +1788,34 @@ def _no_real_font(font) -> str:
     return ""
 
 
+#: The Mac's offscreen font, as the font itself measures: its family, and the advance of a head's
+#: words at the head's 11 px. The numbers the head's guards pin were measured in it.
+_MAC_FONT_TEXT = "Таблиця-О ⇅ Copy EQ"
+_MAC_FONT = (".AppleSystemUIFont", 127.61)
+
+
+def _not_the_mac_font() -> str:
+    """"" where the app's font is the Mac's offscreen one the head's numbers were pinned in, or
+    why not: an engine without real fonts, another family, or a stretch (the reviewer's wide
+    emulation). Fingerprinted by what the font measures, never by a number the product works
+    out -- the re-review of the CI fix: gated on the head's ask, the guards skipped themselves
+    on the very regression they exist for (round 2's hint put back: ask 757 > room 734, and
+    the zoom pins' reference 513 -> 565)."""
+    from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF
+
+    font = QFont(QApplication.font())
+    fontless = _no_real_font(font)
+    if fontless:
+        return fontless
+    font.setPixelSize(11)
+    family = QFontInfo(font).family()
+    advance = QFontMetricsF(font).horizontalAdvance(_MAC_FONT_TEXT)
+    if family != _MAC_FONT[0] or abs(advance - _MAC_FONT[1]) > 0.05:
+        return (f"not the Mac's offscreen font: {family!r}, «{_MAC_FONT_TEXT}» {advance:.2f} px "
+                f"at 11 px, where the Mac's is {_MAC_FONT[0]!r}, {_MAC_FONT[1]} px")
+    return ""
+
+
 def _paints_what_it_says(widget) -> str:
     """The label's ink is the text `fit_text` names -- present, ending where that text's advance
     ends (a glyph's side bearing of slack), inside the room -- so nothing is drawn cut and
@@ -1866,6 +1894,49 @@ def test_the_head_paints_what_its_fit_says(tmp_path, monkeypatch):
     if fontless:
         pytest.skip(f"the fit's rule held for every label; the ink is not checked: "
                     f"{', '.join(sorted(fontless))}")
+
+
+def test_an_on_chip_s_fill_is_drawn_once():
+    """The re-review of the CI fix (IMPORTANT, seen on the Arbiter's screen size): `_FitLabel`
+    has `WA_StyledBackground`, so Qt draws its QSS box before `paintEvent` -- and round 3's
+    paint drew `PE_Widget` again, for every label now and not only the elided ones. Every "on"
+    chip -- the active tab, «← Table-O», «⇄ L + R» and «⇅» on -- laid its translucent accent
+    twice: «Таблиця» 0x28231c at 467c655, 0x3e3120 after (about 12 % of the accent, then 22 %).
+    The chip's box -- its border and its fill, left of the text -- is a plain QLabel's of the
+    same class, in the same sheet, on the same ground. No font in it: the pixels compared are
+    the box's, so it holds on the runner's fontless engine too."""
+    from autosound_tcc.ui.tcc import theme
+    from autosound_tcc.ui.tcc.detail_pane import _DTab
+
+    _app()
+    host = QWidget()
+    host.setStyleSheet(theme.build_qss(theme.get_theme("dark")))
+    chip = _DTab("Таблиця")
+    chip.setParent(host)
+    chip.set_on(True)
+    plain = QLabel("Таблиця", host)
+    plain.setProperty("class", "d-tab on")
+    for row, label in enumerate((chip, plain)):
+        label.setGeometry(10, 10 + 40 * row, 90, 24)
+    host.resize(120, 90)
+    host.show()
+    try:
+        for _ in range(3):
+            QApplication.processEvents()
+        image = host.grab().toImage()
+
+        def box(label) -> list:
+            # Left of the text: the border (x 0) and the padding's fill (x 1-8), mid-height.
+            g = label.geometry()
+            return [image.pixelColor(g.left() + x, g.center().y()).name() for x in range(9)]
+
+        ground = image.pixelColor(2, 2).name()
+        assert box(plain)[4] != ground, "the sheet gives an on chip a fill of its own"
+        assert box(chip) == box(plain), (
+            f"the on chip's box is {box(chip)}, a plain label's of its class {box(plain)}: "
+            f"a fill drawn twice is twice as strong")
+    finally:
+        host.close()
 
 
 def test_the_list_s_floor_keeps_the_version_whole_before_a_saved_name():
@@ -1963,8 +2034,9 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
     and a stretch of 110 -- all over the floor. With the hint, the fit and the paint one rule
     (`_FitLabel._text_rect`) they are 546 / 563 / 579 / 562, all inside it, and pinned here so
     a regression past 586 -- or a fix that brings them lower -- is visible. The numbers are the
-    Mac's offscreen font's: measured first at the default zoom (513); another font says what it
-    measured and skips."""
+    Mac's offscreen font's (513 at the default zoom, pinned too): on that font they are asserted;
+    another font -- `_not_the_mac_font`, by what the font measures -- says what it measured and
+    skips."""
     from PySide6.QtCore import QRect
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QApplication
@@ -1975,6 +2047,9 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
     kind, value, pinned = _EQ_HEAD_LEAST_AT[case]
     app = _app()
     before = QFont(app.font())
+    # The font decides whether the pins apply -- measured before the zoom or the stretch, and
+    # never by the minimum they pin.
+    not_mac = _not_the_mac_font()
     window = tcl._window(tmp_path, monkeypatch)
     i18n.set_language("uk")
     try:
@@ -1997,10 +2072,12 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
         window._fit_centre_floor()
         least = pane.head_asks()[-1]
         floor = window._center.minimumWidth() - (pane.width() - pane._head.width())
-        if reference != _EQ_HEAD_LEAST_MAC:
-            pytest.skip(f"not the Mac's offscreen font (the default minimum is {reference}, "
-                        f"not {_EQ_HEAD_LEAST_MAC}): at {kind} {value} the EQ head's minimum "
-                        f"is {least} against the floor {floor}")
+        if not_mac:
+            pytest.skip(f"{not_mac}: at {kind} {value} the EQ head's minimum is {least} (at the "
+                        f"default {reference}) against the floor {floor}")
+        assert reference == _EQ_HEAD_LEAST_MAC, (
+            f"at the default the EQ head's minimum is {reference} px, pinned at "
+            f"{_EQ_HEAD_LEAST_MAC}: a regression or a fix -- re-pin it")
         assert least == pinned, (
             f"at {kind} {value} the EQ head's minimum is {least} px, pinned at {pinned} "
             f"(the floor {floor}): a regression or a fix -- re-pin it")
