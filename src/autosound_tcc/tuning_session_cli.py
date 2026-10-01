@@ -23,7 +23,14 @@ import sys
 from pathlib import Path
 
 from autosound_tcc.core import config
-from autosound_tcc.core.agent_events import AgentEvent, Question, TextDelta, ToolCall, TurnEnd
+from autosound_tcc.core.agent_events import (
+    AgentEvent,
+    Question,
+    TextDelta,
+    ToolCall,
+    TurnEnd,
+    Unasked,
+)
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.tuning_session import TuningSession
 
@@ -42,6 +49,8 @@ def _render(event: AgentEvent) -> None:
     elif isinstance(event, Question):
         options = " / ".join(o.label for o in event.options)
         print(f"\n  ? {event.question}{f' [{options}]' if options else ''}", flush=True)
+    elif isinstance(event, Unasked):
+        print(f"\n  ! let through without asking: {event.command}", flush=True)
     elif isinstance(event, TurnEnd):
         print("\n[turn done]\n", flush=True)
 

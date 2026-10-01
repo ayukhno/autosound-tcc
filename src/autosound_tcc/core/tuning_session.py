@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Sequence
 
@@ -335,7 +335,8 @@ _FETCHERS = frozenset({"curl", "wget", "fetch"})
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 #: Interpreters whose program is NOT read: `python3 -c` passes as it always did. What they must not
 #: run is a program that is another command's output — `python3 -c "$(curl …)"` is `curl … | python3`.
-_INTERPRETERS = frozenset({"python", "python3", "ruby", "perl", "node"})
+_INTERPRETERS = frozenset({"python", "python3", "pypy", "pypy3", "ruby", "perl", "node", "php",
+                           "osascript", "Rscript", "lua"})
 
 
 def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
@@ -427,6 +428,9 @@ _WRAPPERS = frozenset({"env", "command", "builtin", "exec", "nohup", "nice", "ti
 #: Redirections that write a file. `>&` only when what follows is a file, not a descriptor.
 _WRITE_REDIRECTS = frozenset({">", ">>", ">|", ">!", ">>!", "&>", "&>>", "&>|", "&>!", "<>", ">&"})
 #: Longest first, so `<<<` is not read as `<<` and a `<`.
+#: Where a write is not a file written: a stream thrown away or shown. `2>/dev/null` is on most lines
+#: an agent writes, and asking about it is finding 123 over again (review of tcc#115).
+_STREAM_DEVICES = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
 _REDIRECT_OPERATORS = ("&>>", "&>|", "&>!", "&>", "<<<", "<<-", "<<", "<>", "<&", ">>!", ">>",
                        ">|", ">!", ">&", "<", ">")
 _PARAM_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]")
@@ -957,6 +961,8 @@ def _command_is_dangerous(command: _Command, tainted: set[str], depth: int) -> b
             continue
         if operator == ">&" and (target.text == "-" or _FD.fullmatch(target.text)):
             continue  # `2>&1`: a stream moved, not a file written
+        if target.text in _STREAM_DEVICES and not target.dynamic:
+            continue
         # Somebody else's system file, or a name another command printed. `> /etc/hosts` is not a
         # chain and not a recursive delete, so nothing else catches it, and it is the quiet kind.
         if _runs(target, tainted) or target.text.startswith(_PROTECTED_ROOTS):
@@ -988,15 +994,24 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name in _RUINOUS or name.startswith(_RUINOUS_PREFIXES):
         return True
     if name in ("source", "."):
-        # It runs a file the line names — unless the line does not name it: `. <(curl …)`.
+        # It runs a file the line names — unless the line does not name it: `. <(curl …)`, or
+        # names stdin, where what runs is the heredoc or the pipe.
+        if arguments and _is_stdin_path(arguments[0].text):
+            return _stdin_script_is_dangerous(command, tainted, depth)
         return any(argument.dynamic or _runs(argument, tainted) for argument in arguments)
     if name in ("trap", "alias"):
         return _code_arguments_are_dangerous(name, arguments, depth)
     if name in _WRAPPERS:
         # Each tail once, and a wrapper met in a tail is not unwrapped again: the outer loop already
         # covers the tails after it, and `env env env … rm` must not cost 2ⁿ.
-        return unwrap and any(_words_are_dangerous(words[at:], command, tainted, depth, unwrap=False)
-                              for at in range(1, len(words)))
+        tails = [words[at:] for at in range(1, len(words))]
+        if name == "xargs":
+            # xargs fills the tail's arguments from stdin, with `-I{}` or without: `{}` and `X` are
+            # placeholders, and `rm -rf build` gets more targets than it spells (review of tcc#115).
+            tails = [[tail[0], *(replace(word, dynamic=True) for word in tail[1:])]
+                     for tail in tails]
+        return unwrap and any(_words_are_dangerous(tail, command, tainted, depth, unwrap=False)
+                              for tail in tails)
     if name in _SHELLS:
         return _shell_is_dangerous(arguments, command, tainted, depth)
     if name in _INTERPRETERS or name.startswith("python"):
@@ -1094,9 +1109,18 @@ def _shell_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[
         if not operands or operands[0].dynamic:
             return True  # the script is not written on the line
         return _script_is_dangerous(operands[0].text, depth + 1)
-    if operands and not from_stdin and operands[0].text != "-":
+    if operands and not from_stdin and not _is_stdin_path(operands[0].text):
         return False  # a script file: not read here, as before tcc#115
-    # The script comes in on stdin: a pipe, a heredoc, a here-string, a redirect.
+    return _stdin_script_is_dangerous(command, tainted, depth)
+
+
+def _is_stdin_path(text: str) -> bool:
+    """A file name that IS the command's input: `bash /dev/stdin <<'EOF'` runs the heredoc."""
+    return text in ("-", "/dev/stdin") or text.startswith(("/dev/fd/", "/proc/self/fd/"))
+
+
+def _stdin_script_is_dangerous(command: _Command, tainted: set[str], depth: int) -> bool:
+    """A script that comes in on stdin: a pipe, a heredoc, a here-string, a redirect."""
     if command.piped:
         return True
     for body in command.stdin:
@@ -1112,15 +1136,19 @@ def _interpreter_is_dangerous(arguments: list[_Word], command: _Command,
     at = 0
     while at < len(arguments):
         text = arguments[at].text
+        if text in ("-W", "-X"):
+            at += 2  # python's warning and implementation options take a value
+            continue
+        # `-c` python, `-e`/`-E` perl, ruby, node, osascript, Rscript, lua, `-p` node, `-r` php.
         code_flag = text in ("--eval", "--print") or (
-            len(text) > 1 and text[0] == "-" and text[1] != "-" and text[-1] in "ceEp")
+            len(text) > 1 and text[0] == "-" and text[1] != "-" and text[-1] in "ceEpr")
         if code_flag or text == "-m":
             follows = arguments[at + 1] if at + 1 < len(arguments) else None
             return follows is not None and _runs(follows, tainted)
-        if text == "-" or not text.startswith("-"):
-            if text != "-":
-                return _runs(arguments[at], tainted)  # the script: `python3 <(curl …)`
+        if _is_stdin_path(text):
             break
+        if not text.startswith("-"):
+            return _runs(arguments[at], tainted)  # the script: `python3 <(curl …)`
         at += 1
     # The program comes in on stdin: `curl … | python3`, or a heredoc with a `$( … )` in it.
     if command.piped:

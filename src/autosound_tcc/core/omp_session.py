@@ -631,10 +631,17 @@ class OmpSession:
         writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
         it can overwrite is a measurement or a ledger.
         """
-        if self.gate in (GATE_AUTO, GATE_NEVER):
+        if self.gate == GATE_NEVER:
             return True
         if tool in self.always_allowed:
-            return True
+            return True  # a remembered tick outranks the `auto` guard below, as on the SDK side
+        if self.gate == GATE_AUTO:
+            # "Don't ask" never meant "don't look" (HUB-028). This returned True before any look,
+            # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
+            # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
+            command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
+            return not (tool == "bash"
+                        and bash_is_dangerous(command, _read_roots_for(self.project_dir)))
         if tool in _ALWAYS_GATED_TOOLS:
             return False
         if tool.startswith("mcp__tcc"):

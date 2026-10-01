@@ -703,6 +703,36 @@ def test_the_harness_offers_no_plan_of_its_own(tmp_path):
     assert {"read", "glob", "grep", "bash", "write", "edit", "ask"} <= set(enabled)
 
 
+def test_auto_mode_on_omp_still_asks_about_what_cannot_be_undone(tmp_path):
+    """`auto` was Allow before any look on omp, so a delete passed silently on a Gemini session
+    while the menu's tooltip — and the SDK side — said it would ask (review of #115). The same
+    narrow check now runs here; an ordinary command stays silent (the test below)."""
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_AUTO)
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({**PERMISSION_FRAME, "id": "f1",
+                               "title": "Allow tool: bash\nCommand: rm -rf ~/"}))
+    asyncio.run(session._gate({**PERMISSION_FRAME, "id": "f2",
+                               "title": "Allow tool: bash\nCommand: ls -la"}))
+
+    assert [request.detail for request in session.bridge.requests] == ["Command: rm -rf ~/"]
+    assert [frame["value"] for frame in session.sent] == ["Deny", "Approve"]
+
+
+def test_a_remembered_tool_outranks_the_auto_guard_on_omp_as_on_the_sdk_side(tmp_path):
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_AUTO, always_allowed=frozenset({"bash"}))
+    session.sent = []
+    session._send = session.sent.append
+
+    asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: bash\nCommand: rm -rf ~/"}))
+
+    assert session.bridge.requests == []
+    assert session.sent[0]["value"] == "Approve"
+
+
 def test_auto_mode_stops_asking_about_the_harness(tmp_path):
     """The Arbiter's own choice: shell and file traffic runs without a dialog. Narrower than it
     sounds — TCC's tools raise their confirmations inside the tool, so a DSP or REW write still
