@@ -3134,3 +3134,16 @@ tabs) elides where it should not on Windows metrics — the same family as the C
 **Weight.** Medium: a regression of W-4's own work, seen at full screen.
 
 **Task.** tcc#96, fix round 5 on `wave-0.1.45`, before the release.
+
+### 120. The installer does not check TCC's signature: it says so for the method, nothing for the app
+
+**What.** The Arbiter, 2026-10-01, the Mac, the install line over v0.1.44 (hand check of v0.1.45): the app's block
+printed `version v0.1.45` and `✓ installed`, and nothing about a signature. «а чому він не пише що поставив
+підписаний тег ТСС? на скілу так писав». Read, not diagnosed: `skill/install.sh` verifies only the method's tag
+(`SKILL_SIGNED_FROM`, «✓ … is signed by the skill's author»); the app goes in by `uv tool install … @<tag>` with no
+`verify-tag`. TCC's tag is checked only by TCC's own «Оновити ТСС», from v0.1.45. Same in `install.ps1` as far as
+a grep shows. So a fresh install or an update by the install line takes an unchecked TCC tag.
+
+**Weight.** Medium: the release is signed, and the first install — the one path a new user takes — does not look.
+
+**Task.** The installer is the skill's code: a ticket to:skill at the review between waves.
