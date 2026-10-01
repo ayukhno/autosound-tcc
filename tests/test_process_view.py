@@ -421,3 +421,34 @@ def test_a_step_carries_the_facts_it_covers(project, process):
 
     assert steps["-1.2"].covers == tuple(covers)
     assert steps["-1.3"].covers == ()
+
+
+# ---- a close taken back (skill #107, hub #227) --------------------------------------------------
+
+
+def test_a_close_taken_back_reads_as_an_open_session(project, process):
+    """hub #227: a session reconciling state ran `session-close` to look, and it wrote the close.
+    The method's `session-reopen <reason>` takes it back without erasing it: a `session_reopened`
+    after the last `session_closed` means the session is open again — and a close after that is a
+    close again. Read through the method's own reader, the one place it reads the close."""
+    module = vendor_loader.load_process()
+
+    process.record_session("sdk", "claude-opus-5")
+    assert process_view.session_closed(project) is False
+    process._append(module.EV_SESSION_CLOSED)  # what `session-close` writes on a clean stop
+    assert process_view.session_closed(project) is True
+    process.reopen_session("session-close was run as a check")
+    assert process_view.session_closed(project) is False
+    process._append(module.EV_SESSION_CLOSED)
+    assert process_view.session_closed(project) is True
+
+
+def test_no_journal_or_no_reader_has_no_opinion(project, process, monkeypatch, tmp_path):
+    """None, not False: with no journal, or a method older than v3.0.65 (no reopening, no reader),
+    the journal says nothing either way and the caller keeps what it knew."""
+    module = vendor_loader.load_process()
+
+    assert process_view.session_closed(tmp_path / "elsewhere") is None
+    process._append(module.EV_SESSION_CLOSED)
+    monkeypatch.delattr(module.Process, "session_closed")
+    assert process_view.session_closed(project) is None

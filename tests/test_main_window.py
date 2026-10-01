@@ -5082,6 +5082,44 @@ def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, 
     assert asked == [True], "closed and nothing written since: nothing to ask"
 
 
+def test_a_close_the_method_took_back_is_asked_about_on_quit(monkeypatch, tmp_path):
+    """hub #227 (skill #107): `session-reopen` takes a close back. The session runs it as a shell
+    command, past TCC's tools, so nothing tells the window — only the journal says it: a
+    `session_reopened` after the last `session_closed` means the session is open again, and a
+    quit asks to save as it would have before the close."""
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    class _Worker:
+        def shutdown(self) -> None:
+            pass
+
+    window._agent_worker = _Worker()
+    asked: list[bool] = []
+    monkeypatch.setattr(window, "_ask_save_before_quit",
+                        lambda: (asked.append(True), QMessageBox.StandardButton.Cancel)[1])
+    journal = tmp_path / "process" / "journal.jsonl"
+    journal.parent.mkdir(parents=True)
+
+    def _written(*kinds):
+        journal.write_text("".join(json.dumps({"at": "2026-10-01T18:00:00+00:00", "type": k}) + "\n"
+                                   for k in kinds), encoding="utf-8")
+
+    window._bridge.session_closed()
+    _written("session_started", "session_closed", "session_reopened")
+    window.closeEvent(QCloseEvent())
+    assert asked == [True], "the close was taken back: the session is open again"
+
+    _written("session_started", "session_closed", "session_reopened", "session_closed")
+    window.closeEvent(QCloseEvent())
+    assert asked == [True], "closed again after the reopening: nothing to ask"
+
+
 def test_a_window_left_behind_by_a_test_writes_nothing_into_the_next_test_s_folder(
         tmp_path, monkeypatch):
     """TODO F-053: a window left alive by one test resolved the next test's folder through `config`

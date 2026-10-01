@@ -4827,6 +4827,23 @@ class MainWindow(QMainWindow):
         if tick is not None:
             tick.stop()
 
+    def _closed_in_order(self) -> bool:
+        """The session closed itself, and nothing since says it is open again (TEST-FINDINGS 26).
+
+        `session_close` marks it (`sessionClosed`) and a write through TCC's tools takes the mark
+        back (`sessionChanged`). So does the method's `session-reopen` (skill #107, hub #227) — but
+        a session runs that as a shell command, past TCC's tools, and only the journal sees it: a
+        `session_reopened` after the last `session_closed` means the session is open again. A
+        journal with no opinion (None) leaves the mark as it is.
+        """
+        if not getattr(self, "_session_saved", False):
+            return False
+        try:
+            closed = process_view.session_closed(config.project_dir())
+        except Exception:  # noqa: BLE001 — an unreadable journal says nothing either way
+            closed = None
+        return closed is not False
+
     def _record_session_stop(self) -> None:
         """Write `session_closed` — once per session, on the way out (SKL-029, #126).
 
@@ -5831,7 +5848,7 @@ class MainWindow(QMainWindow):
         # Not asked when the session closed itself in order and wrote nothing after (TEST-FINDINGS
         # 26): "Save the turn" would spend a turn saving nothing.
         if (worker is not None and not getattr(self, "_quitting", False)
-                and not getattr(self, "_session_saved", False)):
+                and not self._closed_in_order()):
             answer = self._ask_save_before_quit()
             if answer == QMessageBox.StandardButton.Cancel:
                 event.ignore()

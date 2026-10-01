@@ -310,6 +310,24 @@ def reviewer(state: dict) -> Optional[dict]:
     return state.get("reviewer")
 
 
+def session_closed(project_dir: Optional[Path] = None) -> Optional[bool]:
+    """Is the session closed, as the journal has it? None when the journal cannot say.
+
+    True when its last session event is `session_closed`. A close can be taken back since the
+    method's v3.0.65: `session-reopen <reason>` appends `session_reopened` after it, the close
+    staying in the journal (skill #107, hub #227) — and a reopening after the last close means
+    the session is open again. Read through the method's own `Process.session_closed`, the one
+    place it reads the close, so the rule is not kept twice. None with no journal, and with a
+    method older than that reader: it has no reopening, so the journal adds nothing to what the
+    caller already knows.
+    """
+    process = _process_module()
+    if process is None or not journal_file(project_dir).is_file():
+        return None
+    reader = getattr(process.Process(str(process_dir(project_dir))), "session_closed", None)
+    return bool(reader()) if callable(reader) else None
+
+
 # ---- what a config change invalidated (SCR-014) -----------------------------
 
 
