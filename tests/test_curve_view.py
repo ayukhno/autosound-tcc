@@ -3387,9 +3387,10 @@ def test_the_delay_radios_can_be_counted_at_a_glance():
     for mode in ("dark", "light"):
         theme = get_theme(mode)
         qss = build_qss(theme)
-        ring = qss.split('QRadioButton[class~="delay-radio"]::indicator')[1].split("}")[0]
+        # Every radio's rule since VM-11 (the feedback window's had none), these included.
+        ring = qss.split("QRadioButton::indicator {")[1].split("}")[0]
         assert f"border: 2px solid {theme.muted}" in ring, f"{mode}: an unselected ring to count"
-        checked = qss.split('QRadioButton[class~="delay-radio"]::indicator:checked')[1]
+        checked = qss.split("QRadioButton::indicator:checked")[1]
         assert theme.accent in checked.split("}")[0], f"{mode}: and the chosen one still fills"
     # The NAME keeps its trace's colour, which is how a radio is matched to a curve without words.
     assert colour_of(trace_token(1)).name() in view._target_buttons[1].styleSheet()

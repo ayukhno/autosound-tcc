@@ -10,6 +10,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog  # noqa: E402
@@ -554,3 +555,46 @@ def test_the_github_route_opens_the_link_its_caller_builds(monkeypatch):
     dialog._on_send()
 
     assert opened == [f"{_GITHUB}?what=froze"]
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_an_unchosen_radio_shows_its_ring_in_either_theme(monkeypatch, mode):
+    """VM-11 (the Windows VM): in the dark theme an unselected radio here was a dark ring on the
+    dark panel — not there at all. Drawn under the sheet the window applies, an unchosen radio is
+    a ring in `muted` around `panel3`, the ring at 3:1 or more on the window's own colour (WCAG's
+    floor for a control's outline), and the chosen one is the accent's disc: the rule the curve
+    window's radios already had, now every radio's."""
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QStyle, QStyleOptionButton
+
+    from tests import _windows
+    from tests.test_theme import _contrast
+
+    app = _app()
+    dialog = FeedbackDialog("https://github.com/example/repo/issues/new",
+                            "https://docs.google.com/forms/d/e/x/formResponse")
+    palette = _windows.theme_on(monkeypatch, dialog, mode)
+    dialog.show()
+    try:
+        app.processEvents()
+        drawn = dialog.grab().toImage()
+
+        def indicator(radio):
+            option = QStyleOptionButton()
+            option.initFrom(radio)
+            box = radio.style().subElementRect(QStyle.SubElement.SE_RadioButtonIndicator, option,
+                                               radio)
+            corner = radio.mapTo(dialog, box.topLeft())
+            middle = corner.y() + box.height() // 2
+            return (QColor(drawn.pixel(corner.x() + 1, middle)).name(),
+                    QColor(drawn.pixel(corner.x() + box.width() // 2, middle)).name())
+
+        assert dialog._radio_form.isChecked() and not dialog._radio_github.isChecked()
+        ring, inside = indicator(dialog._radio_github)
+        said = f"{mode}: ring {ring}, inside {inside}, on {palette.panel}"
+        assert inside == palette.panel3, said
+        assert _contrast(ring, palette.panel) >= 3, said
+        _ring, chosen = indicator(dialog._radio_form)
+        assert chosen == palette.accent, f"{mode}: the chosen radio is {chosen}"
+    finally:
+        dialog.close()

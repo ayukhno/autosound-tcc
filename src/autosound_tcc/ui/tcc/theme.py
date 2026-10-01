@@ -656,15 +656,28 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('accent', 26, 'panel3')};
         color: {t.accent};
     }}
-    /* .delay-radio — the curve window's "which driver is being delayed" radios, one per trace.
+    /* Every radio's indicator — one rule, so no radio is left to the native style.
 
     An unstyled radio indicator is drawn by the native style: a dark circle on this dark ground,
-    which is why a row of THREE read as one bright control and two smudges and the user counted two
-    (2026-08-18: "сорі, я не побачив що їх вже три"). The unselected state gets a ring in `muted`
-    — the same token the axis labels use, so it is legible in both palettes without being loud —
-    and the selected one keeps the accent FILL, so "here are your curves" and "this is the one you
-    are editing" stay two different statements.
-
+    which is why a row of THREE delay radios read as one bright control and two smudges and the
+    user counted two (2026-08-18: "сорі, я не побачив що їх вже три"), and why the feedback
+    window's unselected radios were not there at all on Windows (VM-11), the rule having been the
+    curve window's alone. The unselected state gets a ring in `muted` — the same token the axis
+    labels use, so it is legible in both palettes without being loud — and the selected one the
+    accent FILL, so "here are your choices" and "this is the one picked" stay two statements. */
+    QRadioButton::indicator {{
+        width: 11px;
+        height: 11px;
+        /* Under half the rendered 15px (11 + 2px border either side), or Qt treats the radius as
+        invalid and draws a square — the same rule `.edit-chip` records. */
+        border-radius: 7px;
+        border: 2px solid {t.muted};
+        background: {t.panel3};
+    }}
+    QRadioButton::indicator:hover {{
+        border-color: {t.accent_dim};
+    }}
+    /* .delay-radio — the curve window's "which driver is being delayed" radios, one per trace.
     The label is normal control type rather than the faint 11 px `.phead-sub` it wore; its COLOUR
     is written per widget from the trace's own pen (`curve_view.set_traces`), which is why no
     `color` is set here. */
@@ -674,18 +687,6 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         spacing: 5px;
         padding: 0 3px;
         background: transparent;
-    }}
-    QRadioButton[class~="delay-radio"]::indicator {{
-        width: 11px;
-        height: 11px;
-        /* Under half the rendered 15px (11 + 2px border either side), or Qt treats the radius as
-        invalid and draws a square — the same rule `.edit-chip` records. */
-        border-radius: 7px;
-        border: 2px solid {t.muted};
-        background: {t.panel3};
-    }}
-    QRadioButton[class~="delay-radio"]::indicator:hover {{
-        border-color: {t.accent_dim};
     }}
     /* .check-list — a list of check boxes (the omp models, finding 75, tcc#70): the native box drew
     nothing when empty in the dark theme and sat over the text in the light one. */
@@ -709,7 +710,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-color: {t.accent};
         background: {t.accent};
     }}
-    QRadioButton[class~="delay-radio"]::indicator:checked {{
+    QRadioButton::indicator:checked {{
         border: 2px solid {t.accent};
         background: {t.accent};
     }}

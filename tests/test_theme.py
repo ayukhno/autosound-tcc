@@ -432,3 +432,28 @@ def test_every_orange_button_says_its_words_in_white_that_reads_in_both_themes()
             said = f"{name}: {button} is filled orange in {states} — idle, hover and pressed"
             assert any(s.endswith(f'"{button}"]') for s in states), said
             assert all(any(state in s for s in states) for state in (":hover", ":pressed")), said
+
+
+def test_every_radio_wears_one_ring_that_reads_in_both_themes():
+    """VM-11: the feedback window's unselected radios were a dark ring on the dark panel, while
+    the curve window's had a ring of their own (`.delay-radio`). One rule now draws every radio's
+    indicator — no class keeps a ring to itself — and its ring holds 3:1 or more (WCAG's floor for
+    a control's outline) on every surface a radio sits on, in both themes."""
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        rules = _rules(theme.build_qss(palette))
+        rings = [(selector, body) for selector, body in rules
+                 if "QRadioButton" in selector and "::indicator" in selector]
+        assert rings, f"{name}: no radio indicator rule at all"
+        assert all(selector.startswith("QRadioButton::indicator") for selector, _ in rings), (
+            f"{name}: a class with a radio ring of its own: {[s for s, _ in rings]}")
+        body = dict(rings)["QRadioButton::indicator"]
+        ring = _hex(re.search(r"border:\s*\d+px solid ([^;]+);", body).group(1))
+        for surface in ("panel", "panel2", "panel3", "ground"):
+            ground = palette.tokens[surface]
+            assert _contrast(ring, ground) >= 3, (
+                f"{name}: the ring {ring} is {_contrast(ring, ground):.2f}:1 on {surface} {ground}")
