@@ -3147,3 +3147,22 @@ a grep shows. So a fresh install or an update by the install line takes an unche
 **Weight.** Medium: the release is signed, and the first install — the one path a new user takes — does not look.
 
 **Task.** The installer is the skill's code: a ticket to:skill at the review between waves.
+
+### 121. The taskbar pin (#92): TCC's stamp plus a shell notify makes a desktop pin one button
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, v0.1.45, the hand check of `docs/RESEARCH-W-4-taskbar-pin.md` §4:
+- step 1: Start knows the id — `Autosound TCC` · `AppID : dev.autosound.tcc` (the two «(Mac)» rows are Parallels'
+  shared Mac apps); step 5 not needed;
+- steps 2–3: a fresh pin from the Desktop shortcut carries no id — `Autosound TCC =` (as on 27.09);
+- step 4: `_stamp_windows` on the pinned `.lnk` plus `SHChangeNotify(SHCNE_UPDATEITEM, …)` — step 3 then reads
+  `Autosound TCC = dev.autosound.tcc`; TCC started from the pin is **one button** («перемога! одна»,
+  screenshot: one «Tuning Command Center» button beside `claude`). TCC's own console showed as a second button at
+  the start and went away — the console kept by design (finding 104).
+
+**Weight.** Low: two buttons, both work; the hint («pin it from its running window») stands meanwhile.
+
+**Task.** The lever is found (§4 «Step 4 gives one button»): TCC repairs its own pins after the window is shown —
+the `.lnk` files in `User Pinned\TaskBar` and `User Pinned\ImplicitAppShortcuts\*` that start TCC's launcher and
+lack the id get the stamp and the notify; a byte search, no spawn on an ordinary start; ~30 lines and tests.
+Expected when checked: the first start from a fresh desktop pin is still two buttons, one from the next start.
+Pool for the next wave; tcc#92 (closed with W-4) carries the research.

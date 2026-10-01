@@ -144,6 +144,10 @@ shortcut's target is.
   (below).
 - Step 5 also gives two buttons → no lever: #92 closes.
 
+**Result, 2026-10-01 (the Arbiter, VM, v0.1.45):** step 1 showed `dev.autosound.tcc`; step 3 after a fresh
+Desktop pin showed no id; step 4 put the id on the pin, and TCC started from it was **one button**. The lever is
+found — the first case below (`TEST-FINDINGS.md` 121).
+
 **What each outcome unlocks:**
 
 - **Step 4 gives one button.** TCC repairs its own pins. On Windows, after the window is shown, it looks
