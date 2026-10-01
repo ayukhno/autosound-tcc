@@ -296,14 +296,15 @@ full window back. Both borders can be dragged, and TCC remembers where you left 
 - **Project**: open another project folder, start a new one, copy a car from another project, run
   the intake form, re-read the project from disk.
 - **Session and models**: start a session in TCC, open a terminal on the project, save what the
-  model knows to disk, start a fresh session, configure models, set the reviewer's key, ask about
-  something.
-- **Appearance**: theme, language, text size.
+  model knows to disk, start a fresh session.
 - **Tools**: diagnostics and updates, importing from a Resonalyze project, the
-  [target-curve tool](HOUSE-CURVE.md).
-- **Help and support**: **📖 Guides** opens a page of this guide on GitHub, at the version you
-  have installed: the [quick tour](QUICK-GUIDE.md), this full reference, or the
-  [target-curve page](HOUSE-CURVE.md). Then message the developer, and the support links.
+  [target-curve tool](HOUSE-CURVE.md). Last comes **⚙ Settings**, a submenu in bold: the field order
+  of the EQ card, configure models, the reviewer's key, what the session asks you about, the theme,
+  the language, and larger or smaller text.
+- **Help and support**: **📖 Guides**, a submenu in bold, opens a page of this guide on GitHub, at
+  the version you have installed: the quick guide ([the quick tour](QUICK-GUIDE.md)), the full
+  guide (this reference), or the target-curve guide ([the target-curve page](HOUSE-CURVE.md)).
+  Then message the developer, and the support links.
 
 ## Dialogs
 
