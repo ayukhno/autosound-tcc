@@ -3158,9 +3158,12 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     assert labels.index(i18n.t("menuTools").upper()) < actions.index(visible[-1])
 
 
-def test_the_guide_entry_opens_the_guide_at_the_installed_version(monkeypatch):
-    """Help → the user guide, on GitHub at this build's own tag (tcc #49, hub #202 SKL-053).
-    `docs/` is not in the installed package, so the menu opens the page rather than a file."""
+def test_the_guides_submenu_is_bold_and_opens_the_three_guides_at_the_installed_version(
+        monkeypatch):
+    """Help → «Посібники», a bold submenu holding the quick guide, the full one and the
+    target-curve page (the Arbiter, finding 134, tcc#120: «підменю (жирним), в середині квік-гайд,
+    фул-гайд і цільова крива гайд»). Each on GitHub at this build's own tag (tcc #49, hub #202
+    SKL-053): `docs/` is not in the installed package, so the menu opens the page, not a file."""
     from PySide6.QtGui import QDesktopServices
 
     from autosound_tcc.core import guide
@@ -3175,10 +3178,52 @@ def test_the_guide_entry_opens_the_guide_at_the_installed_version(monkeypatch):
 
     actions = window._menu_btn.menu().actions()
     help_at = next(i for i, a in enumerate(actions) if a.text() == i18n.t("menuHelp").upper())
-    entry = next(a for a in actions[help_at:] if i18n.t("menuGuide") in a.text())
-    entry.trigger()
+    guides = next(a.menu() for a in actions[help_at:]
+                  if a.menu() and i18n.t("menuGuides") in a.text())
+    assert guides.menuAction().font().bold()
+    inside = guides.actions()
+    assert [a.text() for a in inside] == [i18n.t(key) for key in
+                                          ("menuGuideQuick", "menuGuideFull", "menuGuideCurve")]
+    for action in inside:
+        action.trigger()
 
-    assert opened == ["https://example.invalid/v9.9.9/QUICK-GUIDE.md"]
+    assert opened == ["https://example.invalid/v9.9.9/QUICK-GUIDE.md",
+                      "https://example.invalid/v9.9.9/REFERENCE.md",
+                      "https://example.invalid/v9.9.9/HOUSE-CURVE.md"]
+
+
+def test_the_question_mark_after_the_target_curve_opens_the_methods_guide(monkeypatch):
+    """«пряме посилання … знак питання після посилання» (the Arbiter, finding 134, tcc#120): the
+    curve's name opens the tool, the «?» right after it the method's guide to target curves."""
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtTest import QTest
+
+    from autosound_tcc.core import guide
+
+    _app()
+    monkeypatch.setattr(guide, "method_target_guide_url",
+                        lambda: "https://example.invalid/v3.0.64/target_curves_guide.md")
+    opened: list[str] = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+
+    mark = window._target_guide_lbl
+    layout = window._target_label.parentWidget().layout()
+    assert layout.indexOf(mark) == layout.indexOf(window._target_label) + 1
+    assert mark.text() == "?"
+    assert mark.hover_tip.text() == i18n.t("targetGuideTip")
+
+    QTest.mouseClick(mark, Qt.MouseButton.LeftButton)
+    assert opened == ["https://example.invalid/v3.0.64/target_curves_guide.md"]
+
+    # The hint follows a language switch, as the curve's own does.
+    window._on_language_selected("uk")
+    try:
+        assert mark.hover_tip.text() == i18n.t("targetGuideTip")
+        assert mark.hover_tip.text() != i18n.T["en"]["targetGuideTip"]
+    finally:
+        window._on_language_selected("en")
 
 
 def test_the_main_menu_follows_a_language_switch():

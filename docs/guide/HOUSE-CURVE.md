@@ -18,7 +18,8 @@ SQ-Comp-Ref curve.
 ![The header: the target curve's name next to the preset](img/header.webp)
 
 The header shows the target curve of the preset you are looking at, under **Target curve**. It is
-the name the project has recorded; TCC does not choose it.
+the name the project has recorded; TCC does not choose it. The **?** after the name opens the
+method's target-curve guide.
 
 ## Opening it in the target-curve tool
 

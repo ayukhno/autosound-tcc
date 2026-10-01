@@ -953,6 +953,16 @@ class MainWindow(QMainWindow):
         self._target_tip = attach_tip(self._target_label, i18n.t("targetToolTip"))
         self._target_label.mousePressEvent = self._open_target_curve_tool  # type: ignore[assignment]
         layout.addWidget(self._target_label)
+        # «?» right after the curve's name (the Arbiter, finding 134, tcc#120: «знак питання після
+        # посилання»): the name opens the tool, this the method's guide to what a target curve is
+        # and how to choose one -- at the tag of the method this TCC runs.
+        self._target_guide_lbl = QLabel("?")
+        self._target_guide_lbl.setProperty("class", "kv-val kv-val-link")
+        self._target_guide_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._target_guide_tip = attach_tip(self._target_guide_lbl, i18n.t("targetGuideTip"))
+        self._target_guide_lbl.mousePressEvent = (  # type: ignore[assignment]
+            lambda _event: QDesktopServices.openUrl(QUrl(guide.method_target_guide_url())))
+        layout.addWidget(self._target_guide_lbl)
         layout.addStretch(1)
 
         # Always visible (not just in the no-project states). The project files and the ledger are
@@ -1234,12 +1244,24 @@ class MainWindow(QMainWindow):
 
         self._menu_section(menu, "menuHelp")
         # Online, at this build's own tag: `docs/` is not in the installed package, and a link to
-        # `main` would show the screens of another version (tcc #49, hub #202 SKL-053).
-        guide_action = menu.addAction("📖 " + i18n.t("menuGuide"))
-        guide_action.setToolTip(i18n.t("menuGuideTip"))
-        guide_action.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(guide.installed_guide_url()))
-        )
+        # `main` would show the screens of another version (tcc #49, hub #202 SKL-053). The three
+        # pages in one submenu, bold like «Налаштування» (the Arbiter, finding 134, tcc#120:
+        # «підменю (жирним), в середині квік-гайд, фул-гайд і цільова крива гайд»).
+        guides = self._tip_menu(menu)
+        guides.setTitle("📖 " + i18n.t("menuGuides"))
+        for label, tip, page in (("menuGuideQuick", "menuGuideQuickTip", guide.QUICK_GUIDE),
+                                 ("menuGuideFull", "menuGuideFullTip", guide.REFERENCE),
+                                 ("menuGuideCurve", "menuGuideCurveTip", guide.HOUSE_CURVE)):
+            action = guides.addAction(i18n.t(label))
+            action.setToolTip(i18n.t(tip))
+            action.triggered.connect(
+                lambda _c=False, p=page: QDesktopServices.openUrl(
+                    QUrl(guide.installed_guide_url(p)))
+            )
+        menu.addMenu(guides)
+        title_font = guides.menuAction().font()
+        title_font.setBold(True)
+        guides.menuAction().setFont(title_font)
         feedback_action = menu.addAction("💬 " + i18n.t("fbBig"))
         feedback_action.setToolTip(i18n.t("fbBigTip"))
         feedback_action.triggered.connect(self._open_feedback)
@@ -5930,6 +5952,7 @@ class MainWindow(QMainWindow):
         self._preset_field_lbl.setText(i18n.t("preset"))
         self._target_field_lbl.setText(i18n.t("target"))
         self._target_tip.set_text(i18n.t("targetToolTip"))
+        self._target_guide_tip.set_text(i18n.t("targetGuideTip"))
         self._sync_layout_button()
         self._control_layout.refresh()
         # The pane's words are in the new language now (its own listener ran first).
