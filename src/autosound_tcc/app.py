@@ -456,7 +456,19 @@ def main() -> int:
         # "left this alone, it is not mine" is for the person reading, not for the parser.
         for line in result.notes:
             print(line, file=sys.stderr)
-        return 0 if result.ok else 1
+        code = 0 if result.ok else 1
+        # Into the log as well, and the lines out to the caller NOW (tcc#124). On the Windows VM a
+        # run handed the installer a non-zero code and not one of these lines, and the next run of
+        # the same line was fine (hub #229). A pipe is block-buffered, so everything printed above
+        # was still waiting for the interpreter's shutdown; whatever ended that process took it
+        # along, and nothing left a trace of whether the shortcuts had been made.
+        flag = "--uninstall-desktop" if args.uninstall_desktop else "--install-desktop"
+        app_log.logger().info("%s: exit %d — %s", flag, code,
+                              app_log.brief(" | ".join(result.lines + result.notes)))
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:  # `pythonw.exe` handed no handle has no stream at all
+                stream.flush()
+        return code
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
     # Split in two on purpose (2026-09-06): the toolkit first, so there can be a window on screen

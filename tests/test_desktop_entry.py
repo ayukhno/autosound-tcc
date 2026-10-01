@@ -415,6 +415,77 @@ def test_version_flag_prints_and_does_not_start_the_app(capsys, monkeypatch):
     assert readings == [], "a version query reads no model catalogues"
 
 
+# ── what the installer reads back (tcc#124) ───────────────────────────────────────────────────
+#
+# The skill's installer runs `--install-desktop` through a pipe and reads two things: the exit code
+# and the lines. On the Windows VM a run came back with a non-zero code and NONE of TCC's lines --
+# only uv's launcher warning -- and the next run of the same line was fine (hub #229). Whatever
+# ends such a process, its lines must already be with the caller by then: a pipe is block-buffered,
+# so until now every line waited for the interpreter's own shutdown to be written at all.
+
+#: A real `main()` in a real child process, with no stdin at all -- what the windowed launcher
+#: hands `pythonw.exe` from the installer's pipeline -- and an end that skips Python's own
+#: shutdown (`os._exit`), which is where a process killed after `main()` loses what it buffered.
+_INSTALL_DESKTOP_CHILD = r"""
+import os, sys
+sys.stdin = None
+try:
+    os.close(0)
+except OSError:
+    pass
+from autosound_tcc import app
+from autosound_tcc.core import child, desktop_entry
+
+outcome = sys.argv[1]
+
+def fake_install():
+    if outcome == "ok":
+        return desktop_entry.Result(True).say("Built: /made/Autosound TCC.lnk")
+    return desktop_entry.Result(False).say("the shortcuts were not created: refused")
+
+desktop_entry.install_desktop = fake_install
+# The console a windowed TCC makes for itself; nothing to do with the contract under test, and on
+# a Windows runner with no console it would put one on screen.
+child.open_app_console = lambda *a, **k: False
+sys.argv = ["autosound-tcc", "--install-desktop"]
+os._exit(app.main())
+"""
+
+
+def _run_install_desktop(tmp_path, outcome: str):
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
+    # The log goes under tmp_path on every platform (`app_log.log_dir`), not into the real one.
+    env.update(HOME=str(tmp_path), LOCALAPPDATA=str(tmp_path), XDG_STATE_HOME=str(tmp_path))
+    return subprocess.run(
+        [sys.executable, "-c", _INSTALL_DESKTOP_CHILD, outcome],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env, timeout=120,
+    )
+
+
+def test_install_desktop_hands_back_exit_0_and_its_lines_with_no_stdin(tmp_path):
+    proc = _run_install_desktop(tmp_path, "ok")
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Built: /made/Autosound TCC.lnk" in proc.stdout, (
+        "the lines must reach the installer before the process ends, not at its shutdown")
+    # And the log says what was decided, so a run whose code is lost on the way out can be told
+    # from one that failed (hub #229: only the log of the VM can settle which one it was).
+    log = next(tmp_path.rglob("tcc.log")).read_text(encoding="utf-8")
+    assert "--install-desktop: exit 0" in log
+
+
+def test_install_desktop_is_non_zero_only_on_a_real_failure(tmp_path):
+    proc = _run_install_desktop(tmp_path, "failed")
+
+    assert proc.returncode == 1
+    assert "the shortcuts were not created: refused" in proc.stderr
+    log = next(tmp_path.rglob("tcc.log")).read_text(encoding="utf-8")
+    assert "--install-desktop: exit 1" in log
+
+
 def test_every_path_it_creates_is_printed_on_a_line_of_its_own(tmp_path):
     """The caller's contract, stated by the installer that runs this (2026-08-26): print the paths
     created, one per line. It echoes them to whoever is installing, and a path nobody printed is a
