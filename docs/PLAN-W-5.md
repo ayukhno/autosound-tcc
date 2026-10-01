@@ -79,6 +79,18 @@ final review of risky code (the Arbiter, 2026-09-30). Strings in four languages 
   rows' refusals; the remove offer appears only with a stored key and a live export; `remove_key` calls
   `key rm <provider>` over argv without the value.
 
+**#124** `--install-desktop` exits non-zero under the installer's PowerShell pipeline (hub #229 SKL-060, added
+2026-10-01 on the Arbiter's word). *~1 h + the VM*
+- Files: `src/autosound_tcc/app.py` (the `--install-desktop` / `--uninstall-desktop` path ~450), `src/autosound_tcc/core/desktop_entry.py`
+  (`install_desktop`, `_install_windows`), whatever decides the exit code; read-only: the skill's `install.ps1` ~1307–1325.
+- Change: find what made the exit non-zero — uv's GUI launcher printing «warning: Making stdin inheritable failed»
+  to stderr (PowerShell 5.1 turns a native stderr line under `2>&1` into a `NativeCommandError`), or TCC's own
+  exit — and make the command exit 0 when the shortcuts were made, from `irm … | iex` with `2>&1`. If the fix is
+  the installer's (call the console launcher, not `autosound-tcc-gui.exe`; read `$LASTEXITCODE`, not the error
+  stream), say so on hub #229 for `skill`.
+- Test: `tests/test_desktop_entry.py` / the app's CLI test — `--install-desktop` returns 0 after a successful
+  install and non-zero only on a real failure, with no stdin attached. The Arbiter's VM run of the install line.
+
 ## 2 · Larger, no dependency
 
 **#115** «Не питати взагалі» still asks (finding 123). *~2 h · Fable final review*
@@ -149,7 +161,7 @@ Test: the argv carries the flag; a pinned critic-env does not change the model T
 
 ## Order
 
-1. **Small** (1): #119, #114, #118, #111, #120, #117.
+1. **Small** (1): #119, #114, #118, #111, #120, #117, then #124 (added mid-wave).
 2. **Larger** (2): #115 (Fable final review), #116, #98.
 3. **W-4's leftovers** (3): #123, then #122 — the Arbiter's look on the VM together with #111's pin check.
 4. **The skill's three** (4), as its tag lands: #113, #121, then #112 last, since it pins the published tag.
@@ -158,7 +170,7 @@ Test: the argv carries the flag; a pinned critic-env does not change the model T
 
 ## What it costs
 
-Fourteen issues. About **13–14 hours** of build for sections 1–3 (eleven issues, none waiting), **~2 hours**
+Fifteen issues (#124 added mid-wave). About **14–15 hours** of build for sections 1–3 (eleven issues, none waiting), **~2 hours**
 for section 4 once the skill's tag exists, **~1.5 hours** for the release. One VM session needs the Arbiter
 (#111's pin, #122's look).
 
