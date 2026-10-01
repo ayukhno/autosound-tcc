@@ -3402,3 +3402,15 @@ critic: «Я не читаю файлову систему хоста напря
 **Weight.** Medium: a review goes out empty and comes back as a refusal that reads like the critic's fault.
 
 **Task.** For W-5's collection.
+
+### 134. The guides one click away: a «?» after the header's target curve, and a bold guides submenu in the menu
+
+**What.** The Arbiter, 2026-10-01, reading `docs/guide/HOUSE-CURVE.md` (F-084): the method's target-curve guide is
+linked only in the page's second paragraph. «але треба це додати як пряме посилання ось тут — знак питання після
+посилання» — the header's «ЦІЛЬОВА КРИВА · EPY_0db_REW ↗»: a «?» after the curve's link opens the target-curve guide
+directly. «і в головному меню давай зробимо підменю (жирним), в середині квік-гайд, фул-гайд і цільова крива гайд» —
+today Help has one entry, «📖 Посібник користувача» (F-085).
+
+**Weight.** Low–medium: a change, not a defect; the guides exist and are hard to reach.
+
+**Task.** For W-5's collection.

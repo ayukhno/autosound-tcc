@@ -2022,7 +2022,7 @@ menu screenshot in `docs/guide/img/menu.webp` shows the entry.
 
 ### F-084 — The house-curve page (#48, hub #202 SKL-053)
 
-**Статус**: чекає · released in v0.1.44 (2026-09-27, tcc#48 closed); the Arbiter reads the page · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it
+**Статус**: done 2026-10-01 · the Arbiter read the page and opened the method's guide from it: «відкрив - ок»; wants it one click from the header and a guides submenu (TEST-FINDINGS 134) · was: чекає · released in v0.1.44 (2026-09-27, tcc#48 closed); the Arbiter reads the page · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it
 
 `docs/guide/HOUSE-CURVE.md` (renamed from TARGET-CURVE-TOOL.md on SKL-053), eight screenshots
 (`curve-tool-*.webp`), linked from the README, both guides and the CHANGELOG. It opens with where
