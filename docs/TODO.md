@@ -486,7 +486,7 @@ F-010, але тепер видно наслідок: вибрати «той с
 
 ### F-023 — per-round identity of a capture, entirely inside TCC
 
-**Статус**: not taken into W-4 (2026-09-27, tcc#94 deferred) · відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
+**Статус**: відкладено · by the Arbiter's word (tcc#94 deferred); returns at the W-5 review (F-090) · was: not taken into W-4 (2026-09-27, tcc#94 deferred) · відкладено 2026-09-17 · no wave has taken it; наступний великий крок після F-017
 
 **Крок 1 із чотирьох уже існує — як побічний ефект** (02.09, вікно «Взяти заміри»): магазин
 узятих `.tcc/imported-measurements.json` тримає рівно те, що просить пункт 1 — `uuid → {title,
@@ -1630,7 +1630,7 @@ sheet with it.
 
 ### F-044 — пін із десктопного ярлика не зливається з живим вікном: дві іконки, і стара запускає другу копію
 
-**Статус**: narrowed 2026-09-23 → TEST-FINDINGS 44 (W-3 pool): two icons only for a pin made from the desktop shortcut's menu; a pin from the running window stays one icon
+**Статус**: closed · narrowed 2026-09-23 into TEST-FINDINGS 44, carried on as F-087 · was: narrowed 2026-09-23 → TEST-FINDINGS 44 (W-3 pool): two icons only for a pin made from the desktop shortcut's menu; a pin from the running window stays one icon
 `v0.1.27`)
 
 **Зміряно, дослівно:** «якщо іконку на таскбар закріпив з ярлика на столі, то після запуска
@@ -1814,7 +1814,7 @@ table read from the ledger; the wider "dynamic zone" after living with the minim
 
 ### F-068 — the drivers' Fs deserves its own checkbox, and the flag does not exist yet
 
-**Статус**: open · on W-4 as tcc#93 (2026-09-27): the method has the flag now — `seed(..., include_fs=True)` at the pinned v3.0.63, TCC does not pass it · was: waits for the method (hub `#185`, readdressed to skill 2026-09-19)
+**Статус**: done · released in v0.1.45 (2026-09-30, tcc#93 closed): the drivers' Fs travel behind their own box · was: open · on W-4 as tcc#93 (2026-09-27): the method has the flag now — `seed(..., include_fs=True)` at the pinned v3.0.63, TCC does not pass it · was: waits for the method (hub `#185`, readdressed to skill 2026-09-19)
 
 **What the user decided (2026-09-19, hub `#185`).** On seeding a new project from an existing one,
 the drivers' `fs_hz` travels behind its own checkbox, TICKED by default — «імпеданс складна штука і
@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: відкладено · by the Arbiter's word (tcc#69 deferred); returns at the W-5 review (F-090) · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: відкладено · by the Arbiter's word (tcc#69 deferred); returns at the W-5 review (F-090) — `990ea0c` in W-4 cut the main one-process cost, what is left gets measured there · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2012,7 +2012,7 @@ availability out loud, the way it already said `critic_reaches`. 6 runs of the f
 
 ### F-085 — Help → User guide, at the installed tag (#49)
 
-**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK («зроби 49 зараз»), ships with W-3
+**Статус**: done · released in v0.1.44 (2026-09-27, tcc#49 closed) · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK («зроби 49 зараз»), ships with W-3
 
 `core/guide.py`: the guide's GitHub page at the ref this build is: the tag it was installed at
 (`requested_revision`, a release or a candidate), else `v<version>`, else `main`. The menu entry in
@@ -2022,7 +2022,7 @@ menu screenshot in `docs/guide/img/menu.webp` shows the entry.
 
 ### F-084 — The house-curve page (#48, hub #202 SKL-053)
 
-**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it
+**Статус**: чекає · released in v0.1.44 (2026-09-27, tcc#48 closed); the Arbiter reads the page · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · waits for the Arbiter to read it
 
 `docs/guide/HOUSE-CURVE.md` (renamed from TARGET-CURVE-TOOL.md on SKL-053), eight screenshots
 (`curve-tool-*.webp`), linked from the README, both guides and the CHANGELOG. It opens with where
@@ -2041,7 +2041,7 @@ SKL-053 (hub #202) closes when the guides are on `main`, with the three file URL
 
 ### F-083 — A GUI guide with English screenshots (#47)
 
-**Статус**: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's review applied (`696cc54`) · waits for the Arbiter to read the pages
+**Статус**: чекає · released in v0.1.44 (2026-09-27, tcc#47 closed); the Arbiter reads the pages · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's review applied (`696cc54`) · waits for the Arbiter to read the pages
 
 `docs/guide/QUICK-GUIDE.md` (eight screens) and `docs/guide/REFERENCE.md` (every panel, dialog
 and button), 25 lossless WebP screenshots in `docs/guide/img/`, linked from the README. The window
@@ -2097,7 +2097,7 @@ machine (the Windows VM is the likeliest), started from its shortcut. Whatever i
 
 ### F-087 — W-4: a taskbar pin made from the desktop shortcut is a second button on Windows
 
-**Статус**: research done in W-4 (tcc#92, closed) · **hand check 2026-10-01: the lever is found** — TCC's stamp plus a shell notify on the pinned `.lnk` gives one button (`TEST-FINDINGS.md` 121); the self-repair of pins (~30 lines, `RESEARCH-W-4-taskbar-pin.md` §4) waits for the next wave
+**Статус**: done · the research shipped with W-4 (tcc#92 closed, v0.1.45); the hand check 2026-10-01 found the lever (TEST-FINDINGS 121) — the repair is W-5's, F-090 · was: research done in W-4 (tcc#92, closed) · **hand check 2026-10-01: the lever is found** — TCC's stamp plus a shell notify on the pinned `.lnk` gives one button (`TEST-FINDINGS.md` 121); the self-repair of pins (~30 lines, `RESEARCH-W-4-taskbar-pin.md` §4) waits for the next wave
 
 Windows drops `System.AppUserModel.ID` when it pins the desktop shortcut, and stamping the pinned copy
 afterwards (Explorer restarted) left two buttons (TEST-FINDINGS 104). A pin from the running window is one
@@ -2159,7 +2159,7 @@ settings menu (#67), then Windows on the VM (#62, #66), then the skill's tag (#6
 
 ### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
+**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: the next real round with a `sw_01`-style title · was: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
 
 The fix is made in the REW import form: its New name column opens with the name found by
 matching — the round's spelling where the grammar matched (`sw_01` → `sw_1`), the closest missing
@@ -2174,7 +2174,7 @@ reported as unusable.
 
 ### F-080 — The next phase in a clean session: the method's `handoff`, offered (hub #201, S-044)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 against #201's contract · live at `v3.0.60`: `handoff --json` answers (a fresh project: refused, «no phase is recorded»)
+**Статус**: done · released in v0.1.43 (2026-09-23) · was: built on `wave-0.1.43` 2026-09-23 against #201's contract · live at `v3.0.60`: `handoff --json` answers (a fresh project: refused, «no phase is recorded»)
 
 At a phase's END — no step left `todo`/`in_progress`, which is when `handoff` answers — the strip
 offers «Перевірити й почати начисто», once per phase. The click runs `process.py <dir> handoff
@@ -2184,7 +2184,7 @@ through the existing fresh start, else a terminal — with `resume` said beside 
 
 ### F-079 — Whether the tune's history is kept and backed up, visible in the window
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026) · live at `v3.0.60`: `init` made a repository and a first commit, `status` then offered `gh repo create … --private --push` (not run)
+**Статус**: done · released in v0.1.43 (2026-09-23); `gh repo create` is offered, not run, by design · was: built on `wave-0.1.43` 2026-09-23 · the method's half is hub #199 (TCC-026) · live at `v3.0.60`: `init` made a repository and a first commit, `status` then offered `gh repo create … --private --push` (not run)
 
 F-074 found the Arbiter's live project with no repository: no history, no backup, and TCC silent
 by design (`git_facts` said nothing for a folder that is not a repo). He asked to see whether
@@ -2201,7 +2201,7 @@ whole and runs it only on yes (`core/project_repo.py`). Until the vendored metho
 
 ### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · vendored at `v3.0.60`; live on a seeded project: SQ-1/FULL-1/SQ-2 saved through `config save`, SQ-2 (v_005) compared with SQ-1 (v_002), not v_004 · left: a migrated copy of the Passat
+**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: a migrated copy of the Passat · was: built on `wave-0.1.43` 2026-09-23 · vendored at `v3.0.60`; live on a seeded project: SQ-1/FULL-1/SQ-2 saved through `config save`, SQ-2 (v_005) compared with SQ-1 (v_002), not v_004 · left: a migrated copy of the Passat
 
 The method now numbers versions once per project (`state/versions/`, `state/slots.json`), and a new
 project starts that way; the tuner saves a version into a DSP preset under a name (`SQ-2`), and
@@ -2215,7 +2215,7 @@ the skill pushes `config`.
 
 ### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
-**Статус**: built on `wave-0.1.43` 2026-09-23 · live on the Mac at `v3.0.60`: `key status` (env + ~/.zshrc line 3 seen), `key set` over stdin (a malformed key refused with the method's reason, nothing stored — this found and fixed `quiet()`'s closed stdin) · left: a real key and `move-shell` are the Arbiter's, DPAPI on the VM
+**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: a real key, `move-shell`, DPAPI on the VM · was: built on `wave-0.1.43` 2026-09-23 · live on the Mac at `v3.0.60`: `key status` (env + ~/.zshrc line 3 seen), `key set` over stdin (a malformed key refused with the method's reason, nothing stored — this found and fixed `quiet()`'s closed stdin) · left: a real key and `move-shell` are the Arbiter's, DPAPI on the VM
 
 The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
 as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`
@@ -2270,7 +2270,7 @@ with git's line is the point of finding 40 — and bring the two tests to it. Be
 
 ### F-074 — Check the project's GitHub backup after the broken-git spell
 
-**Статус**: answered 2026-09-23 · `EPY-Sep2026` is not a git repository at all (the Arbiter ran
+**Статус**: done · answered 2026-09-23 (the line below) · was: answered 2026-09-23 · `EPY-Sep2026` is not a git repository at all (the Arbiter ran
 `git remote -v` there: "not a git repository"), so there was no backup to fail, and nothing
 failed silently. The real gap: the method's «set up at NEW-PROJECT start» backup
 (`naming-and-structure.md §4a`) has no carrier — no code makes a project a repo, only prose for
@@ -2499,7 +2499,7 @@ is sent before that.
 
 ### F-055 — A separate session: from the session analysis to an intake form
 
-**Статус**: superseded 2026-09-22 · by hub #194 — one intake form for every front end, the skill's page (the Arbiter); built on `wave-0.1.43`. Was: відкладено · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
+**Статус**: closed · superseded 2026-09-22 by hub #194 (one intake form, the skill's page; built on `wave-0.1.43`) · was: superseded 2026-09-22 · by hub #194 — one intake form for every front end, the skill's page (the Arbiter); built on `wave-0.1.43`. Was: відкладено · the Arbiter, 2026-09-14: "analyse it and put all this aside for a separate session"
 
 Where it stands: `docs/SESSION-ANALYSIS-2026-09-14.md` — two runs measured (testTCC8 on the local
 Windows, testTCC-9 on the remote one), the fields the intake needed, and four proposals (one intake
