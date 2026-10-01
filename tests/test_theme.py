@@ -281,6 +281,10 @@ def _styled_mini_select(monkeypatch, stretch: int):
     font = QFont(combo.font())
     font.setStretch(stretch)
     combo.setFont(font)
+    # Measured in the font the sheet gives it, not in whatever an earlier test left the
+    # application's own sheet at: polished here, as a shown window's widgets are before anything
+    # is laid out.
+    combo.ensurePolished()
     return combo
 
 
