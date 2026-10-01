@@ -2107,6 +2107,12 @@ Belongs to W-5 so far:
 11. the «чекає» checks → done by the session where it could (F-078 on a migrated Passat copy; F-081 on the live REW,
     whose typo half is finding 122); F-056 closed — the form has been in use since v0.1.40; F-077, F-083, F-084 stay
     with the Arbiter.
+12. **Everything found goes into W-5** (the Arbiter, 2026-10-01: «все що знайшли беремо в W-5»): findings 120–135 and
+    the items above. What needs the skill went to it the same hour — hub #224 TCC-038 (the installer's TCC signature),
+    #225 TCC-039 (an inherited Fs warns), #226 TCC-040 (a run's reviewer model outranks critic-env pins, finding 130),
+    #227 TCC-041 (`session-close` as a check, a stale CONTINUE block, finding 131); the rest is TCC's alone (Flash is
+    the method's advice, not its refusal; `key rm` exists for 127). Finding 135 also needs the Arbiter's Google Form:
+    the sender question's «Required» off. The milestone opens on «збір закінчено».
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
