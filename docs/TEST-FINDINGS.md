@@ -619,6 +619,9 @@ report after that is about the wrong version.
 **Reproduces.** No: the second attempt on that machine (a UTM VM, "Windows 2") went through, 0.1.36 → 0.1.39. The finding is the "Done" after a failure, not the failure.
 
 **Status.** Not seen again 2026-09-23: the update on the Windows VM succeeded (0.1.41 → 0.1.43) and said Done; the failure path was not met, so the finding stays open.
+
+**Closed 2026-10-01.** Fixed in code: the update script says Done only when the install exits 0, otherwise «The update did not finish» (`core/updates.py`, the `failed` branch). The failure path itself not met live since; a repeat is a new finding.
+
 ### 13. "Update TCC" opens a second, empty console
 
 **What.** Beside `Administrator: cmd`, which runs the update, a second window
@@ -717,6 +720,8 @@ through it.
 
 **Reproduces.** Once.
 
+**Closed 2026-10-01.** Not seen since 0.1.39 (now 0.1.45): the reviewer is checked before a session (v0.1.44), the method's instructions name its own call (hub #200, v3.0.60), the cut stream has its class (hub #204, v3.0.62). A repeat is a new finding.
+
 ### 18. Too wide a gap between the AI dialog and the right column
 
 **What.** Between the right edge of the AI dialog's working area (the composer with "Send" and the
@@ -753,6 +758,8 @@ GitHub is not available).
 **Weight.** Medium: a tester without GitHub cannot report from the app.
 
 **Reproduces.** Always.
+
+**Closed 2026-10-01.** Fixed: «A report without a GitHub account» — the form route in `feedback_dialog.py` (TODO F-042, v0.1.42).
 
 ### 20. A reviewer refused by region: red in the open list, plain in the closed picker, "?" in the footer
 
@@ -800,6 +807,8 @@ The `read_file` refusal, reported later: agy auto-denied it with the home folder
 **Weight.** Medium: every route to the reviewer on that machine failed or went around TCC.
 
 **Reproduces.** Two machines show 17; the `read_file` refusal once.
+
+**Closed 2026-10-01.** Not seen since 0.1.39: the `read_file` refusal went to the skill (hub TCC-014), the bypass is 17's, closed with it. A repeat is a new finding.
 
 ### 22. The protective-filter dialog asks for virtual channels
 
@@ -1373,6 +1382,8 @@ already something else. The two look alike and are opposites.
 
 **Reproduces.** Any selection REW cannot answer for — which finding 38 below makes easy to reach.
 
+**Closed 2026-10-01.** Fixed: `curve_dialog._on_failed` takes the previous curves off the plot before it reports the failure.
+
 ### 38. Titles REW does not hold are offered, chosen and then asked for
 
 **What.** `m-L_49 (sw)` was offered in the picker and selected, and REW answered `KeyError`: it
@@ -1401,6 +1412,8 @@ the window is opened over what the model names, which need not be what REW is ho
 kind picker already greys rows, `_mark_availability`), or the offer list stops being a union and
 the window says what it cannot show. The first keeps the window openable over a name REW has lost;
 the second is simpler and narrower. This is the Arbiter's call.
+
+**Closed 2026-10-01.** Fixed: titles REW could not answer for are greyed and cannot be ticked (`curve_dialog.py`, finding 38).
 
 ### 39. SIGSEGV in Qt's raster painter while dragging a curve — no Python error at all
 
@@ -3146,7 +3159,7 @@ a grep shows. So a fresh install or an update by the install line takes an unche
 
 **Weight.** Medium: the release is signed, and the first install — the one path a new user takes — does not look.
 
-**Task.** The installer is the skill's code: a ticket to:skill at the review between waves.
+**Task.** The installer is the skill's code. **Decided 2026-10-01** at the pre-release walk: W-5, as the skill's ticket — hub #224 TCC-038 (to:skill); nothing changes on TCC's side.
 
 ### 121. The taskbar pin (#92): TCC's stamp plus a shell notify makes a desktop pin one button
 
@@ -3165,4 +3178,4 @@ a grep shows. So a fresh install or an update by the install line takes an unche
 the `.lnk` files in `User Pinned\TaskBar` and `User Pinned\ImplicitAppShortcuts\*` that start TCC's launcher and
 lack the id get the stamp and the notify; a byte search, no spawn on an ordinary start; ~30 lines and tests.
 Expected when checked: the first start from a fresh desktop pin is still two buttons, one from the next start.
-Pool for the next wave; tcc#92 (closed with W-4) carries the research.
+tcc#92 (closed with W-4) carries the research. **Decided 2026-10-01** at the pre-release walk: W-5.

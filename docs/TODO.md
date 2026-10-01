@@ -2073,6 +2073,14 @@ Belongs to W-5 so far:
 - the deferred issues #98 («Оновити TCC» updates TCC alone), #94 (the curve window addresses a capture by its
   round), #69 (test machinery: F-071, F-065, F-066), #21 (capture quality while the mic is in hand).
 
+**The pre-release walk, 2026-10-01 (the Arbiter, item by item; his decisions):**
+1. finding 120, the installer's TCC signature → W-5 as the skill's ticket: hub #224 TCC-038;
+2. finding 121, TCC repairs its own taskbar pins → W-5;
+3. tcc#98, versions and update of omp/agy/gh/Claude Code → W-5: the rows and the button, through the skill's
+   `upkeep.py status` / `tools` (hub #219's contract);
+4. F-056's open point, a fragile driver's inherited Fs → the skill's ticket, a warning, not a refusal: hub #225 TCC-039;
+5. tcc#21, a capture's verdict while the mic is in hand → after v1.1.0, its own wave with a design pass for the re-take.
+
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
 nothing is built before his `ok` on that task.
@@ -2469,7 +2477,7 @@ starts; and whether TCC's own panels load the method's modules from the same cop
 
 **Статус**: чекає · released in **v0.1.40** (2026-09-17, tag on `2055f2b`, method `v3.0.54`): the three points, hub #153 A–F, #154, #155; waiting for the Arbiter's test through the app's update button
 
-**Open, not sent (the Arbiter's word needed):** the method's `v3.0.53` pre-sweep gate REFUSES a fragile driver's inherited Fs until it is confirmed or measured; the Arbiter's rule (2026-09-17) is a warning only — the tuner sets in the DSP what they need, and after phase 0 the working crossovers come from the DSP parameters, not from the capture record. A ticket to skill if the Arbiter says so.
+**Sent 2026-10-01 on the Arbiter's word — hub #225 TCC-039 (to:skill), a warning, not a refusal.** Was: **Open, not sent (the Arbiter's word needed):** the method's `v3.0.53` pre-sweep gate REFUSES a fragile driver's inherited Fs until it is confirmed or measured; the Arbiter's rule (2026-09-17) is a warning only — the tuner sets in the DSP what they need, and after phase 0 the working crossovers come from the DSP parameters, not from the capture record. A ticket to skill if the Arbiter says so.
 
 Named, not yet described. Seen around it today: the protective-filter dialog asks for virtual channels
 (TEST-FINDINGS 22), reading depends on REW's display smoothing (hub #151), and the session filed
