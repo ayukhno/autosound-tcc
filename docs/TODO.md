@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-090 — W-5 is collecting: findings go to this pool, the milestone opens when the list is complete
 
-**Статус**: open 2026-10-01 · stage 1, collection (збір): the Arbiter tests, the session records; no milestone, nothing built · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
+**Статус**: open · **stage 2 from 2026-10-01**: «збір закінчено, в роботу» — milestone `W-5 · v0.1.46` (#5) with 14 issues, all `ok`: #98 (tools rows), #111 (taskbar pins), #112 (method v3.0.65 + its follow-ups), #113 (`--model`), #114 (typo match), #115 (never-ask), #116 (ASK door), #117 (reviewer-key window), #118 (Flash), #119 (relative package), #120 (guides), #121 (feedback sender), #122 (W-4 visible), #123 (W-4 robustness); the skill's share hub #224–#228 on its `W-5 · v3.0.65`; #112, #113 and #121 wait for the skill's tag · was: stage 1, collection · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
 
 The words (the Arbiter, 2026-10-01; `hub/governance/WAVES.md` §1): the wave (хвиля) is the whole cycle; stage 1 is
 the collection (збір), with the number already standing and no milestone; stage 2 is the milestone (віха = веха =
