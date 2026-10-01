@@ -3014,7 +3014,8 @@ def _stepper_width(box) -> int:
     ("_apf_f0", "20000.0 Hz"),
     ("_apf_q", "10.00"),
 ])
-def test_a_number_box_has_room_for_its_value_and_the_steppers_under_every_style(attribute, widest):
+def test_a_number_box_has_room_for_its_value_and_the_steppers_under_every_style(attribute, widest,
+                                                                              monkeypatch):
     """CAR-005, from a Windows run: the arrows were drawn ON the text. `0.000 ms` showed as
     `0.000`, `250.0 Hz` as `250.0 H`, `0.70` as `0.7` — and a Q of `0.7` is not the Q of `0.70`.
 
@@ -3026,10 +3027,19 @@ def test_a_number_box_has_room_for_its_value_and_the_steppers_under_every_style(
     (measured, 2026-09-01). It is not the native `windows11` style a real Windows machine uses,
     which draws wider steppers still; it is the closest thing to a second platform that this one
     can produce, and it fails the old constant exactly the way the report describes.
+
+    Each style under the sheet the window applies, as the app always draws these boxes. The test
+    stood on the application's sheet an earlier theme test left on; F-065 put those tests' sheets
+    on their own views, and on Windows CI this one then measured `windowsvista` with no sheet at
+    all, whose size hint reserves less than its own 37-px steppers — a box the app never shows.
+    Under the sheet it held on every style, Windows CI's included, up to the last sharded run
+    before F-065 (642d84d).
     """
     from PySide6.QtWidgets import QStyleFactory
 
     view = _view()
+    _windows.theme_on(monkeypatch, view, "dark")
+    view.apply_theme()
     box = getattr(view, attribute)
     styles = []
     try:
