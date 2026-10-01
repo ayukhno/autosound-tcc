@@ -2105,7 +2105,8 @@ Belongs to W-5 so far:
       `_SERIES_TAG_RE` without a lookahead; theme.py trusting `_APPLIED` over the app's sheet;
     - code/test hygiene (alongside only): the test modal guard raising inside UI code, uncovered dialog statics.
 11. the «чекає» checks → done by the session where it could (F-078 on a migrated Passat copy; F-081 on the live REW,
-    whose typo half is finding 122); F-077, F-083, F-084, F-056 stay with the Arbiter.
+    whose typo half is finding 122); F-056 closed — the form has been in use since v0.1.40; F-077, F-083, F-084 stay
+    with the Arbiter.
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
@@ -2501,7 +2502,7 @@ starts; and whether TCC's own panels load the method's modules from the same cop
 
 ### F-056 — Import from REW into TCC: the logic and the implementation
 
-**Статус**: чекає · released in **v0.1.40** (2026-09-17, tag on `2055f2b`, method `v3.0.54`): the three points, hub #153 A–F, #154, #155; waiting for the Arbiter's test through the app's update button
+**Статус**: done 2026-10-01 · the form has been in the Arbiter's hands since v0.1.40 — W-2…W-4 findings came from using it (28, 30, 31, 33, 34, 38, all fixed), and today's 122 (the typo match) is W-5's · its open point went to the skill as hub #225 · was: чекає · released in **v0.1.40** (2026-09-17, tag on `2055f2b`, method `v3.0.54`): the three points, hub #153 A–F, #154, #155; waiting for the Arbiter's test through the app's update button
 
 **Sent 2026-10-01 on the Arbiter's word — hub #225 TCC-039 (to:skill), a warning, not a refusal.** Was: **Open, not sent (the Arbiter's word needed):** the method's `v3.0.53` pre-sweep gate REFUSES a fragile driver's inherited Fs until it is confirmed or measured; the Arbiter's rule (2026-09-17) is a warning only — the tuner sets in the DSP what they need, and after phase 0 the working crossovers come from the DSP parameters, not from the capture record. A ticket to skill if the Arbiter says so.
 
