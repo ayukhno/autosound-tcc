@@ -2066,7 +2066,13 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - a channel whose code and id are both written with `_` gets a hyphen ledger row from v3.0.65 that TCC cannot bind
   (#112's review, Minor 4) — next to the method's own reading of an old `D_L…` title as a channel `D-L` (the
   Arbiter, 2026-10-01: «D-L такого не буває»; the `D_` prefix moved into the series, the hyphen is for a driver's
-  side only) — the skill's to settle first.
+  side only) — the skill's to settle first;
+- from the final review (`.superpowers/sdd/PLAN-W-5/final-review.md`, local): the shell lexer (~1000 lines) into
+  its own module out of `core/tuning_session.py`, first commit of the next wave; `cell_text` / `field_changed` /
+  `table_fields` into a Qt-free module so `setting_status` stops importing `detail_pane`; a three-state probe in the
+  reviewer-key window (no answer ≠ «too old», no two 20 s probes on the UI thread); a dynamic head like
+  `"$HOME/.local/bin/omp" --version` asks under `auto`; a method older than v3.0.65 refuses an empty sender in
+  English with no update advice; `docs/guide/REFERENCE.md` links the method's target-curve guide at `main`.
 
 
 **Статус**: open · stage 3, work: **all 15 issues built and reviewed** on branch `wave-0.1.46` (pushed), plan `docs/PLAN-W-5.md`, ledger `.superpowers/sdd/PLAN-W-5/progress.md` (local) — #119, #114, #118, #111, #120, #117, #124 (diagnostics only; hub #229 open until a failure is caught), #115 (Fable), #116, #98, #123, #122, #112 (the method at v3.0.65, signed), #113, #121 · next: pl/de through the Advisor, the final whole-branch review (Fable), the Arbiter's VM pass (checklist in the ledger), release v0.1.46 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e` · was: paused 2026-10-01 evening on the subscription limit, resumed 19:05 · was: stage 2 from 2026-10-01: «збір закінчено, в роботу» — milestone `W-5 · v0.1.46` (#5) with 14 issues, all `ok`: #98 (tools rows), #111 (taskbar pins), #112 (method v3.0.65 + its follow-ups), #113 (`--model`), #114 (typo match), #115 (never-ask), #116 (ASK door), #117 (reviewer-key window), #118 (Flash), #119 (relative package), #120 (guides), #121 (feedback sender), #122 (W-4 visible), #123 (W-4 robustness); the skill's share hub #224–#228 on its `W-5 · v3.0.65`; #112, #113 and #121 wait for the skill's tag · was: stage 1, collection · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
