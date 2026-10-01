@@ -2041,7 +2041,7 @@ SKL-053 (hub #202) closes when the guides are on `main`, with the three file URL
 
 ### F-083 — A GUI guide with English screenshots (#47)
 
-**Статус**: чекає · released in v0.1.44 (2026-09-27, tcc#47 closed); the Arbiter reads the pages · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's review applied (`696cc54`) · waits for the Arbiter to read the pages
+**Статус**: done 2026-10-01 · the Arbiter opened the guide from Help on v0.1.45 and read it: «посібник відкрив - ок» · was: чекає · released in v0.1.44 (2026-09-27, tcc#47 closed); the Arbiter reads the pages · was: built on `wave-0.1.44` 2026-09-23 on the Arbiter's OK (label `ok`), ships with W-3 · the Advisor's review applied (`696cc54`) · waits for the Arbiter to read the pages
 
 `docs/guide/QUICK-GUIDE.md` (eight screens) and `docs/guide/REFERENCE.md` (every panel, dialog
 and button), 25 lossless WebP screenshots in `docs/guide/img/`, linked from the README. The window
