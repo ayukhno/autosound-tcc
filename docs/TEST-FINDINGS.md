@@ -3199,3 +3199,20 @@ row.
 nothing about the right one — in a session with several series, which is every session.
 
 **Task.** For W-5's collection.
+
+### 123. «Не питати взагалі (авто)» ticked, and TCC asks again — a read-only command as «Команда, яку не відкотити»
+
+**What.** The Arbiter, 2026-10-01, the Mac, TCC 0.1.45 · skill 3.0.64, project `passat-b8-2026-aya`, a new session
+asked «перевір критика зразу при старті через режим ASK». Settings → «Питати про» shows `✓ Не питати взагалі (авто)`;
+the chat stopped on «Дозволити Bash?» — «Команда, яку не відкотити: `cd /Users/o.yukhno/dev/autosound/tcc/src/autosound_tcc
+&& f=$(grep -rl "def run(" --include='*.py' core | xargs grep -l "MODE_CLIPBOARD" | head -1); echo $f; grep -n
+"role\|ask\|advisor" $f | head -50`». The Arbiter: «вах, знову питає коли галочка стоїть не питати!»
+
+Facts off the screenshot, not diagnosed: the command only reads (`grep`, `head`, `echo`), and it holds a real
+`$( … )` substitution; it runs outside the project folder, in TCC's own source tree — the session was looking
+through the app's code for how to reach the reviewer, rather than using the method's call.
+
+**Weight.** High, and the fourth time: findings 7 and 15, then 0.1.41 (the `|` inside a grep pattern, closed on
+`wave-0.1.42`). A prompt in a mode set to never ask teaches clicking through without reading.
+
+**Task.** For W-5's collection.
