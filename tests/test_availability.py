@@ -60,6 +60,17 @@ def test_forgetting_refusals_is_what_the_reload_button_does():
     assert _status(choice).ready
 
 
+def test_forgetting_one_routes_refusals_keeps_the_others():
+    """A key saved in «Ключ рецензента» answers the API rows' refusals, not a CLI's (finding 128,
+    tcc#117): the agy row refused for its own reasons and stays red."""
+    api, agy = _choice(harness="api", model="gemini-pro-latest"), _choice()
+    availability.refused(api.key, availability.REFUSED, "no key")
+    availability.refused(agy.key, availability.REFUSED, "no")
+    availability.forget_refusals("api")
+    assert _status(api).ready
+    assert _status(agy).reason == availability.REFUSED
+
+
 def test_a_harness_still_being_read_is_not_checked():
     availability.begin_reading(["agy"])
     assert _status(_choice()).reason == availability.NOT_CHECKED

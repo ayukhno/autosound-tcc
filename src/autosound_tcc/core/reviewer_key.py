@@ -12,7 +12,9 @@ So TCC asks the one reader of all three stores, the method's own script:
 * `autosound_ai.py key status --json` says where each provider's key is used from — keystore,
   file, environment, or nowhere — and never prints a value;
 * `autosound_ai.py key set <provider>` stores a key, which it reads from STDIN: argv is visible to
-  every process on the machine (`ps`), stdin is not.
+  every process on the machine (`ps`), stdin is not;
+* `autosound_ai.py key rm <provider>` takes one out of the keystore, and `key move-shell` moves an
+  exported one in — neither needs a value from TCC (tcc#117).
 
 A vendored method older than these commands answers neither. Then `status()` is None and the
 reachability question falls back to `critic_env`, exactly as before — so TCC works with the method
@@ -30,7 +32,7 @@ import sys
 import threading
 from typing import Optional
 
-from autosound_tcc.core import app_log, child, critic_env, vendor_loader
+from autosound_tcc.core import app_log, availability, child, critic_env, vendor_loader
 
 #: The providers the method stores keys for, in the order the screen lists them.
 PROVIDERS = ("google", "anthropic", "openai")
@@ -116,7 +118,10 @@ def has_key(var: str) -> bool:
 
 
 def shell_exports() -> list[dict]:
-    """`[{var, file, line}]` — keys still exported from a shell profile, as the method found them."""
+    """`[{var, file, line}]` — keys still exported from a shell profile, as the method found them.
+
+    On Windows also the user's environment variables: `file` is `HKCU\\Environment` and `line` is
+    None, the method's own mark for the registry (finding 125, tcc#117)."""
     answer = status()
     exports = answer.get("shell_exports") if answer else None
     return [e for e in exports if isinstance(e, dict)] if isinstance(exports, list) else []
@@ -136,7 +141,43 @@ def set_key(provider: str, value: str) -> tuple[bool, str]:
         return False, ""
     said = (proc.stdout if proc.returncode == 0 else proc.stderr).strip()
     app_log.logger().info("reviewer key: set %s -> exit %s", provider, proc.returncode)
+    if proc.returncode == 0:
+        # What refused for want of a key may answer now: the picker read «API · … · відмова»
+        # after the save until ↻ (finding 128, tcc#117). Only the key's own route.
+        availability.forget_refusals("api")
     return proc.returncode == 0, said
+
+
+def remove_key(provider: str) -> tuple[bool, str]:
+    """Take `provider`'s key out of the OS keystore: the method's `key rm`. (removed, its words)
+
+    Only the provider's name goes on argv — there is no value to send. `rm` empties the keystore
+    and nothing else; what is left in the file or the environment, the method's answer names.
+    """
+    if provider not in PROVIDERS:
+        return False, f"unknown provider {provider!r}"
+    proc = _run(["key", "rm", provider])
+    forget()
+    if proc is None:
+        return False, ""
+    app_log.logger().info("reviewer key: rm %s -> exit %s", provider, proc.returncode)
+    return proc.returncode == 0, (proc.stdout if proc.returncode == 0 else proc.stderr).strip()
+
+
+def move_exports() -> tuple[bool, str]:
+    """The method's `key move-shell --yes`: each key still exported — a shell profile, or the
+    Windows user environment — into the store and out of there. (ran, its words)
+
+    Only after the window asked and the Arbiter said yes (finding 127, tcc#117): `--yes` skips the
+    method's own prompt, which would be the same question a second time. The method reads each
+    value where it is exported; TCC never sees one.
+    """
+    proc = _run(["key", "move-shell", "--yes"])
+    forget()
+    if proc is None:
+        return False, ""
+    app_log.logger().info("reviewer key: move-shell -> exit %s", proc.returncode)
+    return proc.returncode == 0, (proc.stdout or proc.stderr).strip()
 
 
 def move_shell_line() -> str:

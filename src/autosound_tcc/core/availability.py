@@ -76,9 +76,17 @@ def answered(key: str) -> bool:
         return key in _answered
 
 
-def forget_refusals() -> None:
+def forget_refusals(harness: Optional[str] = None) -> None:
+    """Forget what refused this launch: every row (the reload button), or one route's rows.
+
+    A key saved in «Ключ рецензента» answers the API rows' refusals and nothing else — a CLI's
+    refusal is its login's or its region's, not the key's (finding 128, tcc#117)."""
     with _lock:
-        _refusals.clear()
+        if harness is None:
+            _refusals.clear()
+            return
+        for key in [key for key in _refusals if key.startswith(f"{harness}:")]:
+            del _refusals[key]
 
 
 def reset() -> None:
