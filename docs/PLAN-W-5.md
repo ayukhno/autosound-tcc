@@ -149,7 +149,8 @@ final review of risky code (the Arbiter, 2026-09-30). Strings in four languages 
 
 **#112** pin the method at v3.0.65 and follow it. *~30 min after the tag* — vendor the published tag; the
 inherited-Fs comments (`diagnostics_panel.py` ~1256, `project_view.py` ~66); read a «session reopened» event if
-skill #107 adds one; `Paired with method` in the CHANGELOG.
+skill #107 adds one; `Paired with method` in the CHANGELOG. The reviewer-key window moves to the skill's `key move-shell <provider> --drop`
+(hub #230 TCC-043, contract on the ticket): no hold-and-re-store of a pasted key, «Видалити» for the leftover copy.
 
 **#113** the reviewer pick by the method's `--model` (finding 130, skill #106). *~45 min after the flag is named*
 — `run_critic` passes the pick by the flag; the footer names a pin the run overrode as the method reports it.
