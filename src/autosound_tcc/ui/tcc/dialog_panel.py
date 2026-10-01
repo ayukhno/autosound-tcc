@@ -1389,7 +1389,8 @@ class DialogPanel(QWidget):
         self._scroll_to_end()
 
     def add_critique(self, critique: dict) -> None:
-        """Render a reviewer reply as a Critic bubble — or say plainly that there isn't one yet.
+        """Render a reviewer reply as a Critic bubble, or an ASK bubble for a plain question
+        (tcc#116) — or say plainly that there isn't one yet.
 
         `clipboard` is the zero-cost path, not a failure: no API or CLI was reachable, so the
         package is on the clipboard for the Arbiter to paste into any free web chat. Showing it as

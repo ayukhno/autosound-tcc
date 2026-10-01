@@ -183,7 +183,7 @@ def _find_for_script(project_dir: Path, name: str) -> Optional[Path]:
     return None
 
 
-def _script_missing() -> list[str]:
+def script_missing() -> list[str]:
     """The one reason that holds back every task, `ask` included: no reviewer script at all."""
     return [] if is_available() else [f"reviewer script not found at {script_path()}"]
 
@@ -195,7 +195,7 @@ def preflight(project_dir: Optional[Path] = None) -> list[str]:
     missing file, and "nothing happened" is the worst thing a button can do.
     """
     project_dir = Path(project_dir or config.project_dir())
-    problems = _script_missing()
+    problems = script_missing()
     for name in ("data-contract-template.md", "autosound_context.md"):
         if _find_for_script(project_dir, name) is None:
             problems.append(f"{name} not found in {project_dir} (nor in rew_analitic/)")
@@ -373,7 +373,7 @@ def run(
     `via` — `api`, `cli` or `clipboard` — is the route for THIS run, the script's own `--via`
     (tcc#59): after a cut-off CLI stream the method says to take one review through the key.
 
-    `role` is the method's task: `critic` (the default), `advisor`, or `ASK` — a plain question,
+    `role` is the method's task: `critic` (the default), `advisor`, or `ask` (`ASK`) — a question,
     which needs neither the contract nor the context and is always sent as text (tcc#116).
     """
     # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
@@ -384,7 +384,7 @@ def run(
 
     # `ask` runs where intake has not been (skill#27) — and «check the Critic at the start» is
     # asked exactly there (finding 124) — so only a missing script holds it back.
-    problems = _script_missing() if role == ASK else preflight(project_dir)
+    problems = script_missing() if role == ASK else preflight(project_dir)
     if problems:
         # A missing SCRIPT is a broken install; missing project files are a project that has not
         # started yet. Same list, two different things to say about it.

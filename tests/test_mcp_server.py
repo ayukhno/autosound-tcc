@@ -2085,3 +2085,53 @@ def test_the_ask_door_says_it_is_a_question_and_sends_a_review_to_call_critic(tm
 
     assert "call_critic" in said and "not a review" in said
     assert set(tools["ask_reviewer"].inputSchema["properties"]) == {"question", "context"}
+
+
+def test_a_refused_question_is_not_sent_back_through_the_review_door(tmp_path, monkeypatch):
+    """A refused review is told to retry `call_critic` with `via="api"` (tcc#59). A refused question
+    must not be: `ask_reviewer` takes no `via`, and the hint would send the question back as a
+    review — finding 124 the other way round (tcc#116)."""
+    _stub_reviewer(tmp_path, monkeypatch, (
+        "print('⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО — нічого не збережено як рецензію:', file=sys.stderr)\n"
+        "print(\"   · CLI 'agy': quota exhausted\", file=sys.stderr)\n"
+        "print('=' * 50, file=sys.stderr)\n"
+        "sys.exit(4)\n"
+    ))
+    (tmp_path / "rew_analitic").mkdir()
+    for name in ("data-contract-template.md", "autosound_context.md"):
+        (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asked = json.loads(_text(asyncio.run(mcp.call_tool("ask_reviewer", {"question": "ping?"}))))
+    reviewed = json.loads(_text(asyncio.run(mcp.call_tool("call_critic", {"package": "ping?"}))))
+
+    assert asked["mode"] == reviewed["mode"] == "refused"
+    assert "quota exhausted" in asked["detail"]
+    assert "call_critic again" not in asked["detail"]
+    assert "call_critic again" in reviewed["detail"], "a review still gets its retry"
+
+
+def test_the_state_says_a_question_needs_no_intake_where_a_review_is_not_ready(
+        tmp_path, monkeypatch):
+    """Finding 124's folder: «check the Critic at the start» is asked before intake, where the
+    state's `ready` is a review's and says no for the two missing files. The session read that no
+    and had no other door; the state now names the one that needs neither file (tcc#116)."""
+    from autosound_tcc.core import config, critic, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: True)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    state = mcp_server._reviewer_state(tmp_path)
+
+    assert state["ready"] is False
+    assert any("autosound_context.md" in line for line in state["not_ready_because"])
+    assert state["ask"]["ready"] is True and state["ask"]["not_ready_because"] == []
+    assert "ask_reviewer" in state["ask"]["how"] and "no intake" in state["ask"]["how"]
+
+    # What holds back the channel holds back a question too.
+    monkeypatch.setattr(critic, "omp_route_available", lambda: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic",
+                               "omp:google-antigravity/gemini-3.1-pro-high")
+    state = mcp_server._reviewer_state(tmp_path)
+    assert state["ask"]["ready"] is False
+    assert mcp_server.OMP_REVIEWER_REFUSAL in state["ask"]["not_ready_because"]

@@ -152,12 +152,16 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     # reviewer that works. Resolved alias and all: that is the key a call's refusal is filed under.
     resolved, choice = model_choices.resolve_critic(key)
     state = availability.status(choice)
-    because = list(missing) + ([availability.PHRASES[state.reason]] if not state.ready else [])
+    # What holds back the channel, whatever goes down it; the project's files hold back only a
+    # review (tcc#116).
+    channel = [availability.PHRASES[state.reason]] if not state.ready else []
     why_not = model_choices.not_a_reviewer(choice)
     if why_not == model_choices.NOT_A_REVIEWER_OMP:
-        because.append(OMP_REVIEWER_REFUSAL)
+        channel.append(OMP_REVIEWER_REFUSAL)
     if _reviews_itself(project_dir):
-        because.append(SELF_REVIEWER_REFUSAL)
+        channel.append(SELF_REVIEWER_REFUSAL)
+    because = list(missing) + channel
+    ask_because = critic.script_missing() + channel
     return {
         "configured": True,
         # A warning, not a reason in `not_ready_because`: the Arbiter may pick Flash (tcc#118).
@@ -204,6 +208,15 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         # being read. Configured and reachable are not the same as answering (2026-09-13).
         "ready": not because,
         "not_ready_because": because,
+        # `ready` is a REVIEW's, and before intake it says no for the project's two files. A plain
+        # question needs neither — and «check the Critic at the start» is asked exactly there: the
+        # session read the review's no and sent its question as a review (finding 124, tcc#116).
+        "ask": {
+            "how": "a plain question to the reviewer (not a review of a tuning step) goes through "
+                   "the `ask_reviewer` tool; it needs no intake",
+            "ready": not ask_because,
+            "not_ready_because": ask_because,
+        },
     }
 
 
