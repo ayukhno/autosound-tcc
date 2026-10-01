@@ -837,13 +837,13 @@ def test_re_check_from_another_tab_does_not_pay_for_the_probes():
     assert dialog._update_probe is None and dialog._tools_job is None
 
 
-def test_an_update_marks_the_report_stale_without_reading_it_on_another_tab(monkeypatch):
-    """The report names the method's version, so an update makes it stale — and it is re-read when
-    the Installation tab is opened, not in the background behind the Updates tab (VM-1)."""
+def test_an_update_does_not_read_a_report_nobody_has_opened(monkeypatch):
+    """The report names the method's version, so an update makes it stale. One never read is read
+    when the Installation tab is opened, not behind the Updates tab (VM-1); one read before is read
+    again at once — `test_a_report_after_an_update_carries_the_tools_whichever_tab_is_shown`."""
     dialog, _asked = _skill_offered(monkeypatch)
     monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
     dialog._tabs.setCurrentWidget(dialog._updates_tab)
-    dialog._install_read = True
 
     dialog._update_skill()
     _finish_skill_update(dialog)
@@ -873,7 +873,83 @@ def test_a_report_from_a_tab_that_was_never_opened_still_carries_the_versions():
     dialog = DiagnosticsDialog()
     assert dialog._install_read is False
 
-    assert "Autosound TCC" in dialog._report_text()
+    text = dialog._report_text()
+    assert "Autosound TCC" in text
+    assert "[Command-line tools]" in text and "not asked yet" in text, (
+        "the tools are said to be missing, not silently left out (review of VM fix A)")
+
+
+def _tools_section(**versions):
+    from autosound_tcc.core import install_report
+
+    return install_report.Section(
+        "Command-line tools", [install_report.Item(name, here) for name, here in versions.items()])
+
+
+def _finish_report(dialog) -> None:
+    """Run the report's `--version` probes to the end, here and now: a thread its timer polls."""
+    probe = dialog._install_worker
+    assert probe is not None, "the report is being read"
+    probe._thread.join(timeout=10)
+    dialog._poll_tools()
+
+
+def test_a_report_after_an_update_carries_the_tools_whichever_tab_is_shown(monkeypatch):
+    """Review of VM fix A, Minor 1: omp updated from the Updates tab, then «Report a problem» — and
+    the block went without the tools section, because the Installation tab was not on screen. A
+    report read before is read again at once; until its tools answer, the block says they have not
+    — never the versions from before the update, never nothing."""
+    import threading
+
+    from autosound_tcc.core import install_report, updates
+
+    release = threading.Event()
+    answers = iter([lambda: _tools_section(omp="17.3.8"),
+                    lambda: release.wait(5) and _tools_section(omp="18.2.4")])
+    monkeypatch.setattr(install_report, "tools", lambda: next(answers)())
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    _finish_report(dialog)
+    assert "omp  17.3.8" in dialog._report_text()
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate(
+        (updates.ToolUpdate("omp", True, "17.3.8", "18.2.4"),)))
+
+    dialog._tool_rows["omp"][1].click()
+    _finish_tools(dialog)
+
+    assert dialog._tabs.currentWidget() is dialog._updates_tab
+    text = dialog._report_text()
+    assert "[Command-line tools]" in text and "17.3.8" not in text, text
+    assert "being asked" in text or "not asked yet" in text, text
+    release.set()
+    _finish_report(dialog)
+    text = dialog._report_text()
+    assert "[Command-line tools]" in text and "omp  18.2.4" in text, text
+
+
+def test_a_report_during_a_re_check_carries_the_tools_last_delivered(monkeypatch):
+    """Re-check on the Installation tab puts «reading…» back in the box while the tools are asked
+    again; nothing was installed, so the block sends the tools as they last answered."""
+    import threading
+
+    from autosound_tcc.core import install_report
+
+    release = threading.Event()
+    answers = iter([lambda: _tools_section(gh="2.102.0"),
+                    lambda: release.wait(5) and _tools_section(gh="2.102.0")])
+    monkeypatch.setattr(install_report, "tools", lambda: next(answers)())
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    _finish_report(dialog)
+
+    dialog._on_refresh()
+
+    assert dialog._install_worker.running
+    assert "gh  2.102.0" in dialog._report_text()
+    release.set()
+    _finish_report(dialog)
 
 
 def test_the_update_row_carries_the_version_and_not_the_commit():
@@ -1227,6 +1303,7 @@ def test_report_a_problem_offers_both_routes_with_the_installation_block(monkeyp
     _app()
     dialog = DiagnosticsDialog()
     dialog._install_read = True
+    dialog._report_tools = _tools_section(omp="17.3.8")  # the box is the whole answer
     dialog._install_text.setPlainText("[Autosound TCC]\n  version  0.1.4\n")
 
     dialog._open_issue()

@@ -582,6 +582,10 @@ class DiagnosticsDialog(QDialog):
         layout.addLayout(row)
         self._install_worker: Optional[_ToolsProbe] = None
         self._install_read = False
+        #: The tools section the report's probe last delivered, while it still describes this
+        #: machine: an update drops it (`_install_changed`). «Report a problem» sends it whichever
+        #: tab is shown, or says it has not answered (`_report_text`).
+        self._report_tools: Optional[install_report.Section] = None
         # The timer belongs to this dialog, so it stops when the dialog goes; the thread does not,
         # because it holds nothing of Qt's.
         self._install_tries = 0
@@ -591,11 +595,14 @@ class DiagnosticsDialog(QDialog):
         return page
 
     def _install_changed(self) -> None:
-        """Something was installed, so the report's versions are stale: read again now if its tab
-        is on screen, else when it is opened — not eight `--version` calls behind the Updates tab
-        for a box nobody is looking at."""
+        """Something was installed, so the report's versions are stale. Read again now if its tab
+        is on screen or it was read before — «Report a problem» sends it from any tab, and a block
+        sent straight after updating omp went without the tools (review of VM fix A). A report
+        nobody has opened is not read behind the Updates tab: it is read when its tab is."""
+        was_read = self._install_read
         self._install_read = False
-        if self._tabs.currentWidget() is self._install_tab:
+        self._report_tools = None
+        if was_read or self._tabs.currentWidget() is self._install_tab:
             self.refresh_install()
 
     def _build_update_row(self) -> QWidget:
@@ -1122,6 +1129,8 @@ class DiagnosticsDialog(QDialog):
                              and probe.running):
             return
         self._install_timer.stop()
+        if probe is not None and probe.section is not None:
+            self._report_tools = probe.section
         self._render_install(probe.section if probe is not None else None)
 
     def _build_log_tab(self) -> QWidget:
@@ -1423,14 +1432,22 @@ class DiagnosticsDialog(QDialog):
         piece came from, which tools answer — is the half that decides whether the report can be
         answered at all (user, 2026-08-19: "дуже хочу обробляти їх напівавтоматично").
         """
-        if self._install_read:
+        running = self._install_worker is not None and self._install_worker.running
+        if self._install_read and self._report_tools is not None and not running:
             return self._install_text.toPlainText()
-        # The tab was never opened, so the box still holds "reading…". Compose the report now,
-        # WITHOUT the tools section: that one starts eight processes, and the versions and paths —
-        # which are what a report needs — are file reads that cost nothing.
+        # The box is not the whole answer: the tab was never opened, or it is being read again
+        # (Re-check, an update). Compose the report now with the tools as last delivered — or a
+        # section that SAYS they have not answered: they start eight processes, and the versions
+        # and paths are file reads that cost nothing. Left out silently, a report sent straight
+        # after an update read as one with no tools at all (review of VM fix A). In the report's
+        # own English, like its other lines.
+        missing = install_report.Section("Command-line tools", [install_report.Item(
+            "probe", "still being asked" if running else "not asked yet",
+            "" if running else "the Installation tab reads them")])
         try:
             return install_report.as_text(install_report.report(
-                extra=self._install_extra(), with_tools=False))
+                extra=self._install_extra(), with_tools=False,
+                tools_section=self._report_tools or missing))
         except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
             return f"{type(exc).__name__}: {exc}"
 
