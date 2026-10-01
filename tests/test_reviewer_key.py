@@ -31,13 +31,14 @@ _STATUS = {
 class _Method:
     """The method's script, as far as `reviewer_key` sees it: argv and stdin in, an answer out.
 
-    `after_move` / `after_rm` are what `key status` says once `key move-shell` / `key rm` ran."""
+    `after_move` is what `key status` says once `key move-shell` ran; `move_dies` is that child
+    killed at `_run`'s timeout — `_run` returns None — after it changed whatever it changed."""
 
     def __init__(self, status=_STATUS, set_rc=0, set_out="stored in the Keychain",
-                 after_move=None, after_rm=None):
+                 after_move=None, move_dies=False):
         self.calls: list[tuple[list[str], object]] = []
         self.status, self.set_rc, self.set_out = status, set_rc, set_out
-        self.after_move, self.after_rm = after_move, after_rm
+        self.after_move, self.move_dies = after_move, move_dies
 
     def __call__(self, args, *, stdin=None):
         self.calls.append((list(args), stdin))
@@ -52,12 +53,9 @@ class _Method:
         if args[:2] == ["key", "move-shell"]:
             if self.after_move is not None:
                 self.status = self.after_move
+            if self.move_dies:
+                return None
             return subprocess.CompletedProcess(args, 0, "✓ HKCU\\Environment: moved", "")
-        if args[:2] == ["key", "rm"]:
-            if self.after_rm is not None:
-                self.status = self.after_rm
-            return subprocess.CompletedProcess(
-                args, 0, f"{args[2]}: прибрано зі сховища ключів", "")
         raise AssertionError(args)
 
 
@@ -436,59 +434,61 @@ def test_a_copy_the_method_did_not_move_is_said_to_be_still_there(monkeypatch):
     dialog.close()
 
 
-def test_remove_key_names_the_provider_only(monkeypatch):
-    """`key rm <provider>` over argv: there is no value to send, and none is."""
-    method = _Method()
-    _use(monkeypatch, method)
-    reviewer_key.status()
-    removed, said = reviewer_key.remove_key("google")
-    assert removed and said == "google: прибрано зі сховища ключів"
-    assert method.calls[-1] == (["key", "rm", "google"], None)
-    reviewer_key.status()
-    assert method.calls[-1][0][:2] == ["key", "status"], "a removal drops the kept answer"
-    assert reviewer_key.remove_key("nobody") == (False, "unknown provider 'nobody'")
-    assert not any(args[:2] == ["key", "rm"] and args[2] == "nobody" for args, _ in method.calls)
-
-
-def test_a_stored_key_has_a_delete_and_only_a_stored_one(monkeypatch):
-    dialog, _ = _dialog(monkeypatch, _Method())
-    assert not dialog._delete["google"].isHidden()
-    assert dialog._delete["anthropic"].isHidden() and dialog._delete["openai"].isHidden()
-    dialog.close()
-
-
-def test_delete_asks_then_runs_key_rm_and_says_what_is_left(monkeypatch):
-    from autosound_tcc.ui.tcc import i18n
-
-    after = _with(exports=[], google={"used": "env", "keystore": False, "env": True})
-    method = _Method(status=_with(exports=[]), after_rm=after)
-    dialog, asked = _dialog(monkeypatch, method, answer=True)
-    dialog._delete["google"].click()
-    assert len(asked) == 1 and "GEMINI_API_KEY" in asked[0]
-    assert (["key", "rm", "google"], None) in method.calls
-    assert dialog._result.text() == i18n.t("rkDeletedLeft").format(
-        var="GEMINI_API_KEY", where=i18n.t("rkUsed_env"))
-    assert dialog._delete["google"].isHidden()
-    dialog.close()
-
-
-def test_delete_answered_no_removes_nothing(monkeypatch):
-    method = _Method(status=_with(exports=[]))
-    dialog, asked = _dialog(monkeypatch, method, answer=False)
-    dialog._delete["google"].click()
-    assert len(asked) == 1
-    assert not any(args[:2] == ["key", "rm"] for args, _ in method.calls)
-    assert not dialog._delete["google"].isHidden()
-    dialog.close()
-
-
 def test_the_window_opens_on_the_key_field_with_save_as_its_default(monkeypatch):
     """A dialog makes the first button in its focus chain the default — accent ring, bold, Enter.
-    With «Видалити» first in the grid that was the delete; the window is for entering a key."""
+    That was «Перенести» whenever it showed, and Enter in the key field opened the terminal."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from autosound_tcc.core import terminal_launcher
+
+    opened = []
+    monkeypatch.setattr(terminal_launcher, "run_line", opened.append)
     dialog, _ = _dialog(monkeypatch, _Method())
     dialog.show()
     QApplication.processEvents()
-    assert dialog._save.isDefault()
-    assert not any(button.isDefault() for button in dialog._delete.values())
-    assert not dialog._move.isDefault()
+    assert dialog._save.isDefault() and not dialog._move.isDefault()
+    QTest.keyClick(dialog._field, Qt.Key.Key_Return)
+    QApplication.processEvents()
+    assert opened == []
+    dialog.close()
+
+
+def test_another_export_with_a_stored_key_gets_no_yes(monkeypatch):
+    """`key move-shell --yes` stores EVERY export: an old OPENAI_API_KEY export would replace the
+    OpenAI key already in the store, unsaid. No yes here — the terminal asks per variable."""
+    from autosound_tcc.ui.tcc import i18n
+
+    other = {"var": "OPENAI_API_KEY", "file": "~/.zshrc", "line": 7}
+    held_in = {
+        "keystore": {"keystore": True, "used": "keystore"},
+        "the machine file": {"used": "file",
+                             "file": {"path": "critic-env", "line": 2, "blank": False}},
+    }
+    for name, openai in held_in.items():
+        method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY, other], openai=openai))
+        dialog, asked = _dialog(monkeypatch, method, answer=True)
+        dialog._field.setText("AIza" + "h" * 35)
+        dialog._on_save()
+        assert asked == [], name
+        assert not any(args[:2] == ["key", "move-shell"] for args, _ in method.calls), name
+        text = dialog._result.text()
+        assert "OPENAI_API_KEY (~/.zshrc, рядок 7)" in text, name
+        assert f"«{i18n.t('rkMove')}»" in text and "GEMINI_API_KEY" in text, name
+        dialog.close()
+
+
+def test_the_pasted_key_is_stored_again_when_the_move_gets_no_answer(monkeypatch):
+    """A move killed at the timeout may already have stored the exported value: the pasted key
+    goes back over it whatever the move answered."""
+    gone = _with(keystore="dpapi", exports=[])
+    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY]), after_move=gone,
+                     move_dies=True)
+    dialog, _ = _dialog(monkeypatch, method, answer=True)
+    secret = "AIza" + "t" * 35
+    dialog._field.setText(secret)
+    dialog._on_save()
+    calls = [(args, stdin) for args, stdin in method.calls if args[:2] != ["key", "status"]]
+    assert calls[-2:] == [(["key", "move-shell", "--yes"], None),
+                          (["key", "set", "google"], secret + "\n")]
     dialog.close()

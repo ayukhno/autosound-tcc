@@ -13,8 +13,8 @@ So TCC asks the one reader of all three stores, the method's own script:
   file, environment, or nowhere — and never prints a value;
 * `autosound_ai.py key set <provider>` stores a key, which it reads from STDIN: argv is visible to
   every process on the machine (`ps`), stdin is not;
-* `autosound_ai.py key rm <provider>` takes one out of the keystore, and `key move-shell` moves an
-  exported one in — neither needs a value from TCC (tcc#117).
+* `autosound_ai.py key move-shell` moves an exported key into the store, reading it where it is
+  exported — no value from TCC (tcc#117).
 
 A vendored method older than these commands answers neither. Then `status()` is None and the
 reachability question falls back to `critic_env`, exactly as before — so TCC works with the method
@@ -146,22 +146,6 @@ def set_key(provider: str, value: str) -> tuple[bool, str]:
         # after the save until ↻ (finding 128, tcc#117). Only the key's own route.
         availability.forget_refusals("api")
     return proc.returncode == 0, said
-
-
-def remove_key(provider: str) -> tuple[bool, str]:
-    """Take `provider`'s key out of the OS keystore: the method's `key rm`. (removed, its words)
-
-    Only the provider's name goes on argv — there is no value to send. `rm` empties the keystore
-    and nothing else; what is left in the file or the environment, the method's answer names.
-    """
-    if provider not in PROVIDERS:
-        return False, f"unknown provider {provider!r}"
-    proc = _run(["key", "rm", provider])
-    forget()
-    if proc is None:
-        return False, ""
-    app_log.logger().info("reviewer key: rm %s -> exit %s", provider, proc.returncode)
-    return proc.returncode == 0, (proc.stdout if proc.returncode == 0 else proc.stderr).strip()
 
 
 def move_exports() -> tuple[bool, str]:

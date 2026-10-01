@@ -8,8 +8,8 @@ environment variables, which have no line — beside the method's `key move-shel
 it moves anything — so a click here opens it in a terminal and the Arbiter answers it there, and
 nothing moves without his yes.
 
-A save that leaves such a copy behind asks here whether to take it out, and a key in the store can
-be deleted from it (`key rm`) — both the method's commands, never TCC's own edit (tcc#117).
+A save that leaves such a copy behind asks here whether to take it out — through the method's own
+`key move-shell`, never TCC's own edit (tcc#117).
 
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
@@ -90,24 +90,13 @@ class ReviewerKeyDialog(QDialog):
         self._grid = QGridLayout()
         self._grid.setHorizontalSpacing(16)
         self._where: dict[str, QLabel] = {}
-        self._delete: dict[str, QPushButton] = {}
         for row, provider in enumerate(reviewer_key.PROVIDERS):
             self._grid.addWidget(QLabel(_NAMES[provider]), row, 0)
             where = QLabel("")
             where.setProperty("class", "kv-val")
             self._grid.addWidget(where, row, 1)
             self._where[provider] = where
-            # A key in the store can leave it again: the method's `key rm` (finding 127).
-            delete = QPushButton(i18n.t("rkDelete"))
-            # Never the dialog's default: first in the focus chain, it took the accent ring and
-            # Enter — and a delete is not the answer this window expects.
-            delete.setAutoDefault(False)
-            delete.clicked.connect(lambda _checked=False, p=provider: self._on_delete(p))
-            _fit_tinted(delete)
-            delete.setVisible(False)
-            self._grid.addWidget(delete, row, 2)
-            self._delete[provider] = delete
-        self._grid.setColumnStretch(3, 1)
+        self._grid.setColumnStretch(2, 1)
         layout.addLayout(self._grid)
 
         # A key still in a shell profile: its file and line, and the method's own move.
@@ -148,8 +137,9 @@ class ReviewerKeyDialog(QDialog):
         layout.addWidget(buttons)
 
         self.refresh(ask=True)
-        # The window opens on the key field, so its default is «Зберегти», the button after it —
-        # not whichever button comes first in the focus chain («Видалити», «Перенести»).
+        # The window opens on the key field, so its default is «Зберегти», the button after it.
+        # Otherwise a dialog makes the first button in its focus chain the default, «Перенести»
+        # whenever it shows: Enter in the key field then saved AND opened the terminal.
         self._field.setFocus()
 
     def refresh(self, *, ask: bool = False) -> None:
@@ -168,7 +158,6 @@ class ReviewerKeyDialog(QDialog):
             used = entry.get("used", "none") if supported else ""
             label.setText(i18n.t(f"rkUsed_{used}") if used in ("keystore", "file", "env", "none")
                           else "—")
-            self._delete[provider].setVisible(supported and entry.get("keystore") is True)
         exports = reviewer_key.shell_exports()
         self._shell.setVisible(bool(exports))
         self._move.setVisible(bool(exports))
@@ -220,8 +209,17 @@ class ReviewerKeyDialog(QDialog):
         # and no longer: the method's move stores the EXPORTED value, which may be an older key
         # than the one just pasted, so the pasted one goes back over it.
         copies = self._copies_left(provider)
-        if copies and self._confirm(self._remove_question(copies), i18n.t("rkRemoveYes"),
-                                    default_yes=True):
+        held = self._held_elsewhere(copies)
+        if copies and held:
+            # `key move-shell --yes` stores EVERY export: an older copy of another key would
+            # replace the one already stored for it, unsaid. That one is the terminal's to ask
+            # about, variable by variable (tcc#117).
+            lines.append(i18n.t("rkRemoveHeld").format(
+                var=copies[0].get("var", "?"), place="; ".join(_place(e) for e in copies),
+                held=", ".join(f"{e.get('var', '?')} ({_place(e)})" for e in held),
+                button=i18n.t("rkMove")))
+        elif copies and self._confirm(self._remove_question(copies), i18n.t("rkRemoveYes"),
+                                      default_yes=True):
             line, tip = self._remove_copies(provider, value, copies)
             lines.append(line)
             tips.append(tip)
@@ -239,10 +237,25 @@ class ReviewerKeyDialog(QDialog):
             return []
         return [e for e in reviewer_key.shell_exports() if e.get("var") == entry.get("var")]
 
+    @staticmethod
+    def _held_elsewhere(copies: list[dict]) -> list[dict]:
+        """The OTHER exports whose key is already stored — in the keystore, or as a key in the
+        machine file, the method's other store. The move would put the exported value over it."""
+        if not copies:
+            return []
+        providers = (reviewer_key.status() or {}).get("providers") or {}
+        stored = {e.get("var") for e in providers.values() if isinstance(e, dict) and (
+            e.get("keystore") is True
+            or (isinstance(e.get("file"), dict) and e["file"].get("blank") is False))}
+        var = copies[0].get("var")
+        return [e for e in reviewer_key.shell_exports()
+                if e.get("var") != var and e.get("var") in stored]
+
     def _remove_question(self, copies: list[dict]) -> str:
         var = copies[0].get("var", "?")
         text = i18n.t("rkRemoveAsk").format(var=var, place="; ".join(_place(e) for e in copies))
-        # `key move-shell` takes every export, not one: the others are named before the yes.
+        # `key move-shell` takes every export, not one: the others — none of them with a key
+        # stored already (`_held_elsewhere`) — are named before the yes.
         others = [e for e in reviewer_key.shell_exports() if e.get("var") != var]
         if others:
             text += " " + i18n.t("rkRemoveAlso").format(
@@ -251,13 +264,13 @@ class ReviewerKeyDialog(QDialog):
 
     def _remove_copies(self, provider, value: str, copies: list[dict]) -> tuple[str, str]:
         """Move the copies out through the method, put the pasted key back, say where it stands."""
-        moved, said = reviewer_key.move_exports()
-        line = ""
-        if moved:
-            again, why = reviewer_key.set_key(provider, value)
-            if not again:
-                line = "\n" + (i18n.t("rkRefused").format(why=why) if why
-                               else i18n.t("rkNoAnswer"))
+        _moved, said = reviewer_key.move_exports()
+        # Stored again whatever the move answered: a move killed at `_run`'s timeout may have
+        # stored the exported value already (the method stores first, then removes the export and,
+        # on Windows, waits on the broadcast). A second `key set` of the same value is harmless.
+        again, why = reviewer_key.set_key(provider, value)
+        line = "" if again else "\n" + (i18n.t("rkRefused").format(why=why) if why
+                                        else i18n.t("rkNoAnswer"))
         # Read back, not assumed from the yes: the method leaves a line that sets the key by an
         # expression, and says so in its own words — the hover.
         var = copies[0].get("var", "?")
@@ -266,23 +279,6 @@ class ReviewerKeyDialog(QDialog):
         head = (i18n.t("rkNotRemoved").format(var=var, place=place) if left
                 else i18n.t("rkRemoved").format(place=place))
         return head + line, said
-
-    def _on_delete(self, provider) -> None:
-        var = self._entry(provider).get("var") or provider
-        if not self._confirm(i18n.t("rkDeleteAsk").format(var=var), i18n.t("rkDelete"),
-                             default_yes=False):
-            return
-        removed, said = reviewer_key.remove_key(provider)
-        entry = self._entry(provider)  # asked again: `remove_key` dropped the kept answer
-        if not removed or entry.get("keystore"):
-            text = i18n.t("rkNotDeleted").format(var=var)
-        elif entry.get("used") in ("file", "env"):
-            text = i18n.t("rkDeletedLeft").format(var=var, where=i18n.t(f"rkUsed_{entry['used']}"))
-        else:
-            text = i18n.t("rkDeleted").format(var=var)
-        self._result.setText(text)
-        self._result.setToolTip(said)
-        self.refresh()
 
     def _confirm(self, text: str, yes: str, *, default_yes: bool) -> bool:
         """A yes or a no, in the window's language. Its own method, so a test can answer it."""
