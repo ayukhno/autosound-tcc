@@ -1442,3 +1442,166 @@ def test_a_candidate_of_the_first_signed_version_is_checked_one_before_it_predat
     ok, line, why = updates._verdict_by_name("beta-v0.1.44-rc1", "v0.1.45", updates.channel_key)
     assert ok and why == "" and "predates signed tags" in line
     assert updates._verdict_by_name("v0.1.45", "v0.1.45", updates.channel_key) is None
+
+
+# ---- omp, agy, gh and Claude Code: the skill's `upkeep.py status` / `tools` (tcc#98, hub #219) --
+#
+# The vendored skill's `upkeep.py` is a stub file here and its run is faked (`_run_upkeep`): the
+# real `tools` would update this machine's own omp, gh and Claude Code.
+
+#: `conftest.py` stands in for both in every test — the status asks Homebrew and GitHub, and an
+#: update must never reach the developer's own tools; these are the real ones, captured at import.
+_REAL_TOOLS_STATUS = updates.tools_status
+_REAL_UPDATE_TOOLS = updates.update_tools
+
+#: `status` as hub #219's contract comment prints it.
+_TOOLS_STATUS_JSON = {
+    "clone": {"path": "/h/.claude/skills/.autosound-tuning-src", "exists": True,
+              "version": "v3.0.63", "changed": ["skills/autosound-tuning/rew_tool/contract.py"]},
+    "tools": [{"name": "omp", "path": "/opt/homebrew/bin/omp", "how": "brew", "package": "omp",
+               "installed": "17.2.9", "available": "18.4.3", "updatable": True}],
+    "libs": {"python": "/usr/bin/python3",
+             "installed": {"numpy": "2.0.2", "scipy": "1.13.1", "matplotlib": "3.9.4"}},
+}
+
+
+def _vendored_upkeep(monkeypatch, tmp_path, answer, code=0):
+    """The skill TCC runs on, with an `upkeep.py` in it whose run is faked. Returns the script and
+    the `(argv, timeout)` of every run."""
+    import json
+
+    from autosound_tcc.core import vendor_loader
+
+    skill = tmp_path / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    script = skill / "scripts" / "upkeep.py"
+    script.write_text("raise SystemExit('the fake is patched in; this never runs')\n")
+    monkeypatch.setattr(vendor_loader, "skill_dir", lambda: skill)
+    seen = []
+
+    def fake(argv, timeout):
+        seen.append((argv, timeout))
+        return code, answer if isinstance(answer, str) else json.dumps(answer), ""
+
+    monkeypatch.setattr(updates, "_run_upkeep", fake)
+    return script, seen
+
+
+def test_the_tools_status_of_hub_219_is_read_into_one_row_per_tool(monkeypatch, tmp_path):
+    """The contract's own example: omp from Homebrew, 17.2.9 here and 18.4.3 out. Run from the
+    skill TCC runs on, on TCC's interpreter, `--json` before the command and no `--clone` — the
+    clone half of the answer is the method row's business."""
+    from autosound_tcc.core import child
+
+    script, seen = _vendored_upkeep(monkeypatch, tmp_path, _TOOLS_STATUS_JSON)
+
+    found = _REAL_TOOLS_STATUS()
+
+    assert found.ok is True
+    assert found.tools == (updates.Tool("omp", "17.2.9", "18.4.3", True),)
+    assert found.tools[0].newer and found.tools[0].offered
+    argv, timeout = seen[0]
+    assert argv == [child.script_interpreter(), str(script), "--json", "status"]
+    assert timeout >= 60, "up to about a minute, by the contract"
+
+
+def test_an_empty_available_reads_unknown_never_up_to_date(monkeypatch, tmp_path):
+    """`available: ""` is a source that cannot say without installing (agy, a native Claude Code):
+    unknown, so the button is offered. Equal versions are current; `other` is left alone."""
+    rows = [
+        {"name": "claude", "how": "npm", "installed": "2.1.286", "available": "2.1.286",
+         "updatable": True},
+        {"name": "agy", "how": "self", "installed": "1.2.14", "available": "", "updatable": True},
+        {"name": "gh", "how": "other", "installed": "2.92.0", "available": "", "updatable": False},
+    ]
+    _vendored_upkeep(monkeypatch, tmp_path, {**_TOOLS_STATUS_JSON, "tools": rows})
+
+    claude, agy, gh = _REAL_TOOLS_STATUS().tools
+
+    assert agy.available == "" and not agy.newer and agy.offered, "unknown is not up to date"
+    assert not claude.newer and not claude.offered, "the same version: nothing to offer"
+    assert not gh.offered, "installed some other way: not TCC's to update"
+
+
+def test_only_what_is_present_gets_a_row(monkeypatch, tmp_path):
+    _vendored_upkeep(monkeypatch, tmp_path, {**_TOOLS_STATUS_JSON, "tools": []})
+
+    found = _REAL_TOOLS_STATUS()
+
+    assert found.ok is True and found.tools == ()
+
+
+def test_a_status_that_does_not_answer_says_why_in_its_own_words(monkeypatch, tmp_path):
+    _vendored_upkeep(monkeypatch, tmp_path, "Traceback …\nOSError: disk full", code=1)
+
+    found = _REAL_TOOLS_STATUS()
+
+    assert found.ok is False and found.reason == "upkeep_failed"
+    assert "disk full" in found.detail
+
+
+def test_a_method_older_than_its_updater_says_so_and_runs_nothing(monkeypatch, tmp_path):
+    """`upkeep.py` arrived in v3.0.64; a clone from before it has nothing to ask."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "skill_dir", lambda: tmp_path / "old-skill")
+    monkeypatch.setattr(updates, "_run_upkeep",
+                        lambda argv, timeout: pytest.fail("there is no script to run"))
+
+    assert _REAL_TOOLS_STATUS().reason == "no_upkeep_here"
+    assert _REAL_UPDATE_TOOLS(["omp"]).reason == "no_upkeep_here"
+
+
+def test_updating_runs_tools_with_only_the_names_pressed(monkeypatch, tmp_path):
+    from autosound_tcc.core import child
+
+    answer = [{"name": "omp", "how": "brew", "old": "17.2.9", "new": "18.4.3", "ok": True,
+               "command": "/opt/homebrew/bin/brew upgrade omp"}]
+    script, seen = _vendored_upkeep(monkeypatch, tmp_path, answer)
+
+    done = _REAL_UPDATE_TOOLS(["omp"])
+
+    argv, _timeout = seen[0]
+    assert argv == [child.script_interpreter(), str(script), "--json", "tools", "--only", "omp"]
+    assert done.reason == ""
+    assert done.rows == (updates.ToolUpdate("omp", True, "17.2.9", "18.4.3"),)
+
+
+def test_a_tool_that_did_not_update_says_why_and_the_others_still_come_back(monkeypatch,
+                                                                            tmp_path):
+    """Exit 3 when any row is not `ok` — and the list is still printed: one failed update leaves
+    that tool as it was, says why, and hides nothing of the rest."""
+    answer = [
+        {"name": "omp", "how": "brew", "old": "17.2.9", "new": "17.2.9", "ok": False,
+         "why": "Error: omp: Permission denied @ rb_sysopen", "command": "brew upgrade omp"},
+        {"name": "gh", "how": "release", "old": "2.92.0", "new": "2.101.0", "ok": True},
+    ]
+    _script, seen = _vendored_upkeep(monkeypatch, tmp_path, answer, code=3)
+
+    done = _REAL_UPDATE_TOOLS(["omp", "gh"])
+
+    assert seen[0][0][-4:] == ["--only", "omp", "--only", "gh"]
+    omp, gh = done.rows
+    assert omp == updates.ToolUpdate("omp", False, "17.2.9", "17.2.9",
+                                     "Error: omp: Permission denied @ rb_sysopen")
+    assert gh.ok and gh.new == "2.101.0"
+
+
+def test_no_names_updates_nothing(monkeypatch, tmp_path):
+    """`tools` with no `--only` updates EVERY tool present — so an empty list never reaches it."""
+    _script, seen = _vendored_upkeep(monkeypatch, tmp_path, [])
+
+    done = _REAL_UPDATE_TOOLS([])
+
+    assert seen == [] and done.rows == ()
+
+
+def test_an_update_that_does_not_answer_says_why(monkeypatch, tmp_path):
+    _vendored_upkeep(monkeypatch, tmp_path, "", code=-1)
+    monkeypatch.setattr(updates, "_run_upkeep",
+                        lambda argv, timeout: (-1, "", "TimeoutExpired: no answer in 960 s"))
+
+    done = _REAL_UPDATE_TOOLS(["omp"])
+
+    assert done.rows == () and done.reason == "upkeep_failed"
+    assert "TimeoutExpired" in done.detail

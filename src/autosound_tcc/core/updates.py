@@ -610,8 +610,10 @@ def current_channel() -> str:
 #: How long each of `upkeep.py`'s commands may take before TCC stops waiting. Its own inner
 #: timeouts, plus room: `status` asks Homebrew and GitHub about the tools too ("up to about a
 #: minute", the contract on hub #217); `clone` fetches with 300 s; `libs` lets pip take 900 s over
-#: a network that may be a phone in a car park.
-_UPKEEP_TIMEOUT = {"status": 150.0, "keep-local": 180.0, "clone": 360.0, "libs": 960.0}
+#: a network that may be a phone in a car park. `tools` is PER TOOL: the skill gives each update
+#: 900 s, one after another (`update_tools`).
+_UPKEEP_TIMEOUT = {"status": 150.0, "keep-local": 180.0, "clone": 360.0, "libs": 960.0,
+                   "tools": 960.0}
 
 
 #: The skill's trust anchor, as its own `upkeep.py` and both installers hold it (skill #99, hub
@@ -812,34 +814,39 @@ class Upkeep:
     """One `upkeep.py --json` run. `reason` is a key, the way `Status.reason` is."""
 
     ok: bool
-    #: The object it printed — also on a failed step (`libs` exits 3 with its own `why`).
-    data: dict
+    #: The object it printed — also on a failed step (`libs` exits 3 with its own `why`). For
+    #: `tools` a LIST, one row per tool (hub #219), also on exit 3.
+    data: dict | list
     #: "" · "refused" (`detail` is the skill's sentence) · "no_upkeep" · "upkeep_failed".
     reason: str = ""
     detail: str = ""
 
 
-def _upkeep(command: str, *args: str, clone: Path, script: Path) -> Upkeep:
-    """Run `upkeep.py --json --clone <clone> <command> [args]` and read its answer.
+def _upkeep(command: str, *args: str, script: Path, clone: Optional[Path] = None,
+            timeout: Optional[float] = None) -> Upkeep:
+    """Run `upkeep.py --json [--clone <clone>] <command> [args]` and read its answer.
 
     `--json` and `--clone` BEFORE the command (the contract on hub #217 and #219), on the
     interpreter TCC runs on — its console twin on Windows, so git under it opens no window
-    (`child.script_interpreter`). Exit 3 with `{"ok": false, "refused": …}` is a refusal whose
-    sentence goes on screen as the skill wrote it; exit 3 with any other object is a step that
+    (`child.script_interpreter`). `--clone` only when there is one: the tools' commands are not
+    about the clone (tcc#98). Exit 3 with `{"ok": false, "refused": …}` is a refusal whose
+    sentence goes on screen as the skill wrote it; exit 3 with any other answer is a step that
     failed and says why in its own fields.
     """
-    argv = [child.script_interpreter(), str(script), "--json", "--clone", str(clone), command, *args]
-    code, out, err = _run_upkeep(argv, _UPKEEP_TIMEOUT.get(command, 300.0))
+    where = ["--clone", str(clone)] if clone is not None else []
+    argv = [child.script_interpreter(), str(script), "--json", *where, command, *args]
+    code, out, err = _run_upkeep(argv, timeout or _UPKEEP_TIMEOUT.get(command, 300.0))
     try:
         data = json.loads(out) if out.strip() else None
     except ValueError:
         data = None
-    if not isinstance(data, dict):
+    # `tools` prints a list and every other command an object; a refusal is an object for both.
+    if not isinstance(data, dict) and not (command == "tools" and isinstance(data, list)):
         said = (err.strip() or out.strip()).splitlines()
         _log.warning("upkeep %s exited %s with no JSON: %s", command, code,
                      said[-1] if said else "(no output)")
         return Upkeep(False, {}, "upkeep_failed", said[-1] if said else f"exit {code}")
-    if data.get("ok") is False and "refused" in data:
+    if isinstance(data, dict) and data.get("ok") is False and "refused" in data:
         _log.warning("upkeep %s refused: %s", command, data["refused"])
         return Upkeep(False, data, "refused", str(data["refused"]))
     _log.info("upkeep %s: exit %s", command, code)
@@ -985,6 +992,126 @@ def _apply_with(got: Extracted, repo: Path, target: str, *, keep_local: bool,
         libs=_libs_moved(libs.data) if libs_ok
         else str(libs.data.get("why") or libs.detail or libs.reason),
     )
+
+
+# ---- the tools the installer put in: omp, agy, gh, Claude Code (tcc#98, hub #219 TCC-035) -----
+#
+# «Оновити TCC» moved TCC alone and omp stayed at 17.3.8 while brew offered 18.2.4 (finding 107).
+# TCC runs no brew, npm or winget itself: the skill's `upkeep.py` knows how each tool was installed
+# and updates it that way, and TCC shows what it answers (one path, as in SKL-056).
+
+
+def upkeep_script() -> Path:
+    """`upkeep.py` of the skill TCC runs on — the vendored one, as `critic.script_path()` finds
+    `autosound_ai.py`. Not the NEW tag's copy (`_upkeep_from_tag`): the tools do not wait for the
+    method's update, and a fetch is no price for a version number. Absent before v3.0.64."""
+    return vendor_loader.skill_dir() / "scripts" / "upkeep.py"
+
+
+@dataclass(frozen=True)
+class Tool:
+    """One tool that is present here, as `upkeep.py status` names it (hub #219)."""
+
+    name: str
+    #: The version it says it is; "" when it would not say.
+    installed: str
+    #: What its source offers. "" when the source cannot say without installing (agy, a native
+    #: Claude Code): UNKNOWN, which is not "up to date" (the contract says so in as many words).
+    available: str
+    #: False for a tool installed some other way (`how: other`): the skill leaves it alone.
+    updatable: bool
+
+    @property
+    def newer(self) -> bool:
+        """The source names a version, and it is past the one here (or the one here is unknown)."""
+        if not self.available:
+            return False
+        return not self.installed or _version_key(self.available) > _version_key(self.installed)
+
+    @property
+    def offered(self) -> bool:
+        """Whether the row's button may be live: ours to update, and newer or not knowable."""
+        return self.updatable and (self.newer or not self.available)
+
+
+@dataclass(frozen=True)
+class ToolsStatus:
+    """`upkeep.py status`'s tools, or why there are none to show. `reason` is a key."""
+
+    ok: bool
+    tools: tuple[Tool, ...] = ()
+    reason: str = ""
+    detail: str = ""
+
+
+def tools_status() -> ToolsStatus:
+    """omp, agy, gh and Claude Code — whichever are present — with the version here and the one
+    their source offers. Up to about a minute (it asks Homebrew, npm, `omp update --check` and
+    GitHub): off the GUI thread. Reads only; nothing is updated here."""
+    script = upkeep_script()
+    if not script.is_file():
+        return ToolsStatus(False, reason="no_upkeep_here")
+    answer = _upkeep("status", script=script)
+    if not answer.ok:
+        return ToolsStatus(False, reason=answer.reason, detail=answer.detail)
+    rows = answer.data.get("tools")
+    if not isinstance(rows, list):
+        return ToolsStatus(False, reason="upkeep_failed", detail="no tools in its answer")
+    return ToolsStatus(True, tuple(
+        Tool(str(row["name"]), str(row.get("installed") or ""), str(row.get("available") or ""),
+             bool(row.get("updatable")))
+        for row in rows if isinstance(row, dict) and row.get("name")))
+
+
+@dataclass(frozen=True)
+class ToolUpdate:
+    """One tool's row of `upkeep.py tools`: old → new, or why not — and then it is as it was."""
+
+    name: str
+    ok: bool
+    old: str = ""
+    new: str = ""
+    why: str = ""
+
+
+@dataclass(frozen=True)
+class ToolsUpdate:
+    """What `upkeep.py tools` answered; no rows and a `reason` key when it answered nothing."""
+
+    rows: tuple[ToolUpdate, ...]
+    reason: str = ""
+    detail: str = ""
+
+
+def update_tools(names) -> ToolsUpdate:
+    """The tools in `names`, each updated the way it was installed (`tools --only …`). Slow — a
+    package manager per tool: off the GUI thread.
+
+    Only ever with names. `tools` with no `--only` updates EVERY tool present, and a newer omp
+    changes what the next session runs on (tcc#97): that is the Arbiter's press on the rows he
+    saw, so an empty list runs nothing rather than meaning "all".
+    """
+    names = [str(name) for name in names if name]
+    if not names:
+        return ToolsUpdate(())
+    script = upkeep_script()
+    if not script.is_file():
+        return ToolsUpdate((), "no_upkeep_here")
+    only = [part for name in names for part in ("--only", name)]
+    answer = _upkeep("tools", *only, script=script,
+                     timeout=_UPKEEP_TIMEOUT["tools"] * len(names))
+    if not isinstance(answer.data, list):
+        return ToolsUpdate((), answer.reason or "upkeep_failed", answer.detail)
+    rows = tuple(
+        ToolUpdate(str(row.get("name") or ""), bool(row.get("ok")), str(row.get("old") or ""),
+                   str(row.get("new") or ""), str(row.get("why") or ""))
+        for row in answer.data if isinstance(row, dict))
+    for row in rows:
+        # The receipt, where it survives the dialog being closed mid-update.
+        (_log.info if row.ok else _log.warning)(
+            "tool %s: %s -> %s%s", row.name, row.old or "?", row.new or "?",
+            "" if row.ok else f" (not updated: {row.why})")
+    return ToolsUpdate(rows)
 
 
 # ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) -------------

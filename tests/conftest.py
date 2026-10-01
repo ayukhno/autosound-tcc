@@ -413,6 +413,14 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
             updates.Status("skill", "0.0.0", "", False, "offline in tests", updatable=False)),
         raising=False,
     )
+    # ...and the tools under the same tab (tcc#98): the skill's `upkeep.py status` asks Homebrew,
+    # npm and GitHub, and its `tools` would update the developer's own omp, gh and Claude Code.
+    # Tests about the tool rows patch these themselves.
+    monkeypatch.setattr(updates, "tools_status",
+                        lambda: updates.ToolsStatus(False, reason="offline in tests"),
+                        raising=False)
+    monkeypatch.setattr(updates, "update_tools",
+                        lambda names: updates.ToolsUpdate((), "offline in tests"), raising=False)
     # ...and no modal question waits for a person who is not there. A first capture round with no
     # series asks for its number (hub #153 A); in a test nobody answers, and a real QInputDialog
     # holds the whole run — it did, for five minutes, on the first try. Cancel is the answer here;

@@ -1176,3 +1176,178 @@ def test_the_rew_line_of_a_method_that_does_not_send_the_key_is_unchanged():
     line = _rew_line(old)
 
     assert "w-L_1 (sw) — not today" in line and "never expected" not in line
+
+
+# ---- omp, agy, gh and Claude Code (tcc#98) ------------------------------------------------------
+
+
+def _tool(name, here, there, updatable=True):
+    from autosound_tcc.core import updates
+
+    return updates.Tool(name, here, there, updatable)
+
+
+def _finish_tools(dialog) -> None:
+    """Run the tools' job to the end, here and now: a thread the dialog's timer would poll."""
+    for _ in range(5):
+        job = dialog._tools_job
+        if job is None:
+            return
+        job.join(timeout=10)
+        dialog._poll_tools_job()
+    raise AssertionError("the tools' job never settled")
+
+
+def _tools_shown(monkeypatch, *tools):
+    """A dialog whose Installation tab was opened and whose tools' status came back as `tools`."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, tuple(tools)))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentIndex(1)
+    _finish_tools(dialog)
+    return dialog
+
+
+def test_the_tool_rows_appear_after_the_worker_not_before(monkeypatch):
+    """The skill's `status` takes up to a minute (Homebrew, npm, GitHub): the window opens at once
+    and the rows come when the answer does. Opening it updates nothing."""
+    from autosound_tcc.core import updates
+
+    release = threading.Event()
+    monkeypatch.setattr(updates, "tools_status", lambda: release.wait(5) and updates.ToolsStatus(
+        True, (_tool("omp", "17.3.8", "18.2.4"), _tool("agy", "1.2.14", ""),
+               _tool("gh", "2.102.0", "2.102.0"), _tool("claude", "2.1.280", "2.1.284"))))
+    monkeypatch.setattr(updates, "update_tools",
+                        lambda names: pytest.fail("nothing is updated without a press"))
+    _app()
+    dialog = DiagnosticsDialog()
+    assert dialog._tools_job is None, "the window opening asks nothing"
+
+    dialog._tabs.setCurrentIndex(1)
+
+    assert dialog._tools_job is not None and dialog._tool_rows == {}, "not before the worker"
+    assert i18n.t("updToolsChecking") in _texts(dialog)
+    release.set()
+    _finish_tools(dialog)
+
+    assert list(dialog._tool_rows) == ["omp", "agy", "gh", "claude"]
+    label, button = dialog._tool_rows["omp"]
+    assert label.text() == i18n.t("updToolAvailable").format(name="omp", here="17.3.8",
+                                                             there="18.2.4")
+    assert button.isEnabled()
+    label, button = dialog._tool_rows["agy"]
+    assert label.text() == i18n.t("updToolUnknown").format(name="agy", here="1.2.14"), (
+        "an empty `available` reads unknown, never up to date")
+    assert button.isEnabled()
+    label, button = dialog._tool_rows["gh"]
+    assert label.text() == i18n.t("updToolCurrent").format(name="gh", here="2.102.0")
+    assert not button.isEnabled(), "nothing to install: no live button"
+    assert "Claude Code" in dialog._tool_rows["claude"][0].text()
+    assert dialog._tools_all_btn.isEnabled()
+
+
+def test_no_tools_here_and_no_updater_here_are_each_said(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch)
+    assert i18n.t("updToolsNone") in _texts(dialog) and dialog._tool_rows == {}
+
+    monkeypatch.setattr(updates, "tools_status",
+                        lambda: updates.ToolsStatus(False, reason="no_upkeep_here"))
+    dialog._on_refresh()
+    _finish_tools(dialog)
+
+    assert i18n.t("updWhy_no_upkeep_here") in _texts(dialog) and dialog._tool_rows == {}
+
+
+def test_a_tool_s_button_updates_that_tool_and_all_updates_what_is_still_offered(monkeypatch):
+    """Each press is the Arbiter's (a newer omp changes what a session runs on, tcc#97): the row's
+    button sends its one tool, «Update all» the tools whose buttons are live."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"),
+                          _tool("agy", "1.2.14", ""), _tool("gh", "2.102.0", "2.102.0"))
+    asked = []
+    monkeypatch.setattr(updates, "update_tools", lambda names: asked.append(list(names)) or
+                        updates.ToolsUpdate(tuple(updates.ToolUpdate(name, True, "1.0", "2.0")
+                                                  for name in names)))
+
+    dialog._tool_rows["omp"][1].click()
+    assert dialog._tool_rows["omp"][0].text() == i18n.t("updToolUpdating").format(
+        name="omp", here="17.3.8")
+    assert not any(button.isEnabled() for _label, button in dialog._tool_rows.values()), (
+        "one update at a time")
+    assert not dialog._tools_all_btn.isEnabled()
+    _finish_tools(dialog)
+
+    assert asked == [["omp"]]
+    assert dialog._tool_rows["omp"][0].text() == i18n.t("updToolDone").format(
+        name="omp", old="1.0", new="2.0")
+    assert not dialog._tool_rows["omp"][1].isEnabled(), "done: nothing more to press"
+
+    dialog._tools_all_btn.click()
+    _finish_tools(dialog)
+
+    assert asked == [["omp"], ["agy"]], "omp is done and gh is current: agy alone is still offered"
+
+
+def test_a_tool_that_did_not_update_keeps_its_row_says_why_and_hides_no_other(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"),
+                          _tool("agy", "1.2.14", ""), _tool("gh", "2.102.0", "2.102.0"))
+    omp_before = dialog._tool_rows["omp"][0].text()
+    gh_before = dialog._tool_rows["gh"][0].text()
+    why = "Error: omp: Permission denied @ rb_sysopen"
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate((
+        updates.ToolUpdate("omp", False, "17.3.8", "17.3.8", why),
+        updates.ToolUpdate("agy", True, "1.2.14", "1.3.0"))))
+
+    dialog._tools_all_btn.click()
+    _finish_tools(dialog)
+
+    label, button = dialog._tool_rows["omp"]
+    assert label.text() == omp_before + "\n" + i18n.t("updToolFailed").format(why=why)
+    assert button.isEnabled(), "the person can try again"
+    assert dialog._tool_rows["agy"][0].text() == i18n.t("updToolDone").format(
+        name="agy", old="1.2.14", new="1.3.0")
+    assert dialog._tool_rows["gh"][0].text() == gh_before, "a row nobody asked about is untouched"
+    assert list(dialog._tool_rows) == ["omp", "agy", "gh"], "no row hidden"
+
+
+def test_an_update_that_did_not_answer_leaves_every_row_it_asked_about_as_it_was(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    before = dialog._tool_rows["omp"][0].text()
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate(
+        (), "upkeep_failed", "OSError: disk full"))
+
+    dialog._tool_rows["omp"][1].click()
+    _finish_tools(dialog)
+
+    label, button = dialog._tool_rows["omp"]
+    assert label.text().startswith(before + "\n") and "disk full" in label.text()
+    assert button.isEnabled()
+
+
+def test_a_re_check_during_a_tool_update_leaves_its_rows_alone(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    release = threading.Event()
+    monkeypatch.setattr(updates, "update_tools", lambda names: release.wait(5) and
+                        updates.ToolsUpdate((updates.ToolUpdate("omp", True, "17.3.8", "18.2.4"),)))
+    monkeypatch.setattr(updates, "tools_status",
+                        lambda: pytest.fail("no status while a tool is being updated"))
+
+    dialog._tool_rows["omp"][1].click()
+    dialog._on_refresh()
+
+    assert dialog._tool_rows["omp"][0].text() == i18n.t("updToolUpdating").format(
+        name="omp", here="17.3.8")
+    release.set()
+    _finish_tools(dialog)
+    assert "18.2.4" in dialog._tool_rows["omp"][0].text()

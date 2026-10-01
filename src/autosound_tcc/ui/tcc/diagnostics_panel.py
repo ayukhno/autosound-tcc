@@ -164,6 +164,32 @@ def _reason(key: str, detail: str = "") -> str:
     return f"{text}: {detail}" if detail else text
 
 
+def _tool_title(name: str) -> str:
+    """The name a person knows the tool by: `upkeep.py` says `claude` for Claude Code."""
+    return {"claude": "Claude Code"}.get(name, name)
+
+
+def _tool_line(tool) -> str:
+    """One tool's row (tcc#98): the version here → the one out there, in words. An empty
+    `available` is UNKNOWN (hub #219), never "up to date"."""
+    name, here = _tool_title(tool.name), tool.installed or "?"
+    if not tool.updatable:
+        return i18n.t("updToolNotOurs").format(name=name, here=here)
+    if not tool.available:
+        return i18n.t("updToolUnknown").format(name=name, here=here)
+    if tool.newer:
+        return i18n.t("updToolAvailable").format(name=name, here=here, there=tool.available)
+    return i18n.t("updToolCurrent").format(name=name, here=here)
+
+
+def _tool_done_line(row) -> str:
+    """The receipt of one tool that updated: old → new, or that it already was the newest."""
+    name = _tool_title(row.name)
+    if row.new and row.new == row.old:
+        return i18n.t("updToolSame").format(name=name, here=row.new)
+    return i18n.t("updToolDone").format(name=name, old=row.old or "?", new=row.new or "?")
+
+
 def _note(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("class", "phead-sub")
@@ -312,11 +338,10 @@ class _UpdateStep:
     started it.
     """
 
-    def __init__(self, work) -> None:
+    def __init__(self, work, name: str = "tcc-skill-update") -> None:
         self.result = None
         self.error = ""
-        self._thread = threading.Thread(target=self._run, args=(work,),
-                                        name="tcc-skill-update", daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(work,), name=name, daemon=True)
         self._thread.start()
 
     def _run(self, work) -> None:
@@ -541,6 +566,27 @@ class DiagnosticsDialog(QDialog):
         self._tcc_timer = QTimer(self)
         self._tcc_timer.setInterval(_TOOLS_POLL_MS)
         self._tcc_timer.timeout.connect(self._poll_tcc_job)
+        # omp, agy, gh and Claude Code (tcc#98): what the installer put in beside TCC, as the
+        # skill's own `upkeep.py` finds it (hub #219). The rows come after its `status` does — up to
+        # a minute — and nothing is updated without a press: a newer omp changes what a session
+        # runs on (tcc#97).
+        self._tools_title = _section_title(i18n.t("updToolsTitle"))
+        grid.addWidget(self._tools_title)
+        tools = QWidget()
+        self._tools_layout = QVBoxLayout(tools)
+        self._tools_layout.setContentsMargins(0, 0, 0, 0)
+        self._tools_layout.setSpacing(4)
+        grid.addWidget(tools)
+        self._tools: dict = {}
+        self._tool_rows: dict = {}
+        self._tools_all_btn: Optional[QPushButton] = None
+        self._tools_job: Optional[_UpdateStep] = None
+        self._tools_then = None
+        self._tools_asked: list = []
+        self._tools_before: dict = {}
+        self._tools_timer = QTimer(self)
+        self._tools_timer.setInterval(_TOOLS_POLL_MS)
+        self._tools_timer.timeout.connect(self._poll_tools_job)
         return box
 
     def _poll_updates(self) -> None:
@@ -784,6 +830,140 @@ class DiagnosticsDialog(QDialog):
             return
         label.setText("\n".join([i18n.t("updTccHanded"),
                                   i18n.t("updSkillSigned").format(line=ready.signature)]))
+
+    # ---- omp, agy, gh, Claude Code (tcc#98) ----------------------------------
+
+    def _start_tools_check(self) -> None:
+        """Ask the skill's `upkeep.py status` about the tools — but not while one is being
+        updated: its row says so, and the receipt is on its way."""
+        if self._tools_job is not None:
+            return
+        self._show_tools_note(i18n.t("updToolsChecking"))
+        self._run_tools_step(updates.tools_status, self._after_tools_status)
+
+    def _run_tools_step(self, work, then) -> None:
+        self._tools_job = _UpdateStep(work, name="tcc-tools")
+        self._tools_then = then
+        self._tools_timer.start()
+
+    def _poll_tools_job(self) -> None:
+        job = self._tools_job
+        if job is None or job.running:
+            return
+        self._tools_timer.stop()
+        then, self._tools_job, self._tools_then = self._tools_then, None, None
+        then(job)
+
+    def _show_tools_note(self, text: str) -> None:
+        """One line where the rows go: still asking, none here, or why it could not be asked."""
+        clear_layout(self._tools_layout)
+        self._tools, self._tool_rows, self._tools_all_btn = {}, {}, None
+        self._tools_layout.addWidget(_note(text))
+
+    def _after_tools_status(self, job) -> None:
+        """A row per tool that is present: here → out there, and its own button; then «all»."""
+        found = job.result
+        if job.error or found is None:
+            self._show_tools_note(i18n.t("updToolsUnknown").format(why=job.error or "?"))
+            return
+        if not found.ok:
+            self._show_tools_note(i18n.t("updToolsUnknown").format(
+                why=_reason(found.reason, found.detail)))
+            return
+        if not found.tools:
+            self._show_tools_note(i18n.t("updToolsNone"))
+            return
+        clear_layout(self._tools_layout)
+        self._tools = {tool.name: tool for tool in found.tools}
+        self._tool_rows = {}
+        for tool in found.tools:
+            label = QLabel(_tool_line(tool))
+            button = self._tools_row(label, i18n.t("updTool"))
+            button.setEnabled(tool.offered)
+            button.clicked.connect(lambda _c=False, name=tool.name: self._update_tools([name]))
+            self._tool_rows[tool.name] = (label, button)
+        self._tools_all_btn = self._tools_row(None, i18n.t("updToolsAll"))
+        self._tools_all_btn.setEnabled(any(tool.offered for tool in found.tools))
+        self._tools_all_btn.clicked.connect(self._update_offered_tools)
+
+    def _tools_row(self, label: Optional[QLabel], text: str) -> QPushButton:
+        """A line of the tools' list — a label and its button, or the button alone on the right —
+        in a widget of its own, so `clear_layout` takes the whole of it."""
+        row = QWidget()
+        line = QHBoxLayout(row)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(8)
+        if label is None:
+            line.addStretch(1)
+        else:
+            label.setWordWrap(True)
+            label.setProperty("class", "mn")
+            line.addWidget(label, stretch=1)
+        button = QPushButton(text)
+        button.setProperty("class", "reason-btn")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        line.addWidget(button)
+        self._tools_layout.addWidget(row)
+        return button
+
+    def _update_offered_tools(self) -> None:
+        """«Update all» is every row whose button is live — what the rows offer now, not every tool
+        present: one already updated, or current, is not touched again."""
+        self._update_tools([name for name, (_label, button) in self._tool_rows.items()
+                            if button.isEnabled()])
+
+    def _update_tools(self, names: list) -> None:
+        """The skill's `upkeep.py tools --only …`, off the GUI thread: a package manager per tool.
+        Every tool button waits meanwhile — one update at a time."""
+        if self._tools_job is not None or not names:
+            return
+        self._tools_asked = list(names)
+        self._tools_before = {name: (label.text(), button.isEnabled())
+                              for name, (label, button) in self._tool_rows.items()}
+        for name, (label, button) in self._tool_rows.items():
+            button.setEnabled(False)
+            if name in names:
+                label.setText(i18n.t("updToolUpdating").format(
+                    name=_tool_title(name), here=self._tools[name].installed or "?"))
+        if self._tools_all_btn is not None:
+            self._tools_all_btn.setEnabled(False)
+        asked = list(names)
+        self._run_tools_step(lambda: updates.update_tools(asked), self._after_tools_update)
+
+    def _after_tools_update(self, job) -> None:
+        """Each tool asked about: old → new, or its row as it was with the reason under it. A row
+        nobody asked about is put back exactly as it was — a failure hides nothing."""
+        done = job.result
+        if job.error or done is None:
+            done = updates.ToolsUpdate((), "upkeep_failed", job.error or "?")
+        answered = {row.name: row for row in done.rows}
+        moved = False
+        for name, (label, button) in self._tool_rows.items():
+            text, live = self._tools_before.get(name, (label.text(), False))
+            row = answered.get(name)
+            if name not in self._tools_asked:
+                button.setEnabled(live)
+            elif row is not None and row.ok:
+                moved = True
+                label.setText(_tool_done_line(row))
+                button.setEnabled(False)
+            else:
+                if row is not None:
+                    why = row.why or "?"
+                elif done.reason:
+                    why = _reason(done.reason, done.detail)
+                else:  # asked for, and the skill no longer found it here
+                    why = _reason("not_found")
+                label.setText(text + "\n" + i18n.t("updToolFailed").format(why=why))
+                button.setEnabled(live)
+        if self._tools_all_btn is not None:
+            self._tools_all_btn.setEnabled(
+                any(button.isEnabled() for _label, button in self._tool_rows.values()))
+        if moved:
+            # The report underneath names each tool's version; the rows keep their receipts until
+            # the next Re-check, as the method's row does.
+            self._install_read = False
+            self.refresh_install(check_updates=False)
 
     def _poll_tools(self) -> None:
         """Put the tools section in as soon as it lands, and stop asking either way."""
@@ -1044,6 +1224,7 @@ class DiagnosticsDialog(QDialog):
         # dead button people press three times.
         if check_updates:
             self._start_update_check()
+            self._start_tools_check()
         if self._install_worker is not None and self._install_worker.running:
             return
         self._install_read = True
@@ -1177,6 +1358,11 @@ class DiagnosticsDialog(QDialog):
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
         self._beta_box.setText(i18n.t("updBetaChannel"))
+        self._tools_title.setText(i18n.t("updToolsTitle"))
+        for _label, button in self._tool_rows.values():
+            button.setText(i18n.t("updTool"))
+        if self._tools_all_btn is not None:
+            self._tools_all_btn.setText(i18n.t("updToolsAll"))
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._report_btn.setText(i18n.t("diagReport"))
         self._report_hint.setText(i18n.t("diagReportShot"))
