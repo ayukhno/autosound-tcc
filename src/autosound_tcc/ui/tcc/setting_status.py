@@ -53,8 +53,10 @@ def tip_for(status: Optional[str], version: str = "") -> str:
 
 
 def _judge(row: GroupRow, old: Optional[GroupRow], compared: bool,
-           fields: Iterable[str]) -> tuple[bool, bool]:
-    """`(carries a setting, differs from the compared version)` for one channel.
+           fields: Iterable[str], columns: Optional[Iterable[str]] = None) -> tuple[bool, bool]:
+    """`(carries a setting, differs from the compared version)` for one channel: set over
+    `fields`, changed over `columns` (the table's, where the dot stands for a whole tier; `fields`
+    when not given).
 
     A difference is the rows' own (`detail_pane.field_changed`): the value as the table reads it —
     rounded, an absent mute the same as an off one — and every value new on a channel the
@@ -66,7 +68,8 @@ def _judge(row: GroupRow, old: Optional[GroupRow], compared: bool,
     has = any(_is_set(f, row.raw) for f in fields)
     if not compared:
         return has, False
-    return has, any(field_changed(f, row, old) for f in fields)
+    return has, any(field_changed(f, row, old)
+                    for f in (fields if columns is None else tuple(columns)))
 
 
 def _status(has: bool, changed: bool) -> str:
@@ -81,11 +84,16 @@ def _fields(group: ProfileGroup) -> tuple[str, ...]:
 
 def group_status(group: ProfileGroup, compared_group: Optional[ProfileGroup] = None,
                  compared: bool = False) -> str:
-    """One tier as a whole — the tree's group header, a table's tab."""
+    """One tier as a whole — the tree's group header, a table's tab. Changed over the table's own
+    columns, as its rows are marked: «Off» is a column and not a setting, and a channel switched
+    back on was marked in its row and not on the dot (tcc#122, the review of the first pass)."""
+    from autosound_tcc.ui.tcc.detail_pane import table_fields
+
     olds = {r.id: r for r in compared_group.rows} if compared_group is not None else {}
+    columns = table_fields(group)
     has = changed = False
     for row in group.rows_visible():
-        h, c = _judge(row, olds.get(row.id), compared, _fields(group))
+        h, c = _judge(row, olds.get(row.id), compared, _fields(group), columns)
         has, changed = has or h, changed or c
     return _status(has, changed)
 

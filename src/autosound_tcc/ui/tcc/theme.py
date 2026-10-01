@@ -472,6 +472,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QComboBox[class~="mini-select"]:hover {{
         border-color: {t.accent_dim};
     }}
+    /* .cmp-box — «порівняти з»: its closed box draws the label in this state while the picked
+    version is one the method refuses, greyed as the open list greys that row (tcc#122). */
+    QComboBox[class~="cmp-box"]:disabled {{
+        color: {t.faint};
+    }}
     /* .is-warn — the picker whose current choice is not what it appears to be (substituted, or
     the reviewer sharing the Generator's vendor). Tinted rather than only marked beside: a warning
     sign next to a normal-looking field leaves you hunting for what it refers to. */
@@ -1326,8 +1331,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('warn', 14, 'panel2')};
         border: 1px solid {t.warn};
     }}
-    /* The Generator's role keeps the base colour: `muted` a fifth toward `text`, stronger than the
-    time's `stamp` (14% / 10%). In `muted` the time beside it read the brighter of the two (tcc#122). */
+    /* The Generator's role keeps the base colour: `muted` 20% toward `text`, past the time's `stamp`
+    (14% dark / 10% light). In `muted` the time beside it read the brighter of the two (tcc#122). */
     QLabel[class~="msg-who"] {{
         font-size: 10px;
         letter-spacing: 1px;

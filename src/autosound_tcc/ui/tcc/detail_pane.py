@@ -466,10 +466,20 @@ class _HeadBox(QComboBox):
     def __init__(self) -> None:
         super().__init__()
         self._way = "holds"
+        #: The «не читається» room the width was last asked with (`sync_width`).
+        self._sized_mark = 0
 
     def set_way(self, way: str) -> None:
         if way != self._way:
             self._way = way
+            self.updateGeometry()
+
+    def sync_width(self) -> None:
+        """Tells the layout the width changed -- only when the picked row's «не читається»
+        came or went, the one thing the asked width follows the pick for."""
+        mark = unread_mark_width(self)
+        if mark != self._sized_mark:
+            self._sized_mark = mark
             self.updateGeometry()
 
     def way(self) -> str:
@@ -486,14 +496,18 @@ class _HeadBox(QComboBox):
         return max(0, field.width() - 2)
 
     def whole_width(self) -> int:
-        return super().sizeHint().width()
+        """Six letters' room, and a picked row's «не читається» whole beside them (tcc#122)."""
+        return super().sizeHint().width() + unread_mark_width(self)
 
     def floor_width(self) -> int:
         """«v_NNN» whole with the «…» that says a saved name follows: measured on «v_000» alone,
-        «v_001 · P3» read «v_0…» at the floor (the re-review of fix round 1)."""
+        «v_001 · P3» read «v_0…» at the floor (the re-review of fix round 1). And a picked row's
+        «не читається» whole beside it: a refused version has to say so at the floor too."""
         hint = super().sizeHint()
         chrome = hint.width() - self._room(hint)
-        return min(hint.width(), chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000…")))
+        floor = min(hint.width(),
+                    chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000…")))
+        return floor + unread_mark_width(self)
 
     @staticmethod
     def _version_head(text: str) -> str:
@@ -512,8 +526,12 @@ class _HeadBox(QComboBox):
 
     def fit_text(self) -> str:
         """What the closed box draws: the current text, elided to the room it has now -- the
-        version whole and «…» after it where the saved names do not fit."""
-        metrics, room, text = QFontMetricsF(self.font()), self._room(), self.currentText()
+        version whole and «…» after it where the saved names do not fit; a row marked
+        «не читається» with the mark whole (`with_unread_mark`)."""
+        return with_unread_mark(self, self._room(), self._fit)
+
+    def _fit(self, text: str, room: int) -> str:
+        metrics = QFontMetricsF(self.font())
         if metrics.horizontalAdvance(text) <= room:
             return text
         shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
@@ -523,13 +541,7 @@ class _HeadBox(QComboBox):
         return shown
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
-        painter = QStylePainter(self)
-        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
-        option = QStyleOptionComboBox()
-        self.initStyleOption(option)
-        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
-        option.currentText = self.fit_text()
-        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+        paint_compare_box(self, self.fit_text())
 
 
 def cell_width(table: QTableWidget, text: str, font: QFont) -> int:
@@ -998,6 +1010,11 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
     view.setMinimumWidth(view.sizeHintForColumn(0) + 24)
 
 
+#: A row's own label, kept by `mark_unreadable` beside the text that says «не читається» on it: a
+#: closed box elides the label and keeps the mark whole (`with_unread_mark`).
+UNREAD_LABEL_ROLE = Qt.ItemDataRole.UserRole + 8
+
+
 def mark_unreadable(combo: QComboBox, key: Optional[str]) -> None:
     """`key`'s row says «не читається» and is greyed, as the current version's is: the loader
     could not read it — the method refuses a file whose `version` names another — and picked it
@@ -1008,8 +1025,57 @@ def mark_unreadable(combo: QComboBox, key: Optional[str]) -> None:
     item = combo.model().item(index) if index >= 0 else None
     if item is None or not item.isEnabled():
         return
-    combo.setItemText(index, i18n.t("cmpUnreadable").format(version=combo.itemText(index)))
+    label = combo.itemText(index)
+    combo.setItemData(index, label, UNREAD_LABEL_ROLE)
+    combo.setItemText(index, i18n.t("cmpUnreadable").format(version=label))
     item.setEnabled(False)
+    combo.updateGeometry()  # the closed box asks room for the mark (`unread_mark_width`)
+
+
+def unread_mark(combo: QComboBox) -> Optional[tuple[str, str, str]]:
+    """`(the picked row's own label, what its «не читається» says before it, after it)` while the
+    picked row is marked, else None. A translation may put the words on either side."""
+    label = combo.currentData(UNREAD_LABEL_ROLE)
+    text = combo.currentText()
+    at = text.find(label) if isinstance(label, str) and label else -1
+    if at < 0:
+        return None
+    return label, text[:at], text[at + len(label):]
+
+
+def unread_mark_width(combo: QComboBox) -> int:
+    """The room the picked row's «не читається» takes in the box's font; 0 on an unmarked row."""
+    split = unread_mark(combo)
+    if split is None:
+        return 0
+    return math.ceil(QFontMetricsF(combo.font()).horizontalAdvance(split[1] + split[2]))
+
+
+def with_unread_mark(combo: QComboBox, room: int, fit) -> str:
+    """What a closed box draws: `fit(text, room)` of the picked row — and on a row marked
+    «не читається» the mark whole beside what `fit` leaves of the label in the rest. Appended and
+    cut like a saved name, the mark was the first thing the cap took (tcc#122, the review of the
+    first pass): the label gives way, never the mark."""
+    split = unread_mark(combo)
+    if split is None:
+        return fit(combo.currentText(), room)
+    label, before, after = split
+    return before + fit(label, room - unread_mark_width(combo)) + after
+
+
+def paint_compare_box(box: QComboBox, text: str) -> None:
+    """A «порівняти з» box closed, `text` its label — greyed while the picked row is disabled, as
+    the open list draws it (`.cmp-box:disabled`): a refused version read in the ordinary colour."""
+    painter = QStylePainter(box)
+    painter.setPen(box.palette().color(QPalette.ColorRole.Text))
+    option = QStyleOptionComboBox()
+    box.initStyleOption(option)
+    painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+    option.currentText = text
+    item = box.model().item(box.currentIndex()) if box.currentIndex() >= 0 else None
+    if item is not None and not item.isEnabled():
+        option.state &= ~QStyle.StateFlag.State_Enabled
+    painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
 
 
 def is_other_preset(key: Optional[str]) -> bool:
@@ -1156,7 +1222,8 @@ class DetailPane(QFrame):
         self._compare_label.setProperty("class", "phead-sub")
         head_layout.addWidget(self._compare_label)
         self._compare_combo = _HeadBox()
-        self._compare_combo.setProperty("class", "mini-select")
+        # `cmp-box`: a refused pick's closed box greyed (`paint_compare_box`, tcc#122).
+        self._compare_combo.setProperty("class", "mini-select cmp-box")
         # As wide as a version's name, not as the longest line in its list: the head is full.
         self._compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -1368,6 +1435,7 @@ class DetailPane(QFrame):
                 # ...and says so on its row (tcc#122).
                 mark_unreadable(self._compare_combo, version)
                 self._compare_text = self._compare_combo.currentText()
+        self._compare_combo.sync_width()
 
     def _rerender(self) -> None:
         if self._mode == "param" and self._param:

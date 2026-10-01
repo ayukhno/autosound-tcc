@@ -106,3 +106,25 @@ def test_the_dot_judges_a_change_as_the_rows_read_it():
         assert (said == "chg") == rows_mark, (case, "the dot and the rows disagree")
     same = cases["the same, as read"][0]
     assert setting_status.field_status([same], "gain_db", [before], True) == "set"
+
+
+def test_a_channel_switched_back_on_turns_the_dot_as_it_marks_its_row():
+    """tcc#122, the review of the first pass: the dot judged its own list of controls and the rows
+    judge the table's columns, so an «Off» column — a channel switched back on since the compared
+    version — was marked in the row and not on the dot. What changed is judged over the table's
+    columns; what is set, over the controls that are settings (an off channel is not a row)."""
+    from autosound_tcc.ui.tcc.detail_pane import changed_fields
+
+    fields = _FIELDS + ("off",)
+
+    def tier(**by_name):
+        rows = tuple(GroupRow(id=name, name=name, slot=chr(66 + i), raw=raw)
+                     for i, (name, raw) in enumerate(by_name.items()))
+        return ProfileGroup(id="physical_outputs", label="Output", fields=fields, rows=rows)
+
+    now = tier(**{"w-L": {"gain_db": -1.0}})
+    before = tier(**{"w-L": {"gain_db": -1.0, "off": True}})
+    row, old = now.rows[0], before.rows[0]
+    assert changed_fields(now, row, old) == frozenset({"off"}), "the row marks it"
+    assert setting_status.group_status(now, before, compared=True) == "chg"
+    assert setting_status.group_status(now, now, compared=True) == "set"

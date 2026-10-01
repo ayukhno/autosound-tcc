@@ -3818,7 +3818,7 @@ def test_leaving_control_mode_after_a_language_switch_keeps_the_window_on_its_sc
         i18n.set_language("en")
 
 
-@pytest.mark.parametrize("lang", ["de"])
+@pytest.mark.parametrize("lang", ["de", "pl"])
 def test_a_language_switch_at_the_right_edge_keeps_the_full_window_on_its_screen(
         tmp_path, monkeypatch, lang):
     """tcc#122 (W-4's review of tcc#106): in the full window at a 1920 screen's right edge a switch

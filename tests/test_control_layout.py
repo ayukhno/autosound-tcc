@@ -948,6 +948,90 @@ def test_saved_names_cut_at_the_cap_keep_their_ellipsis(stretch):
         assert QFontMetricsF(combo.font()).horizontalAdvance(shown) < room + 1, (room, shown)
 
 
+def _marked_box(stretch, key):
+    """Control mode's box in a font `stretch` wide, `key` picked and marked «не читається»."""
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.control_layout import _CompareBox
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo, mark_unreadable
+
+    combo = _CompareBox()
+    combo.setProperty("class", "mini-select cmp-box")
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(6)
+    font = QFont(combo.font())
+    font.setStretch(stretch)
+    combo.setFont(font)
+    fill_compare_combo(combo, ["v_003", "v_002", "v_001"],
+                       {"v_003": "v_003", "v_002": "v_002 · P3, SQ-2, SQ-3", "v_001": "v_001"},
+                       [("3.S-shelf", [("3.S-shelf/v_001", "v_001 · P1, SQ-1")])], "4.C-cut",
+                       "v_003")
+    combo.setCurrentIndex(combo.findData(key))
+    mark_unreadable(combo, key)
+    return combo
+
+
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+@pytest.mark.parametrize("key", ["v_002", "3.S-shelf/v_001"], ids=["own", "other"])
+def test_the_unreadable_mark_survives_the_cap(stretch, key):
+    """tcc#122, the review of the first pass: «… — не читається» was appended to the row, and the
+    cap cut it first — another configuration's row read the mark as saved names and drew their bare
+    «…», this configuration's lost it off its end («v_002 · P3, SQ-2, SQ…»): a compare with
+    nothing that says nothing, at half a screen. The mark is kept whole; the names, then the preset
+    give way before it, the version whole. At the box's floor and at its cap, own and another
+    configuration's rows, the Mac's font and about twice and four times as wide."""
+    from PySide6.QtGui import QFontMetricsF
+
+    _app()
+    try:
+        i18n.set_language("uk")
+        combo = _marked_box(stretch, key)
+        mark = i18n.t("cmpUnreadable").format(version="")
+        version = key.rsplit("/", 1)[-1]
+        assert mark.strip() and combo.currentText().endswith(mark)
+        for width in sorted({combo.minimumSizeHint().width(), combo.floor_cap()}):
+            combo.resize(width, 26)
+            shown = combo.fit_text()
+            assert shown.endswith(mark), (width, shown)
+            assert version in shown, (width, shown)
+            assert QFontMetricsF(combo.font()).horizontalAdvance(shown) < combo._room() + 1, \
+                (width, shown)
+    finally:
+        i18n.set_language("en")
+
+
+def test_a_refused_pick_is_drawn_greyed_in_the_closed_box():
+    """The open list greys a refused version, as it greys «зараз»; the closed box drew it in the
+    ordinary colour (the review of the first pass). Rendered with the window's sheet: no pixel of
+    the label in the text colour once its row is refused, and some before."""
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+    from autosound_tcc.ui.tcc.theme import build_qss, get_theme
+
+    _app()
+    palette = get_theme("dark")
+    plain = _marked_box(100, "v_002")
+    fill_compare_combo(plain, ["v_002"], {"v_002": "v_002 · P3, SQ-2, SQ-3"}, [], "4.C-cut", None)
+    plain.setCurrentIndex(plain.findData("v_002"))
+    counts = []
+    for box in (plain, _marked_box(100, "v_002")):
+        box.setStyleSheet(build_qss(palette))
+        box.resize(400, 28)
+        counts.append(_pixels_near(box.grab().toImage(), palette.text))
+    assert counts[0] > 0, "the label in the text colour while the pick reads"
+    assert counts[1] == 0, f"refused, the label is greyed: {counts[1]} pixels in the text colour"
+
+
+def _pixels_near(image, colour: str, within: int = 24) -> int:
+    from PySide6.QtGui import QColor
+
+    want = QColor(colour)
+    return sum(1 for x in range(image.width()) for y in range(image.height())
+               if abs(QColor(image.pixel(x, y)).red() - want.red())
+               + abs(QColor(image.pixel(x, y)).green() - want.green())
+               + abs(QColor(image.pixel(x, y)).blue() - want.blue()) <= within)
+
+
 def test_a_squeezed_compare_box_settles_at_its_floor_not_below(tmp_path, monkeypatch):
     """The same box, built the same way `_build_corner` builds it, sharing a row with a widget
     that demands far more room than the row can give -- a real, if artificial, squeeze (a whole

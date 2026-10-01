@@ -35,7 +35,7 @@ from typing import Optional
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QFont, QFontMetricsF, QPalette, QTextCursor
+from PySide6.QtGui import QFont, QFontMetricsF, QTextCursor
 from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
@@ -47,7 +47,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStyle,
     QStyleOptionComboBox,
-    QStylePainter,
     QTableWidget,
     QTabWidget,
     QTextBrowser,
@@ -65,6 +64,10 @@ from autosound_tcc.ui.tcc.detail_pane import (
     fill_compare_combo,
     is_other_preset,
     mark_unreadable,
+    paint_compare_box,
+    unread_mark,
+    unread_mark_width,
+    with_unread_mark,
 )
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -400,18 +403,27 @@ class _CompareBox(QComboBox):
             self.updateGeometry()
 
     def shown_text(self) -> str:
+        return self._shown(self.currentText())
+
+    def _shown(self, row: str) -> str:
         key = self.currentData()
         if is_other_preset(key):
-            return f"{key.split('/', 1)[0]} · {self.currentText()}"
-        return self.currentText()
+            return f"{key.split('/', 1)[0]} · {row}"
+        return row
 
-    def _parts(self) -> Optional[tuple[str, str, str]]:
-        """Another configuration's pick as `(preset, v_NNN, the saved names after it)`."""
+    def _row(self) -> str:
+        """The picked row's own text: a row marked «не читається» without the mark."""
+        split = unread_mark(self)
+        return split[0] if split else self.currentText()
+
+    def _parts(self, row: Optional[str] = None) -> Optional[tuple[str, str, str]]:
+        """Another configuration's pick as `(preset, v_NNN, the saved names after it)`, read off
+        `row` (the picked row's own text by default)."""
         key = self.currentData()
         if not is_other_preset(key):
             return None
         preset, version = key.split("/", 1)
-        row = self.currentText()
+        row = self._row() if row is None else row
         if not row.startswith(version):
             return preset, row, ""
         return preset, version, row[len(version):]
@@ -433,11 +445,26 @@ class _CompareBox(QComboBox):
 
     def fit_text(self) -> str:
         """What the closed box draws: `shown_text`, elided to the room it has now -- the saved
-        names first, then the preset's name; «v_NNN» goes only when nothing else is left."""
-        metrics, room, full = self.fontMetrics(), self._room(), self.shown_text()
+        names first, then the preset's name; «v_NNN» goes only when nothing else is left. A row
+        marked «не читається» keeps the mark whole and gives way before it (`with_unread_mark`,
+        tcc#122: appended and cut as a saved name, it was the first thing the cap took)."""
+        return with_unread_mark(self, self._room(), self._fit)
+
+    def _fit(self, row: str, room: int) -> str:
+        metrics, full = self.fontMetrics(), self._shown(row)
         cut = metrics.elidedText(full, Qt.TextElideMode.ElideRight, room)
-        parts = self._parts()
-        if cut == full or parts is None:
+        if cut == full:
+            return cut
+        parts = self._parts(row)
+        if parts is None:
+            # This configuration's own: «v_NNN…» before Qt cuts into the version, as the full
+            # window's list holds it (`detail_pane._HeadBox`) -- the room a «не читається» takes
+            # beside it at the cap left «v_00…» (tcc#122).
+            version = row.split(" ", 1)[0]
+            if version.startswith("v_") and not cut.startswith(version):
+                for alone in (version + "…", version):
+                    if self._text_width(alone) <= room:
+                        return alone
             return cut
         preset, version, names = parts
         if cut.startswith(f"{preset} · {version}"):
@@ -451,6 +478,11 @@ class _CompareBox(QComboBox):
                                        room - self._text_width(rest))
             if short:
                 return short + rest
+        # Not a letter of the preset left beside it: the version alone, its names' «…» after it
+        # where it fits -- what a «не читається» leaves at the cap (tcc#122).
+        for alone in ((f"{version}…", version) if names else (version,)):
+            if self._text_width(alone) <= room:
+                return alone
         return cut
 
     def sizeHint(self):  # noqa: N802 (Qt override)
@@ -458,6 +490,8 @@ class _CompareBox(QComboBox):
         if is_other_preset(self.currentData()):
             chrome = hint.width() - self._room(hint)
             hint.setWidth(max(hint.width(), self._text_width(self.shown_text()) + chrome))
+        else:  # this configuration's: six letters' room, and a «не читається» beside them
+            hint.setWidth(hint.width() + unread_mark_width(self))
         return hint
 
     def floor_cap(self) -> int:
@@ -477,14 +511,19 @@ class _CompareBox(QComboBox):
         return cap
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
-        # A QComboBox's own floor is its size hint.
+        # A QComboBox's own floor is its size hint. A picked row's «не читається» is held whole
+        # beside what the floor holds of the row, under the same cap (tcc#122).
         hint = super().minimumSizeHint()
+        mark = unread_mark_width(self)
         parts = self._parts()
         if parts is not None:
             preset, version, names = parts
             chrome = hint.width() - self._room(hint)
-            held = self._text_width(f"{preset} · {version}" + ("…" if names else "")) + chrome
+            held = (self._text_width(f"{preset} · {version}" + ("…" if names else ""))
+                    + mark + chrome)
             hint.setWidth(max(hint.width(), min(held, self.floor_cap())))
+        elif mark:
+            hint.setWidth(max(hint.width(), min(hint.width() + mark, self.floor_cap())))
         return hint
 
     def sync_width(self) -> None:
@@ -496,13 +535,7 @@ class _CompareBox(QComboBox):
             self.updateGeometry()
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
-        painter = QStylePainter(self)
-        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
-        option = QStyleOptionComboBox()
-        self.initStyleOption(option)
-        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
-        option.currentText = self.fit_text()
-        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+        paint_compare_box(self, self.fit_text())
 
 
 class _HeaderWatch(QObject):
@@ -772,7 +805,8 @@ class ControlLayout:
         self._compare_label.setProperty("class", "phead-sub")
         layout.addWidget(self._compare_label)
         self.compare_combo = _CompareBox()
-        self.compare_combo.setProperty("class", "mini-select")
+        # `cmp-box`: a refused pick's closed box greyed (`paint_compare_box`, tcc#122).
+        self.compare_combo.setProperty("class", "mini-select cmp-box")
         self.compare_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.compare_combo.setMinimumContentsLength(6)

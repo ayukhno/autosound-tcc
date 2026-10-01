@@ -1,3 +1,4 @@
+import pytest
 
 
 def test_the_permission_bar_is_actually_tinted_not_just_declared_tinted():
@@ -238,12 +239,16 @@ def test_a_sheet_taken_off_behind_its_back_is_put_back(monkeypatch):
     assert app.sets == 2 and app.sheet == theme.build_qss(theme.get_theme("dark"))
 
 
-def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypatch):
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypatch, stretch):
     """Finding 132 (tcc#122): the footer's reviewer box read «API · gemini-3.1-pro-prev» on the
     Windows VM — cut mid-word, no «…», as though that were the model's name. The closed box draws
     its pick elided to its field, «…» where anything was cut, and whole where it fits; the open
-    list keeps every row whole (`MiniCombo.showPopup`). What is checked is what the paint draws."""
-    from PySide6.QtWidgets import QApplication, QComboBox
+    list keeps every row whole (`MiniCombo.showPopup`). What is checked is what the paint draws,
+    against the style's edit field, in the Mac's font and about twice and four times as wide (the
+    Windows runner's offscreen text, as the compare box's tests are held)."""
+    from PySide6.QtGui import QFont, QFontMetricsF
+    from PySide6.QtWidgets import QApplication, QComboBox, QStyle, QStyleOptionComboBox
 
     from autosound_tcc.ui.tcc import theme
 
@@ -255,18 +260,29 @@ def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypa
             drawn.append(option.currentText)
             super().drawControl(element, option)
 
+    def field(box) -> int:
+        option = QStyleOptionComboBox()
+        box.initStyleOption(option)
+        return box.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                          QStyle.SubControl.SC_ComboBoxEditField, box).width()
+
     monkeypatch.setattr(theme, "QStylePainter", _Painter)
     full = "API · gemini-3.1-pro-preview"
     combo = theme.mini_combo()
     combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
     combo.setMinimumContentsLength(6)
+    font = QFont(combo.font())
+    font.setStretch(stretch)
+    combo.setFont(font)
     combo.addItem(full)
-    for width in (90, 140, 180):
-        combo.resize(width, 26)
+    metrics = QFontMetricsF(combo.font())
+    whole = metrics.horizontalAdvance(full)
+    for share in (0.35, 0.55, 0.8):
+        combo.resize(int(whole * share) + combo.width() - field(combo), 26)
         combo.grab()
         shown = drawn[-1]
-        assert shown.endswith("…") and full.startswith(shown[:-1]) and len(shown) > 1, (width, shown)
-        assert combo.fontMetrics().horizontalAdvance(shown) <= combo.width(), (width, shown)
-    combo.resize(combo.fontMetrics().horizontalAdvance(full) + 80, 26)
+        assert shown.endswith("…") and full.startswith(shown[:-1]) and len(shown) > 1, (share, shown)
+        assert metrics.horizontalAdvance(shown) <= field(combo), (share, shown, field(combo))
+    combo.resize(int(whole) + 80 + combo.width() - field(combo), 26)
     combo.grab()
     assert drawn[-1] == full, "whole where it fits"

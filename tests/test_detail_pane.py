@@ -2167,3 +2167,45 @@ def test_a_version_the_method_refuses_says_so_instead_of_comparing_with_nothing(
     assert pane._compare_view is not None, "a version that reads still compares"
     marked = combo.model().item(combo.findData("v_004"))
     assert marked.text() == refused and not marked.isEnabled(), "and the refused one stays said"
+
+
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+def test_the_full_window_s_list_keeps_the_unreadable_mark_at_its_floor(stretch):
+    """tcc#122, the review of the first pass: the full window's list holds six letters' room, and
+    «v_004 · SQ-2 — не читається» came out «v_004…» there — the mark cut, as in control mode's
+    box. It asks the mark's room beside its floor now, and keeps the mark whole, the version whole
+    before it: at its floor and its whole width, in the Mac's font and about twice and four times
+    as wide."""
+    from PySide6.QtGui import QFont, QFontMetricsF
+
+    from autosound_tcc.state.dsp_state import VersionRefused
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    def load(key):
+        if key == "v_004":
+            raise VersionRefused("v_004", "v_003", "the method's own sentence")
+        return _rig_view()
+
+    _app()
+    try:
+        i18n.set_language("uk")
+        pane = DetailPane()
+        box = pane._compare_combo
+        font = QFont(box.font())
+        font.setStretch(stretch)
+        box.setFont(font)
+        pane.set_compare_choices(["v_005", "v_004", "v_003"], "v_004", load,
+                                 labels={"v_004": "v_004 · SQ-2, SQ-3"}, preset="FULL",
+                                 current="v_005")
+        mark = i18n.t("cmpUnreadable").format(version="")
+        assert box.currentText().endswith(mark)
+        for way, width in (("floor", box.floor_width()), ("holds", box.whole_width())):
+            box.set_way(way)
+            box.resize(width, 26)
+            shown = box.fit_text()
+            assert shown.endswith(mark) and shown.startswith("v_004"), (way, width, shown)
+            assert QFontMetricsF(box.font()).horizontalAdvance(shown) < box._room() + 1, shown
+        box.setCurrentIndex(box.findData("v_003"))
+        assert box.floor_width() < width, "a pick that reads asks no room for a mark"
+    finally:
+        i18n.set_language("en")
