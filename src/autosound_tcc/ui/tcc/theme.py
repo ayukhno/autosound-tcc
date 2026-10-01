@@ -193,6 +193,11 @@ PALETTE_DARK: dict[str, str] = {
     # toward `text`: ≥ 4.6:1 on every bubble, still well below the message itself.
     "stamp": "#97a2b0",
     "accent": "#e8973c", "accent_dim": "#b3712c",
+    # The orange a button is FILLED with, under white words (VM-7, the Arbiter: «треба білий
+    # шрифт і в світлій і в темній темах»). The accent itself holds white at 2.4:1 here and 3.7:1
+    # in the light palette, so the fill is a step darker — the light palette's `accent_dim`, the
+    # same in both: 4.85:1.
+    "accent_fill": "#a95f14",
     "ok": "#4bbf87", "inv": "#e8973c", "off": "#6a7686", "warn": "#e05c5c",
     # A stopper that is not an error, as text: orange where `warn` is red (VM-5, ruling 21 — «не
     # сірим - помаранчевим, бо це стопер але не помилка»). The accent's own orange here, ≥ 6:1.
@@ -213,6 +218,7 @@ PALETTE_LIGHT: dict[str, str] = {
     "text": "#1b2430", "muted": "#5c6875", "faint": "#687380",
     "stamp": "#56616e",  # `muted` 10% toward `text`: see the dark palette's `stamp`
     "accent": "#c56f18", "accent_dim": "#a95f14",
+    "accent_fill": "#a95f14",  # see the dark palette's
     "ok": "#1f9c63", "inv": "#c56f18", "off": "#8492a0", "warn": "#c0392b",
     # The accent's orange read 3.2–3.7:1 as text on these panels, under finding 51's 4.5 (VM-5):
     # the same hue darker, ≥ 4.5:1 on every panel and on the ground.
@@ -413,17 +419,22 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.text};
     }}
 
+    /* An orange button says its words in white, in both themes (VM-7): the fill is
+    `accent_fill`, and under the mouse or pressed it deepens rather than paling toward the panel —
+    paler, the light theme's white words fell under 4.5:1. `:pressed` is named because the common
+    `QPushButton:pressed` tint comes later in this sheet and would win: white on that pale tint is
+    no words at all. */
     QPushButton[class~="feedback-btn"] {{
-        background: {t.accent};
+        background: {t.accent_fill};
         border: 1px solid {t.accent_dim};
-        color: #1a1206;
+        color: #ffffff;
         border-radius: 5px;
         padding: 5px 11px;
         font-size: 12px;
         font-weight: 600;
     }}
-    QPushButton[class~="feedback-btn"]:hover {{
-        background: {t.mix('accent', 88, 'panel')};
+    QPushButton[class~="feedback-btn"]:hover, QPushButton[class~="feedback-btn"]:pressed {{
+        background: {mix(t.accent_fill, 85, "#000000")};
     }}
 
     /* .coffee-btn — the footer's support button (user request 2026-07-28), same color as the AI
@@ -1897,15 +1908,19 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 8px 14px;
     }}
     QPushButton[class~="fb-cancel"]:hover {{ color: {t.text}; }}
+    /* White words on the orange fill, as `.feedback-btn` (VM-7): «Send →»'s arrow was the hardest
+    to see in the dark ink. */
     QPushButton[class~="fb-send"] {{
-        background: {t.accent};
-        color: #1a1206;
+        background: {t.accent_fill};
+        color: #ffffff;
         border: none;
         border-radius: 7px;
         padding: 8px 16px;
         font-weight: 700;
     }}
-    QPushButton[class~="fb-send"]:hover {{ background: {t.mix('accent', 88, 'panel')}; }}
+    QPushButton[class~="fb-send"]:hover, QPushButton[class~="fb-send"]:pressed {{
+        background: {mix(t.accent_fill, 85, "#000000")};
+    }}
     QRadioButton {{
         color: {t.text};
         font-size: 12.5px;

@@ -376,3 +376,59 @@ def test_a_hold_is_said_in_orange_that_reads_in_both_themes():
             ground = palette.tokens[surface]
             assert _contrast(drawn, ground) >= 4.5, (
                 f"{name}: {drawn} is {_contrast(drawn, ground):.2f}:1 on {surface} {ground}")
+
+
+def _rules(sheet: str) -> list[tuple[str, str]]:
+    """`(selector, body)` for every rule of `sheet`, the comment before a selector left off."""
+    rules = []
+    for block in sheet.split("}"):
+        if "{" in block:
+            selector, body = block.rsplit("{", 1)
+            rules.append((selector.split("*/")[-1].strip(), body))
+    return rules
+
+
+def test_every_orange_button_says_its_words_in_white_that_reads_in_both_themes():
+    """VM-7 (the Windows VM): «Message the developer» / «Написати розробнику» and the feedback
+    window's «Send →» / «Надіслати →» had dark text on orange, the arrow hard to see. The Arbiter:
+    «треба білий шрифт і в світлій і в темній темах». Every button the sheet fills orange draws
+    its words white — under the mouse and pressed too — at 4.5:1 or more on its fill (WCAG AA for
+    text of these sizes), in both themes. Computed from the colours the sheet draws."""
+    import colorsys
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        rules = _rules(theme.build_qss(theme.get_theme(name)))
+        colours = {}
+        for selector, body in rules:
+            colour = re.search(r"(?:^|\s)color:\s*([^;]+);", body)
+            if colour is not None:
+                colours.setdefault(selector, colour.group(1).strip())
+        orange = []
+        for selector, body in rules:
+            if "QPushButton" not in selector and "QToolButton" not in selector:
+                continue
+            fill = re.search(r"(?:^|\s)background:\s*([^;]+);", body)
+            if fill is None or not fill.group(1).strip().startswith(("#", "rgb(")):
+                continue
+            ground = _hex(fill.group(1))
+            r, g, b = theme._to_rgb(ground)
+            hue, light, saturation = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+            # The accent's orange, filled: not a pale tint of it (a hover wash), and not the yellow
+            # at 45° and over.
+            if not (20 <= hue * 360 <= 40 and saturation >= 0.5 and 0.2 <= light <= 0.7):
+                continue
+            # A state (`:hover`, `:pressed`) draws in its own rule's colour, or its button's.
+            words = colours.get(selector) or colours.get(selector.split(":", 1)[0].strip())
+            assert words is not None, f"{name} {selector}: no colour for the words on {ground}"
+            said = f"{name} {selector}: {words} on {ground}, {_contrast(_hex(words), ground):.2f}:1"
+            assert _hex(words).lower() == "#ffffff", said
+            assert _contrast("#ffffff", ground) >= 4.5, said
+            orange.append(selector)
+        for button in ("feedback-btn", "fb-send"):
+            states = [s for s in orange if f'"{button}"' in s]
+            said = f"{name}: {button} is filled orange in {states} — idle, hover and pressed"
+            assert any(s.endswith(f'"{button}"]') for s in states), said
+            assert all(any(state in s for s in states) for state in (":hover", ":pressed")), said
