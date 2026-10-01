@@ -2053,6 +2053,30 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-090 — W-5 is collecting: findings go to this pool, the milestone opens when the list is complete
+
+**Статус**: open 2026-10-01 · stage 1, collection (збір): the Arbiter tests, the session records; no milestone, nothing built · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
+
+The words (the Arbiter, 2026-10-01; `hub/governance/WAVES.md` §1): the wave (хвиля) is the whole cycle; stage 1 is
+the collection (збір), with the number already standing and no milestone; stage 2 is the milestone (віха = веха =
+milestone = майлстоун), the review. The number is read: no open `W-…` milestone in tcc or skill, both closed at W-4,
+so W-5 — the skill records the same as S-077 (skill `f520612`).
+
+The release is decided, not open: W-5 ends as the patch **v0.1.46**; **v1.1.0** comes after it, paired with skill
+v3.1.0 (hub #220, 2026-09-27 — its deferral put a W-5 first if the W-4 test found problems, and it did). Changing
+that is the Arbiter's word at the review, not a question a session raises.
+
+Belongs to W-5 so far:
+- findings 120 (the installer checks no TCC signature — the skill's code, a ticket `to:skill` at the review) and
+  121 (#92's lever: TCC repairs its own taskbar pins, ~30 lines);
+- the `minor (deferred)` lines of W-4's reviews, `.superpowers/sdd/PLAN-W-4/progress.md` (local), headed in F-089;
+- the deferred issues #98 («Оновити TCC» updates TCC alone), #94 (the curve window addresses a capture by its
+  round), #69 (test machinery: F-071, F-065, F-066), #21 (capture quality while the mic is in hand).
+
+Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
+закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
+nothing is built before his `ok` on that task.
+
 ### F-089 — W-4: the collection
 
 **Статус**: done 2026-09-30 · **v0.1.45 released** — signed tag on `81d5f77` (`git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag v0.1.45` → Good signature), paired with method v3.0.64 (`6d6a987`), PR #105 merged `--ff-only`, milestone `W-4 · v0.1.45` closed with its 17 issues; hub #83, #217, #221 closed with the tag, hub #222 closed by the hub · on the way: #96 took five rounds and a follow-up (the Windows CI's offscreen Qt has no fonts; content-sized columns; the head's staged give-way; one rule for a label's hint, fit and paint); a flaky PySide stale-wrapper crash in control mode's leave() (`bebaa52`); a modal «model gone» that hung a test (`60844f5`); the whole suite in one process had grown to >45 min on Linux (quadratic: global restyles and retranslations over every window left alive) — cut to 5–11 min (`990ea0c`, `81d5f77`), CI timeouts raised on main (`956e8a8`) · the Arbiter's hand checks (`WAVES.md` §3.1) **walked 2026-10-01**: the macOS install line → v0.1.45 (the method left alone: a symlink to the dev checkout; finding 120 — the installer checks no TCC signature); the Windows VM v0.1.44 → v0.1.45 by «Оновити ТСС» → `81d5f77`, the app reads 0.1.45; #92's check → one button after stamp + notify (finding 121) · the later-wave pool from this wave's reviews is the `minor (deferred)` lines of `.superpowers/sdd/PLAN-W-4/progress.md` (local), headed: theme.py trusts `_APPLIED` over the app's sheet; `-rs` in CI's pytest lines; #106/#107 two measures of one table; the tier header dot vs the rows; the modal guard raising RuntimeError; QFileDialog/QInputDialog statics not guarded · builders are Opus only from now on, Fable only for final reviews of risky code (the Arbiter, 2026-09-30)
