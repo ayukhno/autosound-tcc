@@ -2066,7 +2066,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - a channel whose code and id are both written with `_` gets a hyphen ledger row from v3.0.65 that TCC cannot bind
   (#112's review, Minor 4) — next to the method's own reading of an old `D_L…` title as a channel `D-L` (the
   Arbiter, 2026-10-01: «D-L такого не буває»; the `D_` prefix moved into the series, the hyphen is for a driver's
-  side only) — the skill's to settle first;
+  side only) — the skill's to settle first: hub #232 TCC-044;
 - from the final review (`.superpowers/sdd/PLAN-W-5/final-review.md`, local): the shell lexer (~1000 lines) into
   its own module out of `core/tuning_session.py`, first commit of the next wave; `cell_text` / `field_changed` /
   `table_fields` into a Qt-free module so `setting_status` stops importing `detail_pane`; a three-state probe in the
