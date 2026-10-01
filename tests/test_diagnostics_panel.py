@@ -1482,3 +1482,27 @@ def test_a_name_the_skill_refuses_restores_the_row_with_its_reason(monkeypatch, 
     assert label.text() == before + "\n" + i18n.t("updToolFailed").format(
         why=i18n.t("updWhy_upkeep_failed") + ": " + said)
     assert button.isEnabled()
+
+
+def test_coming_back_to_the_window_asks_again_without_the_minute_long_status(monkeypatch):
+    """A session that ended while this window stayed open lets go of omp and Claude Code as soon
+    as the person comes back to the window — not only after Re-check, which asks every tool's
+    source again (re-review of tcc#98)."""
+    from PySide6.QtCore import QEvent
+
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    live = [True]
+    _session(dialog, live)
+    assert not dialog._tool_rows["omp"][1].isEnabled()
+    monkeypatch.setattr(updates, "tools_status",
+                        lambda: pytest.fail("coming back does not ask the tools again"))
+    monkeypatch.setattr(dialog, "isActiveWindow", lambda: True)
+
+    live[0] = False
+    QApplication.sendEvent(dialog, QEvent(QEvent.Type.ActivationChange))
+
+    assert dialog._tools_job is None, "no status was started"
+    assert dialog._tool_rows["omp"][1].isEnabled()
+    assert dialog._tool_guards["omp"].isHidden()

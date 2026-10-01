@@ -2096,9 +2096,9 @@ class MainWindow(QMainWindow):
             # reads it before it is sent, like every other statement of theirs.
             self._diag_dialog.askRequested.connect(self._dialog.put_in_composer)
             # Whether a session runs on omp and Claude Code right now: their update rows wait
-            # while one does (ruling 21, tcc#98). Asked by the window when it opens and on
-            # Re-check, so a session started or ended in between is seen.
-            self._diag_dialog.set_session_probe(self._dialog.has_agent)
+            # while one does (ruling 21, tcc#98). Asked by the window when it opens, when it is
+            # come back to and on Re-check, so a session started or ended in between is seen.
+            self._diag_dialog.set_session_probe(self._session_running)
             self._diag_dialog.set_report(self._contract_report)
         elif self._contract_report is not None:
             self._diag_dialog.set_report(self._contract_report)
@@ -2113,6 +2113,15 @@ class MainWindow(QMainWindow):
         # also the clearest signal that the user wants the CURRENT answer.
         if self._contract_report is None:
             self._start_contract_check()
+
+    def _session_running(self) -> bool:
+        """Is a session running in this window now — the window's own worker, attached and not
+        finished. Not `DialogPanel.has_agent`: the panel keeps its worker after the session ends,
+        so the update rows stayed held until TCC quit — after omp died too (#97), where updating
+        omp is the remedy (re-review of tcc#98). The window drops its worker on Save of an ended
+        session, on restart and on fresh; a thread that finished (omp dying) ended it as well."""
+        worker = getattr(self, "_agent_worker", None)
+        return worker is not None and not _ended(worker)
 
     def _build_left(self) -> QFrame:
         """The left panel is a top-level accordion (user request 2026-07-28): System params /

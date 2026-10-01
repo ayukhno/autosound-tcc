@@ -485,19 +485,53 @@ def test_diagnostics_button_opens_the_panel_with_the_last_report():
     assert window._diag_dialog._report is report
 
 
-def test_the_diagnostics_window_is_told_whether_a_session_is_running():
+class _Worker:
+    """A session worker as far as the window asks: has its thread finished (QThread's own)."""
+
+    def __init__(self) -> None:
+        self.finished = False
+
+    def isFinished(self) -> bool:  # noqa: N802 — QThread's name
+        return self.finished
+
+
+def test_a_session_that_has_ended_no_longer_holds_the_tool_rows(monkeypatch):
     """omp and Claude Code are what a session runs on, so their update rows wait while one runs
-    (ruling 21, tcc#98) — and only the main window knows whether one does."""
+    (ruling 21, tcc#98) — and only while it RUNS. The dialog panel keeps its worker after a session
+    ends, so asking it held the rows until TCC quit: after omp died (#97), where updating omp is
+    the remedy. The window's own worker is the answer — finished, or dropped, is not running."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(
+        True, (updates.Tool("omp", "17.3.8", "18.2.4", True),)))
     _app()
     window = MainWindow()
     window._diag_btn.click()
     dialog = window._diag_dialog
+    dialog._tabs.setCurrentIndex(1)
+    for _ in range(5):
+        if dialog._tools_job is None:
+            break
+        dialog._tools_job.join(timeout=10)
+        dialog._poll_tools_job()
+    omp = dialog._tool_rows["omp"][1]
 
-    assert dialog._session_live() is False
-    window._dialog._worker = object()
+    assert dialog._session_live() is False and omp.isEnabled()
+    worker = _Worker()
+    window._agent_worker = worker
     try:
-        assert dialog._session_live() is True
+        dialog._read_session()
+        assert dialog._session_live() is True and not omp.isEnabled(), "a running session holds it"
+        worker.finished = True  # omp died, the thread ended — the window still holds the worker
+        dialog._read_session()
+        assert dialog._session_live() is False and omp.isEnabled(), "an ended one does not"
+        worker.finished = False
+        window._dialog._worker = worker  # what the dialog panel keeps after any session
+        window._agent_worker = None  # ...and the window drops on Save, restart, fresh
+        dialog._read_session()
+        assert dialog._session_live() is False and omp.isEnabled()
     finally:
+        window._agent_worker = None
         window._dialog._worker = None
 
 

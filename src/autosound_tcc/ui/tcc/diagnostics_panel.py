@@ -20,7 +20,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -603,8 +603,9 @@ class DiagnosticsDialog(QDialog):
         self._tools_job: Optional[_UpdateStep] = None
         self._tools_then = None
         self._tools_asked: list = []
-        #: Is an AI session running — asked of the main window (`set_session_probe`) when the
-        #: window opens, on Re-check and when the rows land; False with nobody to ask.
+        #: Is an AI session running — asked of the main window (`set_session_probe`) when this
+        #: window opens or is come back to, on Re-check, when the rows land and at the press;
+        #: False with nobody to ask.
         self._session_probe = None
         self._session_running = False
         self._tools_timer = QTimer(self)
@@ -857,10 +858,10 @@ class DiagnosticsDialog(QDialog):
     # ---- omp, agy, gh, Claude Code (tcc#98) ----------------------------------
 
     def set_session_probe(self, probe) -> None:
-        """How to ask whether an AI session is running: the main window's
-        `DialogPanel.has_agent`. A session runs on omp and Claude Code, so their rows wait while
-        one runs (ruling 21, tcc#98). Updated under it, the running session keeps the old one on
-        macOS and the update fails on a locked file on Windows, and nothing said why."""
+        """How to ask whether an AI session is running: the main window's `_session_running`.
+        A session runs on omp and Claude Code, so their rows wait while one runs (ruling 21,
+        tcc#98). Updated under it, the running session keeps the old one on macOS and the update
+        fails on a locked file on Windows, and nothing said why."""
         self._session_probe = probe
         self._read_session()
 
@@ -1457,6 +1458,14 @@ class DiagnosticsDialog(QDialog):
         the rows may be from before it started, or from before it ended."""
         super().showEvent(event)
         self._read_session()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Coming back to the window asks again too: a session the person ended in the main
+        window while this one stayed open lets go of omp and Claude Code here and now. Only the
+        question to the main window — the tools' status takes a minute and is Re-check's."""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._read_session()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """Nothing to wait for: the probe is a plain daemon thread holding no Qt object, and the
