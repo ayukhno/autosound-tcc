@@ -12,6 +12,126 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the method at v3.0.65
+
+Paired with method `8bb400f640403f9b5e7faa6acf6d199b855d8901` — the tag on that commit is **`v3.0.65`**.
+
+The wave W-5, collected with the Arbiter on the Mac and on the Windows VM and built on his OK, issue by issue.
+It is one wave on two products: the method was tagged first, and this release pins its tag. What he meets first:
+the diagnostics window has an «Updates» tab, where omp, agy, gh and Claude Code show their versions and update
+beside TCC and the method; the reviewer picked in the footer is the reviewer that runs, whatever a `critic-env`
+file pins; «Don't ask at all (auto)» no longer stops on read-only commands, and a fourth choice asks about nothing;
+a bold «Guides» submenu and a «?» after the header's target curve open the guides; and the reviewer-key window
+deletes a copy of the key left in a shell profile or in the Windows environment.
+
+### Added
+
+- **Updates for omp, agy, gh and Claude Code, on a tab of their own** (tcc#98, finding 107, hub #219). The
+  diagnostics window has a new second tab, «Updates», with TCC's and the method's update rows, the beta box, and a
+  row for each of these tools that is installed: the version here, the one its source offers («unknown» when the
+  source cannot tell), an «Update» button per tool and «Update all». The rows come from the method's own
+  `upkeep.py`; a tool that does not update keeps its row and says why. While a session runs in TCC, the omp and
+  Claude Code buttons (and «Update all» when it would take them along) are off, and an orange line gives the way
+  out: restart TCC and update before you start a session. A problem report carries the tools section whichever
+  tab is on screen. The Installation tab keeps the report box, now at the tab's full height.
+- **A fourth choice under Settings → Ask about: «Don't ask at all, not even about the irreversible»** (tcc#115,
+  finding 123). Nothing from the session's tools asks, not even a delete or an overwrite outside the project; each
+  such command is written into the dialog as a line, «Let through without asking: …». TCC's own DSP and REW writes
+  still ask, inside the tool.
+- **An ASK door to the reviewer** (tcc#116, finding 124). The session can put a plain question to the reviewer,
+  with no review package and no tuning contract, through the model and route picked in the footer. The answer
+  shows in the dialog as «ASK · <model>» and is filed as `process/reviews/<time>-ask.md`; it is not recorded as a
+  review. The session's prompt names this door, and TCC tells the session it is open even in a fresh project,
+  where a review is not ready yet.
+- **The guides one click away** (tcc#120, finding 134). Help's single «User guide» entry is now a bold
+  «📖 Guides» submenu: the quick guide, the full guide and the target-curve guide, each at the version you have
+  installed. A small «?» after the target curve's name in the header opens the method's guide to target curves.
+- **«Delete the copy of VAR» in the reviewer-key window** (tcc#112, finding 127, hub #230). When the key is in the
+  secure store and the same variable is still set in a shell profile or in the Windows environment, a button for
+  each such variable deletes that copy; it asks first, and «Keep» is the default. After a save the window asks
+  the same question itself. The stored key stays, and nothing else is moved or stored: the window runs the
+  method's `key move-shell <provider> --drop`.
+
+### Changed
+
+- **«Don't ask at all (auto)» asks only about what cannot be undone, on both routes** (tcc#115, finding 123). It
+  stopped on read-only commands, because any `$( … )`, backtick or loop counted as irreversible. TCC now reads a
+  command the way the shell does (quotes, `;`, `&&` and new lines, `$( … )` and backticks, loop and `if` bodies,
+  heredocs, `bash -c` scripts) and judges each part. Let through: reads, edits and writes inside the project,
+  also when they are built from substitutions and loops; `2>/dev/null` and its kind no longer count as a write.
+  Still asked: a delete or an overwrite outside the project, also when it comes through `xargs` or as a script
+  piped into `sh` or `source`, and a command TCC cannot read through (a command named by a variable, a delete
+  whose target is a variable, a `case` or a function). The question says why: «A command that cannot be undone».
+  On an omp session auto now asks about these too; before, it asked about nothing there.
+- **Flash can be picked as the reviewer** (tcc#118, finding 129). Its row in the reviewer picker is enabled and
+  marked «not recommended», with the method's reason on hover, and the footer keeps a soft warning. The choice is
+  the tuner's.
+- **The feedback form's «From» is optional** (tcc#121, finding 135, hub #228). Its hint says it is only for
+  someone who wants an answer: email, Telegram or phone. A report the form answered but did not take now says the
+  form may have changed and to update TCC (Menu → Diagnostics and updates), with your text on the clipboard; a
+  network failure keeps its old words (hub #231).
+- **The method at v3.0.65** (tcc#112, hub #225, #227, #230, #231). The feedback form is English, so TCC sends the
+  method's English choice words; TCC's own labels stay in your language. A session the method reopened after
+  closing it (`session-reopen`) is open again for TCC, and quitting asks to save. A driver's Fs copied in from
+  another project is now a warning before the sweep, printed by the method to the session. The reviewer-key window
+  works on the method's new `key move-shell`; with an installed method older than v3.0.65 it offers no delete and
+  says to update the method first, which the updater does.
+- **Orange buttons say their words in white** (tcc#122): «Message the developer», «Send →» and every other orange
+  button, in both themes, on an orange a step darker so that white reads at 4.5:1 or better.
+- **One radio ring that reads in both themes** (tcc#122): in the dark theme the unselected radios were invisible on
+  Windows. The ring now shows on every surface, and a chosen radio is an orange disc.
+- **The light theme's blue reads at 4.5:1 or better as text** (tcc#122), on every panel and bubble.
+- **Polish and German for every new and changed string** of this release (67 keys), translated by the Advisor.
+
+### Fixed
+
+- **The reviewer picked in the footer is the one that runs** (tcc#113, finding 130, hub #226). A model or provider
+  pinned in the machine's or the project's `critic-env` outranked the pick: «API · gemini-3.1-pro-preview» ran as
+  `gpt-5.6-terra`. TCC now passes the pick by the method's `--model` (an older method gets the variable it got
+  before). A pin the run set aside is named in the footer, «pinned in a file, set aside», with the variable, value
+  and file on hover, and in what TCC tells the session. Advice to choose another model points to the footer, not
+  to a `critic-env` line that no longer decides. A review that answered no longer carries a false «the reviewer
+  CLI refused the model» hint (the set-aside line was read as one), and the note about a rejected API key comes
+  only from the method's own line that says so.
+- **A review package passed by its relative path reaches the reviewer as that file** (tcc#119, finding 133). The
+  path TCC prints under a failed call (`process/reviews/…-critic-package.md`, relative to the project) went to the
+  reviewer as text. It is read from the project now, and a path that names no file is refused by name.
+- **The import form's likely typo goes to the closest missing name** (tcc#114, finding 122), not to the first close
+  row in REW's order, and a capture of another series (`sw_B1` for `sw_3`) is no longer offered as a typo. The
+  strip's notice offers the same fix as the form.
+- **Windows: a taskbar pin made from the Desktop shortcut is one button with TCC's window** (tcc#111, finding 121).
+  After the window is shown, TCC finds its own pins that lack its app id and stamps them; a start with nothing to
+  repair runs nothing.
+- **The reviewer-key window on Windows** (tcc#117, findings 125–128). A key set in the Windows environment
+  variables is named as such, not as «line None»; a focused button no longer cuts its words; saving a key lifts
+  the API rows' old refusals in the reviewer picker. While the method's key command runs (on Windows the
+  environment write takes about five seconds), the window shows the wait cursor and «Saving…» or «Removing…»
+  instead of freezing.
+- **`--install-desktop` under the Windows installer** (tcc#124, hub #229). One install said the shortcuts were not
+  created; the cause is not proven yet. TCC now hands the installer its lines before it ends, writes the exit it
+  chose to `tcc.log`, and gives up on the shortcut stamp after 60 s instead of hanging the install. The method's
+  installer prints the app's exit code when the shortcuts fail.
+- **The title's «update available» follows what TCC learns** (tcc#112): after an update, on Re-check, and on the
+  header's ↻ and Menu → Re-read this project from disk, which now ask GitHub again. It used to stay until TCC
+  restarted.
+- **«Compare with» marks a version the method refuses** (tcc#122): greyed, «can't be read», down to a «?» where
+  the box is narrow; the version itself is never cut, and the words are on hover. It compared with nothing before,
+  and said nothing.
+- **The footer's model pickers** (tcc#122, finding 132): a name that does not fit is cut with «…», «just now» is in
+  your language, a full-screen footer gives the pickers its spare width («API · gemini-3.1-pr…» beside an empty gap
+  reads whole now), and on Windows the language and effort boxes show EN, DE and «x-high» whole instead of «…».
+- **The theme switch shows the wait cursor and takes no second click** (tcc#122) until the new theme is on; on
+  Windows it takes a second or two. Project params' «Theme» row follows the switch.
+- **Smaller edges** (tcc#122): the DSP tree's second line recolours on a theme switch; control mode's corner
+  labels follow a language switch, and the switch keeps the window on its screen; the copy-a-car note says what
+  travels on one line, the Fs its last part; `(imp)` columns have their label; an unplanned take whose name the
+  grammar cannot read shows in an open round, marked «not parsed»; the tier dot judges a change as the rows do;
+  the signature line and «how long ago» are in your language; a horizontal scroll bar is TCC's own thin one.
+- **Failure paths that broke or hung** (tcc#123): a crossover TCC cannot read shows «?» with the ledger's value on
+  hover instead of taking its row down; the updater's check stops on a silent git and never waits for a password
+  prompt, and its temp folder is removed when it ends; an OpenSSH too old to check a signature is named as such,
+  not as git.
+
 ## [v0.1.45] — 2026-09-30 · signed tags and a verified updater, the skill updated through its own upkeep, control mode in a small window, the method at v3.0.64
 
 Paired with method `6d6a9877672092c62808e665c178f28f947eb7a4` — the tag on that commit is
