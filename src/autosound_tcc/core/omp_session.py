@@ -61,11 +61,13 @@ from autosound_tcc.core.agent_events import (
     ToolCall,
     ToolEnd,
     TurnEnd,
+    Unasked,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
 from autosound_tcc.core.tuning_session import (
     SKILL_NAME,
     _read_roots_for,
+    bash_is_dangerous,
     bash_is_read_only,
     language_rule,
 )
@@ -258,6 +260,12 @@ GATE_FOREIGN = "foreign"
 # human. What this turns off is the shell-and-file traffic, which is where the noise was -- and a
 # gate that fires on `ls` is a gate that gets clicked through, which protects nothing.
 GATE_AUTO = "auto"
+# Nothing asks, not even what cannot be undone: a delete or an overwrite outside the project goes
+# through unasked. The Arbiter's own proposal (2026-10-01, tcc#115) after `auto` stopped him on a
+# read for the fourth time (finding 123), and named for what it lifts. Never silent: what `auto`
+# would have stopped is said in the dialog (`agent_events.Unasked`). TCC's own tools still
+# confirm inside the tool, so a DSP or REW write still stops for a human.
+GATE_NEVER = "never"
 
 # What a project starts on. `auto`, not `writes` (user, 2026-08-21): the reason the strictest
 # setting was the default -- "start with every write and narrow it if it gets in the way" -- is an
@@ -582,10 +590,15 @@ class OmpSession:
         agent's own progress frames queue up behind the question we are asking about them.
         """
         tool, detail = self._tool_and_detail(frame)
+        command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
         if self._auto_allowed(tool, detail):
             self._answer_frame(frame, True)
+            # `never` asks about nothing, and is never silent about what `auto` would have asked
+            # (tcc#115) — the same line as on the Agent SDK side.
+            if (self.gate == GATE_NEVER and tool == "bash"
+                    and bash_is_dangerous(command, _read_roots_for(self.project_dir))):
+                await self._events.put(Unasked(command))
             return
-        command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
         effect = self.effect_of(command)
         request = ConfirmRequest(
             # The question is what it will change, not what it will run: a command line three
@@ -618,7 +631,7 @@ class OmpSession:
         writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
         it can overwrite is a measurement or a ledger.
         """
-        if self.gate == GATE_AUTO:
+        if self.gate in (GATE_AUTO, GATE_NEVER):
             return True
         if tool in self.always_allowed:
             return True

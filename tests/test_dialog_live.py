@@ -1010,6 +1010,24 @@ def test_the_adapter_speaking_is_not_the_model_speaking(tmp_path):
     assert panel._bubbles[2]._body.text() == "Back."  # a new bubble, not appended above the notice
 
 
+def test_a_command_let_through_unasked_is_a_line_in_the_dialog(tmp_path):
+    """«Не питати взагалі, навіть про незворотне» (tcc#115) asks about nothing, and is never silent:
+    a delete or an overwrite it let through is said in the dialog, by TCC, with the command as it
+    ran — escaped, because a shell line is full of `<`, `>` and `&`."""
+    from autosound_tcc.core.agent_events import Unasked
+    from autosound_tcc.ui.tcc import i18n
+
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(Unasked("rm -rf ~/old && echo done > /tmp/x"))
+
+    bubble = panel._bubbles[-1]
+    assert bubble.findChild(QLabel).text().lower().startswith("system")
+    shown = bubble._body.text()
+    assert i18n.t("gateNeverPassed").split("{command}")[0].strip() in shown
+    assert "rm -rf ~/old &amp;&amp; echo done &gt; /tmp/x" in shown
+
+
 def test_the_activity_line_stops_moving_when_the_tool_returns(tmp_path):
     """A static line says a tool ran, a moving one says it is still running — that difference is
     the only reason the line exists, and nothing ever stopped the dots."""

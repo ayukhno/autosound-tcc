@@ -14,6 +14,7 @@ they reach whichever front-end is driving — the in-app agent or the user's own
 
 from __future__ import annotations
 
+import html
 import re
 import time
 from pathlib import Path
@@ -40,6 +41,7 @@ from autosound_tcc.core.agent_events import (
     TextDelta,
     ToolCall,
     ToolEnd,
+    Unasked,
 )
 from autosound_tcc.ui.tcc import chat_text, discard
 from autosound_tcc.ui.tcc import i18n
@@ -1121,6 +1123,16 @@ class DialogPanel(QWidget):
             self._live_bubble = None
             self._live_text = ""
             self._add_system_message(f"⚠️ {item.text}", role=_SYS_ROLE_TCC)
+        elif isinstance(item, Unasked):
+            # The fourth gate choice asks about nothing (tcc#115), and what it let through that
+            # would have asked under `auto` is said here, by TCC — never silently. Escaped: a shell
+            # line is full of `<`, `>` and `&`. Cut, because a heredoc can be three screens long
+            # and the line is there to be found, not to be the command.
+            self._live_bubble = None
+            self._live_text = ""
+            command = item.command if len(item.command) <= 400 else item.command[:400] + "…"
+            self._add_system_message(
+                i18n.t("gateNeverPassed").format(command=html.escape(command)), role=_SYS_ROLE_TCC)
 
     def _append_live_text(self, text: str) -> None:
         if not text:

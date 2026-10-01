@@ -886,8 +886,16 @@ Start TCC again; if it keeps happening, the reason is here and in the log:",
         "gateAskTitle": "Agent commands",
         "gateAskBody": "Which commands need your confirmation? The app will read measurements and save project files to this device. Irreversible actions always ask, and you can change this choice in the menu.",
         "gateAuto": "Don't ask at all (auto)",
-        "gateAutoTip": "Harness tools (shell, file reads, edits) run without asking. TCC's own "
-                       "DSP and REW writes still ask — those are the ones that change the car.",
+        "gateAutoTip": "Harness tools (shell, file reads, edits) run without asking. A command that "
+                       "cannot be undone (a delete or an overwrite outside the project) still asks — "
+                       "the next choice lifts that too. TCC's own DSP and REW writes still ask — "
+                       "those are the ones that change the car.",
+        "gateNever": "Don't ask at all, not even about the irreversible",
+        "gateNeverTip": "Nothing from the harness asks, not even a command that cannot be undone: a "
+                        "delete or an overwrite outside the project goes through without a question. "
+                        "TCC writes each such command into the dialog as a line. TCC's own DSP and "
+                        "REW writes still ask, inside the tool.",
+        "gateNeverPassed": "Let through without asking: <code>{command}</code>",
         "autoAllowed": "Auto-allowed <code>{tool}</code> — asking about it is off for this project.",
         "questionCancelled": "Question withdrawn — the turn can continue.",
         "questionWithdrawn": "The agent took that question back.",
@@ -2055,8 +2063,16 @@ Choose sweeps (sw) above to read this.",
         "gateAskTitle": "Команди агента",
         "gateAskBody": "Які команди потребують вашого підтвердження? Програма читатиме заміри та зберігатиме файли проєкту на цей пристрій. Незворотні дії завжди вимагають згоди, а цей вибір можна змінити в меню.",
         "gateAuto": "Не питати взагалі (авто)",
-        "gateAutoTip": "Інструменти харнеса (шел, читання, правки) працюють без запиту. Власні "
-                       "записи TCC у DSP і REW усе одно питають — саме вони міняють машину.",
+        "gateAutoTip": "Інструменти харнеса (шел, читання, правки) працюють без запиту. Про команду, "
+                       "яку не відкотити (видалення чи перезапис поза проєктом), усе одно спитає — "
+                       "щоб не питало й про неї, є наступний пункт. Власні записи TCC у DSP і REW усе "
+                       "одно питають — саме вони міняють машину.",
+        "gateNever": "Не питати взагалі, навіть про незворотне",
+        "gateNeverTip": "Не питає ні про що — навіть про команду, яку не відкотити: видалення чи "
+                        "перезапис поза проєктом пройде без запиту. Кожну таку команду TCC запише в "
+                        "діалог окремим рядком. Власні записи TCC у DSP і REW усе одно питають — "
+                        "усередині інструмента.",
+        "gateNeverPassed": "Пропущено без питання: <code>{command}</code>",
         "autoAllowed": "Авто-дозвіл <code>{tool}</code> — питання про нього вимкнено для проєкту.",
         "questionCancelled": "Питання знято — хід може йти далі.",
         "questionWithdrawn": "Агент забрав це питання назад.",
@@ -3242,8 +3258,16 @@ Choose sweeps (sw) above to read this.",
         "gateAskTitle": 'Polecenia agenta',
         "gateAskBody": "Które polecenia wymagają twojego potwierdzenia? Program będzie odczytywał pomiary i zapisywał pliki projektu na tym urządzeniu. Nieodwracalne działania zawsze pytają o zgodę, a ten wybór można zmienić w menu.",
         "gateAuto": 'Nie pytaj wcale (auto)',
-        "gateAutoTip": 'Narzędzia harnessa (powłoka, odczyty, edycje) działają bez pytania. Własne zapisy TCC do DSP '
-                       'i REW wciąż pytają — to one zmieniają auto.',
+        "gateAutoTip": "Harness tools (shell, file reads, edits) run without asking. A command that "
+                       "cannot be undone (a delete or an overwrite outside the project) still asks — "
+                       "the next choice lifts that too. TCC's own DSP and REW writes still ask — "
+                       "those are the ones that change the car.",
+        "gateNever": "Don't ask at all, not even about the irreversible",
+        "gateNeverTip": "Nothing from the harness asks, not even a command that cannot be undone: a "
+                        "delete or an overwrite outside the project goes through without a question. "
+                        "TCC writes each such command into the dialog as a line. TCC's own DSP and "
+                        "REW writes still ask, inside the tool.",
+        "gateNeverPassed": "Let through without asking: <code>{command}</code>",
         "autoAllowed": 'Auto-zgoda na <code>{tool}</code> — pytanie o to jest w tym projekcie wyłączone.',
         "questionCancelled": 'Pytanie wycofano — tura może trwać dalej.',
         "questionWithdrawn": 'Agent wycofał to pytanie.',
@@ -4465,9 +4489,16 @@ Choose sweeps (sw) above to read this.",
         "gateAskTitle": 'Agentenbefehle',
         "gateAskBody": "Welche Befehle brauchen deine Bestätigung? Das Programm liest Messungen und speichert Projektdateien auf diesem Gerät. Unumkehrbare Aktionen fragen immer, und diese Auswahl lässt sich im Menü ändern.",
         "gateAuto": 'Gar nicht fragen (auto)',
-        "gateAutoTip": 'Werkzeuge des Harness (Shell, Lesen, Bearbeiten) laufen ohne Rückfrage. TCCs eigene '
-                       'Schreibvorgänge ins DSP und nach REW fragen weiterhin nach — das sind die, die das Auto '
-                       'verändern.',
+        "gateAutoTip": "Harness tools (shell, file reads, edits) run without asking. A command that "
+                       "cannot be undone (a delete or an overwrite outside the project) still asks — "
+                       "the next choice lifts that too. TCC's own DSP and REW writes still ask — "
+                       "those are the ones that change the car.",
+        "gateNever": "Don't ask at all, not even about the irreversible",
+        "gateNeverTip": "Nothing from the harness asks, not even a command that cannot be undone: a "
+                        "delete or an overwrite outside the project goes through without a question. "
+                        "TCC writes each such command into the dialog as a line. TCC's own DSP and "
+                        "REW writes still ask, inside the tool.",
+        "gateNeverPassed": "Let through without asking: <code>{command}</code>",
         "autoAllowed": '<code>{tool}</code> automatisch erlaubt — die Rückfrage dazu ist für dieses Projekt aus.',
         "questionCancelled": 'Frage zurückgezogen — der Zug kann weitergehen.',
         "questionWithdrawn": 'Der Agent hat diese Frage zurückgenommen.',

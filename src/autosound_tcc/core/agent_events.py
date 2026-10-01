@@ -7,7 +7,7 @@ now that somewhere was the SDK's own message objects — `dialog_panel._on_chunk
 reading `.event` for a stream delta and `.content[].name` for a tool call. That works for exactly
 one harness and silently for none of the others.
 
-So the panel is given a vocabulary instead of a vendor. Seven events, chosen because both harnesses
+So the panel is given a vocabulary instead of a vendor. Eight events, chosen because both harnesses
 actually produce them and the panel actually renders them:
 
     TextDelta          prose arriving a piece at a time -> grows the live bubble
@@ -16,6 +16,7 @@ actually produce them and the panel actually renders them:
     Question           a structured question for the Arbiter, and the turn is blocked on it
     QuestionWithdrawn  the harness took a question back -> the card goes
     Notice             the adapter speaking about the harness, not the model speaking
+    Unasked            the gate let a command through that would otherwise have asked
     TurnEnd            the turn finished, carrying the harness's session id for resume
 
 `Question` has no Agent SDK equivalent today; omp raises it (`ask`) and OpenCode raises it
@@ -124,7 +125,22 @@ class TurnEnd:
     session_id: Optional[str] = None
 
 
-AgentEvent = TextDelta | ToolCall | ToolEnd | Question | QuestionWithdrawn | Notice | TurnEnd
+@dataclass(frozen=True)
+class Unasked:
+    """A command the gate let through without asking, of the kind that otherwise always asks.
+
+    Only the fourth gate choice does this — «Не питати взагалі, навіть про незворотне», the
+    Arbiter's proposal of 2026-10-01 (tcc#115) — and it is his decision, so this is not a warning to
+    act on. But it is never silent: a delete or an overwrite nobody was asked about is exactly the
+    line somebody looks for afterwards.
+    """
+
+    command: str
+
+
+AgentEvent = (
+    TextDelta | ToolCall | ToolEnd | Question | QuestionWithdrawn | Notice | Unasked | TurnEnd
+)
 
 
 @runtime_checkable

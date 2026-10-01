@@ -1591,6 +1591,34 @@ def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypat
     assert not window._gate_actions[omp_session.GATE_AUTO].isChecked()
 
 
+def test_the_gate_menu_has_a_fourth_choice_that_asks_about_nothing(monkeypatch):
+    """The Arbiter, 2026-10-01: «для нього треба додати пункт вибору "взагалі не питати"» (tcc#115).
+    It sits after `auto`, says by its name what it lifts, and its tooltip names the delete or
+    overwrite outside the project that now goes unasked. Kept per project like the other three,
+    and shown in the system params under its own name."""
+    from autosound_tcc.core import omp_session, project_settings
+    from autosound_tcc.ui.tcc import i18n
+
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+
+    assert list(window._gate_actions) == [omp_session.GATE_WRITES, omp_session.GATE_FOREIGN,
+                                          omp_session.GATE_AUTO, omp_session.GATE_NEVER]
+    never = window._gate_actions[omp_session.GATE_NEVER]
+    assert never.text() == i18n.t("gateNever")
+    assert never.toolTip() == i18n.t("gateNeverTip")
+    assert window._gate_actions[omp_session.GATE_AUTO].toolTip() == i18n.t("gateAutoTip")
+
+    window._set_gate_mode(omp_session.GATE_NEVER)
+
+    assert project_settings.get(config.tcc_dir(), "gate") == omp_session.GATE_NEVER
+    assert window._effective_gate() == omp_session.GATE_NEVER
+    assert never.isChecked()
+    assert not window._gate_actions[omp_session.GATE_AUTO].isChecked()
+    assert dict(window._app_config_rows())[i18n.t("cfgGate")] == i18n.t("gateNever")
+
+
 def test_the_effort_picker_offers_three_levels_and_none_of_them_is_cheap(monkeypatch):
     """The Arbiter's rule (2026-08-07): below `high` is not a tuning setting. `max` is on the list
     because nothing escalates on its own — the model varies its own depth, but only under the level

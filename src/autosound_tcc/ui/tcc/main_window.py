@@ -1195,13 +1195,16 @@ class MainWindow(QMainWindow):
         gate_menu.setTitle(i18n.t("gateMode"))
         settings.addMenu(gate_menu)
         self._gate_actions = {}
+        # The fourth, `never`, is the Arbiter's own (2026-10-01, tcc#115): it lifts what `auto`
+        # still asks about, and its tooltip names what that lets through.
+        tips = {omp_session.GATE_AUTO: "gateAutoTip", omp_session.GATE_NEVER: "gateNeverTip"}
         for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
                             (omp_session.GATE_FOREIGN, "gateForeign"),
-                            (omp_session.GATE_AUTO, "gateAuto")):
+                            (omp_session.GATE_AUTO, "gateAuto"),
+                            (omp_session.GATE_NEVER, "gateNever")):
             action = gate_menu.addAction(i18n.t(label))
             action.setCheckable(True)
-            action.setToolTip(i18n.t("gateAutoTip" if mode == omp_session.GATE_AUTO
-                                     else "gateModeTip"))
+            action.setToolTip(i18n.t(tips.get(mode, "gateModeTip")))
             action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
             self._gate_actions[mode] = action
 
@@ -1825,7 +1828,8 @@ class MainWindow(QMainWindow):
                                         else "cfgThemeLight")),
             (i18n.t("cfgGate"), i18n.t({omp_session.GATE_WRITES: "gateWrites",
                                         omp_session.GATE_FOREIGN: "gateForeign",
-                                        omp_session.GATE_AUTO: "gateAuto"}.get(gate, "gateAuto"))),
+                                        omp_session.GATE_AUTO: "gateAuto",
+                                        omp_session.GATE_NEVER: "gateNever"}.get(gate, "gateAuto"))),
         ]
 
     def _set_rew_online(self, online: bool) -> None:

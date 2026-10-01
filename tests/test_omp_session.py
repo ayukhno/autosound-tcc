@@ -719,6 +719,41 @@ def test_auto_mode_stops_asking_about_the_harness(tmp_path):
     assert session.sent[0]["value"] == "Approve"
 
 
+def _never_ask_gate(tmp_path, command: str) -> tuple[OmpSession, list]:
+    session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
+                         gate=omp_session_module.GATE_NEVER)
+    session.sent = []
+    session._send = session.sent.append
+
+    async def run():
+        await session._gate({**PERMISSION_FRAME, "title": f"Allow tool: bash\nCommand: {command}"})
+        events = []
+        while not session._events.empty():
+            events.append(session._events.get_nowait())
+        return events
+
+    return session, asyncio.run(run())
+
+
+def test_never_ask_approves_an_irreversible_command_and_says_so(tmp_path):
+    """The fourth choice (tcc#115) asks about nothing — and what it let through that the narrow
+    check would have stopped is a line in the dialog, the same as on the Agent SDK side."""
+    from autosound_tcc.core.agent_events import Unasked
+
+    session, events = _never_ask_gate(tmp_path, "rm -rf ~/")
+
+    assert session.bridge.requests == []
+    assert session.sent[0]["value"] == "Approve"
+    assert events == [Unasked("rm -rf ~/")]
+
+
+def test_never_ask_says_nothing_about_an_ordinary_command(tmp_path):
+    session, events = _never_ask_gate(tmp_path, "ls -la")
+
+    assert session.sent[0]["value"] == "Approve"
+    assert events == []
+
+
 def test_a_remembered_tool_stops_asking_without_turning_the_gate_off(tmp_path):
     session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
                          always_allowed=frozenset({"write"}))
