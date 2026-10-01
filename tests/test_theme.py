@@ -286,3 +286,26 @@ def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypa
     combo.resize(int(whole) + 80 + combo.width() - field(combo), 26)
     combo.grab()
     assert drawn[-1] == full, "whole where it fits"
+
+
+def test_a_hold_is_said_in_orange_that_reads_in_both_themes():
+    """VM-5 (ruling 21, tcc#98): the line under omp and Claude Code while a session runs on them
+    read red, like an error. The Arbiter: «не сірим - помаранчевим, бо це стопер але не помилка».
+    Orange, then — and not the accent itself: as text the light accent reads 3.2–3.7:1 on these
+    surfaces, under finding 51's 4.5. Computed from the colour the sheet draws, on every surface
+    the line can sit on, in both themes."""
+    import colorsys
+
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        drawn = _drawn(theme.build_qss(palette), 'QLabel[class~="kv-caution"]', "color")
+        r, g, b = theme._to_rgb(drawn)
+        hue = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)[0] * 360
+        assert 20 <= hue <= 45, f"{name}: {drawn} is not orange (hue {hue:.0f}°)"
+        assert drawn.lower() != palette.warn.lower(), f"{name}: the error's red"
+        for surface in ("panel", "panel2", "panel3", "ground"):
+            ground = palette.tokens[surface]
+            assert _contrast(drawn, ground) >= 4.5, (
+                f"{name}: {drawn} is {_contrast(drawn, ground):.2f}:1 on {surface} {ground}")

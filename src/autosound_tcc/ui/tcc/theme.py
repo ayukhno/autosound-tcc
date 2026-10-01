@@ -121,6 +121,9 @@ PALETTE_DARK: dict[str, str] = {
     "stamp": "#97a2b0",
     "accent": "#e8973c", "accent_dim": "#b3712c",
     "ok": "#4bbf87", "inv": "#e8973c", "off": "#6a7686", "warn": "#e05c5c",
+    # A stopper that is not an error, as text: orange where `warn` is red (VM-5, ruling 21 — «не
+    # сірим - помаранчевим, бо це стопер але не помилка»). The accent's own orange here, ≥ 6:1.
+    "caution": "#e8973c",
     "info": "#5aa9e6", "yellow": "#e8c34a",
     # The Arbiter's own blue, and its own token on purpose. It was `accent`, and an
     # orange message bubble reads as an alarm rather than as "you said this" (user,
@@ -138,6 +141,9 @@ PALETTE_LIGHT: dict[str, str] = {
     "stamp": "#56616e",  # `muted` 10% toward `text`: see the dark palette's `stamp`
     "accent": "#c56f18", "accent_dim": "#a95f14",
     "ok": "#1f9c63", "inv": "#c56f18", "off": "#8492a0", "warn": "#c0392b",
+    # The accent's orange read 3.2–3.7:1 as text on these panels, under finding 51's 4.5 (VM-5):
+    # the same hue darker, ≥ 4.5:1 on every panel and on the ground.
+    "caution": "#9f5a13",
     # The prototype's #2f7fc4 is text as often as a fill — the status strip, the changed values,
     # the Critic's and the system's names — and as text it read 3.2–4.2:1 on these panels and
     # bubbles, under finding 51's 4.5 (tcc#122). The same azure, darker: ≥ 4.9:1 on every one.
@@ -804,6 +810,12 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     because the label has to be an `ElidedLabel` and that one measures plain text. */
     QLabel[class~="kv-warn"] {{
         color: {t.warn};
+        font-weight: 600;
+    }}
+    /* .kv-caution — a stopper that is not an error: an update a running session holds back
+    (VM-5, ruling 21). Orange, where `kv-warn` is red and means "wrong". */
+    QLabel[class~="kv-caution"] {{
+        color: {t.caution};
         font-weight: 600;
     }}
     /* .kv-val-link — the header's "Target curve" value, clickable through to the skill's online

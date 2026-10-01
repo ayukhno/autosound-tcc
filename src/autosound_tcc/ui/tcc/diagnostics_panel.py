@@ -1020,7 +1020,9 @@ class DiagnosticsDialog(QDialog):
                 column.setSpacing(2)
                 column.addWidget(label)
                 guard = _note(i18n.t("updToolSession"))
-                guard.setProperty("class", "kv-warn")
+                # Orange, not the error's red: a stopper, not a failure (VM-5, the Arbiter: «не
+                # сірим - помаранчевим, бо це стопер але не помилка»).
+                guard.setProperty("class", "kv-caution")
                 column.addWidget(guard)
                 self._tool_guards[tool.name] = guard
             button = self._tools_row(left, i18n.t("updTool"))
@@ -1028,7 +1030,7 @@ class DiagnosticsDialog(QDialog):
             self._tool_rows[tool.name] = (label, button)
             self._tool_offer[tool.name] = tool.offered
         self._tools_all_note = _note("")
-        self._tools_all_note.setProperty("class", "kv-warn")
+        self._tools_all_note.setProperty("class", "kv-caution")
         self._tools_all_btn = self._tools_row(self._tools_all_note, i18n.t("updToolsAll"))
         self._tools_all_btn.clicked.connect(self._update_offered_tools)
         self._read_session()

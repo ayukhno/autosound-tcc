@@ -1515,6 +1515,25 @@ def test_a_running_session_holds_omp_and_claude_and_says_why(monkeypatch):
     dialog.close()
 
 
+def test_the_session_hold_is_said_in_orange_not_in_the_error_red(monkeypatch):
+    """VM-5 (ruling 21, tcc#98): the hold read red, like an error. The Arbiter: «не сірим -
+    помаранчевим, бо це стопер але не помилка». The theme's own test holds the colour itself."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, (
+        _tool("claude", "2.1.280", "2.1.284"), _tool("omp", "17.3.8", "18.2.4"))))
+    _app()
+    dialog = DiagnosticsDialog()
+    _session(dialog, [True])
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
+    _finish_tools(dialog)
+
+    held = [dialog._tool_guards["omp"], dialog._tool_guards["claude"], dialog._tools_all_note]
+    for label in held:
+        assert not label.isHidden()
+        assert label.property("class") == "kv-caution", label.text()
+
+
 def test_a_second_failure_of_the_same_tool_says_its_reason_once(monkeypatch):
     from autosound_tcc.core import updates
 
