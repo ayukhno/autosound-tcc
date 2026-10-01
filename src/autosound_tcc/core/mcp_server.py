@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import dataclasses
 import json
 import os
 import secrets
@@ -1303,7 +1304,15 @@ def build_server(
             # the key the footer, the pickers and `get_tcc_state` look a refusal up under.
             _, reviewer = model_choices.resolve_critic(
                 project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
-            availability.record_reviewer_outcome(reviewer.key if reviewer else "", result)
+            # The pins are what the run's OWN model set aside, so a model the session named files
+            # them under that model: under the pick, the state said the pick's run set aside a pin
+            # — one equal to the pick, even (tcc#113).
+            named = bool(model and reviewer and not model_choices.same_model(model, reviewer.model))
+            availability.record_reviewer_outcome(
+                reviewer.key if reviewer else "",
+                dataclasses.replace(result, pins_set_aside=None) if named else result)
+            if named and result.pins_set_aside is not None:
+                availability.set_aside(f"{reviewer.harness}:{model}", result.pins_set_aside)
         except Exception:  # noqa: BLE001 — a critique that ran must not fail over its own bookkeeping
             app_log.logger().exception("record_reviewer_outcome failed")
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
@@ -1337,6 +1346,9 @@ def build_server(
                 "review": result.review,
                 # What the clipboard step takes after a refusal (hub #154 §5).
                 "package": result.package,
+                # The run named its model by the method's `--model`, so a pin in critic-env does
+                # not change it: the bubble's advice for `choose_model` follows this (tcc#113).
+                "by_model_flag": result.pins_set_aside is not None,
             }
         )
         detail = result.detail

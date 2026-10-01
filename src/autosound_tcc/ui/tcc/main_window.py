@@ -368,6 +368,14 @@ def _pins_tip(pins: list) -> str:
     return i18n.t("criticPinsTip").format(pins="\n".join(lines))
 
 
+def _pins_short(pins: list) -> str:
+    """The footer's short note, by what was set aside: a file, the environment, or both (tcc#113)."""
+    in_file = any(pin.get("file") for pin in pins)
+    in_env = any(not pin.get("file") for pin in pins)
+    return i18n.t("criticPinsShortBoth" if in_file and in_env
+                  else "criticPinsShort" if in_file else "criticPinsShortEnv")
+
+
 def _panel() -> QFrame:
     frame = QFrame()
     frame.setProperty("class", "panel")
@@ -4666,7 +4674,7 @@ class MainWindow(QMainWindow):
 
         def say(text: str) -> None:
             # The tip after the text: `ElidedLabel.setText` sets its own (the full text, or none).
-            self._critic_status.setText(f"{text} · {i18n.t('criticPinsShort')}" if pins else text)
+            self._critic_status.setText(f"{text} · {_pins_short(pins)}" if pins else text)
             if pins:
                 self._critic_status.setToolTip(_pins_tip(pins))
 

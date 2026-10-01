@@ -197,6 +197,26 @@ def test_being_asked_which_model_is_not_rendered_as_a_failure():
     assert "critic-env" in said, "the answer has to say WHERE the choice is pinned"
 
 
+def test_a_run_that_named_its_model_is_sent_to_the_footer_not_to_a_pin():
+    """tcc#113 review, Minor 1: a run that named its model by the method's `--model` is not changed
+    by a line in critic-env — the flag beats it. Advising that pin was advice that does nothing,
+    and it made the very pin the footer then says to remove. The footer's pick is what works."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._bubbles)
+
+    panel.add_critique({"mode": "choose_model", "models": ["gemini-pro-latest"],
+                        "by_model_flag": True})
+
+    said = " ".join(label.text() for bubble in panel._bubbles[before:]
+                    for label in bubble.findChildren(QLabel))
+    assert "gemini-pro-latest" in said
+    assert i18n.t("criticChooseModelFooter").split("{models}")[0] in said
+    assert "AUTOSOUND_CRITIC_MODEL" not in said
+
+
 def test_a_bubble_measures_its_text_once_not_once_per_resize_pixel():
     """`natural_width` shapes the WHOLE message as one line, and `resizeEvent` asks every bubble
     for it — so dragging the splitter one pixel re-shaped the entire transcript, and it got worse

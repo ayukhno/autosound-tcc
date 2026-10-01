@@ -6067,7 +6067,7 @@ def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
              "line": None},
         ])
         window._refresh_critic_status()
-        assert i18n.t("criticPinsShort") in window._critic_status.text()
+        assert i18n.t("criticPinsShortBoth") in window._critic_status.text()
         tip = window._critic_status.toolTip()
         assert i18n.t("criticPinInFile").format(
             var="AUTOSOUND_CRITIC_MODEL", value="gpt-5.6-terra", file=machine, line=1) in tip
@@ -6078,7 +6078,61 @@ def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
 
         availability.set_aside(pick.key, [])
         window._refresh_critic_status()
-        assert i18n.t("criticPinsShort") not in window._critic_status.text()
+        assert window._critic_status.text() == i18n.t("criticCheckAnswered").format(
+            label=pick.label)
         assert window._critic_status.toolTip() == ""
+    finally:
+        availability.reset()
+
+
+def test_the_start_up_probe_does_not_clear_a_pin_it_cannot_see(monkeypatch):
+    """tcc#113 review, Minor 2: the probe runs with a scratch `PROJECT_MIRROR`, so the method never
+    reads the project's `rew_analitic/.critic-env` for it. Its list of pins is not the whole story:
+    an empty one cleared a pin a real review had named, at every start. The probe records none."""
+    from autosound_tcc.core import availability, critic, model_choices
+    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
+
+    _app()
+    key = "agy:gemini-3.1-pro-high"
+    named = [{"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra",
+              "file": "/p/rew_analitic/.critic-env", "line": 1}]
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
+    availability.reset()
+    try:
+        for seen in ([], [{"variable": "GEMINI_CRITIC_MODEL", "value": "x", "file": None,
+                           "line": None}]):
+            availability.set_aside(key, named)
+            monkeypatch.setattr(critic, "run", lambda package, seen=seen, **kw: critic.CriticResult(
+                critic.MODE_API_OR_CLI, "pong", "gemini-3.1-pro-high", "ask", "", 1.0, "t",
+                pins_set_aside=seen))
+            _ReviewerProbeWorker(key, config.project_dir()).run()
+            assert availability.pins_set_aside(key) == named, seen
+        assert availability.answered(key), "the rest of the probe's answer is still recorded"
+    finally:
+        availability.reset()
+
+
+def test_the_footer_note_says_what_kind_of_pin_was_set_aside(monkeypatch):
+    """tcc#113 review, Minor 4: «a pin in a file» stood beside a run whose only lost pin was an
+    environment variable. The note says what was lost: a file, the environment, or both."""
+    from autosound_tcc.core import availability, model_choices
+
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window = _reviewer_window(monkeypatch, pick)
+    in_file = {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra",
+               "file": "/m/critic-env", "line": 1}
+    in_env = {"variable": "GEMINI_CRITIC_MODEL", "value": "gemini-2.5-pro", "file": None,
+              "line": None}
+    keys = ("criticPinsShort", "criticPinsShortEnv", "criticPinsShortBoth")
+    try:
+        availability.succeeded(pick.key)
+        for pins, want in (([in_file], "criticPinsShort"), ([in_env], "criticPinsShortEnv"),
+                           ([in_env, in_file], "criticPinsShortBoth")):
+            availability.set_aside(pick.key, pins)
+            window._refresh_critic_status()
+            text = window._critic_status.text()
+            assert text.endswith(f" · {i18n.t(want)}"), (want, text)
+            assert [k for k in keys if i18n.t(k) in text] == [want], (want, text)
     finally:
         availability.reset()

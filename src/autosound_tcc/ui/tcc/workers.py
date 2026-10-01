@@ -7,6 +7,7 @@ same names: a test that reaches for `main_window._CliCatalogueWorker` still find
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -203,7 +204,11 @@ class _ReviewerProbeWorker(QThread):
                                                "PROJECT_MIRROR": str(mirror)})
             if result.mode == critic.MODE_ERROR:
                 app_log.logger().warning("reviewer probe could not run: %s", result.detail)
-            availability.record_reviewer_outcome(reviewer.key, result)
+            # Without its pins: the method read no `rew_analitic/.critic-env` for the probe (its
+            # mirror is the scratch folder), so the probe's list is not the whole story, and an
+            # empty one would clear a pin a real review named (tcc#113).
+            availability.record_reviewer_outcome(
+                reviewer.key, dataclasses.replace(result, pins_set_aside=None))
             mode = result.mode
         except Exception:  # noqa: BLE001 — a probe must never take the window down or go silent
             app_log.logger().exception("reviewer probe failed")

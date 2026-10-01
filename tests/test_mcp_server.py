@@ -2155,18 +2155,20 @@ def test_a_pin_the_run_set_aside_is_named_in_the_reviewer_state_for_every_task(
         "pick = args[args.index('--model') + 1]\n"
         "path = os.path.join(os.getcwd(), '.critic-env')\n"
         "pinned = open(path, encoding='utf-8').read().strip() if os.path.isfile(path) else ''\n"
+        "provider = args[args.index('--provider') + 1] if '--provider' in args else '-'\n"
         "if pinned:\n"
-        "    print(f'>> --model {pick} --provider {args[args.index(\"--provider\") + 1]}: '\n"
+        "    print(f'>> --model {pick} --provider {provider}: '\n"
         "          f'рецензент цього запуску — {pick} (провайдер google); не діють для нього: '\n"
         "          f'{pinned} ({path}, рядок 1). Для інших запусків закріплене лишається типовим',\n"
         "          file=sys.stderr)\n"
-        "print('answer')\n"
+        "print('provider=' + provider)\n"
         "print('— [' + args[0] + ': ' + pick + ']')\n"
     ))
     (tmp_path / "rew_analitic").mkdir()
     for name in ("data-contract-template.md", "autosound_context.md"):
         (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
-    mcp, _, _ = _server(tmp_path, _CritiqueBridge())
+    bridge = _CritiqueBridge()
+    mcp, _, _ = _server(tmp_path, bridge)
     pin = {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra", "file": str(env_file),
            "line": 1}
     availability.reset()
@@ -2176,6 +2178,8 @@ def test_a_pin_the_run_set_aside_is_named_in_the_reviewer_state_for_every_task(
             env_file.write_text("AUTOSOUND_CRITIC_MODEL=gpt-5.6-terra\n", encoding="utf-8")
             out = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
             assert out["model"] == "gemini-3.1-pro-high", (tool, out)
+            assert "provider=google" in out["critique"], "the pick's vendor goes with it"
+            assert bridge.critiques[-1]["by_model_flag"] is True
             state = mcp_server._reviewer_state(tmp_path)
             assert state["pins_set_aside"]["pins"] == [pin], (tool, state)
             assert "critic-env" in state["pins_set_aside"]["means"]
@@ -2183,5 +2187,49 @@ def test_a_pin_the_run_set_aside_is_named_in_the_reviewer_state_for_every_task(
             env_file.write_text("", encoding="utf-8")
             asyncio.run(mcp.call_tool(tool, args))
             assert "pins_set_aside" not in mcp_server._reviewer_state(tmp_path), tool
+    finally:
+        availability.reset()
+
+
+def test_pins_a_session_named_model_set_aside_are_filed_under_that_model(tmp_path, monkeypatch):
+    """tcc#113 review, Minor 3: a session may name its own `model` to `call_critic`. The method names
+    the pins against THAT model, and filed under the footer's pick they made the state say the
+    pick's run set aside a pin — even one equal to the pick. They go under the model the run named,
+    and the pick's own record is left as it was."""
+    from autosound_tcc.core import availability, model_choices
+
+    _pick_agy_reviewer(tmp_path, monkeypatch)
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: True)
+    env_file = tmp_path / ".critic-env"
+    env_file.write_text("AUTOSOUND_CRITIC_MODEL=gemini-3.1-pro-high\n", encoding="utf-8")
+    _stub_reviewer(tmp_path, monkeypatch, (
+        "if len(sys.argv) < 2:\n"
+        "    print('Використання: ... [--model <id>] [--provider google|anthropic|openai]')\n"
+        "    sys.exit(1)\n"
+        "args = sys.argv[1:]\n"
+        "pick = args[args.index('--model') + 1]\n"
+        "path = os.path.join(os.getcwd(), '.critic-env')\n"
+        "print(f'>> --model {pick}: рецензент цього запуску — {pick} (провайдер google); '\n"
+        "      f'не діють для нього: AUTOSOUND_CRITIC_MODEL=gemini-3.1-pro-high ({path}, рядок 1). '\n"
+        "      'Для інших запусків закріплене лишається типовим', file=sys.stderr)\n"
+        "print('answer')\n"
+        "print('— [' + args[0] + ': ' + pick + ']')\n"
+    ))
+    (tmp_path / "rew_analitic").mkdir()
+    for name in ("data-contract-template.md", "autosound_context.md"):
+        (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
+    mcp, _, _ = _server(tmp_path, _CritiqueBridge())
+    earlier = [{"variable": "GEMINI_CRITIC_MODEL", "value": "x", "file": None, "line": None}]
+    availability.reset()
+    try:
+        availability.set_aside("agy:gemini-3.1-pro-high", earlier)
+        out = json.loads(_text(asyncio.run(mcp.call_tool(
+            "call_critic", {"package": "## proposal", "model": "gemini-2.5-pro"}))))
+        assert out["model"] == "gemini-2.5-pro", out
+        assert availability.pins_set_aside("agy:gemini-2.5-pro") == [
+            {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gemini-3.1-pro-high",
+             "file": str(env_file), "line": 1}]
+        assert availability.pins_set_aside("agy:gemini-3.1-pro-high") == earlier
+        assert mcp_server._reviewer_state(tmp_path)["pins_set_aside"]["pins"] == earlier
     finally:
         availability.reset()

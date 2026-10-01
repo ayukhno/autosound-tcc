@@ -1423,9 +1423,12 @@ class DialogPanel(QWidget):
             # it — then sends the Arbiter to the clipboard for a channel that works and is merely
             # missing a name (SKL-023). The list is the answer, so the list is what is shown.
             offered = [str(name) for name in critique.get("models") or []]
-            self._add_system_message(
-                i18n.t("criticChooseModel").format(models=", ".join(offered) or "—")
-            )
+            # A run that named its model by the method's `--model` is not changed by a pin in
+            # critic-env, so pinning there is advice that does nothing — and it makes the pin the
+            # footer then says to remove (tcc#113). The footer's pick is what works; the pin only
+            # for a method before the flag.
+            key = "criticChooseModelFooter" if critique.get("by_model_flag") else "criticChooseModel"
+            self._add_system_message(i18n.t(key).format(models=", ".join(offered) or "—"))
         elif mode == "refused":
             # No answer, said as one (hub #154 §5): the reviewer's own reasons, and the package the
             # clipboard step takes — not "the Critic failed" with the package lines as its tail.

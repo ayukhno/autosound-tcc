@@ -988,6 +988,7 @@ Start TCC again; if it keeps happening, the reason is here and in the log:",
         "openTerminal": "⧉ Terminal",
         "terminalOpened": "Opened a terminal running <code>{cli}</code> in the project folder. It picks up TCC through <code>.mcp.json</code>; approve the <b>tcc</b> server on first run.",
         "criticChooseModel": "The reviewer needs a model name: this key can call {models}. Pick one and pin it as <code>AUTOSOUND_CRITIC_MODEL=&lt;model&gt;</code> in <code>~/.config/autosound/critic-env</code> — the channel works, it just does not know which model to use.",
+        "criticChooseModelFooter": "The reviewer needs a model this key can call: {models}. Pick one of them in the reviewer picker in the footer — the channel works, it just has no model it can use. A line in <code>critic-env</code> would not help here: this run names its model itself, and such a line decides only a run that names none, like a session running the reviewer script itself.",
         "criticRefused": "The reviewer gave no answer, and nothing was filed as a review:<br>{detail}",
         "criticPackage": "The package for the clipboard step: {path}",
         "criticClipboard": "No reviewer API or CLI was reachable, so the package is on your <b>clipboard</b>. Paste it into any AI chat, then paste the reply back here — the loop still works, it just goes through you.",
@@ -1242,7 +1243,9 @@ Choose sweeps (sw) above to read this.",
         "sessionNew": "new session",
         "criticCheckAnswered": "{label} · answered the check",
         # A pin in a critic-env the run's own model set aside, as the method named it (tcc#113).
-        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsShort": "pinned in a file, set aside",
+        "criticPinsShortEnv": "pinned in the environment, set aside",
+        "criticPinsShortBoth": "pinned in a file and the environment, set aside",
         "criticPinsTip": (
             "This run went as the reviewer picked here. A settings file (or an environment "
             "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
@@ -2205,6 +2208,7 @@ Choose sweeps (sw) above to read this.",
         "openTerminal": "⧉ Термінал",
         "terminalOpened": "Відкрито термінал із <code>{cli}</code> у папці проєкту. Він підхопить TCC через <code>.mcp.json</code>; на першому запуску підтвердь сервер <b>tcc</b>.",
         "criticChooseModel": "Рецензентові бракує імені моделі: цей ключ може викликати {models}. Обери одну і закріпи як <code>AUTOSOUND_CRITIC_MODEL=&lt;модель&gt;</code> у <code>~/.config/autosound/critic-env</code> — канал працює, він лише не знає, яку модель брати.",
+        "criticChooseModelFooter": "Рецензентові потрібна модель, яку може викликати цей ключ: {models}. Обери одну з них у виборі рецензента в нижній стрічці — канал працює, йому лише бракує моделі, яку можна взяти. Рядок у <code>critic-env</code> тут не допоможе: цей запуск сам називає модель, а такий рядок діє лише там, де модель не названо, — як-от коли сесія сама запускає скрипт рецензента.",
         "criticRefused": "Рецензент не відповів, і нічого не збережено як рецензію:<br>{detail}",
         "criticPackage": "Пакет для кроку через буфер обміну: {path}",
         "criticClipboard": "Ні API, ні CLI рецензента недоступні — пакет у <b>буфері обміну</b>. Встав його в будь-який ШІ-чат, а відповідь встав сюди: цикл працює, просто через тебе.",
@@ -2411,6 +2415,8 @@ Choose sweeps (sw) above to read this.",
         "sessionNew": "нова сесія",
         "criticCheckAnswered": "{label} · відповів на перевірку",
         "criticPinsShort": "закріплене у файлі обійдено",
+        "criticPinsShortEnv": "закріплене в змінній середовища обійдено",
+        "criticPinsShortBoth": "закріплене у файлі й у змінній середовища обійдено",
         "criticPinsTip": (
             "Цей запуск ішов на рецензенті, вибраному тут. Файл налаштувань (або змінна "
             "середовища) називав іншого, і це не діяло:\n{pins}\nДля запуску, де модель не "
@@ -3441,6 +3447,7 @@ Choose sweeps (sw) above to read this.",
         "terminalOpened": 'Otwarto terminal z <code>{cli}</code> w folderze projektu. Podchwyci TCC przez '
                           '<code>.mcp.json</code>; przy pierwszym uruchomieniu zatwierdź serwer <b>tcc</b>.',
         "criticChooseModel": 'Recenzent potrzebuje nazwy modelu: ten klucz może wywołać {models}. Wybierz jeden i przypnij go jako <code>AUTOSOUND_CRITIC_MODEL=&lt;model&gt;</code> w <code>~/.config/autosound/critic-env</code> — kanał działa, po prostu nie wie, którego modelu użyć.',
+        "criticChooseModelFooter": "The reviewer needs a model this key can call: {models}. Pick one of them in the reviewer picker in the footer — the channel works, it just has no model it can use. A line in <code>critic-env</code> would not help here: this run names its model itself, and such a line decides only a run that names none, like a session running the reviewer script itself.",
         "criticRefused": 'Recenzent nie odpowiedział i nic nie zapisano jako recenzji:<br>{detail}',
         "criticPackage": 'Pakiet do kroku przez schowek: {path}',
         "criticClipboard": 'Ani API, ani CLI recenzenta nie było osiągalne, więc pakiet jest w <b>schowku</b>. Wklej go '
@@ -3659,7 +3666,9 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": 'wznowiono',
         "sessionNew": 'nowa sesja',
         "criticCheckAnswered": '{label} · odpowiedział na sprawdzenie',
-        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsShort": "pinned in a file, set aside",
+        "criticPinsShortEnv": "pinned in the environment, set aside",
+        "criticPinsShortBoth": "pinned in a file and the environment, set aside",
         "criticPinsTip": (
             "This run went as the reviewer picked here. A settings file (or an environment "
             "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
@@ -4715,6 +4724,7 @@ Choose sweeps (sw) above to read this.",
         "terminalOpened": 'Ein Terminal mit <code>{cli}</code> im Projektordner ist offen. Es findet TCC über '
                           '<code>.mcp.json</code>; bestätige beim ersten Lauf den Server <b>tcc</b>.',
         "criticChooseModel": 'Der Prüfer braucht einen Modellnamen: dieser Schlüssel kann {models} aufrufen. Wähle eines und trage es als <code>AUTOSOUND_CRITIC_MODEL=&lt;Modell&gt;</code> in <code>~/.config/autosound/critic-env</code> ein — der Kanal funktioniert, er weiß nur nicht, welches Modell er nehmen soll.',
+        "criticChooseModelFooter": "The reviewer needs a model this key can call: {models}. Pick one of them in the reviewer picker in the footer — the channel works, it just has no model it can use. A line in <code>critic-env</code> would not help here: this run names its model itself, and such a line decides only a run that names none, like a session running the reviewer script itself.",
         "criticRefused": 'Der Prüfer hat nicht geantwortet, und nichts wurde als Prüfung abgelegt:<br>{detail}',
         "criticPackage": 'Das Paket für den Schritt über die Zwischenablage: {path}',
         "criticClipboard": 'Weder die API noch das CLI des Prüfers war erreichbar, also liegt das Paket in deiner '
@@ -4928,7 +4938,9 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": 'fortgesetzt',
         "sessionNew": 'neue Sitzung',
         "criticCheckAnswered": '{label} · hat auf die Prüfung geantwortet',
-        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsShort": "pinned in a file, set aside",
+        "criticPinsShortEnv": "pinned in the environment, set aside",
+        "criticPinsShortBoth": "pinned in a file and the environment, set aside",
         "criticPinsTip": (
             "This run went as the reviewer picked here. A settings file (or an environment "
             "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
