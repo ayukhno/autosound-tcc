@@ -46,6 +46,9 @@ _reading: set[str] = set()
 #: Keys that ANSWERED this launch — the reviewer picker's green (finding 55, tcc#58). Ready is only
 #: "nothing known against it"; this is the one positive fact.
 _answered: set[str] = set()
+#: The pins a reviewer's last run set aside with its own model, as the method named them (tcc#113):
+#: a model the run did NOT go as, so the footer and `get_tcc_state` can name a stale pin.
+_set_aside: dict[str, list] = {}
 
 
 def begin_reading(harnesses: Iterable[str]) -> None:
@@ -76,6 +79,21 @@ def answered(key: str) -> bool:
         return key in _answered
 
 
+def set_aside(key: str, pins: list) -> None:
+    """What `key`'s last run set aside; an empty list clears it — the pin was removed."""
+    with _lock:
+        if pins:
+            _set_aside[key] = [dict(pin) for pin in pins]
+        else:
+            _set_aside.pop(key, None)
+
+
+def pins_set_aside(key: str) -> list:
+    """The pins `key`'s last run set aside, [] when none or not known."""
+    with _lock:
+        return [dict(pin) for pin in _set_aside.get(key, [])]
+
+
 def forget_refusals(harness: Optional[str] = None) -> None:
     """Forget what refused this launch: every row (the reload button), or one route's rows.
 
@@ -96,6 +114,7 @@ def reset() -> None:
         _refusals.clear()
         _reading.clear()
         _answered.clear()
+        _set_aside.clear()
     _startup = None
 
 
@@ -127,7 +146,8 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
 
 
 def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
-    """One reviewer call's outcome into the state: an answer clears a refusal, a refusal sets one.
+    """One reviewer call's outcome into the state: an answer clears a refusal, a refusal sets one,
+    and the pins the run set aside replace the last run's (tcc#113).
 
     A clipboard package for a vendor this machine has no transport for is the designed fallback and
     records nothing; so does a project that is not ready to be reviewed yet."""
@@ -135,6 +155,10 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
 
     if not key:
         return
+    # None when the run named no model by the flag, or never ran: nothing learned either way.
+    pins = getattr(result, "pins_set_aside", None)
+    if pins is not None:
+        set_aside(key, pins)
     if result.ok:
         succeeded(key)
         return

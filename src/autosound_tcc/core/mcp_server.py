@@ -162,6 +162,7 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         channel.append(SELF_REVIEWER_REFUSAL)
     because = list(missing) + channel
     ask_because = critic.script_missing() + channel
+    pins = availability.pins_set_aside(choice.key)
     return {
         "configured": True,
         # A warning, not a reason in `not_ready_because`: the Arbiter may pick Flash (tcc#118).
@@ -169,6 +170,9 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
            if not why_not
            and model_choices.reviewer_caution(choice) == model_choices.REVIEWER_CAUTION_FLASH
            else {}),
+        # What the last run's own model set aside, as the method named it (finding 130, tcc#113):
+        # on the VM a pin sent the pick elsewhere, and nothing said where the pin lived.
+        **({"pins_set_aside": {"pins": pins, "means": PINS_SET_ASIDE_MEANS}} if pins else {}),
         # The name the reviewer is called with, as `call_critic` sends it (tcc#57).
         "model": model_choices.reviewer_model(choice),
         # What the Arbiter picked, versus what this machine will actually run. Empty unless the
@@ -235,6 +239,15 @@ FLASH_REVIEWER_WARNING = (
 )
 
 
+#: Beside the pins a run set aside in `get_tcc_state` (tcc#113). English, like the rest of the payload.
+PINS_SET_ASIDE_MEANS = (
+    "the last reviewer run went as the model picked in TCC's footer; these pins in a critic-env "
+    "file (or the environment) name another reviewer and were set aside for it. A pin still "
+    "decides any run that names no model, a direct run of the reviewer script among them. Name a "
+    "stale one to the Arbiter, with its file and line; whether it goes is theirs to decide"
+)
+
+
 SELF_REVIEWER_REFUSAL = (
     "The reviewer is the generator's own model: a model reviewing itself is no second opinion, and "
     "through omp the call hangs (finding 99, tcc#85). Nothing was called. Ask the Arbiter to pick a "
@@ -268,6 +281,15 @@ def configured_critic_harness(project_dir: Path) -> str:
     machine's environment point at different reviewers for ten calls running (TCC-002).
     """
     return critic.configured(project_dir)[1]
+
+
+def configured_critic_provider(project_dir: Path) -> str:
+    """The vendor of the reviewer this project's footer is set to, when its pick carries one — or
+    "". From the same key as `configured_critic_model`, alias and all; the method's `--provider`
+    takes it, and without it the method reads the vendor from the model's name (tcc#113)."""
+    _, choice = model_choices.resolve_critic(
+        project_settings.get(config.tcc_dir(project_dir), "critic", "") or "")
+    return choice.provider if choice is not None else ""
 
 
 def clipboard_reason(project_dir: Path) -> str:
@@ -1272,6 +1294,8 @@ def build_server(
             # the reviewer script reads the env var first (TCC-002).
             harness=configured_critic_harness(project_dir),
             via=via,
+            # The pick's vendor, which goes with the pick's model only (tcc#113).
+            provider="" if model else configured_critic_provider(project_dir),
         )
         critic.log_call(result, None, project_dir)
         try:

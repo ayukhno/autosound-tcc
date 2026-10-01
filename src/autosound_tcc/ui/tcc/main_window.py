@@ -358,6 +358,16 @@ def _ago(iso_timestamp: str) -> str:
     return i18n.t("diagAgoDays").format(n=round(seconds / 86400))
 
 
+def _pins_tip(pins: list) -> str:
+    """The footer's tooltip for the pins a reviewer run set aside, one line each (tcc#113)."""
+    lines = [i18n.t("criticPinInFile").format(var=pin.get("variable", ""), value=pin.get("value", ""),
+                                               file=pin["file"], line=pin.get("line") or "?")
+             if pin.get("file") else
+             i18n.t("criticPinInEnv").format(var=pin.get("variable", ""), value=pin.get("value", ""))
+             for pin in pins]
+    return i18n.t("criticPinsTip").format(pins="\n".join(lines))
+
+
 def _panel() -> QFrame:
     frame = QFrame()
     frame.setProperty("class", "panel")
@@ -4452,7 +4462,7 @@ class MainWindow(QMainWindow):
         return model_choices.resolve(self._critic_choices, str(key)).choice
 
     def _on_critic_model_changed(self, _index: int) -> None:
-        """The footer picker steers the reviewer subprocess through its own env var."""
+        """The footer picker steers the reviewer subprocess — by the method's `--model` (tcc#113)."""
         # The status, not only the warning: the footer names the reviewer, and a warning refresh
         # alone left the previous one there in red. It tints the picker too.
         self._refresh_critic_status()
@@ -4648,24 +4658,35 @@ class MainWindow(QMainWindow):
                 self._critic_status.setToolTip(state.detail or availability_view.phrase(state))
                 self._paint_critic_status(state.reason != availability.NOT_CHECKED)
                 return
+        # A pin the pick's last run set aside, as the method named it (finding 130, tcc#113): the
+        # run went as the pick, and a stale line is named where it lives rather than obeyed. Not
+        # red — nothing went wrong with the run.
+        pins = availability.pins_set_aside(chosen.key) if chosen is not None else []
         self._critic_status.setToolTip("")
+
+        def say(text: str) -> None:
+            # The tip after the text: `ElidedLabel.setText` sets its own (the full text, or none).
+            self._critic_status.setText(f"{text} · {i18n.t('criticPinsShort')}" if pins else text)
+            if pins:
+                self._critic_status.setToolTip(_pins_tip(pins))
+
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if chosen is not None and availability.answered(chosen.key) and not (
                 entry and self_check.same_model(model_choices.reviewer_model(chosen),
                                                 str(entry.get("model") or ""))):
             # The pick answered its check, and the last review was someone else's: name the pick,
             # not another reviewer's call from hours ago in red (finding 92, tcc#82).
-            self._critic_status.setText(i18n.t("criticCheckAnswered").format(label=chosen.label))
+            say(i18n.t("criticCheckAnswered").format(label=chosen.label))
             self._paint_critic_status(False)
             return
         if not entry:
-            self._critic_status.setText(i18n.t("criticNever"))
+            say(i18n.t("criticNever"))
             self._paint_critic_status(False)
             return
         # Short (user, 2026-08-11): the model name alone, and how long ago. The word "Critic" is
         # already three widgets to the left, and the vendor prefix is in the picker beside it.
         model = str(entry.get("model") or entry.get("mode", "?"))
-        self._critic_status.setText(f"{model.split('/')[-1]} · {_ago(entry.get('at', ''))}")
+        say(f"{model.split('/')[-1]} · {_ago(entry.get('at', ''))}")
         # Red when the last review came from another model than the one picked (finding 55: «if
         # the red belongs to the status, let the status be red»).
         wanted = model_choices.reviewer_model(chosen) if chosen is not None else ""

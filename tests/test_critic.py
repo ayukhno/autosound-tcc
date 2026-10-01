@@ -859,3 +859,197 @@ def test_the_ask_package_is_the_question_then_the_sessions_context():
 
     bare = critic.ask_package("Is the channel alive?")
     assert bare.strip() == "Is the channel alive?"
+
+
+# ---- the run's own model, by the method's `--model` (tcc#113, hub #226) ------------------------
+
+#: The method's usage line from v3.0.65 (`main()`, naming `--model`) and the one before it. Pinned
+#: to the vendored source below, as `test_reviewer_key` pins the usage `key help` prints.
+_USAGE_WITH_MODEL = ("Використання: python3 scripts/autosound_ai.py [critic|advisor|ask|doctor] "
+                     "<package_file.md> [trace.csv] [--via api|cli|omp|clipboard] [--model <id>] "
+                     "[--provider google|anthropic|openai]")
+_USAGE_BEFORE = ("Використання: python3 scripts/autosound_ai.py [critic|advisor|ask|doctor] "
+                 "<package_file.md> [trace.csv]")
+
+
+def _lost_pins_line(pick: str, pins, provider: str = "google") -> str:
+    """The method's one stderr line naming what this run's `--model` set aside (`lost_pins`)."""
+    lost = "; ".join(f"{var}={value} ({f'{path}, рядок {line}' if path else 'змінна середовища'})"
+                     for var, value, path, line in pins)
+    return (f">> --model {pick}: рецензент цього запуску — {pick} (провайдер {provider}); "
+            f"не діють для нього: " + lost + ". Для інших запусків закріплене лишається типовим")
+
+
+def _method_stub(usage: str) -> str:
+    """The method's order, as far as these tests need it: its usage with no task; every line of
+    the project's `.critic-env` written over the environment; `--model` (when its usage names it)
+    before any of that; the pins it set aside named in one stderr line; the model in the marker."""
+    takes = "--model" in usage
+    return (
+        "import json\n"
+        f"if len(sys.argv) < 2:\n    print({usage!r})\n    sys.exit(1)\n"
+        "args = sys.argv[1:]\n"
+        "said = json.dumps(args)\n"
+        "pick = None\n"
+        f"if {takes!r} and '--model' in args:\n"
+        "    i = args.index('--model'); pick = args[i + 1]; del args[i:i + 2]\n"
+        "pins = []\n"
+        "path = os.path.join(os.getcwd(), '.critic-env')\n"
+        "if os.path.isfile(path):\n"
+        "    for n, line in enumerate(open(path, encoding='utf-8').read().splitlines(), 1):\n"
+        "        k, _, v = line.partition('=')\n"
+        "        if k and v:\n"
+        "            os.environ[k] = v\n"
+        "            pins.append((k, v, path, n))\n"
+        "model = pick or os.environ.get('AUTOSOUND_CRITIC_MODEL') or os.environ.get('GEMINI_CRITIC_MODEL')\n"
+        "lost = [f'{k}={v} ({p}, рядок {n})' for k, v, p, n in pins if pick and v not in (pick, 'google')]\n"
+        "if lost:\n"
+        "    print(f'>> --model {pick}: рецензент цього запуску — {pick} (провайдер google); '\n"
+        "          'не діють для нього: ' + '; '.join(lost) + '. Для інших запусків закріплене лишається типовим',\n"
+        "          file=sys.stderr)\n"
+        "print('argv=' + said)\n"
+        "print('— [' + args[0] + ': ' + str(model) + ']')\n"
+    )
+
+
+def _capture_argv(tmp_path, monkeypatch) -> dict:
+    """The reviewer's argv and env as `run` sends them, nothing actually run."""
+    seen = {}
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+
+    def capture(argv, **kwargs):
+        seen["argv"], seen["env"] = list(argv), dict(kwargs.get("env") or {})
+        raise OSError("not actually running the reviewer in a test")
+
+    monkeypatch.setattr(critic.subprocess, "run", capture)
+    return seen
+
+
+def test_the_pick_goes_by_the_model_flag_only_to_a_method_that_takes_it(tmp_path, monkeypatch):
+    """Finding 130 (tcc#113): on the VM the footer said «API · gemini-3.1-pro-preview» and the run
+    went as `gpt-5.6-terra` — every critic-env line is written over the environment, and the pick
+    travelled as an environment variable. From v3.0.65 the method takes the run's own model as
+    `--model`, which no pin outranks (hub #226). An older one would read the flag as the trace
+    file, so it is handed the variable, as before. One place for every task."""
+    seen = _capture_argv(tmp_path, monkeypatch)
+    for role in ("critic", "advisor", critic.ASK):
+        monkeypatch.setattr(critic, "takes_model_flag", lambda *_a, **_k: True)
+        critic.run("a package", project_dir=tmp_path, role=role, model="gemini-3.1-pro-preview",
+                   harness="api", provider="google")
+        argv = seen["argv"]
+        assert argv[argv.index("--model") + 1] == "gemini-3.1-pro-preview", (role, argv)
+        assert argv[argv.index("--provider") + 1] == "google", (role, argv)
+        assert argv[argv.index("--via") + 1] == "api", "the route still goes with it"
+
+        monkeypatch.setattr(critic, "takes_model_flag", lambda *_a, **_k: False)
+        critic.run("a package", project_dir=tmp_path, role=role, model="gemini-3.1-pro-preview",
+                   harness="api", provider="google")
+        assert "--model" not in seen["argv"] and "--provider" not in seen["argv"], seen["argv"]
+        assert seen["env"]["GEMINI_CRITIC_MODEL"] == "gemini-3.1-pro-preview"
+
+
+def test_the_provider_goes_only_when_tcc_knows_one_the_method_takes(tmp_path, monkeypatch):
+    """`--provider` names the vendor when TCC knows it (hub #226); otherwise the model's name
+    decides, in the method. An omp pick's vendor is omp's (tcc#74), and a name the method does not
+    list it refuses as a usage error. With no model there is nothing to name, and nothing asked."""
+    seen = _capture_argv(tmp_path, monkeypatch)
+    asked = []
+    monkeypatch.setattr(critic, "takes_model_flag", lambda *_a, **_k: asked.append(1) or True)
+
+    critic.run("# hi", project_dir=tmp_path, model="google-antigravity/gemini-3.1-pro-high",
+               harness="omp", provider="google")
+    assert seen["argv"][seen["argv"].index("--model") + 1] == "google-antigravity/gemini-3.1-pro-high"
+    assert "--provider" not in seen["argv"]
+
+    critic.run("# hi", project_dir=tmp_path, model="house-reviewer", harness="agy",
+               provider="google-antigravity")
+    assert "--model" in seen["argv"] and "--provider" not in seen["argv"]
+
+    asked.clear()
+    critic.run("# hi", project_dir=tmp_path, harness="agy", provider="google")
+    assert "--model" not in seen["argv"] and "--provider" not in seen["argv"]
+    assert asked == [], "no model, no question to the method"
+
+
+def test_whether_the_method_takes_model_is_read_from_its_usage_line(tmp_path, monkeypatch):
+    """Not a version number (hub #226): the method takes `--model` when its usage line names it,
+    as the omp route is read from `VIA_ROUTES` — the Arbiter tests on the skill's working tree
+    before the tag, and a manifest's number is kept by hand (`install_report.skill_version`)."""
+    script = tmp_path / "autosound_ai.py"
+    monkeypatch.setattr(critic, "script_path", lambda: script)
+    assert critic.takes_model_flag() is False, "no script, no flag"
+    script.write_text(f"print({_USAGE_BEFORE!r})\n", encoding="utf-8")
+    assert critic.takes_model_flag() is False
+    script.write_text(f"print({_USAGE_WITH_MODEL!r})\n", encoding="utf-8")
+    assert critic.takes_model_flag() is True
+
+
+def test_a_pinned_critic_env_does_not_change_the_model_tcc_asked_for(stubbed, tmp_path,
+                                                                     monkeypatch):
+    """The VM's case end to end: the project's `.critic-env` pins another model and a provider.
+    A method that takes `--model` answers with TCC's pick and names the pins it set aside; the one
+    before it is handed the variable alone, and its pin wins — finding 130 as it happened."""
+    project = _project(tmp_path)
+    env_file = project / ".critic-env"
+    env_file.write_text("AUTOSOUND_CRITIC_MODEL=gpt-5.6-terra\nAUTOSOUND_CRITIC_PROVIDER=openai\n",
+                        encoding="utf-8")
+
+    stubbed(_method_stub(_USAGE_WITH_MODEL))
+    result = critic.run("pkg", project_dir=project, model="gemini-3.1-pro-preview", harness="api",
+                        provider="google", python_executable=sys.executable)
+    assert result.ok, result.detail
+    assert result.model == "gemini-3.1-pro-preview"
+    assert result.pins_set_aside == [
+        {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra", "file": str(env_file),
+         "line": 1},
+        {"variable": "AUTOSOUND_CRITIC_PROVIDER", "value": "openai", "file": str(env_file),
+         "line": 2},
+    ]
+
+    stubbed(_method_stub(_USAGE_BEFORE))
+    result = critic.run("pkg", project_dir=project, model="gemini-3.1-pro-preview", harness="api",
+                        provider="google", python_executable=sys.executable)
+    assert "--model" not in result.text, result.text
+    assert result.model == "gpt-5.6-terra"
+    assert result.pins_set_aside is None, "an older method reports no pins; none is invented"
+
+
+def test_the_pins_a_run_set_aside_are_read_by_the_lines_shape():
+    """By the flag that opens the line and its `VAR=value (where)` entries — not by its Ukrainian
+    words. A Windows path may hold parentheses; a pin from the environment has no file."""
+    machine = r"C:\Users\Tuner (Work)\AppData\Roaming\autosound\critic-env"
+    line = _lost_pins_line("gemini-3.1-pro-preview", [
+        ("AUTOSOUND_CRITIC_MODEL", "gpt-5.6-terra", machine, 1),
+        ("AUTOSOUND_CRITIC_PROVIDER", "openai", machine, 2),
+        ("AUTOSOUND_CRITIC_MODEL", "anthropic/claude-sonnet-5", "/p/rew_analitic/.critic-env", 3),
+        ("GEMINI_CRITIC_MODEL", "gemini-2.5-pro", None, None),
+    ])
+    stderr = f"critic-env: рядок відкинуто\n{line}\n>> PACKAGE_FILE: process/x.md\n"
+
+    assert critic._pins_set_aside(stderr) == [
+        {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra", "file": machine, "line": 1},
+        {"variable": "AUTOSOUND_CRITIC_PROVIDER", "value": "openai", "file": machine, "line": 2},
+        {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "anthropic/claude-sonnet-5",
+         "file": "/p/rew_analitic/.critic-env", "line": 3},
+        {"variable": "GEMINI_CRITIC_MODEL", "value": "gemini-2.5-pro", "file": None, "line": None},
+    ]
+    assert critic._pins_set_aside(">> REVIEW_FILE: process/reviews/x.md\n") == []
+
+
+def test_the_fake_usage_and_pins_line_are_the_vendored_methods_own():
+    """The fakes above stand for the method's real words: its usage names `--model`, and
+    `lost_pins` prints that line. Pinned to the vendored source so they cannot drift."""
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    assert _USAGE_WITH_MODEL[_USAGE_WITH_MODEL.index("[--via"):] in source
+    assert _USAGE_BEFORE.split("[trace.csv]")[0] in source
+    for words in ('f">> {flags}: рецензент цього запуску — ', "(провайдер {provider}); ",
+                  'f"не діють для нього: " + "; ".join(lost) + ". Для інших запусків закріплене '
+                  'лишається типовим"',
+                  "f\"{var}={value} ({f'{path}, рядок {line}' if path else 'змінна середовища'})\""):
+        assert words in source, words

@@ -1241,6 +1241,15 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": "resumed",
         "sessionNew": "new session",
         "criticCheckAnswered": "{label} · answered the check",
+        # A pin in a critic-env the run's own model set aside, as the method named it (tcc#113).
+        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsTip": (
+            "This run went as the reviewer picked here. A settings file (or an environment "
+            "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
+            "model such a line still applies, so remove one you no longer need."
+        ),
+        "criticPinInFile": "{var}={value} — {file}, line {line}",
+        "criticPinInEnv": "{var}={value} — an environment variable",
         "criticRowSelf": "the generator's own model",
         "criticSelfTip": "This is the model the generator runs on. A model reviewing itself is no second opinion, and through omp the call hangs. Pick a reviewer of another model.",
         "criticRowViaOmp": "through omp — with the method's next update",
@@ -2401,6 +2410,14 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": "відновлено",
         "sessionNew": "нова сесія",
         "criticCheckAnswered": "{label} · відповів на перевірку",
+        "criticPinsShort": "закріплене у файлі обійдено",
+        "criticPinsTip": (
+            "Цей запуск ішов на рецензенті, вибраному тут. Файл налаштувань (або змінна "
+            "середовища) називав іншого, і це не діяло:\n{pins}\nДля запуску, де модель не "
+            "вибрано, такий рядок і далі діє — тож непотрібний краще прибрати."
+        ),
+        "criticPinInFile": "{var}={value} — {file}, рядок {line}",
+        "criticPinInEnv": "{var}={value} — змінна середовища",
         "criticRowSelf": "та сама модель, що й генератор",
         "criticSelfTip": "На цій моделі працює генератор. Модель, що рецензує сама себе, — не друга думка, а через omp виклик зависає. Вибери рецензента іншої моделі.",
         "criticRowViaOmp": "через omp — з наступним оновленням методу",
@@ -3642,6 +3659,14 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": 'wznowiono',
         "sessionNew": 'nowa sesja',
         "criticCheckAnswered": '{label} · odpowiedział na sprawdzenie',
+        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsTip": (
+            "This run went as the reviewer picked here. A settings file (or an environment "
+            "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
+            "model such a line still applies, so remove one you no longer need."
+        ),
+        "criticPinInFile": "{var}={value} — {file}, line {line}",
+        "criticPinInEnv": "{var}={value} — an environment variable",
         "criticRowSelf": 'własny model generatora',
         "criticSelfTip": 'Na tym modelu pracuje generator. Model recenzujący sam siebie to żadna druga opinia, a przez omp wywołanie się zawiesza. Wybierz recenzenta innego modelu.',
         "criticRowViaOmp": 'przez omp — z następną aktualizacją metody',
@@ -4903,6 +4928,14 @@ Choose sweeps (sw) above to read this.",
         "sessionResumed": 'fortgesetzt',
         "sessionNew": 'neue Sitzung',
         "criticCheckAnswered": '{label} · hat auf die Prüfung geantwortet',
+        "criticPinsShort": "a pin in a file set aside",
+        "criticPinsTip": (
+            "This run went as the reviewer picked here. A settings file (or an environment "
+            "variable) named another one, and it did not apply:\n{pins}\nFor a run that names no "
+            "model such a line still applies, so remove one you no longer need."
+        ),
+        "criticPinInFile": "{var}={value} — {file}, line {line}",
+        "criticPinInEnv": "{var}={value} — an environment variable",
         "criticRowSelf": 'eigenes Modell des Generators',
         "criticSelfTip": 'Auf diesem Modell läuft der Generator. Ein Modell, das sich selbst prüft, ist keine zweite Meinung, und durch omp bleibt der Aufruf hängen. Wähle einen Prüfer eines anderen Modells.',
         "criticRowViaOmp": 'über omp — mit dem nächsten Update der Methode',

@@ -6045,3 +6045,40 @@ def test_a_same_name_version_of_another_preset_gets_its_card_and_the_next_bank_i
     os.utime(tmp_path / "other-v_004", (1_700_000_000, 1_700_000_000))
     window._show_banked_delta("v_004", "other", tmp_path)
     assert len(window._dialog._bubbles[before:]) == 4
+
+
+def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
+    """Finding 130 (tcc#113): the footer said «API · gemini-3.1-pro-preview» while a pin in a
+    critic-env sent the run elsewhere. The run now goes as the pick, and the footer names the pin
+    it set aside, as the method reported it — a stale pin found, not obeyed. A run that set
+    nothing aside clears it."""
+    from autosound_tcc.core import availability, model_choices
+
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window = _reviewer_window(monkeypatch, pick)
+    machine = r"C:\Users\Tuner\AppData\Roaming\autosound\critic-env"
+    try:
+        availability.succeeded(pick.key)
+        availability.set_aside(pick.key, [
+            {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra", "file": machine,
+             "line": 1},
+            {"variable": "GEMINI_CRITIC_MODEL", "value": "gemini-2.5-pro", "file": None,
+             "line": None},
+        ])
+        window._refresh_critic_status()
+        assert i18n.t("criticPinsShort") in window._critic_status.text()
+        tip = window._critic_status.toolTip()
+        assert i18n.t("criticPinInFile").format(
+            var="AUTOSOUND_CRITIC_MODEL", value="gpt-5.6-terra", file=machine, line=1) in tip
+        assert i18n.t("criticPinInEnv").format(
+            var="GEMINI_CRITIC_MODEL", value="gemini-2.5-pro") in tip
+        assert "kv-warn" not in str(window._critic_status.property("class")), \
+            "the run went as picked: nothing is wrong with it"
+
+        availability.set_aside(pick.key, [])
+        window._refresh_critic_status()
+        assert i18n.t("criticPinsShort") not in window._critic_status.text()
+        assert window._critic_status.toolTip() == ""
+    finally:
+        availability.reset()

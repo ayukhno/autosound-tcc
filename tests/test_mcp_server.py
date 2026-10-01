@@ -2135,3 +2135,53 @@ def test_the_state_says_a_question_needs_no_intake_where_a_review_is_not_ready(
     state = mcp_server._reviewer_state(tmp_path)
     assert state["ask"]["ready"] is False
     assert mcp_server.OMP_REVIEWER_REFUSAL in state["ask"]["not_ready_because"]
+
+
+def test_a_pin_the_run_set_aside_is_named_in_the_reviewer_state_for_every_task(
+        tmp_path, monkeypatch):
+    """Finding 130 (tcc#113): a model pinned in a critic-env outranked the footer's pick. TCC now
+    names its pick by the method's `--model` — for a question as for a review, one path (tcc#116)
+    — and the state names a pin the run set aside, as the method reported it; a run that sets
+    none aside clears it."""
+    from autosound_tcc.core import availability
+
+    _pick_agy_reviewer(tmp_path, monkeypatch)
+    env_file = tmp_path / ".critic-env"
+    _stub_reviewer(tmp_path, monkeypatch, (
+        "if len(sys.argv) < 2:\n"
+        "    print('Використання: ... [--model <id>] [--provider google|anthropic|openai]')\n"
+        "    sys.exit(1)\n"
+        "args = sys.argv[1:]\n"
+        "pick = args[args.index('--model') + 1]\n"
+        "path = os.path.join(os.getcwd(), '.critic-env')\n"
+        "pinned = open(path, encoding='utf-8').read().strip() if os.path.isfile(path) else ''\n"
+        "if pinned:\n"
+        "    print(f'>> --model {pick} --provider {args[args.index(\"--provider\") + 1]}: '\n"
+        "          f'рецензент цього запуску — {pick} (провайдер google); не діють для нього: '\n"
+        "          f'{pinned} ({path}, рядок 1). Для інших запусків закріплене лишається типовим',\n"
+        "          file=sys.stderr)\n"
+        "print('answer')\n"
+        "print('— [' + args[0] + ': ' + pick + ']')\n"
+    ))
+    (tmp_path / "rew_analitic").mkdir()
+    for name in ("data-contract-template.md", "autosound_context.md"):
+        (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
+    mcp, _, _ = _server(tmp_path, _CritiqueBridge())
+    pin = {"variable": "AUTOSOUND_CRITIC_MODEL", "value": "gpt-5.6-terra", "file": str(env_file),
+           "line": 1}
+    availability.reset()
+    try:
+        for tool, args in (("ask_reviewer", {"question": "Are you there?"}),
+                           ("call_critic", {"package": "## proposal"})):
+            env_file.write_text("AUTOSOUND_CRITIC_MODEL=gpt-5.6-terra\n", encoding="utf-8")
+            out = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+            assert out["model"] == "gemini-3.1-pro-high", (tool, out)
+            state = mcp_server._reviewer_state(tmp_path)
+            assert state["pins_set_aside"]["pins"] == [pin], (tool, state)
+            assert "critic-env" in state["pins_set_aside"]["means"]
+
+            env_file.write_text("", encoding="utf-8")
+            asyncio.run(mcp.call_tool(tool, args))
+            assert "pins_set_aside" not in mcp_server._reviewer_state(tmp_path), tool
+    finally:
+        availability.reset()

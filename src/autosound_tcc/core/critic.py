@@ -94,6 +94,10 @@ class CriticResult:
     models: list = field(default_factory=list)
     #: Project-relative path to the package the clipboard step takes, when the reviewer made one.
     package: Optional[str] = None
+    #: The pins in a critic-env or the environment this run's own `--model` set aside, as the
+    #: method named them (`_pins_set_aside`, tcc#113). None when the run named no model by the
+    #: flag or never ran: then nothing is known either way.
+    pins_set_aside: Optional[list] = None
 
     @property
     def ok(self) -> bool:
@@ -151,6 +155,60 @@ def omp_route_available() -> bool:
         _OMP_ROUTE_CACHE.clear()
         _OMP_ROUTE_CACHE[key] = bool(found) and re.search(r"[\"']omp[\"']", found.group(1)) is not None
     return _OMP_ROUTE_CACHE[key]
+
+
+_MODEL_FLAG_CACHE: dict = {}
+#: The usage line names the flag from v3.0.65 (hub #226); v3.0.64's ends at `[trace.csv]`.
+_MODEL_FLAG_USAGE = "[--model <id>]"
+
+
+def takes_model_flag() -> bool:
+    """Whether the method's reviewer script takes the run's own model as `--model <id>`.
+
+    Read from the script, as `omp_route_available` is, and not from a version: the method's usage
+    line names the flag from v3.0.65 (hub #226). It has to be asked, because an older method takes
+    `--model <id>` for positional words — `--model` itself for the trace file when none is given.
+    Cached by the file's size and mtime — an update replaces the file."""
+    path = script_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _MODEL_FLAG_CACHE:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        _MODEL_FLAG_CACHE.clear()
+        _MODEL_FLAG_CACHE[key] = _MODEL_FLAG_USAGE in text
+    return _MODEL_FLAG_CACHE[key]
+
+
+#: The one stderr line the method prints when this run's `--model` / `--provider` set a pin aside
+#: (`lost_pins`, hub #226): `>> --model <id>: … не діють для нього: VAR=value (<file>, рядок N);
+#: VAR=value (змінна середовища). …`. Read by shape — the flag that opens it, then `VAR=value
+#: (where)` entries, each closed by `; ` before the next or by the full stop — never by its words.
+_PINS_LINE = re.compile(r"^>>\s*--(?:model|provider)\s.*$", re.M)
+_PIN = re.compile(r"(?<!\w)(?P<var>[A-Z][A-Z0-9_]*)=(?P<value>.+?) \((?P<where>.+?)\)"
+                  r"(?=; [A-Z][A-Z0-9_]*=|\.(?:\s|$))")
+#: `<file>, <word> N`: a pin in a file, at its line. Anything else is the inherited environment.
+_PIN_IN_FILE = re.compile(r"^(?P<file>.+), \S+ (?P<line>\d+)$")
+
+
+def _pins_set_aside(stderr: str) -> list:
+    """The pins this run's own model set aside, in the method's order, as `{variable, value, file,
+    line}` — `file` and `line` None for the environment. [] when the method named none."""
+    match = _PINS_LINE.search(stderr or "")
+    if not match:
+        return []
+    pins = []
+    for pin in _PIN.finditer(match.group(0)):
+        where = _PIN_IN_FILE.match(pin.group("where"))
+        pins.append({"variable": pin.group("var"), "value": pin.group("value"),
+                     "file": where.group("file") if where else None,
+                     "line": int(where.group("line")) if where else None})
+    return pins
 
 
 def _project_mirror(project_dir: Path) -> Path:
@@ -343,6 +401,8 @@ def session_env(project_dir: Path) -> dict:
 
 #: The routes one reviewer run may ask for by name — the script's own `--via` (skill `VIA_ROUTES`).
 VIA_ROUTES = ("api", "cli", "clipboard", "omp")
+#: The vendors the script's `--provider` takes (skill `_PROVIDERS`); any other word it refuses.
+PROVIDERS = ("google", "anthropic", "openai")
 
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
@@ -360,13 +420,15 @@ def run(
     python_executable: Optional[str] = None,
     extra_env: Optional[Mapping[str, str]] = None,
     via: str = "",
+    provider: str = "",
 ) -> CriticResult:
     """Call the reviewer once. `package` is either markdown or a path to an existing package file;
     a relative path is the project's (tcc#119).
 
-    `model` overrides the script's own default through the env var it already reads
-    (`GEMINI_CRITIC_MODEL` / `GEMINI_ADVISOR_MODEL`), so the footer's model picker steers the
-    subprocess without this module knowing anything about model names.
+    `model` is the run's own model: the method's `--model` from v3.0.65, which no critic-env pin
+    outranks (hub #226, tcc#113), and `GEMINI_CRITIC_MODEL` in the environment for a method before
+    it. `provider` — `google`, `anthropic`, `openai` — goes beside it as `--provider` when TCC
+    knows the pick's vendor; otherwise the method reads the vendor from the model's name.
 
     `extra_env` carries variables for this call only, applied last.
 
@@ -411,6 +473,15 @@ def run(
         via = (harness or "").strip().lower()
     if via in VIA_ROUTES:
         argv += ["--via", via]
+    # The run's own model by the method's flag (hub #226). An environment variable is outranked by
+    # every critic-env line, which the method writes over the environment: on the VM a pinned
+    # `gpt-5.6-terra` ran under the footer's «API · gemini-3.1-pro-preview» (finding 130, tcc#113).
+    # An omp pick's vendor is omp's business (tcc#74), so no `--provider` goes with it.
+    by_flag = bool(model) and takes_model_flag()
+    if by_flag:
+        argv += ["--model", model]
+        if (provider or "").strip().lower() in PROVIDERS and via != "omp":
+            argv += ["--provider", provider.strip().lower()]
 
     env_overrides = {"PROJECT_MIRROR": str(_project_mirror(project_dir))}
     if model:
@@ -418,7 +489,9 @@ def run(
         # the reviewer (`v3.0.49`, hub SKL-032): a value left in one of them is named on stderr,
         # not obeyed. And writing one was the whole of #130 — TCC set the critic's model, the
         # advisor door looked for its own, found none, and the channel answered as a clipboard
-        # package with `model: null` for thirteen calls.
+        # package with `model: null` for thirteen calls. Still set beside `--model`: the only road
+        # to a method before v3.0.65, and to a newer one a value equal to the run's own model is
+        # no pin it set aside.
         env_overrides["GEMINI_CRITIC_MODEL"] = model
 
     # TCC-002: a stale `GEMINI_BIN` inherited from the machine outranks the reviewer's own
@@ -445,10 +518,12 @@ def run(
     # read that as "the fix did not arrive" (2026-09-11). This line answers the only question that
     # matters: which binary this call actually went out with, and who decided it.
     app_log.logger().info(
-        "critic: bin=%s (%s) model=%s harness=%r inherited GEMINI_BIN=%r",
+        "critic: bin=%s (%s) model=%s (%s) harness=%r inherited GEMINI_BIN=%r",
         env.get("AUTOSOUND_CRITIC_BIN") or env.get("GEMINI_BIN") or "(the script autodetects)",
         "TCC, from the Arbiter's pick" if override else "not set by TCC",
-        model or "(the script's default)", harness, os.environ.get("GEMINI_BIN"))
+        model or "(the script's default)",
+        "--model" if by_flag else "GEMINI_CRITIC_MODEL" if model else "none sent",
+        harness, os.environ.get("GEMINI_BIN"))
     try:
         proc = subprocess.run(
             argv,
@@ -472,6 +547,8 @@ def run(
     duration = time.monotonic() - started
     stdout, stderr = proc.stdout or "", proc.stderr or ""
     tail = "\n".join(line for line in stderr.strip().splitlines()[-6:])
+    # Whatever the outcome: the method names a pin it set aside before it calls anybody.
+    pins = _pins_set_aside(stderr) if by_flag else None
 
     # Deliberately not `proc.returncode == 0`: clipboard mode returns 0 with nothing on stdout.
     match = _MODEL_MARKER.search(stdout)
@@ -481,23 +558,25 @@ def run(
         text = _MODEL_MARKER.sub("", stdout).strip()
         return CriticResult(
             MODE_API_OR_CLI, text, match.group("model") if match else None, role, tail,
-            duration, called_at, review,
+            duration, called_at, review, pins_set_aside=pins,
         )
     if proc.returncode == _REFUSED_EXIT:
         package_match = _PACKAGE_MARKER.search(stderr)
         return CriticResult(MODE_REFUSED, "", None, role, _why_refused(stderr) or tail,
                             duration, called_at,
-                            package=package_match.group("path") if package_match else None)
+                            package=package_match.group("path") if package_match else None,
+                            pins_set_aside=pins)
     if proc.returncode == _CHOOSE_MODEL_EXIT:
         return CriticResult(MODE_CHOOSE_MODEL, "", None, role, stderr.strip() or tail,
-                            duration, called_at, review, _models_offered(stderr))
+                            duration, called_at, review, _models_offered(stderr),
+                            pins_set_aside=pins)
     if _CLIPBOARD_MARKER in stderr:
         # The clipboard path writes the compiled PACKAGE to the same place, so a review the Arbiter
         # works by hand is on the record rather than looking like no review at all.
         return CriticResult(MODE_CLIPBOARD, "", None, role, _why_clipboard(stderr) or tail,
-                            duration, called_at, review)
+                            duration, called_at, review, pins_set_aside=pins)
     return CriticResult(MODE_ERROR, "", None, role, tail or "reviewer produced no output",
-                        duration, called_at)
+                        duration, called_at, pins_set_aside=pins)
 
 
 def log_path(project_dir: Optional[Path] = None) -> Path:
