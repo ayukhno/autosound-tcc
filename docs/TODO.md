@@ -2113,6 +2113,14 @@ Belongs to W-5 so far:
     #227 TCC-041 (`session-close` as a check, a stale CONTINUE block, finding 131); the rest is TCC's alone (Flash is
     the method's advice, not its refusal; `key rm` exists for 127). Finding 135 also needs the Arbiter's Google Form:
     the sender question's «Required» off. The milestone opens on «збір закінчено».
+13. **The skill's W-5 is open** as milestone `W-5 · v3.0.65` (skill #101 = hub #224, #102 = #225, #106 = #226, #107 = #227),
+    so W-5 is a shared wave: the skill's tag first, then TCC vendors v3.0.65 and tags v0.1.46 (`WAVES.md` §1 step 4).
+    TCC's halves, all in W-5: skill #106 — pass the reviewer pick by the `--model` flag the skill names on hub #226;
+    #107 — read a «session reopened» event if the skill adds one; #102 — the comments that still say the pre-sweep gate
+    holds an inherited Fs (`ui/tcc/diagnostics_panel.py` ~1256, `state/project_view.py` ~66), text only; #101 —
+    nothing to build, TCC's tags are signed since v0.1.45 (hub #222). Finding 135 is TCC's in full on the Arbiter's
+    word («знахідку 135 бери теж»); the Google Form's «Required» switch is the one step outside the code — on the
+    release checklist, done by the Arbiter in the form's settings.
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
