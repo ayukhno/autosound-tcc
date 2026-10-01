@@ -3340,4 +3340,11 @@ The same file also holds `AUTOSOUND_CRITIC_PROVIDER=openai`, which `provider_for
 model's name at all — so with the model line gone, a Gemini pick would still be sent as OpenAI's. The Arbiter
 comments out both by hand on the VM.
 
+**Then a second layer, the same project (`testAgy-auto`):** with both machine lines commented out and «API ·
+gemini-3.1-pro-preview» picked, two `call_critic` → «--via api: ключа для anthropic нема ні в середовищі, ні в
+конфігурації», the footer «gemini-3.1-pro-preview · останній виклик відх…». The project's `.critic-env` holds
+`AUTOSOUND_CRITIC_MODEL=anthropic/claude-sonnet-5`; the method reads project files AFTER the machine file
+(`load_env_file`), so the project's line wins over the machine's and over the footer. Three places name the reviewer
+(machine file, project file, the footer), and the one the tuner sees is the one that loses.
+
 **Task.** For W-5's collection — the precedence is the method's and TCC's together.
