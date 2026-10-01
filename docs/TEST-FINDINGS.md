@@ -3310,3 +3310,24 @@ The rule itself is the method's — a Flash reviewer is a skill question as much
 **Weight.** Medium: with the Pro rows refused, the picker leaves no reviewer the tuner can choose.
 
 **Task.** For W-5's collection.
+
+### 130. A model left in the machine's critic-env outranks TCC's pick: «API · gemini-3.1-pro-preview» runs as `gpt-5.6-terra`
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, `autosound_ai.py doctor` (asked to tell a bad key from a good one,
+128): «✓ Знайдено ключ API: GEMINI_API_KEY (google) -- зі сховища ключів: … (DPAPI)», «GEMINI_API_KEY: current (AQ.…,
+53 chars)» — the key is there and is the current one; «▶ Рецензент: gpt-5.6-terra → провайдер openai
+(AUTOSOUND_CRITIC_MODEL, з файлу C:\Users\o.yukhno\AppData\Roaming\autosound\critic-env)», «✗ Живий виклик не
+вдався: OpenAI Codex v0.152.0 …».
+
+Read, not diagnosed past this: TCC hands its pick as `GEMINI_CRITIC_MODEL` (`core/critic.py`, `env_overrides`);
+the method reads `REVIEWER_MODEL_VARS = ("AUTOSOUND_CRITIC_MODEL", "GEMINI_CRITIC_MODEL")` in that order, and a
+critic-env file's lines are written over the environment. So a model left in the machine file wins over every pick
+in the footer — here an OpenAI model sent down the Google key's route, which reads as «відмова» (128). The Mac's
+file does not set it, so the Mac works.
+
+Also in the same output: «Інсталятор: install.ps1 для beta-v3.0.64-rc2 … рушій: not fetched: beta-v3.0.64-rc2
+carries no engine for this machine» — the VM's method clone came from a release candidate's installer.
+
+**Weight.** High: the footer says one reviewer and another is called; the tuner cannot see why.
+
+**Task.** For W-5's collection — the precedence is the method's and TCC's together.
