@@ -759,7 +759,7 @@ GitHub is not available).
 
 **Reproduces.** Always.
 
-**Closed 2026-10-01.** Fixed: «A report without a GitHub account» — the form route in `feedback_dialog.py` (TODO F-042, v0.1.42).
+**Closed 2026-10-01.** Fixed: «A report without a GitHub account» — the form route in `feedback_dialog.py` (TODO F-042, v0.1.41).
 
 ### 20. A reviewer refused by region: red in the open list, plain in the closed picker, "?" in the footer
 

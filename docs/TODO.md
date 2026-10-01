@@ -2080,6 +2080,9 @@ Belongs to W-5 so far:
    `upkeep.py status` / `tools` (hub #219's contract);
 4. F-056's open point, a fragile driver's inherited Fs → the skill's ticket, a warning, not a refusal: hub #225 TCC-039;
 5. tcc#21, a capture's verdict while the mic is in hand → after v1.1.0, its own wave with a design pass for the re-take.
+6. tcc#94 / F-023, a capture addressed by its round (uuid) → after v1.1.0, one wave with tcc#21: both stand on the
+   same uuid index;
+7. findings 12, 17, 19, 21, 37, 38 → closed: fixed in code or not seen since 0.1.39 (each says where).
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
