@@ -3215,4 +3215,25 @@ through the app's code for how to reach the reviewer, rather than using the meth
 **Weight.** High, and the fourth time: findings 7 and 15, then 0.1.41 (the `|` inside a grep pattern, closed on
 `wave-0.1.42`). A prompt in a mode set to never ask teaches clicking through without reading.
 
+**The Arbiter's proposal (same day):** «а це є окремий запит коли "не відкотити"? то для нього треба додати пункт
+вибору "взагалі не питати"». Today the irreversible class asks under every choice, by design (finding 1's text:
+«Те, чого не відкотити, питатиме за будь-якого вибору»). Two halves for the review: a fourth choice that does not
+ask even then (it lifts the last guard — a delete or an overwrite outside the project would go unasked), and the
+misreading itself: a read-only command filed as irreversible.
+
+**Task.** For W-5's collection.
+
+### 124. No ASK mode for the reviewer through TCC: a free question goes out in the Critic's role with the tuning contract
+
+**What.** The Arbiter, 2026-10-01, the Mac, the same session as 123: «перевір критика зразу при старті через режим
+ASK». The session searched TCC's own source for how `call_critic` picks ASK (the command 123 was asked about), then
+sent a short question through `call_critic`: the channel answered in 8 s over the Google API,
+`gemini-3.1-pro-preview` (17 × 23 = 391 right; asked who it is, the model called itself «GPT-4o, OpenAI» — the
+session did not trust the self-report, the route was Google's). The session's conclusion: «Режиму ASK через TCC
+немає: `call_critic` завжди запускає роль Критика з контрактом тюнінгу … Справжній ASK — це `autosound_ai.py ask`, а
+запускати його з сесії TCC заборонено.» It offered to file a request for a role parameter on `call_critic`.
+
+**Weight.** Medium: the reviewer check works, but a plain question to the reviewer has no door in TCC, and the
+session goes digging through the app's code to find one.
+
 **Task.** For W-5's collection.

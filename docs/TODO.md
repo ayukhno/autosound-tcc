@@ -2250,7 +2250,7 @@ the skill pushes `config`.
 
 ### F-077 — The reviewer key from the skill's secret store: TCC's half (hub #197, SKL-051)
 
-**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: a real key, `move-shell`, DPAPI on the VM · was: built on `wave-0.1.43` 2026-09-23 · live on the Mac at `v3.0.60`: `key status` (env + ~/.zshrc line 3 seen), `key set` over stdin (a malformed key refused with the method's reason, nothing stored — this found and fixed `quiet()`'s closed stdin) · left: a real key and `move-shell` are the Arbiter's, DPAPI on the VM
+**Статус**: чекає · the Mac passed 2026-10-01 (the Arbiter: «Ключ рецензента…» shows Google (Gemini) «у захищеному сховищі», no `~/.zshrc` export left; a session's reviewer answered in 8 s over the API, `gemini-3.1-pro-preview`) · left: the key and DPAPI on the VM · was: released in v0.1.43 (2026-09-23); left for the Arbiter: a real key, `move-shell`, DPAPI on the VM · was: built on `wave-0.1.43` 2026-09-23 · live on the Mac at `v3.0.60`: `key status` (env + ~/.zshrc line 3 seen), `key set` over stdin (a malformed key refused with the method's reason, nothing stored — this found and fixed `quiet()`'s closed stdin) · left: a real key and `move-shell` are the Arbiter's, DPAPI on the VM
 
 The skill moves the reviewer key to Keychain (macOS) / DPAPI (Windows), with the 0600 `critic-env`
 as fallback (A19). TCC never WRITES a key — but it judges reachability by parsing `critic-env`
