@@ -637,11 +637,12 @@ _BAD_KEY_WORDS = ("http 400", "400 bad request", "api key", "api_key", "invalid 
 _LOCATION_WORDS = ("selected location", "your location", "your region", "not available in your country")
 #: A CLI refusing the model it was given, in its own words: the method's recogniser (`_FAILURES`'
 #: `bad_model`), agy's «model '…' is not available», the method's own 404 for a model the key
-#: cannot call. Not the bare word «model»: the method's line naming the pins a run set aside
-#: (`AUTOSOUND_CRITIC_MODEL=…`, hub #226) says it, and an answered run read as refused (VM-4).
+#: cannot call, and its «Модель `…` omp не знає: …» / «… CLI 'agy' не знає: …». Not the bare word
+#: «model»: the method's line naming the pins a run set aside (`AUTOSOUND_CRITIC_MODEL=…`, hub
+#: #226) says it, and an answered run read as refused (VM-4).
 _BAD_MODEL_WORDS = ("invalid model", "not recognized as a known model", "unknown model",
                     "not available", "цей ключ викликати не може", "не підтримується")
-_MODEL_NOT_FOUND = re.compile(r'\bmodel "[^"]*" not found')
+_MODEL_NOT_FOUND = re.compile(r'\bmodel "[^"]*" not found|модель `[^`]*`[^\n]* не знає:')
 
 
 def _said(detail: str) -> str:

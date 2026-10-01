@@ -1075,6 +1075,8 @@ _MODEL_REFUSALS = {
     "agy-not-available": ">> ⛔ agy повернув помилку: model 'gemini-3.8-flash-low' is not available",
     "method-404": (">> Модель `gemini-2.5-flash` цей ключ викликати не може: HTTP 404 — This model "
                    "models/gemini-2.5-flash is no longer available to new users."),
+    "method-omp-unknown": ">> Модель `google-antigravity/gemini-9` omp не знає: no such selector",
+    "method-cli-unknown": ">> Модель `gemini-9` CLI 'agy' не знає: exit 1",
 }
 
 
@@ -1111,4 +1113,6 @@ def test_the_model_refusal_words_are_the_vendored_methods_own():
     source = script.read_text(encoding="utf-8")
     assert ('("bad_model", r"invalid model selection|not recognized as a known model|unknown model|'
             'Model \\"[^\\"]*\\" not found"),') in source
-    assert "цей ключ викликати не може: HTTP 404" in source
+    for words in ("цей ключ викликати не може: HTTP 404", 'f"Модель `{model}` omp не знає: ',
+                  'f"Модель `{model}` CLI \'{cli_bin}\' не знає: '):
+        assert words in source, words
