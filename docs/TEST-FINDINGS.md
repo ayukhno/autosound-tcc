@@ -3382,3 +3382,23 @@ mid-word with no ellipsis («здається в полі обрізається
 **Weight.** Low.
 
 **Task.** For W-5's collection.
+
+### 133. A review package handed to `call_critic` by its relative path reaches the critic as the path's text
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, `testAgy-auto`, after 130's pins were commented out: the critic
+answered (`gemini-3.1-pro-preview`) — «Я не можу виконати перевірку, оскільки замість тексту пропозиції ви передали
+лише шлях до файлу `process\reviews\2026-10-01T15-15-09-critic-package.md`». That path is the one TCC itself printed
+a few minutes earlier under a failed call («Пакет для кроку через буфер обміну: process\reviews\…-critic-package.md»),
+relative to the project; the generator handed it back.
+
+Read, not confirmed: `core/critic.py` takes `package` as a file only if `Path(package)` has `.md` and `is_file()` —
+a relative path is checked against TCC's own working folder, not the project's, so it is not found and the path
+string is written into a new package as its text.
+
+Next turn the generator asked the critic to check `process-state.json`, HEAD and the CONTINUE block by itself; the
+critic: «Я не читаю файлову систему хоста напряму. Генератор … повинен зчитувати ці файли і явно додавати їхній
+текст» — the contract working as designed, a session asking past it.
+
+**Weight.** Medium: a review goes out empty and comes back as a refusal that reads like the critic's fault.
+
+**Task.** For W-5's collection.
