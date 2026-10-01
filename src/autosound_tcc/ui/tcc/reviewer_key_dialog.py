@@ -271,16 +271,19 @@ class ReviewerKeyDialog(QDialog):
 
     @staticmethod
     def _drop(provider, var: str, place: str) -> tuple[str, str]:
-        """The method's `key move-shell <provider> --drop`, and the line its exit code says.
+        """The method's `key move-shell <provider> --drop`, and the line its answer says.
 
-        From the code, not from a fresh `key status` (hub #230): 0 removed, 1 nothing to remove,
-        3 refused or failed — the method's own words are the hover — and 2, a form this method
-        does not take. The window re-reads the status afterwards for the rows, not for this line.
+        From the answer, not from a fresh `key status` (hub #230): removed, nothing to remove, or
+        — refused, a crash, any code but 0, 1 and 3 — not removed, with the method's own words as
+        the hover. The method here takes `--drop` (asked before the button or the question was
+        offered), so no code reads as «update the method». The window re-reads the status
+        afterwards for the rows, not for this line.
         """
-        code, said = reviewer_key.drop_export(provider)
-        if code is None:
+        happened, said = reviewer_key.drop_export(provider)
+        if happened is None:
             return i18n.t("rkDropNoAnswer"), said
-        key = {0: "rkRemoved", 1: "rkDropNothing", 3: "rkNotRemoved"}.get(code, "rkDropUpdate")
+        key = {reviewer_key.DROPPED: "rkRemoved",
+               reviewer_key.NOTHING: "rkDropNothing"}.get(happened, "rkNotRemoved")
         return i18n.t(key).format(var=var, place=place), said
 
     def _on_drop(self, provider) -> None:

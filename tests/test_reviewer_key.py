@@ -45,11 +45,13 @@ class _Method:
 
     def __init__(self, status=_STATUS, set_rc=0, set_out="stored in the Keychain",
                  after_move=None, move_rc=0, move_out="✓ HKCU\\Environment: прибрано",
-                 drops=True):
+                 move_err="", drops=True, mute_after_move=False):
         self.calls: list[tuple[list[str], object]] = []
         self.status, self.set_rc, self.set_out = status, set_rc, set_out
-        self.after_move, self.move_rc, self.move_out, self.drops = (
-            after_move, move_rc, move_out, drops)
+        self.after_move, self.move_rc, self.move_out, self.move_err, self.drops = (
+            after_move, move_rc, move_out, move_err, drops)
+        #: `key status` gives no answer once `move-shell` ran (review of #112, minor 3).
+        self.mute_after_move = mute_after_move
 
     def __call__(self, args, *, stdin=None):
         self.calls.append((list(args), stdin))
@@ -64,10 +66,14 @@ class _Method:
         if args[:2] == ["key", "move-shell"]:
             if self.after_move is not None:
                 self.status = self.after_move
+            if self.mute_after_move:
+                self.status = None
             if self.move_rc is None:
                 return None
-            return subprocess.CompletedProcess(args, self.move_rc, self.move_out, "")
+            return subprocess.CompletedProcess(args, self.move_rc, self.move_out, self.move_err)
         if args == ["key", "help"]:
+            if self.drops is None:
+                return None  # the probe killed at `_run`'s timeout
             return subprocess.CompletedProcess(
                 args, 2, "", _USAGE_DROP if self.drops else _USAGE_OLD)
         raise AssertionError(args)
@@ -446,35 +452,69 @@ def test_no_leaves_the_copy_where_it_is(monkeypatch):
     dialog.close()
 
 
-def _said(code):
-    """The window's line for each of `move-shell --drop`'s exit codes (hub #230)."""
+#: The method's own exit-1 line for `move-shell google --drop --yes` with no export (hub #230).
+_NOTHING = "· GEMINI_API_KEY у профілях оболонки не знайдено"
+_TRACEBACK = ('Traceback (most recent call last):\n  File "autosound_ai.py", line 2249, in '
+              'move_shell_run\nPermissionError: [Errno 13] Permission denied: \'/Users/x/.zshrc\'')
+
+
+def _said(key):
+    """The window's line for each answer of `move-shell --drop` (hub #230)."""
     from autosound_tcc.ui.tcc import i18n
 
     place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
-    return {
-        0: i18n.t("rkRemoved").format(place=place),
-        1: i18n.t("rkDropNothing").format(var="GEMINI_API_KEY"),
-        3: i18n.t("rkNotRemoved").format(var="GEMINI_API_KEY", place=place),
-        2: i18n.t("rkDropUpdate").format(var="GEMINI_API_KEY", place=place),
-        None: i18n.t("rkDropNoAnswer"),
-    }[code]
+    return i18n.t(key).format(var="GEMINI_API_KEY", place=place)
 
 
-@pytest.mark.parametrize("code", [0, 1, 3, 2, None])
-def test_the_result_is_read_from_the_exit_code(monkeypatch, code):
-    """0 removed, 1 nothing to do, 3 refused or failed, 2 usage; None, no answer. Read from the
-    code, not from a fresh `key status`: the status here says the copy is gone whatever the code
-    — a reader of the status would say «Прибрано» for every one of them."""
-    gone = _with(exports=[])
-    method = _Method(after_move=gone, move_rc=code, move_out="✗ ~/.zshrc:3: the method's words")
+_ANSWERS = {
+    "removed": (0, "✓ ~/.zshrc:3: прибрано", "", "rkRemoved"),
+    "nothing to do": (1, _NOTHING, "", "rkDropNothing"),
+    "refused": (3, "✗ ~/.zshrc:3: the method's words", "", "rkNotRemoved"),
+    # Python's own exit 1: an exception the method did not catch (review of #112, important 1).
+    "a crash": (1, "", _TRACEBACK, "rkNotRemoved"),
+    # The probe said the method takes `--drop`: any other code is a failure, not an old method.
+    "usage": (2, "", "key move-shell [google|anthropic|openai] [--drop] [--yes]", "rkNotRemoved"),
+    "a signal": (-9, "", "", "rkNotRemoved"),
+    "no answer": (None, "", "", "rkDropNoAnswer"),
+}
+
+
+@pytest.mark.parametrize("case", list(_ANSWERS))
+def test_the_result_is_read_from_the_method_s_answer(monkeypatch, case):
+    """0 removed, 1 with the method's «не знайдено» nothing to do, 3 refused; anything else — a
+    crash, a usage error, a signal — not removed; None, no answer. Read from the answer, not from a
+    fresh `key status`: the status here says the copy is gone whatever happened, and a reader of
+    the status would say «Прибрано» for every one of them."""
+    code, out, err, key = _ANSWERS[case]
+    method = _Method(after_move=_with(exports=[]), move_rc=code, move_out=out, move_err=err)
     dialog, _ = _dialog(monkeypatch, method, answer=True)
     dialog._field.setText("AIza" + "m" * 35)
     dialog._on_save()
-    assert _said(code) in dialog._result.text()
-    others = [_said(c) for c in (0, 1, 3, 2, None) if c != code]
-    assert not any(line in dialog._result.text() for line in others)
-    if code is not None:
-        assert "the method's words" in dialog._result.toolTip()
+    assert _said(key) in dialog._result.text(), case
+    others = {_said(k) for k in ("rkRemoved", "rkDropNothing", "rkNotRemoved", "rkDropNoAnswer",
+                                 "rkDropUpdate") if k != key}
+    assert not any(line in dialog._result.text() for line in others), case
+    if case == "a crash":
+        assert "PermissionError" in dialog._result.toolTip() and "Traceback" not in \
+            dialog._result.toolTip(), "the exception's own line, not the whole traceback"
+    elif out or err:
+        assert (out or err) in dialog._result.toolTip(), case
+    dialog.close()
+
+
+def test_no_answer_stands_alone_when_the_re_read_gets_none_either(monkeypatch):
+    """The drop and the `key status` after it both unanswered: the rows above empty and the blurb
+    says the method cannot keep keys. The line must not send the reader there for the answer."""
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(move_rc=None, mute_after_move=True)
+    dialog, _ = _dialog(monkeypatch, method, answer=True)
+    dialog._field.setText("AIza" + "w" * 35)
+    dialog._on_save()
+    assert i18n.t("rkDropNoAnswer") in dialog._result.text()
+    assert dialog._blurb.text().startswith(i18n.t("rkOld").split("{")[0]), "the re-read got none"
+    for lang in ("uk", "en"):
+        assert any(word in i18n.T[lang]["rkDropNoAnswer"] for word in ("невідомо", "unknown")), lang
     dialog.close()
 
 
@@ -522,6 +562,33 @@ def test_an_older_method_is_never_sent_the_drop(monkeypatch):
     dialog.close()
 
 
+def test_a_probe_with_no_answer_is_not_kept(monkeypatch):
+    """A probe killed at the timeout is no answer about `--drop`: False for this call, and asked
+    again on the next — never «update the method» until the script file changes."""
+    method = _Method(drops=None)
+    _use(monkeypatch, method)
+    assert reviewer_key.drops_exports() is False
+    method.drops = True
+    assert reviewer_key.drops_exports() is True
+    assert method.calls == [(["key", "help"], None), (["key", "help"], None)]
+
+
+def test_the_fake_usage_and_nothing_found_are_the_vendored_method_s_own():
+    """The fakes above stand for the method's real words: its usage line names `--drop`, and its
+    one honest exit 1 says «не знайдено». Pinned to the vendored source so they cannot drift."""
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    move_shell = _USAGE_DROP[_USAGE_DROP.index("key move-shell"):]
+    assert move_shell in source
+    assert reviewer_key._NOTHING_FOUND in source
+    assert _NOTHING.endswith(reviewer_key._NOTHING_FOUND)
+
+
 def test_the_drop_is_asked_of_the_method_s_usage_once(monkeypatch):
     """Asked of what the method says it takes, not of its version number, and only once for one
     script file: the window repaints, the method does not change under it."""
@@ -536,9 +603,9 @@ def test_the_drop_is_asked_of_the_method_s_usage_once(monkeypatch):
 def test_drop_export_names_the_provider_and_nothing_else(monkeypatch):
     method = _Method(move_rc=3, move_out="✗ refused")
     _use(monkeypatch, method)
-    assert reviewer_key.drop_export("google") == (3, "✗ refused")
+    assert reviewer_key.drop_export("google") == (reviewer_key.NOT_DROPPED, "✗ refused")
     assert method.calls == [(["key", "move-shell", "google", "--drop", "--yes"], None)]
-    assert reviewer_key.drop_export("nobody")[0] == 2
+    assert reviewer_key.drop_export("nobody")[0] == reviewer_key.NOT_DROPPED
     assert len(method.calls) == 1, "an unknown provider never reaches the method"
 
 

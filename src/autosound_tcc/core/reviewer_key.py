@@ -47,6 +47,12 @@ _STATUS: object = False
 #: `drops_exports`' answer and the script file it was asked of — `((path, mtime, size), bool)` —
 #: or None before the first question.
 _DROPS: Optional[tuple[tuple, bool]] = None
+#: The method's own words for «no export of this provider», ending its one honest exit 1 of
+#: `move-shell <provider> --drop --yes` (`· GEMINI_API_KEY у профілях оболонки не знайдено`). An
+#: exit 1 without them is Python's own: an exception the method did not catch.
+_NOTHING_FOUND = "у профілях оболонки не знайдено"
+#: What `drop_export` makes of the method's answer.
+DROPPED, NOTHING, NOT_DROPPED = "dropped", "nothing", "not_dropped"
 
 
 def script_path():
@@ -172,32 +178,49 @@ def drops_exports() -> bool:
     seen = (str(script), stat.st_mtime_ns, stat.st_size)
     if _DROPS is None or _DROPS[0] != seen:
         proc = _run(["key", "help"])
-        said = "" if proc is None else f"{proc.stdout or ''}\n{proc.stderr or ''}"
-        _DROPS = (seen, "--drop" in said)
+        if proc is None:
+            # No answer is not «no `--drop`»: kept, it would say «update the method» to a method
+            # that has it until the file changed. Asked again next time.
+            return False
+        _DROPS = (seen, "--drop" in f"{proc.stdout or ''}\n{proc.stderr or ''}")
     return _DROPS[1]
 
 
-def drop_export(provider: str) -> tuple[Optional[int], str]:
+def drop_export(provider: str) -> tuple[Optional[str], str]:
     """The method's `key move-shell <provider> --drop --yes`: `provider`'s exported copy — its
     profile lines, and on Windows the user environment's value — removed WITHOUT storing it, the
-    OS keystore holding the key already (finding 127, hub #230). (exit code, its words); the code
-    is None when the method gave no answer.
+    OS keystore holding the key already (finding 127, hub #230). (what happened, its words); what
+    happened is None when the method gave no answer.
 
-    The code IS the answer: 0 removed, 1 nothing to remove, 3 refused or failed (the keystore does
-    not hold the key — the export is then the only copy — or a line sets it by an expression),
-    2 usage. Only after the window asked and the Arbiter said yes: `--yes` skips the method's own
-    prompt, the same question a second time. Only the provider goes on argv, nothing on stdin; and
-    never to a method without the form (`drops_exports`).
+    Read from the exit code (hub #230): 0 `DROPPED`; 1 `NOTHING` — but only beside the method's
+    own «не знайдено» and no traceback, because Python exits 1 on an exception the method did not
+    catch (a profile it may not write, the registry); 3 refused or failed (the keystore does not
+    hold the key — the export is then the only copy — or a line sets it by an expression). That,
+    a crash, a usage error after the probe said yes, a signal: `NOT_DROPPED`. Of a traceback only
+    its last line goes into the words — the exception, not the method's source.
+
+    Only after the window asked and the Arbiter said yes: `--yes` skips the method's own prompt,
+    the same question a second time. Only the provider goes on argv, nothing on stdin; and never
+    to a method without the form (`drops_exports`).
     """
     if provider not in PROVIDERS:
-        return 2, f"unknown provider {provider!r}"
+        return NOT_DROPPED, f"unknown provider {provider!r}"
     proc = _run(["key", "move-shell", provider, "--drop", "--yes"])
     forget()
     if proc is None:
         return None, ""
     app_log.logger().info("reviewer key: move-shell %s --drop -> exit %s", provider,
                           proc.returncode)
-    return proc.returncode, (proc.stdout or proc.stderr).strip()
+    out, err = (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    crashed = "Traceback (most recent call last)" in err
+    if crashed:
+        err = err.splitlines()[-1].strip()
+    words = "\n".join(part for part in (out, err) if part)
+    if proc.returncode == 0:
+        return DROPPED, words
+    if proc.returncode == 1 and _NOTHING_FOUND in out and not crashed:
+        return NOTHING, words
+    return NOT_DROPPED, words
 
 
 def move_shell_line() -> str:
