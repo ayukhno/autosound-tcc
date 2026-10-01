@@ -164,6 +164,28 @@ def test_an_http_refusal_is_said_with_its_code():
     assert not got.ok and got.reason == "http" and "405" in got.detail
 
 
+def test_a_form_that_answered_and_did_not_take_the_report_is_told_from_a_network_failure():
+    """hub #231 ask 4, tcc#121: a report the form ANSWERED and did not take — its page without the
+    confirmation, or a 4xx — is what a moved form looks like, and a newer TCC is the remedy. A
+    network that never reached Google, and Google's own 5xx, are not."""
+    def answered(code):
+        def post(url, *_):
+            raise urllib.error.HTTPError(url, code, "", None, None)
+        return post
+
+    def offline(*_):
+        raise urllib.error.URLError("no route to host")
+
+    page = form_report.send(_report(), post=lambda *_: (200, "<html>the form page</html>"))
+    assert page.form_refused and page.status == 200
+    for code in (400, 404):
+        got = form_report.send(_report(), post=answered(code))
+        assert got.form_refused and got.status == code, code
+    assert not form_report.send(_report(), post=answered(503)).form_refused
+    assert not form_report.send(_report(), post=offline).form_refused
+    assert not form_report.send(_report(), post=lambda *_: (200, "usp=form_confirm")).form_refused
+
+
 def test_no_method_means_no_form_route_rather_than_a_guess(monkeypatch):
     """Without the method there is no form to send to, and TCC says so instead of inventing an
     address: `post_url()` is "", which is the dialog's own "GitHub is the only route" case."""

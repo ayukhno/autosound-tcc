@@ -155,11 +155,26 @@ class Report:
 
 @dataclass(frozen=True)
 class Sent:
-    """`reason` is "" when the form confirmed, else "unconfirmed", "network", "http" or "no_form"."""
+    """`reason` is "" when the form confirmed, else "unconfirmed", "network", "http" or "no_form".
+
+    `status` is the HTTP status the form answered with, 0 when nothing answered.
+    """
 
     ok: bool
     reason: str = ""
     detail: str = ""
+    status: int = 0
+
+    @property
+    def form_refused(self) -> bool:
+        """Google ANSWERED and did not take the report — told from a network that never reached it.
+
+        Its page without the confirmation, or a 4xx: the request arrived and was turned away as
+        made, which is what a moved form looks like — TCC v0.1.45's reports once the form's choices
+        went English (hub #231). A newer TCC is the remedy there, so the window says so (tcc#121).
+        A 5xx is Google's own trouble, and an update would not cure it.
+        """
+        return self.reason == "unconfirmed" or (self.reason == "http" and 400 <= self.status < 500)
 
 
 def versions_line(lang: str, *, tcc=None, method=None, system=None) -> str:
@@ -265,10 +280,10 @@ def send(report: Report, *, url: str = "", post=None, timeout: float = 0.0) -> S
     try:
         status, body = (post or _post)(url or post_url(), data, timeout or timeout_s())
     except urllib.error.HTTPError as exc:
-        return Sent(False, "http", f"HTTP {exc.code}")
+        return Sent(False, "http", f"HTTP {exc.code}", exc.code)
     except (urllib.error.URLError, OSError) as exc:
         return Sent(False, "network", str(getattr(exc, "reason", None) or exc))
     ok, detail = gate.verify_form_reply(status, body)
     if not ok:
-        return Sent(False, "unconfirmed", f"HTTP {status}")
+        return Sent(False, "unconfirmed", f"HTTP {status}", status)
     return Sent(True, "", detail)

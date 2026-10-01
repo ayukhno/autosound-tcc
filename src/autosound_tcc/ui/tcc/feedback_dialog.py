@@ -270,7 +270,8 @@ class FeedbackDialog(QDialog):
         # ---- the form's questions (TODO F-042) ----------------------------------------------
         # The Arbiter's, 2026-09-17: who wrote, so he can answer; what kind it is; for a problem,
         # how far it stops the tuning. They matter only where they travel — the GitHub route has
-        # its own page — so they go away with the form radio.
+        # its own page — so they go away with the form radio. Who wrote is optional since
+        # 2026-10-01 (finding 135): it is asked of someone who wants an answer.
         self._sender_row = QWidget()
         sender_layout = QHBoxLayout(self._sender_row)
         sender_layout.setContentsMargins(0, 0, 0, 0)
@@ -500,10 +501,9 @@ class FeedbackDialog(QDialog):
         super().reject()
 
     def _send_to_form(self) -> None:
+        # No check on the sender: it is for an answer, if the person wants one (finding 135,
+        # tcc#121), and the method leaves an empty one out of the form's answers (hub #228).
         sender = self._sender.text().strip()
-        if not sender:
-            self._say(i18n.t("fbNoSender"))
-            return
         words = markdown_of(self._editor.document()) if self._editor.toPlainText().strip() else ""
         if not words:
             self._say(i18n.t("fbEmpty"))
@@ -536,10 +536,12 @@ class FeedbackDialog(QDialog):
             self._cancel.setText(i18n.t("fbClose"))
             self._editor.setReadOnly(True)
             return
-        why = i18n.t("fbNoConfirm") if result.reason == "unconfirmed" else result.detail
         # Nothing a person wrote is lost to a network: the whole report goes to the clipboard.
         QGuiApplication.clipboard().setText(form_report.as_text(self._outgoing))
-        self._say(i18n.t("fbNotSent").format(problem=why))
+        # A form that answered and turned the report away has most likely moved under this TCC,
+        # and an update is the cure; a network keeps its own words (hub #231 ask 4, tcc#121).
+        self._say(i18n.t("fbFormRefused") if result.form_refused
+                  else i18n.t("fbNotSent").format(problem=result.detail))
         self._send.setEnabled(True)
 
     def _on_send(self) -> None:

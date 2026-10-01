@@ -299,16 +299,28 @@ def test_who_wrote_is_remembered_for_the_next_report(monkeypatch):
     assert again._sender.text() == "Олег, @oleg"
 
 
-def test_a_report_that_does_not_say_who_wrote_it_is_not_sent(monkeypatch):
+def test_a_report_that_does_not_say_who_wrote_it_is_sent(monkeypatch):
+    """«Від кого» is optional (finding 135, tcc#121, the Arbiter 2026-10-01): it is for an answer,
+    if the person wants one, and a tester who left no contact could not send at all. The method
+    leaves an empty sender out of the form's answers since v3.0.65 (hub #228)."""
     from autosound_tcc.ui.tcc import i18n
 
     dialog, calls = _form_dialog(monkeypatch)
     _ready(dialog, sender="  ")
 
     dialog._on_send()
+    _wait_for_send(dialog)
 
-    assert calls == [] and dialog._sending is None
-    assert dialog._status.text() == i18n.t("fbNoSender")
+    assert len(calls) == 1 and calls[0][0].sender == ""
+    assert dialog._status.text() == i18n.t("fbSent")
+
+
+def test_the_sender_hint_says_it_is_optional_and_what_it_is_for():
+    from autosound_tcc.ui.tcc import i18n
+
+    # The Arbiter's words (tcc#121): optional, and only for someone who wants an answer.
+    assert i18n.T["uk"]["fbFromPh"] == (
+        "необов'язково — якщо хочеш відповідь: email, Telegram чи телефон")
 
 
 def test_a_problem_asks_how_far_it_stops_the_tuning(monkeypatch):
@@ -355,26 +367,45 @@ def test_the_attachment_travels_under_the_words(monkeypatch):
 
 
 def test_a_send_the_form_did_not_confirm_is_not_called_sent_and_the_report_is_kept(monkeypatch):
+    """The form ANSWERED and did not take the report: not a network, so the words say the form
+    may have changed and where to update (hub #231 ask 4, tcc#121) — the way TCC v0.1.45's
+    reports were turned away once the form's choices went English."""
     from PySide6.QtGui import QGuiApplication
 
     from autosound_tcc.core import form_report
     from autosound_tcc.ui.tcc import i18n
 
     dialog, _calls = _form_dialog(
-        monkeypatch, send=lambda report, url: form_report.Sent(False, "unconfirmed", "HTTP 200"))
+        monkeypatch,
+        send=lambda report, url: form_report.Sent(False, "unconfirmed", "HTTP 200", 200))
     _ready(dialog, words="the window froze")
 
     dialog._on_send()
     _wait_for_send(dialog)
 
-    assert i18n.t("fbNoConfirm") in dialog._status.text()
+    assert dialog._status.text() == i18n.t("fbFormRefused")
     kept = QGuiApplication.clipboard().text()
     assert "the window froze" in kept and "Олег, @oleg" in kept, "nothing a person wrote is lost"
     assert dialog._send.isEnabled(), "and it can be tried again"
 
 
+def test_a_form_that_turns_the_request_away_with_a_4xx_is_a_changed_form_too(monkeypatch):
+    from autosound_tcc.core import form_report
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, _calls = _form_dialog(
+        monkeypatch, send=lambda report, url: form_report.Sent(False, "http", "HTTP 400", 400))
+    _ready(dialog)
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+
+    assert dialog._status.text() == i18n.t("fbFormRefused")
+
+
 def test_a_network_failure_is_said_in_its_own_words(monkeypatch):
     from autosound_tcc.core import form_report
+    from autosound_tcc.ui.tcc import i18n
 
     dialog, _calls = _form_dialog(
         monkeypatch, send=lambda report, url: form_report.Sent(False, "network", "no route to host"))
@@ -383,7 +414,32 @@ def test_a_network_failure_is_said_in_its_own_words(monkeypatch):
     dialog._on_send()
     _wait_for_send(dialog)
 
-    assert "no route to host" in dialog._status.text()
+    assert dialog._status.text() == i18n.t("fbNotSent").format(problem="no route to host")
+
+
+def test_googles_own_trouble_is_not_called_a_changed_form(monkeypatch):
+    """A 5xx is Google failing, not the form refusing: updating TCC would not help."""
+    from autosound_tcc.core import form_report
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, _calls = _form_dialog(
+        monkeypatch, send=lambda report, url: form_report.Sent(False, "http", "HTTP 503", 503))
+    _ready(dialog)
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+
+    assert dialog._status.text() == i18n.t("fbNotSent").format(problem="HTTP 503")
+
+
+def test_the_update_line_names_the_menu_item_as_the_menu_calls_it():
+    """«Меню → Діагностика й оновлення» is quoted, not looked up: the label moving would leave
+    the line pointing at nothing. Polish and German carry the English until translated."""
+    from autosound_tcc.ui.tcc import i18n
+
+    for lang in ("uk", "en"):
+        item = i18n.T[lang]["menuDiagnostics"].rstrip("…")
+        assert f"→ {item})" in i18n.T[lang]["fbFormRefused"], lang
 
 
 def test_an_empty_report_is_not_sent(monkeypatch):
