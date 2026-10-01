@@ -742,8 +742,9 @@ def api_choices() -> list[Choice]:
 
 #: Why a row is not offered as a reviewer, for the picker and `get_tcc_state` (tcc#74).
 NOT_A_REVIEWER_OMP = "omp"
-NOT_A_REVIEWER_FLASH = "flash"
 NOT_A_REVIEWER_SELF = "self"
+#: What a reviewer row is offered with but not recommended for (finding 129, tcc#118).
+REVIEWER_CAUTION_FLASH = "flash"
 
 
 def same_model(one: str, other: str) -> bool:
@@ -761,12 +762,11 @@ def not_a_reviewer(choice: Choice, generator: Optional[Choice] = None) -> str:
     and the reviewer script has no omp route until the method's TCC-034 (hub #216). Cut to a bare
     name, an OMP pick went to the vendor's API instead — `gemini-3.1-pro` came back 404.
 
-    `flash`: the method does not review with Flash — it praises and misses, and once backed both
-    sides of the question it was called for. Marked, not hidden: an option that is absent reads as
-    one that does not exist.
-
     `self`: the generator's own model. A model reviewing itself is no second opinion, and through
-    omp it hung twice with no output — the method's warned deadlock (finding 99, tcc#85)."""
+    omp it hung twice with no output — the method's warned deadlock (finding 99, tcc#85).
+
+    Flash is not here since tcc#118: it reviews, the method only advises against it — that is
+    `reviewer_caution`."""
     if generator is not None and same_model(choice.model, generator.model):
         return NOT_A_REVIEWER_SELF
     if choice.harness == "omp":
@@ -774,8 +774,19 @@ def not_a_reviewer(choice: Choice, generator: Optional[Choice] = None) -> str:
 
         if not critic.omp_route_available():
             return NOT_A_REVIEWER_OMP
+    return ""
+
+
+def reviewer_caution(choice: Choice) -> str:
+    """What this reviewer is not recommended for, or "" (finding 129, tcc#118).
+
+    `flash`: the method does not review with Flash — it praises and misses, and once backed both
+    sides of the question it was called for. It advises a Pro tier and refuses nothing
+    (`setup-critic-channel.md`, «Name a Pro tier»), so neither does TCC: tcc#74 greyed the row, and
+    the Arbiter, 2026-10-01 — «"не рекомендується" це одна справа, але вибрати — хай користувач
+    вирішує». Marked, not hidden: an option that is absent reads as one that does not exist."""
     if tier_of(choice) in ("flash", "lite"):
-        return NOT_A_REVIEWER_FLASH
+        return REVIEWER_CAUTION_FLASH
     return ""
 
 

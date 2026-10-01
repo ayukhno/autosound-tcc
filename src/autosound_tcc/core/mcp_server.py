@@ -160,8 +160,11 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
         because.append(SELF_REVIEWER_REFUSAL)
     return {
         "configured": True,
+        # A warning, not a reason in `not_ready_because`: the Arbiter may pick Flash (tcc#118).
         **({"warning": FLASH_REVIEWER_WARNING}
-           if why_not == model_choices.NOT_A_REVIEWER_FLASH else {}),
+           if not why_not
+           and model_choices.reviewer_caution(choice) == model_choices.REVIEWER_CAUTION_FLASH
+           else {}),
         # The name the reviewer is called with, as `call_critic` sends it (tcc#57).
         "model": model_choices.reviewer_model(choice),
         # What the Arbiter picked, versus what this machine will actually run. Empty unless the

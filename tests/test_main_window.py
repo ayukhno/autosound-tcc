@@ -5541,11 +5541,10 @@ def test_the_models_window_is_modal_to_tcc_not_to_every_app(monkeypatch):
         window._settings.remove(mw._ACTIVE_OMP_KEY)
 
 
-def test_an_omp_or_flash_row_is_greyed_in_the_reviewer_picker_with_why_and_stays_if_picked(
-        monkeypatch):
-    """tcc#74: an OMP pick goes through omp only, and the reviewer script has no omp route yet; a
-    Flash model is no reviewer for the method. Both rows say so and cannot be picked — and one that
-    IS the current pick stays selected, as every other row that cannot run does."""
+def test_an_omp_row_is_greyed_in_the_reviewer_picker_with_why_and_stays_if_picked(monkeypatch):
+    """tcc#74: an OMP pick goes through omp only, and the reviewer script has no omp route yet. The
+    row says so and cannot be picked — and one that IS the current pick stays selected, as every
+    other row that cannot run does."""
     from autosound_tcc.core import critic
     from autosound_tcc.core import model_choices as mc
     from autosound_tcc.ui.tcc import i18n
@@ -5556,25 +5555,76 @@ def test_an_omp_or_flash_row_is_greyed_in_the_reviewer_picker_with_why_and_stays
     combo = QComboBox()
     omp = mc.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
                     label="Gemini 3.1 Pro (High)", provider="google-antigravity")
-    flash = mc.Choice(harness="agy", model="gemini-3.8-flash-low",
-                      label="Gemini 3.8 Flash (Low)", provider="google")
     pro = mc.Choice(harness="api", model="gemini-pro-latest", label="gemini-pro-latest",
                     provider="google")
 
-    MainWindow._fill_combo(combo, [omp, flash, pro], flash.key, critic=True)
+    MainWindow._fill_combo(combo, [omp, pro], omp.key, critic=True)
 
     rows = {combo.itemData(i): i for i in range(combo.count())}
     model = combo.model()
     assert i18n.t("criticRowViaOmp") in combo.itemText(rows[omp.key])
-    assert i18n.t("criticRowNotFlash") in combo.itemText(rows[flash.key])
     assert not model.item(rows[omp.key]).isEnabled()
-    assert not model.item(rows[flash.key]).isEnabled()
     assert model.item(rows[pro.key]).isEnabled()
-    assert combo.currentData() == flash.key, "the current pick is not moved"
+    assert combo.currentData() == omp.key, "the current pick is not moved"
 
     # In the generator's picker the same OMP row is an ordinary one.
     MainWindow._fill_combo(combo, [omp], omp.key)
     assert combo.model().item(0).isEnabled()
+
+
+def test_a_flash_row_can_be_picked_as_the_reviewer_and_says_not_recommended(monkeypatch):
+    """Finding 129 (tcc#118), the Arbiter: «"не рекомендується" це одна справа, але вибрати — хай
+    користувач вирішує». tcc#74 greyed the Flash rows; now they are picked like any other, with
+    «не рекомендується» on the row and the method's reason on hover. OMP and self stay refusals."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.core import critic
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: False)  # a method before v3.0.63
+    _app()
+    combo = QComboBox()
+    omp = mc.Choice(harness="omp", model="google-antigravity/gemini-3.1-pro-high",
+                    label="Gemini 3.1 Pro (High)", provider="google-antigravity")
+    flash = mc.Choice(harness="agy", model="gemini-3.8-flash-low",
+                      label="Gemini 3.8 Flash (Low)", provider="google")
+    pro = mc.Choice(harness="api", model="gemini-pro-latest", label="gemini-pro-latest",
+                    provider="google")
+    own = mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5", provider="anthropic")
+
+    MainWindow._fill_combo(combo, [omp, flash, pro, own], flash.key, critic=True, generator=own)
+
+    rows = {combo.itemData(i): i for i in range(combo.count())}
+    model = combo.model()
+    assert model.item(rows[flash.key]).isEnabled(), "a Flash reviewer is the Arbiter's call"
+    assert i18n.t("criticRowNotRecommended") in combo.itemText(rows[flash.key])
+    assert i18n.t("criticNotFlashTip") in combo.itemData(rows[flash.key],
+                                                         Qt.ItemDataRole.ToolTipRole)
+    assert i18n.t("criticRowNotRecommended") not in combo.itemText(rows[pro.key])
+    assert not model.item(rows[omp.key]).isEnabled()
+    assert not model.item(rows[own.key]).isEnabled()
+    assert combo.currentData() == flash.key
+
+
+def test_a_flash_reviewer_pick_keeps_its_warning_beside_the_picker(monkeypatch):
+    """Finding 129 (tcc#118): a Flash pick is allowed, and the «!» beside the picker still says it
+    is not recommended — a warning, not a refusal (tcc#74 called it «не для рецензента»)."""
+    from autosound_tcc.core import model_choices as mc
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setattr(mc, "critic_reaches", lambda choice: True)
+    flash = mc.Choice(harness="agy", model="gemini-3.8-flash-low",
+                      label="Gemini 3.8 Flash (Low)", provider="google")
+    pro = mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    window = _reviewer_window(monkeypatch, flash, pro)
+    monkeypatch.setattr(window, "_generator_choice", lambda: None)
+
+    pairs, hard = window._critic_notes()
+
+    assert (i18n.t("criticRowNotRecommended"), i18n.t("criticNotFlashTip")) in pairs
+    assert hard is False, "a Flash pick reviews; the mark is the soft one"
 
 
 def test_picking_another_reviewer_checks_it_at_once(monkeypatch):

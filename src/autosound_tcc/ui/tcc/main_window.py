@@ -4532,8 +4532,10 @@ class MainWindow(QMainWindow):
                           i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
                           .format(model=for_reach.model, vendor=vendor)))
             hard = True
-        if why_not == model_choices.NOT_A_REVIEWER_FLASH:
-            pairs.append((i18n.t("criticRowNotFlash"), i18n.t("criticNotFlashTip")))
+        if key and not why_not and model_choices.reviewer_caution(for_reach):
+            # Picked, and it reviews: the method advises a Pro tier, the choice is the Arbiter's
+            # (finding 129, tcc#118). A warning, so not `hard`; a refused pick has its refusal.
+            pairs.append((i18n.t("criticRowNotRecommended"), i18n.t("criticNotFlashTip")))
         if chosen is not None and generator is not None and why_not != model_choices.NOT_A_REVIEWER_SELF:
             # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
             # does not recognise, which would make any two unknown models look like a matched pair.
@@ -5139,16 +5141,20 @@ class MainWindow(QMainWindow):
             # "remembered from last launch" are two of the reasons now, not two separate badges.
             state = availability.status(choice)
             # No reviewer, whatever the machine has (tcc#74): an OMP pick goes through omp only
-            # and the script has no omp route yet; Flash is no reviewer for the method.
+            # and the script has no omp route yet; the generator's own model is no second opinion.
             why_not = model_choices.not_a_reviewer(choice, generator=generator) if critic else ""
             if why_not:
                 notes.append(i18n.t({model_choices.NOT_A_REVIEWER_OMP: "criticRowViaOmp",
-                                     model_choices.NOT_A_REVIEWER_SELF: "criticRowSelf"}
-                                    .get(why_not, "criticRowNotFlash")))
+                                     model_choices.NOT_A_REVIEWER_SELF: "criticRowSelf"}[why_not]))
             elif not state.ready:
                 notes.append(availability_view.word(state))
             elif critic and not model_choices.critic_reaches(choice):
                 notes.append(i18n.t("modelClipboardOnly"))
+            # Flash: offered and pickable, marked «не рекомендується» with the method's reason on
+            # hover — the Arbiter: «вибрати — хай користувач вирішує» (finding 129, tcc#118).
+            caution = model_choices.reviewer_caution(choice) if critic and not why_not else ""
+            if caution:
+                notes.append(i18n.t("criticRowNotRecommended"))
             suffix = f"  ·  {' · '.join(notes)}" if notes else ""
             # EVERY route is prefixed, not just the SDK. The same model reached two ways is two
             # different accounts -- a subscription CLI and a metered broker -- and an unlabelled
@@ -5165,6 +5171,8 @@ class MainWindow(QMainWindow):
                 tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
             if state.detail:
                 tip += "\n" + state.detail
+            if caution:
+                tip += "\n" + i18n.t("criticNotFlashTip")
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
             if not state.ready:
                 # Red for what cannot run; grey for what is not known yet — while the catalogues

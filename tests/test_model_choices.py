@@ -985,8 +985,10 @@ def test_an_omp_pick_is_no_reviewer_until_the_method_calls_through_omp(monkeypat
     assert model_choices.critic_reaches(omp) is False
 
 
-def test_a_flash_model_is_marked_not_a_reviewer_and_a_pro_one_is_not():
-    """The method does not review with Flash; the picker says so on the row (tcc#74)."""
+def test_a_flash_model_is_a_reviewer_with_a_caution_and_a_pro_one_has_none():
+    """Finding 129 (tcc#118), the Arbiter: «"не рекомендується" це одна справа, але вибрати — хай
+    користувач вирішує». The method does not review with Flash, and says so; it does not refuse
+    one — so Flash is no reason against the pick, only a caution beside it (tcc#74 refused it)."""
     from autosound_tcc.core import model_choices
 
     flash = model_choices.Choice(harness="agy", model="gemini-3.8-flash-low",
@@ -996,9 +998,12 @@ def test_a_flash_model_is_marked_not_a_reviewer_and_a_pro_one_is_not():
     pro = model_choices.Choice(harness="api", model="gemini-pro-latest",
                                label="gemini-pro-latest", provider="google")
 
-    assert model_choices.not_a_reviewer(flash) == "flash"
-    assert model_choices.not_a_reviewer(lite) == "flash"
+    assert model_choices.not_a_reviewer(flash) == ""
+    assert model_choices.not_a_reviewer(lite) == ""
     assert model_choices.not_a_reviewer(pro) == ""
+    assert model_choices.reviewer_caution(flash) == "flash"
+    assert model_choices.reviewer_caution(lite) == "flash"
+    assert model_choices.reviewer_caution(pro) == ""
 
 
 def test_with_the_omp_route_an_omp_pick_is_a_reviewer_where_omp_is_installed(

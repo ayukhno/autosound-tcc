@@ -1337,6 +1337,24 @@ def test_a_reviewer_that_cannot_run_yet_does_not_report_a_green_light(tmp_path, 
     assert any("autosound_context.md" in line for line in state["not_ready_because"])
 
 
+def test_a_flash_reviewer_pick_is_ready_and_carries_the_warning(tmp_path, monkeypatch):
+    """Finding 129 (tcc#118): the Arbiter may pick a Flash reviewer. The state says the method does
+    not recommend it, and does not call the pick «not ready» for it."""
+    from autosound_tcc.core import config, critic, mcp_server, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: True)
+    monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.8-flash-low")
+
+    state = mcp_server._reviewer_state(tmp_path)
+
+    assert state["warning"] == mcp_server.FLASH_REVIEWER_WARNING
+    assert state["ready"] is True and state["not_ready_because"] == []
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+    assert "warning" not in mcp_server._reviewer_state(tmp_path)
+
+
 def test_a_reviewer_with_nothing_missing_says_it_is_ready(tmp_path, monkeypatch):
     from autosound_tcc.core import config, critic, mcp_server, model_choices, project_settings
 
