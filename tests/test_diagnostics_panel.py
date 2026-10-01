@@ -544,6 +544,27 @@ def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):
     assert "numpy 2.0.2 → 2.1.0" in text, "and the libraries that moved with it"
 
 
+def test_what_the_update_rows_learn_is_told_to_the_window(monkeypatch):
+    """VM-3: the method updated and its row said «up to date», and the main window's title kept
+    «update available» until TCC restarted. Every answer a row shows goes out — and the receipt
+    of an update says the method is now current. A Re-check landing on a row mid-update is not
+    shown, so it is not told either."""
+    from autosound_tcc.core import updates
+
+    dialog, _asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
+    heard = []
+    dialog.updateLearned.connect(heard.append)
+
+    dialog._show_update(updates.Status("tcc", "0.1.45", "0.1.46", True))
+    dialog._update_skill()
+    dialog._show_update(updates.Status("skill", "3.0.6", "3.0.7", True))
+    _finish_skill_update(dialog)
+
+    assert [(s.name, s.latest, s.newer) for s in heard] == [
+        ("tcc", "0.1.46", True), ("skill", "3.0.7", False)]
+
+
 def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
     from autosound_tcc.core import updates
 

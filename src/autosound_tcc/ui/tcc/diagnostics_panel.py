@@ -410,6 +410,10 @@ class DiagnosticsDialog(QDialog):
     refreshRequested = Signal()
     #: Text for the dialog composer — a problem in the skill's files, forwarded to the session.
     askRequested = Signal(str)
+    #: An `updates.Status` this window has just learned — a row's answer, or an update's receipt.
+    #: The main window's title says «update available» by it (VM-3): it kept the word after the
+    #: method was updated here, through Re-check and ↻, until TCC restarted.
+    updateLearned = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -739,6 +743,7 @@ class DiagnosticsDialog(QDialog):
             label.setText(i18n.t("updUnknown"))
         else:
             label.setText(i18n.t("updCurrent").format(what=title, here=here))
+        self.updateLearned.emit(status)
 
     def _on_beta_toggled(self, checked: bool) -> None:
         """The channel is a setting, and the rows above must answer for the one just chosen.
@@ -867,6 +872,9 @@ class DiagnosticsDialog(QDialog):
             # The report must show the new version — but the row keeps what it just said until the
             # next Re-check, because that sentence is the receipt for the press.
             self._install_changed()
+            # And the receipt is an answer: the method is now the release it was offered (VM-3).
+            version = done.version.lstrip("v")
+            self.updateLearned.emit(updates.Status("skill", version, version, False))
         else:
             button.setEnabled(True)
 

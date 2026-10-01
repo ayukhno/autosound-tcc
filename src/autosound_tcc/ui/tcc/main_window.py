@@ -779,6 +779,10 @@ class MainWindow(QMainWindow):
         # 2026-08-19). Two numbers, because a bug is against a PAIR — the app and the method — and
         # either one alone leaves the other to be guessed.
         self._title_note = ""
+        #: The newest answer for each half, "tcc" and "skill": is a newer one out (`_learn_update`).
+        self._update_newer: dict[str, bool] = {}
+        #: The title's own question to GitHub while it is out (`_check_for_updates`).
+        self._title_check_timer: QTimer | None = None
         self._set_title()
 
         root = QWidget()
@@ -1004,7 +1008,7 @@ class MainWindow(QMainWindow):
         self._header_refresh_btn = QPushButton("↻")
         self._header_refresh_btn.setProperty("class", "icon-btn")
         self._header_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._header_refresh_btn.clicked.connect(self._reload_from_disk)
+        self._header_refresh_btn.clicked.connect(self._on_reload_pressed)
         self._refresh_tip = attach_tip(self._header_refresh_btn, i18n.t("refreshProjectTip"))
         layout.addWidget(self._header_refresh_btn)
 
@@ -1182,7 +1186,7 @@ class MainWindow(QMainWindow):
         self._intake_action.triggered.connect(lambda _checked=False: self._open_intake_form())
         self._reload_action = menu.addAction(i18n.t("menuReload"))
         self._reload_action.setToolTip(i18n.t("refreshProjectTip"))
-        self._reload_action.triggered.connect(self._reload_from_disk)
+        self._reload_action.triggered.connect(self._on_reload_pressed)
 
         self._menu_section(menu, "menuSession")
         # Menu wording, not the buttons': "▶ Session in TCC" and "⧉ Terminal" are labels for
@@ -1902,6 +1906,16 @@ class MainWindow(QMainWindow):
         availability.forget_refusals()
         self._refresh_cli_catalogue(force=True)
 
+    def _on_reload_pressed(self) -> None:
+        """The header's ↻ and Menu → Reload: everything `_reload_from_disk` re-reads, and the
+        title's «update available» too — an update installed since launch is a change as well, and
+        the word stayed until TCC restarted (VM-3). On a press only: the session's `report_phase`
+        lands on `_reload_from_disk` too, and a phase move is no reason to ask GitHub. Behind the
+        launch-time question's switch, so a test run reaches no network."""
+        self._reload_from_disk()
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
+            self._check_for_updates()
+
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
 
@@ -2118,6 +2132,9 @@ class MainWindow(QMainWindow):
             # while one does (ruling 21, tcc#98). Asked by the window when it opens, when it is
             # come back to and on Re-check, so a session started or ended in between is seen.
             self._diag_dialog.set_session_probe(self._session_running)
+            # What its update rows learn — a Re-check's answer, an update's receipt — is what the
+            # title's «update available» goes by too (VM-3).
+            self._diag_dialog.updateLearned.connect(self._learn_update)
             self._diag_dialog.set_report(self._contract_report)
         elif self._contract_report is not None:
             self._diag_dialog.set_report(self._contract_report)
@@ -4399,8 +4416,10 @@ class MainWindow(QMainWindow):
         thread — the timer reads the result.
 
         Silent when offline, and silent when up to date: the title is not a place to report that
-        nothing happened.
+        nothing happened. Asked at launch and on ↻ (`_on_reload_pressed`); one question at a time.
         """
+        if self._title_check_timer is not None:
+            return  # still waiting for the last answer
         holder: dict = {}
         # Read here, on the GUI thread: the channel lives in QSettings.
         channel = updates.current_channel()
@@ -4414,19 +4433,38 @@ class MainWindow(QMainWindow):
         threading.Thread(target=ask, name="tcc-title-updates", daemon=True).start()
         tries = {"n": 0}
         timer = QTimer(self)
+        self._title_check_timer = timer
 
         def poll() -> None:
             tries["n"] += 1
             if "result" not in holder and tries["n"] < 120:
                 return
             timer.stop()
-            if any(getattr(status, "newer", False) for status in holder.get("result", ())):
-                self._title_note = i18n.t("titleUpdate")
-                self._set_title()
+            self._title_check_timer = None
+            timer.deleteLater()
+            for status in holder.get("result", ()):
+                self._learn_update(status)
 
         timer.timeout.connect(poll)
         timer.setInterval(500)
         timer.start()
+
+    def _learn_update(self, status) -> None:
+        """One half's answer — TCC's or the method's — and the title's word by the newest answer
+        for each: either newer keeps «update available», both current drop it (VM-3).
+
+        It was set once, by the launch-time question, and nothing took it back: the method updated
+        in the Diagnostics window, its row said «up to date», and the title said otherwise until
+        TCC restarted. An answer that could not be had (`latest` empty — offline, a checkout) is
+        not «up to date», so it leaves that half as it was.
+        """
+        if not getattr(status, "latest", ""):
+            return
+        self._update_newer[status.name] = bool(status.newer)
+        note = i18n.t("titleUpdate") if any(self._update_newer.values()) else ""
+        if note != self._title_note:
+            self._title_note = note
+            self._set_title()
 
     def _install_facts(self) -> dict:
         """What the installation report cannot ask for itself: this window's own live state."""

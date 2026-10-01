@@ -3153,6 +3153,100 @@ def test_the_title_says_when_something_newer_exists(monkeypatch):
     assert str(config.project_dir()) in window.windowTitle(), "and the project stays first"
 
 
+def test_the_title_follows_what_the_diagnostics_window_learns(monkeypatch):
+    """VM-3: the method was updated in TCC, its row said «Скіл 3.0.65 — актуальна», and the title
+    kept «skill 3.0.65 · є оновлення» — through Re-check, through ↻ — until TCC restarted. The
+    title now says what the last answer for each half says: either newer keeps the word, both
+    current drop it, and a half nobody could ask about changes nothing."""
+    from autosound_tcc.core import updates
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._diag_btn.click()
+    dialog = window._diag_dialog
+    word = i18n.t("titleUpdate")
+
+    dialog._show_update(updates.Status("skill", "3.0.64", "3.0.65", True))
+    assert word in window.windowTitle(), "gains it when an answer says available"
+    dialog._show_update(updates.Status("tcc", "0.1.45", "0.1.45", False))
+    assert word in window.windowTitle(), "TCC current, the method still newer"
+    dialog._show_update(updates.Status("skill", "3.0.64", "", False, "no_network"))
+    assert word in window.windowTitle(), "could not ask is not up to date"
+    dialog._show_update(updates.Status("skill", "3.0.65", "3.0.65", False))
+    assert word not in window.windowTitle(), "both current: the word goes"
+    assert "skill" in window.windowTitle() and str(config.project_dir()) in window.windowTitle()
+
+
+def test_the_title_drops_the_word_when_the_method_is_updated_in_tcc(monkeypatch):
+    """VM-3, the case the Arbiter met: no Re-check needed — the update's own receipt is an answer."""
+    from autosound_tcc.core import updates
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._diag_btn.click()
+    dialog = window._diag_dialog
+    dialog._show_update(updates.Status("skill", "3.0.64", "3.0.65", True))
+    assert i18n.t("titleUpdate") in window.windowTitle()
+    monkeypatch.setattr(updates, "local_changes", lambda tag="": updates.LocalChanges(True, ()))
+    monkeypatch.setattr(updates, "apply_skill", lambda tag="", keep_local=False, send=False:
+                        updates.SkillUpdate(True, version="v3.0.65", libs_ok=True))
+
+    dialog._update_skill()
+    for _ in range(5):
+        if dialog._skill_job is None:
+            break
+        dialog._skill_job.join(timeout=10)
+        dialog._poll_skill_job()
+
+    assert i18n.t("titleUpdate") not in window.windowTitle()
+
+
+def test_the_header_reload_asks_again_for_the_title(monkeypatch):
+    """VM-3: ↻ is «what changed since I looked», and an update installed since is one of those
+    things. A press asks GitHub again, off the GUI thread, and the title follows the answer both
+    ways. The session's `report_phase` reloads the project the same way and asks nothing: a phase
+    move is no reason to go to the network. Behind the launch-time question's switch."""
+    from PySide6.QtTest import QTest
+
+    from autosound_tcc.core import updates
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_ping_rew", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_refresh_cli_catalogue", lambda self, force=False: None)
+    answer, asked = [True], []
+    monkeypatch.setattr(updates, "check_all", lambda channel="stable": asked.append(channel) or (
+        updates.Status("tcc", "0.1.45", "0.1.45", False),
+        updates.Status("skill", "3.0.64", "3.0.65", answer[0])))
+    word = i18n.t("titleUpdate")
+
+    def settle(want: bool) -> None:
+        for _ in range(60):
+            if (word in window.windowTitle()) is want:
+                return
+            QTest.qWait(50)
+        raise AssertionError(f"the title never {'gained' if want else 'dropped'} it")
+
+    window._header_refresh_btn.click()
+    assert asked == [], "the switch is off in tests: nothing was asked"
+
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
+    window._reload_from_disk()  # what the session's report_phase lands on
+    QTest.qWait(50)
+    assert asked == [], "a phase report asks GitHub nothing"
+    window._header_refresh_btn.click()
+    settle(True)
+    answer[0] = False
+    window._reload_action.trigger()
+    settle(False)
+    assert len(asked) == 2
+
+
 def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
     """The dialog behind it is the only path to the DSP-profile interview and to seeding a project
     from an existing one -- and its button in the left column has been hidden ever since "which
