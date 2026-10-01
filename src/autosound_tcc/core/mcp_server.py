@@ -316,6 +316,11 @@ class ConfirmRequest:
     title: str
     detail: str
     payload: dict[str, Any] = field(default_factory=dict)
+    #: Why the gate asks, when the detail alone does not say it: an i18n KEY (`ui/tcc/i18n.py`),
+    #: which the confirm bar puts before the detail in the reader's language. A key and not a
+    #: sentence, so core stays language-free — «Команда, яку не відкотити» was a Ukrainian literal
+    #: on the Claude side and missing on omp (review of tcc#115).
+    reason: str = ""
 
 
 class UiBridge(Protocol):

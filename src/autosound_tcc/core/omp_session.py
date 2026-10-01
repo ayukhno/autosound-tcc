@@ -600,14 +600,18 @@ class OmpSession:
                 await self._events.put(Unasked(command))
             return
         effect = self.effect_of(command)
+        # Under `auto` the only thing that reaches here is what cannot be undone, and the question
+        # says so — the same reason, by the same key, as the SDK side (review of tcc#115).
+        irreversible = self.gate == GATE_AUTO
         request = ConfirmRequest(
             # The question is what it will change, not what it will run: a command line three
             # nested calls deep is not something anyone can read and judge, so they approve it
             # unread -- which is worse protection than no gate at all.
             tool=effect or tool,
             title=f"Дозволити {tool}?",
-            detail=detail,
+            detail=command if irreversible else detail,
             payload=dict(frame),
+            reason="gateIrreversible" if irreversible else "",
         )
         try:
             allowed = await asyncio.wait_for(

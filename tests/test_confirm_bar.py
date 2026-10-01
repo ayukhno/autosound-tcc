@@ -276,3 +276,23 @@ def test_the_whole_question_sits_on_the_attention_background():
         app.setStyleSheet(was[0])
         app.setPalette(was[1])
         theme._CURRENT = was[2]
+
+
+def test_a_request_with_a_reason_says_it_before_the_command():
+    """«Команда, яку не відкотити» was a Ukrainian literal on the Claude side and missing on omp
+    (review of #115). The reason travels as an i18n key, so core stays language-free and both
+    adapters' questions read the same in the Arbiter's language."""
+    from autosound_tcc.ui.tcc import i18n
+
+    bar = ConfirmBar()
+    bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?", detail="rm -rf ~/",
+                               reason="gateIrreversible"), Future())
+
+    assert bar._detail.text() == f"{i18n.t('gateIrreversible')}: rm -rf ~/"
+
+
+def test_a_request_without_a_reason_shows_its_detail_as_it_was():
+    bar = ConfirmBar()
+    bar.enqueue(_request(), Future())
+
+    assert bar._detail.text() == "detail"

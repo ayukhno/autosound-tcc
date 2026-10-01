@@ -717,7 +717,8 @@ def test_auto_mode_on_omp_still_asks_about_what_cannot_be_undone(tmp_path):
     asyncio.run(session._gate({**PERMISSION_FRAME, "id": "f2",
                                "title": "Allow tool: bash\nCommand: ls -la"}))
 
-    assert [request.detail for request in session.bridge.requests] == ["Command: rm -rf ~/"]
+    assert [(request.reason, request.detail) for request in session.bridge.requests] == [
+        ("gateIrreversible", "rm -rf ~/")], "the same reason as the SDK side, then the command"
     assert [frame["value"] for frame in session.sent] == ["Deny", "Approve"]
 
 

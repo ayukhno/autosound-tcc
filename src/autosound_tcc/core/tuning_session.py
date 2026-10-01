@@ -423,8 +423,14 @@ _UNREAD_KEYWORDS = frozenset({"case", "esac", "function", "coproc"})
 #: Words that run the command written after them. Their own options differ and some take a value
 #: (`nice -n 5`, `timeout 5`, `xargs -n 1`), so every tail of the line is judged as a command.
 _WRAPPERS = frozenset({"env", "command", "builtin", "exec", "nohup", "nice", "time", "timeout",
-                       "xargs", "stdbuf", "ionice", "caffeinate", "setsid", "flock", "chronic",
-                       "unbuffer", "noglob", "nocorrect", "repeat", "-"})
+                       "stdbuf", "ionice", "caffeinate", "setsid", "flock", "chronic", "unbuffer",
+                       "noglob", "nocorrect", "repeat", "-"})
+#: `xargs` options that take a value — attached (`-n1`) or as the next word (`-n 1`) — and the
+#: ones whose value can only be attached (`-i{}`, `-l5`, `-eEOF`). GNU and BSD together.
+_XARGS_VALUE_FLAGS = frozenset("InLsPdEaJRS")
+_XARGS_ATTACHED_FLAGS = frozenset("ile")
+_XARGS_LONG_VALUES = frozenset({"--arg-file", "--delimiter", "--max-chars", "--max-procs",
+                                "--max-args", "--process-slot-var"})
 #: Redirections that write a file. `>&` only when what follows is a file, not a descriptor.
 _WRITE_REDIRECTS = frozenset({">", ">>", ">|", ">!", ">>!", "&>", "&>>", "&>|", "&>!", "<>", ">&"})
 #: Longest first, so `<<<` is not read as `<<` and a `<`.
@@ -1001,17 +1007,15 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return any(argument.dynamic or _runs(argument, tainted) for argument in arguments)
     if name in ("trap", "alias"):
         return _code_arguments_are_dangerous(name, arguments, depth)
+    if name == "xargs":
+        tail = _xargs_command(arguments)
+        return tail is None or bool(tail) and _words_are_dangerous(tail, command, tainted, depth,
+                                                                   unwrap)
     if name in _WRAPPERS:
         # Each tail once, and a wrapper met in a tail is not unwrapped again: the outer loop already
         # covers the tails after it, and `env env env … rm` must not cost 2ⁿ.
-        tails = [words[at:] for at in range(1, len(words))]
-        if name == "xargs":
-            # xargs fills the tail's arguments from stdin, with `-I{}` or without: `{}` and `X` are
-            # placeholders, and `rm -rf build` gets more targets than it spells (review of tcc#115).
-            tails = [[tail[0], *(replace(word, dynamic=True) for word in tail[1:])]
-                     for tail in tails]
-        return unwrap and any(_words_are_dangerous(tail, command, tainted, depth, unwrap=False)
-                              for tail in tails)
+        return unwrap and any(_words_are_dangerous(words[at:], command, tainted, depth, unwrap=False)
+                              for at in range(1, len(words)))
     if name in _SHELLS:
         return _shell_is_dangerous(arguments, command, tainted, depth)
     if name in _INTERPRETERS or name.startswith("python"):
@@ -1036,6 +1040,61 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name in _FETCHERS and command.piped:
         return True
     return False
+
+
+def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
+    """The command `xargs` runs, as the rules should see it; None when its options are not readable.
+
+    xargs only APPENDS what it reads — one word the line does not spell, at the end — so `xargs rm
+    -rf build` deletes more than `build` and `xargs git log -1 --` is still a `log`. With a
+    placeholder (`-I X`, `-i`, `-J`, `--replace`) it appends nothing and fills exactly the words that
+    hold the placeholder, the command's own name included: `xargs -I{} {} --version` runs whatever
+    came in. (Re-review of tcc#115: marking every word of the tail read `-c` and `log` as unknown.)
+    """
+    placeholder: Optional[str] = None
+    at = 0
+    while at < len(arguments):
+        word = arguments[at]
+        if word.dynamic:
+            return None  # an option the line does not spell
+        text = word.text
+        if text == "--":
+            at += 1
+            break
+        if text.startswith("--"):
+            option, has_value, value = text.partition("=")
+            if option == "--replace":
+                placeholder = value if has_value else "{}"
+            elif option in _XARGS_LONG_VALUES and not has_value:
+                at += 1
+            at += 1
+            continue
+        if len(text) < 2 or not text.startswith("-"):
+            break
+        at += 1
+        for index, letter in enumerate(text[1:], start=1):
+            attached = text[index + 1:]
+            if letter in _XARGS_VALUE_FLAGS:
+                if attached:
+                    value = attached
+                elif at < len(arguments) and not arguments[at].dynamic:
+                    value = arguments[at].text
+                    at += 1
+                else:
+                    return None
+                if letter in "IJ":
+                    placeholder = value
+                break
+            if letter in _XARGS_ATTACHED_FLAGS:
+                if letter == "i":
+                    placeholder = attached or "{}"
+                break
+    tail = arguments[at:]
+    if not tail:
+        return []  # it runs `echo`
+    if placeholder is not None:
+        return [replace(word, dynamic=True) if placeholder in word.text else word for word in tail]
+    return [*tail, _Word(text="…", started=True, dynamic=True)]
 
 
 def _rm_is_dangerous(arguments: list[_Word]) -> bool:
@@ -1334,9 +1393,10 @@ class TuningSession:
             ):
                 return await self._ask(
                     tool_name,
-                    f"Команда, яку не відкотити: {tool_input.get('command', '')}",
+                    tool_input.get("command", ""),
                     tool_input,
                     deny_reason="refused as unrecoverable",
+                    reason="gateIrreversible",
                 )
             return PermissionResultAllow()
 
@@ -1359,10 +1419,11 @@ class TuningSession:
 
         return await self._ask(tool_name, str(tool_input)[:400], tool_input, deny_reason=f"{tool_name} is not pre-approved")
 
-    async def _ask(self, tool: str, detail: str, payload: dict, deny_reason: str):
+    async def _ask(self, tool: str, detail: str, payload: dict, deny_reason: str, reason: str = ""):
         import asyncio
 
-        request = ConfirmRequest(tool=tool, title=f"Дозволити {tool}?", detail=detail, payload=payload)
+        request = ConfirmRequest(tool=tool, title=f"Дозволити {tool}?", detail=detail, payload=payload,
+                                 reason=reason)
         try:
             allowed = await asyncio.wait_for(
                 asyncio.wrap_future(self.bridge.request_confirmation(request)), timeout=600.0

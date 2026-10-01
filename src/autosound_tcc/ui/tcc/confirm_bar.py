@@ -180,7 +180,8 @@ class ConfirmBar(QWidget):
                 continue
             self._current = (request, future)
             self._title.setText(request.title)
-            self._detail.setText(request.detail)
+            reason = getattr(request, "reason", "")
+            self._detail.setText(f"{i18n.t(reason)}: {request.detail}" if reason else request.detail)
             self._fit_question()
             self._update_remaining()
             self.setHidden(False)

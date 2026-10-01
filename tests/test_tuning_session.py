@@ -824,6 +824,8 @@ def test_do_not_ask_mode_still_guards_what_cannot_be_undone(tmp_path):
     _decide(session, "Bash", {"command": "rm -rf /"})
 
     assert [r.tool for r in arbiter.asked] == ["Bash"], "auto alone still asks about this one"
+    assert arbiter.asked[0].reason == "gateIrreversible", "the reason, as a key the UI translates"
+    assert arbiter.asked[0].detail == "rm -rf /", "and the command itself, with no Ukrainian glued on"
 
 
 def test_the_language_rule_reaches_the_tuning_session_not_only_the_interview():
@@ -913,6 +915,10 @@ _VM_2026_10_01 = (
     "ls -la  # what's here",
     # A stream thrown away or shown is not a file written (review of #115, the class of finding 123).
     "ls -la /project 2>/dev/null",
+    # xargs only APPENDS what it reads, so its tail's own words are as spelled (re-review of #115).
+    "git ls-files | xargs git log -1 --oneline --",
+    "ls | xargs -I{} git -C {} status",
+    "ls | xargs -n1 sh -c 'echo $0'",
     "python3 rew_tool/analysis.py --json >/dev/null 2>&1",
     "echo done > /dev/stderr; echo out >/dev/stdout; echo hi > /dev/tty",
     # `xargs` reads and the tail only reads.
@@ -995,6 +1001,8 @@ def test_a_read_with_a_substitution_or_a_loop_is_not_irreversible(command, tmp_p
     "ls | xargs -I X rm -rf X",
     "xargs rm -rf build < list.txt",
     "xargs -I{} sh -c 'rm -rf {}' < list.txt",
+    "ls | xargs -I{} {} --version",
+    "ls | xargs -0 -n 1 rm -rf",
     # A shell or `source` handed `/dev/stdin` runs what comes in on stdin: the body is read.
     "source /dev/stdin <<'EOF'\nrm -rf ~\nEOF",
     ". /dev/stdin <<< \"rm -rf ~\"",
