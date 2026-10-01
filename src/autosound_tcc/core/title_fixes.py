@@ -7,8 +7,10 @@
 * **grammar** — the method's own comparison already matches it, and says so: `validate_series`
   returns `renames`, `{title in REW: canonical title}` (`sw_01 (sw)` → `sw_1 (sw)`, skill #47). The
   fix is a rename, never a re-measurement; the uuid survives it.
-* **typo** — a title the grammar does not match to anything expected, or matches to a series the
-  round did not ask for, while an expected title is still missing and reads almost the same.
+* **typo** — a title the grammar does not match to anything expected, or reads as a measurement
+  the round did not ask for, while an expected title is still missing and reads almost the same.
+  Another series of a name the round expects (`sw_B1 (sw)`, `sw_4 (sw)` for `sw_3 (sw)`) is not
+  one: it is a measurement of its own (tcc#114).
 
 Where the fix is made is the import form (the Arbiter, 2026-09-23): its New name column opens with
 the found name filled in and the row UNTICKED — an automatic match is his to accept. The strip
@@ -20,18 +22,15 @@ not a failure here: the rename and the import were the whole fix.
 
 from __future__ import annotations
 
-import difflib
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
-from autosound_tcc.core import app_log, child, process_writer, vendor_loader
+from autosound_tcc.core import app_log, capture_import, child, process_writer, vendor_loader
 
 Kind = Literal["grammar", "typo"]
 REASON = "renamed in REW by TCC (A17)"
-#: How alike a typo has to be to its intended name to be offered at all.
-_TYPO_CUTOFF = 0.8
 
 
 @dataclass(frozen=True)
@@ -46,15 +45,16 @@ def proposals(rew_titles: Iterable[str], expected: Iterable[str],
     """What to rename, by the method's own comparison first and a close match second."""
     naming = vendor_loader.load_naming()
     titles = [str(t) for t in rew_titles if str(t).strip()]
-    verdict = naming.validate_series(titles, list(expected), glossary)
+    expected = list(expected)
+    verdict = naming.validate_series(titles, expected, glossary)
     fixes = [TitleFix(wrong, right, "grammar")
              for wrong, right in sorted((verdict.get("renames") or {}).items())]
-    missing = list(verdict.get("missing") or [])
-    for title in sorted(set(verdict.get("foreign") or []) | set(verdict.get("extra") or [])):
-        close = difflib.get_close_matches(title, missing, n=1, cutoff=_TYPO_CUTOFF)
-        if close:
-            fixes.append(TitleFix(title, close[0], "typo"))
-            missing.remove(close[0])
+    # The import form's own pass (tcc#114): the closest pair first, and another series of a name
+    # the round expects is no typo of any — the form and the strip must not offer different fixes.
+    loose = sorted(set(verdict.get("foreign") or []) | set(verdict.get("extra") or []))
+    found = capture_import.likely_typos(loose, verdict.get("missing") or [], expected,
+                                        naming, glossary)
+    fixes.extend(TitleFix(loose[index], right, "typo") for index, right in found.items())
     return fixes
 
 

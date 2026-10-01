@@ -486,3 +486,55 @@ def test_a_ticked_row_knows_the_name_the_round_gave_it(tmp_path):
     picked = ci.preselect(rows, ["w-L_1 (sw)", "w-R_1 (sw)"], tmp_path)
 
     assert picked.names == {"u1": "w-L_1 (sw)", "u3": "w-R_1 (sw)"}
+
+
+# ---- a likely typo: the closest missing name, never another series (tcc#114) -------------
+
+
+#: The live REW of 2026-10-01 (finding 122), in REW's order: an older series of three, then the
+#: round's own `sw+w-L_3 (sw)` typed `(se)`.
+_SERIES_B1_AND_A_TYPO = (
+    ("sw_B1 (sw)", "u1", "2026-Oct-01 12:01:00"),
+    ("sw+w-L_B1 (sw)", "u2", "2026-Oct-01 12:02:00"),
+    ("sw+w-R_B1 (sw)", "u3", "2026-Oct-01 12:03:00"),
+    ("sw+w-L_3 (se)", "u4", "2026-Oct-01 13:04:00"),
+)
+
+
+@needs_the_method
+@pytest.mark.parametrize("rows, expected", [
+    (_SERIES_B1_AND_A_TYPO, ["sw_3 (sw)", "sw+w-L_3 (sw)", "sw+w-R_3 (sw)"]),
+    (tuple(row for row in _SERIES_B1_AND_A_TYPO if row[1] != "u3"), ["sw_3 (sw)", "sw+w-L_3 (sw)"]),
+], ids=["live", "plan"])
+def test_another_series_is_not_a_typo_and_the_real_typo_gets_its_name(tmp_path, rows, expected):
+    """Finding 122: the typo pass walked REW's order and gave each missing name to the first row
+    past the cutoff — `sw_B1 (sw)` took `sw_3 (sw)` at 0.84, and `sw+w-L_3 (se)` (0.92) got
+    nothing. A row of another series of the round's driver is a measurement of its own, for every
+    name: `sw+w-L_B1 (sw)` reads 0.82 like `sw+w-R_3 (sw)` and is no typo of that either."""
+    picked = ci.preselect(ci.candidates(_rew(*rows), tmp_path), expected, tmp_path)
+
+    assert picked.names == {"u4": "sw+w-L_3 (sw)"}
+    assert picked.proposed == {"u4"}, "proposed, so it opens unticked"
+    assert picked.ticked == frozenset()
+
+
+def test_the_closest_row_gets_the_missing_name_not_the_first_close_one(tmp_path):
+    """`r-L_1 (se)` comes first in REW's list and passes the cutoff (0.80); `r-R_1 (se)` is the
+    closer (0.90) and gets the name."""
+    rows = ci.candidates(_rew(*[("r-L_1 (se)", "u1", "2026-Oct-01 12:01:00"),
+                                ("r-R_1 (se)", "u2", "2026-Oct-01 12:02:00")]), tmp_path)
+
+    picked = ci.preselect(rows, ["r-R_1 (sw)"], tmp_path)
+
+    assert picked.names == {"u2": "r-R_1 (sw)"}
+    assert picked.proposed == {"u2"}
+
+
+@needs_the_method
+def test_a_series_the_grammar_reads_is_not_a_typo_either(tmp_path):
+    """`sw_4 (sw)` reads 0.89 like `sw_3 (sw)`, and the grammar says what it is: series 4."""
+    rows = ci.candidates(_rew(*[("sw_4 (sw)", "u1", "2026-Oct-01 12:01:00")]), tmp_path)
+
+    picked = ci.preselect(rows, ["sw_3 (sw)"], tmp_path)
+
+    assert picked.names == {} and picked.proposed == frozenset()

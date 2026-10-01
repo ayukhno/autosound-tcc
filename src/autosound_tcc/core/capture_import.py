@@ -43,7 +43,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from autosound_tcc.core import app_log, config, vendor_loader
 
@@ -325,12 +325,23 @@ def key_reader(project_dir: Optional[Path] = None) -> Callable[[str], str]:
     the skill it falls back to the plain casefolded title, which is right for every name the
     grammar itself would have built and merely strict about zero-padding.
     """
+    return _key_reader(*_grammar(project_dir))
+
+
+def _grammar(project_dir: Optional[Path] = None) -> tuple[Any, Any]:
+    """`(the method's naming module, this project's glossary)`, or `(None, None)` without the skill."""
     try:
         from autosound_tcc.core import config as _config, vendor_loader
 
         naming = vendor_loader.load_naming()
         glossary = naming.Glossary.for_project(str(project_dir or _config.project_dir()))
     except Exception:  # noqa: BLE001 — no skill, no glossary: read names as written
+        return None, None
+    return naming, glossary
+
+
+def _key_reader(naming: Any, glossary: Any) -> Callable[[str], str]:
+    if naming is None:
         return lambda title: str(title or "").strip().casefold()
 
     def read(title: str) -> str:
@@ -383,6 +394,99 @@ class Preselect:
 #: How alike a title has to be to a missing expected name to be offered as its typo.
 _TYPO_CUTOFF = 0.8
 
+#: What may stand where a name's series number stands, in a title the grammar refuses: one word
+#: (`B1`, `S3`), so a title that differs anywhere else is not read as another series.
+_SERIES_WORD = re.compile(r"[^\s()]+")
+
+
+def likely_typos(titles: Sequence[str], missing: Iterable[str], expected: Iterable[str],
+                 naming: Any = None, glossary: Any = None) -> dict[int, str]:
+    """`{index in titles: the missing name it is a likely typo of}` — the import form's and the
+    strip's one answer (tcc#114).
+
+    Every pair is scored and the closest wins, highest ratio first, each title and each name used
+    once. Walking the titles in REW's order gave a name to the first title past the cutoff: on the
+    live REW of 2026-10-01 (finding 122) `sw_B1 (sw)` took `sw_3 (sw)` at 0.84 and the real typo,
+    `sw+w-L_3 (se)` at 0.92, got nothing.
+
+    A title that is ANOTHER SERIES of a name the round expects (`_another_series`) is a
+    measurement of its own and no typo of any name — not only of its own: `sw+w-L_B1 (sw)` reads
+    0.82 like `sw+w-R_3 (sw)` too.
+    """
+    titles = [str(title) for title in titles]
+    names = list(dict.fromkeys(str(name) for name in missing if str(name).strip()))
+    if not titles or not names:
+        return {}
+    another_series = _another_series(expected, naming, glossary)
+    scored = []
+    for index, title in enumerate(titles):
+        if another_series(title):
+            continue
+        for order, name in enumerate(names):
+            # `get_close_matches`'s own orientation: the name first, the title second.
+            ratio = difflib.SequenceMatcher(None, name, title).ratio()
+            if ratio >= _TYPO_CUTOFF:
+                scored.append((-ratio, index, order))
+    found: dict[int, str] = {}
+    taken: set[int] = set()
+    for _ratio, index, order in sorted(scored):
+        if index not in found and order not in taken:
+            found[index] = names[order]
+            taken.add(order)
+    return dict(sorted(found.items()))
+
+
+def _another_series(expected: Iterable[str], naming: Any, glossary: Any) -> Callable[[str], bool]:
+    """`title -> whether it is another series of one of the expected names` (tcc#114).
+
+    The grammar always reads the round's names: the round builds them with it. A title it reads
+    too is compared by `name_key` with the series left out (`sw_4 (sw)` for `sw_3 (sw)`). A title
+    it refuses — `sw_B1 (sw)`: `_N` is digits or `final` — is held against the name itself: the
+    name with only its series changed, `sw_` + `B1` + ` (sw)` for `sw_3 (sw)`. Without the skill
+    nothing here can tell a series, and the ratio decides alone.
+    """
+    if naming is None:
+        return lambda _title: False
+
+    def parse(text: str) -> Optional[dict]:
+        try:
+            return naming.parse_name(text, glossary)
+        except Exception:  # noqa: BLE001 — one unreadable title is not a broken list
+            return None
+
+    def unnumbered(parsed: dict) -> Any:
+        # Through `name_key`, both sides: the tuple's shape is the method's (its docstring).
+        return naming.name_key({**parsed, "version": None, "version_n": None})
+
+    shapes = []
+    for name in expected:
+        parsed = parse(str(name).strip())
+        if not parsed or parsed.get("version") is None:
+            continue  # `(imp)` has no series to differ in
+        text, series = str(parsed["title"]), str(parsed["version"])
+        cut = text.rfind("_" + series)
+        if cut < 0:
+            continue
+        shapes.append((unnumbered(parsed), naming.name_key(parsed),
+                       text[:cut + 1], text[cut + 1 + len(series):], series))
+
+    def another(title: str) -> bool:
+        text = str(title or "").strip()
+        parsed = parse(text)
+        mine = (unnumbered(parsed), naming.name_key(parsed)) if parsed is not None else None
+        for bare, key, head, tail, series in shapes:
+            if mine is not None:
+                if mine[0] == bare and mine[1] != key:
+                    return True
+            elif len(text) > len(head) + len(tail) and text.startswith(head) \
+                    and text.endswith(tail):
+                word = text[len(head):len(text) - len(tail)]
+                if word != series and _SERIES_WORD.fullmatch(word):
+                    return True
+        return False
+
+    return another
+
 
 def preselect(rows: Iterable[Candidate], expected: Iterable[str],
               project_dir: Optional[Path] = None) -> Preselect:
@@ -397,7 +501,9 @@ def preselect(rows: Iterable[Candidate], expected: Iterable[str],
     name. **Two rows answering to the same expected name tick NEITHER**: which of the two is the
     one that came out is exactly what the person is looking at the list to decide.
     """
-    read = key_reader(project_dir)
+    rows, expected = list(rows), list(expected)
+    naming, glossary = _grammar(project_dir)
+    read = _key_reader(naming, glossary)
     spelled: dict[str, str] = {}
     for name in expected:
         if str(name).strip():
@@ -423,17 +529,16 @@ def preselect(rows: Iterable[Candidate], expected: Iterable[str],
         else:
             ambiguous.update(row.uuid for row in group)
     # A likely typo: a row that answers to nothing the round expects, whose title reads almost
-    # like a name the round is still missing (`r-R_1 (se)` for `r-R_1 (sw)`).
-    missing = [spelled[key] for key in wanted if key not in by_key]
+    # like a name the round is still missing (`r-R_1 (se)` for `r-R_1 (sw)`). In the round's order,
+    # so a tie goes the same way on every run.
+    missing = [spelled[key] for key in spelled if key in wanted and key not in by_key]
     grouped = {row.uuid for group in by_key.values() for row in group}
-    for row in rows:
-        if not missing or not row.identified or row.imported or row.uuid in grouped:
-            continue
-        close = difflib.get_close_matches(row.title, missing, n=1, cutoff=_TYPO_CUTOFF)
-        if close:
-            names[row.uuid] = close[0]
-            proposed.add(row.uuid)
-            missing.remove(close[0])
+    loose = [row for row in rows
+             if row.identified and not row.imported and row.uuid not in grouped]
+    found = likely_typos([row.title for row in loose], missing, expected, naming, glossary)
+    for index, name in found.items():
+        names[loose[index].uuid] = name
+        proposed.add(loose[index].uuid)
     return Preselect(ticked=frozenset(ticked), ambiguous=frozenset(ambiguous), names=names,
                      proposed=frozenset(proposed))
 

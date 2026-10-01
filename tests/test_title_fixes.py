@@ -21,6 +21,15 @@ def test_a_measurement_that_is_simply_absent_gets_no_fix():
     assert title_fixes.proposals(["m-L_1 (sw)"], ["m-L_1 (sw)", "sw_1 (sw)"]) == []
 
 
+def test_another_series_is_no_typo_and_the_closest_name_wins():
+    """tcc#114, finding 122: the live REW of 2026-10-01. The strip's pass took titles one by one
+    and offered `sw_B1 (sw) → sw_3 (sw)` and `sw+w-L_B1 (sw) → sw+w-R_3 (sw)`: an older series is
+    a measurement of its own, and only the real typo gets a name."""
+    titles = ["sw_B1 (sw)", "sw+w-L_B1 (sw)", "sw+w-R_B1 (sw)", "sw+w-L_3 (se)"]
+    fixes = title_fixes.proposals(titles, ["sw_3 (sw)", "sw+w-L_3 (sw)", "sw+w-R_3 (sw)"])
+    assert fixes == [title_fixes.TitleFix("sw+w-L_3 (se)", "sw+w-L_3 (sw)", "typo")]
+
+
 def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_path, monkeypatch):
     seen = []
 
