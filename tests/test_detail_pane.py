@@ -2170,19 +2170,23 @@ def test_a_version_the_method_refuses_says_so_instead_of_comparing_with_nothing(
 
 
 @pytest.mark.parametrize("stretch", [100, 141, 200])
-def test_the_full_window_s_list_keeps_the_unreadable_mark_at_its_floor(stretch):
-    """tcc#122, the review of the first pass: the full window's list holds six letters' room, and
-    «v_004 · SQ-2 — не читається» came out «v_004…» there — the mark cut, as in control mode's
-    box. It asks the mark's room beside its floor now, and keeps the mark whole, the version whole
-    before it: at its floor and its whole width, in the Mac's font and about twice and four times
+def test_the_full_window_s_list_says_refused_and_keeps_its_floor(stretch):
+    """tcc#122, Ruling 26: the full window's list holds six letters' room, and
+    «v_004 · SQ-2 — не читається» came out «v_004…» there — the mark cut. Then, held whole, the mark
+    raised the list's floor and the window's. Now the names give way, then the mark's words, down
+    to «?», never the version; nothing past the field; the floor the same with and without the
+    refusal. At its floor and its whole width, in the Mac's font and about twice and four times
     as wide."""
-    from PySide6.QtGui import QFont, QFontMetricsF
+    from PySide6.QtGui import QFont
 
     from autosound_tcc.state.dsp_state import VersionRefused
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from tests.test_control_layout import _says_refused
+
+    refused = set()
 
     def load(key):
-        if key == "v_004":
+        if key in refused:
             raise VersionRefused("v_004", "v_003", "the method's own sentence")
         return _rig_view()
 
@@ -2194,18 +2198,89 @@ def test_the_full_window_s_list_keeps_the_unreadable_mark_at_its_floor(stretch):
         font = QFont(box.font())
         font.setStretch(stretch)
         box.setFont(font)
-        pane.set_compare_choices(["v_005", "v_004", "v_003"], "v_004", load,
-                                 labels={"v_004": "v_004 · SQ-2, SQ-3"}, preset="FULL",
-                                 current="v_005")
-        mark = i18n.t("cmpUnreadable").format(version="")
-        assert box.currentText().endswith(mark)
-        for way, width in (("floor", box.floor_width()), ("holds", box.whole_width())):
+        choices = (["v_005", "v_004", "v_003"], "v_004", load)
+        named = {"labels": {"v_004": "v_004 · SQ-2, SQ-3"}, "preset": "FULL", "current": "v_005"}
+        floors = []
+        for refuse in (False, True):
+            refused.clear()
+            refused.update({"v_004"} if refuse else set())
+            pane.set_compare_choices(*choices, **named)
+            floors.append((box.floor_width(), box.whole_width()))
+        assert box.currentText().endswith(i18n.t("cmpUnreadable").format(version=""))
+        assert floors[0] == floors[1], f"the refusal moved the list's floor: {floors}"
+        assert i18n.t("cmpUnreadable").format(version="v_004 · SQ-2, SQ-3") in box.toolTip(), \
+            "the hover says it whole"
+        for way, width in (("floor", box.floor_width()), ("holds", box.whole_width()),
+                           ("holds", box.whole_width() + 120)):
             box.set_way(way)
             box.resize(width, 26)
-            shown = box.fit_text()
-            assert shown.endswith(mark) and shown.startswith("v_004"), (way, width, shown)
-            assert QFontMetricsF(box.font()).horizontalAdvance(shown) < box._room() + 1, shown
-        box.setCurrentIndex(box.findData("v_003"))
-        assert box.floor_width() < width, "a pick that reads asks no room for a mark"
+            _says_refused(box, box.fit_text(), "v_004")
     finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize(("screen", "stretch"),
+                         [(1512, 100), (1512, 110), (1512, 115), (1512, 120), (1920, 100)])
+@pytest.mark.parametrize("view", ["table", "eq_single", "eq_pair"])
+@pytest.mark.parametrize("key", ["v_001", "3.S-shelf/v_001"], ids=["own", "other"])
+def test_a_refused_pick_keeps_the_version_and_the_full_window_s_floor(
+        tmp_path, monkeypatch, view, screen, stretch, key):
+    """The re-review of fix round 1: with the mark held whole, the EQ view's head on the Arbiter's
+    1512 screen asked 610 px against the centre's floor of 588 and Qt trimmed the list to
+    «v_… — не читається»; on 1920 a refused pick raised the window's floor 1186/1252 → 1280,
+    against «a pick never moves the window's floor». At W-4's widths (`test_the_head_reads_at_
+    the_full_window_s_floor`, with the zoom's first steps), the window at its floor: the list keeps
+    the version whole and draws nothing past its field, and the window's minimum is the same
+    whether the picked version reads or is refused."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.state.dsp_state import VersionRefused
+    from autosound_tcc.ui.tcc import main_window
+    from tests import test_control_layout as tcl
+    from tests.test_control_layout import _says_refused
+
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    refused = set()
+
+    def load(k):
+        if k in refused:
+            raise VersionRefused(k.rsplit("/", 1)[-1], "v_009", "the method's own sentence")
+        return tcl._older()
+
+    window = tcl._window(tmp_path, monkeypatch)
+    i18n.set_language("uk")
+    try:
+        monkeypatch.setattr(main_window, "_screen_room", lambda _w: QRect(0, 0, screen, 982))
+        window.show()
+        pane = _arbiter_head(window, view)
+        box = pane._compare_combo
+        floors = []
+        for refuse in (False, True):
+            refused.clear()
+            refused.update({key} if refuse else set())
+            pane.set_compare_choices(
+                ["v_002", "v_001"], key, load, {"v_002": "v_002", "v_001": "v_001 · P3, SQ-2"},
+                [(p, [(f"{p}/v_002", "v_002"), (f"{p}/v_001", "v_001 · P1, SQ-1")])
+                 for p in tcl._OTHERS], "4.C-cut", "v_002")
+            window._fit_centre_floor()
+            for _ in range(4):
+                window.resize(window.minimumWidth(), 900)
+                for _ in range(4):
+                    QApplication.processEvents()
+                if window.width() == window.minimumWidth():
+                    break
+            floors.append((window.minimumWidth(), window.minimumSizeHint().width()))
+        assert not box.model().item(box.currentIndex()).isEnabled(), "refused, and said so"
+        assert floors[0] == floors[1], f"a refused pick moved the window's floor: {floors}"
+        assert box.width() >= box.minimumSizeHint().width(), "nothing for Qt to trim"
+        _says_refused(box, box.fit_text(), "v_001")
+    finally:
+        app.setFont(before)
         i18n.set_language("en")

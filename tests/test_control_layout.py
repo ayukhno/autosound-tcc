@@ -972,32 +972,115 @@ def _marked_box(stretch, key):
     return combo
 
 
+def _says_refused(combo, shown: str, version: str) -> None:
+    """The version whole, the mark's words or its sign after it where they fit, nothing clipped."""
+    import math
+
+    from PySide6.QtGui import QFontMetricsF
+
+    from autosound_tcc.ui.tcc.detail_pane import UNREAD_SIGN
+
+    room, metrics = combo._room(), QFontMetricsF(combo.font())
+    assert version in shown, (room, shown)
+    assert math.ceil(metrics.horizontalAdvance(shown)) <= room, (room, shown)
+    words = i18n.t("cmpUnreadable").format(version="")
+    tail = shown[shown.rindex(version) + len(version):]
+    if math.ceil(metrics.horizontalAdvance(version + UNREAD_SIGN)) <= room:
+        assert (tail.endswith(words) or tail.strip() == UNREAD_SIGN
+                or (tail.endswith("…") and len(tail) > 1 and words.startswith(tail[:-1]))), \
+            (room, shown)
+
+
 @pytest.mark.parametrize("stretch", [100, 141, 200])
 @pytest.mark.parametrize("key", ["v_002", "3.S-shelf/v_001"], ids=["own", "other"])
-def test_the_unreadable_mark_survives_the_cap(stretch, key):
-    """tcc#122, the review of the first pass: «… — не читається» was appended to the row, and the
-    cap cut it first — another configuration's row read the mark as saved names and drew their bare
-    «…», this configuration's lost it off its end («v_002 · P3, SQ-2, SQ…»): a compare with
-    nothing that says nothing, at half a screen. The mark is kept whole; the names, then the preset
-    give way before it, the version whole. At the box's floor and at its cap, own and another
-    configuration's rows, the Mac's font and about twice and four times as wide."""
-    from PySide6.QtGui import QFontMetricsF
+def test_a_refused_pick_gives_way_in_the_ruled_order_and_asks_no_floor(stretch, key):
+    """tcc#122, the controller's Ruling 26 after two reviews: appended and cut like a saved name,
+    «не читається» was the first thing the cap took; held whole, it took the version instead and
+    moved the window's floor. The order of giving way is the saved names, then the preset, then
+    the mark's words — cut with «…» down to «?» — and never the version; nothing is clipped, and
+    the box's floor is the same with the mark as without it. At the box's floor and its cap, own
+    and another configuration's rows, in the Mac's font and about twice and four times as wide."""
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
 
     _app()
     try:
         i18n.set_language("uk")
         combo = _marked_box(stretch, key)
-        mark = i18n.t("cmpUnreadable").format(version="")
+        marked = combo.minimumSizeHint().width()
         version = key.rsplit("/", 1)[-1]
-        assert mark.strip() and combo.currentText().endswith(mark)
-        for width in sorted({combo.minimumSizeHint().width(), combo.floor_cap()}):
+        assert combo.currentText().endswith(i18n.t("cmpUnreadable").format(version=""))
+        for width in sorted({marked, combo.floor_cap(), marked + 40, marked + 120}):
             combo.resize(width, 26)
-            shown = combo.fit_text()
-            assert shown.endswith(mark), (width, shown)
-            assert version in shown, (width, shown)
-            assert QFontMetricsF(combo.font()).horizontalAdvance(shown) < combo._room() + 1, \
-                (width, shown)
+            _says_refused(combo, combo.fit_text(), version)
+        combo.resize(2000, 26)
+        assert combo.fit_text() == combo.shown_text(), "with the room, the whole of it"
+        plain = _marked_box(stretch, key)
+        fill_compare_combo(plain, ["v_003", "v_002", "v_001"],
+                           {"v_003": "v_003", "v_002": "v_002 · P3, SQ-2, SQ-3", "v_001": "v_001"},
+                           [("3.S-shelf", [("3.S-shelf/v_001", "v_001 · P1, SQ-1")])], "4.C-cut",
+                           "v_003")
+        plain.setCurrentIndex(plain.findData(key))
+        assert plain.minimumSizeHint().width() == marked, "the mark asks no floor"
     finally:
+        i18n.set_language("en")
+
+
+#: W-4's widths for control mode: the Arbiter's 1512-px screen at the Mac's font and the zoom's
+#: first steps (`test_a_long_configuration_name_keeps_the_window_in_half_a_screen`), and 1920.
+_W4_WIDTHS = [(1512, 100), (1512, 110), (1512, 115), (1512, 120), (1920, 100)]
+
+
+@pytest.mark.parametrize(("screen", "stretch"), _W4_WIDTHS)
+@pytest.mark.parametrize("key", ["v_001", "3.S-shelf/v_001"], ids=["own", "other"])
+def test_a_refused_pick_at_half_a_screen_keeps_the_version_and_the_window_s_floor(
+        tmp_path, monkeypatch, screen, stretch, key):
+    """The re-review of fix round 1: at half the Arbiter's screen with the zoom's first steps the
+    uncuttable mark left « — не читається» with the version gone (110), or was clipped mid-glyph
+    (115, 120). At those widths and on 1920, the window at its half: the box keeps the version
+    whole and draws nothing past its field, and the window's minimum is the same whether the
+    picked version reads or is refused."""
+    from PySide6.QtGui import QFont
+
+    from autosound_tcc.state.dsp_state import VersionRefused
+
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    refused = set()
+
+    def load(k):
+        if k in refused:
+            raise VersionRefused(k.rsplit("/", 1)[-1], "v_009", "the method's own sentence")
+        return _older()
+
+    try:
+        window = _control_window(tmp_path, monkeypatch, "uk", screen=screen)
+        args = window._compare_args
+        labels = dict(args[3], v_001="v_001 · P3, SQ-2, SQ-3")
+        others = [("3.S-shelf", [("3.S-shelf/v_002", "v_002"),
+                                 ("3.S-shelf/v_001", "v_001 · P1, SQ-1")])]
+        window._compare_args = args[:2] + (load, labels, others) + args[5:]
+        layout = window._control_layout
+        half = layout._right_half()[1].width()
+        floors = []
+        for refuse in (False, True):
+            refused.clear()
+            refused.update({key} if refuse else set())
+            window._on_compare_chosen(None)
+            layout._fill_compare()
+            window._on_compare_chosen(key)
+            _settle(window, half)
+            floors.append(window.minimumSizeHint().width())
+        combo = layout.compare_combo
+        assert not combo.model().item(combo.currentIndex()).isEnabled(), "refused, and said so"
+        _says_refused(combo, combo.fit_text(), key.rsplit("/", 1)[-1])
+        assert floors[0] == floors[1], f"a refused pick moved the window's floor: {floors}"
+        layout.leave()
+    finally:
+        app.setFont(before)
         i18n.set_language("en")
 
 

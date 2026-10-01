@@ -446,9 +446,11 @@ class _CompareBox(QComboBox):
     def fit_text(self) -> str:
         """What the closed box draws: `shown_text`, elided to the room it has now -- the saved
         names first, then the preset's name; «v_NNN» goes only when nothing else is left. A row
-        marked «не читається» keeps the mark whole and gives way before it (`with_unread_mark`,
-        tcc#122: appended and cut as a saved name, it was the first thing the cap took)."""
-        return with_unread_mark(self, self._room(), self._fit)
+        marked «не читається»: its names, its preset, then the mark's words down to a sign, never
+        the version (`with_unread_mark`, tcc#122, Ruling 26)."""
+        key = self.currentData()
+        return with_unread_mark(self, self._room(), self._fit,
+                                key.split("/", 1)[-1] if key else "")
 
     def _fit(self, row: str, room: int) -> str:
         metrics, full = self.fontMetrics(), self._shown(row)
@@ -490,7 +492,8 @@ class _CompareBox(QComboBox):
         if is_other_preset(self.currentData()):
             chrome = hint.width() - self._room(hint)
             hint.setWidth(max(hint.width(), self._text_width(self.shown_text()) + chrome))
-        else:  # this configuration's: six letters' room, and a «не читається» beside them
+        else:  # this configuration's: six letters' room, and a «не читається» beside them where
+            # the header has it to give -- asked, not held: the floor is `minimumSizeHint`'s
             hint.setWidth(hint.width() + unread_mark_width(self))
         return hint
 
@@ -511,19 +514,16 @@ class _CompareBox(QComboBox):
         return cap
 
     def minimumSizeHint(self):  # noqa: N802 (Qt override)
-        # A QComboBox's own floor is its size hint. A picked row's «не читається» is held whole
-        # beside what the floor holds of the row, under the same cap (tcc#122).
+        # A QComboBox's own floor is its size hint. Read off the row without a «не читається»:
+        # the mark asks no floor of its own, and a pick never moves the window's (tcc#122,
+        # Ruling 26 -- held whole, it took the version at W-4's widths).
         hint = super().minimumSizeHint()
-        mark = unread_mark_width(self)
         parts = self._parts()
         if parts is not None:
             preset, version, names = parts
             chrome = hint.width() - self._room(hint)
-            held = (self._text_width(f"{preset} · {version}" + ("…" if names else ""))
-                    + mark + chrome)
+            held = self._text_width(f"{preset} · {version}" + ("…" if names else "")) + chrome
             hint.setWidth(max(hint.width(), min(held, self.floor_cap())))
-        elif mark:
-            hint.setWidth(max(hint.width(), min(hint.width() + mark, self.floor_cap())))
         return hint
 
     def sync_width(self) -> None:

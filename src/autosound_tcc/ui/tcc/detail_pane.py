@@ -466,20 +466,10 @@ class _HeadBox(QComboBox):
     def __init__(self) -> None:
         super().__init__()
         self._way = "holds"
-        #: The «не читається» room the width was last asked with (`sync_width`).
-        self._sized_mark = 0
 
     def set_way(self, way: str) -> None:
         if way != self._way:
             self._way = way
-            self.updateGeometry()
-
-    def sync_width(self) -> None:
-        """Tells the layout the width changed -- only when the picked row's «не читається»
-        came or went, the one thing the asked width follows the pick for."""
-        mark = unread_mark_width(self)
-        if mark != self._sized_mark:
-            self._sized_mark = mark
             self.updateGeometry()
 
     def way(self) -> str:
@@ -496,18 +486,19 @@ class _HeadBox(QComboBox):
         return max(0, field.width() - 2)
 
     def whole_width(self) -> int:
-        """Six letters' room, and a picked row's «не читається» whole beside them (tcc#122)."""
-        return super().sizeHint().width() + unread_mark_width(self)
+        return super().sizeHint().width()
 
     def floor_width(self) -> int:
         """«v_NNN» whole with the «…» that says a saved name follows: measured on «v_000» alone,
-        «v_001 · P3» read «v_0…» at the floor (the re-review of fix round 1). And a picked row's
-        «не читається» whole beside it: a refused version has to say so at the floor too."""
+        «v_001 · P3» read «v_0…» at the floor (the re-review of fix round 1). Or with the sign a
+        refused version comes down to, `UNREAD_SIGN`, where that is the wider -- whatever is
+        picked: a pick never moves the window's floor (tcc#122, Ruling 26)."""
         hint = super().sizeHint()
         chrome = hint.width() - self._room(hint)
-        floor = min(hint.width(),
-                    chrome + math.ceil(QFontMetricsF(self.font()).horizontalAdvance("v_000…")))
-        return floor + unread_mark_width(self)
+        metrics = QFontMetricsF(self.font())
+        least = max(metrics.horizontalAdvance("v_000…"),
+                    metrics.horizontalAdvance("v_000" + UNREAD_SIGN))
+        return min(hint.width(), chrome + math.ceil(least))
 
     @staticmethod
     def _version_head(text: str) -> str:
@@ -527,8 +518,10 @@ class _HeadBox(QComboBox):
     def fit_text(self) -> str:
         """What the closed box draws: the current text, elided to the room it has now -- the
         version whole and «…» after it where the saved names do not fit; a row marked
-        «не читається» with the mark whole (`with_unread_mark`)."""
-        return with_unread_mark(self, self._room(), self._fit)
+        «не читається» gives way after its names and before its version (`with_unread_mark`)."""
+        split = unread_mark(self)
+        version = self._version_head(split[0] if split else self.currentText())
+        return with_unread_mark(self, self._room(), self._fit, version)
 
     def _fit(self, text: str, room: int) -> str:
         metrics = QFontMetricsF(self.font())
@@ -1029,7 +1022,6 @@ def mark_unreadable(combo: QComboBox, key: Optional[str]) -> None:
     combo.setItemData(index, label, UNREAD_LABEL_ROLE)
     combo.setItemText(index, i18n.t("cmpUnreadable").format(version=label))
     item.setEnabled(False)
-    combo.updateGeometry()  # the closed box asks room for the mark (`unread_mark_width`)
 
 
 def unread_mark(combo: QComboBox) -> Optional[tuple[str, str, str]]:
@@ -1051,16 +1043,42 @@ def unread_mark_width(combo: QComboBox) -> int:
     return math.ceil(QFontMetricsF(combo.font()).horizontalAdvance(split[1] + split[2]))
 
 
-def with_unread_mark(combo: QComboBox, room: int, fit) -> str:
-    """What a closed box draws: `fit(text, room)` of the picked row — and on a row marked
-    «не читається» the mark whole beside what `fit` leaves of the label in the rest. Appended and
-    cut like a saved name, the mark was the first thing the cap took (tcc#122, the review of the
-    first pass): the label gives way, never the mark."""
+#: What «не читається» comes down to where its words do not fit beside the version: the sign the
+#: tables already give a value TCC cannot read (`UNREAD_LEG`, tcc#123). With the box greyed it
+#: says "refused"; the hover says it in words (tcc#122, the controller's Ruling 26).
+UNREAD_SIGN = UNREAD_LEG
+
+
+def with_unread_mark(combo: QComboBox, room: int, fit, version: str = "") -> str:
+    """What a closed box draws: `fit(text, room)` of the picked row. On a row marked
+    «не читається» the parts give way in the controller's order (Ruling 26, tcc#122): the saved
+    names, then the preset (`fit`, in what the whole mark leaves), then the mark's words — cut
+    with «…», down to `UNREAD_SIGN` — and never `version`; the whole elided to `room`, never
+    clipped. The mark asks no room of its own: made uncuttable it took the version at W-4's
+    widths and moved the window's floor (the re-review of fix round 1)."""
     split = unread_mark(combo)
     if split is None:
         return fit(combo.currentText(), room)
     label, before, after = split
-    return before + fit(label, room - unread_mark_width(combo)) + after
+    metrics = QFontMetricsF(combo.font())
+
+    def width(text: str) -> int:
+        return math.ceil(metrics.horizontalAdvance(text))
+
+    def held(text: str) -> str:
+        return (text if width(text) <= room
+                else metrics.elidedText(text, Qt.TextElideMode.ElideRight, room))
+
+    shown = fit(label, room - width(before + after))
+    if not version or version in shown:
+        return held(before + shown + after)
+    rest = room - width(version)
+    said = after or before
+    words = metrics.elidedText(said, Qt.TextElideMode.ElideRight, rest) if rest > 0 else ""
+    if not any(ch.isalpha() for ch in words):  # not a letter of the words left: the sign,
+        # apart from the version where there is the room
+        words = next((sign for sign in (f" {UNREAD_SIGN}", UNREAD_SIGN) if width(sign) <= rest), "")
+    return held(version + words if after or not before else words + version)
 
 
 def paint_compare_box(box: QComboBox, text: str) -> None:
@@ -1435,7 +1453,7 @@ class DetailPane(QFrame):
                 # ...and says so on its row (tcc#122).
                 mark_unreadable(self._compare_combo, version)
                 self._compare_text = self._compare_combo.currentText()
-        self._compare_combo.sync_width()
+        self._sync_box_tip()
 
     def _rerender(self) -> None:
         if self._mode == "param" and self._param:
@@ -1697,6 +1715,10 @@ class DetailPane(QFrame):
             preset = self._compare_version.split("/", 1)[0]
             said.append(i18n.t("cmpOtherTip").format(
                 version=f"{preset} · {self._compare_combo.currentText()}"))
+        elif unread_mark(self._compare_combo) is not None:
+            # The box says «не читається» as far as its room goes, down to a sign: the hover says
+            # it whole (tcc#122, Ruling 26).
+            said.append(self._compare_combo.currentText())
         tip = "\n".join(said)
         if self._compare_combo.toolTip() != tip:
             self._compare_combo.setToolTip(tip)
