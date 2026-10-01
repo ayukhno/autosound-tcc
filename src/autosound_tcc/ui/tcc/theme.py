@@ -73,7 +73,11 @@ class MiniCombo(QComboBox):
         self.updateGeometry()
 
     def _own_ask(self) -> QSize:
-        return super().sizeHint()
+        """What the box asks for of itself, as its maximum before any was lent allows it."""
+        hint = super().sizeHint()
+        if self._cap is not None:
+            hint.setWidth(min(hint.width(), self._cap))
+        return hint
 
     def short_of_pick(self) -> int:
         """How much wider than its own ask the box would have to be to draw its pick whole."""
