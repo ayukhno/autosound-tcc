@@ -14,13 +14,16 @@ So TCC asks the one reader of all three stores, the method's own script:
 * `autosound_ai.py key set <provider>` stores a key, which it reads from STDIN: argv is visible to
   every process on the machine (`ps`), stdin is not;
 * `autosound_ai.py key move-shell` moves an exported key into the store, reading it where it is
-  exported — no value from TCC (tcc#117).
+  exported — no value from TCC (tcc#117); `key move-shell <provider> --drop` (v3.0.65, hub #230)
+  removes one provider's exported copy without storing it, for a key the keystore already holds.
 
 A vendored method older than these commands answers neither. Then `status()` is None and the
 reachability question falls back to `critic_env`, exactly as before — so TCC works with the method
 it has on either side of the vendoring, with no window in which a key goes unseen.
 
-No value is logged, cached, or kept here: `set_key` hands it to the child and lets go.
+No value is logged, cached, or kept here: `set_key` hands it to the child and lets go — and
+nothing holds a pasted key across a question either, now that the method can drop a copy without
+storing it (hub #230).
 """
 
 from __future__ import annotations
@@ -41,6 +44,9 @@ _TIMEOUT_S = 20
 _LOCK = threading.Lock()
 #: `False` = not asked yet; `None` = asked, and the method cannot answer; a dict = its answer.
 _STATUS: object = False
+#: `drops_exports`' answer and the script file it was asked of — `((path, mtime, size), bool)` —
+#: or None before the first question.
+_DROPS: Optional[tuple[tuple, bool]] = None
 
 
 def script_path():
@@ -148,20 +154,50 @@ def set_key(provider: str, value: str) -> tuple[bool, str]:
     return proc.returncode == 0, said
 
 
-def move_exports() -> tuple[bool, str]:
-    """The method's `key move-shell --yes`: each key still exported — a shell profile, or the
-    Windows user environment — into the store and out of there. (ran, its words)
+def drops_exports() -> bool:
+    """Does the method here take `key move-shell <provider> --drop` (v3.0.65, hub #230)?
 
-    Only after the window asked and the Arbiter said yes (finding 127, tcc#117): `--yes` skips the
-    method's own prompt, which would be the same question a second time. The method reads each
-    value where it is exported; TCC never sees one.
+    Asked of its usage, not of its version, as `process_writer._refuse_if_too_old` does: `key`
+    with a word it does not know prints the usage line and exits 2 on every method that has `key`,
+    and touches nothing. It has to be asked: v3.0.64 reads `move-shell google --drop --yes` as
+    `move-shell --yes`, and moves AND STORES every export there is. Kept for the script file it
+    was asked of; an update replaces the file, and the next question asks again.
     """
-    proc = _run(["key", "move-shell", "--yes"])
+    global _DROPS
+    script = script_path()
+    try:
+        stat = script.stat()
+    except OSError:
+        return False
+    seen = (str(script), stat.st_mtime_ns, stat.st_size)
+    if _DROPS is None or _DROPS[0] != seen:
+        proc = _run(["key", "help"])
+        said = "" if proc is None else f"{proc.stdout or ''}\n{proc.stderr or ''}"
+        _DROPS = (seen, "--drop" in said)
+    return _DROPS[1]
+
+
+def drop_export(provider: str) -> tuple[Optional[int], str]:
+    """The method's `key move-shell <provider> --drop --yes`: `provider`'s exported copy — its
+    profile lines, and on Windows the user environment's value — removed WITHOUT storing it, the
+    OS keystore holding the key already (finding 127, hub #230). (exit code, its words); the code
+    is None when the method gave no answer.
+
+    The code IS the answer: 0 removed, 1 nothing to remove, 3 refused or failed (the keystore does
+    not hold the key — the export is then the only copy — or a line sets it by an expression),
+    2 usage. Only after the window asked and the Arbiter said yes: `--yes` skips the method's own
+    prompt, the same question a second time. Only the provider goes on argv, nothing on stdin; and
+    never to a method without the form (`drops_exports`).
+    """
+    if provider not in PROVIDERS:
+        return 2, f"unknown provider {provider!r}"
+    proc = _run(["key", "move-shell", provider, "--drop", "--yes"])
     forget()
     if proc is None:
-        return False, ""
-    app_log.logger().info("reviewer key: move-shell -> exit %s", proc.returncode)
-    return proc.returncode == 0, (proc.stdout or proc.stderr).strip()
+        return None, ""
+    app_log.logger().info("reviewer key: move-shell %s --drop -> exit %s", provider,
+                          proc.returncode)
+    return proc.returncode, (proc.stdout or proc.stderr).strip()
 
 
 def move_shell_line() -> str:

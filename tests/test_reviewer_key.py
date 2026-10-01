@@ -28,17 +28,28 @@ _STATUS = {
 }
 
 
+#: `key help` — no such subcommand — prints the usage line and exits 2, on every method that has
+#: `key`. v3.0.65 names the provider and `--drop` in it (hub #230); v3.0.64 does not.
+_USAGE_DROP = ("key set <provider> | key status [--json] | key rm <provider> | "
+               "key move-shell [<provider>] [--drop] [--yes]")
+_USAGE_OLD = "key set <provider> | key status [--json] | key rm <provider> | key move-shell [--yes]"
+
+
 class _Method:
     """The method's script, as far as `reviewer_key` sees it: argv and stdin in, an answer out.
 
-    `after_move` is what `key status` says once `key move-shell` ran; `move_dies` is that child
-    killed at `_run`'s timeout — `_run` returns None — after it changed whatever it changed."""
+    `after_move` is what `key status` says once `key move-shell` ran; `move_rc` is the exit code
+    `move-shell` answers with (hub #230: 0 removed, 1 nothing to do, 3 refused, 2 usage), and None
+    is that child killed at `_run`'s timeout — `_run` returns None — after it changed whatever it
+    changed. `drops` is a method that has `move-shell <provider> --drop` (v3.0.65)."""
 
     def __init__(self, status=_STATUS, set_rc=0, set_out="stored in the Keychain",
-                 after_move=None, move_dies=False):
+                 after_move=None, move_rc=0, move_out="✓ HKCU\\Environment: прибрано",
+                 drops=True):
         self.calls: list[tuple[list[str], object]] = []
         self.status, self.set_rc, self.set_out = status, set_rc, set_out
-        self.after_move, self.move_dies = after_move, move_dies
+        self.after_move, self.move_rc, self.move_out, self.drops = (
+            after_move, move_rc, move_out, drops)
 
     def __call__(self, args, *, stdin=None):
         self.calls.append((list(args), stdin))
@@ -53,10 +64,17 @@ class _Method:
         if args[:2] == ["key", "move-shell"]:
             if self.after_move is not None:
                 self.status = self.after_move
-            if self.move_dies:
+            if self.move_rc is None:
                 return None
-            return subprocess.CompletedProcess(args, 0, "✓ HKCU\\Environment: moved", "")
+            return subprocess.CompletedProcess(args, self.move_rc, self.move_out, "")
+        if args == ["key", "help"]:
+            return subprocess.CompletedProcess(
+                args, 2, "", _USAGE_DROP if self.drops else _USAGE_OLD)
         raise AssertionError(args)
+
+    def changes(self) -> list[tuple[list[str], object]]:
+        """Every call but the reads: `key status` and the usage probe."""
+        return [(a, i) for a, i in self.calls if a[:2] != ["key", "status"] and a != ["key", "help"]]
 
 
 def _with(status=_STATUS, *, keystore=None, exports=None, **providers):
@@ -83,6 +101,8 @@ _REAL_ASK = reviewer_key._ask
 def _use(monkeypatch, method):
     monkeypatch.setattr(reviewer_key, "_run", method)
     monkeypatch.setattr(reviewer_key, "_ask", _REAL_ASK)
+    # The usage probe's answer is kept per script file — the same file in every test here.
+    monkeypatch.setattr(reviewer_key, "_DROPS", None)
     reviewer_key.forget()
 
 
@@ -169,7 +189,7 @@ def test_the_screen_shows_where_never_what(monkeypatch):
     assert dialog._field.text() == "", "the field lets go of the key"
     assert secret not in dialog._result.text()
     assert all(secret not in text for text in asked)
-    assert method.calls[-2][1] == secret + "\n"
+    assert [stdin for args, stdin in method.calls if args[:2] == ["key", "set"]] == [secret + "\n"]
     dialog.close()
 
 
@@ -351,9 +371,10 @@ def test_the_window_s_save_lifts_the_api_rows_refusals(monkeypatch):
     dialog.close()
 
 
-def test_the_remove_offer_needs_a_stored_key_and_a_live_export(monkeypatch):
+def test_the_remove_offer_needs_a_key_in_the_keystore_and_a_live_export(monkeypatch):
     """Finding 127: «треба мати питання чи видалити ключ … коли ключ вже є в сховищі і при цьому
-    ще є в файлі». Asked after a save, only when both hold."""
+    ще є в файлі». Asked after a save, only when both hold — and «в сховищі» is the OS keystore:
+    the method's `--drop` refuses without it, the export then being the only copy (hub #230)."""
     secret = "AIza" + "q" * 35
     cases = {
         "stored + exported": (_Method(status=_with(keystore="dpapi", exports=[_REGISTRY])), 1),
@@ -363,6 +384,9 @@ def test_the_remove_offer_needs_a_stored_key_and_a_live_export(monkeypatch):
         "not stored (refused)": (_Method(set_rc=2), 0),
         "not stored (env only)": (
             _Method(status=_with(google={"used": "env", "keystore": False})), 0),
+        "in the machine file only": (_Method(status=_with(google={
+            "used": "file", "keystore": False,
+            "file": {"path": "critic-env", "line": 2, "blank": False}})), 0),
     }
     for name, (method, want) in cases.items():
         dialog, asked = _dialog(monkeypatch, method)
@@ -373,21 +397,26 @@ def test_the_remove_offer_needs_a_stored_key_and_a_live_export(monkeypatch):
         dialog.close()
 
 
-def test_the_question_names_the_place_and_every_key_the_move_takes(monkeypatch):
-    """`key move-shell` takes every export, not one: the others are named before the yes."""
+def test_the_question_names_only_its_own_copy(monkeypatch):
+    """`key move-shell <provider>` moves that provider's export and no other (hub #230): the
+    question is about one key, and another export is neither named nor touched."""
     other = {"var": "OPENAI_API_KEY", "file": "~/.zshrc", "line": 7}
-    dialog, asked = _dialog(monkeypatch, _Method(status=_with(exports=[_REGISTRY, other])))
+    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY, other]))
+    dialog, asked = _dialog(monkeypatch, method, answer=True)
     dialog._field.setText("AIza" + "n" * 35)
     dialog._on_save()
     assert len(asked) == 1
     assert "GEMINI_API_KEY" in asked[0] and "HKCU\\Environment" in asked[0]
-    assert "OPENAI_API_KEY (~/.zshrc, рядок 7)" in asked[0]
+    assert "OPENAI_API_KEY" not in asked[0]
+    assert [args for args, _ in method.changes() if args[:2] == ["key", "move-shell"]] == [
+        ["key", "move-shell", "google", "--drop", "--yes"]]
     dialog.close()
 
 
-def test_yes_moves_the_copy_out_and_keeps_the_pasted_key(monkeypatch):
-    """The method's move stores the EXPORTED value — maybe an older key than the one just pasted —
-    so the pasted one is stored again after it. Nothing but the provider goes on argv."""
+def test_yes_drops_the_copy_and_holds_no_key(monkeypatch):
+    """The method's `--drop` removes the export WITHOUT storing it (hub #230), so the key just
+    pasted is stored once and let go of — nothing holds it across the question, and nothing
+    stores it again. Only the provider goes on argv."""
     from autosound_tcc.ui.tcc import i18n
 
     gone = _with(keystore="dpapi", exports=[])
@@ -397,10 +426,8 @@ def test_yes_moves_the_copy_out_and_keeps_the_pasted_key(monkeypatch):
     dialog._field.setText(secret)
     dialog._on_save()
     assert len(asked) == 1
-    calls = [(args, stdin) for args, stdin in method.calls if args[:2] != ["key", "status"]]
-    assert calls == [(["key", "set", "google"], secret + "\n"),
-                     (["key", "move-shell", "--yes"], None),
-                     (["key", "set", "google"], secret + "\n")]
+    assert method.changes() == [(["key", "set", "google"], secret + "\n"),
+                                (["key", "move-shell", "google", "--drop", "--yes"], None)]
     assert all(secret not in a for args, _ in method.calls for a in args)
     assert i18n.t("rkRemoved").format(
         place=i18n.t("rkPlaceEnv").format(file="HKCU\\Environment")) in dialog._result.text()
@@ -419,18 +446,139 @@ def test_no_leaves_the_copy_where_it_is(monkeypatch):
     dialog.close()
 
 
-def test_a_copy_the_method_did_not_move_is_said_to_be_still_there(monkeypatch):
-    """`move-shell` leaves a line that sets the key by an expression, and says so; the window
-    reads where the key is afterwards rather than trusting the yes."""
+def _said(code):
+    """The window's line for each of `move-shell --drop`'s exit codes (hub #230)."""
     from autosound_tcc.ui.tcc import i18n
 
-    exported = _with(exports=[{"var": "GEMINI_API_KEY", "file": "~/.zshrc", "line": 3}])
-    method = _Method(status=exported, after_move=exported)
+    place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
+    return {
+        0: i18n.t("rkRemoved").format(place=place),
+        1: i18n.t("rkDropNothing").format(var="GEMINI_API_KEY"),
+        3: i18n.t("rkNotRemoved").format(var="GEMINI_API_KEY", place=place),
+        2: i18n.t("rkDropUpdate").format(var="GEMINI_API_KEY", place=place),
+        None: i18n.t("rkDropNoAnswer"),
+    }[code]
+
+
+@pytest.mark.parametrize("code", [0, 1, 3, 2, None])
+def test_the_result_is_read_from_the_exit_code(monkeypatch, code):
+    """0 removed, 1 nothing to do, 3 refused or failed, 2 usage; None, no answer. Read from the
+    code, not from a fresh `key status`: the status here says the copy is gone whatever the code
+    — a reader of the status would say «Прибрано» for every one of them."""
+    gone = _with(exports=[])
+    method = _Method(after_move=gone, move_rc=code, move_out="✗ ~/.zshrc:3: the method's words")
     dialog, _ = _dialog(monkeypatch, method, answer=True)
     dialog._field.setText("AIza" + "m" * 35)
     dialog._on_save()
-    assert i18n.t("rkNotRemoved").format(
+    assert _said(code) in dialog._result.text()
+    others = [_said(c) for c in (0, 1, 3, 2, None) if c != code]
+    assert not any(line in dialog._result.text() for line in others)
+    if code is not None:
+        assert "the method's words" in dialog._result.toolTip()
+    dialog.close()
+
+
+def test_another_provider_s_stored_key_no_longer_holds_the_yes(monkeypatch):
+    """Under v3.0.64 a yes moved EVERY export, so an old OpenAI line beside a stored OpenAI key
+    kept the question back. With one provider per command it is asked, and moves Gemini only."""
+    other = {"var": "OPENAI_API_KEY", "file": "~/.zshrc", "line": 7}
+    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY, other],
+                                  openai={"keystore": True, "used": "keystore"}))
+    dialog, asked = _dialog(monkeypatch, method, answer=True)
+    dialog._field.setText("AIza" + "h" * 35)
+    dialog._on_save()
+    assert len(asked) == 1
+    assert [args for args, _ in method.changes() if args[:2] == ["key", "move-shell"]] == [
+        ["key", "move-shell", "google", "--drop", "--yes"]]
+    dialog.close()
+
+
+def test_a_move_with_no_answer_stores_nothing_again(monkeypatch):
+    """The re-store of v3.0.64's path is gone with the hold: one `key set`, whatever the drop
+    answered."""
+    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY]), move_rc=None)
+    dialog, _ = _dialog(monkeypatch, method, answer=True)
+    dialog._field.setText("AIza" + "t" * 35)
+    dialog._on_save()
+    assert [args[:2] for args, _ in method.changes()] == [["key", "set"], ["key", "move-shell"]]
+    dialog.close()
+
+
+def test_an_older_method_is_never_sent_the_drop(monkeypatch):
+    """v3.0.64 reads `move-shell google --drop --yes` as `move-shell --yes`: it moves AND STORES
+    every export (hub #230). Its usage line has no `--drop`, so the window asks nothing, runs
+    nothing, offers no «Видалити», and says to update the method."""
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(drops=False)
+    dialog, asked = _dialog(monkeypatch, method, answer=True)
+    assert dialog._drops == {}
+    dialog._field.setText("AIza" + "u" * 35)
+    dialog._on_save()
+    assert asked == []
+    assert not any(args[:2] == ["key", "move-shell"] for args, _ in method.calls)
+    assert i18n.t("rkDropUpdate").format(
         var="GEMINI_API_KEY", place="~/.zshrc, рядок 3") in dialog._result.text()
+    dialog.close()
+
+
+def test_the_drop_is_asked_of_the_method_s_usage_once(monkeypatch):
+    """Asked of what the method says it takes, not of its version number, and only once for one
+    script file: the window repaints, the method does not change under it."""
+    for drops in (True, False):
+        method = _Method(drops=drops)
+        _use(monkeypatch, method)
+        assert reviewer_key.drops_exports() is drops
+        assert reviewer_key.drops_exports() is drops
+        assert method.calls == [(["key", "help"], None)]
+
+
+def test_drop_export_names_the_provider_and_nothing_else(monkeypatch):
+    method = _Method(move_rc=3, move_out="✗ refused")
+    _use(monkeypatch, method)
+    assert reviewer_key.drop_export("google") == (3, "✗ refused")
+    assert method.calls == [(["key", "move-shell", "google", "--drop", "--yes"], None)]
+    assert reviewer_key.drop_export("nobody")[0] == 2
+    assert len(method.calls) == 1, "an unknown provider never reaches the method"
+
+
+def test_a_copy_beside_a_key_in_the_keystore_has_a_delete(monkeypatch):
+    """Finding 127, «… чи кнопку видалити»: the copy left outside the store, beside a key the
+    keystore holds. Not for a key only exported (it is the only copy), and never the default."""
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, _ = _dialog(monkeypatch, _Method())
+    assert list(dialog._drops) == ["google"]
+    button = dialog._drops["google"]
+    assert button.text() == i18n.t("rkDropCopy").format(var="GEMINI_API_KEY")
+    assert not button.autoDefault() and not button.isHidden()
+    dialog.close()
+
+    dialog, _ = _dialog(monkeypatch, _Method(status=_with(
+        google={"used": "env", "keystore": False})))
+    assert dialog._drops == {}
+    dialog.close()
+
+
+def test_delete_asks_first_and_no_keeps_the_copy(monkeypatch):
+    method = _Method()
+    dialog, asked = _dialog(monkeypatch, method, answer=False)
+    dialog._drops["google"].click()
+    assert len(asked) == 1 and "GEMINI_API_KEY" in asked[0] and "~/.zshrc" in asked[0]
+    assert method.changes() == []
+    dialog.close()
+
+
+def test_delete_drops_the_copy_and_the_button_goes_with_it(monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(after_move=_with(exports=[]))
+    dialog, _ = _dialog(monkeypatch, method, answer=True)
+    dialog._drops["google"].click()
+    assert method.changes() == [(["key", "move-shell", "google", "--drop", "--yes"], None)]
+    assert i18n.t("rkRemoved").format(
+        place=i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)) in dialog._result.text()
+    assert dialog._drops == {} and dialog._shell.isHidden()
     dialog.close()
 
 
@@ -451,44 +599,4 @@ def test_the_window_opens_on_the_key_field_with_save_as_its_default(monkeypatch)
     QTest.keyClick(dialog._field, Qt.Key.Key_Return)
     QApplication.processEvents()
     assert opened == []
-    dialog.close()
-
-
-def test_another_export_with_a_stored_key_gets_no_yes(monkeypatch):
-    """`key move-shell --yes` stores EVERY export: an old OPENAI_API_KEY export would replace the
-    OpenAI key already in the store, unsaid. No yes here — the terminal asks per variable."""
-    from autosound_tcc.ui.tcc import i18n
-
-    other = {"var": "OPENAI_API_KEY", "file": "~/.zshrc", "line": 7}
-    held_in = {
-        "keystore": {"keystore": True, "used": "keystore"},
-        "the machine file": {"used": "file",
-                             "file": {"path": "critic-env", "line": 2, "blank": False}},
-    }
-    for name, openai in held_in.items():
-        method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY, other], openai=openai))
-        dialog, asked = _dialog(monkeypatch, method, answer=True)
-        dialog._field.setText("AIza" + "h" * 35)
-        dialog._on_save()
-        assert asked == [], name
-        assert not any(args[:2] == ["key", "move-shell"] for args, _ in method.calls), name
-        text = dialog._result.text()
-        assert "OPENAI_API_KEY (~/.zshrc, рядок 7)" in text, name
-        assert f"«{i18n.t('rkMove')}»" in text and "GEMINI_API_KEY" in text, name
-        dialog.close()
-
-
-def test_the_pasted_key_is_stored_again_when_the_move_gets_no_answer(monkeypatch):
-    """A move killed at the timeout may already have stored the exported value: the pasted key
-    goes back over it whatever the move answered."""
-    gone = _with(keystore="dpapi", exports=[])
-    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY]), after_move=gone,
-                     move_dies=True)
-    dialog, _ = _dialog(monkeypatch, method, answer=True)
-    secret = "AIza" + "t" * 35
-    dialog._field.setText(secret)
-    dialog._on_save()
-    calls = [(args, stdin) for args, stdin in method.calls if args[:2] != ["key", "status"]]
-    assert calls[-2:] == [(["key", "move-shell", "--yes"], None),
-                          (["key", "set", "google"], secret + "\n")]
     dialog.close()

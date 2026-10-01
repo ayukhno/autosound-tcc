@@ -8,8 +8,10 @@ environment variables, which have no line — beside the method's `key move-shel
 it moves anything — so a click here opens it in a terminal and the Arbiter answers it there, and
 nothing moves without his yes.
 
-A save that leaves such a copy behind asks here whether to take it out — through the method's own
-`key move-shell`, never TCC's own edit (tcc#117).
+A save that leaves such a copy behind asks here whether to take it out, and a copy beside a key
+the OS keystore holds has «Видалити копію …» (finding 127, tcc#117): both through the method's own
+`key move-shell <provider> --drop` (v3.0.65, hub #230), which removes that one export without
+storing it — never TCC's own edit, and no pasted key held across the question.
 
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
@@ -109,6 +111,11 @@ class ReviewerKeyDialog(QDialog):
         self._move.clicked.connect(self._on_move)
         _fit_tinted(self._move)
         layout.addWidget(self._move, 0, Qt.AlignmentFlag.AlignLeft)
+        # Under it, «Видалити копію …» per provider whose key the keystore holds (`_show_drops`):
+        # one to a row, so two or three of them never crowd the window's width.
+        self._drop_rows = QVBoxLayout()
+        layout.addLayout(self._drop_rows)
+        self._drops: dict[str, QPushButton] = {}
 
         entry = QHBoxLayout()
         self._provider = QComboBox()
@@ -165,8 +172,35 @@ class ReviewerKeyDialog(QDialog):
             lines = [_shell_line(e) for e in exports]
             # The command by its name; the button runs it with this machine's full paths.
             self._shell.setText("\n".join(lines) + "\nautosound_ai.py key move-shell")
+        self._show_drops(providers if supported else {}, exports)
         for widget in (self._provider, self._field, self._save):
             widget.setEnabled(supported)
+
+    def _show_drops(self, providers: dict, exports: list[dict]) -> None:
+        """«Видалити копію …» for each exported key the OS keystore also holds (finding 127).
+
+        That is the method's own condition for `--drop`: without the key in the keystore the export
+        is the only copy, and the method refuses (hub #230). None from a method without the form —
+        it would move and store every export instead (`reviewer_key.drops_exports`).
+        """
+        for button in self._drops.values():
+            self._drop_rows.removeWidget(button)
+            button.deleteLater()
+        self._drops = {}
+        exported = {e.get("var") for e in exports}
+        held = [p for p in reviewer_key.PROVIDERS if isinstance(providers.get(p), dict)
+                and providers[p].get("keystore") is True and providers[p].get("var") in exported]
+        # The method is asked only when there is something to offer: the question is a child.
+        if not held or not reviewer_key.drops_exports():
+            return
+        for provider in held:
+            button = QPushButton(i18n.t("rkDropCopy").format(var=providers[provider]["var"]))
+            # Never the dialog's default: Enter in the key field saves (see `__init__`).
+            button.setAutoDefault(False)
+            button.clicked.connect(lambda _checked=False, p=provider: self._on_drop(p))
+            _fit_tinted(button)
+            self._drop_rows.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+            self._drops[provider] = button
 
     @staticmethod
     def _entry(provider) -> dict:
@@ -194,8 +228,10 @@ class ReviewerKeyDialog(QDialog):
             return
         provider = self._provider.currentData()
         stored, said = reviewer_key.set_key(provider, value)
+        # The method keeps it now. Nothing here holds it across the question below: the method
+        # drops an exported copy without storing anything over the key just saved (hub #230).
+        del value
         if not stored:
-            del value
             self._result.setText(i18n.t("rkRefused").format(why=said) if said
                                  else i18n.t("rkNoAnswer"))
             self.refresh(ask=True)
@@ -205,25 +241,18 @@ class ReviewerKeyDialog(QDialog):
         lines = [i18n.t("rkSaved").format(where=self._where_now(provider) or said or "—")]
         tips = [said]
         # Stored — and the same variable still exported: the copy every program reads stays
-        # behind unless asked about (finding 127, tcc#117). `value` is held until the answer,
-        # and no longer: the method's move stores the EXPORTED value, which may be an older key
-        # than the one just pasted, so the pasted one goes back over it.
+        # behind unless asked about (finding 127, tcc#117).
         copies = self._copies_left(provider)
-        held = self._held_elsewhere(copies)
-        if copies and held:
-            # `key move-shell --yes` stores EVERY export: an older copy of another key would
-            # replace the one already stored for it, unsaid. That one is the terminal's to ask
-            # about, variable by variable (tcc#117).
-            lines.append(i18n.t("rkRemoveHeld").format(
-                var=copies[0].get("var", "?"), place="; ".join(_place(e) for e in copies),
-                held=", ".join(f"{e.get('var', '?')} ({_place(e)})" for e in held),
-                button=i18n.t("rkMove")))
-        elif copies and self._confirm(self._remove_question(copies), i18n.t("rkRemoveYes"),
-                                      default_yes=True):
-            line, tip = self._remove_copies(provider, value, copies)
-            lines.append(line)
-            tips.append(tip)
-        del value
+        if copies:
+            var, place = copies[0].get("var", "?"), "; ".join(_place(e) for e in copies)
+            if not reviewer_key.drops_exports():
+                # An older method would move and store EVERY export for this yes (hub #230).
+                lines.append(i18n.t("rkDropUpdate").format(var=var, place=place))
+            elif self._confirm(i18n.t("rkRemoveAsk").format(var=var, place=place),
+                               i18n.t("rkRemoveYes"), default_yes=True):
+                line, tip = self._drop(provider, var, place)
+                lines.append(line)
+                tips.append(tip)
         self._result.setText("\n".join(lines))
         self._result.setToolTip("\n".join(tip for tip in tips if tip))
         # The kept answer is current: `_where_now` asked, and each change after it dropped the
@@ -231,54 +260,42 @@ class ReviewerKeyDialog(QDialog):
         self.refresh()
 
     def _copies_left(self, provider) -> list[dict]:
-        """The exports of `provider`'s variable, when its key is also stored — or []."""
+        """The exports of `provider`'s variable, when the OS keystore holds its key — or [].
+
+        The keystore and not the machine file: `--drop` refuses without the key there, the export
+        then being the only copy the method counts (hub #230)."""
         entry = self._entry(provider)
-        if entry.get("used") not in ("keystore", "file"):
+        if entry.get("keystore") is not True:
             return []
         return [e for e in reviewer_key.shell_exports() if e.get("var") == entry.get("var")]
 
     @staticmethod
-    def _held_elsewhere(copies: list[dict]) -> list[dict]:
-        """The OTHER exports whose key is already stored — in the keystore, or as a key in the
-        machine file, the method's other store. The move would put the exported value over it."""
-        if not copies:
-            return []
-        providers = (reviewer_key.status() or {}).get("providers") or {}
-        stored = {e.get("var") for e in providers.values() if isinstance(e, dict) and (
-            e.get("keystore") is True
-            or (isinstance(e.get("file"), dict) and e["file"].get("blank") is False))}
-        var = copies[0].get("var")
-        return [e for e in reviewer_key.shell_exports()
-                if e.get("var") != var and e.get("var") in stored]
+    def _drop(provider, var: str, place: str) -> tuple[str, str]:
+        """The method's `key move-shell <provider> --drop`, and the line its exit code says.
 
-    def _remove_question(self, copies: list[dict]) -> str:
-        var = copies[0].get("var", "?")
-        text = i18n.t("rkRemoveAsk").format(var=var, place="; ".join(_place(e) for e in copies))
-        # `key move-shell` takes every export, not one: the others — none of them with a key
-        # stored already (`_held_elsewhere`) — are named before the yes.
-        others = [e for e in reviewer_key.shell_exports() if e.get("var") != var]
-        if others:
-            text += " " + i18n.t("rkRemoveAlso").format(
-                others=", ".join(f"{e.get('var', '?')} ({_place(e)})" for e in others))
-        return text
+        From the code, not from a fresh `key status` (hub #230): 0 removed, 1 nothing to remove,
+        3 refused or failed — the method's own words are the hover — and 2, a form this method
+        does not take. The window re-reads the status afterwards for the rows, not for this line.
+        """
+        code, said = reviewer_key.drop_export(provider)
+        if code is None:
+            return i18n.t("rkDropNoAnswer"), said
+        key = {0: "rkRemoved", 1: "rkDropNothing", 3: "rkNotRemoved"}.get(code, "rkDropUpdate")
+        return i18n.t(key).format(var=var, place=place), said
 
-    def _remove_copies(self, provider, value: str, copies: list[dict]) -> tuple[str, str]:
-        """Move the copies out through the method, put the pasted key back, say where it stands."""
-        _moved, said = reviewer_key.move_exports()
-        # Stored again whatever the move answered: a move killed at `_run`'s timeout may have
-        # stored the exported value already (the method stores first, then removes the export and,
-        # on Windows, waits on the broadcast). A second `key set` of the same value is harmless.
-        again, why = reviewer_key.set_key(provider, value)
-        line = "" if again else "\n" + (i18n.t("rkRefused").format(why=why) if why
-                                        else i18n.t("rkNoAnswer"))
-        # Read back, not assumed from the yes: the method leaves a line that sets the key by an
-        # expression, and says so in its own words — the hover.
-        var = copies[0].get("var", "?")
-        left = [e for e in reviewer_key.shell_exports() if e.get("var") == var]
-        place = "; ".join(_place(e) for e in (left or copies))
-        head = (i18n.t("rkNotRemoved").format(var=var, place=place) if left
-                else i18n.t("rkRemoved").format(place=place))
-        return head + line, said
+    def _on_drop(self, provider) -> None:
+        """«Видалити копію …»: the exported copy out, the key in the keystore kept (finding 127)."""
+        var = self._entry(provider).get("var") or "?"
+        place = "; ".join(
+            _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var) or "—"
+        if not self._confirm(i18n.t("rkDropAsk").format(var=var, place=place,
+                                                        save=i18n.t("rkSave")),
+                             i18n.t("rkDropYes"), default_yes=False):
+            return
+        line, tip = self._drop(provider, var, place)
+        self._result.setText(line)
+        self._result.setToolTip(tip)
+        self.refresh()
 
     def _confirm(self, text: str, yes: str, *, default_yes: bool) -> bool:
         """A yes or a no, in the window's language. Its own method, so a test can answer it."""
