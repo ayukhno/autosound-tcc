@@ -3347,4 +3347,28 @@ gemini-3.1-pro-preview» picked, two `call_critic` → «--via api: ключа �
 (`load_env_file`), so the project's line wins over the machine's and over the footer. Three places name the reviewer
 (machine file, project file, the footer), and the one the tuner sees is the one that loses.
 
+**Who wrote the project's line** — the session's own report (the Arbiter pasted it): «у проєкті є файл `.critic-env`
+від 2026-09-27, записаний у сесії з claude-sonnet-5». Its advice was to write `gemini-3.1-pro-preview` into the
+file — a fourth pin in place of the third.
+
 **Task.** For W-5's collection — the precedence is the method's and TCC's together.
+
+### 131. The same session's report: `process.py session-close` run as a check wrote `session_closed`; the CONTINUE block is three versions behind; `master`'s files name the wrong version
+
+**What.** The generator's report in `testAgy-auto` (the Windows VM, 2026-10-01, pasted by the Arbiter), three points
+besides 130:
+- «Коли я звіряв стан, я запустив `process.py session-close`. Я думав, що він тільки перевіряє, але він дописав у
+  журнал подію `session_closed` … TCC через неї може вважати сесію закритою, і тоді наступний запуск почнеться як нова
+  сесія.» A command that writes, taken for a read by a session, with a TCC-visible consequence.
+- «Блок ▶️ CONTINUE у `tuning-changelog.md` застарів. Там HEAD `v_010`, а на диску `v_013`.»
+- «Реєстр `master` пошкоджений. У файлах `v_011` і `v_013` усередині записано, що це `v_012`», all three at
+  `2026-09-22T12:00:00` — so «не будується лист налаштувань для HEAD, і без нього я не можу нічого пропонувати»;
+  the session proposes the method's `state.py repair-version` for both.
+
+**Whose.** The first two are the method's (the command's name, the handoff block); the third is this project's data
+— how it got there is not known here (a test project). What TCC shows for a HEAD the method refuses is tcc#50's
+warning (W-4).
+
+**Weight.** Medium for the first: the session's own state can flip under it from a read.
+
+**Task.** For W-5's collection; the method's points go to the skill as a ticket at the review if the Arbiter says so.
