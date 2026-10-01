@@ -12,6 +12,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -603,6 +604,17 @@ def main() -> int:
         )
         window.removeEventFilter(watcher)
         splash.finish(window)
+
+    # TCC's own taskbar pins that lack its id get it, and Explorer is told (finding 121, tcc#111).
+    # HERE, once per launch: after the window is up, so nobody waits for it, and before a project
+    # switch can build a second window, which would ask again. On a thread, because a pin that
+    # needs it costs a PowerShell run; a start whose pins are all stamped reads a few small files
+    # and spawns nothing. Windows only, guarded here for the same reason as `stamp_window` above.
+    if os.name == "nt":
+        from autosound_tcc.core import desktop_entry
+
+        threading.Thread(target=desktop_entry.repair_pins, name="tcc-pin-repair",
+                         daemon=True).start()
 
     code = app.exec()
     # Qt ends HERE rather than in whatever is left of the interpreter. Returning straight out of

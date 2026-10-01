@@ -208,6 +208,131 @@ def test_every_spawn_here_goes_through_child_quiet(monkeypatch, tmp_path):
             assert kwargs.get(key) == value, f"{key} not passed: {kwargs}"
 
 
+# ── the pins TCC repairs itself (finding 121, tcc#111) ──────────────────────────────────────────
+#
+# A pin made from the Desktop shortcut is a copy Windows makes without the id. Stamping that copy
+# and telling Explorer gave one button on the VM (research W-4 §4, 2026-10-01). Nothing here needs
+# Windows: the search is bytes in files, and the stamp is a script that can be read.
+
+_OURS = r"C:\Users\a\AppData\Roaming\uv\tools\autosound-tcc\Scripts\autosound-tcc-gui.exe"
+#: The same launcher as a Path. Forward slashes, so `.name` is the file name on the Mac too.
+_LAUNCHER = Path("C:/Users/a/AppData/Roaming/uv/tools/autosound-tcc/Scripts/autosound-tcc-gui.exe")
+
+
+def _lnk(target: str, *, stamped: bool = False, encoding: str = "utf-16-le") -> bytes:
+    """Enough of a `.lnk` for the byte search: the header's size and magic, the target as Windows
+    writes it, and -- when stamped -- the id as the property store holds it, UTF-16LE."""
+    data = b"L\x00\x00\x00\x01\x14\x02\x00" + b"\x00" * 68 + target.encode(encoding)
+    if stamped:
+        data += b"\x00\x00" + desktop_entry.BUNDLE_ID.encode("utf-16-le")
+    return data
+
+
+def _pinned(tmp_path: Path) -> Path:
+    """`User Pinned` with one of each: TCC's pins with and without the id, in both folders
+    Windows keeps pins in, and other programs' pins beside them."""
+    pinned = tmp_path / "User Pinned"
+    taskbar = pinned / "TaskBar"
+    implicit = pinned / "ImplicitAppShortcuts" / "d249d9ddd424b688"
+    taskbar.mkdir(parents=True)
+    implicit.mkdir(parents=True)
+    (taskbar / "Autosound TCC.lnk").write_bytes(_lnk(_OURS))
+    (taskbar / "From the window.lnk").write_bytes(_lnk(_OURS, stamped=True))
+    (taskbar / "Notepad.lnk").write_bytes(_lnk(r"C:\Windows\System32\notepad.exe"))
+    # TCC's folder, somebody else's program: the launcher is a file name, not a folder.
+    (taskbar / "Python.lnk").write_bytes(
+        _lnk(r"C:\Users\a\AppData\Roaming\uv\tools\autosound-tcc\Scripts\python.exe"))
+    # The 8-bit copy of the path (LinkInfo's LocalBasePath), in capitals: Windows matches file
+    # names regardless of case, so the search does too.
+    (implicit / "Autosound TCC.lnk").write_bytes(_lnk(_OURS.upper(), encoding="ascii"))
+    return pinned
+
+
+def test_the_byte_search_picks_only_tcc_s_pins_without_the_id(tmp_path):
+    pinned = _pinned(tmp_path)
+
+    found = desktop_entry._unstamped_pins(pinned, "autosound-tcc-gui.exe")
+
+    assert found == [pinned / "TaskBar" / "Autosound TCC.lnk",
+                     pinned / "ImplicitAppShortcuts" / "d249d9ddd424b688" / "Autosound TCC.lnk"]
+
+
+def test_the_stamp_tells_explorer_after_each_save(tmp_path):
+    """The stamp alone put the id on the pin and it still did not group, even after an Explorer
+    restart (27.09, finding 104). With `SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH)`
+    after it, the same pin was one button (finding 121). In the C#, so every stamp notifies: the
+    install's and the update's as well as the repair's."""
+    script = desktop_entry._stamp_script([tmp_path / "Autosound TCC.lnk"], desktop_entry.BUNDLE_ID)
+
+    assert 'DllImport("shell32.dll")' in script
+    call = "SHChangeNotify(0x2000, 0x1005, lnk, IntPtr.Zero);"
+    assert call in script
+    assert script.index("file.Save(lnk, true)") < script.index(call)
+
+
+def test_a_pin_s_name_reaches_the_stamp_as_data(tmp_path):
+    """The repair stamps files found on disk, named by whoever pinned them. In `"..."` PowerShell
+    would expand `$HOME` and the backtick; the stamp would miss the file, and miss it again, with
+    a PowerShell run, on every start. PowerShell also ends a `'...'` literal at a typographic
+    quote, so `O’Brien` is doubled like `O'Brien`."""
+    pin = tmp_path / "O’Brien" / "TCC $HOME `n it's mine.lnk"
+    script = desktop_entry._stamp_script([pin], desktop_entry.BUNDLE_ID)
+
+    assert "'" + str(pin).replace("'", "''").replace("’", "’’") + "'" in script
+    assert f'"{pin}"' not in script
+
+
+def test_repair_stamps_and_notifies_tcc_s_unstamped_pins_and_no_other(monkeypatch, tmp_path):
+    pinned = _pinned(tmp_path)
+    scripts: list[str] = []
+
+    def _run(args, **kwargs):
+        scripts.append(args[-1])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+
+    repaired = desktop_entry.repair_pins(pinned, launcher=_LAUNCHER)
+
+    assert repaired == desktop_entry._unstamped_pins(pinned, "autosound-tcc-gui.exe")
+    assert len(scripts) == 1, "one PowerShell for all the pins, not one per pin"
+    for pin in repaired:
+        assert str(pin) in scripts[0]
+    for name in ("From the window.lnk", "Notepad.lnk", "Python.lnk"):
+        assert name not in scripts[0]
+    assert "SHChangeNotify(0x2000" in scripts[0]
+
+
+def test_an_ordinary_start_spawns_nothing(monkeypatch, tmp_path):
+    """TCC's history of flashing windows (findings 14, 43): a start whose pins are all stamped
+    must not run PowerShell to find that out. The byte search decides before anything spawns."""
+    pinned = _pinned(tmp_path)
+    (pinned / "TaskBar" / "Autosound TCC.lnk").unlink()
+    (pinned / "ImplicitAppShortcuts" / "d249d9ddd424b688" / "Autosound TCC.lnk").unlink()
+
+    def _run(*args, **kwargs):
+        raise AssertionError(f"spawned: {args}")
+
+    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+
+    assert desktop_entry.repair_pins(pinned, launcher=_LAUNCHER) == []
+    # Nothing pinned at all, and no `User Pinned` folder: the same nothing.
+    assert desktop_entry.repair_pins(tmp_path / "nowhere", launcher=_LAUNCHER) == []
+
+
+def test_a_repair_that_cannot_spawn_does_not_raise(monkeypatch, tmp_path):
+    """It runs on a thread of its own while the window is up, and an exception there is an error
+    shown in the window -- for a repair that is best effort, like the stamp it reuses."""
+    pinned = _pinned(tmp_path)
+
+    def _run(*args, **kwargs):
+        raise OSError("powershell: not found")
+
+    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+
+    assert len(desktop_entry.repair_pins(pinned, launcher=_LAUNCHER)) == 2
+
+
 def test_nothing_installed_is_a_sentence_not_a_traceback(monkeypatch):
     monkeypatch.setattr(desktop_entry, "resolve_launcher", lambda: None)
     result = desktop_entry.install_desktop()

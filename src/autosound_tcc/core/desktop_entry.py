@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -33,7 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autosound_tcc.core import child
+from autosound_tcc.core import app_log, child
 
 # Every spawn here goes through `child.quiet()`, like the other twelve modules that spawn. It was
 # the one exception (tcc#14) and got away with it only because `app.py` installs a process-wide
@@ -290,6 +291,15 @@ def _shortcut_script(targets: list[Path], launcher: Path, icon: Path | None) -> 
     )
 
 
+def _ps_literal(path: Path) -> str:
+    """A path as a single-quoted PowerShell literal: data, nothing in it expanded.
+
+    PowerShell takes the typographic quotes ‘ ’ ‚ ‛ for `'` as well, so each is doubled like `'`
+    -- a profile folder called `O’Brien` would otherwise end the literal halfway.
+    """
+    return "'" + re.sub("(['‘’‚‛])", r"\1\1", str(path)) + "'"
+
+
 def _stamp_script(targets: list[Path], app_id: str) -> str:
     """PowerShell that writes `System.AppUserModel.ID` into each `.lnk`.
 
@@ -308,7 +318,10 @@ def _stamp_script(targets: list[Path], app_id: str) -> str:
     Kept a SEPARATE PowerShell run on purpose: the shortcuts are saved by the time this runs, so a
     machine where `Add-Type` cannot compile loses the grouping and keeps its shortcuts.
     """
-    paths = ", ".join(f'"{p}"' for p in targets)
+    # Literals, not `"..."`: since tcc#111 these paths include pins found on disk, named by
+    # whoever pinned them, and `"..."` would expand a `$` or a backtick in one -- a stamp that
+    # fails there fails again, with a PowerShell run, on every start.
+    paths = ", ".join(_ps_literal(p) for p in targets)
     # A single-quoted here-string: PowerShell expands nothing inside it, and C# is full of the
     # characters it would otherwise try to expand.
     return (
@@ -369,6 +382,13 @@ namespace AutosoundTcc {
     // "which application am I", the same string the process claims at startup.
     static readonly Guid AppUserModel = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
 
+    // Tells Explorer that one file changed. The id alone left a pin that still did not group, even
+    // after an Explorer restart (27.09, finding 104); with this after the save it was one button
+    // (finding 121, tcc#111) -- the call Chromium's MigrateTaskbarPins makes after the same save.
+    [DllImport("shell32.dll")]
+    static extern void SHChangeNotify(int eventId, uint flags,
+                                      [MarshalAs(UnmanagedType.LPWStr)] string item1, IntPtr item2);
+
     public static void Stamp(string lnk, string id) {
       var link = new ShellLink();
       var file = (IPersistFile)link;
@@ -384,6 +404,7 @@ namespace AutosoundTcc {
         // TRUE: the shortcut keeps the file it was loaded from as its own, which is what makes
         // this a re-save of that .lnk rather than a copy written somewhere else.
         Marshal.ThrowExceptionForHR(file.Save(lnk, true));
+        SHChangeNotify(0x2000, 0x1005, lnk, IntPtr.Zero);  // SHCNE_UPDATEITEM; SHCNF_PATHW | SHCNF_FLUSH
       } finally {
         Marshal.FreeCoTaskMem(value.p);
       }
@@ -398,6 +419,71 @@ def _windows_targets() -> list[Path]:
         os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
     ) / "Microsoft/Windows/Start Menu/Programs"
     return [d / SHORTCUT_NAME for d in (desktop, programs) if d.is_dir()]
+
+
+def _pinned_root() -> Path:
+    """Where Windows keeps the copies it pins: "they make a copy of the shortcut and pin the copy"
+    (Raymond Chen), into `TaskBar` or into a hex-named folder under `ImplicitAppShortcuts`."""
+    return Path(
+        os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
+    ) / "Microsoft/Internet Explorer/Quick Launch/User Pinned"
+
+
+def _unstamped_pins(pinned: Path, launcher_name: str) -> list[Path]:
+    """TCC's pins without TCC's id, found by reading bytes, so finding none spawns nothing.
+
+    A pin is TCC's when the launcher's file name is in it: as UTF-16LE in the target's shell item,
+    as 8-bit in its LinkInfo path, in whatever case Windows wrote it. It is stamped when the id is
+    in it as UTF-16LE, the way the property store holds a `VT_LPWSTR`. Asking COM instead would be
+    a PowerShell per start, and TCC has a history of flashing windows (findings 14, 43).
+    """
+    folders = [pinned / "TaskBar"]
+    try:
+        folders += sorted(p for p in (pinned / "ImplicitAppShortcuts").iterdir() if p.is_dir())
+    except OSError:
+        pass  # no implicit pins on this machine
+    name = launcher_name.lower()
+    ours = (name.encode("utf-16-le"), name.encode("utf-8"))
+    stamp = BUNDLE_ID.encode("utf-16-le")
+    found = []
+    for folder in folders:
+        for link in sorted(folder.glob("*.lnk")):
+            try:
+                data = link.read_bytes()
+            except OSError:
+                continue
+            if stamp not in data and any(n in data.lower() for n in ours):
+                found.append(link)
+    return found
+
+
+def repair_pins(pinned: Path | None = None, launcher: Path | None = None) -> list[Path]:
+    """Stamp TCC's own taskbar pins that lack its id, and tell Explorer (tcc#111). Never raises.
+
+    A pin made from the Desktop shortcut is a copy Windows makes WITHOUT the id (finding 104), so
+    the pin and the window it starts are two buttons. The same stamp the install gives the
+    shortcuts, followed by the notify, made such a pin one button on the VM (finding 121). It
+    helps from the NEXT start: the window this start opened was already counted as another app.
+
+    Returns the pins it stamped, or tried to; empty on an ordinary start, which spawns nothing.
+    """
+    try:
+        launcher = launcher or resolve_launcher()
+        pins = _unstamped_pins(pinned or _pinned_root(), launcher.name) if launcher else []
+    except OSError:
+        return []
+    if not pins:
+        return []
+    result = Result(True)
+    try:
+        stamped = _stamp_windows(pins, result)
+    except OSError as exc:  # no PowerShell to run
+        stamped = False
+        result.say(str(exc))
+    app_log.logger().info("pins: %s %s%s", "stamped" if stamped else "NOT stamped",
+                          ", ".join(str(p) for p in pins),
+                          "" if stamped else f" -- {app_log.brief(' '.join(result.lines))}")
+    return pins
 
 
 def _install_windows(launcher: Path) -> Result:
@@ -436,13 +522,14 @@ def _install_windows(launcher: Path) -> Result:
     return result
 
 
-def _stamp_windows(targets: list[Path], result: Result) -> None:
+def _stamp_windows(targets: list[Path], result: Result) -> bool:
     """Give the shortcuts the same application identity the running window claims.
 
     Best effort, and it says so either way: without this a pinned shortcut and the window it
     started are two taskbar buttons under two icons, WITH it they are one -- but a machine where
     `Add-Type` cannot compile still has working shortcuts, so this never turns an install into a
-    failure. See `_stamp_script` for what is being written and why it needs COM.
+    failure. See `_stamp_script` for what is being written and why it needs COM. True when the
+    script ran clean.
     """
     proc = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -457,15 +544,18 @@ def _stamp_windows(targets: list[Path], result: Result) -> None:
     if proc.returncode == 0:
         # «Pinned and running are one button» held for a pin made from the RUNNING window only: a
         # pin made from the shortcut loses the id (Windows drops it when it pins a shortcut, and
-        # stamping the pinned copy afterwards did not help — finding 104, tcc#62).
+        # stamping the pinned copy afterwards did not help — finding 104, tcc#62). Stamping it AND
+        # notifying does, and `repair_pins` does that at startup (finding 121, tcc#111) — from the
+        # second start on, so the first one still shows two buttons and the hint stays.
         result.say(f"They are: {BUNDLE_ID}")
         result.say("To pin TCC to the taskbar, pin it from its running window: a pin made from "
                    "the shortcut starts it as a second button.")
-    else:
-        result.say(
-            "note: the shortcuts could not be given the app id — pinning one will show a second "
-            f"taskbar button when it runs. {(proc.stderr or '').strip()[:160]}"
-        )
+        return True
+    result.say(
+        "note: the shortcuts could not be given the app id — pinning one will show a second "
+        f"taskbar button when it runs. {(proc.stderr or '').strip()[:160]}"
+    )
+    return False
 
 
 # ── the entry point ───────────────────────────────────────────────────────────────────────────
@@ -567,7 +657,7 @@ def _windows_target_of(shortcut: Path) -> str:
     """What a `.lnk` starts, or "" when it cannot be read. A COM call, like the one that made it."""
     # Single-quoted PowerShell literal, doubling any quote inside it: a path is data here, and
     # the `"..."` form the writing script uses would expand a `$` in somebody's folder name.
-    literal = "'" + str(shortcut).replace("'", "''") + "'"
+    literal = _ps_literal(shortcut)
     script = (
         "$s = New-Object -ComObject WScript.Shell; "
         f"$l = $s.CreateShortcut({literal}); "

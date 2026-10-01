@@ -121,3 +121,23 @@ def test_startup_stamps_the_window_it_just_built():
     )
     assert "windows_identity.stamp_window(int(window.winId()))" in source
     assert source.index("stamp_window") < source.index("window.show()")
+
+
+def test_startup_repairs_the_pins_after_the_window_is_shown():
+    """tcc#111 (finding 121): a pin made from the Desktop shortcut carries no id until TCC stamps
+    it. After `show()`, because the person is waiting for the window and the repair helps only the
+    NEXT start anyway; on a thread, because the stamp is a PowerShell run; on Windows only, so no
+    other platform grows a call at startup."""
+    import inspect
+
+    from autosound_tcc import app
+
+    source = "\n".join(
+        line for line in inspect.getsource(app.main).splitlines()
+        if not line.strip().startswith("#")
+    )
+    call = "threading.Thread(target=desktop_entry.repair_pins"
+    assert call in source
+    shown = source.index("window.show()")
+    assert shown < source.index(call)
+    assert 'if os.name == "nt":' in source[shown:source.index(call)]
