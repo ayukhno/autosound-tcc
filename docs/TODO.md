@@ -2085,6 +2085,25 @@ Belongs to W-5 so far:
 7. findings 12, 17, 19, 21, 37, 38 → closed: fixed in code or not seen since 0.1.39 (each says where).
 8. F-057, «the virtual DSP's calculations» with no description → dropped.
 9. tcc#69, test machinery → closed: F-071 closed 26.09, F-065 done in W-4, F-066 dropped.
+10. W-4's deferred minors (`.superpowers/sdd/PLAN-W-4/progress.md`, local) → W-5, the visible ones and the
+    robustness ones as two tasks, code hygiene only alongside in the same files. Checked against main first (the
+    Arbiter: «перевір перед включенням»; two read-only readers, 2026-10-01):
+    - already fixed: «compare with» → «c…» (0effe54), «Control mo…» at 1600 (f9d3a9e), the tab fill drawn twice
+      (942dd61), the stale refusal hover and `SnapshotError` getattr (b98002c), the table floor on a screen change
+      (4e01614); by design: both corner labels hidden at 756 px (after finding 105), an `(imp)` title as its own group;
+    - **visible, open:** the time stamp brighter than the role label, light `info` labels 3.9–4.2:1 (theme.py); the DSP
+      tree's sub-line colours stale after a theme switch (dsp_tree.py `_SubLine`); «1 drivers» and two «Travels:»
+      lines (i18n `npSeedTravelsFs`); saved names cut without «…» (control_layout.py `fit_text`); «Порівняти з»
+      offers a version it then compares with nothing, silently; `(imp)` has no column label and an unreadable
+      unplanned take never shows (measurement_view.py); control mode's corner labels not re-translated; the tier
+      dot disagrees with the rows (setting_status.py `_judge`); git's English signature line in a translated row;
+      to check live: a language switch at the right screen edge (de/pl), a narrow chat clipping the time;
+    - **robustness, open:** a malformed crossover in a ledger breaks the DSP tree / compare row (`CrossoverLeg.from_raw`
+      unguarded); the settings card loses its time after a same-name switch (`_delta_shown`); the update script's
+      ls-remote guard has no timeout and no `GCM_INTERACTIVE` (may hang the window); the copy preview's `_fs_carried`
+      outside its try; the update's temp folder never removed; the OpenSSH-too-old case advised «update git»;
+      `_SERIES_TAG_RE` without a lookahead; theme.py trusting `_APPLIED` over the app's sheet;
+    - code/test hygiene (alongside only): the test modal guard raising inside UI code, uncovered dialog statics.
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
