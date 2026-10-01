@@ -450,16 +450,26 @@ class DiagnosticsDialog(QDialog):
         self._body_layout.setSpacing(2)
         scroll.setWidget(body)
 
-        # TWO tabs: what is wrong with this PROJECT, and what is installed on this MACHINE. The
-        # second one is here rather than in a window of its own because this is the window a
-        # person already opens when something is off, and the first question every report from a
-        # machine nobody can see has needed is "which versions am I looking at" (user,
-        # 2026-08-19).
+        # What is wrong with this PROJECT first, then what is on this MACHINE. The installation is
+        # here rather than in a window of its own because this is the window a person already
+        # opens when something is off, and the first question every report from a machine nobody
+        # can see has needed is "which versions am I looking at" (user, 2026-08-19).
+        #
+        # Updates are a tab of their own (VM-1, tcc#98): on the Installation tab the updater and
+        # the tool rows had to be scrolled while the report box kept half the height — the Arbiter,
+        # «давай зробимо оновлення на окремій вкладці». Second, in the order the ⚙'s tip names them:
+        # the project check, updates, the logs. The window still opens on the project: the ⚙ and
+        # the status strip's contract line send people here for that, and opening on Updates would
+        # ask GitHub and the minute-long tool status at every open. No update action in TCC opens
+        # this window; the ⚙ and the menu are its doors.
+        self._project_tab = scroll
+        self._updates_tab = self._build_updates_tab()
+        self._install_tab = self._build_install_tab()
+        self._log_tab = self._build_log_tab()
+        self._sessions_tab = self._build_sessions_tab()
         self._tabs = QTabWidget()
-        self._tabs.addTab(scroll, i18n.t("diagTabProject"))
-        self._tabs.addTab(self._build_install_tab(), i18n.t("diagTabInstall"))
-        self._tabs.addTab(self._build_log_tab(), i18n.t("diagTabLog"))
-        self._tabs.addTab(self._build_sessions_tab(), i18n.t("diagTabSessions"))
+        for tab, key in self._tab_keys():
+            self._tabs.addTab(tab, i18n.t(key))
         self._tabs.currentChanged.connect(self._on_tab)
         outer.addWidget(self._tabs, stretch=1)
 
@@ -501,11 +511,48 @@ class DiagnosticsDialog(QDialog):
         i18n.on_language_changed(self._retranslate)
         self._render()
 
+    def _tab_keys(self) -> tuple:
+        """Each tab and the key of its name, in the order they stand."""
+        return ((self._project_tab, "diagTabProject"), (self._updates_tab, "diagTabUpdates"),
+                (self._install_tab, "diagTabInstall"), (self._log_tab, "diagTabLog"),
+                (self._sessions_tab, "diagTabSessions"))
+
+    # ---- updates -------------------------------------------------------------
+
+    def _build_updates_tab(self) -> QWidget:
+        """TCC's and the method's rows, the beta box, and the tools the installer put in."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._build_update_row())
+        layout.addStretch(1)
+        self._updates_read = False
+        # The page scrolls rather than squeezing. The window takes its height when it opens, and
+        # the tool rows land up to a minute later (tcc#98): with no room to grow into, each was
+        # crushed to 5 px of the 25 it needs — unreadable, and a button nobody could press (review
+        # of tcc#98). In a scroll area the page keeps its minimum height and the window keeps its
+        # size; the Project tab is shaped the same way.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(page)
+        return scroll
+
+    def refresh_updates(self) -> None:
+        """Ask GitHub about TCC and the method, and the skill's `upkeep.py` about the tools — each
+        off the GUI thread, each only if it is not being asked already."""
+        self._updates_read = True
+        self._start_update_check()
+        self._start_tools_check()
+
     # ---- what is installed ---------------------------------------------------
 
     def _build_install_tab(self) -> QWidget:
         """One selectable, copyable block. Not a table: it is written to be PASTED — into a
-        message, an issue, a screenshot — and a monospace block survives all three."""
+        message, an issue, a screenshot — and a monospace block survives all three. The box takes
+        the tab's height: nothing lands above it later, now that the updates have their own tab
+        (VM-1)."""
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 8, 0, 0)
@@ -514,7 +561,6 @@ class DiagnosticsDialog(QDialog):
         blurb.setWordWrap(True)
         blurb.setProperty("class", "phead-sub")
         layout.addWidget(blurb)
-        layout.addWidget(self._build_update_row())
         self._install_text = QPlainTextEdit()
         self._install_text.setReadOnly(True)
         self._install_text.setPlainText(i18n.t("diagInstallReading"))
@@ -538,24 +584,22 @@ class DiagnosticsDialog(QDialog):
         self._install_timer = QTimer(self)
         self._install_timer.setInterval(_TOOLS_POLL_MS)
         self._install_timer.timeout.connect(self._poll_tools)
-        # The page scrolls rather than squeezing. The window takes its height when it opens, and
-        # the tool rows land up to a minute later (tcc#98): with no room to grow into, each was
-        # crushed to 5 px of the 25 it needs — unreadable, and a button nobody could press (review
-        # of tcc#98). In a scroll area the page keeps its minimum height and the window keeps its
-        # size; the Project tab is shaped the same way.
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidget(page)
-        return scroll
+        return page
+
+    def _install_changed(self) -> None:
+        """Something was installed, so the report's versions are stale: read again now if its tab
+        is on screen, else when it is opened — not eight `--version` calls behind the Updates tab
+        for a box nobody is looking at."""
+        self._install_read = False
+        if self._tabs.currentWidget() is self._install_tab:
+            self.refresh_install()
 
     def _build_update_row(self) -> QWidget:
         """Two lines, two buttons: is there a newer one, and the thing that installs it.
 
-        Above the report rather than below it, because it is the one part of this tab a person can
-        ACT on — the block underneath is for pasting into a message. The buttons are disabled until
-        the check comes back, and stay disabled when there is nothing to do: a live "Update" button
-        on an up-to-date install is a question mark, not an offer.
+        The buttons are disabled until the check comes back, and stay disabled when there is
+        nothing to do: a live "Update" button on an up-to-date install is a question mark, not an
+        offer.
         """
         box = QWidget()
         grid = QVBoxLayout(box)
@@ -820,10 +864,9 @@ class DiagnosticsDialog(QDialog):
             lines.append(i18n.t("updLibsFailed").format(why=done.libs))
         label.setText("\n".join(lines))
         if done.ok:
-            # The report underneath must show the new version — but the row keeps what it just
-            # said until the next Re-check, because that sentence is the receipt for the press.
-            self._install_read = False
-            self.refresh_install(check_updates=False)
+            # The report must show the new version — but the row keeps what it just said until the
+            # next Re-check, because that sentence is the receipt for the press.
+            self._install_changed()
         else:
             button.setEnabled(True)
 
@@ -1057,10 +1100,9 @@ class DiagnosticsDialog(QDialog):
                           + i18n.t("updToolFailed").format(why=why))
         self._read_session()
         if moved:
-            # The report underneath names each tool's version; the rows keep their receipts until
-            # the next Re-check, as the method's row does.
-            self._install_read = False
-            self.refresh_install(check_updates=False)
+            # The report names each tool's version; the rows keep their receipts until the next
+            # Re-check, as the method's row does.
+            self._install_changed()
 
     def _poll_tools(self) -> None:
         """Put the tools section in as soon as it lands, and stop asking either way."""
@@ -1293,35 +1335,32 @@ class DiagnosticsDialog(QDialog):
         self._log_copy_btn.setText(i18n.t("diagInstallCopied"))
 
     def _on_tab(self, index: int) -> None:
-        """Read the report the first time the tab is opened, and never on the way to the other one.
+        """Ask a tab's questions the first time it is opened, and never on the way to another one.
 
-        Eight subprocesses is not something to pay for opening a dialog about a contract check.
+        Eight subprocesses is not something to pay for opening a dialog about a contract check,
+        and GitHub with the skill's minute-long `status` is not either (VM-1: each tab pays for
+        its own).
         """
-        if index == 1 and not self._install_read:
+        tab = self._tabs.widget(index)
+        if tab is self._updates_tab and not self._updates_read:
+            self.refresh_updates()
+        elif tab is self._install_tab and not self._install_read:
             self.refresh_install()
-        elif index == 2:
+        elif tab is self._log_tab:
             # Every time, not once: the log grows while this window is open, and that is exactly
             # when something is going wrong.
             self.refresh_log()
-        elif index == 3:
+        elif tab is self._sessions_tab:
             self.refresh_sessions()
 
-    def refresh_install(self, check_updates: bool = True) -> None:
+    def refresh_install(self) -> None:
         """Everything that reads a file, now; everything that runs a program, on a thread.
 
         The block is on screen the moment the tab opens — versions, paths, where the skill is —
         with the tools section filling in a second later, rather than an empty box and a wait.
-
-        `check_updates=False` re-reads the report WITHOUT asking GitHub again: used straight after
-        an update, where the row has just said what it installed and replacing that with "checking
-        for updates…" would take the answer away at the moment it was earned.
+        GitHub is not asked from here: that is the Updates tab's (`refresh_updates`), so a re-read
+        straight after an update does not take the row's receipt away at the moment it was earned.
         """
-        # Before the early return below, not after: the tools probe can be a slow one, and
-        # "Re-check" doing nothing at all because a previous probe is still running is the kind of
-        # dead button people press three times.
-        if check_updates:
-            self._start_update_check()
-            self._start_tools_check()
         if self._install_worker is not None and self._install_worker.running:
             return
         self._install_read = True
@@ -1431,17 +1470,22 @@ class DiagnosticsDialog(QDialog):
         """Re-check means everything this window shows, not only the project.
 
         The update rows are the part a person presses this button to see move — after an update
-        was installed, or after the network came back (user, 2026-08-19). The Installation tab is
-        marked unread rather than read here: it starts eight subprocesses, and if the person is
-        looking at another tab that cost belongs at the moment they open it, not now.
+        was installed, or after the network came back (user, 2026-08-19). The Updates and
+        Installation tabs are marked unread rather than read here: they ask GitHub, the skill's
+        `status` and eight subprocesses, and if the person is looking at another tab that cost
+        belongs at the moment they open it, not now.
         """
         self.set_report(None)
         self.refreshRequested.emit()
         self._install_read = False
+        self._updates_read = False
         self._read_session()  # whether a session holds omp and Claude Code (ruling 21)
-        if self._tabs.currentIndex() == 1:
+        tab = self._tabs.currentWidget()
+        if tab is self._updates_tab:
+            self.refresh_updates()
+        elif tab is self._install_tab:
             self.refresh_install()
-        elif self._tabs.currentIndex() == 2:
+        elif tab is self._log_tab:
             self.refresh_log()
 
     def _retranslate(self) -> None:
@@ -1449,10 +1493,8 @@ class DiagnosticsDialog(QDialog):
         self._title.setText(i18n.t("diagTitle"))
         self._refresh_btn.setText(i18n.t("diagRefresh"))
         self._close_btn.setText(i18n.t("diagClose"))
-        self._tabs.setTabText(0, i18n.t("diagTabProject"))
-        self._tabs.setTabText(1, i18n.t("diagTabInstall"))
-        self._tabs.setTabText(2, i18n.t("diagTabLog"))
-        self._tabs.setTabText(3, i18n.t("diagTabSessions"))
+        for tab, key in self._tab_keys():
+            self._tabs.setTabText(self._tabs.indexOf(tab), i18n.t(key))
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
         self._beta_box.setText(i18n.t("updBetaChannel"))

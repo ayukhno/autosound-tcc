@@ -283,11 +283,72 @@ def test_the_dialog_has_a_second_tab_with_what_is_installed():
     _app()
     dialog = DiagnosticsDialog()
 
-    assert dialog._tabs.count() == 4
+    assert dialog._tabs.count() == 5
     assert dialog._tabs.tabText(0) == i18n.t("diagTabProject")
-    assert dialog._tabs.tabText(1) == i18n.t("diagTabInstall")
-    assert dialog._tabs.tabText(2) == i18n.t("diagTabLog")
-    assert dialog._tabs.tabText(3) == i18n.t("diagTabSessions")
+    assert dialog._tabs.tabText(1) == i18n.t("diagTabUpdates")
+    assert dialog._tabs.tabText(2) == i18n.t("diagTabInstall")
+    assert dialog._tabs.tabText(3) == i18n.t("diagTabLog")
+    assert dialog._tabs.tabText(4) == i18n.t("diagTabSessions")
+    assert dialog._tabs.currentWidget() is dialog._project_tab, "it opens on the project"
+
+
+def test_the_updates_have_a_tab_of_their_own():
+    """VM-1 (tcc#98): on the Installation tab the updater and the tool rows needed scrolling while
+    the report box kept half the height — the Arbiter, «давай зробимо оновлення на окремій
+    вкладці». TCC's and the method's rows, the beta box and the tools are on «Updates»; the
+    Installation tab keeps what is not about updating."""
+    _app()
+    dialog = DiagnosticsDialog()
+    updates_tab, install_tab = dialog._updates_tab, dialog._install_tab
+
+    for name in ("tcc", "skill"):
+        label, button = dialog._update_rows[name]
+        assert updates_tab.isAncestorOf(label) and updates_tab.isAncestorOf(button), name
+        assert not install_tab.isAncestorOf(button), name
+    for widget in (dialog._beta_box, dialog._tools_title):
+        assert updates_tab.isAncestorOf(widget) and not install_tab.isAncestorOf(widget)
+    tools = dialog._tools_layout.parentWidget()
+    assert updates_tab.isAncestorOf(tools) and not install_tab.isAncestorOf(tools)
+    for widget in (dialog._install_text, dialog._copy_btn):
+        assert install_tab.isAncestorOf(widget) and not updates_tab.isAncestorOf(widget)
+
+
+def test_the_report_box_takes_the_installation_tab_s_height():
+    """The other half of VM-1: with the updater gone the report is the tab — the box is not left
+    with half of it under rows that moved away."""
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog.show()
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    QApplication.processEvents()
+
+    assert dialog._install_text.height() > dialog._install_tab.height() * 0.6, (
+        f"{dialog._install_text.height()} px of a {dialog._install_tab.height()} px tab")
+    dialog.close()
+
+
+def test_each_tab_asks_only_its_own_questions(monkeypatch):
+    """The report is file reads and eight `--version` calls; the updates are GitHub and the
+    skill's minute-long `status`. Opening one tab pays for that tab only (VM-1)."""
+    from autosound_tcc.core import updates
+
+    asked = []
+    monkeypatch.setattr(updates, "check_all", lambda channel="stable": asked.append(channel) or (
+        updates.Status("tcc", "0.1.3", "", False), updates.Status("skill", "3.0.8", "3.0.8", False)))
+    monkeypatch.setattr(updates, "tools_status", lambda: asked.append("tools") or
+                        updates.ToolsStatus(True, ()))
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    assert dialog._install_read is True
+    assert dialog._update_probe is None and dialog._tools_job is None, "no GitHub, no status"
+
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
+    assert dialog._update_probe is not None and dialog._tools_job is not None
+    dialog._update_probe._thread.join(timeout=5)
+    _finish_tools(dialog)
+    assert sorted(asked) == ["stable", "tools"]
 
 
 def test_the_report_is_read_only_when_the_tab_is_opened():
@@ -299,7 +360,7 @@ def test_the_report_is_read_only_when_the_tab_is_opened():
     assert dialog._install_read is False
 
     started = time.monotonic()
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
 
     assert dialog._install_read is True
     # Everything that reads a file is already on screen; only the tool probes are on a thread.
@@ -363,7 +424,7 @@ def test_the_log_tab_shows_the_tail_and_where_it_came_from():
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog._tabs.setCurrentIndex(2)
+    dialog._tabs.setCurrentWidget(dialog._log_tab)
 
     assert dialog._log_text.toPlainText() == app_log.tail()
     path = app_log.log_path()
@@ -381,7 +442,7 @@ def test_copying_the_log_takes_the_path_with_it(monkeypatch, tmp_path):
     monkeypatch.setattr(app_log, "_log_path", log)
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(2)
+    dialog._tabs.setCurrentWidget(dialog._log_tab)
 
     dialog._copy_log()
 
@@ -725,7 +786,7 @@ def test_re_check_asks_about_updates_again(monkeypatch):
 
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
     dialog._show_update(updates.Status("skill", "3.0.7", "3.0.8", True))
     asked = []
     monkeypatch.setattr(updates, "check_all", lambda channel="stable": asked.append(1) or (
@@ -744,12 +805,31 @@ def test_re_check_from_another_tab_does_not_pay_for_the_probes():
     """Eight subprocesses belong to the moment the tab is opened, not to a button on another one."""
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(0)
+    dialog._tabs.setCurrentWidget(dialog._project_tab)
     dialog._install_read = True
+    dialog._updates_read = True
 
     dialog._on_refresh()
 
     assert dialog._install_read is False, "but it is marked stale, so opening it re-reads"
+    assert dialog._updates_read is False, "the Updates tab too (VM-1)"
+    assert dialog._update_probe is None and dialog._tools_job is None
+
+
+def test_an_update_marks_the_report_stale_without_reading_it_on_another_tab(monkeypatch):
+    """The report names the method's version, so an update makes it stale — and it is re-read when
+    the Installation tab is opened, not in the background behind the Updates tab (VM-1)."""
+    dialog, _asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
+    dialog._install_read = True
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+
+    assert dialog._install_read is False and dialog._install_worker is None
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    assert dialog._install_read is True and dialog._install_worker is not None
 
 
 def test_reporting_a_problem_carries_the_installation_block_into_the_form():
@@ -1042,7 +1122,7 @@ def test_the_sessions_tab_lists_what_there_is_and_ticks_the_newest(tmp_path, mon
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog._tabs.setCurrentIndex(3)
+    dialog._tabs.setCurrentWidget(dialog._sessions_tab)
 
     assert dialog._sessions_list.count() == 2
     assert "18.09 20:17" in dialog._sessions_list.item(0).text()
@@ -1059,7 +1139,7 @@ def test_the_name_follows_what_is_ticked_and_how_it_is_saved(tmp_path, monkeypat
     _rows(tmp_path, monkeypatch)
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(3)
+    dialog._tabs.setCurrentWidget(dialog._sessions_tab)
 
     assert dialog._sessions_name.text() == "EPY-Sep2026-sessions-2026-09-18.md"
 
@@ -1077,7 +1157,7 @@ def test_saving_writes_one_file_per_session_into_the_archive(tmp_path, monkeypat
     _rows(tmp_path, monkeypatch)
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(3)
+    dialog._tabs.setCurrentWidget(dialog._sessions_tab)
     dialog._tick_all_sessions(True)
     dialog._sessions_folder.setText(str(tmp_path / "out"))
 
@@ -1099,7 +1179,7 @@ def test_no_sessions_says_so_and_the_button_cannot_be_pressed(tmp_path, monkeypa
     _app()
     dialog = DiagnosticsDialog()
 
-    dialog._tabs.setCurrentIndex(3)
+    dialog._tabs.setCurrentWidget(dialog._sessions_tab)
 
     assert dialog._sessions_list.count() == 0
     assert dialog._sessions_head.text() == i18n.t("diagSessionsNone")
@@ -1210,7 +1290,7 @@ def _tools_shown(monkeypatch, *tools):
     monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, tuple(tools)))
     _app()
     dialog = DiagnosticsDialog()
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
     _finish_tools(dialog)
     return dialog
 
@@ -1230,7 +1310,7 @@ def test_the_tool_rows_appear_after_the_worker_not_before(monkeypatch):
     dialog = DiagnosticsDialog()
     assert dialog._tools_job is None, "the window opening asks nothing"
 
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
 
     assert dialog._tools_job is not None and dialog._tool_rows == {}, "not before the worker"
     assert i18n.t("updToolsChecking") in _texts(dialog)
@@ -1371,7 +1451,7 @@ def test_the_tool_rows_get_their_height_when_they_land(monkeypatch):
     dialog = DiagnosticsDialog()
     dialog.show()
     QApplication.processEvents()
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
     QApplication.processEvents()
     size = dialog.size()
     _finish_tools(dialog)
@@ -1408,7 +1488,7 @@ def test_a_running_session_holds_omp_and_claude_and_says_why(monkeypatch):
     dialog = DiagnosticsDialog()
     live = [True]
     _session(dialog, live)
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
     _finish_tools(dialog)
 
     for name in ("omp", "claude"):

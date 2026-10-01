@@ -508,7 +508,7 @@ def test_a_session_that_has_ended_no_longer_holds_the_tool_rows(monkeypatch):
     window = MainWindow()
     window._diag_btn.click()
     dialog = window._diag_dialog
-    dialog._tabs.setCurrentIndex(1)
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
     for _ in range(5):
         if dialog._tools_job is None:
             break
