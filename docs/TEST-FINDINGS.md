@@ -3237,3 +3237,26 @@ session did not trust the self-report, the route was Google's). The session's co
 session goes digging through the app's code to find one.
 
 **Task.** For W-5's collection.
+
+### 125. The reviewer-key window on Windows: «… у HKCU\Environment, рядок None» and «бачить кожна програма, запущена з термінала»
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, TCC 0.1.45, «Ключ рецензента…»: the key saved — «Збережено:
+GEMINI_API_KEY — у захищеному сховищі (файлі, зашифрованому твоїм входом у Windows)», Google (Gemini) «у захищеному
+сховищі» ✓. Under it, red: «GEMINI_API_KEY досі експортується у HKCU\Environment, рядок None. Його бачить кожна
+програма, запущена з термінала …». A registry value has no line, so the sentence prints Python's `None`; and a
+user variable in `HKCU\Environment` is seen by every program the user starts, not only from a terminal — the
+sentence is the macOS one (`~/.zshrc`, a line) applied to Windows.
+
+**Weight.** Low: the save and the warning work; the words are wrong on Windows.
+
+**Task.** For W-5's collection (`rkShell` in i18n, four languages).
+
+### 126. The same window on Windows: the «Перенести (відкриє термінал)» button cuts its text on both sides when hovered or focused
+
+**What.** Same screenshots: drawn plain, the button reads whole; hovered/focused (the tinted state) it reads
+«Іеренести (відкриє термінал» — the first letter eaten, the closing bracket gone. The class of finding 1 (a
+button's first letter cut), in a dialog that came after it.
+
+**Weight.** Low.
+
+**Task.** For W-5's collection.
