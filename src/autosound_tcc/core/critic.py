@@ -28,7 +28,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Mapping, Optional
 
 from autosound_tcc.core import app_log, child
@@ -553,7 +553,10 @@ def run(
     # Deliberately not `proc.returncode == 0`: clipboard mode returns 0 with nothing on stdout.
     match = _MODEL_MARKER.search(stdout)
     review_match = _REVIEW_MARKER.search(stderr)
-    review = review_match.group("path") if review_match else None
+    # As a POSIX path, whatever the OS: the method builds it with `os.path.join`, so on Windows it
+    # read `process\reviews\…` in the bubble, the journal and the tools' answers alike — and the
+    # journal is read on other machines (tcc#116, CI on Windows). The path is project-relative.
+    review = PureWindowsPath(review_match.group("path")).as_posix() if review_match else None
     if stdout.strip():
         text = _MODEL_MARKER.sub("", stdout).strip()
         return CriticResult(

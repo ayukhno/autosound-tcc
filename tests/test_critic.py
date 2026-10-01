@@ -1172,3 +1172,25 @@ def test_the_step_down_line_is_the_vendored_methods_own():
     for words in ('f">> Помилка виклику API ({e}). Спроба локального CLI..."',
                   'f"Помилка запиту до Gemini API: {e}', 'f">> --via api: ключ {hidden[0]} із середовища; '):
         assert words in source, words
+
+
+@pytest.mark.parametrize("said", ["process/reviews/2026-10-01T10-00-00-ask.md",
+                                  "process\\reviews\\2026-10-01T10-00-00-ask.md"])
+def test_the_filed_text_is_named_by_a_path_every_os_reads(monkeypatch, tmp_path, said):
+    """CI on Windows (tcc#116): the method files the text under `os.path.join`, so on Windows its
+    `>> REVIEW_FILE:` line reads `process\\reviews\\…`, and that went into the bubble, the journal
+    and the tool's answer as it was. A project-relative POSIX path is what a session, a resume and
+    another machine read alike — for a review and a question both, which share this parse."""
+    import subprocess
+
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0] if a else [], 0, "pong", f">> REVIEW_FILE: {said}\n"))
+
+    result = critic.run("## a question", project_dir=tmp_path, role=critic.ASK)
+
+    assert result.mode == critic.MODE_API_OR_CLI
+    assert result.review == "process/reviews/2026-10-01T10-00-00-ask.md"
