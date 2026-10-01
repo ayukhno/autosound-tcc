@@ -3330,4 +3330,8 @@ carries no engine for this machine» — the VM's method clone came from a relea
 
 **Weight.** High: the footer says one reviewer and another is called; the tuner cannot see why.
 
+The same file also holds `AUTOSOUND_CRITIC_PROVIDER=openai`, which `provider_for` returns before it reads the
+model's name at all — so with the model line gone, a Gemini pick would still be sent as OpenAI's. The Arbiter
+comments out both by hand on the VM.
+
 **Task.** For W-5's collection — the precedence is the method's and TCC's together.
