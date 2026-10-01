@@ -1747,6 +1747,21 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0;
     }}
+    /* The same bar lying down. Without it every horizontal bar was the platform's: a grey groove
+    with «‹ ›» arrows under the measurement grid on Windows (VM-10). */
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: 10px;
+        margin: 0;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {t.border2};
+        border-radius: 4px;
+        min-width: 24px;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0;
+    }}
 
     /* ---- tabs: the header carries the outline, the body carries none ----
 

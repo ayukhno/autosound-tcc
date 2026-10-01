@@ -1282,3 +1282,38 @@ def test_a_pass_the_method_cannot_plan_still_opens_and_says_why(tmp_path, monkey
     assert ("taken", "w-L_6 (sw)") in calls
     assert seen["opened"] == "cap_003"
     assert "--plan needs the phase" in seen["unplanned"]
+
+
+def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
+    """VM-10 (the Windows VM): under the measurement grid, whose «GROUP (RTA)» column did not fit,
+    a native grey bar with «‹ ›» arrows. The columns scroll on their own both ways on purpose (the
+    Arbiter, 2026-09-23: only the table scrolls), and the panel is as wide as its handle leaves it,
+    so the overflow stays — on the bar every other scroll area has: as thick as the vertical one,
+    no arrows, the handle in the sheet's `border2`. Drawn under the sheet the window applies."""
+    from PySide6.QtGui import QColor
+
+    from tests import _windows
+
+    app = _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    palette = _windows.theme_on(monkeypatch, panel, "dark")
+    panel.resize(300, 500)
+    panel.show()
+    try:
+        for _ in range(4):
+            app.processEvents()
+            app.sendPostedEvents()
+        scroll = panel._cols_scroll
+        bar = scroll.horizontalScrollBar()
+        assert bar.isVisible(), "the grid fits at 300 px: nothing to scroll, nothing to test"
+        assert bar.height() == scroll.verticalScrollBar().sizeHint().width(), (
+            f"{bar.height()} px thick, the vertical bar {scroll.verticalScrollBar().sizeHint().width()}")
+        drawn = panel.grab().toImage()
+        left = bar.mapTo(panel, bar.rect().topLeft())
+        middle = left.y() + bar.height() // 2
+        # Scrolled to its start, the handle starts at the bar's left end: no arrow before it.
+        at_start = QColor(drawn.pixel(left.x() + 4, middle)).name()
+        assert at_start == palette.border2, f"{at_start} at the bar's start, not the handle"
+    finally:
+        panel.hide()
