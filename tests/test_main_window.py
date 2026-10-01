@@ -3647,21 +3647,27 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
 def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floors(monkeypatch):
     """VM-9 (the Windows VM, a full-screen window): the footer kept «API · gemini-3.1-pr…» beside
     a wide empty gap. A model picker asked for sixteen letters and could not be given more, and the
-    gap took the rest. Where the row has room, the picker widens to its pick whole -- and no
+    gap took the rest. Where the row has room, each picker widens to its pick whole -- and no
     further -- and the room comes out of the gap, every other control keeping its own width;
     narrowed, the row lays out as it did, from the same asks and floors (the Arbiter: «обрізання в
-    такому форматі - ОК»)."""
+    такому форматі - ОК»).
+
+    «Roomy» is room for BOTH pickers' picks: on CI's wider fonts «— choose a model —» is longer
+    than the Generator's sixteen letters too, and room made for the reviewer alone was shared
+    between them (the first run on Windows: 455 px against the 615 the reviewer's pick takes)."""
     import math
 
     from PySide6.QtGui import QFontMetricsF
-    from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox
+    from PySide6.QtWidgets import QStyle, QStyleOptionComboBox
 
     from autosound_tcc.core import model_choices
+    from autosound_tcc.ui.tcc import copy_menu
 
     app = _app()
     window = MainWindow()
     monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
     combo = window._ai_critic_combo
+    pickers = (window._ai_main_combo, combo)
     footer = combo.parentWidget()
     layout = footer.layout()
 
@@ -3670,12 +3676,20 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
             app.processEvents()
             app.sendPostedEvents()
 
-    def chrome() -> int:
+    def whole(box) -> int:
+        """The box's width with its pick drawn whole: the text's advance or ink, whichever reaches
+        further, and the chrome around the edit field."""
         option = QStyleOptionComboBox()
-        combo.initStyleOption(option)
-        return combo.width() - combo.style().subControlRect(
-            QStyle.ComplexControl.CC_ComboBox, option, QStyle.SubControl.SC_ComboBoxEditField,
-            combo).width()
+        box.initStyleOption(option)
+        field = box.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                           QStyle.SubControl.SC_ComboBoxEditField, box).width()
+        metrics, text = QFontMetricsF(box.font()), box.currentText()
+        drawn = max(metrics.horizontalAdvance(text), metrics.boundingRect(text).right())
+        return math.ceil(drawn) + box.width() - field
+
+    def own_asks() -> int:
+        """What the row's controls ask for of themselves, before a picker is lent anything."""
+        return footer.sizeHint().width() - sum(p.lent() for p in pickers)
 
     window.show()
     settle()
@@ -3688,28 +3702,42 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
     text = combo.currentText()
     assert text.startswith("API · gemini-3.1-pro-preview"), text
     assert footer.minimumSizeHint().width() == floor, "a pick never moves the footer's floor"
-    asks = QComboBox.sizeHint(combo).width()  # the picker's own ask, sixteen letters
-    whole = math.ceil(QFontMetricsF(combo.font()).horizontalAdvance(text)) + chrome()
-    assert whole > asks, "the pick is longer than the picker asks for, or there is nothing to test"
+    asks = combo.sizeHint().width() - combo.lent()  # the picker's own ask, sixteen letters
+    assert whole(combo) > asks, "the pick is longer than the picker asks for: nothing to test"
 
-    roomy = window.width() - footer.width() + footer.sizeHint().width() + (whole - asks) + 40
-    window.resize(roomy, 820)
+    short = sum(p.short_of_pick() for p in pickers)
+    window.resize(window.width() - footer.width() + own_asks() + short + 40, 820)
     settle()
-    assert combo.fit_text() == text, (
-        f"at {window.width()} px the reviewer reads «{combo.fit_text()}», {combo.width()} px "
-        f"wide against the {whole} its pick takes\n{_row_width_report(window, footer)}")
-    assert combo.width() <= whole + 1, "as wide as the pick, not wider"
+    for box in pickers:
+        assert box.fit_text() == box.currentText(), (
+            f"at {window.width()} px a picker reads «{box.fit_text()}», {box.width()} px wide "
+            f"against the {whole(box)} its pick takes\n{_row_width_report(window, footer)}")
+    assert combo.width() <= whole(combo) + 1, "as wide as the pick, not wider"
     for index in range(layout.count()):
         item = layout.itemAt(index)
         widget = item.widget()
-        if widget is not None and widget is not combo and widget.isVisible():
+        if widget is not None and widget not in pickers and widget.isVisible():
             assert widget.width() >= item.sizeHint().width(), (
-                f"{type(widget).__name__} gave up room to the picker\n"
+                f"{type(widget).__name__} gave up room to a picker\n"
                 f"{_row_width_report(window, footer)}")
 
-    window.resize(1280, 820)
+    # The reviewer's status grows (#113's note of a pin set aside): it takes its whole width
+    # before a picker is lent a pixel. With room for every control's own ask and half of what the
+    # pickers are short, the note is whole and the pickers share the rest.
+    status = window._critic_status
+    status.setText(f"{copy_menu.full_text(status)} · {i18n.t('criticPinsShortBoth')}")
     settle()
-    assert window.width() <= 1280, _row_width_report(window, footer)
+    window.resize(window.width() - footer.width() + own_asks() + short // 2, 820)
+    settle()
+    assert status.text() == copy_menu.full_text(status), (
+        f"at {window.width()} px the note reads «{status.text()}» while the pickers are lent "
+        f"{[p.lent() for p in pickers]}\n{_row_width_report(window, footer)}")
+    assert 0 < sum(p.lent() for p in pickers) < short
+
+    # Narrowed to the window's own floor, where the row has nothing to spare on any font.
+    window.resize(window.minimumSizeHint().width(), 820)
+    settle()
+    assert own_asks() > footer.contentsRect().width(), _row_width_report(window, footer)
     assert combo.width() <= asks and combo.sizeHint().width() == asks, (
         f"narrowed, the picker is {combo.width()} px and asks {combo.sizeHint().width()} against "
         f"its own {asks}: the room came out of the row\n{_row_width_report(window, footer)}")
