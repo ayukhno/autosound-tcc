@@ -1356,3 +1356,129 @@ def test_a_re_check_during_a_tool_update_leaves_its_rows_alone(monkeypatch):
     release.set()
     _finish_tools(dialog)
     assert "18.2.4" in dialog._tool_rows["omp"][0].text()
+
+
+def test_the_tool_rows_get_their_height_when_they_land(monkeypatch):
+    """The window takes its size before the rows exist, and they land a minute later: at that size
+    each row and «Update all» still get at least the height they need — a sliver of 5 px is a row
+    nobody can read or press (review of tcc#98)."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, (
+        _tool("claude", "2.1.280", "2.1.284"), _tool("omp", "17.3.8", "18.2.4"),
+        _tool("agy", "1.2.14", ""), _tool("gh", "2.102.0", "2.102.0"))))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog.show()
+    QApplication.processEvents()
+    dialog._tabs.setCurrentIndex(1)
+    QApplication.processEvents()
+    size = dialog.size()
+    _finish_tools(dialog)
+    for _ in range(5):
+        QApplication.processEvents()
+
+    assert dialog.size() == size, "the rows fit without the window being resized"
+    rows = [button.parentWidget() for _label, button in dialog._tool_rows.values()]
+    rows.append(dialog._tools_all_btn.parentWidget())
+    assert len(rows) == 5
+    for row in rows:
+        assert row.height() >= row.minimumSizeHint().height(), (
+            f"{row.height()} px of {row.minimumSizeHint().height()}")
+    dialog.close()
+
+
+def _session(dialog, live: list) -> None:
+    """The main window's answer to "is an AI session running", as a switch the test flips."""
+    dialog.set_session_probe(lambda: live[0])
+
+
+def test_a_running_session_holds_omp_and_claude_and_says_why(monkeypatch):
+    """Ruling 21 (tcc#98): a session runs on omp and Claude Code, so while one runs their buttons —
+    and «Update all», which would take them along — wait, with the reason on the row. agy and gh
+    stay offered. Read again when the window opens and on Re-check."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, (
+        _tool("claude", "2.1.280", "2.1.284"), _tool("omp", "17.3.8", "18.2.4"),
+        _tool("agy", "1.2.14", ""), _tool("gh", "2.92.0", "2.102.0"))))
+    monkeypatch.setattr(updates, "update_tools",
+                        lambda names: pytest.fail("nothing under a running session"))
+    _app()
+    dialog = DiagnosticsDialog()
+    live = [True]
+    _session(dialog, live)
+    dialog._tabs.setCurrentIndex(1)
+    _finish_tools(dialog)
+
+    for name in ("omp", "claude"):
+        assert not dialog._tool_rows[name][1].isEnabled(), name
+        assert not dialog._tool_guards[name].isHidden(), name
+        assert dialog._tool_guards[name].text() == i18n.t("updToolSession")
+    for name in ("agy", "gh"):
+        assert dialog._tool_rows[name][1].isEnabled(), name
+    assert not dialog._tools_all_btn.isEnabled(), "«all» would take omp and Claude Code along"
+    assert i18n.t("updToolsSessionAll").format(names="Claude Code, omp") in _texts(dialog)
+    dialog._update_tools(["omp"])  # a press that slipped past the button: still nothing runs
+    assert dialog._tools_job is None
+
+    live[0] = False
+    dialog._on_refresh()  # Re-check
+    _finish_tools(dialog)
+    assert dialog._tool_rows["omp"][1].isEnabled() and dialog._tools_all_btn.isEnabled()
+    assert dialog._tool_guards["omp"].isHidden()
+
+    live[0] = True
+    dialog.show()  # the window opened again: asked again, no new status needed
+    assert not dialog._tool_rows["omp"][1].isEnabled()
+    assert not dialog._tool_guards["omp"].isHidden()
+    dialog.close()
+
+
+def test_a_second_failure_of_the_same_tool_says_its_reason_once(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    why = "Error: omp: Permission denied @ rb_sysopen"
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate((
+        updates.ToolUpdate("omp", False, "17.3.8", "17.3.8", why),)))
+
+    for _press in range(2):
+        dialog._tool_rows["omp"][1].click()
+        _finish_tools(dialog)
+
+    assert dialog._tool_rows["omp"][0].text() == (
+        i18n.t("updToolAvailable").format(name="omp", here="17.3.8", there="18.2.4") + "\n"
+        + i18n.t("updToolFailed").format(why=why))
+
+
+#: `conftest.py` stands in for `update_tools`; the real one, for the test that runs it end to end.
+from autosound_tcc.core import updates as _updates  # noqa: E402
+
+_REAL_UPDATE_TOOLS = _updates.update_tools
+
+
+def test_a_name_the_skill_refuses_restores_the_row_with_its_reason(monkeypatch, tmp_path):
+    """`--only` with a name the script does not know is argparse's: exit 2, usage on stderr, no
+    JSON. The row is put back as it was, with the script's own last line as the reason."""
+    from autosound_tcc.core import updates, vendor_loader
+
+    skill = tmp_path / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "scripts" / "upkeep.py").write_text("raise SystemExit('never runs')\n")
+    monkeypatch.setattr(vendor_loader, "skill_dir", lambda: skill)
+    said = ("upkeep.py tools: error: argument --only: invalid choice: 'uv' "
+            "(choose from 'claude', 'omp', 'agy', 'gh')")
+    monkeypatch.setattr(updates, "_run_upkeep",
+                        lambda argv, timeout: (2, "", f"usage: upkeep.py tools [-h]\n{said}\n"))
+    dialog = _tools_shown(monkeypatch, _tool("uv", "0.8.0", "0.9.0"))
+    before = dialog._tool_rows["uv"][0].text()
+    monkeypatch.setattr(updates, "update_tools", _REAL_UPDATE_TOOLS)
+
+    dialog._tool_rows["uv"][1].click()
+    _finish_tools(dialog)
+
+    label, button = dialog._tool_rows["uv"]
+    assert label.text() == before + "\n" + i18n.t("updToolFailed").format(
+        why=i18n.t("updWhy_upkeep_failed") + ": " + said)
+    assert button.isEnabled()

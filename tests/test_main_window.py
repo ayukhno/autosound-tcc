@@ -485,6 +485,22 @@ def test_diagnostics_button_opens_the_panel_with_the_last_report():
     assert window._diag_dialog._report is report
 
 
+def test_the_diagnostics_window_is_told_whether_a_session_is_running():
+    """omp and Claude Code are what a session runs on, so their update rows wait while one runs
+    (ruling 21, tcc#98) — and only the main window knows whether one does."""
+    _app()
+    window = MainWindow()
+    window._diag_btn.click()
+    dialog = window._diag_dialog
+
+    assert dialog._session_live() is False
+    window._dialog._worker = object()
+    try:
+        assert dialog._session_live() is True
+    finally:
+        window._dialog._worker = None
+
+
 def test_a_failing_contract_check_lands_in_the_status_strip_not_the_dialog():
     """§8's whole point: disk-state facts are not chat bubbles. A problem the user hasn't opened
     the panel for still has to be visible somewhere that isn't the conversation."""

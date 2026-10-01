@@ -2095,6 +2095,10 @@ class MainWindow(QMainWindow):
             # checker's finding to the thing that can. Into the composer, not out — the Arbiter
             # reads it before it is sent, like every other statement of theirs.
             self._diag_dialog.askRequested.connect(self._dialog.put_in_composer)
+            # Whether a session runs on omp and Claude Code right now: their update rows wait
+            # while one does (ruling 21, tcc#98). Asked by the window when it opens and on
+            # Re-check, so a session started or ended in between is seen.
+            self._diag_dialog.set_session_probe(self._dialog.has_agent)
             self._diag_dialog.set_report(self._contract_report)
         elif self._contract_report is not None:
             self._diag_dialog.set_report(self._contract_report)

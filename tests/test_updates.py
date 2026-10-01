@@ -1737,3 +1737,17 @@ def test_an_update_that_does_not_answer_says_why(monkeypatch, tmp_path):
 
     assert done.rows == () and done.reason == "upkeep_failed"
     assert "TimeoutExpired" in done.detail
+
+
+def test_a_name_the_skill_does_not_know_is_its_usage_error_in_its_own_words(monkeypatch,
+                                                                            tmp_path):
+    """argparse refuses an `--only` outside `TOOLS`: exit 2, usage on stderr, no JSON at all."""
+    said = ("upkeep.py tools: error: argument --only: invalid choice: 'uv' "
+            "(choose from 'claude', 'omp', 'agy', 'gh')")
+    _vendored_upkeep(monkeypatch, tmp_path, [])
+    monkeypatch.setattr(updates, "_run_upkeep",
+                        lambda argv, timeout: (2, "", f"usage: upkeep.py tools [-h]\n{said}\n"))
+
+    done = _REAL_UPDATE_TOOLS(["uv"])
+
+    assert done == updates.ToolsUpdate((), "upkeep_failed", said)

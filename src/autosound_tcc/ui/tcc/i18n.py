@@ -229,6 +229,8 @@ T: dict[Lang, dict[str, str]] = {
         "updToolSame": "{name} {here}: already the newest",
         "updToolFailed": "not updated, left as it was: {why}",
         "updWhy_no_upkeep_here": "the method installed here is older than v3.0.64 and cannot ask the tools yet — update the method first",
+        "updToolSession": "an AI session is running on it — close the session first, then update",
+        "updToolsSessionAll": "close the AI session first — it runs on {names}",
         "diagLogNone": "no log file — this run writes to the terminal only",
         "diagInstallBlurb": "What is installed on this machine — versions, where each piece came \
 from, which command-line tools answer. Copy it into a message when you report something: it \
@@ -1465,6 +1467,8 @@ Choose sweeps (sw) above to read this.",
         "updToolSame": "{name} {here}: вже найновіша",
         "updToolFailed": "не оновлено, лишилась як була: {why}",
         "updWhy_no_upkeep_here": "Скіл тут старіший за v3.0.64 і ще не вміє питати програми — спершу онови Скіл",
+        "updToolSession": "на ній зараз працює сесія з ШІ — спершу закрий сесію, тоді оновлюй",
+        "updToolsSessionAll": "спершу закрий сесію з ШІ — вона працює на {names}",
         "diagLogNone": "лог-файла немає — цей запуск пише лише в термінал",
         "diagInstallBlurb": "Що встановлено на цій машині — версії, звідки взялася кожна частина, \
 які CLI відповідають. Скопіюй у повідомлення, коли про щось звітуєш: це відповідає на перші пʼять \
@@ -2633,6 +2637,8 @@ Choose sweeps (sw) above to read this.",
         "updToolSame": "{name} {here}: already the newest",
         "updToolFailed": "not updated, left as it was: {why}",
         "updWhy_no_upkeep_here": "the method installed here is older than v3.0.64 and cannot ask the tools yet — update the method first",
+        "updToolSession": "an AI session is running on it — close the session first, then update",
+        "updToolsSessionAll": "close the AI session first — it runs on {names}",
         "diagLogNone": 'nie ma pliku logu — ten przebieg pisze tylko do terminala',
         "diagInstallBlurb": 'Co jest zainstalowane na tej maszynie — wersje, skąd wzięła się każda część, które CLI '
                             'odpowiadają. Skopiuj do wiadomości, gdy coś zgłaszasz: to odpowiada na pierwsze pięć pytań, '
@@ -3864,6 +3870,8 @@ Choose sweeps (sw) above to read this.",
         "updToolSame": "{name} {here}: already the newest",
         "updToolFailed": "not updated, left as it was: {why}",
         "updWhy_no_upkeep_here": "the method installed here is older than v3.0.64 and cannot ask the tools yet — update the method first",
+        "updToolSession": "an AI session is running on it — close the session first, then update",
+        "updToolsSessionAll": "close the AI session first — it runs on {names}",
         "diagLogNone": 'keine Protokolldatei — dieser Lauf schreibt nur ins Terminal',
         "diagInstallBlurb": 'Was auf dieser Maschine installiert ist — Versionen, woher jedes Teil kam, welche CLIs '
                             'antworten. Kopiere es in eine Nachricht, wenn du etwas meldest: es beantwortet die ersten '

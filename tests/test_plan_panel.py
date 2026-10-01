@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel  # noqa: E402
@@ -26,8 +26,17 @@ def _app() -> QApplication:
 def test_only_the_current_phase_starts_expanded():
     _app()
     progress = _PlanProgress()
+    # One owner for the rows, as `PlanPanel` is in the window. Built bare, each row was a window
+    # of its own that only reference cycles kept (its hover tips' closures, the header's
+    # `mousePressEvent = self._toggle`), so the garbage collector, not Qt, deleted it — in pieces,
+    # wherever the automatic passes happened to fall — and a nested QBoxLayout was destroyed
+    # twice: `Fatal Python error: Segmentation fault` in `_collect_qt_leftovers`, after this test.
+    # Measured at 9270e37 too, with only the timing of one gen-0 pass moved (review of tcc#98).
+    # Now the holder goes when the test returns and takes every row with it, through Qt.
+    holder = QWidget()
     for i, phase in enumerate(PLAN):
         row = _PhaseRow(phase, i, progress, lambda: None, lambda _sid: None)
+        row.setParent(holder)
         if phase.current:
             assert not row._steps_container.isHidden()
         else:

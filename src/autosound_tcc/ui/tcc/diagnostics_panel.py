@@ -164,6 +164,11 @@ def _reason(key: str, detail: str = "") -> str:
     return f"{text}: {detail}" if detail else text
 
 
+#: The tools a running AI session runs on (ruling 21, tcc#98): omp drives it and Claude Code is
+#: the other harness. Their rows wait while a session runs; agy and gh do not.
+_SESSION_TOOLS = ("omp", "claude")
+
+
 def _tool_title(name: str) -> str:
     """The name a person knows the tool by: `upkeep.py` says `claude` for Claude Code."""
     return {"claude": "Claude Code"}.get(name, name)
@@ -509,7 +514,16 @@ class DiagnosticsDialog(QDialog):
         self._install_timer = QTimer(self)
         self._install_timer.setInterval(_TOOLS_POLL_MS)
         self._install_timer.timeout.connect(self._poll_tools)
-        return page
+        # The page scrolls rather than squeezing. The window takes its height when it opens, and
+        # the tool rows land up to a minute later (tcc#98): with no room to grow into, each was
+        # crushed to 5 px of the 25 it needs — unreadable, and a button nobody could press (review
+        # of tcc#98). In a scroll area the page keeps its minimum height and the window keeps its
+        # size; the Project tab is shaped the same way.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(page)
+        return scroll
 
     def _build_update_row(self) -> QWidget:
         """Two lines, two buttons: is there a newer one, and the thing that installs it.
@@ -579,11 +593,20 @@ class DiagnosticsDialog(QDialog):
         grid.addWidget(tools)
         self._tools: dict = {}
         self._tool_rows: dict = {}
+        #: Whether each row's button would be live with no session running: offered by the
+        #: status, off once that tool updated. The buttons are drawn from this (`_sync_tools`).
+        self._tool_offer: dict = {}
+        #: The «a session runs on it» line under the omp and Claude Code rows (ruling 21).
+        self._tool_guards: dict = {}
         self._tools_all_btn: Optional[QPushButton] = None
+        self._tools_all_note: Optional[QLabel] = None
         self._tools_job: Optional[_UpdateStep] = None
         self._tools_then = None
         self._tools_asked: list = []
-        self._tools_before: dict = {}
+        #: Is an AI session running — asked of the main window (`set_session_probe`) when the
+        #: window opens, on Re-check and when the rows land; False with nobody to ask.
+        self._session_probe = None
+        self._session_running = False
         self._tools_timer = QTimer(self)
         self._tools_timer.setInterval(_TOOLS_POLL_MS)
         self._tools_timer.timeout.connect(self._poll_tools_job)
@@ -833,6 +856,43 @@ class DiagnosticsDialog(QDialog):
 
     # ---- omp, agy, gh, Claude Code (tcc#98) ----------------------------------
 
+    def set_session_probe(self, probe) -> None:
+        """How to ask whether an AI session is running: the main window's
+        `DialogPanel.has_agent`. A session runs on omp and Claude Code, so their rows wait while
+        one runs (ruling 21, tcc#98). Updated under it, the running session keeps the old one on
+        macOS and the update fails on a locked file on Windows, and nothing said why."""
+        self._session_probe = probe
+        self._read_session()
+
+    def _session_live(self) -> bool:
+        return bool(self._session_probe()) if self._session_probe is not None else False
+
+    def _read_session(self) -> None:
+        """Ask again and redraw the buttons by the answer: on open, on Re-check, when rows land."""
+        self._session_running = self._session_live()
+        self._sync_tools()
+
+    def _sync_tools(self) -> None:
+        """Every tool button from what is offered, whether an update is running, and whether a
+        session runs on the tool — with the reason under each row a session holds, and beside
+        «Update all», which would take those along."""
+        busy = self._tools_job is not None
+        held = []
+        for name, (_label, button) in self._tool_rows.items():
+            offered = self._tool_offer.get(name, False)
+            guarded = offered and self._session_running and name in _SESSION_TOOLS
+            if guarded:
+                held.append(_tool_title(name))
+            button.setEnabled(offered and not busy and not guarded)
+            guard = self._tool_guards.get(name)
+            if guard is not None:
+                guard.setHidden(not guarded)
+        if self._tools_all_btn is not None:
+            self._tools_all_btn.setEnabled(not busy and not held and any(self._tool_offer.values()))
+            self._tools_all_note.setText(
+                i18n.t("updToolsSessionAll").format(names=", ".join(held)))
+            self._tools_all_note.setHidden(not held)
+
     def _start_tools_check(self) -> None:
         """Ask the skill's `upkeep.py status` about the tools — but not while one is being
         updated: its row says so, and the receipt is on its way."""
@@ -854,10 +914,14 @@ class DiagnosticsDialog(QDialog):
         then, self._tools_job, self._tools_then = self._tools_then, None, None
         then(job)
 
+    def _clear_tools(self) -> None:
+        clear_layout(self._tools_layout)
+        self._tools, self._tool_rows, self._tool_offer, self._tool_guards = {}, {}, {}, {}
+        self._tools_all_btn = self._tools_all_note = None
+
     def _show_tools_note(self, text: str) -> None:
         """One line where the rows go: still asking, none here, or why it could not be asked."""
-        clear_layout(self._tools_layout)
-        self._tools, self._tool_rows, self._tools_all_btn = {}, {}, None
+        self._clear_tools()
         self._tools_layout.addWidget(_note(text))
 
     def _after_tools_status(self, job) -> None:
@@ -873,36 +937,45 @@ class DiagnosticsDialog(QDialog):
         if not found.tools:
             self._show_tools_note(i18n.t("updToolsNone"))
             return
-        clear_layout(self._tools_layout)
+        self._clear_tools()
         self._tools = {tool.name: tool for tool in found.tools}
-        self._tool_rows = {}
         for tool in found.tools:
             label = QLabel(_tool_line(tool))
-            button = self._tools_row(label, i18n.t("updTool"))
-            button.setEnabled(tool.offered)
+            label.setWordWrap(True)
+            label.setProperty("class", "mn")
+            left = label
+            if tool.name in _SESSION_TOOLS:
+                left = QWidget()
+                column = QVBoxLayout(left)
+                column.setContentsMargins(0, 0, 0, 0)
+                column.setSpacing(2)
+                column.addWidget(label)
+                guard = _note(i18n.t("updToolSession"))
+                guard.setProperty("class", "kv-warn")
+                column.addWidget(guard)
+                self._tool_guards[tool.name] = guard
+            button = self._tools_row(left, i18n.t("updTool"))
             button.clicked.connect(lambda _c=False, name=tool.name: self._update_tools([name]))
             self._tool_rows[tool.name] = (label, button)
-        self._tools_all_btn = self._tools_row(None, i18n.t("updToolsAll"))
-        self._tools_all_btn.setEnabled(any(tool.offered for tool in found.tools))
+            self._tool_offer[tool.name] = tool.offered
+        self._tools_all_note = _note("")
+        self._tools_all_note.setProperty("class", "kv-warn")
+        self._tools_all_btn = self._tools_row(self._tools_all_note, i18n.t("updToolsAll"))
         self._tools_all_btn.clicked.connect(self._update_offered_tools)
+        self._read_session()
 
-    def _tools_row(self, label: Optional[QLabel], text: str) -> QPushButton:
-        """A line of the tools' list — a label and its button, or the button alone on the right —
-        in a widget of its own, so `clear_layout` takes the whole of it."""
+    def _tools_row(self, left: QWidget, text: str) -> QPushButton:
+        """A line of the tools' list — `left`, and a button held to the right even when `left` is
+        hidden — in a widget of its own, so `clear_layout` takes the whole of it."""
         row = QWidget()
         line = QHBoxLayout(row)
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(8)
-        if label is None:
-            line.addStretch(1)
-        else:
-            label.setWordWrap(True)
-            label.setProperty("class", "mn")
-            line.addWidget(label, stretch=1)
+        line.addWidget(left, stretch=1)
         button = QPushButton(text)
         button.setProperty("class", "reason-btn")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        line.addWidget(button)
+        line.addWidget(button, alignment=Qt.AlignmentFlag.AlignRight)
         self._tools_layout.addWidget(row)
         return button
 
@@ -917,48 +990,46 @@ class DiagnosticsDialog(QDialog):
         Every tool button waits meanwhile — one update at a time."""
         if self._tools_job is not None or not names:
             return
+        # Asked again at the press: a session started since the rows were drawn holds its tools
+        # all the same, and the rows now say why.
+        self._read_session()
+        if self._session_running and any(name in _SESSION_TOOLS for name in names):
+            return
         self._tools_asked = list(names)
-        self._tools_before = {name: (label.text(), button.isEnabled())
-                              for name, (label, button) in self._tool_rows.items()}
-        for name, (label, button) in self._tool_rows.items():
-            button.setEnabled(False)
-            if name in names:
-                label.setText(i18n.t("updToolUpdating").format(
-                    name=_tool_title(name), here=self._tools[name].installed or "?"))
-        if self._tools_all_btn is not None:
-            self._tools_all_btn.setEnabled(False)
+        for name in names:
+            self._tool_rows[name][0].setText(i18n.t("updToolUpdating").format(
+                name=_tool_title(name), here=self._tools[name].installed or "?"))
         asked = list(names)
         self._run_tools_step(lambda: updates.update_tools(asked), self._after_tools_update)
+        self._sync_tools()
 
     def _after_tools_update(self, job) -> None:
-        """Each tool asked about: old → new, or its row as it was with the reason under it. A row
-        nobody asked about is put back exactly as it was — a failure hides nothing."""
+        """Each tool asked about: old → new, or its own line with the reason under it. A row
+        nobody asked about keeps its words, and its button comes back — a failure hides nothing."""
         done = job.result
         if job.error or done is None:
             done = updates.ToolsUpdate((), "upkeep_failed", job.error or "?")
         answered = {row.name: row for row in done.rows}
         moved = False
-        for name, (label, button) in self._tool_rows.items():
-            text, live = self._tools_before.get(name, (label.text(), False))
+        for name in self._tools_asked:
+            label = self._tool_rows[name][0]
             row = answered.get(name)
-            if name not in self._tools_asked:
-                button.setEnabled(live)
-            elif row is not None and row.ok:
+            if row is not None and row.ok:
                 moved = True
                 label.setText(_tool_done_line(row))
-                button.setEnabled(False)
-            else:
-                if row is not None:
-                    why = row.why or "?"
-                elif done.reason:
-                    why = _reason(done.reason, done.detail)
-                else:  # asked for, and the skill no longer found it here
-                    why = _reason("not_found")
-                label.setText(text + "\n" + i18n.t("updToolFailed").format(why=why))
-                button.setEnabled(live)
-        if self._tools_all_btn is not None:
-            self._tools_all_btn.setEnabled(
-                any(button.isEnabled() for _label, button in self._tool_rows.values()))
+                self._tool_offer[name] = False
+                continue
+            if row is not None:
+                why = row.why or "?"
+            elif done.reason:
+                why = _reason(done.reason, done.detail)
+            else:  # asked for, and the skill no longer found it here
+                why = _reason("not_found")
+            # From the tool's own line, not from what the label said: a second failure stacked a
+            # second reason under the first (review of tcc#98).
+            label.setText(_tool_line(self._tools[name]) + "\n"
+                          + i18n.t("updToolFailed").format(why=why))
+        self._read_session()
         if moved:
             # The report underneath names each tool's version; the rows keep their receipts until
             # the next Re-check, as the method's row does.
@@ -1341,6 +1412,7 @@ class DiagnosticsDialog(QDialog):
         self.set_report(None)
         self.refreshRequested.emit()
         self._install_read = False
+        self._read_session()  # whether a session holds omp and Claude Code (ruling 21)
         if self._tabs.currentIndex() == 1:
             self.refresh_install()
         elif self._tabs.currentIndex() == 2:
@@ -1363,6 +1435,9 @@ class DiagnosticsDialog(QDialog):
             button.setText(i18n.t("updTool"))
         if self._tools_all_btn is not None:
             self._tools_all_btn.setText(i18n.t("updToolsAll"))
+        for guard in self._tool_guards.values():
+            guard.setText(i18n.t("updToolSession"))
+        self._sync_tools()
         self._copy_btn.setText(i18n.t("diagInstallCopy"))
         self._report_btn.setText(i18n.t("diagReport"))
         self._report_hint.setText(i18n.t("diagReportShot"))
@@ -1376,6 +1451,12 @@ class DiagnosticsDialog(QDialog):
         self._sessions_browse_btn.setText(i18n.t("diagSessionsBrowse"))
         self._sync_sessions_name()
         self._render()
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """Opening the window asks again whether a session holds omp and Claude Code (ruling 21):
+        the rows may be from before it started, or from before it ended."""
+        super().showEvent(event)
+        self._read_session()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         """Nothing to wait for: the probe is a plain daemon thread holding no Qt object, and the
