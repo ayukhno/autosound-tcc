@@ -3539,7 +3539,25 @@ class MainWindow(QMainWindow):
             style.polish(widget)
 
     def _toggle_theme(self) -> None:
-        self._apply_theme("light" if self._mode == "dark" else "dark")
+        """◐: light ↔ dark, under the wait cursor, and no second click until the new theme is on.
+
+        On Windows the sheet takes a second or two to apply, with no sign, and a second click
+        landed (VM-12, the Arbiter: «не давати нажати ще раз до зміни теми»). A click made during
+        the switch is dropped, not queued: the OS holds it until the event loop runs, so the loop
+        runs here, while the button is still off and the switch still under way.
+        """
+        if self.__dict__.get("_theme_switching"):
+            return
+        self._theme_switching = True
+        self._theme_btn.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self._apply_theme("light" if self._mode == "dark" else "dark")
+        finally:
+            QApplication.processEvents()
+            QApplication.restoreOverrideCursor()
+            self._theme_btn.setEnabled(True)
+            self._theme_switching = False
 
     def _set_zoom(self, zoom: float) -> None:
         self._zoom = round(min(_ZOOM_MAX, max(_ZOOM_MIN, zoom)), 2)

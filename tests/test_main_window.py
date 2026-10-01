@@ -96,6 +96,53 @@ def test_theme_toggle_switches_and_persists_in_memory(monkeypatch):
     assert window._mode == start
 
 
+def _click_queued(button) -> None:
+    """A click the OS queued: posted, so it reaches `button` only when the event loop next runs."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    centre = QPointF(button.rect().center())
+    for kind, held in ((QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+                       (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton)):
+        QApplication.postEvent(button, QMouseEvent(kind, centre, centre, Qt.MouseButton.LeftButton,
+                                                   held, Qt.KeyboardModifier.NoModifier))
+
+
+def test_the_theme_switch_wears_the_wait_cursor_and_takes_no_second_click(monkeypatch):
+    """VM-12: on Windows the switch takes 1–2 s with no sign, and a second click lands. The
+    Arbiter: «добре мати значок очікування і не давати нажати ще раз до зміни теми». The wait
+    cursor while the sheet applies; a click during the switch — made again, or queued by the OS
+    behind the busy one — is dropped, not switched back afterwards."""
+    from tests import _windows
+
+    _app()
+    window = MainWindow()
+    _windows.theme_on_the_window(monkeypatch, window)
+    applying, seen = main_window.apply_theme, []
+
+    def slow(app, mode, scale=1.0):
+        cursor = QApplication.overrideCursor()
+        seen.append((mode, cursor.shape() if cursor else None, window._theme_btn.isEnabled()))
+        if len(seen) == 1:
+            window._toggle_theme()
+            _click_queued(window._theme_btn)
+        return applying(app, mode, scale)
+
+    monkeypatch.setattr(main_window, "apply_theme", slow)
+    start = window._mode
+    other = "light" if start == "dark" else "dark"
+    window._theme_btn.click()
+    QApplication.processEvents()
+
+    assert seen == [(other, Qt.CursorShape.WaitCursor, False)]
+    assert window._mode == other
+    assert QApplication.overrideCursor() is None and window._theme_btn.isEnabled()
+    # Once the new theme is on, a click switches again.
+    window._theme_btn.click()
+    QApplication.processEvents()
+    assert window._mode == start and len(seen) == 2
+
+
 def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatch):
     """Same profile+ledger shape used in test_dsp_state.py's MUSWAY-style regression test,
     routed through the real MainWindow load path instead of ProjectView directly."""
