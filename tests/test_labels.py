@@ -47,6 +47,28 @@ def test_a_label_given_the_width_it_asked_for_shows_its_whole_text():
     assert not cut, f"{len(cut)} of {len(texts)} cut in their own width, e.g. " + "; ".join(cut[:3])
 
 
+def test_a_tip_of_the_labels_own_survives_every_re_cut():
+    """tcc#113, CI on Windows: the footer's reviewer status carries a tip of its own — where a pin
+    the run set aside lives — and the label's own eliding wrote over it on the next resize: the
+    full text where it was cut, nothing where it was not. The detail was gone the moment the
+    window laid the new, longer text out. A tip set with `set_tip` is kept through every re-cut,
+    with the full text above it while the label is cut."""
+    label = ElidedLabel("gemini-3.1-pro-preview · answered the check · pinned in the environment",
+                        min_width=10, policy=QSizePolicy.Policy.Maximum)
+    label.set_tip("GEMINI_CRITIC_MODEL=gemini-2.5-pro, in the environment")
+    label.show()
+    try:
+        for width in (label.sizeHint().width(), 80, label.sizeHint().width()):
+            label.resize(width, label.sizeHint().height())
+            cut = label.text() != label._full
+            assert "GEMINI_CRITIC_MODEL=gemini-2.5-pro" in label.toolTip(), (width, label.toolTip())
+            assert (label._full in label.toolTip()) == cut, (width, label.toolTip())
+        label.set_tip("")
+        assert label.toolTip() == "", "and a tip taken back is gone"
+    finally:
+        label.close()
+
+
 def test_a_button_given_the_width_it_asked_for_shows_its_whole_text():
     """The same F-045 on `ElidedButton` (tcc#96, fix round 5): its hint is rounded UP from the
     text's fractional width and the fit is judged in fractions, or a whole-pixel hint one

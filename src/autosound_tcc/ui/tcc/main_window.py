@@ -4775,20 +4775,19 @@ class MainWindow(QMainWindow):
             state = availability.status(chosen)
             if not state.ready:
                 self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
-                self._critic_status.setToolTip(state.detail or availability_view.phrase(state))
+                self._critic_status.set_tip(state.detail or availability_view.phrase(state))
                 self._paint_critic_status(state.reason != availability.NOT_CHECKED)
                 return
         # A pin the pick's last run set aside, as the method named it (finding 130, tcc#113): the
         # run went as the pick, and a stale line is named where it lives rather than obeyed. Not
         # red — nothing went wrong with the run.
         pins = availability.pins_set_aside(chosen.key) if chosen is not None else []
-        self._critic_status.setToolTip("")
 
         def say(text: str) -> None:
-            # The tip after the text: `ElidedLabel.setText` sets its own (the full text, or none).
+            # `set_tip`, not `setToolTip`: the label's own eliding rewrites a plain tip on the next
+            # resize, and where the pin lives was gone the moment the longer text was laid out.
             self._critic_status.setText(f"{text} · {_pins_short(pins)}" if pins else text)
-            if pins:
-                self._critic_status.setToolTip(_pins_tip(pins))
+            self._critic_status.set_tip(_pins_tip(pins) if pins else "")
 
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if chosen is not None and availability.answered(chosen.key) and not (

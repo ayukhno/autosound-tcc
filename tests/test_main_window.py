@@ -6324,6 +6324,7 @@ def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
     it set aside, as the method reported it — a stale pin found, not obeyed. A run that set
     nothing aside clears it."""
     from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc import copy_menu
 
     pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
                                 label="gemini-3.1-pro-preview", provider="google")
@@ -6338,7 +6339,9 @@ def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
              "line": None},
         ])
         window._refresh_critic_status()
-        assert i18n.t("criticPinsShortBoth") in window._critic_status.text()
+        # The whole note, as the label holds it to draw and to copy: drawn, it is elided to
+        # whatever room the footer has (CI's wider fonts cut it in this unshown window's 640 px).
+        assert i18n.t("criticPinsShortBoth") in copy_menu.full_text(window._critic_status)
         tip = window._critic_status.toolTip()
         assert i18n.t("criticPinInFile").format(
             var="AUTOSOUND_CRITIC_MODEL", value="gpt-5.6-terra", file=machine, line=1) in tip
@@ -6349,9 +6352,48 @@ def test_the_footer_names_a_pin_the_last_run_set_aside(monkeypatch):
 
         availability.set_aside(pick.key, [])
         window._refresh_critic_status()
-        assert window._critic_status.text() == i18n.t("criticCheckAnswered").format(
-            label=pick.label)
-        assert window._critic_status.toolTip() == ""
+        assert copy_menu.full_text(window._critic_status) == i18n.t(
+            "criticCheckAnswered").format(label=pick.label)
+        # No pin left in the tip: at most the whole text, where the label is cut.
+        assert window._critic_status.toolTip() in ("", copy_menu.full_text(window._critic_status))
+    finally:
+        availability.reset()
+
+
+def test_where_a_set_aside_pin_lives_stays_in_the_tip_through_a_relayout(monkeypatch):
+    """tcc#113, found checking CI's elided footer: in a shown window the status's tip — where the
+    pin the run set aside lives — was gone the moment the window laid the longer text out. The
+    label's own eliding wrote the full text or nothing over it on every resize. Through a narrow
+    window and a wide one, the tip still says where the pin is."""
+    from autosound_tcc.core import availability, model_choices
+
+    app = _app()
+    window = MainWindow()
+    monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
+    window.show()
+
+    def settle() -> None:
+        for _ in range(4):
+            app.processEvents()
+            app.sendPostedEvents()
+
+    settle()
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window._critic_choices = [pick]
+    MainWindow._fill_combo(window._ai_critic_combo, [pick], pick.key, critic=True)
+    availability.reset()
+    where = i18n.t("criticPinInEnv").format(var="GEMINI_CRITIC_MODEL", value="gemini-2.5-pro")
+    try:
+        availability.succeeded(pick.key)
+        availability.set_aside(pick.key, [{"variable": "GEMINI_CRITIC_MODEL",
+                                           "value": "gemini-2.5-pro", "file": None, "line": None}])
+        window._refresh_critic_status()
+        for width in (window.width(), 1280, 3000):
+            window.resize(width, 820)
+            settle()
+            assert where in window._critic_status.toolTip(), (
+                f"at {window.width()} px the tip reads {window._critic_status.toolTip()!r}")
     finally:
         availability.reset()
 
@@ -6387,6 +6429,7 @@ def test_the_footer_note_says_what_kind_of_pin_was_set_aside(monkeypatch):
     """tcc#113 review, Minor 4: «a pin in a file» stood beside a run whose only lost pin was an
     environment variable. The note says what was lost: a file, the environment, or both."""
     from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc import copy_menu
 
     pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
                                 label="gemini-3.1-pro-preview", provider="google")
@@ -6402,7 +6445,7 @@ def test_the_footer_note_says_what_kind_of_pin_was_set_aside(monkeypatch):
                            ([in_env, in_file], "criticPinsShortBoth")):
             availability.set_aside(pick.key, pins)
             window._refresh_critic_status()
-            text = window._critic_status.text()
+            text = copy_menu.full_text(window._critic_status)  # whole, as drawn where it fits
             assert text.endswith(f" · {i18n.t(want)}"), (want, text)
             assert [k for k in keys if i18n.t(k) in text] == [want], (want, text)
     finally:

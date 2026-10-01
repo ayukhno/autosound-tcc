@@ -49,6 +49,8 @@ class ElidedLabel(QLabel):
         # twice in two shapes. The rule below (skip when the label itself has a rounded tip) does
         # not catch that case: the tip is on the parent, not on the label.
         self._native_tooltip = native_tooltip
+        #: A tip of the owner's own (`set_tip`), kept through every re-cut.
+        self._tip = ""
         self.setMinimumWidth(min_width)
         # `Ignored` for a key: it takes whatever the row has left, however little. `Maximum` for a
         # value: it asks for its natural width and gets it whenever the panel is wide enough, and
@@ -61,6 +63,15 @@ class ElidedLabel(QLabel):
         # The layout has to be told the wanted width changed, or it keeps handing out room for
         # the old one -- see `sizeHint` for why that matters here more than usual.
         self.updateGeometry()
+        self._elide()
+
+    def set_tip(self, tip: str) -> None:
+        """A tip that says more than the text, kept whatever the label is cut to — with the full
+        text above it while it is cut. A plain `setToolTip` lasts until the next resize, where the
+        eliding writes the full text or nothing over it: the footer's reviewer status lost the
+        place a pin it set aside lives the moment the window laid its longer text out (tcc#113,
+        found on CI's wider fonts)."""
+        self._tip = tip
         self._elide()
 
     def sizeHint(self):  # noqa: N802 (Qt override)
@@ -108,7 +119,8 @@ class ElidedLabel(QLabel):
         # attach` leaves it as `hover_tip`): those are not Qt tooltips, so setting a native one
         # here would put TWO hints on the same widget, in two different shapes.
         if self._native_tooltip and getattr(self, "hover_tip", None) is None:
-            self.setToolTip(self._full if shown != self._full else "")
+            cut = self._full if shown != self._full else ""
+            self.setToolTip("\n\n".join(part for part in (cut, self._tip) if part))
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().resizeEvent(event)
