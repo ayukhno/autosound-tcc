@@ -15,13 +15,22 @@ storing it — never TCC's own edit, and no pasted key held across the question.
 
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
+
+Each of the method's `key` commands holds the window while it runs — on Windows `move-shell` writes
+HKCU\\Environment and the broadcast takes about five seconds — so it runs under the wait cursor,
+with every control off and a line saying what is running (VM-2, `_busy`). In the window's own
+thread: the flow is one sequence with a question in the middle, and the pasted key is let go of
+before that question; a worker would have to carry both across.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from contextlib import contextmanager
+
+from PySide6.QtCore import QEventLoop, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -80,6 +89,10 @@ class ReviewerKeyDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(i18n.t("rkTitle"))
         self.setMinimumWidth(560)
+        #: How many of the method's commands are running now (`_busy`); the controls are off then.
+        self._busy_depth = 0
+        #: Whether the method here can take a key (`refresh`): the entry is off when it cannot.
+        self._supported = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
@@ -151,7 +164,14 @@ class ReviewerKeyDialog(QDialog):
 
     def refresh(self, *, ask: bool = False) -> None:
         """Show what the method says now. `ask` re-runs `key status` instead of the kept answer."""
-        answer = reviewer_key.status(refresh=ask)
+        if ask:
+            # The re-read is the method's command too, and waits like one (VM-2).
+            with self._busy("rkBusyRead"):
+                self._show(reviewer_key.status(refresh=True))
+            return
+        self._show(reviewer_key.status())
+
+    def _show(self, answer) -> None:
         supported = answer is not None
         if not supported:
             self._blurb.setText(i18n.t("rkOld").format(path=critic_env.machine_config_path()))
@@ -173,8 +193,62 @@ class ReviewerKeyDialog(QDialog):
             # The command by its name; the button runs it with this machine's full paths.
             self._shell.setText("\n".join(lines) + "\nautosound_ai.py key move-shell")
         self._show_drops(providers if supported else {}, exports)
-        for widget in (self._provider, self._field, self._save):
-            widget.setEnabled(supported)
+        self._supported = supported
+        self._settle()
+
+    def _controls(self) -> list:
+        """What a click or a key lands on: the window's buttons, the provider and the key field —
+        not the buttons of a question box it asked before (`_confirm`'s box stays its child)."""
+        buttons = [b for b in self.findChildren(QPushButton) if b.window() is self]
+        return [*buttons, self._provider, self._field]
+
+    def _settle(self) -> None:
+        """Every control as the window stands: all off while a method command runs (VM-2); else
+        on, and the key entry only where the method can take a key."""
+        busy = self._busy_depth > 0
+        for widget in self._controls():
+            widget.setEnabled(not busy)
+        if not busy:
+            for widget in (self._provider, self._field, self._save):
+                widget.setEnabled(self._supported)
+
+    @contextmanager
+    def _busy(self, line: str | None = None):
+        """While the method's `key` command runs: the wait cursor, every control off, and `line`
+        in the result's place (VM-2, the Arbiter: «як показати значок очікування (бо там десь 5
+        сек)»). The line is painted before the call blocks; it gives way to the line it covered
+        unless the code inside wrote a new one.
+
+        A click made meanwhile is dropped, not queued: the OS holds it until the event loop runs,
+        so the loop runs here once more while the controls are still off.
+        """
+        outer = self._busy_depth == 0
+        self._busy_depth += 1
+        covered = (self._result.text(), self._result.toolTip())
+        # A control turned off loses the focus; the key field, say, gets it back (Enter saves).
+        focused = self.focusWidget()
+        if line:
+            self._result.setText(i18n.t(line))
+            self._result.setToolTip("")
+        if outer:
+            self._settle()
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        if self.isVisible():
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        try:
+            yield
+        finally:
+            self._busy_depth -= 1
+            if line and self._result.text() == i18n.t(line):
+                self._result.setText(covered[0])
+                self._result.setToolTip(covered[1])
+            if outer:
+                if self.isVisible():
+                    QApplication.processEvents()
+                QApplication.restoreOverrideCursor()
+                self._settle()
+                if focused in (self._field, self._provider, self._save) and focused.isEnabled():
+                    focused.setFocus()
 
     def _show_drops(self, providers: dict, exports: list[dict]) -> None:
         """«Видалити копію …» for each exported key the OS keystore also holds (finding 127).
@@ -227,10 +301,19 @@ class ReviewerKeyDialog(QDialog):
         if not value.strip():
             return
         provider = self._provider.currentData()
-        stored, said = reviewer_key.set_key(provider, value)
-        # The method keeps it now. Nothing here holds it across the question below: the method
-        # drops an exported copy without storing anything over the key just saved (hub #230).
-        del value
+        # The method's part waits (VM-2); the question below does not.
+        with self._busy("rkBusySave"):
+            stored, said = reviewer_key.set_key(provider, value)
+            # The method keeps it now. Nothing here holds it across the question below: the
+            # method drops an exported copy without storing anything over the key just saved
+            # (hub #230).
+            del value
+            if stored:
+                where = self._where_now(provider)
+                # Stored — and the same variable still exported: the copy every program reads
+                # stays behind unless asked about (finding 127, tcc#117).
+                copies = self._copies_left(provider)
+                drops = bool(copies) and reviewer_key.drops_exports()
         if not stored:
             self._result.setText(i18n.t("rkRefused").format(why=said) if said
                                  else i18n.t("rkNoAnswer"))
@@ -238,14 +321,11 @@ class ReviewerKeyDialog(QDialog):
             return
         # In the window's language, from the method's answer; the method's own sentence is
         # Ukrainian whatever the window speaks, so it is the hover (finding 42, tcc#65).
-        lines = [i18n.t("rkSaved").format(where=self._where_now(provider) or said or "—")]
+        lines = [i18n.t("rkSaved").format(where=where or said or "—")]
         tips = [said]
-        # Stored — and the same variable still exported: the copy every program reads stays
-        # behind unless asked about (finding 127, tcc#117).
-        copies = self._copies_left(provider)
         if copies:
             var, place = copies[0].get("var", "?"), "; ".join(_place(e) for e in copies)
-            if not reviewer_key.drops_exports():
+            if not drops:
                 # An older method would move and store EVERY export for this yes (hub #230).
                 lines.append(i18n.t("rkDropUpdate").format(var=var, place=place))
             elif self._confirm(i18n.t("rkRemoveAsk").format(var=var, place=place),
@@ -269,17 +349,19 @@ class ReviewerKeyDialog(QDialog):
             return []
         return [e for e in reviewer_key.shell_exports() if e.get("var") == entry.get("var")]
 
-    @staticmethod
-    def _drop(provider, var: str, place: str) -> tuple[str, str]:
+    def _drop(self, provider, var: str, place: str) -> tuple[str, str]:
         """The method's `key move-shell <provider> --drop`, and the line its answer says.
 
         From the answer, not from a fresh `key status` (hub #230): removed, nothing to remove, or
         — refused, a crash, any code but 0, 1 and 3 — not removed, with the method's own words as
         the hover. The method here takes `--drop` (asked before the button or the question was
         offered), so no code reads as «update the method». The window re-reads the status
-        afterwards for the rows, not for this line.
+        afterwards for the rows, not for this line — under the same wait: the drop forgot the
+        kept answer, so that read asks the method again (VM-2).
         """
-        happened, said = reviewer_key.drop_export(provider)
+        with self._busy("rkBusyDrop"):
+            happened, said = reviewer_key.drop_export(provider)
+            self.refresh()
         if happened is None:
             return i18n.t("rkDropNoAnswer"), said
         key = {reviewer_key.DROPPED: "rkRemoved",
@@ -298,7 +380,6 @@ class ReviewerKeyDialog(QDialog):
         line, tip = self._drop(provider, var, place)
         self._result.setText(line)
         self._result.setToolTip(tip)
-        self.refresh()
 
     def _confirm(self, text: str, yes: str, *, default_yes: bool) -> bool:
         """A yes or a no, in the window's language. Its own method, so a test can answer it."""

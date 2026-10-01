@@ -667,3 +667,184 @@ def test_the_window_opens_on_the_key_field_with_save_as_its_default(monkeypatch)
     QApplication.processEvents()
     assert opened == []
     dialog.close()
+
+
+# ── VM-2 (tcc#117): a wait sign while the method's key command runs ──────────────────────────────
+
+
+class _Slow(_Method):
+    """`_Method`, and what the window showed while each command ran: (command, the cursor, the
+    controls still on, the result line). On Windows `move-shell` writes HKCU\\Environment and the
+    broadcast holds the window about five seconds (VM-2)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.window = None
+        self.seen: list[tuple] = []
+        #: Called while the command runs, as the Arbiter's click lands in the frozen window.
+        self.meanwhile = None
+
+    def __call__(self, args, *, stdin=None):
+        cursor = QApplication.overrideCursor()
+        window = self.window
+        self.seen.append((" ".join(args[:2]), cursor.shape() if cursor else None,
+                          None if window is None else [w for w in _controls(window) if w.isEnabled()],
+                          None if window is None else window._result.text()))
+        if self.meanwhile is not None:
+            self.meanwhile()
+        return super().__call__(args, stdin=stdin)
+
+
+def _controls(window) -> list:
+    """Everything in the key window a click or a key lands on — not a question box's buttons."""
+    from PySide6.QtWidgets import QPushButton
+
+    buttons = [b for b in window.findChildren(QPushButton) if b.window() is window]
+    return [*buttons, window._provider, window._field]
+
+
+def _slow_dialog(monkeypatch, method, *, answer=True):
+    """`_dialog` over `method`, which then watches the window; the question records the cursor."""
+    from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
+
+    dialog, _asked = _dialog(monkeypatch, method)
+    method.window = dialog
+    asked: list = []
+
+    def confirm(self, text, yes, **_kw):
+        cursor = QApplication.overrideCursor()
+        asked.append(cursor.shape() if cursor else None)
+        return answer
+
+    monkeypatch.setattr(ReviewerKeyDialog, "_confirm", confirm)
+    return dialog, asked
+
+
+def _settled(dialog) -> None:
+    """After the command: the cursor back, and every control on again."""
+    assert QApplication.overrideCursor() is None
+    assert all(w.isEnabled() for w in _controls(dialog))
+
+
+def test_opening_the_window_waits_under_the_wait_cursor(monkeypatch):
+    """The window asks the method's `key status` before it shows (VM-2)."""
+    from PySide6.QtCore import Qt
+
+    method = _Slow()
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    reads = [s for s in method.seen if s[0] == "key status"]
+    assert reads and all(shape == Qt.CursorShape.WaitCursor for _c, shape, _on, _l in reads)
+    _settled(dialog)
+    dialog.close()
+
+
+def test_a_save_and_its_yes_wait_with_the_buttons_off_and_say_so(monkeypatch):
+    """VM-2, «Прибрати» after a save: the Arbiter, «як показати значок очікування (бо там десь
+    5 сек)». Every command under the wait cursor, every button off, and the line saying what is
+    running — on screen before the call blocks. The question between them is not a wait."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Slow(status=_with(keystore="dpapi", exports=[_REGISTRY]),
+                   after_move=_with(keystore="dpapi", exports=[]))
+    dialog, asked = _slow_dialog(monkeypatch, method)
+    method.seen.clear()
+    dialog._field.setText("AIza" + "s" * 35)
+    dialog._save.click()
+
+    wait = Qt.CursorShape.WaitCursor
+    by_command = {}
+    for command, shape, on, line in method.seen:
+        assert (shape, on) == (wait, []), (command, shape, on)
+        by_command.setdefault(command, line)
+    assert by_command["key set"] == i18n.t("rkBusySave")
+    assert by_command["key move-shell"] == i18n.t("rkBusyDrop")
+    assert asked == [None], "the question is asked without the wait cursor"
+    assert i18n.t("rkBusyDrop") not in dialog._result.text()
+    _settled(dialog)
+    dialog.close()
+
+
+def test_delete_waits_with_the_buttons_off_and_says_so(monkeypatch):
+    """VM-2, «Видалити»: the same wait for the drop, and for the status re-read after it."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Slow(after_move=_with(exports=[]))
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    method.seen.clear()
+    dialog._drops["google"].click()
+
+    commands = [command for command, *_ in method.seen]
+    assert "key move-shell" in commands and "key status" in commands
+    for command, shape, on, line in method.seen:
+        assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyDrop")), command
+    assert dialog._result.text().startswith(i18n.t("rkRemoved").split("{")[0])
+    _settled(dialog)
+    dialog.close()
+
+
+def test_a_refused_save_re_reads_under_the_wait_and_keeps_its_answer(monkeypatch):
+    """The status re-read after a refusal waits too, and its line gives way to the refusal."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Slow(set_rc=2)
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    method.seen.clear()
+    dialog._field.setText("short")
+    dialog._save.click()
+
+    assert [(c, s, on) for c, s, on, _l in method.seen] == [
+        ("key set", Qt.CursorShape.WaitCursor, []), ("key status", Qt.CursorShape.WaitCursor, [])]
+    assert method.seen[1][3] == i18n.t("rkBusyRead")
+    assert dialog._result.text() == i18n.t("rkRefused").format(why="not a key: too short")
+    _settled(dialog)
+    dialog.close()
+
+
+def test_a_click_made_while_the_method_runs_is_dropped(monkeypatch):
+    """The window is frozen, not closed: a click the OS holds behind the busy one reaches a button
+    that is still off, and is dropped — not run once the method answers."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    method = _Slow(after_move=_with(exports=[]))
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    dialog.show()
+    QApplication.processEvents()
+    saves = []
+    dialog._save.clicked.connect(lambda: saves.append(1))
+
+    def click_save():
+        centre = QPointF(dialog._save.rect().center())
+        for kind, held in ((QEvent.Type.MouseButtonPress, Qt.MouseButton.LeftButton),
+                           (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton)):
+            QApplication.postEvent(dialog._save, QMouseEvent(
+                kind, centre, centre, Qt.MouseButton.LeftButton, held,
+                Qt.KeyboardModifier.NoModifier))
+
+    method.meanwhile = click_save
+    dialog._drops["google"].click()
+    method.meanwhile = None
+    QApplication.processEvents()
+    assert saves == []
+    _settled(dialog)
+    # Once the method answered, a click lands again.
+    dialog._save.click()
+    assert saves == [1]
+    dialog.close()
+
+
+def test_an_older_method_still_keeps_the_entry_off_after_the_wait(monkeypatch):
+    """The wait hands the controls back as the window stands: no key entry for a method that
+    cannot store one."""
+    method = _Slow(status=None)
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    assert QApplication.overrideCursor() is None
+    assert not dialog._save.isEnabled() and not dialog._field.isEnabled()
+    assert not dialog._provider.isEnabled()
+    dialog.close()
