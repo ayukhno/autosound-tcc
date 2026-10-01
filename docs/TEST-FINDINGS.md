@@ -3289,4 +3289,24 @@ in the dialog refreshes the dialog's own `key status`, not the picker's memory o
 **Weight.** Medium: the tuner fixes the cause in the window made for it and the app still refuses the route; the
 way out (↻) is not named anywhere near.
 
+**After ↻ (same minutes):** `API · gemini-pro-latest` is no longer red; `API · gemini-3.1-pro-preview` still reads
+«відмова» — the same model answered over the API on the Mac an hour earlier (124). `agy` in a fresh PowerShell on the
+VM answers (Antigravity CLI 1.2.14, Gemini 3.8 Flash (High), «hi» → «Hello!»).
+
+**Task.** For W-5's collection.
+
+### 129. Flash cannot be picked as the reviewer: «не рекомендується» is one thing, the choice should stay the tuner's
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, the reviewer picker (128's screenshot: every `AGY · Gemini 3.x
+Flash` row and `OMP · google-antigravity/…-flash-high` greyed «не для рецензента»): «і чому Flash не вибирається?
+"не рекомендується" це одна справа, але вибрати — хай користувач вирішує».
+
+**History, so the review sees what this reverses:** finding 85 (2026-09-27, tcc#74 on W-3 by the Arbiter's word)
+named «Flash picks are offered for the reviewer, a class the method forbids there»; W-3 built the rows greyed with
+the reason, a current Flash pick kept selected and carrying a warning in the state. What changed: the Arbiter, now
+on a machine where the Pro routes refuse (128) and Flash answers in a terminal, wants the warning without the lock.
+The rule itself is the method's — a Flash reviewer is a skill question as much as a TCC one.
+
+**Weight.** Medium: with the Pro rows refused, the picker leaves no reviewer the tuner can choose.
+
 **Task.** For W-5's collection.
