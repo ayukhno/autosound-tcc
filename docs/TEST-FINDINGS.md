@@ -3372,3 +3372,13 @@ warning (W-4).
 **Weight.** Medium for the first: the session's own state can flip under it from a read.
 
 **Task.** For W-5's collection; the method's points go to the skill as a ticket at the review if the Arbiter says so.
+
+### 132. The footer's reviewer box cuts the model's name without «…»; «just now» in English in a Ukrainian window
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, after 130's pins were commented out: the reviewer works — the box
+green, beside it «Критик · gemini-3.1-pro-preview · just now». The box reads «API · gemini-3.1-pro-prev», cut
+mid-word with no ellipsis («здається в полі обрізається назва моделі»); the line beside it says «just now» untranslated.
+
+**Weight.** Low.
+
+**Task.** For W-5's collection.
