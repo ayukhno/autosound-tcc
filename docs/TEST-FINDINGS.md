@@ -3179,3 +3179,23 @@ the `.lnk` files in `User Pinned\TaskBar` and `User Pinned\ImplicitAppShortcuts\
 lack the id get the stamp and the notify; a byte search, no spawn on an ordinary start; ~30 lines and tests.
 Expected when checked: the first start from a fresh desktop pin is still two buttons, one from the next start.
 tcc#92 (closed with W-4) carries the research. **Decided 2026-10-01** at the pre-release walk: W-5.
+
+### 122. The import form's typo match goes to the first close row in REW's order, not the closest: an older series is offered, the real typo gets nothing
+
+**What.** Checked by the session on the Arbiter's word («щось ти можеш і сам зробити — REW відкритий»), 2026-10-01,
+the live REW on the Mac (69 measurements, the AYA session), TCC v0.1.45's `capture_import.preselect`, two titles
+renamed for the check and put back (the Arbiter did not save REW):
+- `sw_S3 (sw)` renamed `sw_03 (sw)`, the round expecting `sw_3 (sw)` → New name `sw_3 (sw)`, unticked, `≈` — as
+  F-081 promised;
+- `sw+w-L_S3 (sw)` renamed `sw+w-L_3 (se)` (a typo of `sw+w-L_3 (sw)`, similarity 0.92) → **no proposal**. The
+  three missing names went instead to the older series earlier in REW's list: `sw_B1 (sw)` → `sw_3 (sw)`,
+  `sw+w-L_B1 (sw)` → `sw+w-L_3 (sw)`, `sw+w-R_B1 (sw)` → `sw+w-R_3 (sw)`, each `≈`.
+
+Read, not diagnosed further: the typo pass walks rows in REW's order and gives a missing name to the first title at
+`difflib` cutoff 0.8; another series of the same driver passes that cutoff, and the name is then gone for the closer
+row.
+
+**Weight.** Medium: the guard holds (an `≈` row opens unticked), but the form points at the wrong curves and says
+nothing about the right one — in a session with several series, which is every session.
+
+**Task.** For W-5's collection.

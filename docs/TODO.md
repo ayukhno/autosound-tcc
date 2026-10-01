@@ -2104,6 +2104,8 @@ Belongs to W-5 so far:
       outside its try; the update's temp folder never removed; the OpenSSH-too-old case advised «update git»;
       `_SERIES_TAG_RE` without a lookahead; theme.py trusting `_APPLIED` over the app's sheet;
     - code/test hygiene (alongside only): the test modal guard raising inside UI code, uncovered dialog statics.
+11. the «чекає» checks → done by the session where it could (F-078 on a migrated Passat copy; F-081 on the live REW,
+    whose typo half is finding 122); F-077, F-083, F-084, F-056 stay with the Arbiter.
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
@@ -2191,7 +2193,7 @@ settings menu (#67), then Windows on the VM (#62, #66), then the skill's tag (#6
 
 ### F-081 — A wrong capture title is fixed, not refused (the Arbiter's A17, on hub #201's order)
 
-**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: the next real round with a `sw_01`-style title · was: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
+**Статус**: done 2026-10-01 · checked by the session on the live REW: `sw_03 (sw)` → New name `sw_3 (sw)`, unticked, `≈`; the typo half misfires — TEST-FINDINGS 122, for W-5 · was: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: the next real round with a `sw_01`-style title · was: built on `wave-0.1.43` 2026-09-23, reworked the same day on the Arbiter's word · live check: the next round with a `sw_01`-style title
 
 The fix is made in the REW import form: its New name column opens with the name found by
 matching — the round's spelling where the grammar matched (`sw_01` → `sw_1`), the closest missing
@@ -2233,7 +2235,7 @@ whole and runs it only on yes (`core/project_repo.py`). Until the vendored metho
 
 ### F-078 — The per-project version line and saved configurations: TCC's half (hub #195, #198 SKL-052)
 
-**Статус**: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: a migrated copy of the Passat · was: built on `wave-0.1.43` 2026-09-23 · vendored at `v3.0.60`; live on a seeded project: SQ-1/FULL-1/SQ-2 saved through `config save`, SQ-2 (v_005) compared with SQ-1 (v_002), not v_004 · left: a migrated copy of the Passat
+**Статус**: done 2026-10-01 · checked by the session on a migrated copy of the Passat (`hub/scratch/tcc/passat-migrated`, not in git): `migrate-line --apply` → SQ v_001–v_063, FULL v_064–v_070; `config save` SQ-1 = v_057, SQ-2 = v_063 (previous SQ-1), FULL-1 = v_070; TCC v0.1.45's `ledger_line`: labels «v_063 · SQ-2», `previous_of` SQ-2 = v_057 (not v_062), FULL-1 falls back to its parent v_069, both slots' groups offered · was: чекає · released in v0.1.43 (2026-09-23); left for the Arbiter: a migrated copy of the Passat · was: built on `wave-0.1.43` 2026-09-23 · vendored at `v3.0.60`; live on a seeded project: SQ-1/FULL-1/SQ-2 saved through `config save`, SQ-2 (v_005) compared with SQ-1 (v_002), not v_004 · left: a migrated copy of the Passat
 
 The method now numbers versions once per project (`state/versions/`, `state/slots.json`), and a new
 project starts that way; the tuner saves a version into a DSP preset under a name (`SQ-2`), and
