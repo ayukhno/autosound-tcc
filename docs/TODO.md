@@ -2053,9 +2053,23 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
-### F-090 — W-5 is collecting: findings go to this pool, the milestone opens when the list is complete
+### F-091 — Left by W-5's reviews for a later wave
 
-**Статус**: open · **PAUSED 2026-10-01 evening on the subscription limit (10%)** · stage 3, work: branch `wave-0.1.46` (pushed), plan `docs/PLAN-W-5.md`, ledger `.superpowers/sdd/PLAN-W-5/progress.md` (local) · done and reviewed: #119, #114, #118, #111, #120, #117 (1 fix round), #124 (diagnostics only; hub #229 open until a failure is caught) · #115 (task 7) built `5e77ad4` on the limit, not yet reviewed (Fable review next) · next: #115's review (Fable), then #116, #98, #123, #122, the Arbiter's VM pass (pins, key window, visible edges), then #113/#121/#112 on the skill's v3.0.65 tag (contracts on hub #226, #227, #230, #231) · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e` · was: stage 2 from 2026-10-01: «збір закінчено, в роботу» — milestone `W-5 · v0.1.46` (#5) with 14 issues, all `ok`: #98 (tools rows), #111 (taskbar pins), #112 (method v3.0.65 + its follow-ups), #113 (`--model`), #114 (typo match), #115 (never-ask), #116 (ASK door), #117 (reviewer-key window), #118 (Flash), #119 (relative package), #120 (guides), #121 (feedback sender), #122 (W-4 visible), #123 (W-4 robustness); the skill's share hub #224–#228 on its `W-5 · v3.0.65`; #112, #113 and #121 wait for the skill's tag · was: stage 1, collection · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
+**Статус**: open · recorded 2026-10-01 from W-5's task reviews (`.superpowers/sdd/PLAN-W-5/progress.md`, local); no wave has taken it
+
+- the permission gate's pre-existing gaps, older than #115 and not its task (Fable's review of #115, Minor 3):
+  `rm -rf ~/*`, `rm -rf /Users`, `RM -rf ~` on a case-insensitive disk, `find -execdir`, `git push +ref` /
+  `--mirror`, Windows `rd /s`; and a dynamic word as a flag or a wide target (`x=-rf; rm $x ~`,
+  `echo --force | xargs git push …`) — the direct forms ask;
+- the method v3.0.65's `handoff --json` `warnings` and `contract.py`'s `continue_head` are not shown by TCC (#112's
+  review);
+- a channel whose code and id are both written with `_` gets a hyphen ledger row from v3.0.65 that TCC cannot bind
+  (#112's review, Minor 4) — next to the method's own reading of an old `D_L…` title as a channel `D-L` (the
+  Arbiter, 2026-10-01: «D-L такого не буває»; the `D_` prefix moved into the series, the hyphen is for a driver's
+  side only) — the skill's to settle first.
+
+
+**Статус**: open · stage 3, work: **all 15 issues built and reviewed** on branch `wave-0.1.46` (pushed), plan `docs/PLAN-W-5.md`, ledger `.superpowers/sdd/PLAN-W-5/progress.md` (local) — #119, #114, #118, #111, #120, #117, #124 (diagnostics only; hub #229 open until a failure is caught), #115 (Fable), #116, #98, #123, #122, #112 (the method at v3.0.65, signed), #113, #121 · next: pl/de through the Advisor, the final whole-branch review (Fable), the Arbiter's VM pass (checklist in the ledger), release v0.1.46 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e` · was: paused 2026-10-01 evening on the subscription limit, resumed 19:05 · was: stage 2 from 2026-10-01: «збір закінчено, в роботу» — milestone `W-5 · v0.1.46` (#5) with 14 issues, all `ok`: #98 (tools rows), #111 (taskbar pins), #112 (method v3.0.65 + its follow-ups), #113 (`--model`), #114 (typo match), #115 (never-ask), #116 (ASK door), #117 (reviewer-key window), #118 (Flash), #119 (relative package), #120 (guides), #121 (feedback sender), #122 (W-4 visible), #123 (W-4 robustness); the skill's share hub #224–#228 on its `W-5 · v3.0.65`; #112, #113 and #121 wait for the skill's tag · was: stage 1, collection · hub #223 TCC-037 · resume: `hub/bin/role tcc --resume 3497a943-76ed-41b0-a323-9f8777e04c4e`
 
 The words (the Arbiter, 2026-10-01; `hub/governance/WAVES.md` §1): the wave (хвиля) is the whole cycle; stage 1 is
 the collection (збір), with the number already standing and no milestone; stage 2 is the milestone (віха = веха =

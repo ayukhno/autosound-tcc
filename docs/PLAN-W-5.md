@@ -67,17 +67,18 @@ final review of risky code (the Arbiter, 2026-09-30). Strings in four languages 
 
 **#117** the reviewer-key window on Windows (findings 125–128). *~1.5 h*
 - Files: `src/autosound_tcc/ui/tcc/reviewer_key_dialog.py`, `src/autosound_tcc/core/reviewer_key.py`
-  (`shell_exports`, `set_key`, `move_shell_line`; a `remove_key(provider)` over the method's `key rm`),
+  (`shell_exports`, `set_key`, `move_shell_line`),
   `src/autosound_tcc/core/availability.py` (`forget_refusals` for the API rows), `i18n.py`.
 - Change: 125 — `rkShell` for a registry export: «… у змінних середовища Windows (HKCU\Environment): її бачить
   кожна програма», no «рядок None»; the macOS sentence keeps its line. 126 — the move button's minimum width
   from its text in the hover/focus style (padding of the tinted state). 127 — after a save, when the same
-  variable is still exported, the window asks «прибрати звідти?» (runs the method's `key move-shell`), and a
-  stored key has «Видалити» (`key rm`). 128 — a successful save calls `availability.forget_refusals()` and
-  re-reads the picker.
+  variable is still exported, the window asks «прибрати звідти?» (runs the method's `key move-shell`). 128 — a
+  successful save calls `availability.forget_refusals()` and re-reads the picker.
+  *As built:* «Видалити» over `key rm` left this task — `key rm` deletes the STORED copy, and finding 127 meant
+  the leftover exported one (Ruling 13 in the ledger); it came back in #112 over the method's
+  `key move-shell <provider> --drop` (v3.0.65, hub #230).
 - Test: `tests/test_reviewer_key.py` — the registry export renders without a line; a save forgets the API
-  rows' refusals; the remove offer appears only with a stored key and a live export; `remove_key` calls
-  `key rm <provider>` over argv without the value.
+  rows' refusals; the remove offer appears only with a stored key and a live export.
 
 **#124** `--install-desktop` exits non-zero under the installer's PowerShell pipeline (hub #229 SKL-060, added
 2026-10-01 on the Arbiter's word). *~1 h + the VM*
