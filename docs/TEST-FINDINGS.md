@@ -3215,6 +3215,12 @@ through the app's code for how to reach the reviewer, rather than using the meth
 **Weight.** High, and the fourth time: findings 7 and 15, then 0.1.41 (the `|` inside a grep pattern, closed on
 `wave-0.1.42`). A prompt in a mode set to never ask teaches clicking through without reading.
 
+**Again the same hour, the Windows VM, project `testAgy-auto`** («і знову ця біда»): «Команда, яку не відкотити: cd
+"C:/Users/o.yukhno/dev/testAgy-auto/state" && cat registry.json; echo; echo "master HEAD: $(cat master/HEAD)"; …;
+for v in 010 011 012 013; do python3 -c "import json,sys;d=json.load(open(…))…"; done; ls master/proposals» — inside
+the project this time, and again only reads: `cat`, `echo`, a `for` loop, `python3 -c` printing JSON, `ls`, with
+`$( … )` substitutions.
+
 **The Arbiter's proposal (same day):** «а це є окремий запит коли "не відкотити"? то для нього треба додати пункт
 вибору "взагалі не питати"». Today the irreversible class asks under every choice, by design (finding 1's text:
 «Те, чого не відкотити, питатиме за будь-якого вибору»). Two halves for the review: a fourth choice that does not
