@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import eq_export
-from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup, ProjectView
+from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup, ProjectView, leg_label
 from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
@@ -45,6 +45,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
     column_title,
     mark_colour,
     table_fields,
+    unread_leg_tip,
 )
 from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
@@ -383,8 +384,8 @@ class ChannelRow(QWidget):
 
         if self._is_output:
             gain = raw.get("gain_db")
-            parts = [("hp", f"HP {CrossoverLeg.from_raw(raw.get('hp')).label}"),
-                     ("lp", f"LP {CrossoverLeg.from_raw(raw.get('lp')).label}"),
+            parts = [("hp", f"HP {leg_label(raw.get('hp'))}"),
+                     ("lp", f"LP {leg_label(raw.get('lp'))}"),
                      ("gain_db", f"{gain:+.1f}dB" if isinstance(gain, (int, float)) else "—")]
         else:
             # Virtual channels have no crossover, but their gain (and delay) matter in the main
@@ -433,9 +434,11 @@ class ChannelRow(QWidget):
                 meta.append(f"Fs&nbsp;{row.fs_hz:g}&nbsp;Hz{inherited}")
             if meta:
                 html.append(c(" · ".join(meta), t.muted))
-            hp = CrossoverLeg.from_raw(raw.get("hp")).label
-            lp = CrossoverLeg.from_raw(raw.get("lp")).label
+            hp, lp = leg_label(raw.get("hp")), leg_label(raw.get("lp"))
             html.append(f"HP&nbsp;<b>{hp}</b> &nbsp;·&nbsp; LP&nbsp;<b>{lp}</b>")
+            # A leg read as «?» says here what the ledger holds (tcc#123).
+            html += [c(escape(said), t.muted) for said in
+                     (unread_leg_tip("hp", row), unread_leg_tip("lp", row)) if said]
 
         parts = []
         gain = raw.get("gain_db")

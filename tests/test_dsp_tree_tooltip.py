@@ -77,3 +77,24 @@ def test_an_fs_carried_in_from_another_project_says_so():
     assert f"Fs&nbsp;1800&nbsp;Hz&nbsp;({i18n.t('factInherited')})" in _html(carried)
     assert i18n.t("factInherited") not in _html(_IDENTITY), "a fact established here is not marked"
 
+
+
+def test_a_crossover_the_ledger_holds_in_another_shape_leaves_the_row_standing():
+    """tcc#123 (W-4 review): a leg `CrossoverLeg.from_raw` cannot read raised out of the row's
+    constructor, its second line and its hint, and the DSP tree went down with one channel. The
+    row stands: «HP ?» on the line, the ledger's own value in the hint."""
+    import json
+    from html import escape
+
+    from autosound_tcc.state.dsp_state import ProfileGroup
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    raw = {**_LEDGER_ROW, "hp": {"freq": 80, "type": "LR"}}
+    group = ProfileGroup(id="physical_outputs", label="Output",
+                         fields=("hp", "lp", "gain_db"), rows=())
+    row = ChannelRow(group, GroupRow(id="FL", name="FL", raw=raw))
+
+    said = [text for text, _changed in row._line2.parts()]
+    assert said[:2] == ["HP ?", "LP 3200 LR2"], "the other leg still reads"
+    assert escape(i18n.t("xoverUnread").format(value=json.dumps(raw["hp"]))) in row._tip.text()

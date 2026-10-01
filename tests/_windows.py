@@ -59,14 +59,17 @@ class _StandIn:
     def setPalette(self, palette) -> None:  # noqa: N802 (Qt's name)
         self._widget.setPalette(palette)
 
+    def styleSheet(self) -> str:  # noqa: N802 (Qt's name)
+        return self._widget.styleSheet()
+
     def setStyleSheet(self, sheet) -> None:  # noqa: N802 (Qt's name)
         self._widget.setStyleSheet(sheet)
 
 
 def theme_on(monkeypatch, widget, mode, scale=1.0):
     """`theme.apply_theme(app, mode, scale)`, with `widget` standing in for the application: the
-    palette and the sheet go on that widget alone, and the current theme and the record of what
-    was applied are set as the real call sets them -- and put back at teardown (F-065).
+    palette and the sheet go on that widget alone, and the current theme is set as the real call
+    sets it -- and put back at teardown (F-065).
 
     `QApplication.setStyleSheet` re-polishes every widget in the process, and the windows of every
     test before this one are still alive (F-053): 0.13 s for each window they left, so late in one
@@ -75,7 +78,6 @@ def theme_on(monkeypatch, widget, mode, scale=1.0):
     and palette are never touched, so nothing needs putting back there."""
     from autosound_tcc.ui.tcc import theme
 
-    monkeypatch.setattr(theme, "_APPLIED", theme._APPLIED)
     monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
     return theme.apply_theme(_StandIn(widget), mode, scale)
 

@@ -541,6 +541,8 @@ def test_an_open_round_puts_an_rta_with_a_note_under_rta(project):
     "D_R_7 (sw) vs (rta)",  # the tag glued to `_N` is the method; a bracket in the note is not
     "D_ALL_9 (RTA)",  # the grammar lowercases the tag
     "D_w-L (imp) case35l",  # the one method with no `_N`
+    # a tag glued to the word after it is not a tag to the grammar (tcc#123, W-4 review of #109)
+    "D_L_7 (rta) x_8 (sw)y",
 ])
 def test_the_fallback_reads_the_tag_where_the_grammar_would(title):
     """Mirrors the method rather than guessing: the same title without its `D_` is one the grammar

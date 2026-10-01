@@ -1798,10 +1798,6 @@ def current_theme() -> "Theme":
     return _CURRENT if _CURRENT is not None else get_theme("dark")
 
 
-#: The (mode, scale, qss) last handed to `setStyleSheet`, so an identical one is not re-applied.
-_APPLIED: "tuple[str, float, str] | None" = None
-
-
 def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     """Swap the whole application's stylesheet — the Qt equivalent of the prototype's
     `document.documentElement.dataset.theme = mode`. `scale` reapplies the current zoom level
@@ -1828,10 +1824,11 @@ def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     app.setPalette(pal)
     # Skip the re-style when nothing about it changed. `setStyleSheet` on the QApplication makes Qt
     # re-polish every widget in the process — 0.19 s with one window, more with each one after —
-    # and building a second window re-applied an identical sheet for no reason at all.
-    global _APPLIED
+    # and building a second window re-applied an identical sheet for no reason at all. Compared
+    # with the sheet the application HAS, not a record of what this function last set: a sheet
+    # taken off behind its back left the record saying «on», and the next window skipped it
+    # (tcc#123; the W-4 order fixes, where a test had cleared it).
     qss = build_qss(theme, scale=scale)
-    if _APPLIED != (mode, scale, qss):
+    if app.styleSheet() != qss:
         app.setStyleSheet(qss)
-        _APPLIED = (mode, scale, qss)
     return theme

@@ -123,54 +123,79 @@ def test_what_the_app_writes_for_the_machine_is_not_in_the_tests_own_folder(tmp_
     assert not inside, f"written into the test's own folder: {inside}"
 
 
-def test_a_modal_a_test_reaches_fails_the_test_instead_of_waiting():
+def test_a_modal_a_test_reaches_fails_the_test_at_its_end_instead_of_waiting(
+        _no_modal_waits_for_nobody):
     """A real modal in a test waits for a person who is not there: a plain `-n 4` run sat in
     the «model gone» box for 24 minutes (2026-09-30), and CI's Windows shard hit its 25-minute
-    limit in the same stretch. The guard in conftest makes the modal fail the test by name."""
+    limit in the same stretch. The guard in conftest makes the modal fail the test by name.
+
+    Not by raising where the modal opens (tcc#123, W-4 review): that is inside the window's code,
+    and a `try` there that catches broadly took the guard's error for its own and went on -- the
+    test passed. The modal answers «nobody chose», as Escape would, and is written down; the
+    test fails when it is over, naming each modal it reached."""
     from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
     QApplication.instance() or QApplication([])
+    log = _no_modal_waits_for_nobody
     box = QMessageBox()
     box.setWindowTitle("Model gone")
     box.setText("This project is set to a model nothing here can run")
+
+    assert box.exec() == 0 and box.clickedButton() is None
+    assert QDialog().exec() == 0
+    assert QMessageBox.question(None, "Switch?", "Open the other folder?") \
+        == QMessageBox.StandardButton.NoButton
+
     # By its text: the title is a no-op on macOS, where a message box has none.
-    with pytest.raises(RuntimeError, match="a test opened a modal: QMessageBox .*a model nothing"):
-        box.exec()
-    with pytest.raises(RuntimeError, match="a test opened a modal: QDialog"):
-        QDialog().exec()
-    with pytest.raises(RuntimeError, match="a test opened a modal: QMessageBox.question"):
-        QMessageBox.question(None, "Switch?", "Open the other folder?")
+    assert "a model nothing" in log.opened[0] and log.opened[0].startswith("QMessageBox ")
+    assert log.opened[1].startswith("QDialog ")
+    assert log.opened[2].startswith("QMessageBox.question ")
+    with pytest.raises(pytest.fail.Exception, match="a test opened a modal: QMessageBox .*"
+                                                    "a model nothing.*QDialog.*QMessageBox.question"):
+        log.verdict()
+    assert log.opened == [], "said once; this test's own end has nothing left to fail on"
 
 
-@pytest.fixture(params=["true", "a lie"])
-def _sheet_record(request):
-    """`apply_theme`'s record of the sheet as `app_ground` finds it: naming the sheet on the
-    application, or one that is not on it. Set before `app_ground` and put back after it."""
-    from PySide6.QtWidgets import QApplication
+def test_every_dialog_static_answers_cancel_and_is_written_down(_no_modal_waits_for_nobody):
+    """A dialog's static -- `QFileDialog.getExistingDirectory`, `QInputDialog.getText` -- is a
+    modal of its own: its `exec` is C++'s, the guard's `QDialog.exec` never sees it, and a test
+    that reached one waited like the «model gone» box did. Each answers what Cancel answers and
+    is written down like any modal. `QInputDialog.getInt` and `QFileDialog.getSaveFileName` are
+    cancelled quietly by `_isolated_machine_config`: tests walk through those questions."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import (QApplication, QColorDialog, QFileDialog, QFontDialog,
+                                   QInputDialog, QMessageBox)
 
-    from autosound_tcc.ui.tcc import theme
+    QApplication.instance() or QApplication([])
+    log = _no_modal_waits_for_nobody
+    asked = {
+        "QFileDialog.getOpenFileName": (QFileDialog.getOpenFileName(None, "Pick"), ("", "")),
+        "QFileDialog.getOpenFileNames": (QFileDialog.getOpenFileNames(None, "Pick"), ([], "")),
+        "QFileDialog.getExistingDirectory": (QFileDialog.getExistingDirectory(None, "Pick"), ""),
+        "QFileDialog.getOpenFileUrl": (QFileDialog.getOpenFileUrl(None, "Pick"), (QUrl(), "")),
+        "QFileDialog.getOpenFileUrls": (QFileDialog.getOpenFileUrls(None, "Pick"), ([], "")),
+        "QFileDialog.getSaveFileUrl": (QFileDialog.getSaveFileUrl(None, "Pick"), (QUrl(), "")),
+        "QFileDialog.getExistingDirectoryUrl": (QFileDialog.getExistingDirectoryUrl(None, "Pick"),
+                                                QUrl()),
+        "QInputDialog.getText": (QInputDialog.getText(None, "Step", "Name"), ("", False)),
+        "QInputDialog.getMultiLineText": (QInputDialog.getMultiLineText(None, "Note", "Text"),
+                                          ("", False)),
+        "QInputDialog.getItem": (QInputDialog.getItem(None, "Pick", "One", ["a", "b"]),
+                                 ("", False)),
+        "QInputDialog.getDouble": (QInputDialog.getDouble(None, "Level", "dB"), (0.0, False)),
+        "QMessageBox.about": (QMessageBox.about(None, "About", "TCC"), None),
+        "QMessageBox.aboutQt": (QMessageBox.aboutQt(None), None),
+    }
+    colour = QColorDialog.getColor()
+    ok, _font = QFontDialog.getFont()
 
-    app = QApplication.instance() or QApplication([])
-    was = theme._APPLIED
-    on = app.styleSheet()
-    theme._APPLIED = ("dark", 1.0, on if request.param == "true" else on + "/* not on */")
-    yield request.param
-    theme._APPLIED = was
-
-
-def test_app_ground_drops_a_record_that_lies_and_keeps_one_that_is_true(_sheet_record,
-                                                                        app_ground):
-    """A lie -- the sheet cleared, the record saying it is on -- made the next window skip its
-    sheet and measure itself unstyled (four head tests, the full `-n 4` run at 942dd61): dropped,
-    the window applies its own. A true record is kept: cleared, it made every test on this
-    fixture re-style every window the worker still holds, for a sheet already on -- CI's Windows
-    shard 4 past its 25-minute limit."""
-    from autosound_tcc.ui.tcc import theme
-
-    if _sheet_record == "true":
-        assert theme._APPLIED is not None and theme._APPLIED[2] == app_ground.styleSheet()
-    else:
-        assert theme._APPLIED is None
+    for name, (got, cancel) in asked.items():
+        assert got == cancel, name
+    assert not colour.isValid() and colour == QColor() and ok is False
+    assert [entry.split()[0] for entry in log.opened] == [
+        *asked, "QColorDialog.getColor", "QFontDialog.getFont"]
+    log.opened.clear()
 
 
 def test_a_finished_test_s_panes_leave_the_language_switch():

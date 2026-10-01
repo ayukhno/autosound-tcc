@@ -450,9 +450,10 @@ class NewProjectDialog(QDialog):
                     note=i18n.t("npSeedNote"),
                     seat=self._seat_combo.currentData(),
                 )
+                # Inside too: it reads what the seed wrote, which nobody has checked (tcc#123).
+                return report, _fs_carried(target)
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
                 return None, None
-            return report, _fs_carried(target)
 
     def _refresh_seed_note(self, *_args) -> None:
         """Ask for a redraw — on a short delay, because drawing this note runs a whole seed.

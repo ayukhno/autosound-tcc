@@ -12,6 +12,7 @@ Two views share one pane:
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Optional
@@ -51,7 +52,8 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import eq_export
-from autosound_tcc.state.dsp_state import CrossoverLeg, EqBand, GroupRow, ProfileGroup
+from autosound_tcc.state.dsp_state import (UNREAD_LEG, CrossoverLeg, EqBand, GroupRow,
+                                           ProfileGroup, leg_label)
 from autosound_tcc.state.eq_diff import BandDiff, compare_bands
 from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.labels import ElidedButton
@@ -709,7 +711,7 @@ def cell_text(field: str, row: GroupRow) -> str:
     """A value as the table reads it — and as it is compared (`field_changed`)."""
     raw = row.raw
     if field in ("hp", "lp"):
-        return CrossoverLeg.from_raw(raw.get(field)).label
+        return leg_label(raw.get(field))
     if field == "gain_db":
         v = raw.get("gain_db")
         return f"{v:+.1f}" if isinstance(v, (int, float)) else "—"
@@ -732,6 +734,15 @@ def cell_text(field: str, row: GroupRow) -> str:
         count = band_count(row.eq_bands())
         return f"{count} ▸" if count else "—"
     return "—"
+
+
+def unread_leg_tip(field: str, row: GroupRow) -> str:
+    """The hover of a crossover leg the table reads as «?» — what the ledger holds, as it holds
+    it (tcc#123) — or "" for every other cell."""
+    if field not in ("hp", "lp") or cell_text(field, row) != UNREAD_LEG:
+        return ""
+    value = json.dumps(row.raw.get(field), ensure_ascii=False, default=str)
+    return i18n.t("xoverUnread").format(value=value)
 
 
 def field_changed(field: str, row: GroupRow, old_row: Optional[GroupRow]) -> bool:
@@ -1868,6 +1879,9 @@ class DetailPane(QFrame):
                 item.setToolTip(i18n.t("cmpEqChanged"))
             else:
                 item.setToolTip(i18n.t("cmpWas").format(value=before))
+        unread = unread_leg_tip(field, row)
+        if unread:
+            item.setToolTip("\n".join(filter(None, (item.toolTip(), unread))))
         return item
 
     @staticmethod
@@ -1881,6 +1895,8 @@ class DetailPane(QFrame):
         """
         raw = row.raw
         if field in ("hp", "lp"):
+            if cell_text(field, row) == UNREAD_LEG:
+                return ""  # nothing a DSP would take (tcc#123)
             leg = CrossoverLeg.from_raw(raw.get(field))
             return f"{leg.freq_hz:g}" if leg.enabled and leg.freq_hz is not None else ""
         if field in ("gain_db", "ta_ms", "phase_deg"):

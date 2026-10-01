@@ -512,6 +512,26 @@ def test_the_fs_tick_reaches_both_seed_calls(tmp_path, monkeypatch):
     assert len(flags) >= 2 and set(flags) == {False}, flags
 
 
+def test_a_preview_that_lands_a_project_it_cannot_count_does_not_take_the_dialog_down(
+        tmp_path, monkeypatch):
+    """tcc#123 (W-4 review of tcc#93): the preview's seed sits inside a `try` -- a preview must
+    never take the dialog down -- and the Fs count read off what it wrote sat after it. A
+    `project.json` whose `channels` is not a list raised out of the note's redraw."""
+
+    from pathlib import Path
+
+    class _WritesOddChannels(_StubSeeder):
+        def seed(self, source, target, **kwargs):
+            (Path(target) / "project.json").write_text('{"channels": 5}', encoding="utf-8")
+            return super().seed(source, target, **kwargs)
+
+    seeder = _WritesOddChannels(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))
+    source = _passat(tmp_path)
+    dlg = _dialog_on(source, seeder, monkeypatch)
+
+    assert dlg._would_travel(source) == (None, None)
+
+
 def test_the_seat_offers_exactly_the_method_s_seats_in_its_words():
     _app()
     dlg = npd.NewProjectDialog(seed_first=True)

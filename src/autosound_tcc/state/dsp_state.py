@@ -117,6 +117,21 @@ class CrossoverLeg:
         return int(order) if order == int(order) else f"{order:g}"
 
 
+#: What a leg reads as when the ledger holds it in a shape `CrossoverLeg` cannot read (tcc#123):
+#: neither null, «OFF» nor `{f, …}`, or an `f` that is not a number -- a hand-edited ledger, a
+#: writer's slip. One channel's odd value took the whole DSP tree and the compare row down with
+#: it; now that cell says «?» and its hover says what the ledger holds (`detail_pane`).
+UNREAD_LEG = "?"
+
+
+def leg_label(raw: Any) -> str:
+    """`CrossoverLeg.from_raw(raw).label`, or `UNREAD_LEG` for a leg it cannot read."""
+    try:
+        return CrossoverLeg.from_raw(raw).label
+    except (TypeError, ValueError):
+        return UNREAD_LEG
+
+
 def _field_label(field_name: str, raw_value: Any) -> Optional[str]:
     """Render one declared field as a "label: value" chip, or None if genuinely absent.
 
@@ -127,8 +142,7 @@ def _field_label(field_name: str, raw_value: Any) -> Optional[str]:
     if raw_value is None:
         return None
     if field_name in ("hp", "lp"):
-        leg = CrossoverLeg.from_raw(raw_value)
-        return f"{field_name.upper()}: {leg.label}"
+        return f"{field_name.upper()}: {leg_label(raw_value)}"
     if field_name == "eq":
         n = len(raw_value) if isinstance(raw_value, (list, tuple)) else 0
         return f"EQ: {n} band{'s' if n != 1 else ''}" if n else None

@@ -59,8 +59,9 @@ def has_glossary(project_dir: Optional[Path] = None) -> bool:
 # A title the grammar refuses, read for its method tag where the grammar places one (tcc#109): glued
 # to the series number, `_7 (rta)`, with free text after it (`naming.py` `_NAME_RE`/`_TAGGED_RE`) --
 # the last such, as the grammar's greedy body takes it; else the first tag, as `(imp)` with no `_N`
-# is placed (`_UNVERSIONED_RE`: its body holds no bracket). Case-blind, as the grammar is.
-_SERIES_TAG_RE = re.compile(r"_(?:\d+|final)(?:ctl|rep)?\s*\(([A-Za-z]+)\)")
+# is placed (`_UNVERSIONED_RE`: its body holds no bracket). Case-blind, as the grammar is. A tag
+# ends where a word could: `x_8 (sw)y` is no tag to the grammar, and was one here (tcc#123).
+_SERIES_TAG_RE = re.compile(r"_(?:\d+|final)(?:ctl|rep)?\s*\(([A-Za-z]+)\)(?=\s|$)")
 _TAG_RE = re.compile(r"\(([A-Za-z]+)\)")
 # `naming.METHODS`, for a machine with no method to ask.
 _METHODS = ("sw", "rta", "imp")

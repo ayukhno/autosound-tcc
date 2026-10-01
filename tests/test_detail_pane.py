@@ -4,6 +4,7 @@ channel names) and a standalone word (`Front L Full`, the prototype's own conven
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -2112,3 +2113,27 @@ def test_the_eq_head_against_the_arbiter_s_floor_at_a_zoom(tmp_path, monkeypatch
             window._set_zoom(1.0)
         app.setFont(before)
         i18n.set_language("en")
+
+
+@pytest.mark.parametrize("leg", [{"freq": 80, "type": "LR"}, {"f": "80Hz", "type": "LR"}, 80])
+def test_a_crossover_the_ledger_holds_in_another_shape_reads_a_question_mark(leg):
+    """tcc#123 (W-4 review): `CrossoverLeg.from_raw` raises on a leg that is neither null, «OFF»
+    nor `{f, …}`, and `label` on an `f` that is not a number -- a hand-edited ledger, a writer's
+    slip -- and the table and its compare row went down with the channel. The cell says «?», the
+    hover says what the ledger holds, and the copy has nothing to paste."""
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    row = GroupRow(id="m-L", name="m-L", slot="E", raw={"hp": leg, "lp": None, "gain_db": 0.0})
+    group = ProfileGroup(id="physical_outputs", label="Output", fields=("hp", "lp", "gain_db"),
+                         rows=(row,))
+    pane = DetailPane()
+    pane.open_table(group)
+    table = pane._scroll.widget()
+
+    hp = table.item(0, 2)
+    assert hp.text() == "?"
+    assert hp.toolTip() == i18n.t("xoverUnread").format(value=json.dumps(leg))
+    assert DetailPane._copy_value("hp", row) == ""
+    assert table.item(0, 3).text() == "OFF", "the other leg still reads"

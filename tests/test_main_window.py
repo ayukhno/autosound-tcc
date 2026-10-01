@@ -5874,3 +5874,45 @@ def test_a_banked_change_read_from_disk_shows_no_time_and_one_banked_now_does(mo
     for from_disk in (opened, switched):
         assert from_disk._time_label.isHidden() and not from_disk._time_label.text()
     assert banked._time_label.text() == time.strftime("%H:%M:%S", time.localtime(now))
+
+
+def test_a_same_name_version_of_another_preset_gets_its_card_and_the_next_bank_its_time(
+        monkeypatch, tmp_path):
+    """tcc#123 (W-4 review of tcc#100): the card was remembered by its version NAME alone, and the
+    early return came before the window noted which preset it was on. A switch to another preset
+    standing on the same `v_003` drew no card; the bank that followed on that preset was then
+    compared with the preset before the switch, and read as one opened from disk -- no time."""
+    import time
+
+    from autosound_tcc.state import proposal_view
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(proposal_view, "load_delta",
+                        lambda version, preset, project_dir=None: {"version": f"{preset}/{version}"})
+    monkeypatch.setattr(proposal_view, "to_html", lambda delta: f"{delta['version']} banked")
+    monkeypatch.setattr(proposal_view, "delta_path",
+                        lambda version, preset, project_dir=None: tmp_path / f"{preset}-{version}")
+    for name in ("tune-v_003", "other-v_003", "other-v_004"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    now = 1_790_000_000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+    before = len(window._dialog._bubbles)
+
+    window._show_banked_delta("v_003", "tune", tmp_path)   # the project opens on tune's v_003
+    window._show_banked_delta("v_003", "other", tmp_path)  # a switch to other, also on v_003
+    window._show_banked_delta("v_003", "other", tmp_path)  # the watcher fires again: no repeat
+    window._show_banked_delta("v_004", "other", tmp_path)  # v_004 is banked on other
+
+    cards = window._dialog._bubbles[before:]
+    assert len(cards) == 3, [card.plain_text() for card in cards]
+    for card, said in zip(cards, ("tune/v_003", "other/v_003", "other/v_004")):
+        assert said in card.plain_text()
+    switched, banked = cards[1], cards[2]
+    assert switched._time_label.isHidden() and not switched._time_label.text()
+    assert banked._time_label.text() == time.strftime("%H:%M:%S", time.localtime(now))
+
+    # The same version written again -- a bank redone under its name -- is a new card.
+    os.utime(tmp_path / "other-v_004", (1_700_000_000, 1_700_000_000))
+    window._show_banked_delta("v_004", "other", tmp_path)
+    assert len(window._dialog._bubbles[before:]) == 4

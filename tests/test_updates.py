@@ -549,24 +549,30 @@ def test_a_release_signed_by_the_author_s_key_runs_and_a_stranger_s_does_not(mon
 
 # ---- fix round 1: a git too old to check, and TCC's own signature line on the row ------------
 
-@pytest.mark.parametrize("said", [
+@pytest.mark.parametrize("said, why", [
     # git before 2.34: `gpg.format=ssh` is not a value it knows
-    "error: unsupported value for gpg.format: ssh\nfatal: bad config variable 'gpg.format'",
+    ("error: unsupported value for gpg.format: ssh\nfatal: bad config variable 'gpg.format'",
+     "git_too_old"),
     # an ssh-keygen without `-Y`
-    "unknown option -- Y\nusage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile]",
+    ("unknown option -- Y\nusage: ssh-keygen [-q] [-b bits] [-C comment] [-f output_keyfile]",
+     "openssh_too_old"),
     # git saying so itself
-    "error: ssh-keygen -Y find-principals/verify is needed for ssh signature verification "
-    "(available in openssh version 8.2p1+)",
+    ("error: ssh-keygen -Y find-principals/verify is needed for ssh signature verification "
+     "(available in openssh version 8.2p1+)", "openssh_too_old"),
     # no ssh-keygen at all
-    "error: cannot run ssh-keygen: No such file or directory",
+    ("error: cannot run ssh-keygen: No such file or directory", "openssh_too_old"),
     # no ssh-keygen at all, in Git for Windows' words
-    "error: cannot spawn ssh-keygen: No such file or directory",
+    ("error: cannot spawn ssh-keygen: No such file or directory", "openssh_too_old"),
 ])
-def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_path, said):
+def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_path, said, why):
     """install.sh v3.0.64 `verify_tag` matches `*gpg.format*|*"unknown option"*|*"-Y"*` and says
     "this git may be too old": a machine that cannot CHECK a signature is not a release whose
     signature is wrong. The VM, where git is older, is exactly where it would read as a forged
-    release. Nothing is installed either way."""
+    release. Nothing is installed either way.
+
+    And the advice names what is old (tcc#123, W-4 review): git reads `gpg.format`, OpenSSH's
+    `ssh-keygen` does the checking. «Update git» to somebody whose ssh-keygen predates `-Y` sends
+    them to update the one program that was fine."""
     _an_installed_clone(monkeypatch, tmp_path)
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     ran = []
@@ -584,7 +590,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
 
     done = updates.apply_skill("v3.0.64", keep_local=True)
 
-    assert done.ok is False and done.reason == "git_too_old", done
+    assert done.ok is False and done.reason == why, done
     assert "git version 2.30.1" in done.detail
     assert ran == []
 
@@ -1246,7 +1252,11 @@ def test_the_developer_switch_skips_the_signature_not_the_name_check(monkeypatch
     assert (ok, why) == (False, "bad_signature"), "the method's tags too"
 
 
-def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path):
+@pytest.mark.parametrize("said, why", [
+    ("error: unsupported value for gpg.format: ssh", "git_too_old"),
+    ("error: cannot spawn ssh-keygen: No such file or directory", "openssh_too_old"),
+])
+def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path, said, why):
     temp = tmp_path / "temp"
     temp.mkdir()
     monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
@@ -1255,7 +1265,7 @@ def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path
 
     def fake_git(*args, cwd=None, timeout=None):
         if "verify-tag" in args:
-            return False, "error: cannot spawn ssh-keygen: No such file or directory"
+            return False, said
         if args == ("--version",):
             return True, "git version 2.30.1.windows.1"
         return True, ""
@@ -1264,7 +1274,7 @@ def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path
 
     ready = updates.prepare_tcc_update(pid=4242, platform="win32")
 
-    assert ready.script is None and ready.reason == "git_too_old", ready
+    assert ready.script is None and ready.reason == why, ready
     assert "git version 2.30.1" in ready.detail
     assert list(temp.iterdir()) == []
 
@@ -1430,6 +1440,128 @@ def test_a_tag_moved_after_the_check_is_not_installed(monkeypatch, tmp_path, mov
         assert out.rstrip().endswith(_WORDS["done"]), out
     for command in ("ls-remote", "git ", "printf", verified):
         assert command not in out, f"{command!r} reached the window"
+
+
+# ---- tcc#123: the guard cannot wait for a password or a silent server; the folder goes after ------
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_the_guard_closes_every_door_git_could_stop_at(platform):
+    """W-4 review of tcc#102: the guard set `GIT_TERMINAL_PROMPT` alone. Git Credential Manager's
+    window is a door of its own (`GCM_INTERACTIVE`), and a server that stops answering holds the
+    window on «waiting for TCC» with nothing on screen. The doors are the update check's own
+    (`_NO_PROMPTING`); the wait is bounded on each system by what it can rely on."""
+    script = updates.tcc_install_script(pid=1, tag="v0.1.46", words=_MOVED_WORDS,
+                                        platform=platform, sha=_VERIFIED)
+    guard = script[script.index(_WORDS["wait"]):script.index(_WORDS["updating"])]
+
+    if platform == "darwin":
+        assert "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_ASKPASS='' git ls-remote" in guard
+        assert f"-lt {updates._GUARD_TIMEOUT_S} ]" in guard, "a deadline, not a hope"
+        assert "timeout " not in guard, "macOS has no `timeout` to rely on"
+    else:
+        for line in ("set GIT_TERMINAL_PROMPT=0", "set GCM_INTERACTIVE=never",
+                     'set "GIT_ASKPASS="', "set GIT_HTTP_LOW_SPEED_LIMIT=1000",
+                     f"set GIT_HTTP_LOW_SPEED_TIME={updates._GUARD_TIMEOUT_S}"):
+            assert line in guard.splitlines(), line
+        assert guard.index("GCM_INTERACTIVE") < guard.index("ls-remote")
+
+
+def _fake_bin(tmp_path, git: str):
+    """A `bin` with a `uv` that leaves a mark and the `git` given; returns `(bindir, mark)`."""
+    mark = tmp_path / "uv-ran"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "uv").write_text(f"#!/bin/sh\necho ran > '{mark}'\n"
+                               "echo 'Installed 1 executable: autosound-tcc'\n")
+    (bindir / "git").write_text("#!/bin/sh\n" + git)
+    for tool in ("uv", "git"):
+        (bindir / tool).chmod(0o755)
+    return bindir, mark
+
+
+def _gone_pid() -> int:
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    return gone.pid
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_a_server_that_never_answers_ends_in_the_moved_line_not_a_wait(monkeypatch, tmp_path):
+    """Run for real with `/bin/sh` and a `git` that never answers: the script stops asking at its
+    deadline and says the server did not answer, and uv never runs. The `git` it ran had every
+    prompting door closed."""
+    import os
+    import time
+
+    seen = tmp_path / "git-env"
+    bindir, mark = _fake_bin(tmp_path, f"echo \"$GIT_TERMINAL_PROMPT $GCM_INTERACTIVE "
+                                       f"[${{GIT_ASKPASS-unset}}]\" > '{seen}'\nexec sleep 600\n")
+    monkeypatch.setattr(updates, "_GUARD_TIMEOUT_S", 2)
+    folder = tmp_path / "script"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v0.1.46", words=_MOVED_WORDS,
+                                            folder=folder, platform="darwin", sha=_VERIFIED)
+
+    started = time.monotonic()
+    out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True,
+                         encoding="utf-8", env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"},
+                         timeout=30).stdout
+
+    assert time.monotonic() - started < 15, "the deadline held"
+    assert _MOVED_WORDS["moved"] in out and _WORDS["updating"] not in out, out
+    assert not mark.exists(), "uv never ran"
+    assert seen.read_text().split() == ["0", "never", "[]"]
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+@pytest.mark.parametrize("answer", ["", "d" * 40], ids=["installed", "moved"])
+def test_the_update_s_own_folder_is_gone_when_its_script_ends(monkeypatch, tmp_path, answer):
+    """W-4 review of tcc#102: every press left an `autosound-tcc-update-*` folder in the temp
+    directory, for good -- the script is run after TCC has quit, so nobody was left to remove
+    it. The script removes its own folder as it ends, however it ends. Run for real with `/bin/sh`."""
+    import os
+
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    bindir, mark = _fake_bin(tmp_path, f"printf '%s\\trefs/tags/v0.1.46^{{}}\\n' "
+                                       f"'{answer or _VERIFIED}'\n")
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v0.1.46", words=_MOVED_WORDS,
+                                            platform="darwin", sha=_VERIFIED)
+    assert path.parent.parent == temp
+
+    out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True,
+                         encoding="utf-8", env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"},
+                         timeout=30).stdout
+
+    assert mark.exists() is (not answer), out
+    assert list(temp.iterdir()) == [], "the folder and everything in it went with the script"
+
+
+def test_the_windows_update_removes_its_folder_after_its_last_line(monkeypatch, tmp_path):
+    """The same on Windows, where cmd reads a batch file line by line while it runs it: deleting
+    it from inside stops the script with «The batch file cannot be found». So every exit goes
+    to one last line, and that line leaves the batch first (`(goto)`), moves the window out of
+    the folder it was started in, and removes the folder. A folder the caller gave is the
+    caller's, and stays."""
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    path = updates.write_tcc_install_script(pid=4242, tag="v0.1.46", words=_MOVED_WORDS,
+                                            platform="win32", sha=_VERIFIED)
+    lines = path.read_bytes().decode("utf-8").split("\r\n")
+
+    assert lines[-1] == "", "the file ends with its line break"
+    assert lines[-3:-1] == [":end", f'(goto) 2>nul & cd /d "%TEMP%" & rmdir /s /q "{path.parent}"']
+    assert "goto :eof" not in lines, "no exit around the last line"
+    assert [line for line in lines if line.startswith("goto ")] == ["goto end", "goto end"]
+
+    given = tmp_path / "given"
+    given.mkdir()
+    kept = updates.write_tcc_install_script(pid=4242, tag="v0.1.46", words=_MOVED_WORDS,
+                                            folder=given, platform="win32", sha=_VERIFIED)
+    assert "rmdir" not in kept.read_text(encoding="utf-8")
 
 
 def test_a_candidate_of_the_first_signed_version_is_checked_one_before_it_predates(monkeypatch):

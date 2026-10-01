@@ -129,3 +129,48 @@ def test_the_time_on_a_message_reads_on_every_bubble():
                 f"{name} {kind}: the time is {_contrast(stamp, ground):.2f}:1 on {ground}")
             assert _contrast(stamp, ground) < _contrast(palette.text, ground), (
                 f"{name} {kind}: the time must stay quieter than the message")
+
+
+class _App:
+    """What `apply_theme` asks of the application -- its palette and its sheet -- with the sheet
+    writes counted. `setStyleSheet` on the real one re-polishes every widget of the process."""
+
+    def __init__(self) -> None:
+        from PySide6.QtGui import QPalette
+
+        self._palette, self.sheet, self.sets = QPalette(), "", 0
+
+    def palette(self):
+        return self._palette
+
+    def setPalette(self, palette) -> None:  # noqa: N802 (Qt's name)
+        self._palette = palette
+
+    def styleSheet(self) -> str:  # noqa: N802 (Qt's name)
+        return self.sheet
+
+    def setStyleSheet(self, sheet) -> None:  # noqa: N802 (Qt's name)
+        self.sheet, self.sets = sheet, self.sets + 1
+
+
+def test_a_sheet_taken_off_behind_its_back_is_put_back(monkeypatch):
+    """tcc#123 (W-4 review, round 5 of the order fixes): `apply_theme` skipped the re-style when
+    its own record said the sheet was on, whatever the application really had. A test that
+    cleared the sheet left the record saying «applied», and the next window measured itself
+    unstyled. The application's own sheet is what is compared now: the same sheet already on
+    is not applied twice, and one taken off is put back."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import theme
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
+    app = _App()
+
+    theme.apply_theme(app, "dark")
+    theme.apply_theme(app, "dark")
+    assert app.sets == 1, "the identical sheet, already on, is not applied again"
+
+    app.sheet = ""
+    theme.apply_theme(app, "dark")
+    assert app.sets == 2 and app.sheet == theme.build_qss(theme.get_theme("dark"))

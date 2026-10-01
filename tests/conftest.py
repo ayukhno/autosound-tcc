@@ -222,6 +222,53 @@ def _a_finished_test_s_widgets_are_not_retranslated():
     _windows.drop_language_listeners_since(before)
 
 
+class _ModalLog:
+    """The modals a test reached, by name, for its end to fail on (`_no_modal_waits_for_nobody`)."""
+
+    def __init__(self) -> None:
+        self.opened: list = []
+
+    def record(self, what: str, answer):
+        self.opened.append(what)
+        return answer
+
+    def verdict(self) -> None:
+        if self.opened:
+            opened, self.opened = self.opened, []
+            pytest.fail(f"a test opened a modal: {'; '.join(opened)} -- nobody answers it in a "
+                        f"test; patch its exec, or the call that opens it, in the test",
+                        pytrace=False)
+
+
+def _dialog_statics() -> tuple:
+    """`(class, static, what Cancel answers)` for each dialog static the guard answers. Each is
+    a modal of its own: its `exec` is C++'s, which the guard's `QDialog.exec` never sees.
+    `QInputDialog.getInt` and `QFileDialog.getSaveFileName` are not here: `_isolated_machine_config`
+    cancels them quietly, because tests walk through those questions."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QColor, QFont
+    from PySide6.QtWidgets import (QColorDialog, QFileDialog, QFontDialog, QInputDialog,
+                                   QMessageBox)
+
+    return (
+        (QFileDialog, "getOpenFileName", lambda: ("", "")),
+        (QFileDialog, "getOpenFileNames", lambda: ([], "")),
+        (QFileDialog, "getExistingDirectory", lambda: ""),
+        (QFileDialog, "getOpenFileUrl", lambda: (QUrl(), "")),
+        (QFileDialog, "getOpenFileUrls", lambda: ([], "")),
+        (QFileDialog, "getSaveFileUrl", lambda: (QUrl(), "")),
+        (QFileDialog, "getExistingDirectoryUrl", lambda: QUrl()),
+        (QInputDialog, "getText", lambda: ("", False)),
+        (QInputDialog, "getMultiLineText", lambda: ("", False)),
+        (QInputDialog, "getItem", lambda: ("", False)),
+        (QInputDialog, "getDouble", lambda: (0.0, False)),
+        (QColorDialog, "getColor", lambda: QColor()),  # an invalid colour is the cancel
+        (QFontDialog, "getFont", lambda: (False, QFont())),
+        (QMessageBox, "about", lambda: None),
+        (QMessageBox, "aboutQt", lambda: None),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _no_modal_waits_for_nobody(monkeypatch):
     """A modal a test reaches fails that test, naming the modal, instead of holding the run.
@@ -229,28 +276,37 @@ def _no_modal_waits_for_nobody(monkeypatch):
     Nobody answers a modal in a test, and a real one waits forever. A plain `-n 4` run of four
     files here (2026-09-30) sat in `_offer_replacement`'s «model gone» box until the worker was
     killed, 24 minutes on; CI's Windows shard 4 at 0750776 was cancelled at its 25-minute limit
-    in the same stretch of the suite. Now the modal raises, and the test fails with its title and
-    text -- from a slot too, which the slot guard above turns into the test's failure.
+    in the same stretch of the suite.
+
+    The modal answers what nobody choosing answers -- Escape, Cancel -- and is written down, and
+    the test fails at its end naming each one it reached. It used to raise where the modal
+    opened (tcc#123, W-4 review): that is inside the window's code, and a `try` there that
+    catches broadly took the guard's error for its own and went on, so the test passed.
 
     `QDialog.exec` is the one `exec` every dialog in PySide reaches, `QMessageBox`'s included;
-    the static `QMessageBox` questions are modals of their own. A test that is ABOUT a modal
-    patches its `exec` (or the call that opens it) itself; its patch runs later and wins."""
+    the static `QMessageBox` questions and the dialog statics (`_dialog_statics`) are modals of
+    their own. A test that is ABOUT a modal patches its `exec` (or the call that opens it)
+    itself; its patch runs later and wins. Yields the log, for the test of this guard."""
     from PySide6.QtWidgets import QDialog, QMessageBox
 
-    def refuse(what: str):
-        raise RuntimeError(f"a test opened a modal: {what} -- nobody answers it in a test; patch "
-                           f"its exec, or the call that opens it, in the test")
+    log = _ModalLog()
 
     def exec_(self, *_args, **_kwargs):
         text = self.text() if isinstance(self, QMessageBox) else ""
-        refuse(f"{type(self).__name__} «{self.windowTitle()}» {text[:200]!r}")
+        return log.record(f"{type(self).__name__} «{self.windowTitle()}» {text[:200]!r}", 0)
 
     monkeypatch.setattr(QDialog, "exec", exec_)
     for name in ("question", "warning", "information", "critical"):
         monkeypatch.setattr(QMessageBox, name, staticmethod(
-            lambda *args, _name=name, **_kwargs: refuse(
-                f"QMessageBox.{_name} {args[1:3] if len(args) > 2 else args!r}")))
-    yield
+            lambda *args, _name=name, **_kwargs: log.record(
+                f"QMessageBox.{_name} {args[1:3] if len(args) > 2 else args!r}",
+                QMessageBox.StandardButton.NoButton)))
+    for owner, name, cancel in _dialog_statics():
+        monkeypatch.setattr(owner, name, staticmethod(
+            lambda *args, _what=f"{owner.__name__}.{name}", _cancel=cancel, **_kwargs:
+                log.record(f"{_what} {args[:3]!r}", _cancel())))
+    yield log
+    log.verdict()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -451,38 +507,32 @@ def app_ground():
     sheet was on, so the next window skipped it and measured itself unstyled.
 
     Here: the platform's own font -- at the stretch the run declares, `WIDE_STRETCH` (the
-    wide-font emulation's variable), or none; a record of the applied sheet that is TRUE, so the
-    window's own `apply_theme` applies its sheet at its own zoom (per test, from the isolated
-    settings) unless that very sheet is already on; English. Everything goes back after.
+    wide-font emulation's variable), or none; English. The window's own `apply_theme` applies its
+    sheet at its own zoom (per test, from the isolated settings) unless that very sheet is already
+    on the application -- it compares the application's sheet itself since tcc#123, so a sheet a
+    test before this one took off is put back. Everything goes back after.
 
-    Each of these is written only where it differs, and the record is checked against the
-    application's sheet rather than cleared. Every write here is the whole application's --
-    `setStyleSheet` re-polishes every live widget in the process, `setFont` and `setPalette` send
-    each one an event, `set_language` retranslates every window -- and the windows of every test
-    before this one in the worker are all still alive (F-053). Cleared outright (d3f4cc1), the
-    record made each of these tests re-style all of them for a sheet that was already on: on the
-    Mac 1.8-3.1 s a test in `test_detail_pane.py` and 30 s in control mode's chip test, the two
-    files 121 s -> 211 s; CI's Windows shard 4 went from 806 s (942dd61) to 1232 s, then to its
-    25-minute limit (2026-09-30). A record that names the sheet on the application is kept --
-    the window's identical sheet then styles its own widgets as they are built, as in the
-    product; one that does not -- the lie that failed the four head tests -- is dropped, and the
-    window applies its sheet."""
+    Each of these is written only where it differs. Every write here is the whole application's
+    -- `setStyleSheet` re-polishes every live widget in the process, `setFont` and `setPalette`
+    send each one an event, `set_language` retranslates every window -- and the windows of every
+    test before this one in the worker are all still alive (F-053). Re-styling them all for a
+    sheet that was already on (d3f4cc1) cost 1.8-3.1 s a test in `test_detail_pane.py` on the Mac
+    and 30 s in control mode's chip test, the two files 121 s -> 211 s; CI's Windows shard 4 went
+    from 806 s (942dd61) to 1232 s, then to its 25-minute limit (2026-09-30)."""
     from PySide6.QtGui import QFont, QFontDatabase, QPalette
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.ui.tcc import i18n, theme
 
     app = QApplication.instance() or QApplication([])
-    was = (QFont(app.font()), app.styleSheet(), QPalette(app.palette()), theme._APPLIED,
-           theme._CURRENT, i18n.current_language())
+    was = (QFont(app.font()), app.styleSheet(), QPalette(app.palette()), theme._CURRENT,
+           i18n.current_language())
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     stretch = int(os.environ.get("WIDE_STRETCH", "100"))
     if stretch != 100:
         font.setStretch(stretch)
     if app.font() != font:
         app.setFont(font)
-    if theme._APPLIED is not None and theme._APPLIED[2] != app.styleSheet():
-        theme._APPLIED = None
     theme._CURRENT = None
     if i18n.current_language() != "en":
         i18n.set_language("en")
@@ -495,6 +545,6 @@ def app_ground():
             app.setStyleSheet(was[1])
         if app.palette() != was[2]:
             app.setPalette(was[2])
-        theme._APPLIED, theme._CURRENT = was[3], was[4]
-        if i18n.current_language() != was[5]:
-            i18n.set_language(was[5])
+        theme._CURRENT = was[3]
+        if i18n.current_language() != was[4]:
+            i18n.set_language(was[4])

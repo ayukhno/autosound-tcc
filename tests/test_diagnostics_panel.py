@@ -498,17 +498,22 @@ def test_a_failed_update_says_why_and_leaves_the_button(monkeypatch):
     assert button.isEnabled(), "a failure the person can retry must leave them the button"
 
 
-def test_a_git_too_old_to_check_is_said_as_such_on_the_row(monkeypatch):
+@pytest.mark.parametrize("why, other", [("git_too_old", "openssh_too_old"),
+                                        ("openssh_too_old", "git_too_old")])
+def test_a_git_too_old_to_check_is_said_as_such_on_the_row(monkeypatch, why, other):
+    """And an OpenSSH too old to check is told to update OpenSSH, not git (tcc#123)."""
     from autosound_tcc.core import updates
 
     dialog, _asked = _skill_offered(monkeypatch, done=updates.SkillUpdate(
-        False, "git_too_old", "git version 2.30.1: unknown option -- Y"))
+        False, why, "git version 2.30.1: unknown option -- Y"))
 
     dialog._update_skill()
     _finish_skill_update(dialog)
 
     text = dialog._update_rows["skill"][0].text()
-    assert i18n.t("updWhy_git_too_old") in text and "git version 2.30.1" in text
+    assert i18n.t(f"updWhy_{why}") in text and "git version 2.30.1" in text
+    assert i18n.t(f"updWhy_{why}") != f"updWhy_{why}", "a sentence, not the key"
+    assert i18n.t(f"updWhy_{other}") not in text
     assert i18n.t("updWhy_bad_signature") not in text
 
 

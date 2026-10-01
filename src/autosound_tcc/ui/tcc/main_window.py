@@ -3908,16 +3908,29 @@ class MainWindow(QMainWindow):
         Timed only when it is news (tcc#100). The version a project or preset OPENS on was banked
         before the window looked — a record read from disk, and the moment it was drawn is not its
         time. A new version of the same preset, arriving while the window watches, is.
+
+        Remembered by the preset, the version and the file's time, not the version's name alone,
+        and the preset noted before anything returns (tcc#123): a switch to another preset on the
+        same `v_003` drew no card, and the bank that followed there was compared with the preset
+        before the switch, and came without its time.
         """
-        if not version or not preset or version == getattr(self, "_delta_shown", None):
+        if not version or not preset:
             return
         where = (str(root), preset)
         banked_now = where == getattr(self, "_delta_where", None)
         self._delta_where = where
+        try:
+            mtime = proposal_view.delta_path(version, preset).stat().st_mtime
+        except OSError:
+            mtime = None
+        shown = (where, version, mtime)
+        if shown == getattr(self, "_delta_shown", None):
+            return
         delta = proposal_view.load_delta(version, preset)
         # No delta file is the ordinary case — a seeded baseline, a hand-written ledger, a project
-        # older than this. Remembered anyway, so a reload does not re-ask the disk for it.
-        self._delta_shown = version
+        # older than this. Remembered anyway, so a reload does not read it again; one written
+        # after all changes the file's time, and is drawn.
+        self._delta_shown = shown
         if delta is None:
             return
         self._dialog._add_system_message(proposal_view.to_html(delta), role=SYS_ROLE_LEDGER,

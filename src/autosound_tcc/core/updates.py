@@ -117,6 +117,12 @@ TCC_WINDOW_WORDS = {
              "nothing was installed. Start TCC and press «Update TCC» again.",
 }
 
+#: How long the install script waits for the server to name the tag's commit (tcc#123). The person
+#: pressed «Update» and is watching, so it is more patient than a background check (`_ASK_TIMEOUT`);
+#: a server that has not answered by then is said to have not answered (`moved`), and nothing is
+#: installed.
+_GUARD_TIMEOUT_S = 30
+
 #: Cursor home, clear the screen, clear the scrollback. The last one matters: `clear` alone leaves
 #: the typed line one scroll away in Terminal.app, and ESC[3J is honoured by Terminal and iTerm.
 _CLEAR_SCREEN = r"\033[H\033[2J\033[3J"
@@ -136,7 +142,7 @@ def _cmd_echo(text: str) -> str:
 
 def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                        words: Optional[dict] = None, platform: Optional[str] = None,
-                       sha: str = "") -> str:
+                       sha: str = "", folder: Optional[Path] = None) -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -172,6 +178,19 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     `install_report.requested_revision` reads back — the shown version, the channel, the guide
     link. No `sha` (a release from before signing, the developer's switch): nothing was verified,
     so there is nothing to hold uv to.
+
+    **That question cannot wait for a person or a silent server** (tcc#123). Every door git could
+    stop at is closed, the update check's own (`_NO_PROMPTING`): Git Credential Manager's window
+    was open to it, and nobody would have seen why the window stood still. And the wait is bounded
+    by what each system can rely on. macOS has no `timeout`: git runs in the background and the
+    script stops asking after `_GUARD_TIMEOUT_S`. cmd has no background-and-wait of its own, and
+    building one there is fragile where a mistake fails closed — no update would ever install —
+    so git's own limit holds it there: a transfer slower than 1 kB/s for `_GUARD_TIMEOUT_S` ends
+    it (`GIT_HTTP_LOW_SPEED_*`), and the connection itself is bounded by Windows and curl.
+
+    **`folder` is the script's own, and goes when the script ends** (tcc#123): it runs after TCC
+    has quit, so nobody else is left to remove it. Only a folder `write_tcc_install_script` made;
+    None removes nothing.
     """
     if pid is None:
         pid = os.getpid()
@@ -186,13 +205,23 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         # The check before uv: `for /f` reads the first field of git's one line, and an empty
         # answer compares unequal, so it fails closed. `2^>nul` is the redirect escaped into the
         # child command; `^{}` sits inside double quotes, where cmd leaves a caret alone.
+        # cmd cannot hold an empty variable: `set "GIT_ASKPASS="` removes it, the nearest it has.
         guard = [
-            "set GIT_TERMINAL_PROMPT=0",
+            *(f'set "{name}="' if not value else f"set {name}={value}"
+              for name, value in _NO_PROMPTING.items()),
+            "set GIT_HTTP_LOW_SPEED_LIMIT=1000",
+            f"set GIT_HTTP_LOW_SPEED_TIME={_GUARD_TIMEOUT_S}",
             'set "tcc_now="',
             f"for /f \"tokens=1\" %%a in ('git ls-remote \"{TCC_REPO}\" "
             f"\"refs/tags/{tag}^{{}}\" 2^>nul') do set \"tcc_now=%%a\"",
             f'if not "%tcc_now%"=="{sha}" goto moved',
         ] if sha else []
+        # Every exit reaches `:end`. cmd reads a batch file line by line as it runs it, so the
+        # file cannot be deleted from inside: `(goto)` leaves the batch first, and the rest of
+        # the line, already read, runs in the window's own cmd — out of the folder it started
+        # in, which Windows will not remove while it is somebody's current directory.
+        end = ([":end", f'(goto) 2>nul & cd /d "%TEMP%" & rmdir /s /q '
+                        f'"{str(folder).replace("%", "%%")}"'] if folder else [":end"])
         lines = [
             "@echo off",
             "chcp 65001 >nul",
@@ -205,25 +234,42 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             "if errorlevel 1 goto failed",
             "echo.",
             _cmd_echo(said["done"]),
-            "goto :eof",
-            *([":moved", "echo.", _cmd_echo(said["moved"]), "goto :eof"] if sha else []),
+            "goto end",
+            *([":moved", "echo.", _cmd_echo(said["moved"]), "goto end"] if sha else []),
             ":failed",
             "echo.",
             _cmd_echo(said["failed"]),
+            *end,
         ]
     else:
         say = "printf '%s\\n' {}".format
+        doors = " ".join(f"{name}={shlex.quote(value)}" for name, value in _NO_PROMPTING.items())
+        # Git in the background, its answer through the substitution's pipe, and a deadline:
+        # killed, git closes that pipe and the substitution ends with no answer. Its own remote
+        # helper talks to git, not to this pipe, so nothing else holds it open.
         guard = [
-            f"now=$(GIT_TERMINAL_PROMPT=0 git ls-remote {shlex.quote(TCC_REPO)} "
-            f"{shlex.quote(f'refs/tags/{tag}^{{}}')} 2>/dev/null | cut -f1)",
+            "answer=$(",
+            f"  {doors} git ls-remote {shlex.quote(TCC_REPO)} "
+            f"{shlex.quote(f'refs/tags/{tag}^{{}}')} 2>/dev/null &",
+            "  ask=$! waited=0",
+            f'  while kill -0 "$ask" 2>/dev/null && [ "$waited" -lt {_GUARD_TIMEOUT_S} ]; do',
+            "    sleep 1; waited=$((waited + 1))",
+            "  done",
+            '  kill "$ask" 2>/dev/null',
+            ")",
+            "now=$(printf '%s\\n' \"$answer\" | cut -f1)",
             f'if [ "$now" != {shlex.quote(sha)} ]; then',
             "  " + say(shlex.quote(said["moved"])),
             "  exit 1",
             "fi",
         ] if sha else []
+        # However the script ends — done, failed, the tag moved, the window closed.
+        cleanup = [f"trap {shlex.quote(f'rm -rf -- {shlex.quote(str(folder))}')} EXIT"
+                   ] if folder else []
         lines = [
             "#!/bin/sh",
             "# TCC's update, written by TCC for the terminal it opened (core/updates.py).",
+            *cleanup,
             f"printf '{_CLEAR_SCREEN}'",
             say(shlex.quote(said["wait"])),
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done",
@@ -244,13 +290,16 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     """`tcc_install_script` in a file, for `terminal_launcher.run_script` to run by name.
 
     A fresh folder of this user's each time (`mkdtemp`, mode 0700): nobody else's file can be
-    standing where ours is about to be run. CRLF for the batch file, because cmd reads one by
-    line; UTF-8 for both.
+    standing where ours is about to be run. The script removes it as it ends (tcc#123) — every
+    press used to leave one behind for good; a `folder` the caller gave is the caller's, and
+    stays. CRLF for the batch file, because cmd reads one by line; UTF-8 for both.
     """
     windows = _is_windows(platform)
-    folder = Path(folder) if folder else Path(tempfile.mkdtemp(prefix="autosound-tcc-update-"))
+    made = None if folder else Path(tempfile.mkdtemp(prefix="autosound-tcc-update-"))
+    folder = Path(folder) if folder else made
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
-    path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha),
+    path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
+                                       folder=made),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -647,6 +696,11 @@ _FETCH_TIMEOUT = 300.0
 _CANNOT_CHECK = ("gpg.format", "unknown option", "-Y", "cannot run ssh-keygen",
                  "cannot spawn ssh-keygen")
 
+#: Of those, the ones that are OpenSSH's and not git's (tcc#123): git reads `gpg.format`, and
+#: `ssh-keygen` does the checking — missing, or older than `-Y` (git names 8.2p1). «Update git»
+#: sent somebody whose git was fine to update it, and the old ssh-keygen stayed.
+_OPENSSH_CANNOT = ("unknown option", "-Y", "cannot run ssh-keygen", "cannot spawn ssh-keygen")
+
 
 def _release_key(name: str) -> Optional[tuple[int, ...]]:
     """`v3.0.64` -> (3, 0, 64); None for any other name — the skill's `tag_key`."""
@@ -686,6 +740,7 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     Good signature by the constant's key: ok. A release before `signed_from`: ok, and the line
     says it predates signing. The developer's switch skips it, and the line says so. Anything else
     at or after it is refused: `git_too_old` when git could not check at all (`_CANNOT_CHECK`),
+    `openssh_too_old` when it was ssh-keygen that could not (`_OPENSSH_CANNOT`, tcc#123),
     `bad_signature` for an unsigned tag, a stranger's key, a name that is not a release — in git's
     own words either way.
 
@@ -708,7 +763,10 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     last = (said.splitlines() or ["git verify-tag failed"])[-1]
     if any(mark in said for mark in _CANNOT_CHECK):
         _known, version = _git("--version")
-        return False, f"{version or 'git'}: {last}", "git_too_old"
+        # git's own word first: a git before 2.34 says `gpg.format`, and nothing of OpenSSH.
+        openssh = "gpg.format" not in said and any(mark in said for mark in _OPENSSH_CANNOT)
+        return (False, f"{version or 'git'}: {last}",
+                "openssh_too_old" if openssh else "git_too_old")
     return False, f"{tag}: {last}", "bad_signature"
 
 
