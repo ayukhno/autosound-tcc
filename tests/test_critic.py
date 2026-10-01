@@ -692,6 +692,8 @@ def test_the_session_is_told_to_reach_the_reviewer_through_tcc():
     from autosound_tcc.core import tuning_session
 
     assert "call_critic" in tuning_session.SYSTEM_PROMPT_APPEND
+    # Finding 124: a session that did not know the ASK door sent its question as a review.
+    assert "ask_reviewer" in tuning_session.SYSTEM_PROMPT_APPEND
 
 
 def test_an_omp_pick_reaches_the_reviewer_by_omp_s_own_selector(tmp_path):
