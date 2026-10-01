@@ -168,6 +168,54 @@ def test_an_existing_package_file_is_used_as_is(stubbed, tmp_path):
     assert not critic.package_dir(project).exists()
 
 
+def test_a_relative_package_path_is_read_from_the_project(stubbed, tmp_path, monkeypatch):
+    """The path TCC itself prints under a failed call is relative to the PROJECT, and TCC's own
+    working folder is somewhere else: checked there, it named nothing and went to the reviewer as
+    the package's text — «ви передали лише шлях до файлу» (finding 133, tcc#119)."""
+    stubbed("print(open(sys.argv[2], encoding='utf-8').read())\nprint('— [critic: m]')\n")
+    project = _project(tmp_path)
+    reviews = project / "process" / "reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "x-critic-package.md").write_text("the package the Generator wrote",
+                                                 encoding="utf-8")
+    elsewhere = tmp_path / "tcc-working-folder"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    relative = str(Path("process") / "reviews" / "x-critic-package.md")
+    result = critic.run(relative, project_dir=project, python_executable=sys.executable)
+
+    assert "the package the Generator wrote" in result.text
+    assert not critic.package_dir(project).exists(), "read as that file, not composed from its name"
+
+
+def test_a_package_path_that_names_no_file_is_refused_by_its_name(stubbed, tmp_path):
+    """Sent as text it is a review of a file name; refused, it says which name found nothing."""
+    stubbed("print('reviewed')\nprint('— [critic: m]')\n")
+    project = _project(tmp_path)
+
+    missing = str(Path("process") / "reviews" / "gone-critic-package.md")
+    result = critic.run(missing, project_dir=project, python_executable=sys.executable)
+
+    assert result.mode == critic.MODE_ERROR
+    assert result.detail == f"no package file at {missing}"
+    assert result.text == "", "the reviewer was never called"
+    assert not critic.package_dir(project).exists()
+
+
+def test_a_package_text_that_ends_in_a_path_still_goes_as_text(stubbed, tmp_path):
+    """Only a single line is taken for a path: a real package may well end by citing one."""
+    stubbed("print(open(sys.argv[2], encoding='utf-8').read())\nprint('— [critic: m]')\n")
+    project = _project(tmp_path)
+    package = "## Package\nThe crossover plan.\nPrevious review: process/reviews/earlier-critic.md"
+
+    result = critic.run(package, project_dir=project, python_executable=sys.executable)
+
+    assert result.ok
+    assert "The crossover plan." in result.text
+    assert len(list(critic.package_dir(project).glob("pkg_*.md"))) == 1
+
+
 def test_model_choice_reaches_the_subprocess_env(stubbed, tmp_path):
     stubbed("print(os.environ.get('GEMINI_CRITIC_MODEL', 'unset'))\nprint('— [critic: m]')\n")
     project = _project(tmp_path)

@@ -263,6 +263,30 @@ def write_package(markdown: str, project_dir: Optional[Path] = None) -> Path:
     return path
 
 
+def _package_file(package: str, project_dir: Path) -> Optional[Path]:
+    """The package file `package` names — `None` when `package` is the package's own text.
+
+    A relative path is the PROJECT's, tried there before TCC's working folder. TCC prints the
+    clipboard package as `process/reviews/…-critic-package.md` under a failed call; the Generator
+    handed that back, checked against TCC's own folder it named nothing, and the path went to the
+    reviewer as the package's text — «ви передали лише шлях до файлу» (finding 133, tcc#119).
+    """
+    text = package.strip()
+    if len(text.splitlines()) != 1 or not text.endswith(".md"):
+        return None
+    candidate = Path(text)
+    tried = (candidate,) if candidate.is_absolute() else (project_dir / candidate, candidate)
+    return next((path for path in tried if path.is_file()), None)
+
+
+def _shaped_like_a_package_path(package: str) -> bool:
+    """One line, ending in `.md`, with a separator in it: a path, not a package's text. Such a
+    string that names no file is refused by that name — sent as text it is a review of a file
+    name (tcc#119). Both separators, because the path may have been printed on another platform."""
+    text = package.strip()
+    return len(text.splitlines()) == 1 and text.endswith(".md") and bool(re.search(r"[\\/]", text))
+
+
 def configured(project_dir: Path) -> tuple[str, str]:
     """`(model, route)` of the reviewer this project's footer is set to — `("", "")` when none.
 
@@ -319,7 +343,8 @@ def run(
     extra_env: Optional[Mapping[str, str]] = None,
     via: str = "",
 ) -> CriticResult:
-    """Call the reviewer once. `package` is either markdown or a path to an existing package file.
+    """Call the reviewer once. `package` is either markdown or a path to an existing package file;
+    a relative path is the project's (tcc#119).
 
     `model` overrides the script's own default through the env var it already reads
     (`GEMINI_CRITIC_MODEL` / `GEMINI_ADVISOR_MODEL`), so the footer's model picker steers the
@@ -343,10 +368,11 @@ def run(
         mode = MODE_ERROR if not is_available() else MODE_NOT_READY
         return CriticResult(mode, "", None, role, "; ".join(problems), 0.0, called_at)
 
-    candidate = Path(package)
-    package_path = candidate if candidate.suffix == ".md" and candidate.is_file() else write_package(
-        package, project_dir
-    )
+    package_path = _package_file(package, project_dir)
+    if package_path is None and _shaped_like_a_package_path(package):
+        return CriticResult(MODE_ERROR, "", None, role, f"no package file at {package.strip()}",
+                            0.0, called_at)
+    package_path = package_path or write_package(package, project_dir)
 
     argv = [python_executable, str(script_path()), role, str(package_path)]
     if trace_path:
