@@ -3260,3 +3260,17 @@ button's first letter cut), in a dialog that came after it.
 **Weight.** Low.
 
 **Task.** For W-5's collection.
+
+### 127. Saving a key that also sits in the environment leaves the copy there: no «remove it from there?» and no delete
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, after 125: «Перенести» opened a terminal — «Перенести
+GEMINI_API_KEY з HKCU\Environment у сховище Windows, зашифроване вашим входом (DPAPI) і прибрати звідти? [y/N] y» →
+«✓ … збережено … У вже відкритих терміналах змінна ще жива -- відкрий новий»; reopened, the window shows Google
+(Gemini) «у захищеному сховищі» and no red line ✓. His point: «але якщо я не переніс ключ, а вставив його і зберіг,
+то треба мати питання чи видалити ключ, чи мати кнопку видалити, коли ключ вже є в сховищі і при цьому ще є в
+файлі». Today «Зберегти» stores the key and leaves the exported copy; only «Перенести» removes it.
+
+**Weight.** Low–medium: the key stays readable to every program until the tuner finds the second button.
+
+**Task.** For W-5's collection — the delete or the question is the method's command first (`autosound_ai.py key`),
+TCC's button on it.
