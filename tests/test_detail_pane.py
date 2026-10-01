@@ -2137,3 +2137,33 @@ def test_a_crossover_the_ledger_holds_in_another_shape_reads_a_question_mark(leg
     assert hp.toolTip() == i18n.t("xoverUnread").format(value=json.dumps(leg))
     assert DetailPane._copy_value("hp", row) == ""
     assert table.item(0, 3).text() == "OFF", "the other leg still reads"
+
+
+def test_a_version_the_method_refuses_says_so_instead_of_comparing_with_nothing():
+    """tcc#122 (W-4's review of #89): «порівняти з» offered a version whose file the method
+    refuses — its `version` names another — and picked, it compared with nothing and said
+    nothing: no marks, as though nothing had changed. The row says «не читається» and is greyed,
+    as the current version's is; the other versions compare as before."""
+    from autosound_tcc.state.dsp_state import VersionRefused
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    def load(key):
+        if key == "v_004":
+            raise VersionRefused("v_004", "v_003", "the method's own sentence")
+        return _rig_view()
+
+    _app()
+    pane = DetailPane()
+    pane.set_view(_rig_view_changed())
+    pane.set_compare_choices(["v_005", "v_004", "v_003"], "v_004", load,
+                             labels={"v_004": "v_004 · SQ-2"}, preset="FULL", current="v_005")
+    combo = pane._compare_combo
+    refused = i18n.t("cmpUnreadable").format(version="v_004 · SQ-2")
+    assert combo.currentText() == refused, combo.currentText()
+    assert not combo.model().item(combo.currentIndex()).isEnabled(), "greyed, as «зараз» is"
+    assert pane._compare_view is None
+
+    combo.setCurrentIndex(combo.findData("v_003"))
+    assert pane._compare_view is not None, "a version that reads still compares"
+    marked = combo.model().item(combo.findData("v_004"))
+    assert marked.text() == refused and not marked.isEnabled(), "and the refused one stays said"

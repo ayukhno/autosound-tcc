@@ -14,6 +14,7 @@ and `set_report()` brings the answer back.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import urllib.parse
@@ -162,6 +163,29 @@ def _reason(key: str, detail: str = "") -> str:
     if text == f"updWhy_{key}":  # no translation for this one
         text = key
     return f"{text}: {detail}" if detail else text
+
+
+#: The sentences a tag's signature check writes — `updates._verify_tag` for TCC's own tags, the
+#: skill's `upkeep.py verify_tag` for its own, word for word the same — by their parts (tcc#122:
+#: «Підпис релізу: v3.0.7: signature good (ayukhno)» in a Ukrainian row). A failure never reaches
+#: this line: it goes through `_reason`.
+_SIGNATURE_FORMS = (
+    (re.compile(r"(?P<tag>\S+): signature good \((?P<principal>[^()]+)\)"), "updSigGood"),
+    (re.compile(r"(?P<tag>\S+) predates signed tags \(they start at (?P<first>\S+)\): "
+                r"installed without a signature check"), "updSigPredates"),
+    (re.compile(r"signature NOT checked: (?P<var>\S+)=1 is set \(a developer's switch\)"),
+     "updSigSkipped"),
+)
+
+
+def _signature_said(line: str) -> str:
+    """The signature line in the reader's language, the tag and the key's name as they are; a
+    line in no form TCC knows — a newer method's, git's own — as it was printed."""
+    for form, key in _SIGNATURE_FORMS:
+        found = form.fullmatch(line.strip())
+        if found:
+            return i18n.t(key).format(**found.groupdict())
+    return line
 
 
 #: The tools a running AI session runs on (ruling 21, tcc#98): omp drives it and Claude Code is
@@ -780,7 +804,7 @@ class DiagnosticsDialog(QDialog):
         if done.ok:
             lines = [i18n.t("updSkillDone").format(version=done.version.lstrip("v"))]
             if done.signature:
-                lines.append(i18n.t("updSkillSigned").format(line=done.signature))
+                lines.append(i18n.t("updSkillSigned").format(line=_signature_said(done.signature)))
         else:
             lines = [i18n.t("updFailed").format(why=_reason(done.reason, done.detail))]
         if done.patch:
@@ -853,7 +877,8 @@ class DiagnosticsDialog(QDialog):
             button.setEnabled(True)
             return
         label.setText("\n".join([i18n.t("updTccHanded"),
-                                  i18n.t("updSkillSigned").format(line=ready.signature)]))
+                                  i18n.t("updSkillSigned").format(
+                                      line=_signature_said(ready.signature))]))
 
     # ---- omp, agy, gh, Claude Code (tcc#98) ----------------------------------
 

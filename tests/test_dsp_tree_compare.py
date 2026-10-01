@@ -311,3 +311,31 @@ def test_the_tree_marks_exactly_the_cells_the_table_marks():
             by_table = {f for c, f in enumerate(columns, start=2)
                         if table.item(r, c).data(detail_pane.CHANGED_ROLE) is True}
             assert chan.changed_fields() == by_table, (group.id, chan._row.name)
+
+
+def test_a_changed_value_follows_a_theme_switch(monkeypatch):
+    """tcc#122 (W-4's reviews of #104 and #108): the line writes the change's blue into its rich
+    text, and a theme switch left it in the old theme's blue — on the light ground, the dark
+    theme's pale azure — until the next resize or compare. The switch the window makes, on the
+    application, re-cuts it."""
+    from PySide6.QtGui import QPalette
+
+    from autosound_tcc.ui.tcc import theme
+
+    app = _app()
+    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
+    sheet, palette = app.styleSheet(), QPalette(app.palette())
+    try:
+        theme.apply_theme(app, "dark")
+        tree = _compared_tree()
+        line = _row_of(tree, "physical_outputs", "m-R")._line2
+        line.resize(2000, 20)
+        line._elide()
+        dark, light = theme.get_theme("dark").info, theme.get_theme("light").info
+        assert dark in line.text()
+
+        theme.apply_theme(app, "light")
+        assert light in line.text() and dark not in line.text(), line.text()
+    finally:
+        app.setStyleSheet(sheet)
+        app.setPalette(palette)

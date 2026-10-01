@@ -75,3 +75,34 @@ def test_the_dot_is_a_bigger_target_than_its_paint():
     assert dot.isHidden()
     dot.set_status("none")
     assert dot.tip_text() == i18n.t("dotNone")
+
+
+def test_the_dot_judges_a_change_as_the_rows_read_it():
+    """tcc#122 (W-4's review of #105): the dot compared raw values and the rows compare what they
+    show, so the two disagreed both ways — mute `false` against none (both read «—»), gain −1.04
+    against −1.0 (both read −1.0), and a channel the compared version lacks, every value of which
+    the rows mark new, was not blue on the dot when nothing was set on it. The dot asks the rows'
+    own rule now: blue exactly when a row marks something."""
+    from autosound_tcc.ui.tcc.detail_pane import changed_fields
+
+    fields = _FIELDS + ("mute",)
+
+    def tier(**by_name):
+        rows = tuple(GroupRow(id=name, name=name, slot=chr(66 + i), raw=raw)
+                     for i, (name, raw) in enumerate(by_name.items()))
+        return ProfileGroup(id="physical_outputs", label="Output", fields=fields, rows=rows)
+
+    before = tier(**{"w-L": {"gain_db": -1.0}})
+    cases = {
+        "the same, as read": (tier(**{"w-L": {"gain_db": -1.04, "mute": False}}), "set"),
+        "a value that moved": (tier(**{"w-L": {"gain_db": -1.5}}), "chg"),
+        "a channel it lacks": (tier(**{"w-L": {"gain_db": -1.0}, "m-L": {}}), "chg"),
+    }
+    olds = {r.id: r for r in before.rows}
+    for case, (now, want) in cases.items():
+        rows_mark = any(changed_fields(now, r, olds.get(r.id)) for r in now.rows_visible())
+        said = setting_status.group_status(now, before, compared=True)
+        assert said == want, (case, said)
+        assert (said == "chg") == rows_mark, (case, "the dot and the rows disagree")
+    same = cases["the same, as read"][0]
+    assert setting_status.field_status([same], "gain_db", [before], True) == "set"

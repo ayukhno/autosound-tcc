@@ -998,6 +998,20 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
     view.setMinimumWidth(view.sizeHintForColumn(0) + 24)
 
 
+def mark_unreadable(combo: QComboBox, key: Optional[str]) -> None:
+    """`key`'s row says «не читається» and is greyed, as the current version's is: the loader
+    could not read it — the method refuses a file whose `version` names another — and picked it
+    compared with nothing and said nothing, as though nothing had changed (tcc#122, W-4's review
+    of #89). Marked when it is first loaded, since reading every version to fill the list would
+    be a read per version on every reload; the list is filled afresh on the next one."""
+    index = combo.findData(key) if key else -1
+    item = combo.model().item(index) if index >= 0 else None
+    if item is None or not item.isEnabled():
+        return
+    combo.setItemText(index, i18n.t("cmpUnreadable").format(version=combo.itemText(index)))
+    item.setEnabled(False)
+
+
 def is_other_preset(key: Optional[str]) -> bool:
     """A compare key of another preset's version (`SQ/v_004`)."""
     return bool(key) and "/" in key
@@ -1351,6 +1365,9 @@ class DetailPane(QFrame):
                 self._compare_view = self._compare_loader(version)
             except Exception:  # noqa: BLE001 — a version that cannot be read compares with nothing
                 self._compare_view = None
+                # ...and says so on its row (tcc#122).
+                mark_unreadable(self._compare_combo, version)
+                self._compare_text = self._compare_combo.currentText()
 
     def _rerender(self) -> None:
         if self._mode == "param" and self._param:

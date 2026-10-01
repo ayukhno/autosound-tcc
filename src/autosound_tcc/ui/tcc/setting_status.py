@@ -54,14 +54,19 @@ def tip_for(status: Optional[str], version: str = "") -> str:
 
 def _judge(row: GroupRow, old: Optional[GroupRow], compared: bool,
            fields: Iterable[str]) -> tuple[bool, bool]:
-    """`(carries a setting, differs from the compared version)` for one channel."""
+    """`(carries a setting, differs from the compared version)` for one channel.
+
+    A difference is the rows' own (`detail_pane.field_changed`): the value as the table reads it —
+    rounded, an absent mute the same as an off one — and every value new on a channel the
+    compared version lacks. The raw values made the dot disagree with the rows both ways
+    (tcc#122, W-4's review of #105). Imported here: `detail_pane` imports this module."""
+    from autosound_tcc.ui.tcc.detail_pane import field_changed
+
     fields = tuple(fields)
     has = any(_is_set(f, row.raw) for f in fields)
     if not compared:
         return has, False
-    if old is None:  # a channel the compared version does not have
-        return has, has
-    return has, any(row.raw.get(f) != old.raw.get(f) for f in fields)
+    return has, any(field_changed(f, row, old) for f in fields)
 
 
 def _status(has: bool, changed: bool) -> str:

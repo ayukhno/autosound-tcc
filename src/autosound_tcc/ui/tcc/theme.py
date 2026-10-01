@@ -16,8 +16,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics
-from PySide6.QtWidgets import QComboBox, QWidget
+from PySide6.QtGui import QFont, QFontMetrics, QPalette
+from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox, QStylePainter, QWidget
 
 Mode = Literal["dark", "light"]
 
@@ -56,6 +56,37 @@ class MiniCombo(QComboBox):
             widest = max(advance(i) for i in range(self.count()))
             view.setMinimumWidth(widest + _POPUP_CHROME_PX)
         super().showPopup()
+
+    def fit_text(self) -> str:
+        """The pick as the closed box draws it: elided to the style's edit field, less the pixel
+        each side of it the label is drawn inside (`control_layout._CompareBox`'s measure) and
+        an icon's room where the pick has one."""
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                            QStyle.SubControl.SC_ComboBoxEditField, self)
+        room = field.width() - 2
+        if not option.currentIcon.isNull():
+            room -= option.iconSize.width() + 4
+        return self.fontMetrics().elidedText(self.currentText(), Qt.TextElideMode.ElideRight,
+                                             max(0, room))
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+        """QComboBox's own paint with the pick elided: Qt clips a closed box's text at the field,
+        and the footer's reviewer box read «API · gemini-3.1-pro-prev» — cut mid-word with no «…»,
+        as though that were the model's name (finding 132, tcc#122, the Windows VM)."""
+        painter = QStylePainter(self)
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        if self.currentIndex() >= 0:
+            option.currentText = self.fit_text()
+        elif self.placeholderText():  # as Qt's own paint has it
+            option.palette.setBrush(QPalette.ColorRole.ButtonText,
+                                    option.palette.placeholderText())
+            option.currentText = self.placeholderText()
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
 
 
 def mini_combo() -> MiniCombo:
@@ -107,7 +138,10 @@ PALETTE_LIGHT: dict[str, str] = {
     "stamp": "#56616e",  # `muted` 10% toward `text`: see the dark palette's `stamp`
     "accent": "#c56f18", "accent_dim": "#a95f14",
     "ok": "#1f9c63", "inv": "#c56f18", "off": "#8492a0", "warn": "#c0392b",
-    "info": "#2f7fc4", "yellow": "#c99a12",
+    # The prototype's #2f7fc4 is text as often as a fill — the status strip, the changed values,
+    # the Critic's and the system's names — and as text it read 3.2–4.2:1 on these panels and
+    # bubbles, under finding 51's 4.5 (tcc#122). The same azure, darker: ≥ 4.9:1 on every one.
+    "info": "#1b609c", "yellow": "#c99a12",
     "arbiter": "#4453c4",
 }
 
@@ -1292,11 +1326,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.mix('warn', 14, 'panel2')};
         border: 1px solid {t.warn};
     }}
+    /* The Generator's role keeps the base colour: `muted` a fifth toward `text`, stronger than the
+    time's `stamp` (14% / 10%). In `muted` the time beside it read the brighter of the two (tcc#122). */
     QLabel[class~="msg-who"] {{
         font-size: 10px;
         letter-spacing: 1px;
         text-transform: uppercase;
-        color: {t.muted};
+        color: {t.mix('muted', 80, 'text')};
     }}
     QLabel[class~="msg-who-crit"] {{ color: {t.info}; }}
     QLabel[class~="msg-who-user"] {{ color: {t.arbiter}; }}

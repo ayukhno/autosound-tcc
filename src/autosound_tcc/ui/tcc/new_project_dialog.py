@@ -487,19 +487,22 @@ class NewProjectDialog(QDialog):
         report, fs = self._would_travel(source)
         if report is not None and report.ok:
             key = "npSeedTravelsFindings" if self._seed_findings.isChecked() else "npSeedTravels"
-            lines.append(i18n.t(key).format(
+            travels = i18n.t(key).format(
                 channels=report.channels, amps=report.amps,
-                flaws=report.flaws, questions=report.questions))
+                flaws=report.flaws, questions=report.questions)
+            if self._seed_fs.isChecked() and fs is not None:
+                # Zero is said too, as a real answer: the source measured none, or a different
+                # processor leaves the channels behind and their Fs with them (the line below).
+                # The last part of the one line that says what travels (tcc#122: it was a second
+                # «Travels:» line of its own).
+                travels += " · " + i18n.t("npSeedTravelsFs").format(fs=fs)
+            lines.append(travels)
             if self._seed_findings.isChecked() and (report.flaws or report.questions):
                 # Where those rows POINT, not just how many: their `evidence` names captures that
                 # exist in the source project and nowhere in this one. Carrying them is legitimate
                 # — they are the same car — but a row whose proof lives elsewhere is a different
                 # thing from one measured here, and the person ticking the box is who has to know.
                 lines.append(i18n.t("npSeedFindingsEvidence"))
-            if self._seed_fs.isChecked() and fs is not None:
-                # Zero is said too, as a real answer: the source measured none, or a different
-                # processor leaves the channels behind and their Fs with them (the line below).
-                lines.append(i18n.t("npSeedTravelsFs").format(fs=fs))
             if summary.channels and not report.channels:
                 # The one a person has to read BEFORE pressing Create: wanting the findings and
                 # not the channels was impossible, so the working answer was to go around the

@@ -64,6 +64,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
     eq_field_order,
     fill_compare_combo,
     is_other_preset,
+    mark_unreadable,
 )
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -438,13 +439,19 @@ class _CompareBox(QComboBox):
         parts = self._parts()
         if cut == full or parts is None:
             return cut
-        preset, version, _names = parts
+        preset, version, names = parts
         if cut.startswith(f"{preset} · {version}"):
             return cut
-        rest = f" · {version}"
-        short = metrics.elidedText(preset, Qt.TextElideMode.ElideRight,
-                                   room - self._text_width(rest))
-        return short + rest if short else cut
+        # The version whole, and the «…» after it that says saved names were cut: where the cap
+        # fell between «<preset> · v_NNN» and that «…», the names went without a mark and the box
+        # read as a version saved under none (tcc#122). The preset gives way for both; only where
+        # not one of its letters is left beside them does the mark go, as «… · v_NNN».
+        for rest in ((f" · {version}…", f" · {version}") if names else (f" · {version}",)):
+            short = metrics.elidedText(preset, Qt.TextElideMode.ElideRight,
+                                       room - self._text_width(rest))
+            if short:
+                return short + rest
+        return cut
 
     def sizeHint(self):  # noqa: N802 (Qt override)
         hint = super().sizeHint()
@@ -702,6 +709,10 @@ class ControlLayout:
         """Rebuild the tabs from the view the window holds now — after a reload, a preset switch
         or a language change. The feed refreshes itself; the tables are data the view carries."""
         if self.active and self.tabs is not None:
+            # Before `_fill_tabs`, whose `_fit_corner` judges them by their width in these words:
+            # they kept the language the corner was built in (tcc#122, W-4's review of #96).
+            self._compare_label.setText(i18n.t("cmpWith"))
+            self._compare_other.setText(i18n.t("cmpOtherTag"))
             self._fill_tabs()
 
     # ---- where the tree and the tables lead ----------------------------------------------------
@@ -809,9 +820,16 @@ class ControlLayout:
         fill_compare_combo(combo, own, labels, others, preset, current)
         combo.setCurrentIndex(max(combo.findData(key) if key else 0, 0))
         combo.blockSignals(blocked)
+        if self._unreadable(key, _compare_now(self.window)[1]):
+            mark_unreadable(combo, key)  # the refill forgot what the pick found (tcc#122)
         selectable = [v for v in own if v != current]
         self._corner.setVisible(bool(selectable or others))
         self._fit_corner()
+
+    def _unreadable(self, key: Optional[str], view) -> bool:
+        """Whether `key` is a version the window has a loader for and could not read."""
+        args = getattr(self.window, "_compare_args", None) or ()
+        return bool(key) and view is None and len(args) > 2 and args[2] is not None
 
     def _on_compare_picked(self, _index: int) -> None:
         chosen = getattr(self.window, "_on_compare_chosen", None)
@@ -829,6 +847,9 @@ class ControlLayout:
         blocked = self.compare_combo.blockSignals(True)
         self.compare_combo.setCurrentIndex(max(self.compare_combo.findData(key) if key else 0, 0))
         self.compare_combo.blockSignals(blocked)
+        if self._unreadable(key, view):
+            # A version the window could not read: said on its row, not compared with in silence.
+            mark_unreadable(self.compare_combo, key)
         self._fit_corner()
         self._hold_table()
         self.sync_dots()

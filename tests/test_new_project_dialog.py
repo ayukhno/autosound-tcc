@@ -500,6 +500,28 @@ def test_the_note_counts_the_fs_the_box_carries(tmp_path, monkeypatch):
     assert counted not in dlg._seed_summary.text(), "unticked, nothing of it is promised"
 
 
+def test_what_travels_is_said_on_one_line_the_fs_its_last_part(tmp_path, monkeypatch):
+    """tcc#122 (W-4's review of tcc#93): the note said «Travels:» twice, the Fs on a line of its
+    own, and «the Fs of 1 drivers». One line names what travels, the Fs its last part; the count's
+    noun in the form the rest of the window uses for a count of any size, in every language."""
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._seed_edit.setText(str(_passat_with_fs(tmp_path)))
+    for lang in ("en", "uk"):
+        npd.i18n.set_language(lang)
+        try:
+            dlg._refresh_seed_note_now()
+            lines = dlg._seed_summary.text().splitlines()
+            travels = [line for line in lines
+                       if line.startswith(npd.i18n.t("npSeedTravels").split("{", 1)[0])]
+            assert len(travels) == 1, (lang, lines)
+            assert travels[0].endswith(" · " + npd.i18n.t("npSeedTravelsFs").format(fs=7)), lines
+        finally:
+            npd.i18n.set_language("en")
+    one = npd.i18n.t("npSeedTravelsFs").format(fs=1)
+    assert "1 drivers" not in one and "1 driver" in one, one
+
+
 def test_the_fs_tick_reaches_both_seed_calls(tmp_path, monkeypatch):
     monkeypatch.setattr(npd.config, "set_project_dir", lambda p: None)
     seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), _Report(2))

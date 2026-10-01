@@ -562,6 +562,45 @@ def test_a_title_with_no_method_tag_keeps_the_sweep_default(title):
     assert [g["method"] for g in groups] == ["sw"]
 
 
+def test_every_method_the_grammar_knows_heads_its_column_with_a_name():
+    """tcc#122 (W-4's review of #109): `(imp)` had no entry beside «sweep (sw)» and «MMM RTA
+    (rta)», so its column was headed with the bare tag, «imp». Every method `naming` knows has
+    its name before its tag."""
+    naming = vendor_loader.load_naming()
+    for method in naming.METHODS:
+        title = "w-L (imp)" if method == "imp" else f"w-L_1 ({method})"
+        [group] = measurement_view.groups_from_titles([title])
+        label = group["label"]
+        assert label.endswith(f" ({method})") and label != f" ({method})", (method, label)
+
+
+def test_an_open_round_shows_an_unplanned_take_the_grammar_cannot_read(project):
+    """tcc#122 (W-4's review of #109): an open round lists what it asks for, and REW's extras
+    where the grammar reads them; a take captured though nobody asked, with a title the grammar
+    refuses — `D_` before the code (S-042) — was on neither list and never showed until the round
+    closed. It shows among the extras, as typed, marked unread for the panel to say «не
+    розібрано»; one the grammar reads is not marked."""
+    process_view.process_dir(project).mkdir(parents=True, exist_ok=True)
+    (process_view.process_dir(project) / "process-state.json").write_text(
+        json.dumps({"schema_version": 1, "active_phase": "2", "plan": [],
+                    "capture": {"id": "cap_010", "phase": "2", "version": "7",
+                                "expected": ["w-L_7 (rta)"],
+                                "taken": {"w-L_7 (rta)": {"planned": True},
+                                          "D_L w+m_7 (rta) inv": {"planned": False}}}}),
+        encoding="utf-8",
+    )
+
+    session = mv.build_session("2", 7, ["w-R_7 (rta)"], project)
+
+    items = {i.name: i for g in session.groups for i in g.items}
+    unread = items.get("D_L w+m_7 (rta) inv")
+    assert unread is not None, _names(session)
+    assert unread.additional and unread.unread, unread
+    assert unread.status == mv.STATUS_DONE, "the round took it in"
+    assert not items["w-R_7 (rta)"].unread, "REW's extra the grammar reads is not marked"
+    assert not items["w-L_7 (rta)"].unread
+
+
 def test_a_round_is_linked_to_the_steps_whose_evidence_names_its_captures(tmp_path):
     """No field records that link — but SCR-035 makes every closed step cite something real, and a
     capture is cited by its REW title."""

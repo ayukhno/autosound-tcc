@@ -21,7 +21,7 @@ import re
 from html import escape
 from typing import Optional
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QEvent, QSettings, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetricsF
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -170,6 +170,14 @@ class _SubLine(ElidedLabel):
         said = "".join(out) + ("…" if cut else "")
         if said != QLabel.text(self):
             QLabel.setText(self, said)
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """The change's colour is written into the text, so a theme switch — the application's
+        sheet and palette, re-set — cuts the line again: it kept the old theme's blue until the
+        next resize or compare (tcc#122, W-4's reviews of #104 and #108)."""
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange) and self._parts:
+            self._elide()
 
 
 class _Pill(QLabel):

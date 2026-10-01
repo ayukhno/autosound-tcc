@@ -9,6 +9,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -914,6 +915,24 @@ def test_a_row_says_what_was_in_the_chain_while_it_was_measured():
     assert protected._prot.isVisibleTo(protected)
     assert not plain._prot.isVisibleTo(plain)
     assert "HP 100 LR24" in protected._prot_tip.text()
+
+
+@pytest.mark.parametrize("title", ["D_L w+m_7 (rta) inv", "Baseline solo"])
+def test_a_take_the_grammar_cannot_read_says_so_and_gains_no_method(title):
+    """tcc#122: an unplanned take with a title the grammar refuses shows among the extras, as
+    typed, with «не розібрано» beside it in the window's language — and no method of the column's
+    own: «Baseline solo (sw)» would say what nobody recorded."""
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
+    from autosound_tcc.ui.tcc.mock_data import MeasItem
+
+    _app()
+    try:
+        i18n.set_language("uk")
+        row = _MeasRow(MeasItem(name=title, status="done", additional=True, unread=True), "sw")
+        assert row._name_label.full_text() == f"{title} {i18n.t('measUnread')}"
+        assert i18n.t("measUnread") == "не розібрано"
+    finally:
+        i18n.set_language("en")
 
 
 def test_the_card_fits_the_column_it_lives_in():

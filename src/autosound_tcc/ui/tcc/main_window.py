@@ -338,7 +338,8 @@ _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
 
 
 def _ago(iso_timestamp: str) -> str:
-    """Human "how long ago" for the reviewer status. Falls back to the raw stamp if unparseable."""
+    """Human "how long ago" for the reviewer status, in the reader's language («just now» stood in
+    a Ukrainian footer, finding 132, tcc#122). Falls back to the raw stamp if unparseable."""
     from datetime import datetime, timezone
 
     try:
@@ -349,12 +350,12 @@ def _ago(iso_timestamp: str) -> str:
         then = then.replace(tzinfo=timezone.utc)
     seconds = (datetime.now(timezone.utc) - then).total_seconds()
     if seconds < 90:
-        return "just now"
+        return i18n.t("diagAgoNow")
     if seconds < 5400:
-        return f"{round(seconds / 60)} min ago"
+        return i18n.t("diagAgoMin").format(n=round(seconds / 60))
     if seconds < 172800:
-        return f"{round(seconds / 3600)} h ago"
-    return f"{round(seconds / 86400)} d ago"
+        return i18n.t("diagAgoHours").format(n=round(seconds / 3600))
+    return i18n.t("diagAgoDays").format(n=round(seconds / 86400))
 
 
 def _panel() -> QFrame:
@@ -5935,12 +5936,20 @@ class MainWindow(QMainWindow):
         return box.exec()
 
     def _on_language_selected(self, lang: str) -> None:
+        width = self.frameGeometry().width()
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
         self._retranslate()
         # A running session reads the language out of `get_tcc_state`; switching it here and not
         # republishing would leave the model writing files in the language of an hour ago.
         self._publish_snapshot()
+        if self.isVisible():
+            # The floor is checked mid-switch (`_fit_centre_floor`), and the header and the footer
+            # grow with the words set after it: at a 1920 screen's right edge German left the
+            # window at 1935 (tcc#122, W-4's review of #106). Counted from the width before the
+            # switch, last, and once more on the event loop's next pass, as `_on_layout_toggle`.
+            width = self._keep_on_screen(since=width)
+            QTimer.singleShot(0, self, lambda: self._keep_on_screen(since=width))
 
     def _retranslate(self) -> None:
         """Re-set every already-built widget's text. Header/footer labels created via `_phead`

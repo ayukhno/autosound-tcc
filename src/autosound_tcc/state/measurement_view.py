@@ -65,7 +65,8 @@ _SERIES_TAG_RE = re.compile(r"_(?:\d+|final)(?:ctl|rep)?\s*\(([A-Za-z]+)\)(?=\s|
 _TAG_RE = re.compile(r"\(([A-Za-z]+)\)")
 # `naming.METHODS`, for a machine with no method to ask.
 _METHODS = ("sw", "rta", "imp")
-_METHOD_LABELS = {"sw": "sweep (sw)", "rta": "MMM RTA (rta)"}
+# Every method `naming.METHODS` knows: `imp` had none, and its column was headed «imp» (tcc#122).
+_METHOD_LABELS = {"sw": "sweep (sw)", "rta": "MMM RTA (rta)", "imp": "impedance (imp)"}
 
 
 def _method_by_tag(text: str, methods) -> Optional[str]:
@@ -453,6 +454,17 @@ def build_session(
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys)
+    if round_open:
+        # Captured in this round though nobody asked, under a title the grammar cannot read --
+        # `D_L w+m_7 (rta) inv`, the `D_` refused (S-042). On neither list above, it never showed
+        # until the round closed (tcc#122, W-4's review of #109). As typed, marked for the panel.
+        listed = {n for spec in groups_spec for n in spec["names"]}
+        listed |= {str(t) for t in round_.get("expected") or []}
+        extras += tuple(
+            MeasItem(name=title, status=status_for(title), extra=issues_for(title),
+                     additional=True, unread=True)
+            for title in sorted(recorded_taken - listed) if _key(title) is None
+        )
     if extras:
         # Ours, at this version, but not on the checklist -- an experiment tag, a channel the
         # phase doesn't ask for. Shown, flagged blue, never silently dropped.

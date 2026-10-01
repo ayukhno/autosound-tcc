@@ -447,6 +447,8 @@ class _MeasRow(QWidget):
         self._extra = item.extra
         self._additional = item.additional
         self._protective = getattr(item, "protective", "")
+        #: A title the grammar cannot read (tcc#122): «не розібрано» beside it, no method added.
+        self._unread = bool(getattr(item, "unread", False))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -465,15 +467,19 @@ class _MeasRow(QWidget):
         self._render()
 
     def _render(self) -> None:
-        base = with_method(self.item_name, self.method_suffix)
+        # As typed when the grammar cannot read it: the column's method would be a guess.
+        base = self.item_name if self._unread else with_method(self.item_name, self.method_suffix)
         if self._count:
             base += f" · {self._count}"
+        extra = self._extra
+        if self._unread:  # the check's own words, if it has any, after the mark
+            extra = " · ".join(part for part in (i18n.t("measUnread"), self._extra) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")
         self._name_label.style().unpolish(self._name_label)
         self._name_label.style().polish(self._name_label)
-        self._name_label.set_parts(base, self._extra, self._additional)
+        self._name_label.set_parts(base, extra, self._additional)
         self._prot.setVisible(bool(self._protective))
         if self._protective:
             self._prot.setText(short_legs(self._protective))

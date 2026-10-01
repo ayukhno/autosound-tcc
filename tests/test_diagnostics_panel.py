@@ -1506,3 +1506,67 @@ def test_coming_back_to_the_window_asks_again_without_the_minute_long_status(mon
     assert dialog._tools_job is None, "no status was started"
     assert dialog._tool_rows["omp"][1].isEnabled()
     assert dialog._tool_guards["omp"].isHidden()
+
+
+_SIGNATURE_LINES = (
+    ("v3.0.7: signature good (ayukhno)", "updSigGood", {"tag": "v3.0.7", "principal": "ayukhno"}),
+    ("v3.0.40 predates signed tags (they start at v3.0.64): installed without a signature check",
+     "updSigPredates", {"tag": "v3.0.40", "first": "v3.0.64"}),
+)
+
+
+@pytest.mark.parametrize("lang", ["uk", "en"])
+@pytest.mark.parametrize("line, key, parts", _SIGNATURE_LINES)
+def test_the_signature_line_is_said_in_the_reader_s_language(line, key, parts, lang):
+    """tcc#122 (W-4's review of tcc#102): «Підпис релізу: v3.0.7: signature good (ayukhno)» — the
+    row in Ukrainian, the line in git's English. The forms TCC and the skill write are said by
+    their parts, the tag and the key's name as they are; English reads as it did."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _signature_said
+
+    try:
+        i18n.set_language(lang)
+        assert _signature_said(line) == i18n.t(key).format(**parts)
+        if lang == "en":
+            assert _signature_said(line) == line, "the English is the line as it was"
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_developer_s_switch_is_said_in_the_reader_s_language():
+    from autosound_tcc.core.signed_tags import SKIP_VERIFY_VAR
+    from autosound_tcc.ui.tcc.diagnostics_panel import _signature_said
+
+    line = f"signature NOT checked: {SKIP_VERIFY_VAR}=1 is set (a developer's switch)"
+    try:
+        i18n.set_language("uk")
+        assert _signature_said(line) == i18n.t("updSigSkipped").format(var=SKIP_VERIFY_VAR)
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("line", ["", "Good \"git\" signature for ayukhno with ED25519 key SHA256:x",
+                                  "v3.0.7: signature good"])
+def test_a_signature_line_tcc_does_not_know_is_left_as_git_printed_it(line):
+    from autosound_tcc.ui.tcc.diagnostics_panel import _signature_said
+
+    try:
+        i18n.set_language("uk")
+        assert _signature_said(line) == line
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_updated_method_s_row_says_its_signature_in_ukrainian(monkeypatch):
+    """The row the Arbiter reads: the receipt of a method update, in his language end to end."""
+    dialog, _asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
+    try:
+        i18n.set_language("uk")
+        dialog._update_skill()
+        _finish_skill_update(dialog)
+        text = dialog._update_rows["skill"][0].text()
+        said = i18n.t("updSigGood").format(tag="v3.0.7", principal="ayukhno")
+        assert i18n.t("updSkillSigned").format(line=said) in text, text
+        assert "signature good" not in text
+    finally:
+        i18n.set_language("en")

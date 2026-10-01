@@ -3818,6 +3818,47 @@ def test_leaving_control_mode_after_a_language_switch_keeps_the_window_on_its_sc
         i18n.set_language("en")
 
 
+@pytest.mark.parametrize("lang", ["de"])
+def test_a_language_switch_at_the_right_edge_keeps_the_full_window_on_its_screen(
+        tmp_path, monkeypatch, lang):
+    """tcc#122 (W-4's review of tcc#106): in the full window at a 1920 screen's right edge a switch
+    to German left it past the edge (1935; Polish 1933): the floor was checked mid-switch, and the
+    header and the footer grew with the words set after it. Checked once the words are all set,
+    and once more on the event loop's next pass, as leaving control mode is."""
+    window = _window_on_a_screen(tmp_path, monkeypatch, 1920)
+    window.show()
+    try:
+        _let_it_settle()
+        _at_the_right_edge(window, 200)  # at its minimum, which the new words will raise
+        before = window.frameGeometry()
+        window._on_language_selected(lang)
+        _let_it_settle()
+        after = window.frameGeometry()
+        if after.width() <= before.width():
+            pytest.skip(f"in this font the {lang} words did not widen the window "
+                        f"({before.width()} -> {after.width()} px)")
+        assert after.left() >= 0 and after.right() <= 1919, (
+            f"the window is at x {after.left()}..{after.right()} on a 1920-px screen")
+    finally:
+        i18n.set_language("en")
+
+
+@pytest.mark.parametrize("seconds, key, n", [(30, "diagAgoNow", None), (600, "diagAgoMin", 10),
+                                             (7200, "diagAgoHours", 2),
+                                             (3 * 86400, "diagAgoDays", 3)])
+def test_how_long_ago_the_reviewer_answered_is_in_the_reader_s_language(seconds, key, n):
+    """Finding 132 (tcc#122): «Критик · gemini-3.1-pro-preview · just now» in a Ukrainian window."""
+    from datetime import datetime, timedelta, timezone
+
+    at = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+    try:
+        i18n.set_language("uk")
+        assert main_window._ago(at) == i18n.t(key).format(n=n)
+        assert main_window._ago("not a time") == "not a time", "unreadable: the stamp as it is"
+    finally:
+        i18n.set_language("en")
+
+
 def _write_a_small_rig(folder) -> None:
     """Three controls in the one tier -- a table narrower than its pane's head -- and a second
     configuration, SQ, to compare with."""

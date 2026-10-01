@@ -659,6 +659,55 @@ def test_the_corner_labels_are_whole_or_hidden_never_cut(tmp_path, monkeypatch, 
         i18n.set_language("en")
 
 
+def test_the_corner_labels_follow_a_language_switch(tmp_path, monkeypatch):
+    """tcc#122 (W-4's review of #96): «compare with» and «another configuration» kept the language
+    control mode was entered in — the tabs were rebuilt in the new one, the two labels beside the
+    box were not. Switched with room for both, both read in the new language, whole."""
+    try:
+        window = _control_window(tmp_path, monkeypatch, "en")
+        layout = window._control_layout
+        combo = layout.compare_combo
+        combo.setCurrentIndex(combo.findData("3.S-shelf/v_002"))
+        window._on_language_selected("uk")
+        _settle(window, _roomy(window))
+        assert _corner_words(window) == (i18n.t("cmpWith"), i18n.t("cmpOtherTag")), \
+            _corner_words(window)
+        assert i18n.t("cmpWith") != "compare with", "the switch reached the table"
+        layout.leave()
+    finally:
+        i18n.set_language("en")
+
+
+def test_a_version_the_method_refuses_says_so_in_the_corner_too(tmp_path, monkeypatch):
+    """tcc#122: control mode's one «порівняти з» says «не читається» on a version the method
+    refuses, as the full window's does, instead of comparing every tab with nothing in silence;
+    and the next pick, a version that reads, compares as before."""
+    from autosound_tcc.state.dsp_state import VersionRefused
+
+    def load(key):
+        if key == "3.S-shelf/v_001":
+            raise VersionRefused("v_001", "v_002", "the method's own sentence")
+        return _older()
+
+    window = _control_window(tmp_path, monkeypatch)
+    window._compare_args = window._compare_args[:2] + (load,) + window._compare_args[3:]
+    layout = window._control_layout
+    layout._fill_compare()
+    combo = layout.compare_combo
+    combo.setCurrentIndex(combo.findData("3.S-shelf/v_001"))
+    assert combo.currentText() == i18n.t("cmpUnreadable").format(version="v_001"), \
+        combo.currentText()
+    assert not combo.model().item(combo.currentIndex()).isEnabled()
+    assert window._compare_view_now() is None
+
+    combo.setCurrentIndex(combo.findData("3.S-shelf/v_002"))
+    assert window._compare_view_now() is not None
+    layout._fill_compare()  # a reload's refill, the refused one still picked elsewhere: said again
+    window._on_compare_chosen("3.S-shelf/v_001")
+    assert combo.currentText() == i18n.t("cmpUnreadable").format(version="v_001")
+    layout.leave()
+
+
 def test_the_corner_labels_settle_and_do_not_flicker_at_their_threshold(tmp_path, monkeypatch):
     """Shown or hidden is decided from the header's width against what the header asks for WITH
     the label, and a hidden label comes back only with room to spare: resized across both
@@ -776,13 +825,15 @@ def test_a_long_configuration_name_keeps_the_window_in_half_a_screen(
             if key.startswith("3.S"):
                 # The saved names give way first; the preset too only where the cap leaves the
                 # box less than «3.S-shelf · v_002…» (ubuntu's fonts on CI at 467c655: «3… ·
-                # v_002» where this expected the preset whole) -- the version whole either way.
+                # v_002» where this expected the preset whole) -- the version whole either way,
+                # and the names' «…» after it while a letter of the preset is left (tcc#122).
                 base = QComboBox.minimumSizeHint(combo)
                 held = combo._text_width("3.S-shelf · v_002…") + base.width() - combo._room(base)
                 if box >= held:
                     assert shown.startswith("3.S-shelf · v_002"), \
                         f"the saved names give way: {shown}"
-                assert shown.endswith(" · v_002") or shown.startswith("3.S-shelf · v_002"), shown
+                assert shown.endswith((" · v_002", " · v_002…")) or \
+                    shown.startswith("3.S-shelf · v_002"), shown
             else:
                 # The version whole and the preset's beginning -- as much of it as the cap
                 # leaves, never none (the Arbiter: cut is fine if the beginning shows). ubuntu's
@@ -856,6 +907,45 @@ def test_the_compare_box_s_floor_holds_a_typical_name_in_any_font():
         pytest.skip(f"this font engine ignores the stretch (the floor name measures {widths}): "
                     f"no growth for the cap to follow, caps {caps}")
     assert caps[0] < caps[1] < caps[2], f"the cap follows the font: {caps}"
+
+
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+def test_saved_names_cut_at_the_cap_keep_their_ellipsis(stretch):
+    """tcc#122 (W-4's review of #96, fix round 5): where the cap fell between «3.S-shelf · v_002»
+    and the «…» after it, the saved names went without a mark — the box read «3.S-shelf · v_002»
+    as though v_002 had been saved under none. At every width from the one to the other the «…»
+    stays after the version, the preset giving way for it; the version whole, the preset's
+    beginning shown. At the fonts `test_the_compare_box_s_floor_holds_a_typical_name_in_any_font`
+    widens: the Mac's, and about twice and four times (the Windows runner's offscreen text)."""
+    from PySide6.QtGui import QFont, QFontMetricsF
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.control_layout import _CompareBox
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    combo = _CompareBox()
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(6)
+    font = QFont(combo.font())
+    font.setStretch(stretch)
+    combo.setFont(font)
+    fill_compare_combo(combo, ["v_001"], {"v_001": "v_001"},
+                       [("3.S-shelf", [("3.S-shelf/v_002", "v_002 · P3, SQ-2")])], "4.C-cut", None)
+    combo.setCurrentIndex(combo.findData("3.S-shelf/v_002"))
+    base = QComboBox.minimumSizeHint(combo)
+    chrome = base.width() - combo._room(base)
+    head, marked = combo._text_width("3.S-shelf · v_002"), combo._text_width("3.S-shelf · v_002…")
+    assert marked > head
+    for room in range(head, marked + 3):
+        combo.resize(room + chrome, base.height())
+        shown = combo.fit_text()
+        assert combo._room() == room
+        assert shown.endswith("…") and "v_002" in shown, (room, shown)
+        assert shown.endswith(" · v_002…") or shown.startswith("3.S-shelf · v_002"), (room, shown)
+        assert shown.startswith("3.S"), (room, shown)
+        # Qt's own cut may run a fraction of a pixel into the one `_room` keeps each side (F-045).
+        assert QFontMetricsF(combo.font()).horizontalAdvance(shown) < room + 1, (room, shown)
 
 
 def test_a_squeezed_compare_box_settles_at_its_floor_not_below(tmp_path, monkeypatch):

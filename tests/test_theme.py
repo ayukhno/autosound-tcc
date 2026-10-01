@@ -101,34 +101,96 @@ def test_the_reviewer_pickers_state_colour_holds_under_the_mouse():
             assert colour in sheet[at:].split("}", 1)[0], (name, state)
 
 
+def _hex(value: str) -> str:
+    """`#rrggbb` or `rgb(r, g, b)` as the sheet writes a colour, as `#rrggbb`."""
+    value = value.strip()
+    if value.startswith("#"):
+        return value
+    r, g, b = (int(float(part)) for part in value[value.index("(") + 1:-1].split(",")[:3])
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _drawn(sheet: str, selector: str, prop: str) -> str:
+    """The colour `selector`'s first rule in `sheet` gives `prop`."""
+    import re
+
+    block = sheet.split(selector + " {", 1)[1].split("}", 1)[0]
+    return _hex(re.search(r"(?:^|\s)" + prop + r":\s*([^;]+);", block).group(1))
+
+
+_BUBBLES = ("msg-gen", "msg-crit", "msg-user", "msg-sys", "msg-sys-warn", "msg-sys-error")
+
+
 def test_the_time_on_a_message_reads_on_every_bubble():
     """tcc#100: the time beside who spoke is 10 px on a TINTED bubble. In `faint` it came to
     3.4:1 on the Arbiter's own bubble — the one he reads to time a wait — against the 4.5:1 that
     finding 51 (tcc#65) set after his eyes strained. Computed from the colours the sheet draws, for
     every kind of bubble in both themes; and it stays quieter than the message itself."""
-    import re
-
     from autosound_tcc.ui.tcc import theme
 
-    def drawn(sheet: str, selector: str, prop: str) -> str:
-        block = sheet.split(selector + " {", 1)[1].split("}", 1)[0]
-        value = re.search(prop + r":\s*([^;]+);", block).group(1).strip()
-        if value.startswith("#"):
-            return value
-        r, g, b = (int(float(part)) for part in value[value.index("(") + 1:-1].split(",")[:3])
-        return f"#{r:02x}{g:02x}{b:02x}"
-
-    kinds = ("msg-gen", "msg-crit", "msg-user", "msg-sys", "msg-sys-warn", "msg-sys-error")
     for name in ("dark", "light"):
         palette = theme.get_theme(name)
         sheet = theme.build_qss(palette)
-        stamp = drawn(sheet, 'QLabel[class~="msg-time"]', "color")
-        for kind in kinds:
-            ground = drawn(sheet, f'QFrame[class~="{kind}"]', "background")
+        stamp = _drawn(sheet, 'QLabel[class~="msg-time"]', "color")
+        for kind in _BUBBLES:
+            ground = _drawn(sheet, f'QFrame[class~="{kind}"]', "background")
             assert _contrast(stamp, ground) >= 4.5, (
                 f"{name} {kind}: the time is {_contrast(stamp, ground):.2f}:1 on {ground}")
             assert _contrast(stamp, ground) < _contrast(palette.text, ground), (
                 f"{name} {kind}: the time must stay quieter than the message")
+
+
+def test_who_spoke_reads_on_every_bubble_and_never_quieter_than_the_time():
+    """tcc#122 (W-4's review of tcc#100): the role is what the eye finds, the time is looked up
+    when wanted — and on the Generator's bubble the time read brighter than the role beside it
+    (`muted` 4.8:1 against the stamp's 5.5:1), while the light theme's Critic and System roles, in
+    `info`, came to 3.2–3.5:1 against finding 51's 4.5. Each role at 4.5:1 or more and at least as
+    strong as the time, on its own bubble, computed from the colours the sheet draws."""
+    from autosound_tcc.ui.tcc import theme
+
+    role = {"msg-gen": "msg-who", "msg-crit": "msg-who-crit", "msg-user": "msg-who-user",
+            "msg-sys": "msg-who-sys", "msg-sys-warn": "msg-who-sys", "msg-sys-error": "msg-who-sys"}
+    for name in ("dark", "light"):
+        sheet = theme.build_qss(theme.get_theme(name))
+        stamp = _drawn(sheet, 'QLabel[class~="msg-time"]', "color")
+        for kind in _BUBBLES:
+            ground = _drawn(sheet, f'QFrame[class~="{kind}"]', "background")
+            who = _drawn(sheet, f'QLabel[class~="{role[kind]}"]', "color")
+            said = f"{name} {kind}: the role {_contrast(who, ground):.2f}:1, the time " \
+                   f"{_contrast(stamp, ground):.2f}:1 on {ground}"
+            assert _contrast(who, ground) >= 4.5, said
+            assert _contrast(who, ground) >= _contrast(stamp, ground), said
+
+
+def test_every_label_in_the_info_blue_reads_on_what_it_sits_on():
+    """tcc#122: the light theme's `info` as text came to 3.6–4.2:1 on its own panels — the status
+    strip, the changed pills, the band ids, the protective marks — against finding 51's 4.5. Every
+    rule of the sheet that draws text in `info` is checked on its own background where it has an
+    opaque one, and on each of the panels where it does not, in both themes."""
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        sheet = theme.build_qss(palette)
+        checked = 0
+        for block in sheet.split("}"):
+            if "{" not in block:
+                continue
+            selector, body = block.rsplit("{", 1)
+            colour = re.search(r"(?:^|\s)color:\s*([^;]+);", body)
+            if colour is None or _hex(colour.group(1)) != palette.info:
+                continue
+            ground = re.search(r"(?:^|\s)background:\s*([^;]+);", body)
+            grounds = ([_hex(ground.group(1))] if ground and ground.group(1).startswith(("#", "rgb("))
+                       else [palette.tokens[t] for t in ("ground", "panel", "panel2", "panel3")])
+            for under in grounds:
+                checked += 1
+                assert _contrast(palette.info, under) >= 4.5, (
+                    f"{name} {selector.split('*/')[-1].strip()}: "
+                    f"{_contrast(palette.info, under):.2f}:1 on {under}")
+        assert checked > 20, f"{name}: the sheet's info-blue labels were found ({checked})"
 
 
 class _App:
@@ -174,3 +236,37 @@ def test_a_sheet_taken_off_behind_its_back_is_put_back(monkeypatch):
     app.sheet = ""
     theme.apply_theme(app, "dark")
     assert app.sets == 2 and app.sheet == theme.build_qss(theme.get_theme("dark"))
+
+
+def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypatch):
+    """Finding 132 (tcc#122): the footer's reviewer box read «API · gemini-3.1-pro-prev» on the
+    Windows VM — cut mid-word, no «…», as though that were the model's name. The closed box draws
+    its pick elided to its field, «…» where anything was cut, and whole where it fits; the open
+    list keeps every row whole (`MiniCombo.showPopup`). What is checked is what the paint draws."""
+    from PySide6.QtWidgets import QApplication, QComboBox
+
+    from autosound_tcc.ui.tcc import theme
+
+    QApplication.instance() or QApplication([])
+    drawn = []
+
+    class _Painter(theme.QStylePainter):
+        def drawControl(self, element, option):  # noqa: N802 (Qt's name)
+            drawn.append(option.currentText)
+            super().drawControl(element, option)
+
+    monkeypatch.setattr(theme, "QStylePainter", _Painter)
+    full = "API · gemini-3.1-pro-preview"
+    combo = theme.mini_combo()
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(6)
+    combo.addItem(full)
+    for width in (90, 140, 180):
+        combo.resize(width, 26)
+        combo.grab()
+        shown = drawn[-1]
+        assert shown.endswith("…") and full.startswith(shown[:-1]) and len(shown) > 1, (width, shown)
+        assert combo.fontMetrics().horizontalAdvance(shown) <= combo.width(), (width, shown)
+    combo.resize(combo.fontMetrics().horizontalAdvance(full) + 80, 26)
+    combo.grab()
+    assert drawn[-1] == full, "whole where it fits"

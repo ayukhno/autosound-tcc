@@ -53,6 +53,9 @@ class MeasItem:
     # than looked up by the panel because the row is a renderer: the round and the grammar that
     # turns a title into a channel both live where the session is built.
     protective: str = ""
+    # A title the naming grammar cannot read, shown as typed: the panel says «не розібрано» beside
+    # it, in the window's language, and adds no method of its own (tcc#122).
+    unread: bool = False
 
 
 @dataclass(frozen=True)
