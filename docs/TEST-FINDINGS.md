@@ -3414,3 +3414,18 @@ today Help has one entry, «📖 Посібник користувача» (F-08
 **Weight.** Low–medium: a change, not a defect; the guides exist and are hard to reach.
 
 **Task.** For W-5's collection.
+
+### 135. The feedback form's «Від кого» is required; it should be optional, and its hint should say it is for an answer
+
+**What.** The Arbiter, 2026-10-01, «Написати розробнику» → the form route: «перевір що ось тут в формі зворотнього
+звʼязку поле контакту не обовʼязкове … а в середині зміни надпис, щоб було видно пояснення, що це для зворотнього
+звʼязку, якщо користувач хоче його отримати». Today: «Від кого:» with the hint «ім'я і контакт: email, Telegram чи
+телефон».
+
+Checked by reading: it is required — `feedback_dialog._send_to_form` stops on an empty sender with `fbNoSender`, and
+`core/form_report` refuses a report with no sender («what the form would not take»), i.e. the Google Form's question
+is required too. Optional means both: TCC's check and the question's «Required» switch in the Arbiter's form.
+
+**Weight.** Low–medium: a tester who does not want to leave a contact cannot send at all.
+
+**Task.** For W-5's collection — the hint in four languages through the Advisor.
