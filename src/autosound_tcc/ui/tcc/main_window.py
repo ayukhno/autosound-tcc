@@ -28,6 +28,7 @@ import shiboken6
 from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
+    QObject,
     QPoint,
     QProcess,
     QRect,
@@ -558,6 +559,46 @@ def _cap_combo_width(combo) -> None:
     # while the row has room and gives them up -- down to a few and the arrow -- before anything
     # is pushed off.
     combo.setMinimumWidth(90)
+    # ...and past 260 px only into room the row has to spare, as far as its pick whole (VM-9,
+    # `_SpareRoom`).
+    combo.takes_spare_room()
+
+
+class _SpareRoom(QObject):
+    """Lends a row's spare width to its pickers, each as far as its pick whole (VM-9).
+
+    On a full-screen window the reviewer read «API · gemini-3.1-pr…» beside a wide empty gap: the
+    pickers asked for sixteen letters and the gap had the rest. Only what the row has past
+    everything's own ask is lent -- in proportion to what each picker is short of its pick, where
+    there is not enough for both -- so a row with nothing to spare is laid out exactly as before,
+    from the same asks and the same floors (the Arbiter: «обрізання в такому форматі - ОК»). Not a
+    stretch factor: a layout lays out a stretching item from its FLOOR, and the pickers would have
+    taken the whole of a narrow row's shortfall before anything else gave a pixel.
+
+    Lent again whenever the row is resized or laid out, which a picker asks for when what it
+    shows changes (`theme.MiniCombo.takes_spare_room`)."""
+
+    def __init__(self, row: QWidget, pickers: list) -> None:
+        super().__init__(row)
+        self._row, self._pickers = row, pickers
+        row.installEventFilter(self)
+
+    def eventFilter(self, _watched, event) -> bool:  # noqa: N802 (Qt override)
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            self.lend()
+        return False
+
+    def lend(self) -> None:
+        shown = [p for p in self._pickers if p.isVisibleTo(self._row)]
+        for picker in self._pickers:
+            if picker not in shown:
+                picker.lend(0)
+        asks = self._row.layout().sizeHint().width() - sum(p.lent() for p in shown)
+        spare = max(0, self._row.contentsRect().width() - asks)
+        short = [p.short_of_pick() for p in shown]
+        wanted = sum(short)
+        for picker, want in zip(shown, short):
+            picker.lend(want if spare >= wanted else spare * want // wanted)
 
 
 def _rows_keep_their_colour(combo) -> None:
@@ -1410,6 +1451,7 @@ class MainWindow(QMainWindow):
 
         # Both combos exist now, so one pass fills them from the one registry.
         self._reload_model_choices()
+        self._footer_room = _SpareRoom(footer, [ai_main, ai_critic])
         self._running_model: Optional[str] = None
 
         # What the picker's own label cannot say: this machine sends that key somewhere else, or

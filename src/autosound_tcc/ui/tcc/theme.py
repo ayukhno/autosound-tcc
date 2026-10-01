@@ -11,11 +11,12 @@ never a per-widget inline `setStyleSheet()` — so both themes stay in sync auto
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette
 from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox, QStylePainter, QWidget
 
@@ -43,6 +44,61 @@ class MiniCombo(QComboBox):
     noticing. Here it is right every time it is opened, and costs one pass over the rows.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        #: What a row lends this box past its own ask, and its maximum before any was lent (VM-9).
+        self._lent = 0
+        self._cap: int | None = None
+
+    def takes_spare_room(self) -> None:
+        """Let a row lend this box its spare width, as far as the pick whole (VM-9).
+
+        The footer's model pickers ask for sixteen letters (`main_window._cap_combo_width`) and,
+        held to that, read «API · gemini-3.1-pr…» on a full-screen window beside a wide empty gap.
+        The row lends the room (`main_window._SpareRoom`) -- only what it has beyond everything's
+        ask, so a narrow row is laid out exactly as before, from the same asks and floors -- and
+        asks again whenever what the box shows changes: a pick, a refill, a row's text."""
+        if self._cap is not None:
+            return
+        self._cap = self.maximumWidth()
+        self.currentIndexChanged.connect(self._ask_again)
+        model = self.model()
+        for signal in (model.rowsInserted, model.rowsRemoved, model.dataChanged,
+                       model.modelReset, model.layoutChanged):
+            signal.connect(self._ask_again)
+
+    def _ask_again(self, *_args) -> None:
+        # A refill blocks the box's signals and picks its row last (`main_window._fill_combo`):
+        # the row lends on the layout request this posts, after the pick has landed.
+        self.updateGeometry()
+
+    def _own_ask(self) -> QSize:
+        return super().sizeHint()
+
+    def short_of_pick(self) -> int:
+        """How much wider than its own ask the box would have to be to draw its pick whole."""
+        asks = self._own_ask()
+        text = self.currentText()
+        metrics = QFontMetricsF(self.font())
+        drawn = math.ceil(max(metrics.horizontalAdvance(text), metrics.boundingRect(text).right()))
+        return max(0, drawn - self._room(asks))
+
+    def lent(self) -> int:
+        return self._lent
+
+    def lend(self, width: int) -> None:
+        """Take `width` past the box's own ask -- and its maximum with it, where that is less."""
+        width = max(0, width)
+        if width != self._lent:
+            self._lent = width
+            self.setMaximumWidth(max(self._cap or 0, self._own_ask().width() + width))
+            self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt override)
+        hint = self._own_ask()
+        hint.setWidth(hint.width() + self._lent)
+        return hint
+
     def showPopup(self) -> None:  # noqa: N802 (Qt override)
         view = self.view()
         if view is not None and self.count():
@@ -57,17 +113,20 @@ class MiniCombo(QComboBox):
             view.setMinimumWidth(widest + _POPUP_CHROME_PX)
         super().showPopup()
 
-    def _room(self) -> int:
-        """The width the closed label is drawn in: the style's edit field — all of it under the
-        app's stylesheet, which draws a `.mini-select`'s label itself, clipped to the field; a
-        pixel in from each side under a platform style, which is `QCommonStyle`'s inset — less an
-        icon's room where the pick has one (6 px of spacing under the sheet, 4 under the platform).
+    def _room(self, size: QSize | None = None) -> int:
+        """The width the closed label is drawn in, at `size` or the box's own: the style's edit
+        field — all of it under the app's stylesheet, which draws a `.mini-select`'s label itself,
+        clipped to the field; a pixel in from each side under a platform style, which is
+        `QCommonStyle`'s inset — less an icon's room where the pick has one (6 px of spacing under
+        the sheet, 4 under the platform).
 
         The inset was taken under the sheet too, and Qt sizes a box to its widest row's ink: the
         widest rows came out «…» (EN and DE in the language box) and «x-hi…» on the Windows VM,
         two pixels short of a field that clips nothing (VM-6, tcc#122)."""
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
+        if size is not None:
+            option.rect = QRect(QPoint(0, 0), size)
         field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
                                             QStyle.SubControl.SC_ComboBoxEditField, self)
         sheet = self.style().metaObject().className() == "QStyleSheetStyle"

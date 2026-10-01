@@ -3613,6 +3613,77 @@ def test_a_narrow_window_squeezes_the_footer_instead_of_pushing_its_buttons_off_
                 f"{name(right)} (from x {next_from})")
 
 
+def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floors(monkeypatch):
+    """VM-9 (the Windows VM, a full-screen window): the footer kept «API · gemini-3.1-pr…» beside
+    a wide empty gap. A model picker asked for sixteen letters and could not be given more, and the
+    gap took the rest. Where the row has room, the picker widens to its pick whole -- and no
+    further -- and the room comes out of the gap, every other control keeping its own width;
+    narrowed, the row lays out as it did, from the same asks and floors (the Arbiter: «обрізання в
+    такому форматі - ОК»)."""
+    import math
+
+    from PySide6.QtGui import QFontMetricsF
+    from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox
+
+    from autosound_tcc.core import model_choices
+
+    app = _app()
+    window = MainWindow()
+    monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
+    combo = window._ai_critic_combo
+    footer = combo.parentWidget()
+    layout = footer.layout()
+
+    def settle() -> None:
+        for _ in range(4):
+            app.processEvents()
+            app.sendPostedEvents()
+
+    def chrome() -> int:
+        option = QStyleOptionComboBox()
+        combo.initStyleOption(option)
+        return combo.width() - combo.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, option, QStyle.SubControl.SC_ComboBoxEditField,
+            combo).width()
+
+    window.show()
+    settle()
+    floor = footer.minimumSizeHint().width()
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview")
+    window._critic_choices = [pick]
+    MainWindow._fill_combo(combo, [pick], pick.key, critic=True)
+    settle()
+    text = combo.currentText()
+    assert text.startswith("API · gemini-3.1-pro-preview"), text
+    assert footer.minimumSizeHint().width() == floor, "a pick never moves the footer's floor"
+    asks = QComboBox.sizeHint(combo).width()  # the picker's own ask, sixteen letters
+    whole = math.ceil(QFontMetricsF(combo.font()).horizontalAdvance(text)) + chrome()
+    assert whole > asks, "the pick is longer than the picker asks for, or there is nothing to test"
+
+    roomy = window.width() - footer.width() + footer.sizeHint().width() + (whole - asks) + 40
+    window.resize(roomy, 820)
+    settle()
+    assert combo.fit_text() == text, (
+        f"at {window.width()} px the reviewer reads «{combo.fit_text()}», {combo.width()} px "
+        f"wide against the {whole} its pick takes\n{_row_width_report(window, footer)}")
+    assert combo.width() <= whole + 1, "as wide as the pick, not wider"
+    for index in range(layout.count()):
+        item = layout.itemAt(index)
+        widget = item.widget()
+        if widget is not None and widget is not combo and widget.isVisible():
+            assert widget.width() >= item.sizeHint().width(), (
+                f"{type(widget).__name__} gave up room to the picker\n"
+                f"{_row_width_report(window, footer)}")
+
+    window.resize(1280, 820)
+    settle()
+    assert window.width() <= 1280, _row_width_report(window, footer)
+    assert combo.width() <= asks and combo.sizeHint().width() == asks, (
+        f"narrowed, the picker is {combo.width()} px and asks {combo.sizeHint().width()} against "
+        f"its own {asks}: the room came out of the row\n{_row_width_report(window, footer)}")
+
+
 #: The output table's columns that read whole at the full window's minimum (tcc#106, finding 114:
 #: «300 …», «NO…», «GAIN DE», «ELAY M» on the Arbiter's screenshot): the crossovers, the gain, the
 #: delay and the polarity.
