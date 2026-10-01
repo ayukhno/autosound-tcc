@@ -635,7 +635,19 @@ _BAD_KEY_WORDS = ("http 400", "400 bad request", "api key", "api_key", "invalid 
 #: says "model", and the model advice (names drift, press ↻) is wrong for it — the CLI still lists
 #: the model, so ↻ brings it straight back (Windows session, 2026-09-13).
 _LOCATION_WORDS = ("selected location", "your location", "your region", "not available in your country")
-_BAD_MODEL_WORDS = ("model", "not available", "unknown model", "не підтримується")
+#: A CLI refusing the model it was given, in its own words: the method's recogniser (`_FAILURES`'
+#: `bad_model`), agy's «model '…' is not available», the method's own 404 for a model the key
+#: cannot call. Not the bare word «model»: the method's line naming the pins a run set aside
+#: (`AUTOSOUND_CRITIC_MODEL=…`, hub #226) says it, and an answered run read as refused (VM-4).
+_BAD_MODEL_WORDS = ("invalid model", "not recognized as a known model", "unknown model",
+                    "not available", "цей ключ викликати не може", "не підтримується")
+_MODEL_NOT_FOUND = re.compile(r'\bmodel "[^"]*" not found')
+
+
+def _said(detail: str) -> str:
+    """A failure's words as the hints read them: lowercased, and without the line that names the
+    pins the run set aside — #113 reads that into the footer's note, never as a refusal (VM-4)."""
+    return _PINS_LINE.sub("", detail or "").lower()
 
 
 def _refused_tool(said: str) -> str:
@@ -656,8 +668,8 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     that explains a failure without naming the next action is the same dead end as `mode:
     clipboard` with nothing in it — one step further along, and still nowhere.
     """
-    said = (detail or "").lower()
-    if not said:
+    said = _said(detail)
+    if not said.strip():
         return ""
     if any(word in said for word in _PERMISSION_WORDS):
         where = project_dir or config.project_dir()
@@ -696,7 +708,7 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
             "refused it by location, before the model ran. ↻ will not help: the CLI still lists it. "
             "Pick a different Critic model in TCC's footer."
         )
-    if any(word in said for word in _BAD_MODEL_WORDS):
+    if any(word in said for word in _BAD_MODEL_WORDS) or _MODEL_NOT_FOUND.search(said):
         return (
             "the reviewer CLI refused the model it was given. Model names drift and the CLI prints "
             "its own list; pick another Critic in TCC's footer, or press ↻ beside it to re-read "
@@ -712,7 +724,7 @@ def refusal_reason(detail: str) -> Optional[str]:
     other words are a refusal too: the call went out and no review came back."""
     from autosound_tcc.core import availability
 
-    said = (detail or "").lower()
+    said = _said(detail)
     if not said.strip():
         return None
     if any(word in said for word in _LOCATION_WORDS):

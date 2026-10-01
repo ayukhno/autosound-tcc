@@ -2233,3 +2233,72 @@ def test_pins_a_session_named_model_set_aside_are_filed_under_that_model(tmp_pat
         assert mcp_server._reviewer_state(tmp_path)["pins_set_aside"]["pins"] == earlier
     finally:
         availability.reset()
+
+
+# ── VM-4 (tcc#113): no refusal hint on a run that answered ───────────────────────────────────────
+
+#: A method that takes `--model` and, before it calls anybody, names the critic-env pin the run set
+#: aside (`lost_pins`, hub #226) — the line the VM printed on 2026-10-01.
+_SETS_A_PIN_ASIDE = (
+    "if len(sys.argv) < 2:\n"
+    "    print('Використання: ... [--model <id>] [--provider google|anthropic|openai]')\n"
+    "    sys.exit(1)\n"
+    "args = sys.argv[1:]\n"
+    "pick = args[args.index('--model') + 1]\n"
+    "print(f'>> --model {pick} --provider google: рецензент цього запуску — {pick} '\n"
+    "      '(провайдер google); не діють для нього: AUTOSOUND_CRITIC_MODEL=gpt-5.6-terra '\n"
+    "      '(C:/Users/Tuner/AppData/Roaming/autosound/critic-env, рядок 1). '\n"
+    "      'Для інших запусків закріплене лишається типовим', file=sys.stderr)\n"
+)
+
+
+def _reviewer_tools(tmp_path, monkeypatch, body):
+    """`ask_reviewer` and `call_critic` over a stub method, each called once: {tool: its answer}."""
+    _pick_agy_reviewer(tmp_path, monkeypatch)
+    _stub_reviewer(tmp_path, monkeypatch, _SETS_A_PIN_ASIDE + body)
+    (tmp_path / "rew_analitic").mkdir(exist_ok=True)
+    for name in ("data-contract-template.md", "autosound_context.md"):
+        (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
+    mcp, _, _ = _server(tmp_path, _CritiqueBridge())
+    return {tool: json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+            for tool, args in (("ask_reviewer", {"question": "Are you there?"}),
+                               ("call_critic", {"package": "## proposal"}))}
+
+
+def test_a_run_that_answered_carries_no_refusal_hint(tmp_path, monkeypatch):
+    """VM-4: `ask_reviewer` answered over the API (gemini, 10.5 s) with a critic-env pin set
+    aside, and TCC's result still told the session «the reviewer CLI refused the model it was
+    given» — the bare word «model» matched the pins line. An answer is the proof the route works:
+    no hint rides on it, through either door."""
+    from autosound_tcc.core import availability, critic
+
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch, (
+            "print('pong')\n"
+            "print('— [' + args[0] + ': ' + pick + ']')\n"))
+    finally:
+        availability.reset()
+    for tool, out in answers.items():
+        assert out["mode"] == critic.MODE_API_OR_CLI, (tool, out)
+        assert "refused the model" not in out["detail"], (tool, out["detail"])
+        assert "What to do" not in out["detail"], (tool, out["detail"])
+
+
+def test_a_real_model_refusal_still_says_what_to_do(tmp_path, monkeypatch):
+    """The CLI's own refusal of the model keeps its hint, the pins line beside it or not."""
+    from autosound_tcc.core import availability, critic
+
+    refusal = ('>> ⛔ agy повернув помилку: error: invalid model selection (--model '
+               '"gemini-3.5-flash-medium" --effort ""): model gemini-3.5-flash-medium is not '
+               'recognized as a known model or custom model in settings')
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch, (
+            f"print({refusal!r}, file=sys.stderr)\n"
+            "print('▶ РУЧНИЙ РЕЖИМ: БУФЕР ОБМІНУ (CLIPBOARD MODE)', file=sys.stderr)\n"))
+    finally:
+        availability.reset()
+    for tool, out in answers.items():
+        assert out["mode"] == critic.MODE_CLIPBOARD, (tool, out)
+        assert "What to do: the reviewer CLI refused the model" in out["detail"], (tool, out)

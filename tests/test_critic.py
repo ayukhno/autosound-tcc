@@ -1053,3 +1053,62 @@ def test_the_fake_usage_and_pins_line_are_the_vendored_methods_own():
                   'лишається типовим"',
                   "f\"{var}={value} ({f'{path}, рядок {line}' if path else 'змінна середовища'})\""):
         assert words in source, words
+
+
+# ── VM-4 (tcc#113): the set-aside-pins line is no refusal ─────────────────────────────────────────
+
+#: The VM's line, 2026-10-01: `ask_reviewer` answered over the API (gemini, 10.5 s) with a
+#: critic-env pin set aside, and the result still said «the reviewer CLI refused the model».
+_VM_PINS = _lost_pins_line("gemini-3.1-pro-preview", [
+    ("AUTOSOUND_CRITIC_MODEL", "gpt-5.6-terra",
+     r"C:\Users\Tuner\AppData\Roaming\autosound\critic-env", 1)])
+
+#: What a reviewer CLI says when it refuses the model it was given, in its own words: the method's
+#: recogniser (`_FAILURES`' `bad_model`, pinned to the vendored source below), agy's answer on a
+#: clipboard fall, and the method's own 404 for a model the key cannot call.
+_MODEL_REFUSALS = {
+    "agy-invalid-selection": ('error: invalid model selection (--model "gemini-3.5-flash-medium" '
+                              '--effort ""): model gemini-3.5-flash-medium is not recognized as a '
+                              'known model or custom model in settings'),
+    "unknown-model": "Error: unknown model gemini-9-ultra",
+    "model-not-found": 'Model "gemini-9-ultra" not found',
+    "agy-not-available": ">> ⛔ agy повернув помилку: model 'gemini-3.8-flash-low' is not available",
+    "method-404": (">> Модель `gemini-2.5-flash` цей ключ викликати не може: HTTP 404 — This model "
+                   "models/gemini-2.5-flash is no longer available to new users."),
+}
+
+
+def test_the_pins_line_is_no_refusal():
+    """VM-4: the bare word «model» matched the pins line (`AUTOSOUND_CRITIC_MODEL=…`, hub #226),
+    which #113 reads into the footer's note — never as a refusal, and never as a reason."""
+    from autosound_tcc.core import critic
+
+    tail = f"{_VM_PINS}\n>> REVIEW_ROUTE: api\n>> REVIEW_FILE: process/reviews/x-ask.md"
+    assert critic.remedy(tail, harness="agy") == ""
+    assert critic.remedy(_VM_PINS, harness="agy") == ""
+    assert critic.refusal_reason(_VM_PINS) is None
+    # «model» alone says nothing about a refusal.
+    assert critic.remedy("the model answered in 10.5 s", harness="agy") == ""
+
+
+@pytest.mark.parametrize("said", list(_MODEL_REFUSALS.values()), ids=list(_MODEL_REFUSALS))
+def test_a_real_model_refusal_still_says_what_to_do(said):
+    """The CLI's own refusals keep their hint — beside the pins line too, which the method prints
+    before it calls anybody."""
+    from autosound_tcc.core import availability, critic
+
+    for detail in (said, f"{_VM_PINS}\n{said}"):
+        assert "refused the model" in critic.remedy(detail, harness="agy"), detail
+        assert critic.refusal_reason(detail) == availability.REFUSED
+
+
+def test_the_model_refusal_words_are_the_vendored_methods_own():
+    """The method's recogniser of a refused model, which `_MODEL_REFUSALS` stands for."""
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    assert ('("bad_model", r"invalid model selection|not recognized as a known model|unknown model|'
+            'Model \\"[^\\"]*\\" not found"),') in source
+    assert "цей ключ викликати не може: HTTP 404" in source
