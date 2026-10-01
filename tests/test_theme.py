@@ -239,20 +239,11 @@ def test_a_sheet_taken_off_behind_its_back_is_put_back(monkeypatch):
     assert app.sets == 2 and app.sheet == theme.build_qss(theme.get_theme("dark"))
 
 
-@pytest.mark.parametrize("stretch", [100, 141, 200])
-def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypatch, stretch):
-    """Finding 132 (tcc#122): the footer's reviewer box read «API · gemini-3.1-pro-prev» on the
-    Windows VM — cut mid-word, no «…», as though that were the model's name. The closed box draws
-    its pick elided to its field, «…» where anything was cut, and whole where it fits; the open
-    list keeps every row whole (`MiniCombo.showPopup`). What is checked is what the paint draws,
-    against the style's edit field, in the Mac's font and about twice and four times as wide (the
-    Windows runner's offscreen text, as the compare box's tests are held)."""
-    from PySide6.QtGui import QFont, QFontMetricsF
-    from PySide6.QtWidgets import QApplication, QComboBox, QStyle, QStyleOptionComboBox
-
+def _drawn_picks(monkeypatch) -> list:
+    """What every `MiniCombo` paints as its closed label, in order — the paint itself, spied, so
+    what is checked is what is drawn rather than what a helper returns."""
     from autosound_tcc.ui.tcc import theme
 
-    QApplication.instance() or QApplication([])
     drawn = []
 
     class _Painter(theme.QStylePainter):
@@ -260,32 +251,104 @@ def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypa
             drawn.append(option.currentText)
             super().drawControl(element, option)
 
-    def field(box) -> int:
-        option = QStyleOptionComboBox()
-        box.initStyleOption(option)
-        return box.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
-                                          QStyle.SubControl.SC_ComboBoxEditField, box).width()
-
     monkeypatch.setattr(theme, "QStylePainter", _Painter)
-    full = "API · gemini-3.1-pro-preview"
+    return drawn
+
+
+def _edit_field(box) -> int:
+    """The style's edit field: under the app's sheet, the width the closed label is clipped to."""
+    from PySide6.QtWidgets import QStyle, QStyleOptionComboBox
+
+    option = QStyleOptionComboBox()
+    box.initStyleOption(option)
+    return box.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                      QStyle.SubControl.SC_ComboBoxEditField, box).width()
+
+
+def _styled_mini_select(monkeypatch, stretch: int):
+    """A `.mini-select` under the sheet the window applies (`_windows.theme_on`), its font
+    `stretch`ed: the Mac's offscreen text, and about twice and four times as wide — the Windows
+    runner's, as the compare box's tests are held."""
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import theme
+    from tests import _windows
+
+    QApplication.instance() or QApplication([])
     combo = theme.mini_combo()
-    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-    combo.setMinimumContentsLength(6)
+    _windows.theme_on(monkeypatch, combo, "dark")
     font = QFont(combo.font())
     font.setStretch(stretch)
     combo.setFont(font)
+    return combo
+
+
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypatch, stretch):
+    """Finding 132 (tcc#122): the footer's reviewer box read «API · gemini-3.1-pro-prev» on the
+    Windows VM — cut mid-word, no «…», as though that were the model's name. The closed box draws
+    its pick elided to its field, «…» where anything was cut, and whole where it fits; the open
+    list keeps every row whole (`MiniCombo.showPopup`). What is checked is what the paint draws,
+    against the style's edit field, under the app's stylesheet (VM-6: the first version ran
+    without it, and the sheet draws the label across the whole field) — and whole the moment the
+    field holds the pick's ink, since nothing short of that is clipped."""
+    import math
+
+    from PySide6.QtGui import QFontMetricsF
+    from PySide6.QtWidgets import QComboBox
+
+    drawn = _drawn_picks(monkeypatch)
+    full = "API · gemini-3.1-pro-preview"
+    combo = _styled_mini_select(monkeypatch, stretch)
+    combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(6)
     combo.addItem(full)
     metrics = QFontMetricsF(combo.font())
     whole = metrics.horizontalAdvance(full)
     for share in (0.35, 0.55, 0.8):
-        combo.resize(int(whole * share) + combo.width() - field(combo), 26)
+        combo.resize(int(whole * share) + combo.width() - _edit_field(combo), 26)
         combo.grab()
         shown = drawn[-1]
         assert shown.endswith("…") and full.startswith(shown[:-1]) and len(shown) > 1, (share, shown)
-        assert metrics.horizontalAdvance(shown) <= field(combo), (share, shown, field(combo))
-    combo.resize(int(whole) + 80 + combo.width() - field(combo), 26)
+        assert metrics.horizontalAdvance(shown) <= _edit_field(combo), (
+            share, shown, _edit_field(combo))
+    ink = math.ceil(metrics.boundingRect(full).right())
+    combo.resize(ink + combo.width() - _edit_field(combo), 26)
+    combo.grab()
+    assert drawn[-1] == full, f"whole in a field of its ink ({ink} px), which clips nothing"
+    combo.resize(int(whole) + 80 + combo.width() - _edit_field(combo), 26)
     combo.grab()
     assert drawn[-1] == full, "whole where it fits"
+
+
+@pytest.mark.parametrize("stretch", [100, 141, 200])
+def test_a_mini_select_at_its_own_width_draws_every_row_whole(monkeypatch, stretch):
+    """VM-6 (tcc#122, the Windows VM): the language box read «…» for EN and DE, and the effort box
+    «x-hi…» where «x-high» fits — maximised or not, since a box sized to its rows does not grow.
+    `fit_text` took the edit field less a pixel each side, the platform style's inset; the app's
+    sheet draws the label across the whole field, and Qt sizes the box to its widest row's ink,
+    so the widest rows lost their letters to two pixels nothing clips. Under the sheet the window
+    applies, at the width each box gives itself (and its floor in the window), every row is
+    drawn as it is."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.core import model_choices
+
+    drawn = _drawn_picks(monkeypatch)
+    badges = [badge for _code, badge in i18n.language_badges()]
+    efforts = [i18n.t(f"effort_{level}") for level in model_choices.EFFORT_LEVELS]
+    for rows, floor in ((badges, 64), (efforts, 62)):  # `main_window`'s own floors for the two
+        combo = _styled_mini_select(monkeypatch, stretch)
+        for row in rows:
+            combo.addItem(row)
+        combo.setMinimumWidth(floor)
+        combo.resize(combo.sizeHint().expandedTo(combo.minimumSize()))
+        for index, row in enumerate(rows):
+            combo.setCurrentIndex(index)
+            combo.grab()
+            assert drawn[-1] == row, (
+                f"«{row}» drawn as «{drawn[-1]}» in a {combo.width()} px box, field "
+                f"{_edit_field(combo)} px")
 
 
 def test_a_hold_is_said_in_orange_that_reads_in_both_themes():

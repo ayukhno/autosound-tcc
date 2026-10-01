@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics, QPalette
+from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette
 from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox, QStylePainter, QWidget
 
 Mode = Literal["dark", "light"]
@@ -57,19 +57,33 @@ class MiniCombo(QComboBox):
             view.setMinimumWidth(widest + _POPUP_CHROME_PX)
         super().showPopup()
 
-    def fit_text(self) -> str:
-        """The pick as the closed box draws it: elided to the style's edit field, less the pixel
-        each side of it the label is drawn inside (`control_layout._CompareBox`'s measure) and
-        an icon's room where the pick has one."""
+    def _room(self) -> int:
+        """The width the closed label is drawn in: the style's edit field — all of it under the
+        app's stylesheet, which draws a `.mini-select`'s label itself, clipped to the field; a
+        pixel in from each side under a platform style, which is `QCommonStyle`'s inset — less an
+        icon's room where the pick has one (6 px of spacing under the sheet, 4 under the platform).
+
+        The inset was taken under the sheet too, and Qt sizes a box to its widest row's ink: the
+        widest rows came out «…» (EN and DE in the language box) and «x-hi…» on the Windows VM,
+        two pixels short of a field that clips nothing (VM-6, tcc#122)."""
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
         field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
                                             QStyle.SubControl.SC_ComboBoxEditField, self)
-        room = field.width() - 2
+        sheet = self.style().metaObject().className() == "QStyleSheetStyle"
+        room = field.width() if sheet else field.width() - 2
         if not option.currentIcon.isNull():
-            room -= option.iconSize.width() + 4
-        return self.fontMetrics().elidedText(self.currentText(), Qt.TextElideMode.ElideRight,
-                                             max(0, room))
+            room -= option.iconSize.width() + (6 if sheet else 4)
+        return max(0, room)
+
+    def fit_text(self) -> str:
+        """The pick as the closed box draws it: whole while its ink is inside the label's room —
+        a trailing bearing past the field is nothing anybody sees, and it is what Qt's own sizing
+        leaves out — otherwise elided to that room."""
+        text, room = self.currentText(), self._room()
+        if QFontMetricsF(self.font()).boundingRect(text).right() <= room:
+            return text
+        return self.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, room)
 
     def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
         """QComboBox's own paint with the pick elided: Qt clips a closed box's text at the field,
