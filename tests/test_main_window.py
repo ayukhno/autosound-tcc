@@ -143,6 +143,37 @@ def test_the_theme_switch_wears_the_wait_cursor_and_takes_no_second_click(monkey
     assert window._mode == start and len(seen) == 2
 
 
+def _shown_row(section, key: str) -> str:
+    """The value a section's `key → value` row shows (`_kv_row`), whole."""
+    from autosound_tcc.ui.tcc import copy_menu
+    from autosound_tcc.ui.tcc.labels import ElidedLabel
+
+    for row in section.findChildren(QWidget):
+        if row.property("class") == "paramrow":
+            key_label, value = row.findChildren(ElidedLabel)[:2]
+            if copy_menu.full_text(key_label) == key:
+                return copy_menu.full_text(value)
+    raise AssertionError(f"no «{key}» row in the section")
+
+
+def test_the_project_params_theme_row_follows_every_switch(monkeypatch):
+    """VM-8: after ◐ to dark the Project params «Theme» row still said «light» — the row was
+    written when the section was built and never again. Through the switch itself (◐, the wait
+    cursor and all), both ways."""
+    from tests import _windows
+
+    _app()
+    window = MainWindow()
+    _windows.theme_on_the_window(monkeypatch, window)
+    word = {"dark": i18n.t("cfgThemeDark"), "light": i18n.t("cfgThemeLight")}
+    assert _shown_row(window._project_section, i18n.t("cfgTheme")) == word[window._mode]
+    for _ in range(2):
+        window._theme_btn.click()
+        QApplication.processEvents()
+        assert _shown_row(window._project_section, i18n.t("cfgTheme")) == word[window._mode], (
+            f"the theme is {window._mode}")
+
+
 def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatch):
     """Same profile+ledger shape used in test_dsp_state.py's MUSWAY-style regression test,
     routed through the real MainWindow load path instead of ProjectView directly."""

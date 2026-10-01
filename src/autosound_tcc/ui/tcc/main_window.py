@@ -1889,13 +1889,15 @@ class MainWindow(QMainWindow):
             # but not how hard it was asked to think does not say what actually ran.
             (i18n.t("cfgEffort"), i18n.t(f"effort_{effort}")),
             (i18n.t("cfgCritic"), label_for(critic)),
-            (i18n.t("cfgTheme"), i18n.t("cfgThemeDark" if self._mode == "dark"
-                                        else "cfgThemeLight")),
+            (i18n.t("cfgTheme"), self._theme_word()),
             (i18n.t("cfgGate"), i18n.t({omp_session.GATE_WRITES: "gateWrites",
                                         omp_session.GATE_FOREIGN: "gateForeign",
                                         omp_session.GATE_AUTO: "gateAuto",
                                         omp_session.GATE_NEVER: "gateNever"}.get(gate, "gateAuto"))),
         ]
+
+    def _theme_word(self) -> str:
+        return i18n.t("cfgThemeDark" if self._mode == "dark" else "cfgThemeLight")
 
     def _set_rew_online(self, online: bool) -> None:
         self._rew_online = online
@@ -3159,8 +3161,14 @@ class MainWindow(QMainWindow):
         # Which models answer, which language, which permissions -- those are decisions about
         # *this project*, kept in its own `tcc-project.json`. System params is the rig: the DSP,
         # the amps, the mic, the REW port. They were in the wrong section (user, 2026-08-06).
+        self._theme_value = None
         for label, value in self._app_config_rows():
-            self._project_section.body_layout().addWidget(_kv_row(label, value))
+            row = _kv_row(label, value)
+            self._project_section.body_layout().addWidget(row)
+            if label == i18n.t("cfgTheme"):
+                # Kept so a switch rewrites the word alone (`_apply_theme`, VM-8).
+                self._theme_value = next(label for label in row.findChildren(ElidedLabel)
+                                         if label.property("class") == "pv")
         # The tune's history and its backup, in the section's header where they show even folded
         # (the Arbiter, 2026-09-23: «добре бачити чи є репо для проекту, чи є гіт взагалі»), and
         # the facts as rows. The folder was silent when it was not a repository — and the live
@@ -3545,6 +3553,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._match_icon_buttons)
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
+        # The Project params row that names the theme (VM-8): written when the section was built
+        # and never again, it still said «light» after ◐. The word alone, not the section: a
+        # rebuild re-reads git, and the switch is already the slow part on Windows (VM-12).
+        value = self.__dict__.get("_theme_value")
+        if value is not None and shiboken6.isValid(value):
+            value.setText(self._theme_word())
         self._repolish_all()
         self._fit_centre_floor()
         # The curve window is not in this window's widget tree and would not repaint from the
