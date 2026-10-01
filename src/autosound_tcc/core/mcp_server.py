@@ -1358,10 +1358,11 @@ def build_server(
             detail = f"{detail}\n{why}".strip() if detail else why
         # And, when the CLI's own words name something we can act on, the ONE thing to do about
         # it. A message that explains a failure without naming the next action is the same dead
-        # end as `mode: clipboard` with nothing in it, one step further along. Not on a run that
-        # answered: the answer is the proof the route works, and on the VM an answered run's
-        # set-aside-pins line came back as «the reviewer CLI refused the model» (VM-4, tcc#113).
-        fix = "" if result.ok else critic.remedy(
+        # end as `mode: clipboard` with nothing in it, one step further along. On a run that
+        # answered, only the key note: the answer is the proof the route works — on the VM an
+        # answered run's set-aside-pins line came back as «the reviewer CLI refused the model»
+        # (VM-4, tcc#113) — but a key the API rejected before a CLI answered still costs every call.
+        fix = critic.fallback_note(result.detail) if result.ok else critic.remedy(
             result.detail, harness=configured_critic_harness(project_dir), project_dir=project_dir)
         if fix:
             detail = f"{detail}\n\nWhat to do: {fix}".strip() if detail else f"What to do: {fix}"

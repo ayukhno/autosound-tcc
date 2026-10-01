@@ -1077,6 +1077,10 @@ _MODEL_REFUSALS = {
                    "models/gemini-2.5-flash is no longer available to new users."),
     "method-omp-unknown": ">> Модель `google-antigravity/gemini-9` omp не знає: no such selector",
     "method-cli-unknown": ">> Модель `gemini-9` CLI 'agy' не знає: exit 1",
+    # skill #85 (`cli_model_mismatch`): an API id stepped down to agy, which does not list it.
+    "method-cli-mismatch": ("· CLI 'agy' не знає `gemini-3.1-pro-preview` (так модель називає API); "
+                            "його моделі цієї лінії: gemini-3.1-pro-high, gemini-3.1-pro-low. Задай "
+                            "AUTOSOUND_CRITIC_MODEL=<одна з них> -- сходинка сама модель не вгадує"),
 }
 
 
@@ -1089,8 +1093,11 @@ def test_the_pins_line_is_no_refusal():
     assert critic.remedy(tail, harness="agy") == ""
     assert critic.remedy(_VM_PINS, harness="agy") == ""
     assert critic.refusal_reason(_VM_PINS) is None
-    # «model» alone says nothing about a refusal.
+    # «model» alone says nothing about a refusal; nor does the method taking the CLI for a model
+    # the API does not know but the CLI serves.
     assert critic.remedy("the model answered in 10.5 s", harness="agy") == ""
+    assert critic.remedy(">> API не знає `gemini-3.1-pro-high` (404), а CLI agy її знає: шлях — CLI",
+                         harness="agy") == ""
 
 
 @pytest.mark.parametrize("said", list(_MODEL_REFUSALS.values()), ids=list(_MODEL_REFUSALS))
@@ -1114,5 +1121,54 @@ def test_the_model_refusal_words_are_the_vendored_methods_own():
     assert ('("bad_model", r"invalid model selection|not recognized as a known model|unknown model|'
             'Model \\"[^\\"]*\\" not found"),') in source
     for words in ("цей ключ викликати не може: HTTP 404", 'f"Модель `{model}` omp не знає: ',
-                  'f"Модель `{model}` CLI \'{cli_bin}\' не знає: '):
+                  'f"Модель `{model}` CLI \'{cli_bin}\' не знає: ',
+                  "CLI 'agy' не знає `{model}` (так модель називає API)"):
+        assert words in source, words
+
+
+# ── VM-4 review, Important 2: the rejected-key note on a run that answered ──────────────────────
+
+#: The method's step down from a failed API call to a CLI, with Gemini's words for a key it does
+#: not take (`autosound_ai.py`: `>> Помилка виклику API ({e}). Спроба локального CLI...`).
+_KEY_REJECTED = (">> Помилка виклику API (Помилка запиту до Gemini API: HTTP Error 400: Bad Request "
+                 "— API key not valid. Please pass a valid API key.). Спроба локального CLI...")
+#: An answered `--via api` run names the key it took — and says «api_key» while doing so.
+_VIA_API_KEY = (">> --via api: ключ GEMINI_API_KEY із середовища; "
+                "/Users/x/.config/autosound/critic-env (рядок 2) гасить його для інших запусків")
+
+
+def test_an_answer_after_a_rejected_key_keeps_the_key_note():
+    """The key was rejected and a CLI answered after it: the note is true — every call spends the
+    API attempt first — and an answered result is the only place a session can learn it."""
+    from autosound_tcc.core import critic
+
+    note = critic.fallback_note(f"{_VM_PINS}\n{_KEY_REJECTED}\n>> REVIEW_ROUTE: cli")
+    assert "`GEMINI_API_KEY` is set and the API rejected it" in note and "BEFORE" in note
+    assert "refused the model" not in note
+
+
+def test_the_key_note_on_an_answer_is_read_from_the_step_down_line_only():
+    """Not from the whole tail: the `--via api` line names the key, the pins line names variables,
+    and neither is a rejection."""
+    from autosound_tcc.core import critic
+
+    assert critic.fallback_note(f"{_VIA_API_KEY}\n>> REVIEW_ROUTE: api") == ""
+    assert critic.fallback_note(_VM_PINS) == ""
+    assert critic.fallback_note("Gemini API: HTTP 400 Bad Request") == "", "not the method's line"
+    assert critic.fallback_note(">> Помилка виклику API (HTTP Error 503: Service Unavailable). "
+                                "Спроба локального CLI...") == "", "a failure, not the key"
+    # A line that names no vendor names no variable either: not Gemini's for every key.
+    note = critic.fallback_note(">> Помилка виклику API (HTTP Error 400: Bad Request — API key "
+                                "not valid). Спроба локального CLI...")
+    assert "rejected it" in note and "GEMINI_API_KEY" not in note
+
+
+def test_the_step_down_line_is_the_vendored_methods_own():
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    for words in ('f">> Помилка виклику API ({e}). Спроба локального CLI..."',
+                  'f"Помилка запиту до Gemini API: {e}', 'f">> --via api: ключ {hidden[0]} із середовища; '):
         assert words in source, words

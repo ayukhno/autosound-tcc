@@ -637,18 +637,55 @@ _BAD_KEY_WORDS = ("http 400", "400 bad request", "api key", "api_key", "invalid 
 _LOCATION_WORDS = ("selected location", "your location", "your region", "not available in your country")
 #: A CLI refusing the model it was given, in its own words: the method's recogniser (`_FAILURES`'
 #: `bad_model`), agy's «model '…' is not available», the method's own 404 for a model the key
-#: cannot call, and its «Модель `…` omp не знає: …» / «… CLI 'agy' не знає: …». Not the bare word
-#: «model»: the method's line naming the pins a run set aside (`AUTOSOUND_CRITIC_MODEL=…`, hub
-#: #226) says it, and an answered run read as refused (VM-4).
+#: cannot call, its «Модель `…` omp не знає: …» / «… CLI 'agy' не знає: …», and its «CLI 'agy' не
+#: знає `…` (так модель називає API)» for an API id stepped down to agy (skill #85). Not the bare
+#: word «model»: the method's line naming the pins a run set aside (`AUTOSOUND_CRITIC_MODEL=…`, hub
+#: #226) says it, and an answered run read as refused (VM-4). Nor «API не знає `…` (404), а CLI її
+#: знає»: that is the method taking the CLI for a model it serves, not a refusal.
 _BAD_MODEL_WORDS = ("invalid model", "not recognized as a known model", "unknown model",
                     "not available", "цей ключ викликати не може", "не підтримується")
-_MODEL_NOT_FOUND = re.compile(r'\bmodel "[^"]*" not found|модель `[^`]*`[^\n]* не знає:')
+_MODEL_NOT_FOUND = re.compile(
+    r'\bmodel "[^"]*" not found|модель `[^`]*`[^\n]* не знає:|cli \'[^\']*\' не знає `[^`]+`')
+#: The method's step down from a failed API call to a CLI: `>> Помилка виклику API (<why>). Спроба
+#: локального CLI...`. On a run that answered, the one line that can say the key was rejected.
+_API_STEP_DOWN = re.compile(r"^>> Помилка виклику API \(.*$", re.M)
+#: The key a vendor's words point to, for a line that names no variable itself.
+_KEY_VARS = (("gemini", "GEMINI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
+             ("claude", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"))
 
 
 def _said(detail: str) -> str:
     """A failure's words as the hints read them: lowercased, and without the line that names the
     pins the run set aside — #113 reads that into the footer's note, never as a refusal (VM-4)."""
     return _PINS_LINE.sub("", detail or "").lower()
+
+
+def _key_note(line: str) -> str:
+    """The rejected-key note, naming the variable `line` (lowercased) points to — not Gemini's for
+    every key (VM-4 review); a line that names no vendor names no variable."""
+    named = re.search(r"\b[a-z]+_api_key\b", line)
+    var = named.group(0).upper() if named else next(
+        (var for word, var in _KEY_VARS if word in line), "")
+    return (
+        f"{f'`{var}`' if var else 'The API key'} is set and the API rejected it. It is tried "
+        "BEFORE the CLI, so every call spends that time first and then falls back. Replace the "
+        "key or remove the variable — with it gone the call goes straight to the CLI, which is "
+        "the path that works on a subscription login."
+    )
+
+
+def fallback_note(detail: str) -> str:
+    """On a run that ANSWERED, the one hint still true of it, or "": the API rejected the key and a
+    CLI answered after it, so every call spends the API's attempt first (VM-4 review).
+
+    Read from the method's own step-down line only, never the whole tail: an answered `--via api`
+    run names the key it took in another line («api_key»), and the pins line names variables too.
+    """
+    for line in _API_STEP_DOWN.findall(detail or ""):
+        said = line.lower()
+        if any(word in said for word in _BAD_KEY_WORDS):
+            return _key_note(said)
+    return ""
 
 
 def _refused_tool(said: str) -> str:
@@ -696,13 +733,9 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
             f"the reviewer CLI is asking permission it has no standing answer for. It needs that "
             f"answer in its own settings; this project is at {where}."
         )
-    if any(word in said for word in _BAD_KEY_WORDS):
-        return (
-            "`GEMINI_API_KEY` is set and the API rejected it. It is tried BEFORE the CLI, so every "
-            "call spends that time first and then falls back. Replace the key or remove the "
-            "variable — with it gone the call goes straight to the CLI, which is the path that "
-            "works on a subscription login."
-        )
+    keyed = [line for line in said.splitlines() if any(word in line for word in _BAD_KEY_WORDS)]
+    if keyed:
+        return _key_note(keyed[0])
     if any(word in said for word in _LOCATION_WORDS):
         return (
             "the reviewer's vendor does not offer this model from where this machine is — the CLI "

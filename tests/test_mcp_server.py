@@ -2252,17 +2252,19 @@ _SETS_A_PIN_ASIDE = (
 )
 
 
-def _reviewer_tools(tmp_path, monkeypatch, body):
-    """`ask_reviewer` and `call_critic` over a stub method, each called once: {tool: its answer}."""
+def _reviewer_tools(tmp_path, monkeypatch, body, *, via=""):
+    """`ask_reviewer` and `call_critic` over a stub method, each called once: {tool: its answer}.
+    With `via`, only `call_critic` — the door that takes it."""
     _pick_agy_reviewer(tmp_path, monkeypatch)
     _stub_reviewer(tmp_path, monkeypatch, _SETS_A_PIN_ASIDE + body)
     (tmp_path / "rew_analitic").mkdir(exist_ok=True)
     for name in ("data-contract-template.md", "autosound_context.md"):
         (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
     mcp, _, _ = _server(tmp_path, _CritiqueBridge())
-    return {tool: json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
-            for tool, args in (("ask_reviewer", {"question": "Are you there?"}),
-                               ("call_critic", {"package": "## proposal"}))}
+    calls = ((("call_critic", {"package": "## proposal", "via": via}),) if via else
+             (("ask_reviewer", {"question": "Are you there?"}),
+              ("call_critic", {"package": "## proposal"})))
+    return {tool: json.loads(_text(asyncio.run(mcp.call_tool(tool, args)))) for tool, args in calls}
 
 
 def test_a_run_that_answered_carries_no_refusal_hint(tmp_path, monkeypatch):
@@ -2302,3 +2304,48 @@ def test_a_real_model_refusal_still_says_what_to_do(tmp_path, monkeypatch):
     for tool, out in answers.items():
         assert out["mode"] == critic.MODE_CLIPBOARD, (tool, out)
         assert "What to do: the reviewer CLI refused the model" in out["detail"], (tool, out)
+
+
+#: The method's step down from a failed API call to a CLI, with Gemini's words for a key it does
+#: not take — then a CLI answers.
+_KEY_REJECTED = (">> Помилка виклику API (Помилка запиту до Gemini API: HTTP Error 400: Bad Request "
+                 "— API key not valid. Please pass a valid API key.). Спроба локального CLI...")
+_ANSWERS = "print('pong')\nprint('— [' + args[0] + ': ' + pick + ']')\n"
+
+
+def test_an_answer_after_a_rejected_key_still_says_the_key_costs_time(tmp_path, monkeypatch):
+    """VM-4 review, Important 2: the API rejected the key, a CLI answered after it. «Every call
+    spends that time first» is true of that run, and its result is the only place a session can
+    learn it — through either door, with the pins line beside it and no refusal hint."""
+    from autosound_tcc.core import availability, critic
+
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch,
+                                  f"print({_KEY_REJECTED!r}, file=sys.stderr)\n" + _ANSWERS)
+    finally:
+        availability.reset()
+    for tool, out in answers.items():
+        assert out["mode"] == critic.MODE_API_OR_CLI, (tool, out)
+        assert "What to do: `GEMINI_API_KEY` is set and the API rejected it" in out["detail"], (
+            tool, out["detail"])
+        assert "refused the model" not in out["detail"], (tool, out["detail"])
+
+
+def test_an_answered_api_run_that_names_its_key_gets_no_key_note(tmp_path, monkeypatch):
+    """`--via api` names the key it took (`>> --via api: ключ GEMINI_API_KEY із середовища …`),
+    and «api_key» in it read as «the API rejected it» — on a run the API answered."""
+    from autosound_tcc.core import availability, critic
+
+    named = (">> --via api: ключ GEMINI_API_KEY із середовища; "
+             "/Users/x/.config/autosound/critic-env (рядок 2) гасить його для інших запусків")
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch, (
+            f"print({named!r}, file=sys.stderr)\n"
+            "print('>> REVIEW_ROUTE: api', file=sys.stderr)\n" + _ANSWERS), via="api")
+    finally:
+        availability.reset()
+    out = answers["call_critic"]
+    assert out["mode"] == critic.MODE_API_OR_CLI, out
+    assert "What to do" not in out["detail"] and "rejected" not in out["detail"], out["detail"]
