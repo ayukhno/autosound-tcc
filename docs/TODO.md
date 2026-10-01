@@ -1863,7 +1863,7 @@ worked wave gets it retroactively, or `W-1` opens on the next one, is the user's
 
 ### F-066 — shard weights are macOS seconds, and Windows does not scale from them
 
-**Статус**: відкладено · by the Arbiter's word (tcc#69 deferred); returns at the W-5 review (F-090) · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: dropped 2026-10-01 · the Arbiter at the pre-release walk: not worth the work with one PR per wave; returns if CI time creeps up; tcc#69 closed · was: відкладено (tcc#69) · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Run 35430530459, all twelve shards green: ubuntu came out 108 · 115 · 194 · 111 s and
 windows 137 · 159 · 268 · 200. The packing is the same for both — `tests/shard-weights.json` is
@@ -1883,7 +1883,7 @@ wall time.
 
 ### F-065 — the suite costs three times more in one process than the same files do apart
 
-**Статус**: відкладено · by the Arbiter's word (tcc#69 deferred); returns at the W-5 review (F-090) — `990ea0c` in W-4 cut the main one-process cost, what is left gets measured there · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
+**Статус**: done 2026-10-01 · in W-4 (`990ea0c`, `81d5f77`): the whole suite on main is 5 min Linux / 12 min Windows (run on `4f075d0`), was >45 min; tcc#69 closed at the pre-release walk · was: відкладено (tcc#69) · was: not taken into W-4 (2026-09-27, tcc#69 deferred) · deferred again 2026-09-26 at the W-3 review (tcc#69, off the milestone) · deferred 2026-09-23 · out of W-2 by the Arbiter's word: CI machinery, needs CI measurements · returns: at the next wave's review
 
 **The fact.** Two recordings of the same tree, same machine (M1 Pro), same day:
 
@@ -2083,6 +2083,8 @@ Belongs to W-5 so far:
 6. tcc#94 / F-023, a capture addressed by its round (uuid) → after v1.1.0, one wave with tcc#21: both stand on the
    same uuid index;
 7. findings 12, 17, 19, 21, 37, 38 → closed: fixed in code or not seen since 0.1.39 (each says where).
+8. F-057, «the virtual DSP's calculations» with no description → dropped.
+9. tcc#69, test machinery → closed: F-071 closed 26.09, F-065 done in W-4, F-066 dropped.
 
 Each new finding goes to `TEST-FINDINGS.md` (122 onward), recorded, not diagnosed. On the Arbiter's «збір
 закінчено» the milestone `W-5 · v0.1.46` opens and each item becomes an issue on it with the four assessment lines;
@@ -2502,7 +2504,7 @@ day on the same subject):
 
 ### F-057 — The method's virtual-DSP calculations (skill side)
 
-**Статус**: відкладено · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for a separate session
+**Статус**: dropped 2026-10-01 · the Arbiter at the pre-release walk: never described with numbers; the related skill#29–#35 and hub #117 are closed, the method moved v3.0.52 → v3.0.64; a repeat comes as a new finding with numbers · was: відкладено · the Arbiter, 2026-09-14: "a problem with the calculations in the skill's virtual DSP"; for a separate session
 
 The method's, not TCC's: once the next session has it described with numbers, it goes to the skill as
 a bus ticket (related: skill#29–#35 from the remote run, hub #117 on the Resonalyze readers). Nothing
