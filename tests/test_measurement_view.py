@@ -485,8 +485,9 @@ def test_a_title_ending_in_something_other_than_the_method_still_sorts_by_it(tmp
 
 # ---- a title the grammar refuses still sorts by its method tag (tcc#109, finding 117) -----------
 # `testAgy-auto`, rounds `cap_010` and `cap_013`: the notes after the tag are the grammar's own
-# clarification (naming.py `_TAGGED_RE`, `params`) -- what it refuses is the `D_` before the code
-# (S-042: `_` only begins the series). Refused, the title fell to its last word and to SW.
+# clarification (naming.py `_TAGGED_RE`, `params`) -- what it refused was the `D_` before the code
+# (S-042: `_` only begins the series). Refused, the title fell to its last word and to SW. Since the
+# method's v3.0.65 the grammar reads them, `D_L` as `D-L` (S-079); they sort the same either way.
 _CAP_013_TAKEN = {
     "D_SW+Ws_9 (rta)": {"at": "2026-09-24T14:41:01+00:00", "planned": True},
     "D_ALL_9 (rta)": {"at": "2026-09-24T14:41:02+00:00", "planned": True},
@@ -519,7 +520,9 @@ def test_a_past_round_puts_its_unplanned_rta_captures_under_rta():
 
 
 def test_an_open_round_puts_an_rta_with_a_note_under_rta(project):
-    """`cap_010` while open: the round's own list, grouped by `groups_from_titles`."""
+    """`cap_010` while open: the round's own list, grouped by `groups_from_titles`. The method reads
+    `D_L` as `D-L` since v3.0.65 (S-079), so the names come back in its one notation, the way
+    `sw_01 (sw)` comes back `sw_1 (sw)`."""
     process_view.process_dir(project).mkdir(parents=True, exist_ok=True)
     (process_view.process_dir(project) / "process-state.json").write_text(
         json.dumps({"schema_version": 1, "active_phase": "2", "plan": [],
@@ -532,7 +535,7 @@ def test_an_open_round_puts_an_rta_with_a_note_under_rta(project):
     session = mv.build_session("2", 7, [], project)
 
     assert [g.method for g in session.groups] == ["rta"]
-    assert _names(session) == [_CAP_010_TITLE, "D_L w+m_7 (rta) inv"]
+    assert _names(session) == ["D-L_7 (rta) m-L: lev=-4.5, PK=-2", "D-L w+m_7 (rta) inv"]
 
 
 @pytest.mark.parametrize("title", [
@@ -577,23 +580,24 @@ def test_every_method_the_grammar_knows_heads_its_column_with_a_name():
 def test_an_open_round_shows_an_unplanned_take_the_grammar_cannot_read(project):
     """tcc#122 (W-4's review of #109): an open round lists what it asks for, and REW's extras
     where the grammar reads them; a take captured though nobody asked, with a title the grammar
-    refuses — `D_` before the code (S-042) — was on neither list and never showed until the round
-    closed. It shows among the extras, as typed, marked unread for the panel to say «не
-    розібрано»; one the grammar reads is not marked."""
+    refuses, was on neither list and never showed until the round closed. It shows among the
+    extras, as typed, marked unread for the panel to say «не розібрано»; one the grammar reads is
+    not marked. The live title was `D_L w+m_7 (rta) inv`, refused for its `D_` (S-042) until the
+    method's v3.0.65 read it as `D-L` (S-079); this one has no `_` before its series."""
     process_view.process_dir(project).mkdir(parents=True, exist_ok=True)
     (process_view.process_dir(project) / "process-state.json").write_text(
         json.dumps({"schema_version": 1, "active_phase": "2", "plan": [],
                     "capture": {"id": "cap_010", "phase": "2", "version": "7",
                                 "expected": ["w-L_7 (rta)"],
                                 "taken": {"w-L_7 (rta)": {"planned": True},
-                                          "D_L w+m_7 (rta) inv": {"planned": False}}}}),
+                                          "L w+m 7 (rta) inv": {"planned": False}}}}),
         encoding="utf-8",
     )
 
     session = mv.build_session("2", 7, ["w-R_7 (rta)"], project)
 
     items = {i.name: i for g in session.groups for i in g.items}
-    unread = items.get("D_L w+m_7 (rta) inv")
+    unread = items.get("L w+m 7 (rta) inv")
     assert unread is not None, _names(session)
     assert unread.additional and unread.unread, unread
     assert unread.status == mv.STATUS_DONE, "the round took it in"

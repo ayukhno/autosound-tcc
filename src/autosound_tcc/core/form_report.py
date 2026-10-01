@@ -47,7 +47,7 @@ from autosound_tcc.core import install_report, vendor_loader
 #: `is_available()` asks the second one.
 _MODULE = "gates/side_effect.py"
 
-#: What a person writing a report chooses from — the form's kinds minus "Тест", which is for probes
+#: What a person writing a report chooses from — the form's kinds minus "Test", which is for probes
 #: so the sheet needs no cleaning after a check (the Arbiter, 2026-09-17). The split is the gate's
 #: too (`FORM_PERSON_KINDS`); this name is what the window reads.
 _FALLBACK_TIMEOUT_S = 20
@@ -96,13 +96,17 @@ def post_url() -> str:
 
 
 def kind_answers() -> dict[str, str]:
-    """`{"problem": "Проблема", …}` — the form's own words, empty without the method."""
+    """`{"problem": "Problem", …}` — the form's own words, empty without the method.
+
+    English since the method's v3.0.65 (the Arbiter, 2026-10-01; hub #231): the keys are the
+    contract and did not move, the words did — and the form takes only the words it lists.
+    """
     gate = _form_gate()
     return dict(gate.FORM_KINDS) if gate is not None else {}
 
 
 def impact_answers() -> dict[str, str]:
-    """`{"stops": "Зупиняє: …", …}` — the form's own words, empty without the method."""
+    """`{"stops": "Stops tuning: …", …}` — the form's own words, empty without the method."""
     gate = _form_gate()
     return dict(gate.FORM_IMPACTS) if gate is not None else {}
 
@@ -115,7 +119,7 @@ def kinds() -> tuple[str, ...]:
 def person_kinds() -> tuple[str, ...]:
     """What a person writing a report chooses from: the form's kinds without the probe kind.
 
-    "Тест" is for probes — a kind of its own, so the sheet needs no cleaning after a check (the
+    "Test" is for probes — a kind of its own, so the sheet needs no cleaning after a check (the
     Arbiter, 2026-09-17). The split is the gate's (`FORM_PERSON_KINDS`); an older or newer method
     that does not name it is read as "every kind a person may choose".
     """
@@ -188,8 +192,9 @@ def compose(message: str, attachment: str = "") -> str:
 def fields(report: Report) -> dict[str, str]:
     """The form's question ids with their answers, built by the gate.
 
-    Raises `ValueError` for what the form would not take — no sender, no words, or a choice it does
-    not list — and `NoForm` when there is no method to ask.
+    Raises `ValueError` for what the form would not take — no words, or a choice it does not list —
+    and `NoForm` when there is no method to ask. An empty sender is the method's to judge: left out
+    of the answers since v3.0.65 (hub #228), refused by an older one.
     """
     gate = _required_gate()
     return dict(gate.form_answers(report.sender, report.kind, report.message,

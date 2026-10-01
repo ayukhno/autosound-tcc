@@ -137,8 +137,10 @@ def groups_from_titles(titles) -> list[dict]:
 
     A title the grammar refuses is read for its method tag where the grammar would find it, not by
     its last word (tcc#109, finding 117): `D_L w+m_9 (rta) inv` and `D_L_7 (rta) m-L: lev=-4.5,
-    PK=-2` carry the note the grammar welcomes and are refused only for the `D_` before the code
-    (S-042) -- by the suffix they went under SW. A title with no tag at all stays under SW.
+    PK=-2` carry the note the grammar welcomes and were refused only for the `D_` before the code
+    (S-042) -- by the suffix they went under SW. The method reads them since v3.0.65 (`D_L` as
+    `D-L`, S-079); the fallback stays for a title it still refuses and for an older method. A title
+    with no tag at all stays under SW.
     """
     try:
         naming = vendor_loader.load_naming()
@@ -456,8 +458,9 @@ def build_session(
     extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys)
     if round_open:
         # Captured in this round though nobody asked, under a title the grammar cannot read --
-        # `D_L w+m_7 (rta) inv`, the `D_` refused (S-042). On neither list above, it never showed
-        # until the round closed (tcc#122, W-4's review of #109). As typed, marked for the panel.
+        # `L w+m 7 (rta) inv`, no `_` before the series (the live one, `D_L w+m_7 (rta) inv`, is
+        # read since the method's v3.0.65, S-079). On neither list above, it never showed until
+        # the round closed (tcc#122, W-4's review of #109). As typed, marked for the panel.
         listed = {n for spec in groups_spec for n in spec["names"]}
         listed |= {str(t) for t in round_.get("expected") or []}
         extras += tuple(

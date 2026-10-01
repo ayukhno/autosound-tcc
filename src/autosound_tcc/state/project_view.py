@@ -63,8 +63,10 @@ def fact_inherited(x: Any) -> bool:
     """Whether a fact was carried in from another project rather than established on this build.
 
     `origin: inherited` since the method's v3.0.53 (hub #154 §4): `project_seed.py` marks what it
-    copies, and the pre-sweep gate holds a fragile driver's inherited Fs until the Arbiter confirms
-    or measures it. Absent means `here`, as every fact written before.
+    copies. Since v3.0.65 the pre-sweep gate WARNS on a fragile driver's inherited Fs and the sweep
+    goes on (`presweep_warnings`, hub #225) — the high-pass is still held to 1.1 × that Fs — until
+    the Arbiter confirms it or it is measured here. Absent means `here`, as every fact written
+    before.
     """
     return isinstance(x, dict) and x.get("origin") == "inherited"
 

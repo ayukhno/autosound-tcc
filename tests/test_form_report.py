@@ -47,10 +47,12 @@ def test_a_version_that_cannot_be_told_is_said_rather_than_left_blank():
 
 
 def test_every_answer_goes_to_its_own_question():
+    # The form's words are English since the method's v3.0.65 (hub #231); the person's own stay
+    # as typed.
     assert form_report.fields(_report()) == {
         _GATE.FORM_FIELD_SENDER: "Олег, @oleg",
-        _GATE.FORM_FIELD_KIND: "Проблема",
-        _GATE.FORM_FIELD_IMPACT: "Зупиняє: далі налаштовувати не можу",
+        _GATE.FORM_FIELD_KIND: "Problem",
+        _GATE.FORM_FIELD_IMPACT: "Stops tuning: I can't go on",
         _GATE.FORM_FIELD_MESSAGE: "it froze",
         _GATE.FORM_FIELD_VERSIONS: "TCC 1",
     }
@@ -84,16 +86,17 @@ def test_the_answers_are_the_forms_own_words():
 
 
 def test_a_person_is_offered_every_kind_but_the_test_one():
-    # "Тест" is for probes (the Arbiter, 2026-09-17: a kind of its own, so the sheet needs no
+    # "Test" is for probes (the Arbiter, 2026-09-17: a kind of its own, so the sheet needs no
     # cleaning after a check) — not a choice for someone writing about their car.
     assert form_report.person_kinds() == ("problem", "wish", "feedback")
     assert "test" in form_report.kinds()
 
 
-def test_a_report_without_a_sender_or_words_is_refused():
-    # Both are required by the form: the Arbiter answers people, so he must know who wrote.
-    with pytest.raises(ValueError):
-        form_report.fields(_report(sender="  "))
+def test_a_report_without_words_is_refused_and_one_without_a_sender_is_not():
+    # The sender is optional since the method's v3.0.65 (hub #228, finding 135): it is for an
+    # answer, if the person wants one, and an empty one is left out rather than sent blank.
+    got = form_report.fields(_report(sender="  "))
+    assert _GATE.FORM_FIELD_SENDER not in got and got[_GATE.FORM_FIELD_MESSAGE] == "it froze"
     with pytest.raises(ValueError):
         form_report.fields(_report(message="  "))
 
@@ -115,7 +118,7 @@ def test_the_words_come_first_and_the_attachment_under_them():
 def test_the_report_as_text_keeps_every_answer_for_a_paste():
     text = form_report.as_text(_report())
 
-    for part in ("Олег, @oleg", "Проблема", "Зупиняє", "it froze", "TCC 1"):
+    for part in ("Олег, @oleg", "Problem", "Stops tuning", "it froze", "TCC 1"):
         assert part in text
 
 

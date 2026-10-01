@@ -1553,8 +1553,10 @@ class DiagnosticsDialog(QDialog):
         self._body_layout.addWidget(_note(_rew_line(report)))
 
         # Facts carried in from another project, and sources that are gone (hub #154 §3/§4).
-        # Reported, never gated — so not counted in the headline — but named: a fragile driver's
-        # inherited Fs holds the pre-sweep gate until the Arbiter confirms or measures it.
+        # Reported, never gated — so not counted in the headline — but named. The pre-sweep gate
+        # gates on them no more either (the method's v3.0.65, hub #225): a fragile driver's
+        # inherited Fs is a warning before the sweep (`presweep_warnings`), the sweep goes on, and
+        # the high-pass is still held to 1.1 × that Fs.
         if report.inherited or report.sources_gone:
             self._body_layout.addWidget(_section_title(i18n.t("diagInherited")))
             for row in report.inherited:
