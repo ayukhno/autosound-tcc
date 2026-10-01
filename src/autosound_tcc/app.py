@@ -465,9 +465,21 @@ def main() -> int:
         flag = "--uninstall-desktop" if args.uninstall_desktop else "--install-desktop"
         app_log.logger().info("%s: exit %d — %s", flag, code,
                               app_log.brief(" | ".join(result.lines + result.notes)))
-        for stream in (sys.stdout, sys.stderr):
-            if stream is not None:  # `pythonw.exe` handed no handle has no stream at all
+        for name in ("stdout", "stderr"):
+            stream = getattr(sys, name)
+            if stream is None:  # `pythonw.exe` handed no handle has no stream at all
+                continue
+            try:
                 stream.flush()
+            except (OSError, ValueError) as exc:
+                # A caller that stopped reading: BrokenPipeError (EPIPE, and Windows'
+                # ERROR_BROKEN_PIPE), or on Windows OSError 22 (EINVAL), which is what the C runtime
+                # makes of a pipe whose reader closed; ValueError is a stream already closed. The
+                # shortcuts are what they are either way, and the exit is the one just logged
+                # (final review, Minor 1). The stream is dropped as well: the interpreter flushes it
+                # again at exit, and a second failure there would turn this exit into 120.
+                app_log.logger().info("%s: %s not written: %s", flag, name, exc)
+                setattr(sys, name, None)
         return code
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.

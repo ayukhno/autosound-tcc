@@ -320,6 +320,28 @@ def test_an_ordinary_start_spawns_nothing(monkeypatch, tmp_path):
     assert desktop_entry.repair_pins(tmp_path / "nowhere", launcher=_LAUNCHER) == []
 
 
+def test_a_powershell_that_never_answers_is_not_stamped_and_does_not_hang(monkeypatch, tmp_path):
+    """From `--install-desktop` a PowerShell that hangs would hang the install, and from the
+    start-up repair it would hold a thread for the session (final review, Minor 4). Bounded, and
+    a run that runs out is the same answer as one that failed: not stamped, said, never raised."""
+    seen = {}
+
+    def _run(args, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        raise desktop_entry.subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+
+    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    result = desktop_entry.Result(True)
+
+    assert desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result) is False
+    assert seen["timeout"] == desktop_entry.STAMP_TIMEOUT_S
+    assert result.ok
+    assert any("second taskbar button" in line for line in result.lines)
+    assert any("did not answer" in line for line in result.lines)
+    # The repair that reuses it, on its thread at start-up, stays quiet the same way.
+    assert len(desktop_entry.repair_pins(_pinned(tmp_path), launcher=_LAUNCHER)) == 2
+
+
 def test_a_repair_that_cannot_spawn_does_not_raise(monkeypatch, tmp_path):
     """It runs on a thread of its own while the window is up, and an exception there is an error
     shown in the window -- for a repair that is best effort, like the stamp it reuses."""
@@ -437,6 +459,13 @@ from autosound_tcc import app
 from autosound_tcc.core import child, desktop_entry
 
 outcome = sys.argv[1]
+end = sys.argv[2]
+if end == "reader-gone":
+    # stdout becomes a pipe nobody reads any more: EPIPE on POSIX, EINVAL (22) on Windows.
+    r, w = os.pipe()
+    os.close(r)
+    os.dup2(w, 1)
+    os.close(w)
 
 def fake_install():
     if outcome == "ok":
@@ -448,11 +477,14 @@ desktop_entry.install_desktop = fake_install
 # a Windows runner with no console it would put one on screen.
 child.open_app_console = lambda *a, **k: False
 sys.argv = ["autosound-tcc", "--install-desktop"]
-os._exit(app.main())
+code = app.main()
+if end == "abrupt":
+    os._exit(code)
+sys.exit(code)
 """
 
 
-def _run_install_desktop(tmp_path, outcome: str):
+def _run_install_desktop(tmp_path, outcome: str, end: str = "abrupt"):
     import subprocess
     import sys
 
@@ -460,7 +492,7 @@ def _run_install_desktop(tmp_path, outcome: str):
     # The log goes under tmp_path on every platform (`app_log.log_dir`), not into the real one.
     env.update(HOME=str(tmp_path), LOCALAPPDATA=str(tmp_path), XDG_STATE_HOME=str(tmp_path))
     return subprocess.run(
-        [sys.executable, "-c", _INSTALL_DESKTOP_CHILD, outcome],
+        [sys.executable, "-c", _INSTALL_DESKTOP_CHILD, outcome, end],
         stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env, timeout=120,
     )
 
@@ -484,6 +516,56 @@ def test_install_desktop_is_non_zero_only_on_a_real_failure(tmp_path):
     assert "the shortcuts were not created: refused" in proc.stderr
     log = next(tmp_path.rglob("tcc.log")).read_text(encoding="utf-8")
     assert "--install-desktop: exit 1" in log
+
+
+def test_a_caller_that_stopped_reading_does_not_change_the_exit_the_log_names(tmp_path):
+    """The log line is what the VM recipe reads first (hub #229), so it must name the exit the
+    process really has. A flush into a pipe whose reader is gone raised out of `main()` -- exit 1
+    under a log saying `exit 0` -- and swallowing it alone was not enough: the interpreter flushes
+    the same buffer again at exit, and a failure there makes the exit 120 (final review, Minor 1).
+    """
+    proc = _run_install_desktop(tmp_path, "ok", end="reader-gone")
+
+    log = next(tmp_path.rglob("tcc.log")).read_text(encoding="utf-8")
+    assert "--install-desktop: exit 0" in log
+    assert proc.returncode == 0, proc.stderr
+
+
+class _Unwritable:
+    """A standard stream whose flush raises, the way a caller's pipe does once it is gone."""
+
+    def __init__(self, error):
+        self.error = error
+
+    def write(self, text):
+        return len(text)
+
+    def flush(self):
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [
+    BrokenPipeError(32, "Broken pipe"),      # POSIX, and Windows' ERROR_BROKEN_PIPE
+    OSError(22, "Invalid argument"),         # Windows: the C runtime's word for a reader gone
+    ValueError("I/O operation on closed file."),
+], ids=["EPIPE", "EINVAL", "closed"])
+def test_a_flush_that_raises_leaves_the_exit_code_alone(monkeypatch, error):
+    import sys
+
+    from autosound_tcc import app as app_module
+    from autosound_tcc.core import app_log, child
+
+    monkeypatch.setattr(app_log, "setup", lambda *a, **k: None)
+    monkeypatch.setattr(app_log, "note_start", lambda *a, **k: False)
+    monkeypatch.setattr(child, "open_app_console", lambda *a, **k: False)
+    monkeypatch.setattr(child, "hide_console_windows", lambda *a, **k: None)
+    monkeypatch.setattr(desktop_entry, "install_desktop",
+                        lambda: desktop_entry.Result(True).say("Built: /made/Autosound TCC.lnk"))
+    monkeypatch.setattr(sys, "argv", ["autosound-tcc", "--install-desktop"])
+    monkeypatch.setattr(sys, "stdout", _Unwritable(error))
+
+    assert app_module.main() == 0
+    assert sys.stdout is None, "kept, it would fail again in the interpreter's own flush at exit"
 
 
 def test_every_path_it_creates_is_printed_on_a_line_of_its_own(tmp_path):

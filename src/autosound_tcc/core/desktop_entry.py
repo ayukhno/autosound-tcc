@@ -522,6 +522,11 @@ def _install_windows(launcher: Path) -> Result:
     return result
 
 
+#: How long the stamp's PowerShell may take. `Add-Type` compiles C# on every run, which costs
+#: seconds; a minute is a hang, not a slow machine.
+STAMP_TIMEOUT_S = 60.0
+
+
 def _stamp_windows(targets: list[Path], result: Result) -> bool:
     """Give the shortcuts the same application identity the running window claims.
 
@@ -531,17 +536,24 @@ def _stamp_windows(targets: list[Path], result: Result) -> bool:
     failure. See `_stamp_script` for what is being written and why it needs COM. True when the
     script ran clean.
     """
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-         _stamp_script(targets, BUNDLE_ID)],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        **child.quiet(),
-    )
-    if proc.returncode == 0:
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             _stamp_script(targets, BUNDLE_ID)],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=STAMP_TIMEOUT_S,
+            **child.quiet(),
+        )
+        ran, said = proc.returncode == 0, (proc.stderr or "").strip()
+    except subprocess.TimeoutExpired:
+        # Not stamped, and said like any other failure: from `--install-desktop` a PowerShell that
+        # hangs would hang the install (final review, Minor 4).
+        ran, said = False, f"PowerShell did not answer in {STAMP_TIMEOUT_S:.0f} s."
+    if ran:
         # «Pinned and running are one button» held for a pin made from the RUNNING window only: a
         # pin made from the shortcut loses the id (Windows drops it when it pins a shortcut, and
         # stamping the pinned copy afterwards did not help — finding 104, tcc#62). Stamping it AND
@@ -553,7 +565,7 @@ def _stamp_windows(targets: list[Path], result: Result) -> bool:
         return True
     result.say(
         "note: the shortcuts could not be given the app id — pinning one will show a second "
-        f"taskbar button when it runs. {(proc.stderr or '').strip()[:160]}"
+        f"taskbar button when it runs. {said[:160]}"
     )
     return False
 
