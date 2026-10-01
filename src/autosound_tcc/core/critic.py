@@ -69,6 +69,10 @@ _REFUSED_EXIT = 4
 #: what came back was two missing filenames in English under a Ukrainian UI (user, 2026-08-13).
 MODE_NOT_READY = "not_ready"
 
+#: The method's plain-question task, `autosound_ai.py ask` (skill#27): the same reviewer and
+#: channel as a review, with no tuning contract and no project needed (finding 124, tcc#116).
+ASK = "ask"
+
 
 @dataclass(frozen=True)
 class CriticResult:
@@ -179,6 +183,11 @@ def _find_for_script(project_dir: Path, name: str) -> Optional[Path]:
     return None
 
 
+def _script_missing() -> list[str]:
+    """The one reason that holds back every task, `ask` included: no reviewer script at all."""
+    return [] if is_available() else [f"reviewer script not found at {script_path()}"]
+
+
 def preflight(project_dir: Optional[Path] = None) -> list[str]:
     """Reasons the Critic cannot run yet, as user-facing lines. Empty list = ready.
 
@@ -186,9 +195,7 @@ def preflight(project_dir: Optional[Path] = None) -> list[str]:
     missing file, and "nothing happened" is the worst thing a button can do.
     """
     project_dir = Path(project_dir or config.project_dir())
-    problems: list[str] = []
-    if not is_available():
-        problems.append(f"reviewer script not found at {script_path()}")
+    problems = _script_missing()
     for name in ("data-contract-template.md", "autosound_context.md"):
         if _find_for_script(project_dir, name) is None:
             problems.append(f"{name} not found in {project_dir} (nor in rew_analitic/)")
@@ -261,6 +268,17 @@ def write_package(markdown: str, project_dir: Optional[Path] = None) -> Path:
     path = folder / f"pkg_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     path.write_text(markdown, encoding="utf-8")
     return path
+
+
+def ask_package(question: str, context: str = "") -> str:
+    """What `ask` reads from its file: the question, then the session's own context under a heading.
+
+    The method takes a file, not text (`autosound_ai.py ask <question.md>`), puts it under
+    «GENERATOR'S QUESTION», and adds the project's `autosound_context.md` as background itself
+    when there is one — so only what the session adds goes here (tcc#116).
+    """
+    context = (context or "").strip()
+    return (question or "").strip() + (f"\n\n## Context\n\n{context}" if context else "") + "\n"
 
 
 def _package_file(package: str, project_dir: Path) -> Optional[Path]:
@@ -354,6 +372,9 @@ def run(
 
     `via` — `api`, `cli` or `clipboard` — is the route for THIS run, the script's own `--via`
     (tcc#59): after a cut-off CLI stream the method says to take one review through the key.
+
+    `role` is the method's task: `critic` (the default), `advisor`, or `ASK` — a plain question,
+    which needs neither the contract nor the context and is always sent as text (tcc#116).
     """
     # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
     python_executable = python_executable or child.script_interpreter()
@@ -361,18 +382,25 @@ def run(
     started = time.monotonic()
     called_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    problems = preflight(project_dir)
+    # `ask` runs where intake has not been (skill#27) — and «check the Critic at the start» is
+    # asked exactly there (finding 124) — so only a missing script holds it back.
+    problems = _script_missing() if role == ASK else preflight(project_dir)
     if problems:
         # A missing SCRIPT is a broken install; missing project files are a project that has not
         # started yet. Same list, two different things to say about it.
         mode = MODE_ERROR if not is_available() else MODE_NOT_READY
         return CriticResult(mode, "", None, role, "; ".join(problems), 0.0, called_at)
 
-    package_path = _package_file(package, project_dir)
-    if package_path is None and _shaped_like_a_package_path(package):
-        return CriticResult(MODE_ERROR, "", None, role, f"no package file at {package.strip()}",
-                            0.0, called_at)
-    package_path = package_path or write_package(package, project_dir)
+    if role == ASK:
+        # A question is text, always: «what does process/reviews/x.md say?» is about that file,
+        # and sent as the file — or refused as one that is missing — it answers nobody (tcc#116).
+        package_path = write_package(package, project_dir)
+    else:
+        package_path = _package_file(package, project_dir)
+        if package_path is None and _shaped_like_a_package_path(package):
+            return CriticResult(MODE_ERROR, "", None, role, f"no package file at {package.strip()}",
+                                0.0, called_at)
+        package_path = package_path or write_package(package, project_dir)
 
     argv = [python_executable, str(script_path()), role, str(package_path)]
     if trace_path:

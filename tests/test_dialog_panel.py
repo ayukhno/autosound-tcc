@@ -422,3 +422,17 @@ def test_a_message_with_no_time_of_its_own_shows_none():
 
     bare = MessageBubble("gen", "GENERATOR · X", "Hi")
     assert bare._time_label.isHidden() and not bare._time_label.text()
+
+
+def test_an_answer_to_a_plain_question_is_labelled_ask_not_critic():
+    """tcc#116: a question to the reviewer is not a review, and its answer must not read as one."""
+    _app()
+    panel = DialogPanel()
+
+    panel.add_critique({"mode": "answered", "role": "ask", "text": "pong",
+                        "model": "gemini-3.1-pro-high"})
+    assert panel._bubbles[-1]._role == "ASK · gemini-3.1-pro-high"
+
+    panel.add_critique({"mode": "answered", "role": "critic", "text": "too hot",
+                        "model": "gemini-3.1-pro-high"})
+    assert panel._bubbles[-1]._role == "Critic · gemini-3.1-pro-high"

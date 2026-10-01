@@ -799,3 +799,61 @@ def test_an_api_pick_runs_through_the_key_and_an_omp_pick_hands_a_session_nothin
     project_settings.set_value(config.tcc_dir(tmp_path), "critic",
                                "omp:google-antigravity/gemini-3.1-pro-high")
     assert critic.session_env(tmp_path) == {}
+
+
+# ---- ask: a plain question on the reviewer's channel (tcc#116) --------------------------------
+
+
+def test_ask_runs_the_methods_ask_task_in_a_project_with_no_tuning_files(stubbed, tmp_path):
+    """Finding 124: «перевір критика зразу при старті через режим ASK» — at the start, so in a
+    folder intake has not reached. The method's `ask` needs no contract and no context (skill#27),
+    so TCC must not hold it back for the two files a review needs; the model goes over exactly as
+    a review's does."""
+    stubbed(
+        "print('task=' + sys.argv[1])\n"
+        "print('model=' + os.environ.get('GEMINI_CRITIC_MODEL', 'unset'))\n"
+        "print('question=' + open(sys.argv[2], encoding='utf-8').read().strip())\n"
+        "print('— [ask: gemini-3.1-pro-high]')\n"
+    )
+    bare = tmp_path / "fresh"
+    bare.mkdir()
+
+    result = critic.run("Are you there?", project_dir=bare, role=critic.ASK,
+                        model="gemini-3.1-pro-high", python_executable=sys.executable)
+
+    assert result.mode == critic.MODE_API_OR_CLI, result.detail
+    assert "task=ask" in result.text
+    assert "model=gemini-3.1-pro-high" in result.text
+    assert "question=Are you there?" in result.text
+    assert result.role == "ask" and result.model == "gemini-3.1-pro-high"
+    # The same folder, asked for a review: still not ready, the two files are still missing.
+    assert critic.run("pkg", project_dir=bare,
+                      python_executable=sys.executable).mode == critic.MODE_NOT_READY
+
+
+def test_a_question_is_sent_as_text_even_when_it_reads_like_a_package_path(stubbed, tmp_path):
+    """A review's one-line `….md` is a package path (tcc#119); a question never is. «Що в
+    process/reviews/old-critic.md?» sent as that file's contents, or refused as "no package file",
+    would answer a question nobody asked."""
+    stubbed("print(open(sys.argv[2], encoding='utf-8').read())\nprint('— [ask: m]')\n")
+    project = _project(tmp_path)
+    (project / "process" / "reviews").mkdir(parents=True)
+    (project / "process" / "reviews" / "old-critic.md").write_text("THE OLD REVIEW", encoding="utf-8")
+
+    for question in ("process/reviews/old-critic.md", "process/reviews/missing.md"):
+        result = critic.run(question, project_dir=project, role=critic.ASK,
+                            python_executable=sys.executable)
+        assert result.ok, result.detail
+        assert result.text.strip() == question
+
+
+def test_the_ask_package_is_the_question_then_the_sessions_context():
+    """The script puts the file under «GENERATOR'S QUESTION» and adds the project's own context as
+    background itself; what the session adds goes under its own heading after the question."""
+    with_context = critic.ask_package("  Is the channel alive?  ", "  Start of the session.  ")
+    assert with_context.startswith("Is the channel alive?")
+    assert with_context.index("Is the channel alive?") < with_context.index("Start of the session.")
+    assert "## Context" in with_context
+
+    bare = critic.ask_package("Is the channel alive?")
+    assert bare.strip() == "Is the channel alive?"

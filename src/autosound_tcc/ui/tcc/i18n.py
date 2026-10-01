@@ -245,6 +245,9 @@ answers the first five questions anybody would ask.",
         "staleStrip": "{what} — {n} channel(s) need re-measuring: {codes}",
         "missingRecord": "Not written down: {what} — {why}.",
         "criticSaved": "Text saved to {path}",
+        # The reviewer's answer to a plain question (tcc#116). «ASK» is the mode's own name, as the
+        # Arbiter says it in every language («перевір критика … через режим ASK», finding 124).
+        "askBubble": "ASK · {model}",
         # The flaw map (SCR-015). `action` is the load-bearing half — what may and may not be done
         # about a feature — so each value gets a short label a reader can scan, not a raw key.
         "acousticsNone": "No flaw map yet. Phase 0 measures what this cabin does to the sound, and the rows land here — each with what may and may not be done about it.",
@@ -1461,6 +1464,7 @@ Choose sweeps (sw) above to read this.",
         "staleStrip": "{what} — перезняти каналів: {n} ({codes})",
         "missingRecord": "Не записано: {what} — {why}.",
         "criticSaved": "Текст збережено у {path}",
+        "askBubble": "ASK · {model}",
         "acousticsNone": "Карти дефектів ще немає. Фаза 0 міряє, що ця машина робить зі звуком, і рядки з'являться тут — кожен із тим, що з ним можна й чого не можна.",
         "acousticsPlanHidden": "ще {n} — робочий план тюна (вирізи, стики); тут не показані.",
         "acousticsOnlyPlan": "Усе, що поки зміряно, — робочий план тюна ({n} рядків): вирізи і стики, яких після тюна не буде. Того, що лишиться в машині, ще не записано.",
@@ -2611,6 +2615,7 @@ Choose sweeps (sw) above to read this.",
         "staleStrip": '{what} — do ponownego zmierzenia kanałów: {n} ({codes})',
         "missingRecord": 'Nie zapisano: {what} — {why}.',
         "criticSaved": 'Tekst zapisano w {path}',
+        "askBubble": 'ASK · {model}',
         "acousticsNone": 'Mapy wad jeszcze nie ma. Faza 0 mierzy, co to auto robi z dźwiękiem, i wiersze trafią tutaj '
                          '— każdy z tym, co z nim wolno, a czego nie wolno zrobić.',
         "acousticsPlanHidden": 'jeszcze {n} — roboczy plan strojenia (cięcia, zwrotnice); tu nie pokazane.',
@@ -3824,6 +3829,7 @@ Choose sweeps (sw) above to read this.",
         "staleStrip": '{what} — {n} Kanal/Kanäle müssen neu gemessen werden: {codes}',
         "missingRecord": 'Nicht festgehalten: {what} — {why}.',
         "criticSaved": 'Text gespeichert in {path}',
+        "askBubble": 'ASK · {model}',
         "acousticsNone": 'Noch keine Fehlerkarte. Phase 0 misst, was dieser Innenraum mit dem Klang macht, und die '
                          'Zeilen landen hier — jede mit dem, was man dagegen tun darf und was nicht.',
         "acousticsPlanHidden": 'noch {n} — der Arbeitsplan der Abstimmung (Absenkungen, Trennungen); hier nicht gezeigt.',

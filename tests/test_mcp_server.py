@@ -166,6 +166,8 @@ def test_tool_surface_is_the_documented_set(tmp_path):
         "propose_change",
         "show_curves",
         "call_critic",
+        # A plain question on the same channel, without the tuning contract (tcc#116).
+        "ask_reviewer",
         "write_rew_filters",
         "copy_helix_eq",
         "report_phase",
@@ -1938,3 +1940,148 @@ def test_the_generators_own_model_is_no_reviewer(tmp_path, monkeypatch):
     out = json.dumps(asyncio.run(mcp.call_tool("call_critic", {"package": "hello"})),
                      ensure_ascii=False, default=str)
     assert ran == [] and "generator" in out
+
+
+# ---- ask_reviewer: a plain question to the reviewer, through TCC (tcc#116) --------------------
+
+
+def _stub_reviewer(tmp_path, monkeypatch, body):
+    """The method's reviewer script, stood in for by `body` (Python, argv = [task, package]). The
+    only fake in these tests: TCC's pick, its refusals, the record and the bubble are the real
+    ones."""
+    from autosound_tcc.core import critic
+
+    script = tmp_path / "stub_reviewer.py"
+    script.write_text("import os, sys\n" + body, encoding="utf-8")
+    monkeypatch.setattr(critic, "script_path", lambda: script)
+    return script
+
+
+class _CritiqueBridge(RecordingBridge):
+    def __init__(self) -> None:
+        super().__init__(allow=True)
+        self.critiques: list[dict] = []
+
+    def show_critique(self, critique: dict) -> None:
+        self.critiques.append(critique)
+
+
+def _pick_agy_reviewer(project, monkeypatch):
+    from autosound_tcc.core import config, model_choices, project_settings
+
+    monkeypatch.setattr(model_choices, "_CLI_CACHE",
+                        {"agy": [model_choices.Choice(harness="agy", model="gemini-3.1-pro-high",
+                                                      label="Gemini 3.1 Pro (High)",
+                                                      provider="google")]})
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    project_settings.set_value(config.tcc_dir(project), "critic", "agy:gemini-3.1-pro-high")
+
+
+def test_ask_reviewer_runs_the_methods_ask_task_with_tccs_pick_and_records_the_reply(
+        tmp_path, monkeypatch):
+    """Finding 124: asked to check the Critic «через режим ASK», the session searched TCC's source
+    for an ASK mode and sent its question as a Critic review — `call_critic` always runs the
+    tuning task, and the session may not run the method's `ask` itself. The door: the method's
+    `ask`, TCC's model, the reply filed as `process/reviews/<ts>-ask.md`, an «ASK» bubble, and
+    no tuning contract asked for — this project has none."""
+    from autosound_tcc.core import critic
+
+    _pick_agy_reviewer(tmp_path, monkeypatch)
+    _stub_reviewer(tmp_path, monkeypatch, (
+        "question = open(sys.argv[2], encoding='utf-8').read()\n"
+        "rel = os.path.join('process', 'reviews', '2026-10-01T10-00-00-' + sys.argv[1] + '.md')\n"
+        "os.makedirs(os.path.dirname(rel), exist_ok=True)\n"
+        "open(rel, 'w', encoding='utf-8').write('pong')\n"
+        "print('>> REVIEW_FILE: ' + rel, file=sys.stderr)\n"
+        "print('task=' + sys.argv[1] + ' model=' + os.environ.get('GEMINI_CRITIC_MODEL', 'none'))\n"
+        "print(question)\n"
+        "print('— [' + sys.argv[1] + ': gemini-3.1-pro-high]')\n"
+    ))
+    bridge = _CritiqueBridge()
+    mcp, _, _ = _server(tmp_path, bridge)
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool(
+        "ask_reviewer", {"question": "Are you there?", "context": "Start of the session."}))))
+
+    assert out["mode"] == critic.MODE_API_OR_CLI, out
+    assert "task=ask model=gemini-3.1-pro-high" in out["critique"]
+    assert "Are you there?" in out["critique"] and "Start of the session." in out["critique"]
+    assert out["model"] == "gemini-3.1-pro-high"
+    review = "process/reviews/2026-10-01T10-00-00-ask.md"
+    assert (tmp_path / review).read_text(encoding="utf-8") == "pong"
+    assert bridge.critiques[-1]["role"] == "ask"
+    assert bridge.critiques[-1]["review"] == review
+    assert json.loads(critic.log_path(tmp_path).read_text(encoding="utf-8")
+                      .splitlines()[-1])["role"] == "ask"
+    # A question is not a review: the journal's reviewer record is the process's last critique,
+    # and a plain question filed there would read as one. A review on the same channel — given the
+    # two files a review needs — is filed.
+    journal = tmp_path / "process" / "journal.jsonl"
+    assert not journal.exists() or '"critic_called"' not in journal.read_text(encoding="utf-8")
+    (tmp_path / "rew_analitic").mkdir()
+    for name in ("data-contract-template.md", "autosound_context.md"):
+        (tmp_path / "rew_analitic" / name).write_text("x", encoding="utf-8")
+    asyncio.run(mcp.call_tool("call_critic", {"package": "## proposal"}))
+    assert '"critic_called"' in journal.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("settings, omp_route, reason", [
+    pytest.param({"critic": "omp:google-antigravity/gemini-3.1-pro-high"}, False,
+                 mcp_server.OMP_REVIEWER_REFUSAL, id="omp-without-its-route"),
+    pytest.param({"generator": "omp:anthropic/claude-opus-5",
+                  "critic": "omp:anthropic/claude-opus-5"}, True,
+                 mcp_server.SELF_REVIEWER_REFUSAL, id="the-generators-own-model"),
+])
+def test_ask_reviewer_is_refused_for_the_reasons_call_critic_is(
+        tmp_path, monkeypatch, settings, omp_route, reason):
+    """No route, no call — for a question exactly as for a review (tcc#74, tcc#85)."""
+    from autosound_tcc.core import config, critic, project_settings
+
+    monkeypatch.setattr(critic, "omp_route_available", lambda: omp_route)
+    for key, value in settings.items():
+        project_settings.set_value(config.tcc_dir(tmp_path), key, value)
+    ran = tmp_path / "the-script-ran"
+    _stub_reviewer(tmp_path, monkeypatch, f"open({str(ran)!r}, 'w').write('yes')\n")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asked = json.loads(_text(asyncio.run(mcp.call_tool("ask_reviewer", {"question": "ping?"}))))
+    reviewed = json.loads(_text(asyncio.run(mcp.call_tool("call_critic", {"package": "ping?"}))))
+
+    assert not ran.exists(), "nothing was called"
+    assert asked["mode"] == critic.MODE_ERROR and asked["detail"] == reason
+    assert asked == reviewed
+
+
+def test_ask_reviewer_with_no_reviewer_picked_says_why_as_call_critic_does(tmp_path, monkeypatch):
+    """The script falls to the clipboard with nothing picked; TCC says why, for a question as for
+    a review."""
+    _stub_reviewer(tmp_path, monkeypatch, (
+        "print('▶ РУЧНИЙ РЕЖИМ: БУФЕР ОБМІНУ (CLIPBOARD MODE)', file=sys.stderr)\n"
+    ))
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asked = json.loads(_text(asyncio.run(mcp.call_tool("ask_reviewer", {"question": "ping?"}))))
+
+    assert asked["mode"] == "clipboard"
+    assert "no reviewer is configured" in asked["detail"]
+
+
+def test_an_empty_question_calls_nothing(tmp_path, monkeypatch):
+    ran = tmp_path / "the-script-ran"
+    _stub_reviewer(tmp_path, monkeypatch, f"open({str(ran)!r}, 'w').write('yes')\n")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool("ask_reviewer", {"question": "  "}))))
+
+    assert out["mode"] == "error" and not ran.exists()
+
+
+def test_the_ask_door_says_it_is_a_question_and_sends_a_review_to_call_critic(tmp_path):
+    """The description is all the session reads to choose between the two doors."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    said = tools["ask_reviewer"].description
+
+    assert "call_critic" in said and "not a review" in said
+    assert set(tools["ask_reviewer"].inputSchema["properties"]) == {"question", "context"}

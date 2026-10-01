@@ -32,7 +32,7 @@ carries an INTENT, or is a SIGNAL. Every tool below was checked against "does th
 | `propose_change` | — | intent, put on screen for the Arbiter |
 | `copy_helix_eq` | clipboard | hand-off to a human, gated |
 | `write_rew_filters` | REW's model | an instrument, not project data; gated |
-| `call_critic` | `.tcc/` call log | TCC's own namespace |
+| `call_critic`, `ask_reviewer` | `.tcc/` call log | TCC's own namespace |
 | `report_phase` | — | **converted** — read-back + refresh signal |
 | the four onboarding tools | — | **converted** — intent handed to the skill's writer |
 
@@ -1184,6 +1184,44 @@ def build_server(
         Never run the reviewer script yourself for it: a direct run's reply never reaches the
         Arbiter's window, only the journal.
         """
+        return await _call_reviewer(package, role="critic", trace_path=trace_path, model=model,
+                                    step=step, via=via)
+
+    @tool()
+    async def ask_reviewer(question: str, context: str = "") -> str:
+        """Ask the reviewer a plain question and return its answer — not a review.
+
+        ASK is the method's free-question task (`autosound_ai.py ask`): a quick check at the start
+        of a session that the reviewer answers, a translation, a wording, a question about the
+        method. It carries no tuning contract and needs no intake, so it works in a fresh folder.
+        A review of a tuning step — a proposal, a round's plan, a gate verdict — goes to
+        `call_critic`, never here.
+
+        The same reviewer on the same channel as `call_critic`: the model and route the Arbiter
+        picked in TCC's footer, refused for the same reasons, the answer filed in
+        `process/reviews/<ts>-ask.md` and shown to the Arbiter. `context` is optional background
+        that goes after the question. The outcomes are `call_critic`'s: `answered` carries the
+        answer in `critique`; `clipboard` means nobody has answered yet. Never run the reviewer
+        script yourself for it: a direct run's reply never reaches the Arbiter's window.
+        """
+        if not (question or "").strip():
+            return _nothing_called("no question was given")
+        return await _call_reviewer(critic.ask_package(question, context), role=critic.ASK)
+
+    def _nothing_called(why: str) -> str:
+        """A reviewer call refused before anything ran, in the shape every reviewer answer has."""
+        return json.dumps({"mode": critic.MODE_ERROR, "critique": "", "model": None,
+                           "detail": why, "package": None, "seconds": 0}, ensure_ascii=False)
+
+    async def _call_reviewer(package: str, *, role: str, trace_path: str = "", model: str = "",
+                             step: str = "", via: str = "") -> str:
+        """One call on the reviewer channel, for `call_critic` and `ask_reviewer` alike (tcc#116).
+
+        TCC's pick of model and route, the refusals when there is no route, the log and the bubble
+        are one path, so a question cannot reach a reviewer a review would not. Only the method's
+        task differs, and what follows from it: a question is not filed in the journal as a
+        review, and is not offered a `via` its tool does not take.
+        """
         # An OMP pick goes through omp or not at all (tcc#74): with no omp route in the script it
         # went to the vendor's API under a name cut from omp's selector, and came back 404.
         route = configured_critic_harness(project_dir)
@@ -1198,9 +1236,7 @@ def build_server(
         elif _reviews_itself(project_dir):
             refusal = SELF_REVIEWER_REFUSAL
         if refusal:
-            return json.dumps({"mode": critic.MODE_ERROR, "critique": "", "model": None,
-                               "detail": refusal, "package": None, "seconds": 0},
-                              ensure_ascii=False)
+            return _nothing_called(refusal)
         # The Arbiter's pick is the default. Without this the call went out with NO model, the
         # reviewer script used its own built-in, and TCC's picker steered nothing at all — the
         # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"
@@ -1211,6 +1247,7 @@ def build_server(
             package,
             project_dir=project_dir,
             trace_path=trace_path or None,
+            role=role,
             model=model or configured_critic_model(project_dir) or None,
             # And the CLI that goes with it. Sending the model without the binary is how the two
             # came to disagree: the pick said `agy`, the machine's `GEMINI_BIN` said `gemini`, and
@@ -1230,7 +1267,9 @@ def build_server(
         # Into the skill's journal too, with a pointer to the critique's own text (SCR-027). The
         # local log answers the footer's "last called"; the journal is what a resume and any other
         # front-end read, and until now it recorded that a review happened and lost what it argued.
-        if result.mode in (critic.MODE_API_OR_CLI, critic.MODE_CLIPBOARD):
+        # Not a question: the method files `critic_called` as the process's last reviewer, and a
+        # plain question there would read as the last critique (tcc#116). Its text is filed anyway.
+        if role != critic.ASK and result.mode in (critic.MODE_API_OR_CLI, critic.MODE_CLIPBOARD):
             try:
                 process_writer.record_reviewer(
                     project_dir,
@@ -1270,7 +1309,7 @@ def build_server(
             result.detail, harness=configured_critic_harness(project_dir), project_dir=project_dir)
         if fix:
             detail = f"{detail}\n\nWhat to do: {fix}".strip() if detail else f"What to do: {fix}"
-        if result.mode == critic.MODE_REFUSED and not via and route != "omp":
+        if result.mode == critic.MODE_REFUSED and role != critic.ASK and not via and route != "omp":
             # The method's own message names `--via api` for the script; the route that brings the
             # answer back to the window is this tool (finding 63, tcc#59).
             detail = (f"{detail}\n\n" if detail else "") + (

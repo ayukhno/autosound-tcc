@@ -1408,7 +1408,10 @@ class DialogPanel(QWidget):
             # model output in as rich text: asterisks and hashes showed literally, every newline
             # collapsed, so a three-page structured critique arrived as one flat paragraph (user,
             # 2026-08-11) — and an unescaped `<` in it would have been markup, not text.
-            self._add_bubble("crit", f"Critic · {model}",
+            # A plain question's answer is labelled as the ASK it was, not as a review (tcc#116).
+            title = (i18n.t("askBubble").format(model=model) if critique.get("role") == "ask"
+                     else f"Critic · {model}")
+            self._add_bubble("crit", title,
                              _markdown(critique.get("text", "")) + note,
                              str(critique.get("text", "")))
         elif mode == "clipboard":
