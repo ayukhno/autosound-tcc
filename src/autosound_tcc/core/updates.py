@@ -123,6 +123,10 @@ TCC_WINDOW_WORDS = {
 #: installed.
 _GUARD_TIMEOUT_S = 30
 
+#: The name every update folder starts with (`write_tcc_install_script`), and the only kind of folder
+#: the script will remove as it ends (`tcc_install_script`).
+_UPDATE_FOLDER_PREFIX = "autosound-tcc-update-"
+
 #: Cursor home, clear the screen, clear the scrollback. The last one matters: `clear` alone leaves
 #: the typed line one scroll away in Terminal.app, and ESC[3J is honoured by Terminal and iTerm.
 _CLEAR_SCREEN = r"\033[H\033[2J\033[3J"
@@ -190,8 +194,13 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
 
     **`folder` is the script's own, and goes when the script ends** (tcc#123): it runs after TCC
     has quit, so nobody else is left to remove it. Only a folder `write_tcc_install_script` made;
-    None removes nothing.
+    None removes nothing. Anything but an absolute path named `_UPDATE_FOLDER_PREFIX…` is refused
+    (ValueError): on Windows the removal runs after `cd /d "%TEMP%"`, where `Path("")` — `.` —
+    would have emptied the temp directory.
     """
+    if folder is not None and not (Path(folder).is_absolute()
+                                   and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
+        raise ValueError(f"{str(folder)!r} is not the update's own folder; it is not removed")
     if pid is None:
         pid = os.getpid()
     said = {**TCC_WINDOW_WORDS, **(words or {})}
@@ -255,7 +264,8 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f'  while kill -0 "$ask" 2>/dev/null && [ "$waited" -lt {_GUARD_TIMEOUT_S} ]; do',
             "    sleep 1; waited=$((waited + 1))",
             "  done",
-            '  kill "$ask" 2>/dev/null',
+            # Only at the deadline: a git that answered was reaped, and its number may be reused.
+            f'  if [ "$waited" -ge {_GUARD_TIMEOUT_S} ]; then kill "$ask" 2>/dev/null; fi',
             ")",
             "now=$(printf '%s\\n' \"$answer\" | cut -f1)",
             f'if [ "$now" != {shlex.quote(sha)} ]; then',
@@ -263,9 +273,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             "  exit 1",
             "fi",
         ] if sha else []
-        # However the script ends — done, failed, the tag moved, the window closed.
-        cleanup = [f"trap {shlex.quote(f'rm -rf -- {shlex.quote(str(folder))}')} EXIT"
-                   ] if folder else []
+        # However the script ends — done, failed, the tag moved, the window closed. A closed
+        # window is SIGHUP, and dash runs no EXIT trap on a signal (bash does): HUP, INT and TERM
+        # end the script, and that end runs it.
+        cleanup = [f"trap {shlex.quote(f'rm -rf -- {shlex.quote(str(folder))}')} EXIT",
+                   "trap 'exit 1' HUP INT TERM"] if folder else []
         lines = [
             "#!/bin/sh",
             "# TCC's update, written by TCC for the terminal it opened (core/updates.py).",
@@ -295,7 +307,7 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     stays. CRLF for the batch file, because cmd reads one by line; UTF-8 for both.
     """
     windows = _is_windows(platform)
-    made = None if folder else Path(tempfile.mkdtemp(prefix="autosound-tcc-update-"))
+    made = None if folder else Path(tempfile.mkdtemp(prefix=_UPDATE_FOLDER_PREFIX))
     folder = Path(folder) if folder else made
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
     path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,

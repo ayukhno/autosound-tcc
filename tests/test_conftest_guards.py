@@ -156,6 +156,28 @@ def test_a_modal_a_test_reaches_fails_the_test_at_its_end_instead_of_waiting(
     assert log.opened == [], "said once; this test's own end has nothing left to fail on"
 
 
+def test_a_question_asked_again_after_cancel_ends_the_test_instead_of_spinning(
+        _no_modal_waits_for_nobody):
+    """Cancel lets the code go on, and code that asks again after a cancel would ask forever --
+    the old raise broke out of that (review of tcc#123). After `_MODAL_CAP` modals in one test
+    the guard fails the test where it stands, past a broad `except Exception` too."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from tests.conftest import _MODAL_CAP
+
+    QApplication.instance() or QApplication([])
+    asked = 0
+    with pytest.raises(pytest.fail.Exception, match=f"{_MODAL_CAP} modals in one test"):
+        while True:
+            try:
+                QMessageBox.question(None, "Again?", "Open the other folder?")
+            except Exception:  # noqa: BLE001 — what a window's own code might do
+                pass
+            asked += 1
+    assert asked == _MODAL_CAP
+    assert _no_modal_waits_for_nobody.opened == [], "said once; the test's end has nothing left"
+
+
 def test_every_dialog_static_answers_cancel_and_is_written_down(_no_modal_waits_for_nobody):
     """A dialog's static -- `QFileDialog.getExistingDirectory`, `QInputDialog.getText` -- is a
     modal of its own: its `exec` is C++'s, the guard's `QDialog.exec` never sees it, and a test

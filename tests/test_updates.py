@@ -1459,6 +1459,9 @@ def test_the_guard_closes_every_door_git_could_stop_at(platform):
         assert "GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_ASKPASS='' git ls-remote" in guard
         assert f"-lt {updates._GUARD_TIMEOUT_S} ]" in guard, "a deadline, not a hope"
         assert "timeout " not in guard, "macOS has no `timeout` to rely on"
+        kills = [line.strip() for line in guard.splitlines() if 'kill "$ask"' in line]
+        assert kills == [f'if [ "$waited" -ge {updates._GUARD_TIMEOUT_S} ]; then '
+                         f'kill "$ask" 2>/dev/null; fi'], "a git that answered is not killed"
     else:
         for line in ("set GIT_TERMINAL_PROMPT=0", "set GCM_INTERACTIVE=never",
                      'set "GIT_ASKPASS="', "set GIT_HTTP_LOW_SPEED_LIMIT=1000",
@@ -1487,10 +1490,13 @@ def _gone_pid() -> int:
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
-def test_a_server_that_never_answers_ends_in_the_moved_line_not_a_wait(monkeypatch, tmp_path):
+@pytest.mark.parametrize("shape", ["given folder", "its own folder"])
+def test_a_server_that_never_answers_ends_in_the_moved_line_not_a_wait(monkeypatch, tmp_path,
+                                                                      shape):
     """Run for real with `/bin/sh` and a `git` that never answers: the script stops asking at its
     deadline and says the server did not answer, and uv never runs. The `git` it ran had every
-    prompting door closed."""
+    prompting door closed. In the shape TCC writes it too -- its own folder, its EXIT trap -- and
+    that folder is gone after (review of tcc#123)."""
     import os
     import time
 
@@ -1498,10 +1504,14 @@ def test_a_server_that_never_answers_ends_in_the_moved_line_not_a_wait(monkeypat
     bindir, mark = _fake_bin(tmp_path, f"echo \"$GIT_TERMINAL_PROMPT $GCM_INTERACTIVE "
                                        f"[${{GIT_ASKPASS-unset}}]\" > '{seen}'\nexec sleep 600\n")
     monkeypatch.setattr(updates, "_GUARD_TIMEOUT_S", 2)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
     folder = tmp_path / "script"
     folder.mkdir()
     path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v0.1.46", words=_MOVED_WORDS,
-                                            folder=folder, platform="darwin", sha=_VERIFIED)
+                                            folder=folder if shape == "given folder" else None,
+                                            platform="darwin", sha=_VERIFIED)
 
     started = time.monotonic()
     out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True,
@@ -1512,6 +1522,7 @@ def test_a_server_that_never_answers_ends_in_the_moved_line_not_a_wait(monkeypat
     assert _MOVED_WORDS["moved"] in out and _WORDS["updating"] not in out, out
     assert not mark.exists(), "uv never ran"
     assert seen.read_text().split() == ["0", "never", "[]"]
+    assert list(temp.iterdir()) == [], "its own folder went with it"
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
@@ -1537,6 +1548,56 @@ def test_the_update_s_own_folder_is_gone_when_its_script_ends(monkeypatch, tmp_p
 
     assert mark.exists() is (not answer), out
     assert list(temp.iterdir()) == [], "the folder and everything in it went with the script"
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+@pytest.mark.parametrize("shell", ["/bin/sh", "/bin/dash"])
+def test_a_window_closed_while_it_waits_still_takes_the_folder(monkeypatch, tmp_path, shell):
+    """Closing the window sends the script SIGHUP. bash runs an EXIT trap on it, dash does not
+    (review of tcc#123): HUP, INT and TERM end the script, and the end takes the folder."""
+    import os
+    import shutil
+    import signal
+
+    if not shutil.which(shell):
+        pytest.skip(f"no {shell} here")
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    tcc = subprocess.Popen(["sleep", "60"])  # TCC, still open: the script waits for it
+    try:
+        path = updates.write_tcc_install_script(pid=tcc.pid, tag="v0.1.46", words=_MOVED_WORDS,
+                                                platform="darwin", sha=_VERIFIED)
+        script = subprocess.Popen([shell, str(path)], stdout=subprocess.PIPE, text=True,
+                                  encoding="utf-8", env={**os.environ, "PATH": "/usr/bin:/bin"})
+        for line in script.stdout:  # its traps are set by the time it says this
+            if _WORDS["wait"] in line:
+                break
+        script.send_signal(signal.SIGHUP)
+        script.wait(timeout=10)
+        script.stdout.close()
+    finally:
+        tcc.kill()
+        tcc.wait()
+
+    assert list(temp.iterdir()) == [], "the folder went with the window"
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+@pytest.mark.parametrize("folder", ["", "autosound-tcc-update-x", "/tmp/somebody-else-s"],
+                         ids=["empty", "relative", "not-ours"])
+def test_a_folder_that_is_not_the_update_s_own_is_never_removed(platform, folder):
+    """The script removes `folder` as it ends; on Windows after `cd /d "%TEMP%"`, so an empty one
+    -- `Path("")`, which reads `.` -- would have emptied the temp directory (review of tcc#123).
+    Only an absolute path whose name is the one `write_tcc_install_script` gives is taken."""
+    from pathlib import Path
+
+    with pytest.raises(ValueError, match="not the update's own folder"):
+        updates.tcc_install_script(pid=1, tag="v0.1.46", platform=platform, sha=_VERIFIED,
+                                   folder=Path(folder))
+    ours = Path("/tmp/autosound-tcc-update-x1y2").resolve()
+    assert str(ours) in updates.tcc_install_script(pid=1, tag="v0.1.46", platform=platform,
+                                                   sha=_VERIFIED, folder=ours)
 
 
 def test_the_windows_update_removes_its_folder_after_its_last_line(monkeypatch, tmp_path):

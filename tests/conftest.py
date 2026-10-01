@@ -222,6 +222,11 @@ def _a_finished_test_s_widgets_are_not_retranslated():
     _windows.drop_language_listeners_since(before)
 
 
+#: How many modals one test may reach before the guard fails it where it stands. Cancel lets the
+#: code go on, and code that asks again after a cancel would ask forever (review of tcc#123).
+_MODAL_CAP = 20
+
+
 class _ModalLog:
     """The modals a test reached, by name, for its end to fail on (`_no_modal_waits_for_nobody`)."""
 
@@ -229,6 +234,13 @@ class _ModalLog:
         self.opened: list = []
 
     def record(self, what: str, answer):
+        if len(self.opened) >= _MODAL_CAP:
+            # `pytest.fail` raises a BaseException: a broad `except Exception` around the
+            # question does not swallow it and ask again.
+            opened, self.opened = self.opened, []
+            pytest.fail(f"{_MODAL_CAP} modals in one test, the last {opened[-1]} -- asked "
+                        f"again after Cancel? Nobody answers it in a test; patch its exec, or "
+                        f"the call that opens it, in the test", pytrace=False)
         self.opened.append(what)
         return answer
 
