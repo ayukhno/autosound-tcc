@@ -3274,3 +3274,19 @@ GEMINI_API_KEY з HKCU\Environment у сховище Windows, зашифрова
 
 **Task.** For W-5's collection — the delete or the question is the method's command first (`autosound_ai.py key`),
 TCC's button on it.
+
+### 128. A key saved in «Ключ рецензента» does not lift the API rows' «відмова»: the reviewer picker stays red until ↻
+
+**What.** The Arbiter, 2026-10-01, the Windows VM, right after 127 (key in DPAPI, nothing exported): the reviewer
+picker shows `API · gemini-pro-latest · відмова` and `API · gemini-3.1-pro-preview · відмова` in red, only
+`OMP · Gemini 3.1 Pro` green; the footer: `AGY · Gemini 3.1 Pro` «Gemini 3.1 Pro (Low) · останній виклик відх…».
+«і не можу вибрати модель».
+
+Read, not diagnosed: «відмова» is `availability.REFUSED` — «the last call to it was refused» in this launch, i.e.
+before the key existed; refusals are forgotten only by ↻ (`main_window.py` ~1857, `forget_refusals`). Saving a key
+in the dialog refreshes the dialog's own `key status`, not the picker's memory of refusals.
+
+**Weight.** Medium: the tuner fixes the cause in the window made for it and the app still refuses the route; the
+way out (↻) is not named anywhere near.
+
+**Task.** For W-5's collection.
