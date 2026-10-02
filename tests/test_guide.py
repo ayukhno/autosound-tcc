@@ -7,6 +7,7 @@ between versions, and a link to `main` would show a guide for a build the user d
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -94,3 +95,25 @@ def test_the_methods_guide_is_where_the_link_says():
     if root is None:
         pytest.skip("no method checked out")
     assert (root / guide.METHOD_TARGET_GUIDE).is_file()
+
+
+_VENDORED = Path(__file__).parents[1] / "vendor" / "autosound-tuning-skill"
+
+
+def test_the_reference_links_the_methods_guide_at_the_tag_this_tcc_ships_with(monkeypatch):
+    """tcc#132: REFERENCE.md linked the method's target-curve guide at `main`, while the «?» it
+    describes opens it at the installed method's tag. A Markdown page cannot ask which method is
+    installed, so it names the tag of the method this TCC vendors -- read here the way the «?»
+    reads it, so the next move of the submodule fails this until the link moves with it."""
+    if not (_VENDORED / ".claude-plugin" / "plugin.json").is_file():
+        pytest.skip("the method's submodule is not checked out: no pin to hold the link to")
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV,
+                       str(_VENDORED / "skills" / vendor_loader.SKILL_NAME))
+    assert vendor_loader.skill_repo_root() == _VENDORED.resolve(), "the vendored method, no other"
+    expected = guide.method_target_guide_url()
+    assert "/blob/main/" not in expected, f"the vendored manifest names no release: {expected}"
+
+    text = (_GUIDE_DIR / guide.REFERENCE).read_text(encoding="utf-8")
+    links = re.findall(r"\]\((https://github\.com/ayukhno/autosound-tuning-skill/[^)\s]*"
+                       + re.escape(Path(guide.METHOD_TARGET_GUIDE).name) + r")\)", text)
+    assert links == [expected]
