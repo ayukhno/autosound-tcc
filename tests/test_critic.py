@@ -775,7 +775,8 @@ def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, m
     assert "GEMINI_API_KEY" in seen["env"]
 
     critic.run("a package", project_dir=tmp_path, harness="agy", model="gemini-3.8-flash-high")
-    assert "--via" not in seen["argv"] and "GEMINI_API_KEY" not in seen["env"]
+    # Without the ask, the pick's own route — its CLI (tcc#127).
+    assert seen["argv"][-2:] == ["--via", "cli"] and "GEMINI_API_KEY" not in seen["env"]
 
 
 def test_an_api_pick_runs_through_the_key_and_an_omp_pick_hands_a_session_nothing(tmp_path,
@@ -1194,3 +1195,124 @@ def test_the_filed_text_is_named_by_a_path_every_os_reads(monkeypatch, tmp_path,
 
     assert result.mode == critic.MODE_API_OR_CLI
     assert result.review == "process/reviews/2026-10-01T10-00-00-ask.md"
+
+
+# ---- a key in the OS store and a CLI pick (finding 136, tcc#127) ------------------------------
+
+#: The VENDORED method, run in a child with its key store, its API callers and its CLI replaced:
+#: the route is chosen by the method's own code, from TCC's own argv and environment, and nothing
+#: leaves the machine. `sys.argv[1]` is the method's script, the rest TCC's argv after it. The
+#: stored keys are fakes held in memory: never on argv, never printed — the API caller says only
+#: whether it was handed the stored one.
+_ROUTE_PROBE = r'''
+import importlib.util, os, sys
+method = sys.argv[1]
+sys.argv = [method] + sys.argv[2:]
+spec = importlib.util.spec_from_file_location("autosound_ai_route_probe", method)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+def refuse(*_a, **_k):
+    raise AssertionError("the probe runs nothing and calls nobody")
+
+mod.subprocess.run = mod.subprocess.Popen = refuse
+import urllib.request
+urllib.request.urlopen = refuse
+installed = set(filter(None, os.environ.get("PROBE_CLIS", "").split(",")))
+mod.shutil.which = lambda name, *a, **k: f"/probe/bin/{name}" if name in installed else None
+stored = {var: "probe-" + var.lower() + "-0123456789abcdef"
+          for var in filter(None, os.environ.get("PROBE_STORED", "").split(","))}
+fake = (stored.get, stored.__setitem__, lambda var: stored.pop(var, None) is not None)
+for kind in list(mod._KEYSTORE_BACKENDS):
+    mod._KEYSTORE_BACKENDS[kind] = fake
+mod._KEYSTORE_BACKENDS["probe"] = fake
+os.environ["AUTOSOUND_KEYSTORE"] = "probe"
+mod._KEYSTORE_CACHE.clear()
+
+def api(vendor):
+    def call(key, model, prompt, *_rest):
+        print(f"PROBE api {vendor} {'stored' if key in stored.values() else 'other'}", file=sys.stderr)
+        return "an answer through the API", model
+    return call
+
+mod.call_gemini_api, mod.call_anthropic_api, mod.call_openai_api = (
+    api("google"), api("anthropic"), api("openai"))
+mod.list_gemini_models = refuse
+
+def cli(provider, binary, model, prompt, timeout=None):
+    print(f"PROBE cli {os.path.basename(binary)}", file=sys.stderr)
+    return "an answer through the CLI", None, None
+
+mod.call_cli = cli
+mod.list_cli_models = lambda: []
+mod.copy_to_clipboard = lambda _text: False
+mod.main()
+'''
+
+_STORED = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+
+def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
+                 stored=_STORED) -> str:
+    """`api <vendor> stored` or `cli <binary>`: where the vendored method sent TCC's call, with
+    `stored` in its OS key store and agy, codex and claude on PATH."""
+    import subprocess
+
+    if not critic.is_available():
+        pytest.skip("the method's submodule is not checked out")
+    probe = tmp_path / "route_probe.py"
+    probe.write_text(_ROUTE_PROBE, encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir(exist_ok=True)
+    # No file of the machine's own is read: the method's machine file lives under these.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "cfg"))
+    for var in (*_STORED, "AUTOSOUND_CRITIC_BIN", "GEMINI_BIN", "AUTOSOUND_CRITIC_MODEL",
+                "GEMINI_CRITIC_MODEL", "AUTOSOUND_CRITIC_PROVIDER", "AUTOSOUND_KEYSTORE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("PROBE_CLIS", "agy,codex,claude")
+    monkeypatch.setenv("PROBE_STORED", ",".join(stored))
+    monkeypatch.setattr(critic.shutil, "which",
+                        lambda name, *a, **k: f"/probe/bin/{name}" if name in ("agy", "codex", "claude")
+                        else None)
+    real_run, seen = subprocess.run, {}
+
+    def through_the_probe(argv, **kwargs):
+        argv = [sys.executable, str(probe), *argv[1:]]
+        seen["argv"] = argv
+        proc = real_run(argv, **kwargs)
+        seen["stderr"] = proc.stderr or ""
+        return proc
+
+    monkeypatch.setattr(critic.subprocess, "run", through_the_probe)
+    result = critic.run("# a question", project_dir=project, role=critic.ASK, model=model,
+                        harness=harness, provider=provider, via=via)
+    said = seen.get("stderr", "")
+    assert "probe-" not in " ".join(seen.get("argv", [])) + said + result.text, "a key in sight"
+    routes = [line.split(" ", 1)[1] for line in said.splitlines() if line.startswith("PROBE ")]
+    assert len(routes) == 1, (result.mode, said)
+    return routes[0]
+
+
+@pytest.mark.parametrize("harness,model,provider,cli", [
+    ("agy", "gemini-3.1-pro-high", "google", "agy"),
+    ("agy", "gemini-3.5-flash", "google", "agy"),
+    ("agy", "claude-sonnet-4-6", "anthropic", "agy"),
+    ("codex", "gpt-5.2-codex", "openai", "codex"),
+    ("sdk", "claude-sonnet-5", "anthropic", "claude"),
+])
+def test_a_cli_pick_goes_to_its_cli_with_a_key_in_the_os_store(tmp_path, monkeypatch, harness,
+                                                                model, provider, cli):
+    """Finding 136 (tcc#127), measured on the vendored method itself: finding 32 keeps the key
+    out of a CLI pick's environment, but the method reads its OS key store too and tries the API
+    before the CLI whenever a key is there. Without a route named, an agy pick of a model with no
+    effort tier and a codex pick went to the vendor's API on the stored key: money spent under a
+    pick that said «subscription». The route of a CLI pick is its CLI."""
+    assert _route_taken(tmp_path, monkeypatch, harness=harness, model=model,
+                        provider=provider) == f"cli {cli}"
+
+
+def test_an_api_pick_still_goes_through_the_stored_key(tmp_path, monkeypatch):
+    """«API · …» is the key's route (tcc#74), and a key in the store is what it runs on."""
+    assert _route_taken(tmp_path, monkeypatch, harness="api", model="gemini-pro-latest",
+                        provider="google") == "api google stored"

@@ -407,6 +407,10 @@ PROVIDERS = ("google", "anthropic", "openai")
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
 _CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",)}
+#: The picks that run on a login rather than a key — the routes `model_choices.ROUTES` bills to
+#: a subscription: agy's, codex's, and the SDK's Claude login, which the method reaches through
+#: the `claude` CLI. Each run goes as `--via cli` (tcc#127).
+_LOGIN_ROUTES = ("agy", "codex", "sdk")
 
 
 def run(
@@ -434,6 +438,7 @@ def run(
 
     `via` — `api`, `cli` or `clipboard` — is the route for THIS run, the script's own `--via`
     (tcc#59): after a cut-off CLI stream the method says to take one review through the key.
+    Without it the pick's own route goes: `api`, `omp`, or `cli` for a login's pick (tcc#127).
 
     `role` is the method's task: `critic` (the default), `advisor`, or `ask` (`ASK`) — a question,
     which needs neither the contract nor the context and is always sent as text (tcc#116).
@@ -468,9 +473,16 @@ def run(
     if trace_path:
         argv.append(str(trace_path))
     via = (via or "").strip().lower()
-    if not via and (harness or "").strip().lower() in ("api", "omp"):
+    route = (harness or "").strip().lower()
+    if not via and route in ("api", "omp"):
         # «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74).
-        via = (harness or "").strip().lower()
+        via = route
+    elif not via and route in _LOGIN_ROUTES:
+        # And a login's route is its CLI. The method reads its OS key store as well as the
+        # environment, and tries the API first whenever it finds a key there: with a key stored,
+        # agy's untiered and Claude models, codex and the SDK all went to the vendor's API under a
+        # pick that said «subscription» (measured on the method, finding 136, tcc#127).
+        via = "cli"
     if via in VIA_ROUTES:
         argv += ["--via", via]
     # The run's own model by the method's flag (hub #226). An environment variable is outranked by
