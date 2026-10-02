@@ -1374,6 +1374,11 @@ def _spells_narrow_names(parent: str, part: str) -> bool:
     `.` or `..`), and `parent` not a folder where every name is somebody's home (Ruling 41)."""
     if _is_wide_target(f"{parent}/\0"):
         return False  # `/Users/[s]omeone`: whatever it spells is a home
+    if re.search(r"\[[\^!]|\[[^\]]*\[[:=.]", part):
+        # A negation (`[^x]`, `[!x]`) or a POSIX class (`[[:alpha:]]`, `[[=e=]]`, `[[.a.]]`):
+        # `fnmatch` reads `[^` as a caret and has no classes, so `/[^x]tc` read as a name that is
+        # not `/etc` (Ruling 44). `[.]config` is none of these: a `[.` counts only inside a bracket.
+        return False
     spelled = re.compile(fnmatch.translate(part))
     return not any(spelled.match(name) and _is_wide_target(f"{parent}/{name}")
                    for name in _WIDE_NAMES)
@@ -1760,6 +1765,9 @@ def _interpreter_is_dangerous(name: str, arguments: list[_Word], command: _Comma
     at = 0
     while at < len(arguments):
         text = arguments[at].text
+        if (text.partition("=")[0] in values or text[:2] in values) and _runs(arguments[at],
+                                                                                tainted):
+            return True  # glued: `node --import="$(curl …)"`, `ruby -r"$(curl …)"` (Ruling 44)
         if text in values:
             if at + 1 < len(arguments) and _runs(arguments[at + 1], tainted):
                 return True  # `node --import "$(curl …)"`: a data: URL is code (Ruling 43)
