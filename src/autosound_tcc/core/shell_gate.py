@@ -240,7 +240,11 @@ _RM_RECURSIVE = re.compile(r"(?:^|\s)-[a-zA-Z]*[rR][a-zA-Z]*(?:\s|$)")
 #: were known; `/Users`, the system's own folders and a home spelled as a path were not (tcc#128).
 #: Lower case, because the comparison is: macOS and Windows disks ignore case.
 _SYSTEM_DIRS = frozenset({"/etc", "/usr", "/bin", "/sbin", "/system", "/library", "/var", "/dev",
-                          "/users", "/home", "/applications", "/volumes", "/private", "/opt"})
+                          "/users", "/home", "/applications", "/volumes", "/private", "/opt",
+                          "/root", "/mnt", "/media"})
+#: One level below these is a whole thing: a home (`/Users/<x>`, `/home/<x>`), a mounted disk
+#: (`/Volumes/<x>`, `/mnt/<x>`, `/media/<x>`); `/media/<user>/<x>` is a disk too (Ruling 43).
+_ONE_LEVEL_WIDE = re.compile(r"/(?:users|home|volumes|mnt)/[^/]+|/media/[^/]+(?:/[^/]+)?")
 #: The same on a Windows disk, as Git Bash, WSL and Cygwin spell it: a drive, its system folders,
 #: the folder the homes live in, and one home.
 _WINDOWS_WIDE = re.compile(r"(?:[a-z]:|/[a-z]|/mnt/[a-z]|/cygdrive/[a-z])"
@@ -1360,7 +1364,7 @@ def _is_wide_target(text: str) -> bool:
         # the project for something wider. `../build` is one sibling (Ruling 41).
         climbs = path.split("/")
         return climbs == [".."] or climbs[:2] == ["..", ".."]
-    return (path == "" or path in _SYSTEM_DIRS or bool(re.fullmatch(r"/(?:users|home)/[^/]+", path))
+    return (path == "" or path in _SYSTEM_DIRS or bool(_ONE_LEVEL_WIDE.fullmatch(path))
             or bool(_WINDOWS_WIDE.fullmatch(path)))
 
 
@@ -1757,6 +1761,8 @@ def _interpreter_is_dangerous(name: str, arguments: list[_Word], command: _Comma
     while at < len(arguments):
         text = arguments[at].text
         if text in values:
+            if at + 1 < len(arguments) and _runs(arguments[at + 1], tainted):
+                return True  # `node --import "$(curl …)"`: a data: URL is code (Ruling 43)
             at += 2  # its value — a library, a folder, a setting — is not the program
             continue
         # `-c` python, `-e`/`-E` perl, ruby, node, osascript, Rscript, lua, `-p` node, `-r` php.
