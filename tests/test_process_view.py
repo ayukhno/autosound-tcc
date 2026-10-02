@@ -296,6 +296,7 @@ def test_a_channel_written_with_underscore_answers_to_both_notations(project, pr
     (["sw", "w-L"], "sw", "sw+w-L_3 (sw)"),  # a joint names each of its members
     (["sr-LH", "sr-L"], "sr-LH", "sr-LH_3 (rta)"),  # a variation of any length (the Arbiter, 2026-10-02)
     (["sw-r2", "sw"], "sw-r2", "sw-r2_3 (sw)"),
+    (["w-L"], "w-L", "v_003 (w-L_10 (sw))"),  # a capture bracketed in prose
 ])
 def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, process, codes, said,
                                                                      title):
@@ -322,6 +323,35 @@ def test_another_channels_capture_never_clears_a_change(project, process, codes,
     stale = _change_then_capture(project, process, codes, said, title)
 
     assert set(stale) == {said}, stale
+
+
+@pytest.mark.parametrize("round_title, cited", [
+    ("w-L_10 (sw)", "tw-L_10 (sw)"),  # the tweeter's capture is not the woofer's round
+    ("w-L_10 (sw)", "tw_L_10 (sw)"),
+    ("tw-L_10 (sw)", "w-L_10 (sw)"),
+    ("sr-L_3 (rta)", "sr-LH_3 (rta)"),  # a longer variation of the same driver
+    ("sr-LH_3 (rta)", "xsr-LH_3 (rta)"),  # a longer driver type ending the same way
+    ("w-L (imp)", "tw-L (imp)"),
+])
+def test_a_step_is_not_linked_to_a_round_by_another_channels_capture(round_title, cited):
+    """The round-to-step link (`steps_using`) read the evidence the way the stale check did, as
+    a substring: a round asking for `w-L_10 (sw)` was linked to a step that cites only
+    `tw-L_10 (sw)` (#126). A title counts as cited only whole, by the same match."""
+    state = {"plan": [{"id": "s", "evidence": [cited]}]}
+
+    assert process_view.steps_using(state, [round_title]) == ()
+
+
+@pytest.mark.parametrize("cited", [
+    "w-L_10 (sw)",
+    "w-L_10 (sw) captured and verified",
+    "sweeps: w-L_10 (sw), w-R_10 (sw)",
+    "the left woofer (w-L_10 (sw))",  # in brackets in prose: a `(` before a title is not a tag
+])
+def test_a_step_is_linked_to_the_round_whose_capture_it_cites(cited):
+    state = {"plan": [{"id": "s", "evidence": [cited]}, {"id": "t", "evidence": ["v_003"]}]}
+
+    assert process_view.steps_using(state, ["w-L_10 (sw)"]) == ("s",)
 
 
 def test_a_step_evidenced_by_another_channel_is_not_re_chipped(project, process):

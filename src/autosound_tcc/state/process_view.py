@@ -203,7 +203,8 @@ def steps_using(state: Optional[dict], titles) -> tuple[str, ...]:
         if not isinstance(step, dict):
             continue
         evidence = " ".join(str(item) for item in (step.get("evidence") or []))
-        if any(title in evidence for title in wanted):
+        # Whole, as the stale check reads it (`_cites`): `w-L_10 (sw)` is in `tw-L_10 (sw)` as text.
+        if any(_cites(title, evidence) for title in wanted):
             out.append(str(step.get("id")))
     return tuple(out)
 
@@ -259,7 +260,7 @@ def _to_step(step: dict, stale: Optional[dict] = None,
     # Any name the channel answers to (SCR-039) — the evidence is a REW title typed under whichever
     # name was current that day, which need not be the one the `config_change` used.
     if evidence and any(
-        _names_channel(name, evidence)
+        _cites(name, evidence)
         for code in (stale or {})
         for name in (aliases or {}).get(code, (code,))
     ):
@@ -400,11 +401,11 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
                 stale[code] = {**event, "impact_parsed": parsed}
         elif kind == process.EV_STEP_DONE:
             # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so the code is
-            # looked for in the text -- as a whole code, not a substring (`_names_channel`).
+            # looked for in the text -- as a whole code, not a substring (`_cites`).
             evidence = " ".join(str(item) for item in event.get("evidence") or [])
             cleared = [
                 c for c in stale
-                if any(_names_channel(name, evidence) for name in aliases.get(c, (c,)))
+                if any(_cites(name, evidence) for name in aliases.get(c, (c,)))
             ]
             for code in cleared:
                 del stale[code]
@@ -416,20 +417,29 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
 _CONTROLS_IN_CODE = ("ctl1", "ctl3")
 
 
-def _names_channel(name: str, evidence: str) -> bool:
-    """Whether `evidence` names the channel `name` as a whole code, not as a piece of another one.
+def _cites(name: str, evidence: str) -> bool:
+    """Whether `evidence` names `name` -- a channel code, or a capture title that begins with one --
+    whole, not as a piece of another channel's.
 
     It was a substring test, and `w-L` is in `tw-L_10 (sw)`: a tweeter-only step cleared a woofer
-    swap, the silence SCR-014 exists to prevent (#126's review, Important 1). A channel is `<driver
-    type>-<its variation>` with any variation (`sr-LH`, `sw-r2`; the Arbiter, 2026-10-02), and `_`
-    only begins the series. So no letter or digit may touch the name on either side; no `-` may
-    come before it (it would be another channel's variation) nor after it, unless that `-` begins a
-    control (`w-L-ctl1_3`); and no `(` before it, which is the method tag (`(sw)` is not the channel
-    `sw`). What may follow: the series `_`, a space and a modifier, the `+` of a joint, the end.
+    swap, the silence SCR-014 exists to prevent (#126's review, Important 1), and a round asking
+    for `w-L_10 (sw)` was linked to the tweeter's step. A channel is `<driver type>-<its
+    variation>` with any variation (`sr-LH`, `sw-r2`; the Arbiter, 2026-10-02), and `_` only begins
+    the series. So no letter or digit may touch the name on either side; no `-` may come before it
+    (it would be another channel's variation) nor after it, unless that `-` begins a control
+    (`w-L-ctl1_3`). A `(` may come before it, as prose puts things in brackets, but a bare code
+    that is the WHOLE of a bracket is not counted: `(sw)` is the method tag, not the channel `sw`,
+    and a code alone in brackets cannot be told from one -- left stale, which says so, rather than
+    cleared in silence. A title carries its own tag and may be bracketed whole. What may follow:
+    the series `_`, a space and a modifier, the `+` of a joint, punctuation, the end.
     """
+    word = re.escape(name)
     controls = "|".join(_CONTROLS_IN_CODE)
-    pattern = (rf"(?<![A-Za-z0-9(\-]){re.escape(name)}"
-               rf"(?=$|[^A-Za-z0-9\-]|-(?:{controls})(?![A-Za-z0-9]))")
+    if re.search(r"\s", name):  # a title (`w-L_10 (sw)`): prose may bracket it whole
+        before = r"(?<![A-Za-z0-9\-])"
+    else:  # a bare code: never the whole of a bracket
+        before = rf"(?:(?<![A-Za-z0-9(\-])|(?<=\()(?!{word}\)))"
+    pattern = rf"{before}{word}(?=$|[^A-Za-z0-9\-]|-(?:{controls})(?![A-Za-z0-9]))"
     return re.search(pattern, evidence) is not None
 
 
