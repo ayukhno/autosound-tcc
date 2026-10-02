@@ -3840,6 +3840,9 @@ class MainWindow(QMainWindow):
 
         review = process_view.reviewer(state)
         if review:
+            # The new text takes the tip of the one before with it — a pin set aside, or why the
+            # pick is not ready — since that tip is not about this line (`ElidedLabel.setText`,
+            # tcc#129).
             self._critic_status.setText(
                 i18n.t("criticStatus").format(
                     model=review.get("model") or review.get("vendor") or "?",

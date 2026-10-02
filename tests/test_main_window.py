@@ -6575,6 +6575,41 @@ def test_where_a_set_aside_pin_lives_stays_in_the_tip_through_a_relayout(monkeyp
         availability.reset()
 
 
+def test_a_process_state_refresh_takes_the_pin_tip_with_its_text(tmp_path, monkeypatch):
+    """tcc#129: the process state names the last reviewer, and its refresh wrote that line over
+    the footer's status — under the pin tip of the line before, a tip about a pin set aside under
+    a text that says nothing of one. The tip describes the text it sits on."""
+    from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc import copy_menu
+
+    process = tmp_path / "process"
+    process.mkdir()
+    (process / "process-state.json").write_text(json.dumps({
+        "schema_version": 3, "active_phase": "1",
+        "phases": {"1": {"status": "cur", "title": "Crossovers"}},
+        "plan": [{"id": "xo", "name": "Choose crossovers", "status": "cur", "phase": "1"}],
+        "reviewer": {"vendor": "google", "model": "gemini-3.1-pro-preview",
+                     "at": "2026-10-02T10:00:00Z"},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window = _reviewer_window(monkeypatch, pick)
+    where = i18n.t("criticPinInEnv").format(var="GEMINI_CRITIC_MODEL", value="gemini-2.5-pro")
+    try:
+        availability.succeeded(pick.key)
+        availability.set_aside(pick.key, [{"variable": "GEMINI_CRITIC_MODEL",
+                                           "value": "gemini-2.5-pro", "file": None, "line": None}])
+        window._refresh_critic_status()
+        assert where in window._critic_status.toolTip()
+
+        window._refresh_process()
+        assert i18n.t("criticStatus").split("{")[0] in copy_menu.full_text(window._critic_status)
+        assert where not in window._critic_status.toolTip()
+    finally:
+        availability.reset()
+
+
 def test_the_start_up_probe_does_not_clear_a_pin_it_cannot_see(monkeypatch):
     """tcc#113 review, Minor 2: the probe runs with a scratch `PROJECT_MIRROR`, so the method never
     reads the project's `rew_analitic/.critic-env` for it. Its list of pins is not the whole story:

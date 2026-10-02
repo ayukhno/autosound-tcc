@@ -53,7 +53,7 @@ class ElidedLabel(QLabel):
         # twice in two shapes. The rule below (skip when the label itself has a rounded tip) does
         # not catch that case: the tip is on the parent, not on the label.
         self._native_tooltip = native_tooltip
-        #: A tip of the owner's own (`set_tip`), kept through every re-cut.
+        #: A tip of the owner's own (`set_tip`), kept through every re-cut until the next text.
         self._tip = ""
         self.setMinimumWidth(min_width)
         # `Ignored` for a key: it takes whatever the row has left, however little. `Maximum` for a
@@ -63,6 +63,10 @@ class ElidedLabel(QLabel):
 
     def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
         self._full = text
+        # A tip of the owner's own said more about the text it was set with, and goes with it: the
+        # footer's process-state refresh left a pin's tip under a line that names no pin (tcc#129).
+        # The owner sets the new text's own after this (`set_tip`).
+        self._tip = ""
         super().setText(text)
         # The layout has to be told the wanted width changed, or it keeps handing out room for
         # the old one -- see `sizeHint` for why that matters here more than usual.
@@ -71,7 +75,8 @@ class ElidedLabel(QLabel):
 
     def set_tip(self, tip: str) -> None:
         """A tip that says more than the text, kept whatever the label is cut to — with the full
-        text above it while it is cut. A plain `setToolTip` lasts until the next resize, where the
+        text above it while it is cut — until the next `setText`, so it is set after the text it
+        is about (tcc#129). A plain `setToolTip` lasts until the next resize, where the
         eliding writes the full text or nothing over it: the footer's reviewer status lost the
         place a pin it set aside lives the moment the window laid its longer text out (tcc#113,
         found on CI's wider fonts)."""

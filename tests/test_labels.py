@@ -69,6 +69,25 @@ def test_a_tip_of_the_labels_own_survives_every_re_cut():
         label.close()
 
 
+def test_a_new_text_takes_the_old_tip_with_it():
+    """tcc#129: a tip of the owner's own says more about the text it was set with. The footer's
+    process-state refresh wrote a new text and the pin tip of the old one stayed under it. A new
+    text drops it — through every re-cut after — and the owner sets the new text's own after."""
+    label = ElidedLabel("gemini-3.1-pro-preview · answered the check · pinned in the environment",
+                        min_width=10, policy=QSizePolicy.Policy.Maximum)
+    label.set_tip("GEMINI_CRITIC_MODEL=gemini-2.5-pro, in the environment")
+    label.show()
+    try:
+        label.setText("Critic · gemini-3.1-pro-preview · 5 min ago")
+        for width in (label.sizeHint().width(), 80):
+            label.resize(width, label.sizeHint().height())
+            assert "GEMINI_CRITIC_MODEL" not in label.toolTip(), (width, label.toolTip())
+        label.set_tip("where the new text's pin lives")
+        assert "where the new text's pin lives" in label.toolTip()
+    finally:
+        label.close()
+
+
 def test_a_button_given_the_width_it_asked_for_shows_its_whole_text():
     """The same F-045 on `ElidedButton` (tcc#96, fix round 5): its hint is rounded UP from the
     text's fractional width and the fit is judged in fractions, or a whole-pixel hint one
