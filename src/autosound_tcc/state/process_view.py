@@ -477,11 +477,13 @@ def _reading() -> tuple:
 
 def _evidence_text(items, one=None) -> str:
     """A step's evidence as one text to look names up in: each item as written, and after them
-    each one `one` (`canonical_title`) reads in another notation, as it reads it."""
+    each title `one` (`canonical_title`) reads in another notation, as it reads it. An item is
+    read whole and, when it is a " + " list, title by title -- the way the method's `resolves`
+    takes evidence (#126's re-review, Minor D: `w_L_10 (sw) + tw_L_10 (sw)` names `tw-L` too)."""
     said = [str(item) for item in items or []]
     if one is not None:
-        read = [str(one(item)) for item in said]
-        said += [r for r, item in zip(read, said) if r != item]
+        titles = [part for item in said for part in dict.fromkeys([item, *item.split(" + ")])]
+        said += [read for read, title in ((str(one(t)), t) for t in titles) if read != title]
     return " ".join(said)
 
 

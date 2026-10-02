@@ -304,6 +304,9 @@ def test_a_channel_written_with_underscore_answers_to_both_notations(project, pr
     # Minor B: a code in brackets counts unless it is a method tag (`(sw)`), which it cannot be
     # told from -- `w-L` is no tag
     (["w-L"], "w-L", "v_003 (w-L)"),
+    # Minor D: a " + " list is read title by title, as the method's `resolves` reads it
+    (["w-L", "tw-L"], "tw-L", "w_L_10 (sw) + tw_L_10 (sw)"),
+    (["w-L", "tw-L"], "w-L", "w_L_10 (sw) + tw_L_10 (sw)"),
 ])
 def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, process, codes, said,
                                                                      title):
@@ -321,6 +324,7 @@ def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, pro
     (["sw", "sw-r2"], "sw", "sw-r2_3 (sw)"),  # a variation is another channel
     (["w-L", "tw-L"], "w-L", "tw_L_10 (sw)"),  # read through `canonical_title`, still the tweeter's
     (["sw", "w-L"], "sw", "v_003 (sw)"),  # `(sw)` alone is the method tag, whatever comes before
+    (["w-L", "tw-L", "m-L"], "tw-L", "w_L_10 (sw) + m_L_10 (sw)"),  # a list of others' captures
 ])
 def test_another_channels_capture_never_clears_a_change(project, process, codes, said, title):
     """#126's review, Important 1: the evidence was matched as a substring, so `w-L` was found in
@@ -363,6 +367,7 @@ def test_a_step_is_not_linked_to_a_round_by_another_channels_capture(round_title
     "w-L_10 (sw) + w-R_10 (sw)",  # a list of captures: a space before each, not a joint
     "w-R_10 (sw) + w-L_10 (sw)",
     "w_L_10 (sw)",  # #126's re-review, Minor A: typed with `_`, read by the method as `w-L`
+    "tw_L_10 (sw) + w_L_10 (sw)",  # Minor D: the second title of a list, read the same way
 ])
 def test_a_step_is_linked_to_the_round_whose_capture_it_cites(cited):
     state = {"plan": [{"id": "s", "evidence": [cited]}, {"id": "t", "evidence": ["v_003"]}]}
