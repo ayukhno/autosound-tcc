@@ -801,7 +801,8 @@ answers the first five questions anybody would ask.",
         "gateWrites": "every write",
         "gateForeign": "only what the skill does not own",
         "gateModeTip": "The skill writes `process/`, `state/` and the project's own files constantly, and a new project asks about none of it: a prompt on every `ls` is one you learn to click through, which protects nothing. What still stops for you is what changes the car — TCC's own DSP and REW writes confirm inside the tool, whatever this is set to. Narrow it here if you want the file traffic in front of you too.",
-        "configureModels": "models…",
+        # «OMP» in every language (VM-16, the Arbiter): «models…» read as a word cut short.
+        "configureModels": "OMP",
         "configureModelsTitle": "Models offered in the generator picker",
         "configureModelsBlurb": "omp reports every model it knows about. Tick the ones you have access to — those are what the generator picker offers. Claude runs through the Agent SDK and is always available.",
         "configureModelsFilter": "filter by name, provider or id",
@@ -2044,7 +2045,7 @@ Choose sweeps (sw) above to read this.",
         "gateWrites": "кожен запис",
         "gateForeign": "лише те, чим скіл не володіє",
         "gateModeTip": "Скіл постійно пише в `process/`, `state/` і власні файли проєкту, і новий проєкт про це не питає: запит на кожен `ls` — це запит, який навчаються клікати не читаючи, а він тоді нічого не охороняє. Спиняється те, що міняє машину: власні записи TCC у DSP і REW питають усередині інструмента за будь-якого налаштування. Звузь тут, якщо хочеш бачити й файловий трафік.",
-        "configureModels": "моделі…",
+        "configureModels": "OMP",
         "configureModelsTitle": "Моделі у виборі генератора",
         "configureModelsBlurb": "omp знає про всі ці моделі. Познач ті, до яких маєш доступ — саме вони будуть у виборі генератора. Claude іде через Agent SDK і доступний завжди.",
         "configureModelsFilter": "фільтр за назвою, провайдером або id",
@@ -3278,7 +3279,7 @@ Choose sweeps (sw) above to read this.",
                        'wtedy niczego nie chroni. Zatrzymuje się to, co zmienia auto — własne zapisy TCC do DSP i '
                        'REW pytają wewnątrz narzędzia niezależnie od tego ustawienia. Zawęź tutaj, jeśli chcesz mieć '
                        'przed oczami także ruch plikowy.',
-        "configureModels": 'modele…',
+        "configureModels": 'OMP',
         "configureModelsTitle": 'Modele w wyborze generatora',
         "configureModelsBlurb": 'omp raportuje każdy model, o którym wie. Zaznacz te, do których masz dostęp — właśnie one '
                                 'trafią do wyboru generatora. Claude idzie przez Agent SDK i jest dostępny zawsze.',
@@ -4543,7 +4544,7 @@ Choose sweeps (sw) above to read this.",
                        'das Auto verändert — TCCs eigene Schreibvorgänge ins DSP und nach REW fragen im Werkzeug '
                        'selbst nach, wie das hier auch steht. Verenge es hier, wenn du auch den Dateiverkehr vor '
                        'Augen haben willst.',
-        "configureModels": 'Modelle…',
+        "configureModels": 'OMP',
         "configureModelsTitle": 'Modelle in der Generator-Auswahl',
         "configureModelsBlurb": 'omp meldet jedes Modell, das es kennt. Hake die an, zu denen du Zugang hast — genau die '
                                 'bietet die Generator-Auswahl an. Claude läuft über das Agent SDK und ist immer verfügbar.',

@@ -3565,6 +3565,23 @@ def test_copy_the_car_opens_the_dialog_already_copying(monkeypatch):
     assert seeds == [True, False]
 
 
+def test_the_footer_s_omp_button_reads_omp_in_every_language():
+    """VM-16: the footer's «models…» read on the VM as a word cut short. The Arbiter: «OMP», the
+    same in all four languages -- what it opens is omp's catalogue. Drawn whole: the window's
+    own button, as wide as its word."""
+    assert {lang: i18n.T[lang]["configureModels"] for lang in ("en", "uk", "pl", "de")} == {
+        "en": "OMP", "uk": "OMP", "pl": "OMP", "de": "OMP"}
+    app = _app()
+    window = MainWindow()
+    window.show()
+    try:
+        app.processEvents()
+        assert window._models_btn.text() == "OMP"
+        assert window._models_btn.width() >= window._models_btn.sizeHint().width()
+    finally:
+        window.hide()
+
+
 def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
     """Both, on purpose (user, 2026-08-23). Saying thank you and reporting a bug are the two
     things somebody does on impulse, and an impulse does not open a menu -- but the menu is where
