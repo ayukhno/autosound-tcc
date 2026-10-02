@@ -261,26 +261,85 @@ def test_a_done_step_evidenced_under_the_old_name_is_still_re_chipped(project, p
     assert step.tag["en"] == "recheck", step
 
 
+def _change_then_capture(project, process, codes, said, title):
+    """A project whose channels are `codes` as written, a change naming `said`, then a step closed
+    with the capture `title` -- what is still stale after it."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    proj = vendor_loader.load_project().Project(str(project))
+    data = proj.load()
+    data["channels"] = [{"code": code} for code in codes]  # as written, an older session's `_` too
+    proj.save(data)
+    _record_change(project, process, f"remeasure: [{said}]")
+    process.finish_step("2.1", [title])
+    return process_view.stale_channels(project)
+
+
 @pytest.mark.parametrize("said, title", [
     ("w-L", "w-L_10 (sw)"),  # the change in the one notation, the capture too
     ("w_L", "w-L_10 (sw)"),  # the change as the project writes it, the capture renamed (S-079)
     ("w-L", "w_L_10 (sw)"),  # the capture as typed, read by the method as `w-L`
+    ("w_L", "w_L_10 (sw)"),  # both as the project writes them
 ])
 def test_a_channel_written_with_underscore_answers_to_both_notations(project, process, said, title):
     """#126: a channel `project.json` writes `w_L` answers to `w-L` too (`load_channels`, the
     method's one notation), so a change and the capture that answers it meet whichever of the two
     each was written in. The first case cleared before `w-L` had a channel behind it and must
     still clear now that it has one."""
-    process.enter_phase("2")
-    process.add_step("2.1", "sweep the fronts")
-    proj = vendor_loader.load_project().Project(str(project))
-    data = proj.load()
-    data["channels"] = [{"code": "w_L", "slot": "C"}]  # as an older session wrote it
-    proj.save(data)
-    _record_change(project, process, f"remeasure: [{said}]")
-    process.finish_step("2.1", [title])
+    assert _change_then_capture(project, process, ["w_L", "tw_L"], said, title) == {}
 
-    assert process_view.stale_channels(project) == {}
+
+@pytest.mark.parametrize("codes, said, title", [
+    (["w-L", "w-L-x"], "w-L", "w-L-ctl1_3 (sw)"),  # the first control of a series is the channel's
+    (["w-L"], "w-L", "w-L_3rep (sw)"),  # and so is its repeat
+    (["w-L", "w-R"], "w-L", "w-L low_cut_3 (sw)"),  # a modifier after the code
+    (["sw", "w-L"], "sw", "sw+w-L_3 (sw)"),  # a joint names each of its members
+    (["sr-LH", "sr-L"], "sr-LH", "sr-LH_3 (rta)"),  # a variation of any length (the Arbiter, 2026-10-02)
+    (["sw-r2", "sw"], "sw-r2", "sw-r2_3 (sw)"),
+])
+def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, process, codes, said,
+                                                                     title):
+    assert _change_then_capture(project, process, codes, said, title) == {}
+
+
+@pytest.mark.parametrize("codes, said, title", [
+    (["w_L", "tw_L"], "w_L", "tw-L_10 (sw)"),  # the tweeter's capture, renamed to the hyphen
+    (["w_L", "tw_L"], "w-L", "tw_L_10 (sw)"),  # the tweeter's capture as typed
+    (["w_L", "tw_L"], "w_L", "tw_L_10 (sw)"),
+    (["w-L", "tw-L"], "w-L", "tw-L_10 (sw)"),  # the same, all in the one notation
+    (["sw", "w-L"], "sw", "w-L_10 (sw)"),  # `(sw)` is the method, not the channel `sw`
+    (["sr-LH", "xsr-LH"], "sr-LH", "xsr-LH_3 (rta)"),  # a longer driver type ending the same way
+    (["sr-L", "sr-LH"], "sr-L", "sr-LH_3 (rta)"),  # a longer variation of the same driver
+    (["sw", "sw-r2"], "sw", "sw-r2_3 (sw)"),  # a variation is another channel
+])
+def test_another_channels_capture_never_clears_a_change(project, process, codes, said, title):
+    """#126's review, Important 1: the evidence was matched as a substring, so `w-L` was found in
+    `tw-L_10 (sw)` and a tweeter-only step cleared a woofer swap without a word -- the silence
+    SCR-014 exists to prevent. Since the one-notation names, also across spellings (`w_L` by
+    `tw-L_10`). A name counts only as a whole code: a channel is `<driver type>-<its variation>`
+    (the Arbiter, 2026-10-02), so a letter or digit on either side, or a `-` that starts another
+    variation, makes it another channel's."""
+    stale = _change_then_capture(project, process, codes, said, title)
+
+    assert set(stale) == {said}, stale
+
+
+def test_a_step_evidenced_by_another_channel_is_not_re_chipped(project, process):
+    """The plan's half of the same match: a stale woofer does not put «recheck» on a step whose
+    only capture is the tweeter's (`w-L` is in `tw-L_10 (sw)` as text, not as a code)."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the tweeter")
+    process.add_step("2.2", "sweep the woofer")
+    process.finish_step("2.1", ["tw-L_10 (sw)"])
+    process.finish_step("2.2", ["w-L_10 (sw)"])
+    _record_change(project, process, "remeasure: [w-L]")
+
+    stale = process_view.stale_channels(project)
+    plan = process_view.to_plan(process_view.load_state(project), stale)
+    tags = {s.id: s.tag["en"] for phase in plan for s in phase.steps}
+
+    assert set(stale) == {"w-L"}
+    assert tags["2.2"] == "recheck" and tags["2.1"] != "recheck", tags
 
 
 def test_a_capture_from_before_the_change_does_not_clear_it(project, process):

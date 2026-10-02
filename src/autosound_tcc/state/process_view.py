@@ -16,6 +16,7 @@ the mock rather than showing an empty plan that looks like a finished one.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from dataclasses import replace
 from typing import Optional
@@ -258,7 +259,7 @@ def _to_step(step: dict, stale: Optional[dict] = None,
     # Any name the channel answers to (SCR-039) — the evidence is a REW title typed under whichever
     # name was current that day, which need not be the one the `config_change` used.
     if evidence and any(
-        name in evidence
+        _names_channel(name, evidence)
         for code in (stale or {})
         for name in (aliases or {}).get(code, (code,))
     ):
@@ -398,16 +399,38 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
             for code in codes:
                 stale[code] = {**event, "impact_parsed": parsed}
         elif kind == process.EV_STEP_DONE:
-            # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so a substring
-            # match on the code is what actually works against what the skill writes.
+            # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so the code is
+            # looked for in the text -- as a whole code, not a substring (`_names_channel`).
             evidence = " ".join(str(item) for item in event.get("evidence") or [])
             cleared = [
                 c for c in stale
-                if any(name in evidence for name in aliases.get(c, (c,)))
+                if any(_names_channel(name, evidence) for name in aliases.get(c, (c,)))
             ]
             for code in cleared:
                 del stale[code]
     return stale
+
+
+#: The two controls `naming.generate_name` writes INTO a code with a `-` (`m-L-ctl1_49 (sw)`): the
+#: channel's own capture, not a variation of it. `ctl`/`rep` go after the series (`_49rep`).
+_CONTROLS_IN_CODE = ("ctl1", "ctl3")
+
+
+def _names_channel(name: str, evidence: str) -> bool:
+    """Whether `evidence` names the channel `name` as a whole code, not as a piece of another one.
+
+    It was a substring test, and `w-L` is in `tw-L_10 (sw)`: a tweeter-only step cleared a woofer
+    swap, the silence SCR-014 exists to prevent (#126's review, Important 1). A channel is `<driver
+    type>-<its variation>` with any variation (`sr-LH`, `sw-r2`; the Arbiter, 2026-10-02), and `_`
+    only begins the series. So no letter or digit may touch the name on either side; no `-` may
+    come before it (it would be another channel's variation) nor after it, unless that `-` begins a
+    control (`w-L-ctl1_3`); and no `(` before it, which is the method tag (`(sw)` is not the channel
+    `sw`). What may follow: the series `_`, a space and a modifier, the `+` of a joint, the end.
+    """
+    controls = "|".join(_CONTROLS_IN_CODE)
+    pattern = (rf"(?<![A-Za-z0-9(\-]){re.escape(name)}"
+               rf"(?=$|[^A-Za-z0-9\-]|-(?:{controls})(?![A-Za-z0-9]))")
+    return re.search(pattern, evidence) is not None
 
 
 def _channel_aliases(project_dir: Optional[Path] = None) -> dict[str, tuple[str, ...]]:
