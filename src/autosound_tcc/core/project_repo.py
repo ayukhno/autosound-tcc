@@ -21,7 +21,7 @@ from typing import Optional
 from autosound_tcc.core import app_log, child, vendor_loader
 
 #: Ten minutes: a first push carries the project's captures, and 120 s was not enough for one
-#: (Ruling 48). A bound still, with the tree killed at it (`child.run_bounded`).
+#: (Ruling 48). Still a bound: the push's tree is killed at it (`child.run_bounded`).
 _TIMEOUT_S = 600
 
 
