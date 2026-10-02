@@ -3505,3 +3505,15 @@ wording odd; what he expected is to be asked (recorded as said).
 **Weight.** Low.
 
 **Task.** For W-6's collection (record only).
+
+### 142. After a new reviewer pick, the footer shows the old model's red line for a minute, with nothing that says a check runs
+
+**What.** The Arbiter on the Windows VM, 2026-10-02, v0.1.46: the Critic picker changed to «AGY · Gemini 3.8 Flash
+(Low) · not recommended»; beside it, for about a minute, the status still read the previous reviewer in red,
+«gemini-3.1-pro-preview · 23 h ago», and then «Gemini 3.8 Flash (Low) · answered the check». His words: «цей
+проміжок часу було б добре на місці чи поруч зі знаком питання крутити колесико поки іде перевірка».
+
+**Weight.** Low–medium: for a minute the footer looks like the new pick failed.
+
+**Task.** For W-6's collection (record only): while the new pick's check runs, a spinner in place of (or beside) the
+«!» and no stale red line from the old pick.
