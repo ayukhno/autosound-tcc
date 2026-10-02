@@ -16,19 +16,15 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
-#: The API route switched off in «Ключ рецензента» (finding 136, tcc#127): the Arbiter's own word,
-#: so it goes before anything the machine could say about the row.
-API_OFF = "api_off"
 NOT_INSTALLED = "not_installed"
 SIGN_IN = "sign_in"
 LOCATION = "location"
 REFUSED = "refused"
 NOT_CHECKED = "not_checked"
-PRIORITY = (API_OFF, NOT_INSTALLED, SIGN_IN, LOCATION, REFUSED, NOT_CHECKED)
+PRIORITY = (NOT_INSTALLED, SIGN_IN, LOCATION, REFUSED, NOT_CHECKED)
 
 #: For the agent, in `get_tcc_state` — English, like the rest of that payload.
 PHRASES = {
-    API_OFF: "the Arbiter switched the API route off in TCC's reviewer-key window",
     NOT_INSTALLED: "its CLI is not installed on this machine",
     SIGN_IN: "not signed in to Claude on this machine",
     LOCATION: "not available in your region",
@@ -140,11 +136,6 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
         from autosound_tcc.core import model_choices
         unconfirmed = model_choices.unconfirmed
     found: list[tuple[str, str]] = []
-    if choice.harness == "api":
-        from autosound_tcc.core import config
-
-        if config.reviewer_api_off():
-            found.append((API_OFF, ""))
     if not getattr(choice, "available", True):
         found.append((NOT_INSTALLED, ""))
     if choice.harness == "sdk" and signed_in() is False:

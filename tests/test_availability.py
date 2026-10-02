@@ -98,9 +98,9 @@ def test_the_most_serious_reason_wins():
     availability.refused(choice.key, availability.LOCATION, "x")
     availability.begin_reading(["codex"])
     assert _status(choice, unconfirmed=True).reason == availability.NOT_INSTALLED
-    assert list(availability.PRIORITY) == [availability.API_OFF, availability.NOT_INSTALLED,
-                                          availability.SIGN_IN, availability.LOCATION,
-                                          availability.REFUSED, availability.NOT_CHECKED]
+    assert list(availability.PRIORITY) == [availability.NOT_INSTALLED, availability.SIGN_IN,
+                                          availability.LOCATION, availability.REFUSED,
+                                          availability.NOT_CHECKED]
 
 
 def test_every_reason_has_a_phrase_for_the_agent():
@@ -293,20 +293,3 @@ def test_a_model_the_route_does_not_serve_goes_red():
         _result(critic.MODE_CHOOSE_MODEL, "Модель `gemini-3.1-pro-high` не знайдена (HTTP 404)"),
         reaches=lambda _c: True)
     assert _status(_choice()).reason == availability.REFUSED
-
-
-def test_with_the_api_switched_off_the_api_rows_are_off_and_nothing_else():
-    """«Не використовувати API» in «Ключ рецензента» (the Arbiter, finding 136, tcc#127): the
-    pick respects it — the API rows say so, before anything else they could say; a CLI's row is
-    its login's business and stays as it was."""
-    from autosound_tcc.core import config
-
-    api, agy = _choice(harness="api", model="gemini-pro-latest"), _choice()
-    availability.refused(api.key, availability.REFUSED, "a rejected key")
-    config.set_reviewer_api_off(True)
-    assert config.reviewer_api_off() is True
-    assert _status(api).reason == availability.API_OFF
-    assert _status(agy).ready
-    config.set_reviewer_api_off(False)
-    assert config.reviewer_api_off() is False
-    assert _status(api).reason == availability.REFUSED

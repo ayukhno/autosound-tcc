@@ -889,8 +889,7 @@ _RM_ANSWERS = {
     "removed": (0, "GEMINI_API_KEY: прибрано зі сховища ключів", "", _GONE,
                 reviewer_key.REMOVED, ""),
     "removed, the file still has one": (
-        0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: файл "
-           "~/.config/autosound/critic-env",
+        0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: файл ~/.config/autosound/critic-env",
         "", _with(_GONE, google={"used": "file", "file": {"path": "critic-env", "line": 2,
                                                           "blank": False}}),
         reviewer_key.REMOVED, "file"),
@@ -1069,39 +1068,4 @@ def test_delete_key_waits_with_the_buttons_off_and_says_so(monkeypatch):
     for command, shape, on, line in method.seen:
         assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyRm")), command
     _settled(dialog)
-    dialog.close()
-
-
-# ── tcc#127: «Не використовувати API», TCC's own switch ──────────────────────────────────────────
-
-
-def test_the_api_switch_is_saved_in_tcc_s_settings(monkeypatch):
-    """«а якщо вимикання явне зробити просто — то можна і вимикання і видалення» (the Arbiter,
-    finding 136). TCC's own setting, not the method's: it is on whatever the method can do, and
-    it outlives the window."""
-    from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc import i18n
-
-    dialog, _ = _dialog(monkeypatch, _Method())
-    assert dialog._api_off.text() == i18n.t("rkApiOff") and not dialog._api_off.isChecked()
-    dialog._api_off.click()
-    assert config.reviewer_api_off() is True
-    dialog.close()
-
-    dialog, _ = _dialog(monkeypatch, _Method(status=None))
-    assert dialog._api_off.isChecked() and dialog._api_off.isEnabled(), "an older method too"
-    dialog._api_off.click()
-    assert config.reviewer_api_off() is False
-    dialog.close()
-
-
-def test_the_api_switch_waits_with_everything_else(monkeypatch):
-    """Off while the method's command runs (VM-2), and on again after it."""
-    method = _Slow(status=_with(exports=[]), after_rm=_GONE)
-    dialog, _ = _slow_dialog(monkeypatch, method)
-    on = []
-    method.meanwhile = lambda: on.append(dialog._api_off.isEnabled())
-    dialog._removes["google"].click()
-    assert on and not any(on)
-    assert dialog._api_off.isEnabled()
     dialog.close()

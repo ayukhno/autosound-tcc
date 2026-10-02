@@ -5,7 +5,6 @@ from autosound_tcc.core import availability
 from autosound_tcc.ui.tcc import i18n
 
 _WORDS = {
-    availability.API_OFF: "availApiOff",
     availability.NOT_INSTALLED: "availNotInstalled",
     availability.SIGN_IN: "availSignIn",
     availability.LOCATION: "availLocation",
@@ -13,7 +12,6 @@ _WORDS = {
     availability.NOT_CHECKED: "availNotChecked",
 }
 _PHRASES = {
-    availability.API_OFF: "availPhraseApiOff",
     availability.NOT_INSTALLED: "availPhraseNotInstalled",
     availability.SIGN_IN: "availPhraseSignIn",
     availability.LOCATION: "availPhraseLocation",
