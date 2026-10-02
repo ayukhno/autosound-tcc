@@ -161,6 +161,45 @@ Test: the argv carries the flag; a pinned critic-env does not change the model T
 `_send_to_form`'s check; `fbFromPh` «необов'язково — якщо хочеш відповідь: email, Telegram чи телефон»;
 `fbNoSender` gone. Test: an empty sender sends. The Arbiter turns the form question's «Required» off.
 
+## 5 · Everything deferred to the next wave, taken into W-5 (2026-10-02)
+
+The Arbiter, after the VM pass and before the tag: «бери все що ми відкладали на наступну хвилю (не взагалі) - щоб
+бути готовим до релізу 1.1.0 і роби в цю хвилю». Pool F-091, finding 136 and the method's v3.0.66; #21 and #94 stay
+after v1.1.0. Each issue body is the spec; the order is one committer at a time, the gate's move first so later
+tasks build on the new module.
+
+**#128** the permission gate in its own module, then its pre-existing gaps closed. *~3 h, reviewed on Fable*
+- Step 1, a pure move (its own commit, no behaviour change, the gate's tests untouched and green): the shell lexer and
+  rules from `core/tuning_session.py` into `core/shell_gate.py`; `tuning_session` and `omp_session` import from it.
+- Step 2, the gaps the issue lists, each with a test in the gate's test file (asks: `rm -rf ~/*`, `/Users`,
+  case-insensitive `RM`, `find -execdir`, `git push +ref` / `--mirror`, `rd /s`, a dynamic word as a flag or a wide
+  target, `ruby -r … -e "$(…)"`, `node -r … -e "$(…)"`; passes: a `$HOME`/`~` head whose last word is a plain name).
+
+**#126** the method at v3.0.66. *~1.5 h*
+- The submodule pointer to the signed `v3.0.66` (`fd89466`), the 2ec40ed habit; TCC's two `D_L…` fixture tests back to
+  «refused»; a `_`-only code's ledger row bound or shown impossible; the `handoff --json` `warnings` and
+  `contract.py`'s `continue_head` shown where TCC shows the handoff and the diagnostics.
+
+**#127** the reviewer key deleted and the API switched off (finding 136). *~2 h*
+- First the measurement (a stored key vs a CLI pick, with `--via` and without), its result in the report; a fix if a
+  CLI pick reaches the API. Then «Видалити ключ» (the method's `key rm <provider>`, a confirm naming the provider) and,
+  if simple, an explicit «не використовувати API» the pick respects. Secrets: never on argv, never logged.
+
+**#129** reviewer hints and probes say only what is true. *~1.5 h*
+- A three-state `key help` probe off the UI thread; the 401 rejected-key note for Anthropic/OpenAI; an older method's
+  empty-sender refusal says to update the method; the footer's pin tip describes the text it sits on.
+
+**#130** a problem report carries the tools as they are. *~30 min*
+
+**#131** check boxes readable in dark on Windows; a disabled Send that looks disabled. *~45 min*
+
+**#132** hygiene before v1.1.0. *~1 h*
+- `cell_text` / `field_changed` / `table_fields` into a Qt-free module; REFERENCE.md's target-curve link at the tag;
+  `_stamp_windows` kills the process tree on its timeout; the 1512 test skips with its reason.
+
+Then: the Advisor for pl/de of the new keys, a final review of #126–#132 (Fable), the Arbiter's short VM look (the key
+window's delete and switch, check boxes in dark), CHANGELOG v0.1.46 extended, the release.
+
 ## Order
 
 1. **Small** (1): #119, #114, #118, #111, #120, #117, then #124 (added mid-wave).
