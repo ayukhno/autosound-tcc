@@ -12,9 +12,9 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the method at v3.0.65
+## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the reviewer key deleted in one place, the method at v3.0.66
 
-Paired with method `8bb400f640403f9b5e7faa6acf6d199b855d8901` — the tag on that commit is **`v3.0.65`**.
+Paired with method `fd89466e782f10f579543dcd38a276719bc20251` — the tag on that commit is **`v3.0.66`**.
 
 The wave W-5, collected with the Arbiter on the Mac and on the Windows VM and built on his OK, issue by issue.
 It is one wave on two products: the method was tagged first, and this release pins its tag. What he meets first:
@@ -22,7 +22,10 @@ the diagnostics window has an «Updates» tab, where omp, agy, gh and Claude Cod
 beside TCC and the method; the reviewer picked in the footer is the reviewer that runs, whatever a `critic-env`
 file pins; «Don't ask at all (auto)» no longer stops on read-only commands, and a fourth choice asks about nothing;
 a bold «Guides» submenu and a «?» after the header's target curve open the guides; and the reviewer-key window
-deletes a copy of the key left in a shell profile or in the Windows environment.
+deletes a copy of the key left in a shell profile or in the Windows environment. Then, on his word, the wave took
+in everything deferred to the next one (tcc#126–#132), so that no tail goes into v1.1.0: the method at v3.0.66,
+«Delete the key» in the reviewer-key window, a permission gate that knows many more ways to lose a disk, hints
+that say only what is true, check boxes that show in the dark theme, and a TCC that exits when its window closes.
 
 ### Added
 
@@ -51,6 +54,10 @@ deletes a copy of the key left in a shell profile or in the Windows environment.
   each such variable deletes that copy; it asks first, and «Keep» is the default. After a save the window asks
   the same question itself. The stored key stays, and nothing else is moved or stored: the window runs the
   method's `key move-shell <provider> --drop`.
+- **«Delete the key» in the reviewer-key window** (tcc#127, finding 136). One button removes the provider's key
+  from the secure store and from every copy the window can reach (a shell profile, the Windows environment); the
+  question names each place first. The line after it says what is left: «No copy is left: … nothing is charged»
+  only when that is true, and otherwise where the copy still is. To bring the key back, paste it and save.
 
 ### Changed
 
@@ -76,12 +83,31 @@ deletes a copy of the key left in a shell profile or in the Windows environment.
   another project is now a warning before the sweep, printed by the method to the session. The reviewer-key window
   works on the method's new `key move-shell`; with an installed method older than v3.0.65 it offers no delete and
   says to update the method first, which the updater does.
+- **The method at v3.0.66** (tcc#126, hub #232). The old `D_` prefix is refused again (a channel is
+  `<driver type>-<variant>`, e.g. `sr-LH`, `sw-r2`); a ledger row the method banks under the hyphen (`w-L`) binds
+  to its channel written `w_L`. The handoff box and the diagnostics name a stale CONTINUE block, as the method
+  warns of it, and say where the block and the ledger stand. A stale channel is cleared only by a capture that
+  names it as a whole code, read as the method reads evidence (a typed `w_L`, a bracketed code, a « + » list).
+  An in-app «Update the method» is read by TCC at once, whole; if it cannot be, TCC keeps the old one and says to
+  restart.
+- **A reviewer picked as a login never goes through the API** (tcc#127): a CLI, agy, codex or Claude SDK pick runs
+  as the method's `--via cli`, so a stored key no longer takes it to the API, and its child gets no vendor key.
+- **The permission gate knows more ways to lose a disk** (tcc#128). Its shell reading is a module of its own, and
+  it now asks about: a whole mounted disk (`/Volumes/…`, `/mnt/…`, `/media/…`) and `/root`; a relative climb out of
+  the project (`rm -rf ../..`); PowerShell's `Remove-Item -Recurse` and its aliases on a wide target; `cmd /c`
+  with `rd /s` behind `if exist`; a home the line sets (`HOME=/ …`, `${HOME:=…}`) or spells another way
+  (`//Users`); a bracket glob that bash widens (`/[^x]tc`); an interpreter option whose value comes from another
+  command's output. A pipe into `rm` or `chmod -R` asks; `ls … | grep … | xargs chmod 755` on a narrow listing
+  does not. Still not judged: cmd's redirect targets and `for /f` strings.
+- **Check boxes wear the radios' ring** (tcc#131): in the dark theme on Windows they were invisible. Every check
+  box, in dialogs and in list rows, is a grey ring that is an orange square when ticked, in both themes; a disabled
+  one is grey. A disabled «Send» and «Cancel» in the feedback window look disabled.
 - **Orange buttons say their words in white** (tcc#122): «Message the developer», «Send →» and every other orange
   button, in both themes, on an orange a step darker so that white reads at 4.5:1 or better.
 - **One radio ring that reads in both themes** (tcc#122): in the dark theme the unselected radios were invisible on
   Windows. The ring now shows on every surface, and a chosen radio is an orange disc.
 - **The light theme's blue reads at 4.5:1 or better as text** (tcc#122), on every panel and bubble.
-- **Polish and German for every new and changed string** of this release (67 keys), translated by the Advisor.
+- **Polish and German for every new and changed string** of this release (86 keys), translated by the Advisor.
 
 ### Fixed
 
@@ -131,6 +157,17 @@ deletes a copy of the key left in a shell profile or in the Windows environment.
   hover instead of taking its row down; the updater's check stops on a silent git and never waits for a password
   prompt, and its temp folder is removed when it ends; an OpenSSH too old to check a signature is named as such,
   not as git.
+- **Hints that say only what is true** (tcc#129). Only a bare 401 is read as a rejected key, for Anthropic and
+  OpenAI (a 403 is mostly a region or a VPN), and the note names the variable. The key window asks the method
+  whether it can delete a copy once per opening, and a method that did not answer is not called too old. An
+  older method that refuses an empty feedback sender is named, with where to update it. The footer's tip goes
+  with the text it is about, and a refused pick keeps its line after a session writes the process state.
+- **A problem report carries the tools as they are** (tcc#130): not the versions from before an update, and a
+  tools check slower than the report says «did not answer in time (15 s)», not «not asked yet»; Re-check asks a
+  stuck one again.
+- **TCC exits when its window closes, also after a hung tool** (tcc#132). A tools check or the shortcut stamp's
+  compiler that hangs is killed with its whole process tree on its timeout, and nothing waits for it after. The
+  reference links the method's target-curve guide at the tag TCC ships with, not at `main`.
 
 ## [v0.1.45] — 2026-09-30 · signed tags and a verified updater, the skill updated through its own upkeep, control mode in a small window, the method at v3.0.64
 
