@@ -2053,9 +2053,9 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
-### F-092 — W-6 is collecting: findings go to this pool, the milestone opens when the list is complete
+### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
 
-**Статус**: open · W-6 — ЗБІР from 2026-10-02 evening (the Arbiter: «починай» after v0.1.46): the Arbiter tests, the session only records; the milestone (and whether it is one wave with the skill's `W-6 · v3.1.0`) is his word after «збір закінчено» · started with what W-5 left: recorded at «Випускати як є» (v0.1.46 released without them)
+**Статус**: open · stage 2, the milestone's review (2026-10-02, «збір закінчено»): `W-6 · v1.1.0` (#6), one wave with the skill's `W-6 · v3.1.0`; issues #134 (the method at v3.1.0: hub #233, #236), #135 (agy through ADC, hub #235), #136 (findings 137, 138), #137 (139), #138 (140), #139 (141, shape asked), #140 (142), #141 (the flaky six), #94 (one title twice: a warning), #21 (capture quality at import) — none built until its `ok` · was: W-6 — ЗБІР from 2026-10-02 evening (the Arbiter: «починай» after v0.1.46): the Arbiter tests, the session only records; the milestone (and whether it is one wave with the skill's `W-6 · v3.1.0`) is his word after «збір закінчено» · started with what W-5 left: recorded at «Випускати як є» (v0.1.46 released without them)
 
 - finding 137 — the reviewer-key window squeezes the rows' «Delete the key» buttons after a save that leaves a copy;
 - finding 138 — the key window joins the places with «;» (→ «and» / «і», four languages);
