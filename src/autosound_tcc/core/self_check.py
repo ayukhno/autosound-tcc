@@ -309,14 +309,36 @@ def _recommendation_check() -> Check:
     )
 
 
+#: agy's sign-in, by the method's route word (hub #235, tcc#135).
+_AGY_SIGN_IN_TITLE = {"adc": "selfAgyAdcTitle", "account": "selfAgyAccountTitle",
+                      "none": "selfAgyNoneTitle"}
+
+
+def _agy_sign_in_check() -> Optional[Check]:
+    """Which sign-in agy will use for a review — Google Cloud's ADC, its account, or none — as the
+    method reads it (tcc#135). No row when agy is not installed, or when the method cannot say."""
+    if not model_choices.cli_available("agy"):
+        return None
+    from autosound_tcc.core import critic
+
+    found = critic.agy_sign_in()
+    if found is None:
+        return None
+    route, line = found
+    return Check("agy_sign_in", WARN if route == "none" else OK,
+                 _t(_AGY_SIGN_IN_TITLE[route]), line)
+
+
 def run() -> list[Check]:
     """Every self-check, worst first. Never raises: a diagnostics panel that crashes is worse than
     one that is missing a row."""
     checks = []
     for probe in (_alias_check, _catalogue_check, _pin_check, _reviewer_actual_check,
-                  _recommendation_check):
+                  _recommendation_check, _agy_sign_in_check):
         try:
-            checks.append(probe())
+            found = probe()
+            if found is not None:  # a probe with nothing to say leaves no row (tcc#135)
+                checks.append(found)
         except Exception as exc:  # noqa: BLE001 — a broken probe is a row, not a dead dialog
             checks.append(Check(probe.__name__, WARN, _t("selfCheckFailed"), str(exc)))
     order = {BAD: 0, WARN: 1, OK: 2}

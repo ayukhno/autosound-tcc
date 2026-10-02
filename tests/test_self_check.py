@@ -328,3 +328,50 @@ def test_no_tags_to_compare_against_is_silence_not_an_alarm(monkeypatch, tmp_pat
     }, tmp_path)
 
     assert self_check._pin_check().status == self_check.OK
+
+
+def test_an_installed_agy_says_how_it_signs_in_from_the_methods_own_reading(monkeypatch):
+    """hub #235, tcc#135: which sign-in agy will use — Google Cloud's ADC, its account, or none —
+    shown where TCC shows its setup. The method reads it (`agy_sign_in`, from disk and the
+    environment its runs start with, critic-env included); TCC shows its words, not a copy."""
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in",
+                        lambda project_dir=None: ("adc", "ADC (Google Cloud), /home/x/adc.json"))
+
+    row = _find(self_check.run(), "agy_sign_in")
+
+    assert row.status == self_check.OK
+    assert "ADC" in row.title
+    assert row.detail == "ADC (Google Cloud), /home/x/adc.json"
+
+
+def test_an_agy_with_no_sign_in_is_a_warning_with_the_methods_way_out(monkeypatch):
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in",
+                        lambda project_dir=None: ("none", "agy без входу: запусти `agy` раз і увійди"))
+
+    row = _find(self_check.run(), "agy_sign_in")
+
+    assert row.status == self_check.WARN
+    assert row.detail.startswith("agy без входу")
+
+
+def test_no_agy_no_row(monkeypatch):
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: ("adc", "x"))
+
+    assert "agy_sign_in" not in {c.id for c in self_check.run()}
+
+
+def test_a_method_that_cannot_say_leaves_no_row(monkeypatch):
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: None)
+
+    assert "agy_sign_in" not in {c.id for c in self_check.run()}

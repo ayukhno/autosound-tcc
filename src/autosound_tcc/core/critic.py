@@ -21,6 +21,7 @@ never as an answer.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -917,6 +918,40 @@ def last_call(project_dir: Optional[Path] = None) -> Optional[dict]:
         except ValueError:
             continue
     return None
+
+
+#: The method's own reading of agy's sign-in, asked in a child (tcc#135). Not imported into TCC:
+#: the script loads its machine critic-env into `os.environ` when it is imported, keys included,
+#: and TCC's own environment is what every child it starts inherits.
+_AGY_SIGN_IN_ASK = (
+    "import json, sys; sys.path.insert(0, sys.argv[1]); import autosound_ai as a; "
+    "print(json.dumps(list(a.agy_sign_in())))"
+)
+
+
+def agy_sign_in(project_dir: Optional[Path] = None) -> Optional[tuple[str, str]]:
+    """`(route, line)` — how agy will sign in for a review: `adc`, `account` or `none`, in the
+    method's own words (hub #235; `autosound_ai.agy_sign_in`, v3.1.0). None when the method cannot
+    say: an older one without the function, no script, or a child that did not answer.
+
+    The method reads it off disk and off the environment its runs start with, critic-env included
+    — never by running agy, and no credential file is opened."""
+    if not is_available():
+        return None
+    project_dir = Path(project_dir or config.project_dir())
+    try:
+        proc = child.run_bounded(
+            [child.script_interpreter(), "-c", _AGY_SIGN_IN_ASK, str(script_path().parent)],
+            timeout=15, cwd=str(project_dir), text=True, encoding="utf-8",
+            errors="replace", env=vendor_loader.child_env(), **child.quiet(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    try:
+        route, line = json.loads((proc.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError, TypeError):
+        return None
+    return (str(route), str(line)) if route in ("adc", "account", "none") else None
 
 
 def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] = None) -> str:
