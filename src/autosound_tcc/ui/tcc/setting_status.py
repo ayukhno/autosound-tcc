@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QStyle, QStyleOptionTab, QStylePainter, QTabBar, Q
 from autosound_tcc.state.dsp_state import CrossoverLeg, GroupRow, ProfileGroup
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+from autosound_tcc.ui.tcc.row_rule import field_changed, table_fields
 from autosound_tcc.ui.tcc.theme import current_theme
 
 #: The painted dot, and the square that answers the mouse around it: «можна зробити зону
@@ -58,12 +59,10 @@ def _judge(row: GroupRow, old: Optional[GroupRow], compared: bool,
     `fields`, changed over `columns` (the table's, where the dot stands for a whole tier; `fields`
     when not given).
 
-    A difference is the rows' own (`detail_pane.field_changed`): the value as the table reads it —
+    A difference is the rows' own (`row_rule.field_changed`): the value as the table reads it —
     rounded, an absent mute the same as an off one — and every value new on a channel the
     compared version lacks. The raw values made the dot disagree with the rows both ways
-    (tcc#122, W-4's review of #105). Imported here: `detail_pane` imports this module."""
-    from autosound_tcc.ui.tcc.detail_pane import field_changed
-
+    (tcc#122, W-4's review of #105)."""
     fields = tuple(fields)
     has = any(_is_set(f, row.raw) for f in fields)
     if not compared:
@@ -87,8 +86,6 @@ def group_status(group: ProfileGroup, compared_group: Optional[ProfileGroup] = N
     """One tier as a whole — the tree's group header, a table's tab. Changed over the table's own
     columns, as its rows are marked: «Off» is a column and not a setting, and a channel switched
     back on was marked in its row and not on the dot (tcc#122, the review of the first pass)."""
-    from autosound_tcc.ui.tcc.detail_pane import table_fields
-
     olds = {r.id: r for r in compared_group.rows} if compared_group is not None else {}
     columns = table_fields(group)
     has = changed = False

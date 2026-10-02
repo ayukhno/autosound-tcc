@@ -106,12 +106,8 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
-from autosound_tcc.ui.tcc.detail_pane import (
-    DetailPane,
-    eq_field_order,
-    is_other_preset,
-    table_fields,
-)
+from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
+from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
 from autosound_tcc.ui.tcc.dialog_panel import _SYS_ROLE_TCC, SYS_ROLE_LEDGER, DialogPanel

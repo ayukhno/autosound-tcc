@@ -37,15 +37,13 @@ from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
-from autosound_tcc.ui.tcc.detail_pane import (
-    band_changes,
+from autosound_tcc.ui.tcc.detail_pane import band_changes, mark_colour, unread_leg_tip
+from autosound_tcc.ui.tcc.row_rule import (
     band_count,
     cell_text,
     changed_fields,
     column_title,
-    mark_colour,
     table_fields,
-    unread_leg_tip,
 )
 from autosound_tcc.ui.tcc.setting_status import StatusDot
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
@@ -375,7 +373,7 @@ class ChannelRow(QWidget):
             # MUTE-only in the working interface (user request 2026-07-27) -- OFF (hardware
             # physically disabled at the DSP level, GroupRow.off) is real data but stays out of
             # the main tree/table for now, deferred to a future settings view to avoid confusing
-            # the two states side by side. See pill-off/`_FIELD_COLUMNS["off"]` (detail_pane.py) --
+            # the two states side by side. See pill-off/`FIELD_COLUMNS["off"]` (row_rule.py) --
             # left in place, just not wired into any profile's `fields` list right now.
             pill = ("mute", i18n.t("pillMute"), "mute")
         elif raw.get("polarity") == "INV" or "polarity" in changed:

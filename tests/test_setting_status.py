@@ -4,6 +4,9 @@ grey — nothing is set there, green — something is, blue — it differs from 
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import textwrap
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -83,7 +86,7 @@ def test_the_dot_judges_a_change_as_the_rows_read_it():
     against −1.0 (both read −1.0), and a channel the compared version lacks, every value of which
     the rows mark new, was not blue on the dot when nothing was set on it. The dot asks the rows'
     own rule now: blue exactly when a row marks something."""
-    from autosound_tcc.ui.tcc.detail_pane import changed_fields
+    from autosound_tcc.ui.tcc.row_rule import changed_fields
 
     fields = _FIELDS + ("mute",)
 
@@ -113,7 +116,7 @@ def test_a_channel_switched_back_on_turns_the_dot_as_it_marks_its_row():
     judge the table's columns, so an «Off» column — a channel switched back on since the compared
     version — was marked in the row and not on the dot. What changed is judged over the table's
     columns; what is set, over the controls that are settings (an off channel is not a row)."""
-    from autosound_tcc.ui.tcc.detail_pane import changed_fields
+    from autosound_tcc.ui.tcc.row_rule import changed_fields
 
     fields = _FIELDS + ("off",)
 
@@ -128,3 +131,50 @@ def test_a_channel_switched_back_on_turns_the_dot_as_it_marks_its_row():
     assert changed_fields(now, row, old) == frozenset({"off"}), "the row marks it"
     assert setting_status.group_status(now, before, compared=True) == "chg"
     assert setting_status.group_status(now, now, compared=True) == "set"
+
+
+# ---- the rows' rule, apart from the widget module (tcc#132) -------------------------------------
+#
+# Asked of an interpreter of its own: this one has Qt and every widget module loaded already, so
+# `sys.modules` here says nothing about what one import pulls in.
+
+
+def _fresh(code: str) -> str:
+    done = subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output=True,
+                          text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def test_the_rows_rule_is_a_module_without_qt():
+    """W-5's review (tcc#132): `cell_text`, `field_changed` and `table_fields` lived in the widget
+    module, and the dot reached into it for them. The rule is plain Python — what a value reads as,
+    and whether it moved — and sits in a module of its own that imports no Qt."""
+    loaded = _fresh("""
+        import sys
+        from autosound_tcc.ui.tcc import row_rule
+        print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
+    """)
+    assert loaded == "[]"
+
+
+def test_the_dot_judges_without_the_widget_module():
+    """The dot asked `detail_pane` for the rows' rule through an import inside a function, because
+    `detail_pane` imports the dot (tcc#122). Both import the rule now, and judging a tier and a
+    control loads no table."""
+    said = _fresh("""
+        import sys
+        from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+        from autosound_tcc.ui.tcc import setting_status
+
+        def tier(gain):
+            row = GroupRow(id="w-L", name="w-L", slot="B", raw={"gain_db": gain})
+            return ProfileGroup(id="physical_outputs", label="Output",
+                                fields=("hp", "gain_db", "eq"), rows=(row,))
+
+        now, before = tier(-1.5), tier(-1.0)
+        print(setting_status.group_status(now, before, compared=True),
+              setting_status.field_status([now], "gain_db", [before], True),
+              "autosound_tcc.ui.tcc.detail_pane" in sys.modules)
+    """)
+    assert said == "chg chg False"
