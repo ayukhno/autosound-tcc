@@ -87,8 +87,11 @@ def cli_path() -> Optional[str]:
     return str(fallback) if os.access(fallback, os.X_OK) else None
 
 
-def signed_in() -> Optional[bool]:
+def signed_in(*, reviewer: bool = False) -> Optional[bool]:
     """Has the Claude route got something to authenticate with, as last probed.
+
+    `reviewer`: a reviewer's `claude -p` runs with `ANTHROPIC_API_KEY` left out (tcc#127), so for
+    it only the login counts; a tuning session's child keeps the key, and the key is enough there.
 
     Never runs anything: this is read by the pickers, on the UI thread, on every rebuild. The
     answer comes from `probe_signed_in()`, which a worker calls once at launch.
@@ -98,7 +101,14 @@ def signed_in() -> Optional[bool]:
     is missing when the truth is that we failed to ask is worse than saying nothing: they would go
     and re-do a login that was fine.
     """
+    if not reviewer and os.environ.get(_API_KEY_VAR):
+        return True
     return _SIGNED_IN
+
+
+#: The key `claude` bills over a login. #127 leaves it out of a reviewer's child, so the probe asks
+#: about the login with it left out too — what that child will actually have.
+_API_KEY_VAR = "ANTHROPIC_API_KEY"
 
 
 def probe_signed_in(*, force: bool = False) -> Optional[bool]:
@@ -119,15 +129,15 @@ def probe_signed_in(*, force: bool = False) -> Optional[bool]:
     machine nobody has ever logged in on. That gap is why a fresh install offered three Claude
     models that could not have answered any of them (found on a clean Mac, 2026-08-13).
 
-    An `ANTHROPIC_API_KEY` is the other way the route can work, and it needs no CLI at all.
+    An `ANTHROPIC_API_KEY` is the other way a tuning session can work, and it needs no CLI at all
+    — `signed_in()` counts it. It is not a login: a reviewer's `claude -p` runs without it
+    (tcc#127), so it neither answers this probe nor goes into the probe's child. Counted as a
+    login, it showed a reviewer as ready that then failed to sign in (final review of v0.1.46, M2).
     """
     global _SIGNED_IN, _ASKED
     if _ASKED and not force:
         return _SIGNED_IN
     _ASKED = True
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        _SIGNED_IN = True
-        return _SIGNED_IN
     binary = cli_path()
     if binary is None:
         _SIGNED_IN = None
@@ -137,6 +147,7 @@ def probe_signed_in(*, force: bool = False) -> Optional[bool]:
         # it on the same pipes, and 2 s is under node's cold start (review of tcc#132).
         proc = child.run_bounded(
             [binary, "auth", "status"],
+            env={name: value for name, value in os.environ.items() if name != _API_KEY_VAR},
             text=True,
             encoding="utf-8",
             errors="replace",

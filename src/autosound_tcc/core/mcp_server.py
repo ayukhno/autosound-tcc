@@ -190,7 +190,7 @@ def _reviewer_state(project_dir: Path) -> dict[str, Any]:
     # choice is often not in it. Judge the key itself rather than reporting "unreachable" for a
     # reviewer that works. Resolved alias and all: that is the key a call's refusal is filed under.
     resolved, choice = model_choices.resolve_critic(key)
-    state = availability.status(choice)
+    state = availability.status(choice, reviewer=True)
     # What holds back the channel, whatever goes down it; the project's files hold back only a
     # review (tcc#116).
     channel = [availability.PHRASES[state.reason]] if not state.ready else []

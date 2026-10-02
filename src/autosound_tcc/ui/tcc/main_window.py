@@ -495,7 +495,7 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     return row, title, sub
 
 
-def _mark_missing(combo, entries, warn: bool = False) -> None:
+def _mark_missing(combo, entries, warn: bool = False, reviewer: bool = False) -> None:
     """Red when the current choice is not among `entries`, plain when it is.
 
     Recomputed on every selection change, not only when the list is rebuilt. It was set once at
@@ -515,7 +515,7 @@ def _mark_missing(combo, entries, warn: bool = False) -> None:
     # (finding 20: red in the open list, plain in the closed picker that is on screen all the
     # time). "Not checked yet" is not a refusal and does not turn it red.
     def runs(choice) -> bool:
-        state = availability.status(choice)
+        state = availability.status(choice, reviewer=reviewer)
         return choice.available and (state.ready or state.reason == availability.NOT_CHECKED)
 
     missing = bool(current) and not any(choice.key == current and runs(choice) for choice in entries)
@@ -525,7 +525,7 @@ def _mark_missing(combo, entries, warn: bool = False) -> None:
     combo.style().polish(combo)
 
 
-def _sdk_login_note(choice) -> tuple[str, str]:
+def _sdk_login_note(choice, reviewer: bool = False) -> tuple[str, str]:
     """"You picked Claude and this machine has no Claude login" — headline and detail, or both empty.
 
     Only for a `False` from `signed_in()`. `None` means the probe could not tell (no CLI to ask, a
@@ -534,7 +534,8 @@ def _sdk_login_note(choice) -> tuple[str, str]:
     """
     if choice is None or getattr(choice, "harness", "") != "sdk":
         return "", ""
-    if claude_sdk.signed_in() is not False:
+    # A reviewer's `claude -p` runs without `ANTHROPIC_API_KEY` (tcc#127): only the login counts.
+    if claude_sdk.signed_in(reviewer=reviewer) is not False:
         return "", ""
     return i18n.t("sdkNoLogin"), i18n.t("sdkNoLoginTip").format(cmd=claude_sdk.LOGIN_HINT)
 
@@ -4669,7 +4670,7 @@ class MainWindow(QMainWindow):
         choice = resolved.choice if resolved is not None else None
         tint = ""
         if current:
-            state = availability.status(choice) if choice is not None else None
+            state = availability.status(choice, reviewer=True) if choice is not None else None
             if choice is None or not choice.available or (
                     not state.ready and state.reason != availability.NOT_CHECKED):
                 tint = " is-missing"
@@ -4762,7 +4763,7 @@ class MainWindow(QMainWindow):
                 pairs.append((i18n.t("criticSameVendor"),
                               i18n.t("criticSameVendorTip").format(vendor=vendor)))
         # ...and the one the Generator has too: the Claude route with nothing to authenticate with.
-        login_note, login_tip = _sdk_login_note(chosen)
+        login_note, login_tip = _sdk_login_note(chosen, reviewer=True)
         if login_note:
             pairs.append((login_note, login_tip))
             hard = True
@@ -4817,7 +4818,7 @@ class MainWindow(QMainWindow):
         the pick's, as `_refresh_critic_status` paints the critic log's (finding 55). The new text
         takes the tip of the one before with it (`ElidedLabel.setText`, tcc#129)."""
         chosen = self._critic_pick()
-        if chosen is not None and not availability.status(chosen).ready:
+        if chosen is not None and not availability.status(chosen, reviewer=True).ready:
             self._refresh_critic_status()
             return
         model = str(review.get("model") or "")
@@ -4830,7 +4831,7 @@ class MainWindow(QMainWindow):
         self._refresh_critic_warning()
         chosen = self._critic_pick()
         if chosen is not None:
-            state = availability.status(chosen)
+            state = availability.status(chosen, reviewer=True)
             if not state.ready:
                 self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
                 self._critic_status.set_tip(state.detail or availability_view.phrase(state))
@@ -5407,7 +5408,7 @@ class MainWindow(QMainWindow):
                 notes.append(i18n.t("modelFree"))
             # One word for why it cannot run, or nothing (spec 2026-09-13). "Not installed" and
             # "remembered from last launch" are two of the reasons now, not two separate badges.
-            state = availability.status(choice)
+            state = availability.status(choice, reviewer=critic)
             # No reviewer, whatever the machine has (tcc#74): an OMP pick goes through omp only
             # and the script has no omp route yet; the generator's own model is no second opinion.
             why_not = model_choices.not_a_reviewer(choice, generator=generator) if critic else ""
@@ -5485,7 +5486,7 @@ class MainWindow(QMainWindow):
             index = 0
         combo.setCurrentIndex(index if index >= 0 else 0)
         combo.blockSignals(blocked)
-        _mark_missing(combo, entries)
+        _mark_missing(combo, entries, reviewer=critic)
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:
         key = self._ai_main_combo.currentData()

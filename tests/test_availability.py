@@ -319,3 +319,36 @@ def test_claude_s_login_probe_through_an_npm_shim_is_killed_with_node(monkeypatc
     [claude] = spawns.hung
     assert claude.timeouts == [claude_sdk._AUTH_TIMEOUT_S, child.REAP_TIMEOUT_S]
     assert spawns.taskkills == [["taskkill", "/T", "/F", "/PID", str(claude.pid)]]
+
+
+def test_an_api_key_is_a_login_for_the_session_and_not_for_a_reviewer(monkeypatch):
+    """#127 leaves `ANTHROPIC_API_KEY` out of a reviewer's `claude -p`, so on a machine with the key
+    and no `claude` login the reviewer row said ready and the first review failed (final review of
+    v0.1.46, M2). The probe now asks `claude auth status` with the key left out — the login the
+    reviewer's child has — and a tuning session, whose child keeps the key, still counts the key."""
+    import subprocess
+
+    from autosound_tcc.core import claude_sdk
+
+    seen: list = []
+
+    def fake_run(args, **kwargs):
+        seen.append(kwargs.get("env"))
+        return subprocess.CompletedProcess(args, 0, '{"loggedIn": false}', "")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: "/usr/bin/claude")
+    monkeypatch.setattr(claude_sdk, "_ASKED", False, raising=False)
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", None, raising=False)
+    monkeypatch.setattr(claude_sdk.child, "run_bounded", fake_run)
+
+    assert claude_sdk.probe_signed_in(force=True) is False, "the login is what was asked"
+    assert seen and seen[0] is not None and "ANTHROPIC_API_KEY" not in seen[0], \
+        "asked as the reviewer's child runs: without the key"
+    assert claude_sdk.signed_in(reviewer=True) is False
+    assert claude_sdk.signed_in() is True, "a session's child keeps the key"
+
+    sdk = _choice(harness="sdk", model="claude-opus-5")
+    assert availability.status(sdk, reviewer=True, unconfirmed=lambda _c: False).reason \
+        == availability.SIGN_IN
+    assert availability.status(sdk, unconfirmed=lambda _c: False).ready

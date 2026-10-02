@@ -130,11 +130,17 @@ def reset() -> None:
 
 
 def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
-           unconfirmed: Optional[Callable[[object], bool]] = None) -> Status:
-    """Ready, or the most serious reason it is not (see `PRIORITY`)."""
+           unconfirmed: Optional[Callable[[object], bool]] = None,
+           reviewer: bool = False) -> Status:
+    """Ready, or the most serious reason it is not (see `PRIORITY`).
+
+    `reviewer`: the choice is judged as a reviewer's, whose Claude child runs without
+    `ANTHROPIC_API_KEY` (tcc#127) — only the login signs it in (`claude_sdk.signed_in`)."""
     if signed_in is None:
         from autosound_tcc.core import claude_sdk
-        signed_in = claude_sdk.signed_in
+
+        def signed_in() -> Optional[bool]:
+            return claude_sdk.signed_in(reviewer=reviewer)
     if unconfirmed is None:
         from autosound_tcc.core import model_choices
         unconfirmed = model_choices.unconfirmed
