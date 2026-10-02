@@ -2485,3 +2485,34 @@ def test_a_reviewer_call_still_out_does_not_hold_the_exit(tmp_path, monkeypatch)
         release.set()
         caller.join(10)
     assert answer and "the sub is 3 dB hot" in _text(answer[0])
+
+
+def test_a_call_left_running_by_a_test_is_drained_before_the_next(tmp_path):
+    """tcc#141: since the MCP calls run on daemon threads (tcc#132), `asyncio.run` no longer joins
+    a call at a test's end, so a call one test left running could touch process-wide state in the
+    next. The suite drains them after every test (`tests/conftest.py`); this is what it calls."""
+    import threading
+    import time
+
+    from autosound_tcc.core import mcp_server
+
+    done = threading.Event()
+    mcp_server._CALLS.submit(lambda: (time.sleep(0.3), done.set()))
+
+    left = mcp_server.drain_calls(timeout=2.0)
+
+    assert left == 0 and done.is_set()
+
+
+def test_draining_gives_up_at_its_limit_and_says_how_many_are_left():
+    import threading
+
+    from autosound_tcc.core import mcp_server
+
+    release = threading.Event()
+    mcp_server._CALLS.submit(release.wait)
+    try:
+        assert mcp_server.drain_calls(timeout=0.1) == 1
+    finally:
+        release.set()
+        assert mcp_server.drain_calls(timeout=2.0) == 0

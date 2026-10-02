@@ -121,6 +121,18 @@ class _DaemonCalls(concurrent.futures.Executor):
 _CALLS = _DaemonCalls()
 
 
+def drain_calls(timeout: float = 2.0) -> int:
+    """Wait, up to `timeout` in all, for the blocking calls still out; how many are left (tcc#141).
+
+    A call on `_CALLS` is no longer joined by `asyncio.run` at a test's end, so one a test left
+    running could touch process-wide state in the next test, after its monkeypatches were undone
+    (the serial suite's flaky six, W-5's release). The suite drains them after every test."""
+    deadline = time.monotonic() + timeout
+    for thread in [t for t in threading.enumerate() if t.name == "tcc-mcp-call"]:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    return sum(1 for t in threading.enumerate() if t.name == "tcc-mcp-call" and t.is_alive())
+
+
 async def _in_thread(fn, /, *args, **kwargs):
     """`asyncio.to_thread` on `_CALLS`: the call's context goes with it, as `to_thread` sends it."""
     ctx = contextvars.copy_context()

@@ -116,6 +116,18 @@ def _no_console_keeper_threads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_mcp_call_outlives_its_test():
+    """tcc#141: an MCP call runs on a daemon thread since tcc#132, which `asyncio.run` no longer
+    joins at a test's end. One left running reached `availability` in the next test after its
+    monkeypatches were undone — the serial suite's flaky six at W-5's release. Drained here, so
+    whatever a late call wrote is there before the next test's `_fresh_availability` resets it."""
+    yield
+    from autosound_tcc.core import mcp_server
+
+    mcp_server.drain_calls(timeout=2.0)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_availability():
     """Every test starts on a fresh launch's availability, and leaves one behind.
 
