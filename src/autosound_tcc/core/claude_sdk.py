@@ -133,9 +133,10 @@ def probe_signed_in(*, force: bool = False) -> Optional[bool]:
         _SIGNED_IN = None
         return _SIGNED_IN
     try:
-        proc = subprocess.run(
+        # Bounded with the tree killed: an npm install is `claude.CMD`, cmd.exe with node.exe under
+        # it on the same pipes, and 2 s is under node's cold start (review of tcc#132).
+        proc = child.run_bounded(
             [binary, "auth", "status"],
-            capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",

@@ -12,7 +12,8 @@ import sys
 
 import pytest
 
-from autosound_tcc.core import install_report, updates
+from autosound_tcc.core import child, install_report, updates
+from tests import _hung_child
 
 
 def _git_answers(monkeypatch, answers: dict):
@@ -735,7 +736,7 @@ def test_the_probe_never_raises_when_git_is_missing(monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(subprocess, "run", boom)
+    monkeypatch.setattr(subprocess, "Popen", boom)
 
     ok, out = updates._git("ls-remote", "x")
 
@@ -949,7 +950,7 @@ def test_the_update_check_can_never_stop_to_ask_for_a_password(monkeypatch):
 
         return sp.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(updates.subprocess, "run", fake_run)
+    monkeypatch.setattr(updates.child, "run_bounded", fake_run)
 
     updates._git("ls-remote", "--tags", "https://example.invalid/x.git")
 
@@ -1812,3 +1813,36 @@ def test_a_name_the_skill_does_not_know_is_its_usage_error_in_its_own_words(monk
     done = _REAL_UPDATE_TOOLS(["uv"])
 
     assert done == updates.ToolsUpdate((), "upkeep_failed", said)
+
+
+# ---- a git that never answers (review of #132, I3) -----------------------------------------------
+#
+# git runs https as a child of its own, `git-remote-https`, and the helper inherits git's stderr:
+# TCC's pipe. At the timeout `subprocess.run` killed git alone and then, on Windows, waited with no
+# bound for the helper to let go -- on a stalled link, curl's own minutes.
+
+
+def test_a_git_that_never_answers_is_killed_with_its_https_helper(monkeypatch, tmp_path):
+    spawns = _hung_child.install(monkeypatch)
+
+    ok, said = updates._git("ls-remote", "--tags", "https://example.invalid/x.git")
+    blob = updates._git_blob(tmp_path, "v0.1.46:upkeep.py")
+
+    assert not ok and said.startswith("TimeoutExpired") and blob is None
+    assert [git.args[:2] for git in spawns.hung] == [["git", "ls-remote"], ["git", "-C"]]
+    for git in spawns.hung:
+        assert git.killed and git.timeouts == [updates._ASK_TIMEOUT, child.REAP_TIMEOUT_S]
+    assert [kill[-1] for kill in spawns.taskkills] == [str(git.pid) for git in spawns.hung]
+
+
+def test_the_tcc_rows_check_ends_when_git_never_answers(monkeypatch):
+    """«Оновити TCC» runs this on a thread and the row polls it with no cap on its tries
+    (`diagnostics_panel._poll_tcc_job`): the row said «checking the tag…», its button grey, for as
+    long as git hung. Bounded, the step ends, and the row has git's reason to say."""
+    spawns = _hung_child.install(monkeypatch)
+
+    ready = updates.prepare_tcc_update(updates.STABLE)
+
+    assert ready.script is None and ready.reason == "probe_failed"
+    assert "TimeoutExpired" in ready.detail
+    assert spawns.hung and all(git.killed for git in spawns.hung)

@@ -38,8 +38,8 @@ def _app():
 def catalogue(monkeypatch):
     monkeypatch.setattr(model_choices, "omp_available", lambda: True)
     monkeypatch.setattr(
-        model_choices.subprocess,
-        "run",
+        model_choices.child,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps({"models": CATALOGUE}), ""),
     )
 
@@ -125,7 +125,7 @@ def test_omp_error_shows_a_plain_line_first_with_the_raw_text_behind_a_toggle(mo
         "pending (rerun with PI_DEBUG_STARTUP=1 to see the last phase reached)"
     )
     monkeypatch.setattr(
-        model_choices.subprocess, "run",
+        model_choices.child, "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(a, 1, "", raw),
     )
 

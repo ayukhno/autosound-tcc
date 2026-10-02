@@ -361,10 +361,14 @@ _log = logging.getLogger("autosound_tcc")
 
 def _git(*args: str, cwd: Optional[Path] = None,
          timeout: float = _ASK_TIMEOUT) -> tuple[bool, str]:
-    """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash."""
+    """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash.
+
+    Bounded with the tree killed (`child.run_bounded`): git runs https as a child of its own,
+    `git-remote-https`, on git's stderr, and `subprocess.run` killed git alone at the timeout and
+    then, on Windows, waited with no bound for the helper to let go (review of tcc#132)."""
     try:
-        done = subprocess.run(
-            ["git", *args], capture_output=True, text=True, timeout=timeout,
+        done = child.run_bounded(
+            ["git", *args], text=True, timeout=timeout,
             encoding="utf-8",
             errors="replace",
             env={**os.environ, **_NO_PROMPTING},
@@ -375,7 +379,7 @@ def _git(*args: str, cwd: Optional[Path] = None,
             # while `agy` produced one every time. The startup flash was agy, and it is gone
             # because agy is no longer asked at startup (`core/model_choices.refresh_cli_catalogue`).
             # A console handed to git would now be a window we create for nothing.
-            check=False, cwd=str(cwd) if cwd else None,
+            cwd=str(cwd) if cwd else None,
             **child.quiet())
     except Exception as exc:  # noqa: BLE001 — no git, no network, a hung server
         # Logged HERE too, and that is the point: this path returns before the one below, so a
@@ -788,9 +792,8 @@ def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
     Bytes, not text: a file is copied out of the tag as it is, the way install.ps1 takes a zip
     rather than let PowerShell decode it through the console's code page."""
     try:
-        done = subprocess.run(["git", "-C", str(repo), "show", spec], capture_output=True,
-                              timeout=_ASK_TIMEOUT, check=False,
-                              env={**os.environ, **_NO_PROMPTING}, **child.quiet())
+        done = child.run_bounded(["git", "-C", str(repo), "show", spec], timeout=_ASK_TIMEOUT,
+                                 env={**os.environ, **_NO_PROMPTING}, **child.quiet())
     except Exception:  # noqa: BLE001 — no git: the same as no file
         return None
     return done.stdout if done.returncode == 0 else None

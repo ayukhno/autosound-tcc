@@ -80,9 +80,10 @@ def run_offer(offer: str, project: Path) -> RepoResult:
     if not argv or argv[0] != "gh":
         return RepoResult(False, f"not a gh command: {offer}")
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=_TIMEOUT_S, cwd=str(project),
-                              **child.quiet())
+        # Bounded with the tree killed: gh pushes through git, and git through its https helper,
+        # all on gh's pipes, and this runs on the GUI thread (review of tcc#132).
+        proc = child.run_bounded(argv, text=True, encoding="utf-8", errors="replace",
+                                 timeout=_TIMEOUT_S, cwd=str(project), **child.quiet())
     except (OSError, subprocess.SubprocessError) as exc:
         return RepoResult(False, f"{type(exc).__name__}: {exc}")
     app_log.logger().info("project repo: gh repo create -> exit %s", proc.returncode)

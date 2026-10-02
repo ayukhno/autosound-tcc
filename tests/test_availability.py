@@ -6,8 +6,9 @@ import time
 
 import pytest
 
-from autosound_tcc.core import availability
+from autosound_tcc.core import availability, child
 from autosound_tcc.core.model_choices import Choice
+from tests import _hung_child
 
 
 @pytest.fixture(autouse=True)
@@ -299,3 +300,22 @@ def test_a_model_the_route_does_not_serve_goes_red():
         _result(critic.MODE_CHOOSE_MODEL, "Модель `gemini-3.1-pro-high` не знайдена (HTTP 404)"),
         reaches=lambda _c: True)
     assert _status(_choice()).reason == availability.REFUSED
+
+
+def test_claude_s_login_probe_through_an_npm_shim_is_killed_with_node(monkeypatch):
+    """An npm install gives `claude.CMD`, so the probe's child is `cmd.exe` with `node.exe` under
+    it on the same pipes, and its 2 s is under node's cold start: the bound was hit routinely and
+    then, on Windows, was no bound (review of #132). The tree goes at the timeout, and the answer
+    is "cannot tell"."""
+    from autosound_tcc.core import claude_sdk
+
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: r"C:\Users\a\AppData\Roaming\npm\claude.CMD")
+    monkeypatch.setattr(claude_sdk, "_ASKED", False, raising=False)
+    monkeypatch.setattr(claude_sdk, "_SIGNED_IN", None, raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    spawns = _hung_child.install(monkeypatch)
+
+    assert claude_sdk.probe_signed_in(force=True) is None
+    [claude] = spawns.hung
+    assert claude.timeouts == [claude_sdk._AUTH_TIMEOUT_S, child.REAP_TIMEOUT_S]
+    assert spawns.taskkills == [["taskkill", "/T", "/F", "/PID", str(claude.pid)]]

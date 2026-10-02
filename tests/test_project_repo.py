@@ -9,8 +9,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton  # noqa: E402
 
-from autosound_tcc.core import config, project_repo  # noqa: E402
+from autosound_tcc.core import child, config, project_repo  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
+from tests import _hung_child  # noqa: E402
 
 
 def test_a_method_without_the_command_says_update(tmp_path, monkeypatch):
@@ -77,3 +78,17 @@ def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
     window._on_git_backup()
     assert ran == [offer]
+
+
+def test_a_push_that_never_ends_is_killed_with_git_under_gh(monkeypatch, tmp_path):
+    """`gh repo create … --push` runs git, and git its https helper, on gh's own pipes -- and the
+    yes runs it on the GUI thread. On Windows a push past the 120 s froze the window until the
+    push ended (review of #132). The tree goes at the timeout, and the row says why."""
+    spawns = _hung_child.install(monkeypatch)
+
+    result = project_repo.run_offer("gh repo create car-tune --private --source . --push", tmp_path)
+
+    assert not result.ok and result.said.startswith("TimeoutExpired")
+    [gh] = spawns.hung
+    assert gh.timeouts == [project_repo._TIMEOUT_S, child.REAP_TIMEOUT_S]
+    assert spawns.taskkills == [["taskkill", "/T", "/F", "/PID", str(gh.pid)]]

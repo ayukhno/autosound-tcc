@@ -209,7 +209,7 @@ def test_a_probe_that_never_ran_at_all_also_leaves_a_line(caplog, monkeypatch):
     def _boom(*_a, **_k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(subprocess, "run", _boom)
+    monkeypatch.setattr(subprocess, "Popen", _boom)
     with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
         ok, out = updates._git("ls-remote", "--tags", "whatever")
 

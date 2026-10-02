@@ -735,8 +735,8 @@ def _catalogue(monkeypatch, models):
 
     monkeypatch.setattr(model_choices, "omp_available", lambda: True)
     monkeypatch.setattr(
-        model_choices.subprocess,
-        "run",
+        model_choices.child,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps({"models": models}), ""),
     )
 
@@ -5064,7 +5064,7 @@ def test_claude_is_asked_for_its_login_once_not_once_per_alt_tab(monkeypatch):
     monkeypatch.setattr(claude_sdk, "cli_path", lambda: "/usr/bin/claude")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(
-        claude_sdk.subprocess, "run",
+        claude_sdk.child, "run_bounded",
         lambda *a, **k: ran.append(1) or subprocess.CompletedProcess(a, 0, '{"loggedIn": true}', ""))
 
     for _ in range(6):                       # six alt-tabs

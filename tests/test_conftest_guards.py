@@ -90,6 +90,8 @@ def test_the_suite_cannot_run_this_machines_claude(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(claude_sdk.subprocess, "run",
                         lambda *a, **k: spawned.append(a) or subprocess.CompletedProcess(a, 1, "", ""))
+    monkeypatch.setattr(claude_sdk.child, "run_bounded",
+                        lambda *a, **k: spawned.append(a) or subprocess.CompletedProcess(a, 1, "", ""))
 
     claude_sdk.probe_signed_in(force=True)
 

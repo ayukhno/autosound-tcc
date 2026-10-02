@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import model_choices
+from autosound_tcc.core import child, model_choices
 from autosound_tcc.core import model_choices as mc
 from autosound_tcc.core.model_choices import Choice, OmpCatalogueError
+from tests import _hung_child
 
 CATALOGUE = {
     "models": [
@@ -40,8 +41,8 @@ CATALOGUE = {
 def catalogue(monkeypatch):
     monkeypatch.setattr(model_choices, "omp_available", lambda: True)
     monkeypatch.setattr(
-        model_choices.subprocess,
-        "run",
+        model_choices.child,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(CATALOGUE), ""),
     )
     # The picker reads the catalogue as last READ, never the process — `omp models --json` is a
@@ -231,7 +232,7 @@ def test_the_agy_catalogue_is_retried_and_read_off_both_streams(monkeypatch):
         return _Proc("", "Fetching available models...\ngemini-3.1-pro-high\tGemini 3.1 Pro (High)")
 
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
-    monkeypatch.setattr(mc.subprocess, "run", fake_run)
+    monkeypatch.setattr(mc.child, "run_bounded", fake_run)
 
     rows = mc._fetch_agy_choices()
 
@@ -884,6 +885,7 @@ def test_the_picker_never_launches_omp_itself(monkeypatch):
         raise AssertionError("the picker must not launch a process")
 
     monkeypatch.setattr(mc.subprocess, "run", explode)
+    monkeypatch.setattr(mc.child, "run_bounded", explode)
 
     entries = mc.choices(["google/gemini-3.1-pro-preview"])
 
@@ -1020,3 +1022,21 @@ def test_with_the_omp_route_an_omp_pick_is_a_reviewer_where_omp_is_installed(
     assert model_choices.critic_reaches(omp) is True
     monkeypatch.setattr(model_choices.shutil, "which", lambda name: None)
     assert model_choices.critic_reaches(omp) is False
+
+
+def test_agy_and_omp_that_never_answer_are_killed_and_say_nothing(monkeypatch):
+    """Both are asked off the GUI thread, and both are bound by a timeout that on Windows was none
+    once a child of theirs held the pipes (review of #132). The tree goes at the timeout, and the
+    answer is the one a failure already gives: no agy rows, an omp error."""
+    spawns = _hung_child.install(monkeypatch)
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(mc, "omp_available", lambda: True)
+
+    assert mc._fetch_agy_choices() == []
+    with pytest.raises(OmpCatalogueError):
+        mc.omp_catalogue()
+
+    agy, omp = spawns.hung
+    assert agy.timeouts == [mc.CLI_TIMEOUT_S, child.REAP_TIMEOUT_S]
+    assert omp.timeouts == [mc.CATALOGUE_TIMEOUT_S, child.REAP_TIMEOUT_S]
+    assert [kill[-1] for kill in spawns.taskkills] == [str(agy.pid), str(omp.pid)]
