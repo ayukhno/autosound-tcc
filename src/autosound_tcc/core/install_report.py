@@ -89,7 +89,9 @@ def _run(argv: list[str]) -> str:
     kills a probe at its timeout and then waits for its pipes with no bound, and a grandchild that
     outlived the kill held them for good (tcc#132). Now at most `_PROBE_TIMEOUT` +
     `child.TASKKILL_TIMEOUT_S` + `child.REAP_TIMEOUT_S` (3 + 5 + 2 s), and about 3 s where
-    `taskkill` answers as it does: inside the 15 s the diagnostics panel waits for the section."""
+    `taskkill` answers as it does. The section adds `_which_all`'s own 10 s before the probes, so
+    at worst it takes 20 s: past the 15 s the diagnostics panel waits, where it reads «did not
+    answer in time» and the section is taken late when the report is sent or copied (tcc#130)."""
     try:
         done = child.run_bounded(
             argv, text=True, encoding="utf-8", errors="replace", timeout=_PROBE_TIMEOUT,

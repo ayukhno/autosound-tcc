@@ -826,6 +826,15 @@ def test_a_bounded_run_hands_back_what_the_child_said():
     assert (done.returncode, done.stdout.strip(), done.stderr.strip()) == (3, "out", "err")
 
 
+def test_a_bounded_run_feeds_the_child_its_input():
+    """`input` as `subprocess.run` takes it, into a stdin that is a pipe for it (review of #132,
+    M1): passed on to `Popen` it was a `TypeError`, which a probe's `except` turns into silence."""
+    done = child.run_bounded([sys.executable, "-c", "import sys; print(sys.stdin.read().upper())"],
+                             timeout=60, input="the key", text=True, **child.flags())
+
+    assert done.stdout.strip() == "THE KEY"
+
+
 def test_off_windows_a_child_given_up_on_is_killed_and_no_taskkill_runs(monkeypatch):
     """`taskkill` is Windows'. Elsewhere the child is killed, the wait after the kill is bounded
     all the same, and the caller hears `TimeoutExpired` with the bound it set."""

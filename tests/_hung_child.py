@@ -115,12 +115,12 @@ class Spawns:
 
 
 def install(monkeypatch, *, windows: bool = True) -> Spawns:
-    """Every `Popen` from here on hangs. `windows` makes this Windows as far as the code asks: its
-    own platform check, and `subprocess.run`'s, whose timeout branch is per platform -- the hang
-    is in the Windows one, which calls `communicate()` again, unbounded, after the kill."""
+    """Every `Popen` from here on hangs. `windows` makes this Windows as far as the code asks, or
+    not: its own platform check, and `subprocess.run`'s, whose timeout branch is per platform --
+    the hang is in the Windows one, which calls `communicate()` again, unbounded, after the kill.
+    Set both ways: `windows=False` on the Windows runner is still a POSIX case (review of #132, I1)."""
     spawns = Spawns()
     monkeypatch.setattr(subprocess, "Popen", spawns)
-    if windows:
-        monkeypatch.setattr(sys, "platform", "win32")
-        monkeypatch.setattr(subprocess, "_mswindows", True)
+    monkeypatch.setattr(sys, "platform", "win32" if windows else "linux")
+    monkeypatch.setattr(subprocess, "_mswindows", windows)
     return spawns

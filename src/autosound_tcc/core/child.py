@@ -314,8 +314,10 @@ def kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def run_bounded(args, *, timeout: float, **kwargs) -> subprocess.CompletedProcess:
-    """`subprocess.run(args, capture_output=True, timeout=timeout, **kwargs)` that comes back.
+def run_bounded(args, *, timeout: float, input=None, **popen_kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run(args, input=input, capture_output=True, timeout=timeout)` that comes back.
+    The rest are `Popen` keywords: `check=` and `capture_output=` are not taken (output is always
+    captured, and the return code is the caller's to read).
 
     `subprocess.run` on Windows, at the timeout, kills the one process and then waits in
     `communicate()` with no bound for its pipes -- which a grandchild that outlived the kill holds
@@ -324,10 +326,18 @@ def run_bounded(args, *, timeout: float, **kwargs) -> subprocess.CompletedProces
     tree is killed (`kill_tree`) and the wait after it is `REAP_TIMEOUT_S`; a grandchild that
     outlives even that keeps its pipes, read by `subprocess`'s own daemon threads, and nothing
     waits for it. Raises `TimeoutExpired` with `timeout`, as `run` does.
+
+    Off Windows it is `run` but for two things, both on the timeout path only: a grandchild that
+    holds the pipes costs up to `REAP_TIMEOUT_S` more (`run` waits on the child alone there), and
+    the `TimeoutExpired` carries no partial output.
     """
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+    if input is not None:
+        if popen_kwargs.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used.")
+        popen_kwargs["stdin"] = subprocess.PIPE
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **popen_kwargs)
     try:
-        out, err = proc.communicate(timeout=timeout)
+        out, err = proc.communicate(input, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_tree(proc)
         try:
