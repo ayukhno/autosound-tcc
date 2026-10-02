@@ -1687,6 +1687,30 @@ def test_a_refused_reviewer_is_not_ready_and_says_why_in_one_phrase(tmp_path, mo
     assert availability.PHRASES[availability.LOCATION] in state["not_ready_because"]
 
 
+def test_an_api_pick_with_the_api_switched_off_is_not_ready_and_calls_nothing(tmp_path,
+                                                                              monkeypatch):
+    """«Не використовувати API» (finding 136, tcc#127): the session reads it in `get_tcc_state`
+    before it asks, and `call_critic` on an «API · …» pick runs nothing and says why."""
+    import subprocess
+
+    from autosound_tcc.core import availability, config, critic, project_settings
+    from autosound_tcc.core.mcp_server import _reviewer_state
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "api:gemini-pro-latest")
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    config.set_reviewer_api_off(True)
+    state = _reviewer_state(tmp_path)
+    assert state["ready"] is False
+    assert availability.PHRASES[availability.API_OFF] in state["not_ready_because"]
+
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: ran.append(a) or None)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    answer = json.loads(_text(asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))))
+    assert ran == [] and answer["mode"] == critic.MODE_ERROR
+    assert answer["detail"] == critic.API_OFF_REFUSAL
+
+
 @pytest.mark.parametrize("listed", [True, False], ids=["target-in-catalogue", "target-not-listed"])
 def test_a_refusal_under_an_aliased_reviewer_is_where_the_reviewer_is_reported(
         tmp_path, monkeypatch, listed):

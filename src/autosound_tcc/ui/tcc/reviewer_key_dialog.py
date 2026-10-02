@@ -17,6 +17,9 @@ A key the OS keystore holds has «Видалити ключ» on its row (findin
 own `key rm <provider>`, after a yes that names the provider and the API route it stops. The line
 after it is read from the store, not from the exit.
 
+«Не використовувати API» is TCC's own switch, in its settings (tcc#127): while it is on, the
+«API · …» rows are off and no reviewer run goes to the API, whatever key the machine holds.
+
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
 
@@ -35,6 +38,7 @@ from PySide6.QtCore import QEventLoop, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -47,7 +51,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import critic_env, reviewer_key, terminal_launcher
+from autosound_tcc.core import config, critic_env, reviewer_key, terminal_launcher
 from autosound_tcc.ui.tcc import i18n
 
 _NAMES = {"google": "Google (Gemini)", "anthropic": "Anthropic (Claude)", "openai": "OpenAI"}
@@ -109,7 +113,7 @@ class ReviewerKeyDialog(QDialog):
         self._grid = QGridLayout()
         self._grid.setHorizontalSpacing(16)
         self._where: dict[str, QLabel] = {}
-        #: «Видалити ключ» on each provider's row, shown while the OS keystore holds its key (`_show`).
+        #: «Видалити ключ» on each provider's row, shown while the OS store holds its key (`_show`).
         self._removes: dict[str, QPushButton] = {}
         for row, provider in enumerate(reviewer_key.PROVIDERS):
             self._grid.addWidget(QLabel(_NAMES[provider]), row, 0)
@@ -127,6 +131,14 @@ class ReviewerKeyDialog(QDialog):
             self._removes[provider] = remove
         self._grid.setColumnStretch(2, 1)
         layout.addLayout(self._grid)
+
+        # «Не використовувати API» (finding 136, tcc#127): TCC's own setting, read by every reviewer
+        # run and by the footer — so it is on whatever the method here can do.
+        self._api_off = QCheckBox(i18n.t("rkApiOff"))
+        self._api_off.setToolTip(i18n.t("rkApiOffTip"))
+        self._api_off.setChecked(config.reviewer_api_off())
+        self._api_off.toggled.connect(config.set_reviewer_api_off)
+        layout.addWidget(self._api_off)
 
         # A key still in a shell profile: its file and line, and the method's own move.
         self._shell = QLabel("")
@@ -216,7 +228,7 @@ class ReviewerKeyDialog(QDialog):
         """What a click or a key lands on: the window's buttons, the provider and the key field —
         not the buttons of a question box it asked before (`_confirm`'s box stays its child)."""
         buttons = [b for b in self.findChildren(QPushButton) if b.window() is self]
-        return [*buttons, self._provider, self._field]
+        return [*buttons, self._provider, self._field, self._api_off]
 
     def _settle(self) -> None:
         """Every control as the window stands: all off while a method command runs (VM-2); else

@@ -129,6 +129,21 @@ def set_update_channel(value: str) -> None:
     _settings().setValue(_UPDATE_CHANNEL_KEY, value)
 
 
+#: «Не використовувати API» in «Ключ рецензента» (finding 136, tcc#127): the reviewer goes through
+#: a subscription or a CLI only, whatever key the machine holds.
+_REVIEWER_API_OFF_KEY = "reviewer/api_off"
+
+
+def reviewer_api_off() -> bool:
+    """Whether the Arbiter switched the reviewer's API route off. False when never set."""
+    # An ini file keeps a bool as the word: `true` comes back as a string.
+    return str(_settings().value(_REVIEWER_API_OFF_KEY, False)).strip().lower() in ("true", "1")
+
+
+def set_reviewer_api_off(off: bool) -> None:
+    _settings().setValue(_REVIEWER_API_OFF_KEY, bool(off))
+
+
 def feedback_sender() -> str:
     """Who the last report without GitHub was from, "" when none was sent."""
     return str(_settings().value(_FEEDBACK_SENDER_KEY, "") or "")

@@ -394,10 +394,21 @@ def session_env(project_dir: Path) -> dict:
         if not omp_route_available():
             return {}
         return {"AUTOSOUND_CRITIC_MODEL": model, "AUTOSOUND_CRITIC_BIN": "omp"}
+    if route == "api" and config.reviewer_api_off():
+        # The key's route is off (tcc#127): a session's own run would take the key all the same.
+        return {}
     env = {"AUTOSOUND_CRITIC_MODEL": model}
     env.update(critic_bin_override(harness=route))
     return env
 
+
+#: Why nothing was called while «Не використовувати API» is on (tcc#127). English, as every refusal
+#: the session reads.
+API_OFF_REFUSAL = (
+    "The Arbiter switched the reviewer's API route off in TCC (the reviewer-key window, «Не "
+    "використовувати API»), so an «API · …» pick or via='api' is not taken and nothing was called. "
+    "Ask the Arbiter to pick a subscription or CLI reviewer in the footer, or to switch the API "
+    "back on.")
 
 #: The routes one reviewer run may ask for by name — the script's own `--via` (skill `VIA_ROUTES`).
 VIA_ROUTES = ("api", "cli", "clipboard", "omp")
@@ -458,6 +469,25 @@ def run(
         mode = MODE_ERROR if not is_available() else MODE_NOT_READY
         return CriticResult(mode, "", None, role, "; ".join(problems), 0.0, called_at)
 
+    via = (via or "").strip().lower()
+    route = (harness or "").strip().lower()
+    if not via and route in ("api", "omp"):
+        # «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74).
+        via = route
+    elif not via and route in _LOGIN_ROUTES:
+        # And a login's route is its CLI. The method reads its OS key store as well as the
+        # environment, and tries the API first whenever it finds a key there: with a key stored,
+        # agy's untiered and Claude models, codex and the SDK all went to the vendor's API under a
+        # pick that said «subscription» (measured on the method, finding 136, tcc#127).
+        via = "cli"
+    if config.reviewer_api_off():
+        # «Не використовувати API» (tcc#127): the key's route is not taken, by a pick or by a run
+        # that asks for it — and nothing is written for a call that does not happen.
+        if via == "api":
+            return CriticResult(MODE_ERROR, "", None, role, API_OFF_REFUSAL, 0.0, called_at)
+        # A pick with no route of its own goes by the CLI too, not by the method's key-first order.
+        via = via or "cli"
+
     if role == ASK:
         # A question is text, always: «what does process/reviews/x.md say?» is about that file,
         # and sent as the file — or refused as one that is missing — it answers nobody (tcc#116).
@@ -472,17 +502,6 @@ def run(
     argv = [python_executable, str(script_path()), role, str(package_path)]
     if trace_path:
         argv.append(str(trace_path))
-    via = (via or "").strip().lower()
-    route = (harness or "").strip().lower()
-    if not via and route in ("api", "omp"):
-        # «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74).
-        via = route
-    elif not via and route in _LOGIN_ROUTES:
-        # And a login's route is its CLI. The method reads its OS key store as well as the
-        # environment, and tries the API first whenever it finds a key there: with a key stored,
-        # agy's untiered and Claude models, codex and the SDK all went to the vendor's API under a
-        # pick that said «subscription» (measured on the method, finding 136, tcc#127).
-        via = "cli"
     if via in VIA_ROUTES:
         argv += ["--via", via]
     # The run's own model by the method's flag (hub #226). An environment variable is outranked by

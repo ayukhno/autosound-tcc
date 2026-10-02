@@ -1231,7 +1231,8 @@ mod._KEYSTORE_CACHE.clear()
 
 def api(vendor):
     def call(key, model, prompt, *_rest):
-        print(f"PROBE api {vendor} {'stored' if key in stored.values() else 'other'}", file=sys.stderr)
+        whose = 'stored' if key in stored.values() else 'other'
+        print(f"PROBE api {vendor} {whose}", file=sys.stderr)
         return "an answer through the API", model
     return call
 
@@ -1273,8 +1274,8 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     monkeypatch.setenv("PROBE_CLIS", "agy,codex,claude")
     monkeypatch.setenv("PROBE_STORED", ",".join(stored))
     monkeypatch.setattr(critic.shutil, "which",
-                        lambda name, *a, **k: f"/probe/bin/{name}" if name in ("agy", "codex", "claude")
-                        else None)
+                        lambda name, *a, **k: f"/probe/bin/{name}"
+                        if name in ("agy", "codex", "claude") else None)
     real_run, seen = subprocess.run, {}
 
     def through_the_probe(argv, **kwargs):
@@ -1316,3 +1317,39 @@ def test_an_api_pick_still_goes_through_the_stored_key(tmp_path, monkeypatch):
     """«API · …» is the key's route (tcc#74), and a key in the store is what it runs on."""
     assert _route_taken(tmp_path, monkeypatch, harness="api", model="gemini-pro-latest",
                         provider="google") == "api google stored"
+
+
+# ---- «Не використовувати API»: the switch the pick respects (finding 136, tcc#127) -------------
+
+
+def test_with_the_api_off_no_run_goes_to_the_api(tmp_path, monkeypatch):
+    """The Arbiter: «якщо вимикання явне зробити просто — то можна і вимикання і видалення». With
+    it on, an «API · …» pick and a run that asks for the key by name (tcc#59) call nothing and say
+    why; every other route goes as it would."""
+    from autosound_tcc.core import config
+
+    seen = _capture_argv(tmp_path, monkeypatch)
+    config.set_reviewer_api_off(True)
+    for harness, via in (("api", ""), ("agy", "api")):
+        seen.clear()
+        result = critic.run("# hi", project_dir=tmp_path, model="gemini-pro-latest",
+                            harness=harness, via=via)
+        assert seen == {}, (harness, via, "nothing is run")
+        assert result.mode == critic.MODE_ERROR and "API" in result.detail, (harness, via)
+
+    critic.run("# hi", project_dir=tmp_path, model="gemini-3.1-pro-high", harness="agy")
+    assert seen["argv"][seen["argv"].index("--via") + 1] == "cli"
+    # A pick with no route of its own goes by the CLI too, never by the method's key-first order.
+    critic.run("# hi", project_dir=tmp_path, model="gemini-3.1-pro-high", harness="")
+    assert seen["argv"][seen["argv"].index("--via") + 1] == "cli"
+
+
+def test_with_the_api_off_an_api_pick_hands_a_session_nothing(tmp_path, monkeypatch):
+    """A session that runs the method itself would take the key: an «API · …» pick hands its
+    shell no model while the API is off, as an OMP pick without omp's route does (tcc#74)."""
+    from autosound_tcc.core import config
+
+    monkeypatch.setattr(critic, "configured", lambda _p: ("gemini-pro-latest", "api"))
+    assert critic.session_env(tmp_path) == {"AUTOSOUND_CRITIC_MODEL": "gemini-pro-latest"}
+    config.set_reviewer_api_off(True)
+    assert critic.session_env(tmp_path) == {}
