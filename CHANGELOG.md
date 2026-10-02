@@ -12,6 +12,56 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+The wave W-6 · v1.1.0, one wave with the method's W-6 · v3.1.0: TCC v1.1.0 pins the method's v3.1.0
+and is released the same day. **Update both** — TCC's Updates tab offers the method's update beside
+its own; a TCC v1.1.0 next to an older method reads channels by their literal names, as that method
+does.
+
+### Added
+
+- **agy through Google Cloud's ADC** (tcc#135, hub #235). For an account Google's AI Studio gives no
+  key — or on Google Cloud's free trial, whose credit pays for Gemini on Vertex AI — agy signs in
+  with Application Default Credentials. TCC takes the method's one switch for it,
+  `AGY_ADC_AUTH=true` in the machine's critic-env, for its own reading of agy's models too, so a TCC
+  started from the Dock sees agy's list; the diagnostics name which sign-in agy will use (ADC with
+  its account and project, agy's own account, or none, with the way out); and under ADC the
+  reviewer the method names there, Gemini 3.8 Flash (High), is recommended rather than marked «not
+  recommended».
+- **A warning when REW holds two measurements under one name** (tcc#94). The import window and the
+  measurement card name the title(s) and say to rename or delete the extra one in REW; the curve
+  window says the same instead of «REW is not holding this measurement». Nothing is renamed or
+  blocked: the curves and the method cannot tell which one to take, so the name has to be made
+  one again in REW.
+- **A turning wheel while a new reviewer pick is checked** (tcc#140, finding 142). For the minute
+  the check takes, the footer says «… · checking…» beside the «!» instead of the previous
+  reviewer's red line, and the «!» claims a fallback only when the reviewer asked for this pick
+  answered as another model.
+
+### Changed
+
+- **The method at v3.1.0** (tcc#134, hub #233, #236, #237). TCC binds a DSP ledger row to its
+  channel through the method's own map, one rule for both (`w_L` ↔ `w-L`). A session TCC starts —
+  in the app or in a terminal — is told the footer's reviewer route as well as its model, so its own
+  run of the method no longer goes to the API on a stored key whatever the footer says; this closes
+  the gap v0.1.46 named. The Updates tab now knows the newest agy and the newest native Claude Code,
+  so their rows read «up to date» or the newer version.
+- **The Updates tab remembers what an update learned** (tcc#138, finding 140). After «Update» or
+  «Update all» a tool reads «already the newest» across Re-check while its version stays the same
+  (for up to 12 hours), and the receipt shows the move the row saw («2.1.286 → 2.1.287»). A tool
+  whose source cannot name its newest version says so plainly instead of inviting an update.
+- **The reviewer-key window** (tcc#136, findings 137, 138). Its rows keep their height when the copy
+  line appears, the window shrinks back when it goes, and places are joined with «and» («Delete the
+  key from the secure store and the Windows environment variables?»).
+
+### Fixed
+
+- **Hover after a switch to another app and back** (tcc#137, finding 139). The widget that was under
+  the mouse no longer keeps its hover look, and hover works at once on return, in every window.
+- **A test suite that cannot carry state across tests** (tcc#141): the reviewer calls a test leaves
+  running are drained before the next one.
+
 ## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the reviewer key deleted in one place, the method at v3.0.66
 
 Paired with method `fd89466e782f10f579543dcd38a276719bc20251` — the tag on that commit is **`v3.0.66`**.
