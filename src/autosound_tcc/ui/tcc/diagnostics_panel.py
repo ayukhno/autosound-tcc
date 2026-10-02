@@ -51,6 +51,7 @@ from autosound_tcc.core import (
     session_export,
     terminal_launcher,
     updates,
+    vendor_loader,
 )
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.ui.tcc import i18n
@@ -864,6 +865,11 @@ class DiagnosticsDialog(QDialog):
             lines = [i18n.t("updSkillDone").format(version=done.version.lstrip("v"))]
             if done.signature:
                 lines.append(i18n.t("updSkillSigned").format(line=_signature_said(done.signature)))
+            # TCC's own readers kept the method it started with until a restart (#126, the
+            # re-review of 697378d). Read again here, on the GUI thread, between two of its passes;
+            # when the new files do not load in this process, the old method stays and he is told.
+            if not vendor_loader.reload_loaded():
+                lines.append(i18n.t("updSkillRestart").format(version=done.version.lstrip("v")))
         else:
             lines = [i18n.t("updFailed").format(why=_reason(done.reason, done.detail))]
         if done.patch:

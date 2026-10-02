@@ -3313,6 +3313,10 @@ def test_the_title_drops_the_word_when_the_method_is_updated_in_tcc(monkeypatch)
     monkeypatch.setattr(updates, "local_changes", lambda tag="": updates.LocalChanges(True, ()))
     monkeypatch.setattr(updates, "apply_skill", lambda tag="", keep_local=False, send=False:
                         updates.SkillUpdate(True, version="v3.0.65", libs_ok=True))
+    # Not the real re-read (#126): it would undo the suite's dead REW port (conftest).
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "reload_loaded", lambda: True)
 
     dialog._update_skill()
     for _ in range(5):

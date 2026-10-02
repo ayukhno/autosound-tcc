@@ -10,9 +10,11 @@ name, keeping the vendored code physically isolated.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Optional
@@ -274,7 +276,18 @@ def child_env(**extra: str) -> dict[str, str]:
     }
 
 
+#: Held while a vendored module loads and while the method is read again (#126): a module is in
+#: `sys.modules` before its body has run, so a reader on another thread that found it there was
+#: handed it half-built. Re-entrant, because a module's load may ask for another one.
+_LOCK = threading.RLock()
+
+
 def _load_file(path: Path, module_name: str) -> ModuleType:
+    with _LOCK:
+        return _load_file_locked(path, module_name)
+
+
+def _load_file_locked(path: Path, module_name: str) -> ModuleType:
     if module_name in sys.modules:
         return sys.modules[module_name]
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -321,6 +334,64 @@ def load(vendored_rel: str) -> ModuleType:
             f"Installed: install the skill for Claude Code, or set {SKILL_DIR_ENV}."
         )
     return _load_file(rew_tool_dir() / vendored_rel, _VENDORED[vendored_rel])
+
+
+def _method_modules() -> dict[str, ModuleType]:
+    """Every module in this process that is the method's: the namespaced ones `load()` made, and
+    the bare ones they import from beside themselves (`import naming` after their own
+    `sys.path.insert`) -- the same files, under their own names. Found by where they were read
+    from: the `rew_tool` TCC uses now and the one each namespaced module came from."""
+    dirs = [rew_tool_dir()]
+    for rel, name in _VENDORED.items():
+        where = getattr(sys.modules.get(name), "__file__", None)
+        if where:
+            dirs.append(Path(os.path.abspath(where)).parents[len(Path(rel).parts) - 1])
+    # As found and as resolved: the installed skill is a link into the clone (`skill_repo_root`).
+    roots = {os.path.normcase(form(str(d))) for d in dirs for form in (os.path.abspath, os.path.realpath)}
+    prefixes = tuple(root.rstrip(os.sep) + os.sep for root in roots)
+    out = {}
+    for name, module in list(sys.modules.items()):
+        where = getattr(module, "__file__", None)
+        if name.startswith("autosound_tcc._vendor."):
+            out[name] = module
+        elif where and os.path.normcase(os.path.abspath(where)).startswith(prefixes):
+            out[name] = module
+    return out
+
+
+def reload_loaded() -> bool:
+    """Read the method again, after an in-app update moved its files (#126).
+
+    Every module of the method this process holds is dropped and each one TCC had loaded is
+    loaded again at once, under the lock `load()` takes, so a reader gets the old method or the
+    new one and never a mix or a module half-built. When the new files do not load here -- a
+    library the new method needs and this interpreter lacks, a file the update left broken --
+    every old module goes back and this says False: the caller tells the person to restart TCC.
+    The rest of the method (the AI session, the scripts TCC runs as children) reads the files
+    anew on every start anyway. Objects made from the old modules keep their code until they go.
+    """
+    with _LOCK:
+        importlib.invalidate_caches()
+        old = _method_modules()
+        for name in old:
+            del sys.modules[name]
+        try:
+            for rel, name in _VENDORED.items():
+                if name in old:
+                    _load_file_locked(rew_tool_dir() / rel, name)
+        except BaseException as exc:  # whatever a module raises as it loads
+            for name in _method_modules():
+                sys.modules.pop(name, None)
+            sys.modules.update(old)
+            if not isinstance(exc, Exception):
+                raise  # an interrupt: the old method is back, and the interrupt goes on
+            from autosound_tcc.core import app_log
+
+            app_log.logger().warning(
+                "the updated method does not load in this process (%s: %s); the one TCC started "
+                "with stays until it restarts", type(exc).__name__, exc)
+            return False
+        return True
 
 
 def load_rew_api() -> ModuleType:

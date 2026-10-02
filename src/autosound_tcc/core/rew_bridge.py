@@ -34,11 +34,14 @@ class RewBridge:
 
     @property
     def api(self) -> ModuleType:
-        if self._api is None:
-            from autosound_tcc.core import vendor_loader
+        """The module handed in, or the loader's, asked on every use rather than kept: an in-app
+        update reads the method again (`vendor_loader.reload_loaded`, #126), and a bridge that kept
+        its first module talked to REW through the old method until TCC restarted."""
+        if self._api is not None:
+            return self._api
+        from autosound_tcc.core import vendor_loader
 
-            self._api = vendor_loader.load_rew_api()
-        return self._api
+        return vendor_loader.load_rew_api()
 
     @property
     def base_url(self) -> str:

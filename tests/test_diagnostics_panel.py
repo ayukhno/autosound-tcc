@@ -608,9 +608,12 @@ def _finish_skill_update(dialog) -> None:
     raise AssertionError("the skill update never settled")
 
 
-def _skill_offered(monkeypatch, changed=(), done=None):
-    """A dialog whose skill row offers 3.0.7, a clone with `changed`, and `apply_skill` recorded."""
-    from autosound_tcc.core import updates
+def _skill_offered(monkeypatch, changed=(), done=None, reloads=True):
+    """A dialog whose skill row offers 3.0.7, a clone with `changed`, and `apply_skill` recorded.
+
+    The method is not really read again (`vendor_loader.reload_loaded`, #126): that would re-read
+    the real `rew_api` and undo the suite's dead REW port. `dialog.reloaded` counts the asks."""
+    from autosound_tcc.core import updates, vendor_loader
 
     _app()
     dialog = DiagnosticsDialog()
@@ -624,7 +627,47 @@ def _skill_offered(monkeypatch, changed=(), done=None):
     monkeypatch.setattr(updates, "apply_skill",
                         lambda tag="", keep_local=False, send=False:
                         asked.append((tag, keep_local, send)) or done)
+    dialog.reloaded = []
+    monkeypatch.setattr(vendor_loader, "reload_loaded",
+                        lambda: dialog.reloaded.append(1) or reloads)
     return dialog, asked
+
+
+def _update_cleanly(dialog, monkeypatch):
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("clean: no question"))
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+    return dialog._update_rows["skill"][0].text()
+
+
+def test_an_update_that_lands_is_read_by_tcc_at_once(monkeypatch):
+    """#126 (the re-review of 697378d): every reader in TCC kept the method it started with until
+    a restart. The update that lands has it read again, once; the line says nothing more."""
+    dialog, _asked = _skill_offered(monkeypatch)
+
+    text = _update_cleanly(dialog, monkeypatch)
+
+    assert dialog.reloaded == [1]
+    assert i18n.t("updSkillRestart").split("{")[0] not in text
+
+
+def test_an_update_tcc_cannot_read_while_running_says_to_restart(monkeypatch):
+    dialog, _asked = _skill_offered(monkeypatch, reloads=False)
+
+    text = _update_cleanly(dialog, monkeypatch)
+
+    assert dialog.reloaded == [1]
+    assert i18n.t("updSkillRestart").format(version="3.0.7") in text
+
+
+def test_a_failed_update_reads_nothing_again(monkeypatch):
+    from autosound_tcc.core import updates
+
+    dialog, _asked = _skill_offered(monkeypatch, done=updates.SkillUpdate(False, "clone_failed", "x"))
+
+    _update_cleanly(dialog, monkeypatch)
+
+    assert dialog.reloaded == []
 
 
 def test_updating_the_method_reports_the_version_it_landed_on(monkeypatch):

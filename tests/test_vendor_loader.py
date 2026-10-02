@@ -173,3 +173,127 @@ def test_on_windows_a_refused_symlink_becomes_a_junction(tmp_path, monkeypatch):
 
     assert link is not None and link.exists()
     assert made and made[0][0] == str(skill.resolve())
+
+
+# ---- an in-app update reads the method again (#126, the re-review of 697378d) ----------------
+# The loader kept every vendored module for the whole run, so after «Оновити Скіл» every reader in
+# the process -- `load_channels`, the measurement view, the stale check -- kept the method TCC
+# started with until TCC was restarted. These tests run on a fake skill of their own, never on the
+# real one: re-reading the real `rew_api` would undo the suite's dead REW port (conftest).
+
+import sys  # noqa: E402
+import threading  # noqa: E402
+import types  # noqa: E402
+
+_VENDOR_PREFIX = "autosound_tcc._vendor."
+
+
+@pytest.fixture
+def fake_skill(tmp_path, monkeypatch):
+    """A skill folder whose `naming.py` says which version it is and imports a bare sibling the
+    way the method's modules do (`sys.path` + `import`), with the real modules put back after."""
+    rew_tool = tmp_path / "skill" / "rew_tool"
+    rew_tool.mkdir(parents=True)
+    for name in ("rew_api.py", "project.py", "contract.py"):
+        (rew_tool / name).write_text("", encoding="utf-8")
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(tmp_path / "skill"))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    kept = {k: m for k, m in sys.modules.items() if k.startswith(_VENDOR_PREFIX)}
+    for name in kept:
+        del sys.modules[name]
+    try:
+        yield rew_tool
+    finally:
+        for name in [k for k in sys.modules if k.startswith(_VENDOR_PREFIX)
+                     or k in ("tcc_fake_sibling", "tcc_fake_gate")]:
+            del sys.modules[name]
+        sys.modules.update(kept)
+
+
+def _write_method(rew_tool, version, *, broken=False):
+    (rew_tool / "tcc_fake_sibling.py").write_text(f"VERSION = {version!r}\n", encoding="utf-8")
+    (rew_tool / "naming.py").write_text(
+        "import os, sys\n"
+        "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n"
+        "import tcc_fake_sibling\n"
+        + ("raise ImportError('this method needs something TCC does not have')\n" if broken else "")
+        + f"VERSION = {version!r}\nSIBLING = tcc_fake_sibling.VERSION\n",
+        encoding="utf-8")
+
+
+def test_a_reader_after_an_update_reads_the_new_method(fake_skill):
+    _write_method(fake_skill, "v3.0.65")
+    before = vendor_loader.load_naming()
+    assert (before.VERSION, before.SIBLING) == ("v3.0.65", "v3.0.65")
+
+    _write_method(fake_skill, "v3.0.66-longer")  # what the update put on disk
+    assert vendor_loader.load_naming() is before, "nothing reads the disk again on its own"
+    assert vendor_loader.reload_loaded() is True
+
+    after = vendor_loader.load_naming()
+    assert after is not before
+    assert (after.VERSION, after.SIBLING) == ("v3.0.66-longer", "v3.0.66-longer"), \
+        "the module and the sibling it imports bare are both the new method's"
+
+
+def test_a_new_method_that_will_not_load_leaves_the_old_one_serving(fake_skill):
+    """Never half of each: when the new files do not load in this process, every module the old
+    method had goes back, and the update's line says to restart TCC (the panel's half)."""
+    _write_method(fake_skill, "v3.0.65")
+    before = vendor_loader.load_naming()
+    sibling = sys.modules["tcc_fake_sibling"]
+
+    _write_method(fake_skill, "v3.0.66-longer", broken=True)
+    assert vendor_loader.reload_loaded() is False
+
+    assert vendor_loader.load_naming() is before
+    assert sys.modules["tcc_fake_sibling"] is sibling
+
+
+def test_a_reload_with_nothing_loaded_loads_nothing(fake_skill):
+    _write_method(fake_skill, "v3.0.66-longer", broken=True)
+
+    assert vendor_loader.reload_loaded() is True
+    assert not [k for k in sys.modules if k.startswith(_VENDOR_PREFIX)]
+
+
+def test_a_reader_never_gets_a_module_another_thread_is_still_loading(fake_skill, monkeypatch):
+    """A module is in `sys.modules` before its body has run (so it can refer to itself). A second
+    reader that found it there was handed it half-built; it waits for the load now."""
+    gate = types.ModuleType("tcc_fake_gate")
+    gate.started, gate.release = threading.Event(), threading.Event()
+    monkeypatch.setitem(sys.modules, "tcc_fake_gate", gate)
+    (fake_skill / "naming.py").write_text(
+        "import tcc_fake_gate\n"
+        "tcc_fake_gate.started.set()\n"
+        "tcc_fake_gate.release.wait(10)\n"
+        "DONE = True\n", encoding="utf-8")
+    got = {}
+    first = threading.Thread(target=lambda: got.setdefault("first", vendor_loader.load_naming()))
+    first.start()
+    assert gate.started.wait(10)
+    second = threading.Thread(target=lambda: got.setdefault("second", vendor_loader.load_naming()))
+    second.start()
+    second.join(0.3)
+    try:
+        assert "second" not in got, "the second reader was handed a module still loading"
+    finally:
+        gate.release.set()
+        first.join(10)
+        second.join(10)
+    assert got["second"] is got["first"] and got["second"].DONE
+
+
+def test_the_rew_bridge_follows_a_reloaded_api(monkeypatch):
+    """The bridge kept the module it first loaded for its whole life; it asks the loader now."""
+    from autosound_tcc.core.rew_bridge import RewBridge
+
+    old, new = types.SimpleNamespace(BASE_URL="old"), types.SimpleNamespace(BASE_URL="new")
+    current = [old]
+    monkeypatch.setattr(vendor_loader, "load_rew_api", lambda: current[0])
+    bridge = RewBridge()
+    assert bridge.base_url == "old"
+    current[0] = new
+    assert bridge.base_url == "new"
+    injected = RewBridge(old)
+    assert injected.api is old, "an api handed in is kept"
