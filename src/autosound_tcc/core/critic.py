@@ -682,6 +682,22 @@ _API_STEP_DOWN = re.compile(r"^>> Помилка виклику API \(.*$", re.M
 #: The key a vendor's words point to, for a line that names no variable itself.
 _KEY_VARS = (("gemini", "GEMINI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"),
              ("claude", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY"))
+#: The key of a vendor as the method names it (`provider`).
+_VENDOR_VARS = {"google": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY"}
+#: The method's line before its API call, naming the vendor it calls (lowercased, as `_said` reads
+#: it): `>> Підключення до API (<provider>, <model>), чекаю до … с...`.
+_API_CONNECT = re.compile(r"^>> підключення до api \((google|anthropic|openai), ", re.M)
+#: A refusal block's line for the API rung (`failures`, `· API <provider>: <e>`): the same words
+#: as the step-down line, which a run that did not answer carries only here (`_why_refused`).
+_API_REFUSED = re.compile(r"^\s*· api (google|anthropic|openai): .*$", re.M)
+#: The statuses that are the KEY, by vendor, when the words name no key: Anthropic and OpenAI
+#: calls let urllib's own `HTTP Error 401: Unauthorized` through, and no key word matched it
+#: (tcc#129). Anthropic's 403 is `permission_error`, the key not allowed the model; OpenAI's is a
+#: country it does not serve, which no key changes. Gemini's errors come wrapped in its own words
+#: (`Помилка запиту до Gemini API: …`), and its rejected key says «API key not valid».
+_KEY_STATUSES = {"anthropic": ("401", "403"), "openai": ("401",)}
+_HTTP_STATUS = re.compile(r"\bhttp error (\d{3})\b")
 
 
 def _said(detail: str) -> str:
@@ -690,12 +706,13 @@ def _said(detail: str) -> str:
     return _PINS_LINE.sub("", detail or "").lower()
 
 
-def _key_note(line: str) -> str:
+def _key_note(line: str, vendor: str = "") -> str:
     """The rejected-key note, naming the variable `line` (lowercased) points to — not Gemini's for
-    every key (VM-4 review); a line that names no vendor names no variable."""
+    every key (VM-4 review) — or else `vendor`'s, the one the method said it called (tcc#129); a
+    line and a run that name no vendor name no variable."""
     named = re.search(r"\b[a-z]+_api_key\b", line)
-    var = named.group(0).upper() if named else next(
-        (var for word, var in _KEY_VARS if word in line), "")
+    var = named.group(0).upper() if named else (
+        _VENDOR_VARS.get(vendor) or next((var for word, var in _KEY_VARS if word in line), ""))
     return (
         f"{f'`{var}`' if var else 'The API key'} is set and the API rejected it. It is tried "
         "BEFORE the CLI, so every call spends that time first and then falls back. Replace the "
@@ -710,12 +727,38 @@ def fallback_note(detail: str) -> str:
 
     Read from the method's own step-down line only, never the whole tail: an answered `--via api`
     run names the key it took in another line («api_key»), and the pins line names variables too.
+    The vendor it called is read from its line before the call, for a status that names no key
+    (tcc#129) and for the variable to name.
     """
-    for line in _API_STEP_DOWN.findall(detail or ""):
-        said = line.lower()
-        if any(word in said for word in _BAD_KEY_WORDS):
-            return _key_note(said)
+    for said, vendor in _api_failures(detail, refusal=False):
+        if _rejects_key(said, vendor):
+            return _key_note(said, vendor)
     return ""
+
+
+def _api_failures(detail: str, *, refusal: bool) -> list[tuple[str, str]]:
+    """`(line, vendor)`, lowercased, for each of the method's own lines saying its API call failed:
+    the step-down — its vendor from the line before the call, "" when the tail lost it — and, with
+    `refusal`, a refusal block's `· API <vendor>: …`, which names its own."""
+    said = (detail or "").lower()
+    called = _API_CONNECT.search(said)
+    vendor = called.group(1) if called else ""
+    lines = [(line.lower(), vendor) for line in _API_STEP_DOWN.findall(detail or "")]
+    if refusal:
+        lines += [(match.group(0), match.group(1)) for match in _API_REFUSED.finditer(said)]
+    return lines
+
+
+def _rejects_key(said: str, vendor: str) -> bool:
+    """Whether the method's API-failure line `said` says the API rejected the key: a key word, or
+    a status that is `vendor`'s key (tcc#129). With no vendor named, a bare 401 still is: unwrapped,
+    it is Anthropic's or OpenAI's, and the key for both; a 403 is not told."""
+    if any(word in said for word in _BAD_KEY_WORDS):
+        return True
+    status = _HTTP_STATUS.search(said)
+    if status is None or "gemini api" in said:
+        return False
+    return status.group(1) in (_KEY_STATUSES.get(vendor, ()) if vendor else ("401",))
 
 
 def _refused_tool(said: str) -> str:
@@ -766,6 +809,11 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     keyed = [line for line in said.splitlines() if any(word in line for word in _BAD_KEY_WORDS)]
     if keyed:
         return _key_note(keyed[0])
+    # A status that is the key, read from the method's own API lines only: a CLI's 401 is its
+    # sign-in, not the key (tcc#129).
+    for line, vendor in _api_failures(detail, refusal=True):
+        if _rejects_key(line, vendor):
+            return _key_note(line, vendor)
     if any(word in said for word in _LOCATION_WORDS):
         return (
             "the reviewer's vendor does not offer this model from where this machine is — the CLI "

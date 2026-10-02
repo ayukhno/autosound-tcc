@@ -2349,3 +2349,50 @@ def test_an_answered_api_run_that_names_its_key_gets_no_key_note(tmp_path, monke
     out = answers["call_critic"]
     assert out["mode"] == critic.MODE_API_OR_CLI, out
     assert "What to do" not in out["detail"] and "rejected" not in out["detail"], out["detail"]
+
+
+# ── tcc#129: Anthropic's and OpenAI's rejected key, as urllib's bare «HTTP Error 401» ─────────────
+
+#: The method's lines for an Anthropic call whose key the API did not take: the vendor it called,
+#: then the step down with urllib's own words, which name no key.
+_ANTHROPIC_401 = (">> Підключення до API (anthropic, claude-opus-4-7), чекаю до 300 с...\n"
+                  ">> Помилка виклику API (HTTP Error 401: Unauthorized). Спроба локального CLI...")
+
+
+def test_an_answer_after_a_bare_401_says_the_key_costs_time(tmp_path, monkeypatch):
+    """No key word matched «HTTP Error 401: Unauthorized», so an Anthropic or OpenAI key the API
+    rejected never got the note, though every call spends that attempt first."""
+    from autosound_tcc.core import availability, critic
+
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch,
+                                  f"print({_ANTHROPIC_401!r}, file=sys.stderr)\n" + _ANSWERS)
+    finally:
+        availability.reset()
+    for tool, out in answers.items():
+        assert out["mode"] == critic.MODE_API_OR_CLI, (tool, out)
+        assert "What to do: `ANTHROPIC_API_KEY` is set and the API rejected it" in out["detail"], (
+            tool, out["detail"])
+
+
+def test_a_refusal_after_a_bare_401_says_the_key(tmp_path, monkeypatch):
+    """A run that did not answer: the method's refusal block names the API rung's words on its own
+    line, and the key note comes from there."""
+    from autosound_tcc.core import availability, critic
+
+    refused = (
+        "print('⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО — нічого не збережено як рецензію:', file=sys.stderr)\n"
+        "print('   · API openai: HTTP Error 401: Unauthorized', file=sys.stderr)\n"
+        "print(\"   · CLI 'codex': not signed in\", file=sys.stderr)\n"
+        "print('=' * 50, file=sys.stderr)\n"
+        "sys.exit(4)\n")
+    availability.reset()
+    try:
+        answers = _reviewer_tools(tmp_path, monkeypatch, refused)
+    finally:
+        availability.reset()
+    for tool, out in answers.items():
+        assert out["mode"] == critic.MODE_REFUSED, (tool, out)
+        assert "What to do: `OPENAI_API_KEY` is set and the API rejected it" in out["detail"], (
+            tool, out["detail"])

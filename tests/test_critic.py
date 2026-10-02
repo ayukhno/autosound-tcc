@@ -1175,6 +1175,101 @@ def test_the_step_down_line_is_the_vendored_methods_own():
         assert words in source, words
 
 
+# ── tcc#129: Anthropic's and OpenAI's rejected key is urllib's bare «HTTP Error 401» ──────────────
+
+def _connect(provider: str, model: str) -> str:
+    """The method's line before its API call, naming the vendor it calls."""
+    return f">> Підключення до API ({provider}, {model}), чекаю до 300 с..."
+
+
+#: The step down after an Anthropic or OpenAI call refused: `_post_json` lets urllib's own
+#: exception through, so the line says the status and names neither the key nor the vendor.
+_BARE = ">> Помилка виклику API (HTTP Error {code}: {why}). Спроба локального CLI..."
+_BARE_401 = _BARE.format(code=401, why="Unauthorized")
+_BARE_403 = _BARE.format(code=403, why="Forbidden")
+_VENDOR_MODELS = {"anthropic": ("claude-opus-4-7", "ANTHROPIC_API_KEY"),
+                  "openai": ("gpt-5.5", "OPENAI_API_KEY")}
+
+
+@pytest.mark.parametrize("vendor", list(_VENDOR_MODELS))
+def test_a_bare_401_from_anthropic_or_openai_is_a_rejected_key(vendor):
+    """No key word matches «HTTP Error 401: Unauthorized», so those keys never got the note: read
+    from the method's own step-down line, with the variable of the vendor it called."""
+    from autosound_tcc.core import critic
+
+    model, var = _VENDOR_MODELS[vendor]
+    note = critic.fallback_note("\n".join((
+        _connect(vendor, model), _BARE_401,
+        f">> Виклик локального CLI 'x' ({vendor}), чекаю до 600 с...", ">> REVIEW_ROUTE: cli")))
+    assert f"`{var}` is set and the API rejected it" in note and "BEFORE" in note
+
+
+def test_a_403_is_the_key_for_anthropic_and_not_for_openai():
+    """Anthropic's 403 is `permission_error`, the key not allowed the model; OpenAI's is a country
+    it does not serve, and no key would change that. With no vendor named it is not told."""
+    from autosound_tcc.core import critic
+
+    note = critic.fallback_note(f"{_connect('anthropic', 'claude-opus-4-7')}\n{_BARE_403}")
+    assert "`ANTHROPIC_API_KEY` is set and the API rejected it" in note
+    assert critic.fallback_note(f"{_connect('openai', 'gpt-5.5')}\n{_BARE_403}") == ""
+    assert critic.fallback_note(_BARE_403) == ""
+
+
+def test_a_bare_401_with_no_vendor_line_names_no_variable():
+    """The tail may have lost the line naming the vendor: the 401 is still one of the two keys
+    (Gemini's are wrapped in its own words), so the note stands, naming no variable."""
+    from autosound_tcc.core import critic
+
+    note = critic.fallback_note(f"{_BARE_401}\n>> REVIEW_ROUTE: cli")
+    assert "The API key is set and the API rejected it" in note
+    assert "_API_KEY" not in note
+
+
+def test_a_401_is_read_from_the_method_s_api_line_only():
+    """A CLI's own 401 is its login, not the API key: `claude` says it of an expired sign-in. And
+    Gemini's 401 is not the two vendors' case: its rejected key says «API key not valid»."""
+    from autosound_tcc.core import critic
+
+    cli_401 = ('>> ⛔ claude повернув помилку: API Error: 401 {"type":"error","error":{"type":'
+               '"authentication_error","message":"OAuth token has expired."}}')
+    failed = _BARE.format(code=503, why="Service Unavailable")
+    assert critic.fallback_note(
+        f"{_connect('anthropic', 'claude-opus-4-7')}\n{failed}\n{cli_401}") == ""
+    assert "rejected it" not in critic.remedy(
+        f"· CLI 'claude': {cli_401}\nНаступна сходинка — буфер обміну", harness="claude")
+    gemini_401 = (">> Помилка виклику API (Помилка запиту до Gemini API: HTTP Error 401: "
+                  "Unauthorized). Спроба локального CLI...")
+    assert critic.fallback_note(f"{_connect('google', 'gemini-3-pro')}\n{gemini_401}") == ""
+
+
+@pytest.mark.parametrize("vendor", list(_VENDOR_MODELS))
+def test_a_refusal_after_a_bare_401_says_the_key(vendor):
+    """A run that did not answer carries the method's refusal block, not its step-down line: the
+    same words, on the block's own line for the API rung (`· API <vendor>: …`)."""
+    from autosound_tcc.core import critic
+
+    _model, var = _VENDOR_MODELS[vendor]
+    refusal = (f"· API {vendor}: HTTP Error 401: Unauthorized\n"
+               "· CLI 'x': not signed in\n"
+               "Наступна сходинка — буфер обміну (нижче); з ключем API — `--via api` для цього "
+               "запуску (setup-critic-channel.md §7).")
+    assert f"`{var}` is set and the API rejected it" in critic.remedy(refusal, harness="claude")
+    forbidden = refusal.replace("401: Unauthorized", "403: Forbidden")
+    assert ("rejected it" in critic.remedy(forbidden, harness="claude")) == (vendor == "anthropic")
+
+
+def test_the_api_lines_are_the_vendored_methods_own():
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    for words in ('f">> Підключення до API ({provider}, {api_model}), чекаю до ',
+                  'failures.append(f"API {provider}: {e}")', 'print(f"   · {line}", file=sys.stderr)',
+                  "def _post_json(url, headers, body, timeout):"):
+        assert words in source, words
+
+
 @pytest.mark.parametrize("said", ["process/reviews/2026-10-01T10-00-00-ask.md",
                                   "process\\reviews\\2026-10-01T10-00-00-ask.md"])
 def test_the_filed_text_is_named_by_a_path_every_os_reads(monkeypatch, tmp_path, said):
